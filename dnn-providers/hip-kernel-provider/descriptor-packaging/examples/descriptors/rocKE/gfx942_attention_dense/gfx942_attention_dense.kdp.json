@@ -1,16 +1,16 @@
 {
   "version": "1.0",
-  "id": "15402b1e-6b43-412d-85af-78a8036d2132",
+  "id": "15d4d5c6-064c-4bb5-90fa-aa0f000cb216",
   "name": "hipkernel:gfx942_attention_dense",
   "matchers": [
-    "69b58b6f-73de-4951-a081-cd0bbc5cbd98"
+    "9b34dd9a-11f6-480b-bbd1-ae4ded5a4e89"
   ],
-  "engine": "051294a8-d7fe-46c0-980d-584c26c85b1a",
-  "dispatch": "71a8b66b-a2a6-461c-9b4b-74406afbd70c",
+  "engine": "16510dde-d86d-4327-bf84-06296e2c74ce",
+  "dispatch": "eb824832-3d72-4496-a732-1c0a1a4f8bb3",
   "kernelDescriptors": [
     {
       "version": "1.0",
-      "id": "5122ddc5-24e2-41d0-bf0a-73c2b2f3cfac",
+      "id": "f9a39809-dae6-4929-8d23-2fc5fcbdae19",
       "name": "attention_dense.dit_bf16_d128_b1_hq9_kv9_sq1024_skv62208_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -26,7 +26,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -45,7 +47,7 @@
     },
     {
       "version": "1.0",
-      "id": "46c7b690-0ec9-485a-8354-feef7f58e1d9",
+      "id": "d6ad73cc-1f41-4c0b-8890-776df801b3a7",
       "name": "attention_dense.dit_bf16_d128_b1_hq9_kv9_sq2048_skv62208_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -61,7 +63,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -80,7 +84,7 @@
     },
     {
       "version": "1.0",
-      "id": "d5f33d8e-3094-46c1-9a84-68ed3d715e71",
+      "id": "fe89bc6a-06ae-46c3-9c95-16e57e2bcb41",
       "name": "attention_dense.dit_bf16_d128_b1_hq9_kv9_sq4096_skv62208_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -96,7 +100,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -115,7 +121,7 @@
     },
     {
       "version": "1.0",
-      "id": "c0b5531b-880c-49d7-b689-e01aa2e7817c",
+      "id": "8fe92104-4c32-4a8e-b58b-048598896aec",
       "name": "attention_dense.dit_bf16_d128_b1_hq9_kv9_sq8192_skv62208_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -131,7 +137,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -150,7 +158,7 @@
     },
     {
       "version": "1.0",
-      "id": "ce7d0a9d-c9a0-4891-80c5-ece711ae0c63",
+      "id": "0adb8ffe-f276-4650-862e-8a96ef68f108",
       "name": "attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -166,7 +174,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -185,7 +195,7 @@
     },
     {
       "version": "1.0",
-      "id": "d1c131f9-56eb-47c7-88ae-579cdd4c3cad",
+      "id": "6d71887c-27f1-4c2a-91a2-39938bf11c98",
       "name": "attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -201,7 +211,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -220,7 +232,7 @@
     },
     {
       "version": "1.0",
-      "id": "c8630006-2e79-4541-b732-b7b7e6d8286e",
+      "id": "6854a961-76bc-4c3e-9769-408fd5e75faa",
       "name": "attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq4096_skv4096_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -236,7 +248,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -255,7 +269,7 @@
     },
     {
       "version": "1.0",
-      "id": "e327897e-6587-4ef0-aee8-3a3ddf2b805f",
+      "id": "d478734f-ae55-4584-bc27-6d4385987bf6",
       "name": "attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -271,7 +285,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -290,7 +306,7 @@
     },
     {
       "version": "1.0",
-      "id": "b5754243-6c4b-4087-a7a3-2757129601ba",
+      "id": "4f7b4567-1fd1-4c32-897d-3f3d13048ec5",
       "name": "attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -306,7 +322,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -325,7 +343,7 @@
     },
     {
       "version": "1.0",
-      "id": "3e7432b0-569d-4795-a4af-73133d96cfeb",
+      "id": "b54dfcd4-f259-4730-a5ce-59d751468c85",
       "name": "attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -341,7 +359,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -360,7 +380,7 @@
     },
     {
       "version": "1.0",
-      "id": "d9aea2cd-7ca7-49f7-bdb5-6bbb430ac6d6",
+      "id": "584b3fa4-e9fc-4a03-9fb5-c244fa56df04",
       "name": "attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq4096_skv4096_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -376,7 +396,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -395,7 +417,7 @@
     },
     {
       "version": "1.0",
-      "id": "c0e9c570-55b1-4bc5-8baf-ecab1aefa11a",
+      "id": "0568cf44-bd76-4fd3-be29-d228ec91d8d9",
       "name": "attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -411,7 +433,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -430,7 +454,7 @@
     },
     {
       "version": "1.0",
-      "id": "e9bd29bc-e66c-41db-b66b-42881ba7e86f",
+      "id": "1f5ba71b-a4d6-452f-818b-2c9d54bc395e",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq2048_skv2048_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -446,7 +470,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -465,7 +491,7 @@
     },
     {
       "version": "1.0",
-      "id": "51b0b4c5-6cd2-409b-8b92-00e92452f9ff",
+      "id": "51b26b69-c536-4c06-b99e-745781c84841",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -481,7 +507,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -500,7 +528,7 @@
     },
     {
       "version": "1.0",
-      "id": "4fd7437b-a6bc-4d63-ba05-2fb2223735af",
+      "id": "d6574b87-a307-4381-abf1-0e8073e3a3c3",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq4096_skv4096_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -516,7 +544,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -535,7 +565,7 @@
     },
     {
       "version": "1.0",
-      "id": "69f770ef-b9fa-4e9a-b92f-a82a3ffc44fd",
+      "id": "1c084e78-93ec-45b3-970b-ed2a4d8dff60",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -551,7 +581,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -570,7 +602,7 @@
     },
     {
       "version": "1.0",
-      "id": "f5b91be5-996a-4c8b-bab0-559dd605049d",
+      "id": "93c44b85-a9aa-47d1-8bc7-0bbcb4e3f12e",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq8192_skv8192_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -586,7 +618,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -605,7 +639,7 @@
     },
     {
       "version": "1.0",
-      "id": "aa46fa22-ce1e-47ec-bd64-f8597abdc08f",
+      "id": "27a80706-1c07-46c9-9872-4292d11a13d1",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -621,7 +655,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -640,7 +676,7 @@
     },
     {
       "version": "1.0",
-      "id": "3824147e-aac8-4577-a586-6be2914b7583",
+      "id": "fe7bc7ce-7b57-4da1-a66f-d02457fc24f2",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq16384_skv16384_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -656,7 +692,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -675,7 +713,7 @@
     },
     {
       "version": "1.0",
-      "id": "7cd67620-8123-4cee-a84b-1ad37f79f395",
+      "id": "1313e93f-0fca-4151-88dd-793564071d97",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq16384_skv16384_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -691,7 +729,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -710,7 +750,7 @@
     },
     {
       "version": "1.0",
-      "id": "96e142be-4003-45bd-9be7-fe93936cbcd8",
+      "id": "70c98ef8-8141-4f7f-848d-06267ddb204c",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq32768_skv32768_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -726,7 +766,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -745,7 +787,7 @@
     },
     {
       "version": "1.0",
-      "id": "3e60916c-16e1-49c2-af93-01550f888e79",
+      "id": "b37859b6-2dcf-489b-85a1-57fd3c508269",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -761,7 +803,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -780,7 +824,7 @@
     },
     {
       "version": "1.0",
-      "id": "da31900a-47a6-4249-bb9f-958c40e1c604",
+      "id": "d16c3a85-058d-4bdf-8e62-88acd2deae77",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -796,7 +840,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -815,7 +861,7 @@
     },
     {
       "version": "1.0",
-      "id": "fb718bc0-b861-4224-a6fd-bec33012ecce",
+      "id": "e060ac3e-38c8-4a1a-85c3-625aa62cda18",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -831,7 +877,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -850,7 +898,7 @@
     },
     {
       "version": "1.0",
-      "id": "b36df869-0411-4058-b051-c25ce62bedf2",
+      "id": "60fe0225-24cb-417c-88da-67198d1b499c",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -866,7 +914,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -885,7 +935,7 @@
     },
     {
       "version": "1.0",
-      "id": "8ea3d851-6828-4548-9b91-91efbac00803",
+      "id": "e55b7d79-ed09-4054-b1d1-1e114cb2f39e",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -901,7 +951,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -920,7 +972,7 @@
     },
     {
       "version": "1.0",
-      "id": "e4262206-819f-43d8-bd9e-2021a81281e5",
+      "id": "d58f5bf1-9fc5-49df-a3e4-9c688a522f8a",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -936,7 +988,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -955,7 +1009,7 @@
     },
     {
       "version": "1.0",
-      "id": "ccc54345-4912-4db1-b4cd-26ebfce9c420",
+      "id": "79f7b80b-d809-4995-b735-5a55e0806aa3",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -971,7 +1025,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -990,7 +1046,7 @@
     },
     {
       "version": "1.0",
-      "id": "4db716f3-5c11-4e28-b23d-94e107df7e3f",
+      "id": "c2b8e9b7-597c-4583-b1f6-b4ed6d58b28d",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1006,7 +1062,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1025,7 +1083,7 @@
     },
     {
       "version": "1.0",
-      "id": "a47d6f07-c3ef-4dc6-80c4-859698269e40",
+      "id": "e31f4f1f-3883-4cd8-ae56-817347475242",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1041,7 +1099,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1060,7 +1120,7 @@
     },
     {
       "version": "1.0",
-      "id": "6ca2d138-de5e-4a3e-b06f-c7269ec3494f",
+      "id": "13f940f9-9ce4-4313-966a-05e3ad525231",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1076,7 +1136,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1095,7 +1157,7 @@
     },
     {
       "version": "1.0",
-      "id": "899b459a-70c3-41df-8567-733c3019ba14",
+      "id": "4d7df740-dbac-4ba3-93a7-9ec36d0eaeb5",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1111,7 +1173,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1130,7 +1194,7 @@
     },
     {
       "version": "1.0",
-      "id": "3325c8e7-08f9-4f60-b678-6394b4625176",
+      "id": "82b3ca8c-7a94-4e17-8439-3123e1c0883f",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1146,7 +1210,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1165,7 +1231,7 @@
     },
     {
       "version": "1.0",
-      "id": "8a187287-1ee3-431e-a44f-f54f50bbe675",
+      "id": "ae73861e-7a65-4b84-830e-93a1c5f66a8c",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1181,7 +1247,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1200,7 +1268,7 @@
     },
     {
       "version": "1.0",
-      "id": "58fe5315-7dac-4085-9cd9-6173f2bebaf8",
+      "id": "3923bc61-d49c-40b5-84df-c848909ff3f7",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1216,7 +1284,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1235,7 +1305,7 @@
     },
     {
       "version": "1.0",
-      "id": "ed7ae746-ca4f-4bd3-b9fc-d2e82d0eda3c",
+      "id": "726af10f-f3ba-45d6-b577-8e4115cb8b80",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1251,7 +1321,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1270,7 +1342,7 @@
     },
     {
       "version": "1.0",
-      "id": "f642d353-b1fa-476f-9588-4310c0f383f1",
+      "id": "ebd38c9e-fa41-49ba-ac81-32ce08505da8",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1286,7 +1358,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1305,7 +1379,7 @@
     },
     {
       "version": "1.0",
-      "id": "6f91e46f-4d19-452a-b42f-613f3195475c",
+      "id": "210dee67-7daf-473a-bdc0-621dd6394a3a",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1321,7 +1395,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1340,7 +1416,7 @@
     },
     {
       "version": "1.0",
-      "id": "d53f7509-f51b-4113-9bf4-cf43bf75490c",
+      "id": "84baa2a9-9c0b-4ec6-b3c3-a2e8089bec57",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1356,7 +1432,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1375,7 +1453,7 @@
     },
     {
       "version": "1.0",
-      "id": "b8d943bd-6d16-4b3d-9ef5-c3b48ae5d8c1",
+      "id": "e6cbf103-9d65-470c-acff-bef64ed60f9d",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1391,7 +1469,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1410,7 +1490,7 @@
     },
     {
       "version": "1.0",
-      "id": "e7f0458f-55cb-41be-bdfe-eeb3f51a32a2",
+      "id": "75dee52c-a9b4-454a-833b-68c6d2e285dd",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1426,7 +1506,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1445,7 +1527,7 @@
     },
     {
       "version": "1.0",
-      "id": "def0ca82-3226-4c8a-bdf6-e96eaf849dc6",
+      "id": "e33dd907-9d27-4e49-8c5e-d3f8cd9d77fc",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1461,7 +1543,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1480,7 +1564,7 @@
     },
     {
       "version": "1.0",
-      "id": "a891bbe3-c20c-4176-b071-96a98da5eaba",
+      "id": "1849d60e-b13b-4cd1-b03c-c30b29576f9f",
       "name": "attention_dense.ltx2_bf16_d128_b1_hq32_kv32_sq6144_skv6144_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1496,7 +1580,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1515,7 +1601,7 @@
     },
     {
       "version": "1.0",
-      "id": "57723a34-4544-4bc8-9d59-a012c1f81e1c",
+      "id": "12c9733f-4fb2-4f1b-80a3-f7a5ecb527b2",
       "name": "attention_dense.ltx2_bf16_d128_b1_hq32_kv32_sq37632_skv37632_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1531,7 +1617,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1550,7 +1638,7 @@
     },
     {
       "version": "1.0",
-      "id": "38dcb7d2-2a96-4e6d-ba23-f12fc6618c98",
+      "id": "3765ba49-d2cc-4346-928f-bf64c322dc13",
       "name": "attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1566,7 +1654,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1585,7 +1675,7 @@
     },
     {
       "version": "1.0",
-      "id": "3da8dfaf-dede-485b-89f5-f87626358694",
+      "id": "9ac07c2b-c95b-436a-8ec5-df436c531436",
       "name": "attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1601,7 +1691,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1620,7 +1712,7 @@
     },
     {
       "version": "1.0",
-      "id": "c3473fba-2e63-45dd-b89d-c97868f0d6a0",
+      "id": "1c0108a6-9f48-453b-bdba-32184b498415",
       "name": "attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1636,7 +1728,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1655,7 +1749,7 @@
     },
     {
       "version": "1.0",
-      "id": "f8f19b76-fea8-4603-bb3f-cd074a6f019c",
+      "id": "1822c7bc-46b7-47dc-af3d-861509822e53",
       "name": "attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1671,7 +1765,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1690,7 +1786,7 @@
     },
     {
       "version": "1.0",
-      "id": "95ab5c1d-34d7-4c8e-86f4-3d67a5979ea6",
+      "id": "42faeac6-aab4-4335-8488-cc14dd2fdd71",
       "name": "attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1706,7 +1802,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1725,7 +1823,7 @@
     },
     {
       "version": "1.0",
-      "id": "a7746c16-2374-4817-a64f-1b3d87a22b1b",
+      "id": "901c0bf2-0710-49e3-b206-acbc693af66c",
       "name": "attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1741,7 +1839,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1760,7 +1860,7 @@
     },
     {
       "version": "1.0",
-      "id": "05e47e17-e825-4293-b38c-1f663facd814",
+      "id": "b4b2854c-0dda-4a28-a693-11f240184450",
       "name": "attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1776,7 +1876,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1795,7 +1897,7 @@
     },
     {
       "version": "1.0",
-      "id": "13ed45c3-5d6a-4eb7-a6f4-32e025c33aeb",
+      "id": "9b3b8d07-230e-4989-980c-29d26b3b33d0",
       "name": "attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1811,7 +1913,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1830,7 +1934,7 @@
     },
     {
       "version": "1.0",
-      "id": "8233fbf5-9ccd-4a6e-a687-4f75e5b07556",
+      "id": "480f5c95-3f41-4fa2-9ee3-509c4aad2ab4",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq2048_skv2048_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1846,7 +1950,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1865,7 +1971,7 @@
     },
     {
       "version": "1.0",
-      "id": "476679bf-4ed8-4c0f-92ae-318e571b8345",
+      "id": "14e43393-9bee-4a0b-8100-866283700665",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1881,7 +1987,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1900,7 +2008,7 @@
     },
     {
       "version": "1.0",
-      "id": "6a7b416b-8c6b-493d-84a1-e41d1b000f90",
+      "id": "65c10f1b-22d2-4152-a89e-3dc558ddbbe3",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq4096_skv4096_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1916,7 +2024,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1935,7 +2045,7 @@
     },
     {
       "version": "1.0",
-      "id": "5701d944-10f9-41b2-8780-17bdc76622ce",
+      "id": "363052dd-9b3f-4777-a942-8d48ac9ac421",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1951,7 +2061,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -1970,7 +2082,7 @@
     },
     {
       "version": "1.0",
-      "id": "36c8ed46-9e95-46b0-8483-9e33c25f2300",
+      "id": "29b4ffdc-6006-4992-91fb-38a269a36083",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq8192_skv8192_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1986,7 +2098,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2005,7 +2119,7 @@
     },
     {
       "version": "1.0",
-      "id": "48785166-62f5-40b0-8cc7-b0fc9784966b",
+      "id": "edd84171-b795-4986-96ce-6278216d9884",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2021,7 +2135,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2040,7 +2156,7 @@
     },
     {
       "version": "1.0",
-      "id": "6e313beb-557e-4cfd-81f1-2392ed6d0cf3",
+      "id": "aff8b963-cd1e-4d36-9abc-68dd63691765",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq32768_skv32768_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2056,7 +2172,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2075,7 +2193,7 @@
     },
     {
       "version": "1.0",
-      "id": "bcc51b16-873d-403e-83ff-4b267a09fb18",
+      "id": "9904bb27-2503-4252-95f0-5722a827bd3a",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2091,7 +2209,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2110,7 +2230,7 @@
     },
     {
       "version": "1.0",
-      "id": "dac451df-e55b-43ef-b0a2-57d928283fd0",
+      "id": "6208dd59-f79f-46df-ada5-345fba857bd0",
       "name": "attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2126,7 +2246,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2145,7 +2267,7 @@
     },
     {
       "version": "1.0",
-      "id": "9826171f-bcce-4321-b815-6b615efac302",
+      "id": "d6a918fe-4467-4ce4-a44a-dce53c8a8b52",
       "name": "attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2161,7 +2283,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2180,7 +2304,7 @@
     },
     {
       "version": "1.0",
-      "id": "e03da309-5723-40e5-a6fd-db0eb2994187",
+      "id": "af72dca8-27f5-49da-9254-c24c2246e816",
       "name": "attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2196,7 +2320,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2215,7 +2341,7 @@
     },
     {
       "version": "1.0",
-      "id": "3bb987ee-2bb1-48b9-8f4d-7a0d4319d7f1",
+      "id": "795e3148-8f3f-4171-ad0f-31869480542b",
       "name": "attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2231,7 +2357,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2250,7 +2378,7 @@
     },
     {
       "version": "1.0",
-      "id": "604d62bc-7906-43ae-bc6a-69d35e57b933",
+      "id": "1973fa3b-21c4-40db-babc-b2c1d1166e8b",
       "name": "attention_dense.train8b_bf16_d128_b3_hq32_kv8_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2266,7 +2394,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2285,7 +2415,7 @@
     },
     {
       "version": "1.0",
-      "id": "0b3a433f-aae7-417a-b70d-50c1181b0217",
+      "id": "a1797fb6-3e4f-4bbe-82e8-5a5f43fa76aa",
       "name": "attention_dense.tile32_bf16_d64_b2_hq4_kv4_sq256_skv288_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2301,7 +2431,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2320,7 +2452,7 @@
     },
     {
       "version": "1.0",
-      "id": "a51a755a-4bb7-4871-b2ee-2ef2fb864577",
+      "id": "666bfaa5-fece-426a-8ab7-7d087130990c",
       "name": "attention_dense.tile32_bf16_d64_b2_hq4_kv4_sq256_skv288_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2336,7 +2468,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2355,7 +2489,7 @@
     },
     {
       "version": "1.0",
-      "id": "658f8298-e965-4fc2-ba5d-37de4fe2b4d4",
+      "id": "b49f09ae-27d9-4c02-9c9f-021aed1cbc39",
       "name": "attention_dense.tile32_bf16_d128_b2_hq4_kv4_sq256_skv288_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2371,7 +2505,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2390,7 +2526,7 @@
     },
     {
       "version": "1.0",
-      "id": "2f2f3819-2a50-4f05-9dee-f5948d1f9f46",
+      "id": "b93c8af5-1e3e-4f0b-bf20-fc4a0b709e28",
       "name": "attention_dense.tile32_bf16_d128_b2_hq4_kv4_sq256_skv288_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2406,7 +2542,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2425,7 +2563,7 @@
     },
     {
       "version": "1.0",
-      "id": "61f2ed2d-8f43-4794-b866-4d5a4882556c",
+      "id": "d0081af2-f08f-4229-b061-0515574dca8f",
       "name": "attention_dense.tile32_fp16_d64_b2_hq4_kv4_sq256_skv288_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2441,7 +2579,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2460,7 +2600,7 @@
     },
     {
       "version": "1.0",
-      "id": "73d22856-7e9a-4797-8b7a-fa59209ee5fd",
+      "id": "b6c17998-c86b-45d1-afeb-ab3c9ae09145",
       "name": "attention_dense.tile32_fp16_d64_b2_hq4_kv4_sq256_skv288_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2476,7 +2616,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2495,7 +2637,7 @@
     },
     {
       "version": "1.0",
-      "id": "952c9687-73c0-4627-a3be-7786c40b5a00",
+      "id": "c22ee591-ab98-4787-8a68-31e5921deefd",
       "name": "attention_dense.tile32_fp16_d128_b2_hq4_kv4_sq256_skv288_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2511,7 +2653,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2530,7 +2674,7 @@
     },
     {
       "version": "1.0",
-      "id": "7dbfc7e2-2595-4b85-9292-6fdae61091bb",
+      "id": "56c25012-6b21-4d8c-8c25-b77af63652cc",
       "name": "attention_dense.tile32_fp16_d128_b2_hq4_kv4_sq256_skv288_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2546,7 +2690,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 32,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2565,7 +2711,7 @@
     },
     {
       "version": "1.0",
-      "id": "5911b42c-5e16-4317-8554-59add663d170",
+      "id": "1303d0c2-076a-4557-beaa-17ca67a9b41e",
       "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq256_skv512_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2581,7 +2727,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2600,7 +2748,7 @@
     },
     {
       "version": "1.0",
-      "id": "d260b927-2e3b-4aeb-9d27-c5d55dc61b00",
+      "id": "3e515b0c-d8d7-4669-bbe5-4d7ab20cfe4c",
       "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2616,7 +2764,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2635,7 +2785,7 @@
     },
     {
       "version": "1.0",
-      "id": "12bbe8f8-6b5a-42fc-90d7-02a95c55d253",
+      "id": "5836f9d5-4043-4eef-b4a9-1935b1b26753",
       "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq256_skv512_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2651,7 +2801,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2670,7 +2822,7 @@
     },
     {
       "version": "1.0",
-      "id": "baf3aa01-dac3-44ce-973d-348ec9be20fc",
+      "id": "b7a5df2c-cf38-4bab-b7c8-6109c4b37629",
       "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2686,7 +2838,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2705,7 +2859,7 @@
     },
     {
       "version": "1.0",
-      "id": "d0b99bd0-5179-4692-a6c0-d4a8fb69a5d1",
+      "id": "dac29455-0148-43e9-b0e5-08f079e74c2d",
       "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq512_skv256_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2721,7 +2875,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2740,7 +2896,7 @@
     },
     {
       "version": "1.0",
-      "id": "0b95386c-acaa-45a0-9454-626fe63f0847",
+      "id": "855477a2-769c-4835-b150-5ed7686e6bc9",
       "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2756,7 +2912,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2775,7 +2933,7 @@
     },
     {
       "version": "1.0",
-      "id": "a89a90c5-25db-40ef-8699-b696ba6981bb",
+      "id": "b8ea47e4-8123-4055-9700-9deae9d010f1",
       "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq512_skv256_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2791,7 +2949,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2810,7 +2970,7 @@
     },
     {
       "version": "1.0",
-      "id": "26a8f9ef-801c-45ec-abd1-3a1cf361a059",
+      "id": "128ac08f-c5b7-4100-977a-95c3d588bd2d",
       "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2826,7 +2986,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2845,7 +3007,7 @@
     },
     {
       "version": "1.0",
-      "id": "474f469b-432c-407b-ba4a-a8a4f18e1b14",
+      "id": "bd426741-7217-4638-bc7f-77c994099684",
       "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2861,7 +3023,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2880,7 +3044,7 @@
     },
     {
       "version": "1.0",
-      "id": "2df40592-aaca-4f37-ab1f-6d6ea346c484",
+      "id": "8b4268cf-c179-476e-b1d6-e26e197c3753",
       "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2896,7 +3060,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2915,7 +3081,7 @@
     },
     {
       "version": "1.0",
-      "id": "ed39a9b7-36c9-4544-9635-c4b00ed676f3",
+      "id": "08b2508d-c6f2-45f5-b5b1-77fc979ac42a",
       "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2931,7 +3097,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2950,7 +3118,7 @@
     },
     {
       "version": "1.0",
-      "id": "4eccfe78-db82-42f2-ac7b-6c98a024c00e",
+      "id": "46485611-9b16-4d36-8c58-8fbc762bfb28",
       "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2966,7 +3134,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -2985,7 +3155,7 @@
     },
     {
       "version": "1.0",
-      "id": "efe6679a-d6c2-46f1-8589-9be9939f2cfb",
+      "id": "ad7e228f-474f-407c-a836-5a06712d4fbd",
       "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3001,7 +3171,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3020,7 +3192,7 @@
     },
     {
       "version": "1.0",
-      "id": "21ac0564-f5f7-4e46-99fd-e1f33b3c2e7e",
+      "id": "7b73825d-86f4-4b2f-8bc3-fc174a0c0725",
       "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3036,7 +3208,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3055,7 +3229,7 @@
     },
     {
       "version": "1.0",
-      "id": "a9e45a88-fa73-4108-8e40-754340979f37",
+      "id": "ccfe72cb-aa5d-46b5-9b4b-e0cce61e513a",
       "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3071,7 +3245,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3090,7 +3266,7 @@
     },
     {
       "version": "1.0",
-      "id": "10253cde-6a83-4d4f-bb9a-56c2ee4e621d",
+      "id": "ccb481b1-652d-4468-9fdd-df69ff541896",
       "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3106,7 +3282,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3125,7 +3303,7 @@
     },
     {
       "version": "1.0",
-      "id": "3f9fc811-9b32-4a0a-9914-d4927388c604",
+      "id": "09db1d80-f4e8-4c64-88da-f8363c42dea2",
       "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq256_skv512_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3141,7 +3319,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3160,7 +3340,7 @@
     },
     {
       "version": "1.0",
-      "id": "70955679-85ba-412f-9fa1-a63fee282072",
+      "id": "ee1d7abf-9383-497c-9654-7fccb22ae313",
       "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3176,7 +3356,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3195,7 +3377,7 @@
     },
     {
       "version": "1.0",
-      "id": "854f95bb-f9e5-4b4c-b3c5-2ca937cc76ea",
+      "id": "24c80354-9b06-4a66-a0fe-5af547277814",
       "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq256_skv512_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3211,7 +3393,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3230,7 +3414,7 @@
     },
     {
       "version": "1.0",
-      "id": "07bd4a7e-c985-452a-bbb4-48456df3c84d",
+      "id": "b2a8bb3e-7895-4a84-ba73-efac6b2ff3e3",
       "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3246,7 +3430,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3265,7 +3451,7 @@
     },
     {
       "version": "1.0",
-      "id": "ad4b62e2-665b-41bf-b298-ffef4ace78d8",
+      "id": "aa2d9765-cb61-4cde-96f8-1a124568f077",
       "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq512_skv256_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3281,7 +3467,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3300,7 +3488,7 @@
     },
     {
       "version": "1.0",
-      "id": "3dcd2efe-3370-483d-9d5f-a38afa68e419",
+      "id": "91e49fe6-f27a-4820-ab03-7b55abdaa5cc",
       "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3316,7 +3504,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3335,7 +3525,7 @@
     },
     {
       "version": "1.0",
-      "id": "ba8ee802-49c8-469f-92a9-41019310ad76",
+      "id": "d2ea3bf4-be62-4d53-9fca-06a0eb3b79a7",
       "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq512_skv256_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3351,7 +3541,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3370,7 +3562,7 @@
     },
     {
       "version": "1.0",
-      "id": "cf1c1633-2125-447d-bd3b-64a4a5a5ab0a",
+      "id": "4981f024-8e03-4e41-9a10-cfb8bf064a26",
       "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3386,7 +3578,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3405,7 +3599,7 @@
     },
     {
       "version": "1.0",
-      "id": "a3367577-bbaa-4ab2-816a-110756dbf629",
+      "id": "e10ce0a9-c6f0-4491-bce2-282b718677a2",
       "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3421,7 +3615,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3440,7 +3636,7 @@
     },
     {
       "version": "1.0",
-      "id": "1c1938b3-6e93-456f-8a09-68639d04e9ed",
+      "id": "9c3380ff-5136-4b5a-a68e-e4f1478aa8e6",
       "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3456,7 +3652,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3475,7 +3673,7 @@
     },
     {
       "version": "1.0",
-      "id": "f3d5775f-878d-4f06-b039-000897d2c27d",
+      "id": "9c4df093-4cdb-4bad-b803-3706f8240bf6",
       "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3491,7 +3689,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3510,7 +3710,7 @@
     },
     {
       "version": "1.0",
-      "id": "e0d2c3ee-2972-408c-b8eb-222651d6ee04",
+      "id": "eb00eec9-3c65-43a0-a8e9-c7c2426eb987",
       "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3526,7 +3726,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3545,7 +3747,7 @@
     },
     {
       "version": "1.0",
-      "id": "a652b550-5e75-444e-82b8-4a90b270b8ef",
+      "id": "25902a75-182c-4a2d-8df1-327489a27993",
       "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3561,7 +3763,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3580,7 +3784,7 @@
     },
     {
       "version": "1.0",
-      "id": "49fab4cc-c0cc-4adc-8d95-763fdda99cb8",
+      "id": "f3443583-3087-4c86-a2e0-16e46061f11d",
       "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3596,7 +3800,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3615,7 +3821,7 @@
     },
     {
       "version": "1.0",
-      "id": "7c6189be-c1f5-4d48-b404-7b3bf009f044",
+      "id": "090624ad-4724-4558-bb3d-786dd7343610",
       "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3631,7 +3837,9 @@
           "causal": false,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3650,7 +3858,7 @@
     },
     {
       "version": "1.0",
-      "id": "1fce9482-4119-4339-9142-dc45304f3172",
+      "id": "ee52248b-753e-4cf4-a705-5d15d0148ada",
       "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3666,7 +3874,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3685,7 +3895,7 @@
     },
     {
       "version": "1.0",
-      "id": "7c35ceda-b157-4376-8367-efefee074e96",
+      "id": "4c11abce-b335-4545-a0bb-365aa8243501",
       "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq256_skv512_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3701,7 +3911,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3720,7 +3932,7 @@
     },
     {
       "version": "1.0",
-      "id": "1e4fd479-ed52-4d4d-8d27-cff36e76521d",
+      "id": "b20608fd-32fb-4aac-90ec-3c6fb4d9f42e",
       "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3736,7 +3948,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3755,7 +3969,7 @@
     },
     {
       "version": "1.0",
-      "id": "f739ffa9-2c15-416b-9f27-8f61be356945",
+      "id": "ea3d5131-404e-4c8b-ae6d-5a506d9b4f04",
       "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq256_skv512_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3771,7 +3985,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3790,7 +4006,7 @@
     },
     {
       "version": "1.0",
-      "id": "3afb0998-a488-4405-b86c-f53bc8ebb47a",
+      "id": "ff0ab418-d26e-44fd-96bd-db1962ef9a93",
       "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3806,7 +4022,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3825,7 +4043,7 @@
     },
     {
       "version": "1.0",
-      "id": "f046ed23-0768-4c9a-abc4-7012e91736e8",
+      "id": "839fcf92-8604-45a5-a8b5-53e0726cf590",
       "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq512_skv256_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3841,7 +4059,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3860,7 +4080,7 @@
     },
     {
       "version": "1.0",
-      "id": "d61ba0af-bfbc-4079-9808-285526c8f42b",
+      "id": "0fdbab9d-c563-42f1-a0f8-63f50848c04c",
       "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3876,7 +4096,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3895,7 +4117,7 @@
     },
     {
       "version": "1.0",
-      "id": "e91c10c1-3f83-454a-a8c8-1bead5c4ef2f",
+      "id": "5195a6b9-c014-4d0c-869a-04c139cb3529",
       "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq512_skv256_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3911,7 +4133,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3930,7 +4154,7 @@
     },
     {
       "version": "1.0",
-      "id": "581d4d0a-1073-451b-bdc6-d1ceb462b8f5",
+      "id": "157521cf-9bca-4d3c-a03c-0d03c6fd6525",
       "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3946,7 +4170,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -3965,7 +4191,7 @@
     },
     {
       "version": "1.0",
-      "id": "b8fca497-7251-41b4-9090-4731b677e34b",
+      "id": "d0e49dc6-1f51-4c07-a4e3-77cdb7aaaa56",
       "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -3981,7 +4207,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4000,7 +4228,7 @@
     },
     {
       "version": "1.0",
-      "id": "4e4e9f41-5483-43b8-87c3-a975a8fe9d85",
+      "id": "c6fe1474-033e-4368-b7f2-756c0fc6b688",
       "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4016,7 +4244,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4035,7 +4265,7 @@
     },
     {
       "version": "1.0",
-      "id": "a834f24e-e8a5-4970-ac45-1ffc96eb7383",
+      "id": "7cefb138-d2c3-432f-bbb6-0849c72aaeec",
       "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4051,7 +4281,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4070,7 +4302,7 @@
     },
     {
       "version": "1.0",
-      "id": "7f28fb0a-8fef-4762-81fe-e44a22d2daa0",
+      "id": "da8548f8-4cdb-4991-8077-5d6531186caf",
       "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4086,7 +4318,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4105,7 +4339,7 @@
     },
     {
       "version": "1.0",
-      "id": "7821cec1-46fd-4274-80cd-7e12072cdaa1",
+      "id": "55defb12-e63d-4a96-89ab-21a152f38778",
       "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4121,7 +4355,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4140,7 +4376,7 @@
     },
     {
       "version": "1.0",
-      "id": "28ad71d5-b844-4191-99ae-f01fb57e1a1e",
+      "id": "93ccae3e-d6c2-41a0-8e0d-9d5ef0e0fdab",
       "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4156,7 +4392,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4175,7 +4413,7 @@
     },
     {
       "version": "1.0",
-      "id": "4ec9f3e7-de6e-41f5-81f1-4761f8ccd51f",
+      "id": "13e0b2b5-4dc1-4c64-beb7-493e5ea16c10",
       "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4191,7 +4429,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4210,7 +4450,7 @@
     },
     {
       "version": "1.0",
-      "id": "c6473698-2705-49a8-b0dc-f17ba4102e0d",
+      "id": "aaa5a805-28d5-4803-8764-4c4c1e9cdb98",
       "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4226,7 +4466,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4245,7 +4487,7 @@
     },
     {
       "version": "1.0",
-      "id": "64e578d5-4ebe-4632-8cab-891522b38449",
+      "id": "90788156-a766-47ae-b9bd-00e6b6321e6c",
       "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq256_skv512_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4261,7 +4503,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4280,7 +4524,7 @@
     },
     {
       "version": "1.0",
-      "id": "055e85a0-ada2-4b56-bca8-1ab663b12a62",
+      "id": "5788e3c7-3106-44bc-9e71-c6880cf5d9b3",
       "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4296,7 +4540,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4315,7 +4561,7 @@
     },
     {
       "version": "1.0",
-      "id": "18e63ed4-2ae7-40ae-a135-9fb8b83225ee",
+      "id": "b9bcea8f-716b-42c4-aabd-ee534206d2ff",
       "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq256_skv512_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4331,7 +4577,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4350,7 +4598,7 @@
     },
     {
       "version": "1.0",
-      "id": "efd09fb7-0fa8-4b1f-b2c8-13146935c786",
+      "id": "1e226cd0-760e-4f01-83ef-11a0a7ca7641",
       "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4366,7 +4614,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4385,7 +4635,7 @@
     },
     {
       "version": "1.0",
-      "id": "90e726f1-7864-4cd3-9fa9-553431af2df3",
+      "id": "2b720c72-2b9a-4846-a9dd-3d19e8af54b6",
       "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq512_skv256_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4401,7 +4651,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4420,7 +4672,7 @@
     },
     {
       "version": "1.0",
-      "id": "e5aa73b4-5824-4b30-a4b9-d6502230c6e7",
+      "id": "f3c6e4a8-93ee-4e9b-9631-9aca439c2019",
       "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4436,7 +4688,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4455,7 +4709,7 @@
     },
     {
       "version": "1.0",
-      "id": "01b000db-9c69-4288-acb2-1f11f11afce3",
+      "id": "de169568-e00b-4fe8-bf14-8561d205547c",
       "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq512_skv256_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4471,7 +4725,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4490,7 +4746,7 @@
     },
     {
       "version": "1.0",
-      "id": "a8a3601d-bcc5-4a63-9038-82b2b4df7f33",
+      "id": "e61e06de-b031-48d9-acd6-3504839a22ce",
       "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4506,7 +4762,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4525,7 +4783,7 @@
     },
     {
       "version": "1.0",
-      "id": "cbfb40e4-905c-4ec8-b696-06ec2be30f4a",
+      "id": "9cda8f45-cdd4-4e8f-a69c-fdfc0418fe8e",
       "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4541,7 +4799,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4560,7 +4820,7 @@
     },
     {
       "version": "1.0",
-      "id": "69d7881c-3ced-414c-bc1e-d79d98c7655d",
+      "id": "12e44a64-146e-4e0d-a2c1-8f7eaf49137e",
       "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4576,7 +4836,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4595,7 +4857,7 @@
     },
     {
       "version": "1.0",
-      "id": "d95cf44e-c124-45e7-b532-818bcc9df81e",
+      "id": "a63cf3d6-78c8-4816-b8c4-e95960c170e1",
       "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4611,7 +4873,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4630,7 +4894,7 @@
     },
     {
       "version": "1.0",
-      "id": "88d708aa-555c-46c6-b87f-822cbb5b0405",
+      "id": "dc0dfca6-98b5-4a58-a238-edbefb95c855",
       "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4646,7 +4910,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4665,7 +4931,7 @@
     },
     {
       "version": "1.0",
-      "id": "6eb5fc5d-cb83-4677-b9b3-30939cf2c1d4",
+      "id": "8a643894-7cda-41ec-9745-8e95516d94b0",
       "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4681,7 +4947,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4700,7 +4968,7 @@
     },
     {
       "version": "1.0",
-      "id": "2d5017ec-3b8e-4a57-bceb-e2426ad154b0",
+      "id": "320884f6-785f-412a-93e7-e3eec54d258c",
       "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4716,7 +4984,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4735,7 +5005,7 @@
     },
     {
       "version": "1.0",
-      "id": "f25a9dd9-efbb-4b8e-bbb9-16a5c810bb1e",
+      "id": "a9c58771-4223-498f-af5f-ecfc0697ef1b",
       "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4751,7 +5021,9 @@
           "causal": false,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4770,7 +5042,7 @@
     },
     {
       "version": "1.0",
-      "id": "a80142c6-7551-44aa-baf2-5bc956c6098d",
+      "id": "5b6e1531-3287-4abd-a002-0b05f7f2e711",
       "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4786,7 +5058,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4805,7 +5079,7 @@
     },
     {
       "version": "1.0",
-      "id": "e59f855c-b867-4bfb-8fac-31642a447e1d",
+      "id": "9898ddbc-a333-4480-984e-ecc1861b55dd",
       "name": "attention_dense.rockebench_fp16_d128_b1_hq32_kv32_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4821,7 +5095,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": false,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4840,7 +5116,7 @@
     },
     {
       "version": "1.0",
-      "id": "447c19ea-1859-4aca-88a2-8f2bbdc2bb42",
+      "id": "7bcf2f9f-0a22-48c2-8a71-acbbd27df2b5",
       "name": "attention_dense.rockebench_bf16_d128_b8_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4856,7 +5132,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4875,7 +5153,7 @@
     },
     {
       "version": "1.0",
-      "id": "9346d849-6e8a-4ab0-885a-0634890ada1a",
+      "id": "41862137-9745-4089-ad9c-ca94d721b8ba",
       "name": "attention_dense.rockebench_fp16_d64_b4_hq64_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4891,7 +5169,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4910,7 +5190,7 @@
     },
     {
       "version": "1.0",
-      "id": "4cb80ee8-3b79-4e60-b8ab-5e9246e69df3",
+      "id": "17ed1387-d1bf-4884-b668-544d932af00a",
       "name": "attention_dense.rockebench_fp16_d128_b4_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4926,7 +5206,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4945,7 +5227,7 @@
     },
     {
       "version": "1.0",
-      "id": "5dcb46f7-03a9-432d-ab89-73b03b9c676f",
+      "id": "4187717f-bffd-406b-ad4c-fcfdc9b4584c",
       "name": "attention_dense.rockebench_fp16_d128_b8_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4961,7 +5243,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -4980,7 +5264,7 @@
     },
     {
       "version": "1.0",
-      "id": "9c44cf39-0c67-426d-8866-3438b3365c2b",
+      "id": "9ad14b60-5d42-4e6b-9d38-00d1dc9727ef",
       "name": "attention_dense.rockebench_fp16_d128_b1_hq32_kv8_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -4996,7 +5280,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -5015,7 +5301,7 @@
     },
     {
       "version": "1.0",
-      "id": "cbeab3a0-c839-49de-a456-ea374775fa15",
+      "id": "a6c050ad-6bd1-4bef-9218-360dadad2cad",
       "name": "attention_dense.rockebench_fp16_d128_b4_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -5031,7 +5317,9 @@
           "causal": true,
           "dtype": "fp16",
           "block_n": 64,
-          "waves_per_eu": 2
+          "waves_per_eu": 2,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
@@ -5050,7 +5338,7 @@
     },
     {
       "version": "1.0",
-      "id": "799a00e2-7006-46b1-8b8e-9e8f71bf2626",
+      "id": "7eb42a58-8bbb-4ee5-944f-35fe1a955dd2",
       "name": "attention_dense.rockebench_bf16_d64_b1_hq64_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -5066,7 +5354,9 @@
           "causal": true,
           "dtype": "bf16",
           "block_n": 64,
-          "waves_per_eu": 4
+          "waves_per_eu": 4,
+          "persistent": true,
+          "num_persistent": 304
         }
       },
       "metadata": {
