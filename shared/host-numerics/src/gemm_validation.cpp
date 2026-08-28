@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <roc/host_numerics/gemm_validation.hpp>
-
 #include <stdexcept>
 #include <utility>
 
@@ -68,21 +67,18 @@ GemmValidationResult validateGemm(const GemmProblem& problem, const Tensor& obse
         };
     }
 
-    const std::vector<size_t> selectedIndices
-        = options.comparison.selection.indices(observed.shape().elementCount());
+    const std::vector<size_t> selectedIndices =
+        options.comparison.selection.indices(observed.shape().elementCount());
     Tensor expected(problem.outputType, Shape{1, selectedIndices.size()});
-    Tensor observedSelected = observed
-                                  .copySelectedElements(
-                                      selectedIndices, options.comparison.selection.indexOrder())
-                                  .reshapeSharingStorage(Shape{1, selectedIndices.size()});
+    Tensor observedSelected =
+        observed.copySelectedElements(selectedIndices, options.comparison.selection.indexOrder())
+            .reshapeSharingStorage(Shape{1, selectedIndices.size()});
 
-    GemmRunInfo runInfo
-        = runSelectedReference(request, expected, options.backend);
+    GemmRunInfo runInfo = runSelectedReference(request, expected, options.backend);
     ComparisonOptions compactOptions = options.comparison;
     compactOptions.selection = OutputSelection::all();
     ComparisonResult comparison = compare(observedSelected, expected, compactOptions);
-    remapComparisonLocations(
-        comparison, observed, options.comparison.selection, selectedIndices);
+    remapComparisonLocations(comparison, observed, options.comparison.selection, selectedIndices);
     return {
         .reference = std::move(runInfo),
         .comparison = std::move(comparison),
