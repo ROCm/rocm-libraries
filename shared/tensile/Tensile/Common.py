@@ -2412,6 +2412,14 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
 
   version_str = os.environ.get("ROCM_VERSION")
   if not version_str:
+    # Prefer the pip-installed rocm_sdk version if available, as it reflects
+    # the actual installed package rather than any system-wide ROCm install.
+    try:
+      import rocm_sdk
+      version_str = rocm_sdk.__version__
+    except ImportError:
+      pass
+  if not version_str:
     for root in [os.environ.get("ROCM_PATH"), os.environ.get("HIP_PATH"), "/opt/rocm"]:
       if root:
         try:
@@ -2419,14 +2427,6 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
           break
         except OSError:
           continue
-  if not version_str:
-    # Fallback for TheRock pip installs where ROCM_PATH is not set and
-    # /opt/rocm does not exist. rocm_sdk.__version__ is the ROCm version.
-    try:
-      import rocm_sdk
-      version_str = rocm_sdk.__version__
-    except ImportError:
-      pass
   if version_str:
     globalParameters["HipClangVersion"] = version_str
     tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
