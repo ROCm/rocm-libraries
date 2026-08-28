@@ -1167,6 +1167,10 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
+    if state["ClusterDim"] in ([16, 1], [1, 16]):
+      reject(state, printRejectionReason,
+              "Currently ClusterDim = 16x1 and 1x16 are not supported")
+
     # Multicast uses a mask fixed to the physical cluster position, but Stream-K remaps
     # each WG's tile per iteration, so the broadcast would target the wrong partner.
     # Keep the cluster WG-id decode (gated on ClusterDim) but leave multicast off for Stream-K
@@ -1889,8 +1893,11 @@ class Solution(collections.abc.Mapping):
         # limits, stagger state, and LDS bank state before current-tile code
         # resumes. Keep rejecting axes whose borrowed-state contract is not
         # audited below.
-        if state["StreamK"] != 3:
-          reject(state, printRejectionReason, "PrefetchAcrossPersistent is currently supported only with StreamK=3")
+        # HalfPLR + PAP is decided in the HalfPLR block (HalfPLR forces
+        # SuppressNoLoadLoop after this guard). Accepted only for
+        # StreamK==3 and StreamKForceDPOnly==1.
+        if state["StreamK"] not in (3, 4, 5):
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent is currently supported only with StreamK in [3, 4, 5]")
         if not state["BufferLoad"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent requires BufferLoad")
         if state["PrefetchGlobalRead"] < 1:

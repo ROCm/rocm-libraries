@@ -148,6 +148,35 @@ TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
     EXPECT_EQ(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), 2048u);
 }
 
+TEST(TestEngineManager, AddEngineNamesTheDiscardedDuplicateWhenTheCallerSuppliesAName)
+{
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true, 2048), "hipkernel:ConvFwd");
+    manager.addEngine(createTestEngine(1, true, 4096), "hipkernel:ConvFwd");
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "hipkernel:ConvFwd"));
+
+    // The name joins the id rather than replacing it: the id is what greps against the
+    // admission logs.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "0x0000000000000001"));
+}
+
+TEST(TestEngineManager, AddEngineNamesTheDiscardedDuplicateFromTheRegistryWhenNoNameIsGiven)
+{
+    using hipdnn_data_sdk::utilities::formatEngineIdHex;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(MIOPEN_ENGINE_ID, true, 2048));
+    manager.addEngine(createTestEngine(MIOPEN_ENGINE_ID, true, 4096));
+
+    // No name was declared, so this one comes from the static registry.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "MIOPEN_ENGINE"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, formatEngineIdHex(MIOPEN_ENGINE_ID)));
+}
+
 TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)
 {
     TestEngineManager manager;
