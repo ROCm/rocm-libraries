@@ -1979,7 +1979,7 @@ def _enable_gfx942_sink_prefill_tuned(problem: UnifiedAttentionProblem) -> bool:
 
 
 def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
-    """gfx950 full-causal bf16 attention-sink prefill -> waves_per_eu=3.
+    """gfx950 full-causal bf16/fp16 attention-sink prefill -> waves_per_eu=3.
 
     Same-run A/B on gfx950 vs the shipped nw4/mw16/T64 config (waves_per_eu is
     the only difference): 1.07x @ S1024, 1.11x @ S2048, 1.15x @ S4096, reproduced
@@ -1990,7 +1990,7 @@ def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
     """
     return (
         _resolve_attention_arch() == "gfx950"
-        and problem.dtype == "bf16"
+        and problem.dtype in ("bf16", "fp16")
         and not problem.use_fp8
         and problem.head_size == 64
         and problem.block_size == 16
@@ -2474,8 +2474,8 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
 
     This wires the kernel config that the parity + trace benchmarks proved
     fastest-and-correct for the AITER prefill-2D trace family (d64 / b32 /
-    GQA-8 / bf16, with attention sinks) into production. The combo stacks,
-    on top of ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
+    GQA-8 / bf16 and fp16, with attention sinks) into production. The combo
+    stacks, on top of ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
 
       * ``use_transposed_scalar_state``  (one m/l per lane + broadcast alpha)
       * ``use_transposed_mask_once``     (mask invariants once / KV iter; no-SW)
@@ -2500,7 +2500,7 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
     """
     if _resolve_attention_arch() != "gfx950":
         return False
-    if problem.dtype != "bf16":
+    if problem.dtype not in ("bf16", "fp16"):
         return False
     # FP8 KV is supported via the *sync-dequant* loader, which writes bf16
     # into K_lds/V_lds (k_scale folded in) -- exactly what the 32x32 combo
