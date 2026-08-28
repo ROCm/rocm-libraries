@@ -24,6 +24,8 @@ lgb = pytest.importorskip("lightgbm")
 np = pytest.importorskip("numpy")
 pytest.importorskip("pandas")  # imported transitively by uhd_gen.__main__
 
+import uhd_gen  # noqa: E402,F401  puts _generated/ on sys.path
+from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModel  # noqa: E402
 from uhd_gen.__main__ import _looks_like_cost_metric  # noqa: E402
 from uhd_gen.lgbm_to_flatbuffer import (  # noqa: E402
     GBDT_MODEL_FILE_IDENTIFIER,
@@ -55,22 +57,62 @@ def _train_simple_model(X: np.ndarray, y: np.ndarray, num_trees: int = 5) -> lgb
     return lgb.train(params, train_data, num_boost_round=num_trees)
 
 
-def _evaluate_flatbuffer_tree(
-    buffer: bytes, features: np.ndarray
-) -> float:
-    """Evaluate FlatBuffer GbdtModel manually.
+def _score_flatbuffer_model(buffer: bytes, features) -> float:
+    """Mirror of `TreeDataAdapter::score()` over a GbdtModel FlatBuffer.
 
-    This mirrors TreeDataAdapter::score() to verify correctness.
+    Deliberately a re-implementation rather than a call into the tool: the point is
+    to walk the emitted bytes exactly the way the C++ runtime walks them, so a
+    writer that produces a buffer the runtime misreads fails here.
+
+    Semantics copied from
+    plugin_sdk/include/hipdnn_plugin_sdk/ingestor/uhd/adapters/TreeDataAdapter.hpp:
+      - score() is `base_score + sum(tree)`; `learning_rate` is metadata and is NOT
+        applied, because LightGBM folds shrinkage into the dumped leaf values (:294-299)
+      - a node is a leaf when `left_children[node] < 0` (:342-350)
+      - `decision_lte` absent or true means `<=`, false means `<` (:356-362)
+      - a NaN feature, or a feature index outside the row, takes `default_left` (:369-385)
     """
-    # Skip to root table offset (after file identifier)
-    root_offset = struct.unpack_from("<I", buffer, 0)[0]
+    model = GbdtModel.GetRootAs(buffer, 0)
+    total = model.BaseScore()
+    for tree_idx in range(model.TreesLength()):
+        total += _score_flatbuffer_tree(model.Trees(tree_idx), features)
+    return total
 
-    # For now, just verify the buffer structure is valid
-    # Full evaluation would require parsing the FlatBuffer manually
-    # or using generated Python bindings
-    assert len(buffer) > 0
-    assert buffer[4:8] == GBDT_MODEL_FILE_IDENTIFIER
-    return 0.0  # Placeholder
+
+def _score_flatbuffer_tree(tree, features) -> float:
+    has_default_left = tree.DefaultLeftLength() > 0
+    has_decision_lte = tree.DecisionLteLength() > 0
+
+    node = 0
+    steps = 0
+    max_steps = tree.LeftChildrenLength()
+    while node < tree.LeftChildrenLength():
+        steps += 1
+        if steps > max_steps:
+            raise AssertionError("tree descent exceeded node count: cyclic child indices")
+
+        left = tree.LeftChildren(node)
+        right = tree.RightChildren(node)
+        if left < 0:
+            return tree.LeafValues(node) if node < tree.LeafValuesLength() else 0.0
+
+        feature_idx = tree.FeatureIndices(node)
+        threshold = tree.Thresholds(node)
+        use_lte = (not has_decision_lte) or bool(tree.DecisionLte(node))
+        default_left = has_default_left and bool(tree.DefaultLeft(node))
+
+        if 0 <= feature_idx < len(features):
+            value = features[feature_idx]
+            if value != value:  # NaN
+                go_left = default_left
+            else:
+                go_left = value <= threshold if use_lte else value < threshold
+        else:
+            go_left = default_left
+
+        node = left if go_left else right
+
+    return 0.0
 
 
 class TestTrainModelCvPaths:
@@ -237,22 +279,126 @@ class TestConverter:
 
 
 class TestRoundTrip:
-    """Test prediction round-trip between LightGBM and FlatBuffer."""
+    """The converted model must predict what LightGBM predicts.
 
-    def test_tree_structure_preserved(self, tmp_path: Path):
-        """Test that tree structure is preserved in conversion."""
-        X, y = _create_synthetic_data(n_samples=200, n_features=5)
-        model = _train_simple_model(X, y, num_trees=3)
+    This is the training<->runtime parity check RFC 0019 §15 Phase 4 asks for, and
+    the only test in either language that would catch a converter emitting bytes the
+    runtime walks differently. Structural assertions cannot: a buffer with the right
+    tree count and the wrong split semantics passes every one of them.
+    """
 
+    def test_predictions_match_lightgbm(self):
+        """Every row must score the same through both evaluators."""
+        X, y = _create_synthetic_data(n_samples=800, n_features=6)
+        model = _train_simple_model(X, y, num_trees=12)
+        buffer = build_gbdt_model(model.dump_model(), "sha256:test")
+
+        expected = model.predict(X, raw_score=True)
+        for row in range(X.shape[0]):
+            actual = _score_flatbuffer_model(buffer, X[row])
+            assert actual == pytest.approx(expected[row], rel=1e-9, abs=1e-9), (
+                f"row {row}: flatbuffer {actual} != lightgbm {expected[row]}"
+            )
+
+    def test_exact_threshold_values_match(self):
+        """Feature values sitting exactly on a split threshold.
+
+        This is where `decision_lte` is observable: `<=` sends the row left, `<`
+        sends it right, and every other input in the corpus agrees either way. A
+        converter that dropped the field, or inverted it, passes
+        test_predictions_match_lightgbm on random data and fails here.
+        """
+        X, y = _create_synthetic_data(n_samples=400, n_features=4)
+        model = _train_simple_model(X, y, num_trees=6)
         model_json = model.dump_model()
         buffer = build_gbdt_model(model_json, "sha256:test")
 
-        # Verify we have the right number of trees
-        # The tree count should match
-        assert len(model_json["tree_info"]) == 3
+        thresholds = _collect_thresholds(model_json)
+        assert thresholds, "model produced no internal splits to probe"
 
-        # Buffer should contain tree data
-        assert len(buffer) > 500  # Non-trivial size for 3 trees
+        probes = []
+        for feature_idx, threshold in thresholds[:40]:
+            row = np.full(X.shape[1], 0.5)
+            row[feature_idx] = threshold
+            probes.append(row)
+
+        probe_matrix = np.array(probes)
+        expected = model.predict(probe_matrix, raw_score=True)
+        for i, row in enumerate(probes):
+            actual = _score_flatbuffer_model(buffer, row)
+            assert actual == pytest.approx(expected[i], rel=1e-9, abs=1e-9), (
+                f"probe {i} on threshold: flatbuffer {actual} != lightgbm {expected[i]}"
+            )
+
+    def test_missing_values_match(self):
+        """NaN features must take the direction `default_left` records.
+
+        LightGBM decides missing-value routing per node at training time. If the
+        converter drops `default_left`, the mirror falls back to `False` (go right)
+        and diverges on exactly the rows that carry a NaN.
+        """
+        X, y = _create_synthetic_data(n_samples=600, n_features=5)
+        model = _train_simple_model(X, y, num_trees=8)
+        buffer = build_gbdt_model(model.dump_model(), "sha256:test")
+
+        rng = np.random.default_rng(7)
+        probes = X[:60].copy()
+        for row in probes:
+            row[rng.integers(0, probes.shape[1])] = np.nan
+
+        expected = model.predict(probes, raw_score=True)
+        for i, row in enumerate(probes):
+            actual = _score_flatbuffer_model(buffer, row)
+            assert actual == pytest.approx(expected[i], rel=1e-9, abs=1e-9), (
+                f"NaN probe {i}: flatbuffer {actual} != lightgbm {expected[i]}"
+            )
+
+    def test_learning_rate_is_not_applied_twice(self):
+        """A non-default shrinkage must not scale the ensemble a second time.
+
+        LightGBM folds `learning_rate` into the dumped leaf values, so the emitted
+        model carries 1.0 as provenance and `TreeDataAdapter::score()` deliberately
+        ignores it. Training at 0.3 rather than the 0.1 the other cases use makes a
+        double application a 3x error rather than a rounding difference.
+        """
+        X, y = _create_synthetic_data(n_samples=400, n_features=4)
+        train_data = lgb.Dataset(X, label=y)
+        model = lgb.train(
+            {
+                "objective": "regression",
+                "num_leaves": 7,
+                "learning_rate": 0.3,
+                "verbose": -1,
+                "min_data_in_leaf": 5,
+            },
+            train_data,
+            num_boost_round=5,
+        )
+        buffer = build_gbdt_model(model.dump_model(), "sha256:test")
+
+        assert GbdtModel.GetRootAs(buffer, 0).LearningRate() == pytest.approx(1.0)
+
+        expected = model.predict(X[:50], raw_score=True)
+        for i in range(50):
+            assert _score_flatbuffer_model(buffer, X[i]) == pytest.approx(
+                expected[i], rel=1e-9, abs=1e-9
+            )
+
+
+def _collect_thresholds(model_json) -> list[tuple[int, float]]:
+    """Every (split_feature, threshold) pair in the ensemble, in DFS order."""
+    found: list[tuple[int, float]] = []
+
+    def walk(node):
+        if "leaf_value" in node:
+            return
+        found.append((node["split_feature"], node["threshold"]))
+        walk(node["left_child"])
+        walk(node["right_child"])
+
+    for tree_info in model_json["tree_info"]:
+        walk(tree_info["tree_structure"])
+    return found
 
 
 class TestEdgeCases:
