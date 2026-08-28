@@ -26,6 +26,7 @@
 #include <string>
 
 #include "TestHelpers.hpp"
+#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/transforms/asm/StinkyUnreachableBlockElimPass.hpp"
@@ -171,6 +172,46 @@ TEST_F(StinkyUnreachableBlockElimPassTest, MakesPreviouslyRejectedFunctionLiftab
     Expected<LiftAttachedSSAResult> after = liftAsmRegistersToAttachedSSA(*func);
     EXPECT_TRUE(after.hasValue()) << (after.hasValue() ? "" : after.getError());
     EXPECT_TRUE(func->hasAttachedSSA());
+}
+
+// A module records each instruction group as a pair of raw boundary nodes, so
+// erasing the block that holds one would leave the range dangling with nothing
+// able to detect it afterwards. Given the module, the pass clears such a group
+// while the nodes are still alive.
+//
+// Both groups are checked in one run because the property that matters is that
+// the guard is per-group: a group in a surviving block keeps its range. A guard
+// that cleared everything on any deletion would pass the first half alone.
+TEST(StinkyUnreachableBlockElimGroupGuardTest, ClearsOnlyGroupsInErasedBlocks) {
+    StinkyAsmModule::ModuleOptions opts{};
+    opts.OptLevel = 0;
+    StinkyAsmModule module("test", {12, 5, 0}, opts);
+    module.addGroup("live");
+    module.addGroup("dead");
+
+    Function& func = module.getFunction();
+    BasicBlock* entry = func.getEntryBlock();
+    BasicBlock* orphan = func.createBasicBlock("orphan");
+
+    StinkyInstruction* liveFirst = createVAddInBlock(entry, kArch, 2, 0, 1);
+    StinkyInstruction* liveLast = createVAddInBlock(entry, kArch, 3, 0, 1);
+    StinkyInstruction* deadFirst = createVAddInBlock(orphan, kArch, 4, 0, 1);
+    StinkyInstruction* deadLast = createVAddInBlock(orphan, kArch, 5, 0, 1);
+
+    module.setGroupRange("live", IntrusiveListIterator<IRBase>(liveFirst),
+                         IntrusiveListIterator<IRBase>(liveLast));
+    module.setGroupRange("dead", IntrusiveListIterator<IRBase>(deadFirst),
+                         IntrusiveListIterator<IRBase>(deadLast));
+    ASSERT_TRUE(module.findGroupRange("live").has_value());
+    ASSERT_TRUE(module.findGroupRange("dead").has_value());
+
+    PassContext passCtx;
+    AnalysisManager am;
+    createStinkyUnreachableBlockElimPass(module)->run(func, passCtx, am);
+
+    ASSERT_FALSE(hasBlock(func, "orphan"));
+    EXPECT_FALSE(module.findGroupRange("dead").has_value());
+    EXPECT_TRUE(module.findGroupRange("live").has_value());
 }
 
 }  // namespace
