@@ -809,7 +809,7 @@ validParameters = { # we need to make sure this matches develop
     #     ^^^^^^^^^^^^   ^   ^^^^   ^^^^
     #      MatrixInst  BlkM   WT    Wave
     #  - means (32x64) per MI * (4x1) per wave * (2x2) per workgroup = (32*4*2)x(64*1*2) = 256x128 macro tile
-    # Tensile will ignore the parameters ThreadTile and WorkGroup when the alternative format is used
+    # TensileLite will ignore the parameters ThreadTile and WorkGroup when the alternative format is used
     # NOTE: MatrixInstruction is no longer validated through this structure, but is instead validated via the
     #   ``TensileLogic`` program.
     "MatrixInstruction": -1,

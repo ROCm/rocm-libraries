@@ -9,7 +9,7 @@
 # lands on the same pool sizes as FP8 (93/97/101/105 of 106), so this config is not
 # here to widen the budget numbers -- it is here because it is a genuinely different
 # allocation path that could drift away from FP8, and because the GPU test it stands
-# in for (Tensile/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_pap_prefetchgl2.yaml)
+# in for (tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_pap_prefetchgl2.yaml)
 # regressed alongside the FP8 one and had no unit analogue.
 #
 # Reduced to a single MatrixInstruction (the GPU test sweeps four) because the SGPR

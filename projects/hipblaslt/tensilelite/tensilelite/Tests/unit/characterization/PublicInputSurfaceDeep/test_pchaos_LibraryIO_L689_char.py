@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurfaceDeep characterization: ``if CU is None`` at
-``Tensile/LibraryIO.py:689`` inside ``getCUCount``.
+``tensilelite/LibraryIO.py:689`` inside ``getCUCount``.
 
 Branch d2f6f0df95db1dd2e280fe5b92edb75f8acc175d.
 

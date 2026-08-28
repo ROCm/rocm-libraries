@@ -6,7 +6,7 @@
 Characterisation test — branch_id f6884744123d833fb9c2adb4d3d9b29f52dfa5b0
 
 Predicate : self.do["PreLoop"]   (bare boolean read)
-Site      : Tensile/KernelWriterAssembly.py:2182
+Site      : tensilelite/KernelWriterAssembly.py:2182
 Solver    : z3 4.16.0  — SAT  (solver-backed-under-assumptions)
 
 Classification note
@@ -14,7 +14,7 @@ Classification note
 Both polarities are solver-satisfiable under the seeded boolean domain.
 At runtime the live value is pinned to True: KernelWriter.__init__
 (KernelWriter.py:485) writes ``self.do["PreLoop"] = True`` and that literal
-is never reassigned anywhere in the Tensile/ package.  The FALSE branch is
+is never reassigned anywhere in the tensilelite/ package.  The FALSE branch is
 therefore structurally dead at runtime even though the solver admits it.
 
 Tests here:
@@ -29,7 +29,7 @@ pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
-# Predicate semantics (pure; no Tensile import required)
+# Predicate semantics (pure; no TensileLite import required)
 # ---------------------------------------------------------------------------
 
 def _pred(value):

@@ -36,20 +36,6 @@ from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
 
-from Tensile.Common import (
-)
-
-from Tensile.KernelWriterBase import (
-)
-from Tensile.resources import copy_static_headers
-from Tensile.SolutionStructs.Solution import (
-)
-from Tensile.Toolchain.Validators import (
-)
-
-from .ParseArguments import parseArguments
-
-
 from tensilelite.Common import (
     CHeader,
     DebugConfig,
@@ -1083,14 +1069,14 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
 
 
 ################################################################################
-# Tensile Create Library
+# TensileLite Create Library
 ################################################################################
 @profile
 def run():
     start = timer()
     print1("")
     print1(HR)
-    print1("# Tensile Create Library")
+    print1("# TensileLite Create Library")
     print2(HR)
     print2("")
 
@@ -1293,7 +1279,7 @@ def run():
         else:
             printWarning(f"Cannot remove build_tmp")
 
-    print("# Tensile Library Writer DONE")
+    print("# TensileLite Library Writer DONE")
     print(HR)
     print("")
 

@@ -4,7 +4,7 @@
 ################################################################################
 # P2 designed seed config for gfx90a (aldebaran, CDNA2/MFMA).
 #
-# Mirrors the schema of Tensile/Tests/common/gemm/bf16_tn.yaml
+# Mirrors the schema of tensilelite/Tests/common/gemm/bf16_tn.yaml
 # (GlobalParameters + BenchmarkProblems:[[ProblemType, {ForkParameters: ...}]]).
 #
 # Design rationale (see attribution-gfx90a.json):

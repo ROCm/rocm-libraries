@@ -32,7 +32,7 @@ ROCJITSU_CONFIG="${ROCJITSU_CONFIG:-}"
 RACE_REPORT_DIR="${RACE_REPORT_DIR:-${PWD}/race-reports}"
 HIPBLASLT_BENCH="${HIPBLASLT_BENCH:-${ROCM_PATH}/bin/hipblaslt-bench}"
 TENSILELITE_ROOT="${TENSILELITE_ROOT:-${ROCM_PATH}/share/hipblaslt/tensilelite}"
-TENSILE_DRIVER="${TENSILE_DRIVER:-${TENSILELITE_ROOT}/Tensile/bin/Tensile}"
+TENSILE_DRIVER="${TENSILE_DRIVER:-${TENSILELITE_ROOT}/tensilelite/bin/Tensile}"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
 RACE_TIMEOUT_SECONDS="${RACE_TIMEOUT_SECONDS:-180}"
 TENSILELITE_TIMEOUT_SECONDS="${TENSILELITE_TIMEOUT_SECONDS:-420}"
@@ -130,7 +130,7 @@ if [[ ! -d "${TENSILELITE_ROOT}" ]]; then
 fi
 
 if [[ ! -f "${TENSILE_DRIVER}" ]]; then
-  echo "Tensile driver not found: ${TENSILE_DRIVER}" >&2
+  echo "TensileLite driver not found: ${TENSILE_DRIVER}" >&2
   exit 1
 fi
 
@@ -386,8 +386,8 @@ run_tensilelite_client_check() {
   fi
 
   echo "running tensilelite-client under rocjitsu race detection"
-  # Drive the normal Tensile front end with the client from the TheRock artifact.
-  # This covers a different surface from hipblaslt-bench: Python-side Tensile
+  # Drive the normal TensileLite front end with the client from the TheRock artifact.
+  # This covers a different surface from hipblaslt-bench: Python-side TensileLite
   # setup, rocisa imports, generated client config, and the standalone
   # tensilelite-client runtime path.
   timeout "${TENSILELITE_TIMEOUT_SECONDS}" \

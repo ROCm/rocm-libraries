@@ -4,7 +4,7 @@
 ################################################################################
 # P2 designed StreamK config for gfx942 codegen characterization.
 #
-# Goal: exercise the uncovered branches of Tensile/Components/StreamK.py
+# Goal: exercise the uncovered branches of tensilelite/Components/StreamK.py
 # (methodology-A missing ranges: 202, 316, 326-409, 464+) on gfx942.
 #
 # StreamK family sweep:

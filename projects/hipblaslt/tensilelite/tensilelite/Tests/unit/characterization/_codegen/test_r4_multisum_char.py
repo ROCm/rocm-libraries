@@ -5,7 +5,7 @@
 """R4 — multi-index summation (tensor contraction) graIncrements characterization.
 
 Exercises the "other summation" arm of
-``Tensile/KernelWriterAssembly.py:graIncrements`` (lines 5022-5092) that runs
+``tensilelite/KernelWriterAssembly.py:graIncrements`` (lines 5022-5092) that runs
 when ``loopIdx != self.states.unrollIdx`` — i.e. when a kernel has more than
 one summation index (NumIndicesSummation > 1).
 

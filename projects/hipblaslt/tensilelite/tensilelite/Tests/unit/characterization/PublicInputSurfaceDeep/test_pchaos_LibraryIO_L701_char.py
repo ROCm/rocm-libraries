@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-# Characterization of Tensile/LibraryIO.py:701 [if]
+# Characterization of tensilelite/LibraryIO.py:701 [if]
 #   branch_id: 6869457874b8963d9b4896f00511d65f19f5b4d8
 #   function: getCUCount
 #   predicate: CU is None   (CU = os.environ.get("CU", None))

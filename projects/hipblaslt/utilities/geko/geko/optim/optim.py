@@ -6,7 +6,7 @@ from __future__ import annotations
 """GEMM Kernel Optimization module.
 
 Implements the main optimization workflow.
-Generates Tensile tensilelite for specific GEMM types and executes multi-GPU
+Generates TensileLite configurations for specific GEMM types and executes multi-GPU
 optimization with automatic load balancing and progress monitoring.
 
 Key functions:
@@ -14,7 +14,7 @@ Key functions:
     run: Execute optimization across multiple GPUs.
     analyze: Benchmark and filter optimized kernels.
 
-Integrates with hipBLASLt for benchmarking and Tensile for kernel compilation.
+Integrates with hipBLASLt for benchmarking and TensileLite for kernel compilation.
 """
 
 import os
@@ -210,7 +210,7 @@ def run(
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation. Used both
-            for the Tensile binary and to add tensilelite to PYTHONPATH.
+            for the TensileLite binary and to add tensilelite to PYTHONPATH.
         tuning_dir (str | Path): Directory containing per-GEMM optimization
             YAML configs (see configure).
         devices (Sequence[int], optional): GPU device IDs used by the load

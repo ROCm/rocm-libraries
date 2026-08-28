@@ -9,7 +9,7 @@ Drives the designed sparse_dtvsm.yaml config through the config-driven emit
 harness and asserts every emitted kernel is real gfx942 AMDGCN assembly with
 err==0.
 
-Target missing ranges in Tensile/KernelWriterAssembly.py:
+Target missing ranges in tensilelite/KernelWriterAssembly.py:
   - 3048-3105 : graMetadataTileAssignment, gated by
                   ``kernel["DirectToVgprSparseMetadata"]``
   - 4102-4192 : computeMetaDataSrd, gated by

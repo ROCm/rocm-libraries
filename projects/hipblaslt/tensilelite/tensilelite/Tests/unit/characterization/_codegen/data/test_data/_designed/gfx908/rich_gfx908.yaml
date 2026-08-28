@@ -17,7 +17,7 @@
 #   StorePriorityOpt fork: False vs True (gates alphaBeforeLoadC path)
 #
 # DataType: h (fp16 in/out, f32 compute) matches gfx908 HHS curated shape.
-# Both MI shapes are in validMFMA["HH"] per Tensile/Common/ValidParameters.py.
+# Both MI shapes are in validMFMA["HH"] per tensilelite/Common/ValidParameters.py.
 # Total fork permutations = 2 MI x 2 GSU x 2 StorePriorityOpt = 8; limit=8 gives all.
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -60,7 +60,7 @@ BenchmarkProblems:
         # Two valid gfx908 HH (fp16) MFMA shapes in 9-element format:
         #   [16,16,16,1,1,1,1,1,1] = native HHS 16x16 tile (K=16)
         #   [32,32,8,1,1,1,1,1,1]  = larger 32x32 tile (K=8), exercises wider MT path
-        # Both are in validMFMA["HH"] - verified against Tensile/Common/ValidParameters.py.
+        # Both are in validMFMA["HH"] - verified against tensilelite/Common/ValidParameters.py.
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,  1, 1,  1, 1]
           - [32, 32,  8, 1,  1,  1, 1,  1, 1]

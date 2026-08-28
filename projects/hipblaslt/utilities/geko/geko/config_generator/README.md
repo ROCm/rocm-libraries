@@ -1,6 +1,6 @@
 # `geko.config_generator`
 
-Generates Tensile tuning configs (and related artifacts) from a YAML GEMM specification and a local [hipBLASLt](https://github.com/ROCm/hipBLASLt) tree.
+Generates TensileLite tuning configs (and related artifacts) from a YAML GEMM specification and a local [hipBLASLt](https://github.com/ROCm/hipBLASLt) tree.
 
 ## How to run
 
@@ -20,7 +20,7 @@ python3 scripts/config_generator.py [--hipblaslt PATH] [--config PATH] [--output
 - **`--verbose` / `-v`:** `0` = WARNING, `1` = INFO (default `1`).
 - **`--no-shell-scripts`:** emit YAML and config log only (skip per-entity `.sh` and `run_*_all.sh`).
 
-The driver prepends `hipblaslt_path/tensilelite` to `sys.path`. When shell scripts are enabled (default), it may build the Tensile client via `geko.utils.build_tensilelite_client` (optional YAML key `BUILD_DIR` overrides the build directory). YAML-only runs (`write_shell_scripts=False`) skip the client build.
+The driver prepends `hipblaslt_path/tensilelite` to `sys.path`. When shell scripts are enabled (default), it may build the TensileLite client via `geko.utils.build_tensilelite_client` (optional YAML key `BUILD_DIR` overrides the build directory). YAML-only runs (`write_shell_scripts=False`) skip the client build.
 
 ### Python API
 
@@ -55,7 +55,7 @@ See [`fork_params/README.md`](fork_params/README.md).
 |-----|--------|
 | `TRANSA`, `TRANSB` | `'T'` or `'N'` |
 | `DataType`, `DestDataType`, `ComputeDataType` | See comments in `config.yaml` |
-| `ARCH` | Must be a key of `HARDWARE_MAP` in [`constants.py`](constants.py). Tensile `LibraryLogic` defaults (`ScheduleName`, `ArchitectureName`, `DeviceNames`) are stored per `ARCH` in `_ARCH_SPECS` and exposed as `HARDWARE_MAP[ARCH]['LibraryLogic']`. |
+| `ARCH` | Must be a key of `HARDWARE_MAP` in [`constants.py`](constants.py). TensileLite `LibraryLogic` defaults (`ScheduleName`, `ArchitectureName`, `DeviceNames`) are stored per `ARCH` in `_ARCH_SPECS` and exposed as `HARDWARE_MAP[ARCH]['LibraryLogic']`. |
 
 ### Sizes and `SIZE_OPTION`
 
@@ -131,7 +131,7 @@ Order matches [`config_generator.run`](config_generator.py):
 3. **`MIDesign`**, **`get_optimization_params`**, **`get_post_processor`** — per-run instances from config.
 4. **Per size:** **`generate_fork_params`** — MI groups from `MIDesign`, non-MI params/groups from optimization profile, optional post-processing, then `Groups` assembled ([`fork_param_generator.py`](fork_param_generator.py)); build **`ConfigEntry`**.
 5. **`do_cluster`** / **`do_merge`** — group sizes and merge fork params; respect kernel cap for heuristic search space.
-6. **`geko.utils.build_tensilelite_client`** — when shell scripts are enabled, ensure prebuilt Tensile client path for generated `.sh` files.
+6. **`geko.utils.build_tensilelite_client`** — when shell scripts are enabled, ensure prebuilt TensileLite client path for generated `.sh` files.
 7. **`ConfigSectionGenerator.build_config`** + **`EntityOutputWriter.write_entity_files_only`** / **`append_aggregate_metadata`** — one output bundle per merged entry.
 
 ```mermaid
@@ -162,7 +162,7 @@ flowchart LR
 ### Core types ([`shared_utils.py`](shared_utils.py))
 
 - **`ForkParameter`** — Named fork axis: value list, optional comment, `active` flag.
-- **`GroupDimension`** — List of MI/param bundles that vary together in Tensile `Groups`.
+- **`GroupDimension`** — List of MI/param bundles that vary together in TensileLite `Groups`.
 - **`ConfigEntry`** — One logical output config: sizes, merged `fork_params`, kernel count, MI counts per size.
 
 ### Registries

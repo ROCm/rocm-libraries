@@ -282,7 +282,7 @@ inv build --architecture gfx1100 --clean
 
 > [!NOTE]
 > To determine defaults for the `TensileCreateLibrary` command generated when building the device
-> libraries, run `Tensile/bin/TensileCreateLibrary --help` from the tensilelite directory.
+> libraries, run `tensilelite/bin/TensileCreateLibrary --help` from the tensilelite directory.
 
 > [!NOTE]
 > Refer to the tensilelite [README](./tensilelite/README.md) for instructions on building for the tensile workflow.

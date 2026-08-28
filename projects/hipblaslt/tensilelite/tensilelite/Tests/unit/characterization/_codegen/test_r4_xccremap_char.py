@@ -5,7 +5,7 @@
 """R4 — gfx1250 XCC cluster-remap workgroup-init characterization (CPU-only).
 
 Exercises the "Init workgroup id from ttmp with cluster remap" arm in
-``Tensile/KernelWriterAssembly.py`` lines 2398-2453.
+``tensilelite/KernelWriterAssembly.py`` lines 2398-2453.
 
 Gate conditions:
   - ``self.states.archCaps["WorkGroupIdFromTTM"]`` is True on gfx12xx

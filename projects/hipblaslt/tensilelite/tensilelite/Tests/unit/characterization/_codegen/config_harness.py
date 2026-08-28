@@ -8,13 +8,13 @@ This is *not* a test module (no ``test_`` prefix, not collected). It exercises
 the **config-driven** solution-generation surface that the logic-driven
 :mod:`codegen_harness` does not touch:
 
-    Tensile config YAML  ->  BenchmarkProcess (BenchmarkStructs)
+    TensileLite config YAML  ->  BenchmarkProcess (BenchmarkStructs)
                          ->  constructForkPermutations
                          ->  _generateForkedSolutions  ->  Solution(s)
                          ->  generateKernelObjectsFromSolutions  ->  kernel dict(s)
                          ->  processKernelSource  ->  assembly text
 
-A Tensile ``BenchmarkProblems`` entry is a ``[ProblemType, ProblemSizeGroup]``
+A TensileLite ``BenchmarkProblems`` entry is a ``[ProblemType, ProblemSizeGroup]``
 pair. The ``ForkParameters`` block is a cartesian product of single-element
 value lists, so each fork permutation yields exactly one ``Solution`` (CPU-only;
 no GPU, no benchmarking, no compile). We then hand the resulting ``Solution``
@@ -112,7 +112,7 @@ def _isolated_globals_with_isa(isaInfoMap):
 
 
 def _load_config(config_path):
-    """Read a Tensile config YAML into a dict (GlobalParameters/BenchmarkProblems)."""
+    """Read a TensileLite config YAML into a dict (GlobalParameters/BenchmarkProblems)."""
     from tensilelite import LibraryIO
 
     return LibraryIO.read(str(resolve_tensile_path(config_path)))

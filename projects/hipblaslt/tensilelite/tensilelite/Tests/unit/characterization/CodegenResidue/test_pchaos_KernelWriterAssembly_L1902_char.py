@@ -6,7 +6,7 @@
 Characterisation test — branch_id 24d207463aa7b7dbc424872db6e75313529bf4d6
 
 Predicate : if self.states.overflowedResources:
-Site      : Tensile/KernelWriterAssembly.py:1902
+Site      : tensilelite/KernelWriterAssembly.py:1902
 Function  : checkResources
 Solver    : z3 4.16.0  — SAT  (solver-backed-under-assumptions)
 

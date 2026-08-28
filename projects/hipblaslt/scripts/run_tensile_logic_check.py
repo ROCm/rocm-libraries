@@ -27,7 +27,7 @@ def _find_hipblaslt_root() -> Path:
 
 
 def _ensure_paths(root: Path, build_dir: Path, lib_logic_path: Path) -> None:
-    """Prepend sys.path entries so `import rocisa` and Tensile resolve.
+    """Prepend sys.path entries so `import rocisa` and tensilelite resolve.
 
     CMake places the nanobind module under build/tensilelite/rocisa/rocisa/
     (_rocisa*.so). The importable package root is build/tensilelite/rocisa.

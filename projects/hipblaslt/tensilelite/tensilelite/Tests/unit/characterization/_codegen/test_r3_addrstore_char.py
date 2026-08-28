@@ -8,7 +8,7 @@ Drives the designed addrstore.yaml config (f8n + UseScaleAB=Vector +
 UseScaleAlphaVec=1, two MFMA shapes) through the config-driven emit harness
 and asserts every emitted kernel is real gfx942 AMDGCN assembly with err==0.
 
-Target missing ranges in Tensile/AsmAddressCalculation.py:
+Target missing ranges in tensilelite/AsmAddressCalculation.py:
   - 320-352  : ScaleAlphaVec arm (optSingleColVgpr branch)
   - 382-396  : ScaleAlphaVec arm (optSharedColVgpr branch)
   - 397-410  : ScaleAVec arm     (optSharedColVgpr branch)

@@ -24,17 +24,17 @@ from unittest import mock
 
 import pytest
 
-from Tensile import GpuRevisionTarget as gpu_rev
-from Tensile.TensileLogic.ValidCorpusConsistency import find_gfx1250v0_overlay_violations
+from tensilelite import GpuRevisionTarget as gpu_rev
+from tensilelite.TensileLogic.ValidCorpusConsistency import find_gfx1250v0_overlay_violations
 
 pytestmark = pytest.mark.unit
 
-# The revision mapping and probe wrapper live in the packaged Tensile tree
-# (Tensile/GpuRevisionTarget.py, invoke-free), so they are present in ROCm test
+# The revision mapping and probe wrapper live in the packaged TensileLite tree
+# (tensilelite/GpuRevisionTarget.py, invoke-free), so they are present in ROCm test
 # artifacts and CI exercises them directly -- not skipped.
 #
 # The invoke -> CMake build wiring lives in hipBLASLt's tasks.py at the project
-# root (unit -> Tests -> Tensile -> tensilelite -> hipblaslt). That file is
+# root (unit -> Tests -> tensilelite -> tensilelite -> hipblaslt). That file is
 # dev-only tooling absent from packaged artifacts and needs invoke, so the wiring
 # tests load it by path and skip cleanly when it (or invoke) is unavailable,
 # without aborting the module.
@@ -67,10 +67,10 @@ REVISION_OPT = "-DHIPBLASLT_ASIC_REVISION"
 
 
 # --------------------------------------------------------------------------- #
-# The pure mapping and its probe wrapper (Tensile/GpuRevisionTarget.py).
+# The pure mapping and its probe wrapper (tensilelite/GpuRevisionTarget.py).
 # --------------------------------------------------------------------------- #
 class TestRevisionToGpuTarget:
-    """base arch + asicRevision -> Tensile --gpu-targets value."""
+    """base arch + asicRevision -> TensileLite --gpu-targets value."""
 
     @pytest.mark.parametrize("arch,revision,expected", [
         ("gfx1250", 0, "gfx1250v0"),   # the only v0 case
@@ -323,7 +323,7 @@ class TestBuildTaskCommandLine:
 # invariant is checked against the tree that actually ships.
 #
 # The enforcement point is ``TensileLogic --check-all``, via
-# ``Tensile.TensileLogic.ValidCorpusConsistency.find_gfx1250v0_overlay_violations``,
+# ``tensilelite.TensileLogic.ValidCorpusConsistency.find_gfx1250v0_overlay_violations``,
 # which runs whenever ``--architecture`` includes ``gfx1250v0`` or ``all``
 # (hipBLASLt's dedicated gfx1250v0 build always passes the former -- see
 # ``device-library/CMakeLists.txt``), regardless of whether the real

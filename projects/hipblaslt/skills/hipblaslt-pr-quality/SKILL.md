@@ -33,7 +33,7 @@ On any conflict, the base MUST-rule wins.
 ### Scoping of base rules (adds)
 Bind the base change-classes and scope buckets to hipBLASLt paths:
 - Frontend / API: `projects/hipblaslt/library/include/hipblaslt/**` (public headers), `projects/hipblaslt/library/src/**`.
-- Tensile / kernel generation: `projects/hipblaslt/tensilelite/**`, especially `KernelWriter*.py`.
+- TensileLite / kernel generation: `projects/hipblaslt/tensilelite/**`, especially `KernelWriter*.py`.
 - Tests/clients: `projects/hipblaslt/clients/**`.
 
 ### Tightens M1 (defect-fix regression test)
@@ -46,12 +46,12 @@ Known-bug entries live in `projects/hipblaslt/clients/tests/data/known_bugs.yaml
 id and a time-box. This is the concrete implementation of the base "track and time-box
 quarantines" requirement. Waiver code **`W-KNOWN-BUG`** declares a tracked two-PR plan.
 
-### Adds — Tensile test levels (maps the base test-level SHOULD to real lanes)
-C++ unit → Tensile pytest → client/API → integration → perf. Pick the lowest level that fails on
+### Adds — TensileLite test levels (maps the base test-level SHOULD to real lanes)
+C++ unit → TensileLite pytest → client/API → integration → perf. Pick the lowest level that fails on
 the regression. Map the base test-level table onto these lanes when advising or reviewing.
 
 ### Adds — characterization snapshot (`.ambr` golden) discipline
-Scope: `projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/` — characterization tests
+Scope: `projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/` — characterization tests
 that pin TensileLite's *current* Python behavior as syrupy `.ambr` goldens, run in the `-m unit`
 lane. Green means "behavior unchanged," not "correct"; a red is information about the PR's own
 change. When a PR's diff touches any `.ambr` file, gate on all of the below.
@@ -103,10 +103,10 @@ Overlap with the base branch on any of these since the PR diverged → **mandato
 Some merge-time breakage has **no file overlap at all**: one PR changes a *validator or allow-list*
 while another adds *data the validator checks*. Treat these as a coupled pair even though they touch
 different paths. The concrete hipBLASLt instance:
-- Validator / allow-list: `projects/hipblaslt/tensilelite/Tensile/Common/GlobalParameters.py` (the
+- Validator / allow-list: `projects/hipblaslt/tensilelite/tensilelite/Common/GlobalParameters.py` (the
   global-parameter registry and the `_assertGlobalParametersAreValid` ignored-key allow-list), plus
-  the enforcing test `projects/hipblaslt/tensilelite/Tensile/Tests/unit/test_input_yaml_corpus_clean.py`.
-- Validated data: YAML fixtures under `projects/hipblaslt/tensilelite/Tensile/Tests/**` (e.g.
+  the enforcing test `projects/hipblaslt/tensilelite/tensilelite/Tests/unit/test_input_yaml_corpus_clean.py`.
+- Validated data: YAML fixtures under `projects/hipblaslt/tensilelite/tensilelite/Tests/**` (e.g.
   `common/gemm/**`).
 
 If, since the PR diverged, the base branch changed the validator/allow-list **and** this PR adds or

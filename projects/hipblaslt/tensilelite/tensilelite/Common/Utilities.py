@@ -154,8 +154,8 @@ def elineno():
 
 ################################################################################
 # Is query version compatible with current version
-# a yaml file is compatible with tensile if
-# tensile.major == yaml.major and tensile.minor.step > yaml.minor.step
+# a yaml file is compatible with TensileLite if
+# TensileLite.major == yaml.major and TensileLite.minor.step > yaml.minor.step
 ################################################################################
 def versionIsCompatible(queryVersionString):
     (qMajor, qMinor, qStep) = queryVersionString.split(".")

@@ -25,7 +25,7 @@
 #
 # Usage:
 #
-# Assuming one runs the following Tensile command:
+# Assuming one runs the following TensileLite command:
 #
 #   tensilelite run <yaml> tensile-out
 #

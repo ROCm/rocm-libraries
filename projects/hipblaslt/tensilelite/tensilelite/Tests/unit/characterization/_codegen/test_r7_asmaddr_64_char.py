@@ -5,7 +5,7 @@
 """R7 -- gfx942 AsmAddressCalculation 64-bit / Scale-vector / InitialStrides arms.
 
 Three configs and one direct-driver test exercise the remaining uncovered branches
-of Tensile/AsmAddressCalculation.py (miss=163, 60% coverage target):
+of tensilelite/AsmAddressCalculation.py (miss=163, 60% coverage target):
 
 Config A -- asmaddr_srvw_scale.yaml:
   fp8n TN + UseScaleAB="Vector" + UseScaleAlphaVec=1 + StoreRemapVectorWidth=4

@@ -42,10 +42,10 @@ documented `--global-parameters` surface.
   `gfxToIsa(CpuOnlyArch)` instead of shelling out to `amdgpu-arch` /
   `rocm_agent_enumerator`, so `detectGlobalCurrentISA` no longer raises on a
   GPU-less host and `tensilelite.Tensile()` runs CPU-only.
-- **Device-launch stub** — `Tensile/ClientWriter.py::runClient`: when `CpuOnly`
+- **Device-launch stub** — `tensilelite/ClientWriter.py::runClient`: when `CpuOnly`
   is set it writes the client config / run-script as usual but skips the
   device-bound client launch and returns returncode `0`.
-- **Synthetic results CSV** — `Tensile/BenchmarkProblems.py::_writeSyntheticResultsCSV`
+- **Synthetic results CSV** — `tensilelite/BenchmarkProblems.py::_writeSyntheticResultsCSV`
   writes a deterministic results CSV in the schema `LibraryLogic.addFromCSV`
   consumes. Every solution cell holds the fixed constant
   `_CPU_ONLY_SYNTHETIC_GFLOPS = 1000.0` (never random, never timestamped) so the

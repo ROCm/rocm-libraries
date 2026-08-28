@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-# Characterization of Tensile/BenchmarkProblems.py:557 [if]
+# Characterization of tensilelite/BenchmarkProblems.py:557 [if]
 #   branch_id: 099093bf09abd54f42b409be3afe7454cfaf8eaf
 #   function: _benchmarkProblemType
 #   predicate: not cacheValid

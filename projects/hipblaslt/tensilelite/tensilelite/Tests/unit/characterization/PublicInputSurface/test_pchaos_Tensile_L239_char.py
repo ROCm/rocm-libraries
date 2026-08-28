@@ -55,7 +55,7 @@ def _make_args(**overrides):
 
 
 # ---------------------------------------------------------------------------
-# Unit: pure predicate truthiness (no Tensile import; no side-effects)
+# Unit: pure predicate truthiness (no TensileLite import; no side-effects)
 # ---------------------------------------------------------------------------
 
 def test_platform_predicate_true_nonzero_int():

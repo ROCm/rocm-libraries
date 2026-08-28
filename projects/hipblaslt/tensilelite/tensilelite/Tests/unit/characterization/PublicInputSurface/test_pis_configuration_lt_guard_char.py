@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurface characterization: the ``isinstance(rhs, Parameter)``
-guard in ``Parameter.__lt__`` (Tensile/Configuration.py:218).
+guard in ``Parameter.__lt__`` (tensilelite/Configuration.py:218).
 
 Branch 766aca336236aae2b14b573c47e639e5adb3307d. The predicate is a runtime
 type dispatch on the caller-supplied right-hand operand of ``<``:

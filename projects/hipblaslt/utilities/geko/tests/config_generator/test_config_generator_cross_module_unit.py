@@ -55,17 +55,17 @@ def test_param_meta_helpers_and_loader_cache(monkeypatch: pytest.MonkeyPatch) ->
     assert pm._format_range([1, 2, 3]) == "[1, 2, 3]"
     assert pm._format_range(list(range(10)), start_elements=2, end_elements=2) == "[0, 1, ..., 8, 9]"
 
-    gp_mod = types.ModuleType("Tensile.Common.GlobalParameters")
+    gp_mod = types.ModuleType("tensilelite.Common.GlobalParameters")
     gp_mod.defaultBenchmarkCommonParameters = [{"A": 11}, {"B": 22}]
-    vp_mod = types.ModuleType("Tensile.Common.ValidParameters")
+    vp_mod = types.ModuleType("tensilelite.Common.ValidParameters")
     vp_mod.validParameters = {
         "A": [0, 1, 2, 3, 4, 5],
         "B": [7],
         "C": [1, 2, 3],
     }
 
-    monkeypatch.setitem(sys.modules, "Tensile.Common.GlobalParameters", gp_mod)
-    monkeypatch.setitem(sys.modules, "Tensile.Common.ValidParameters", vp_mod)
+    monkeypatch.setitem(sys.modules, "tensilelite.Common.GlobalParameters", gp_mod)
+    monkeypatch.setitem(sys.modules, "tensilelite.Common.ValidParameters", vp_mod)
 
     pm.load_tensile_metadata.cache_clear()
     m1 = pm.load_tensile_metadata()
@@ -329,8 +329,8 @@ def test_gfx950_post_processor_cms_helpers(monkeypatch: pytest.MonkeyPatch) -> N
     )
     assert len(mi) == 9
 
-    # Cover CMS loading path with injected Tensile modules.
-    cs_mod = types.ModuleType("Tensile.Components.CustomSchedule")
+    # Cover CMS loading path with injected TensileLite modules.
+    cs_mod = types.ModuleType("tensilelite.Components.CustomSchedule")
     cs_mod.query_cms_kernels = lambda **_k: [
         {
             "MatrixInstruction": [16, 16, 4, 1],
@@ -342,10 +342,10 @@ def test_gfx950_post_processor_cms_helpers(monkeypatch: pytest.MonkeyPatch) -> N
             "NoSuchKey": 7,
         }
     ]
-    vp_mod = types.ModuleType("Tensile.Common.ValidParameters")
+    vp_mod = types.ModuleType("tensilelite.Common.ValidParameters")
     vp_mod.validParameters = {"DepthU": [1], "GlobalSplitU": [1]}
-    monkeypatch.setitem(sys.modules, "Tensile.Components.CustomSchedule", cs_mod)
-    monkeypatch.setitem(sys.modules, "Tensile.Common.ValidParameters", vp_mod)
+    monkeypatch.setitem(sys.modules, "tensilelite.Components.CustomSchedule", cs_mod)
+    monkeypatch.setitem(sys.modules, "tensilelite.Common.ValidParameters", vp_mod)
 
     def _mk(name, values, **kwargs):
         return ForkParameter(
