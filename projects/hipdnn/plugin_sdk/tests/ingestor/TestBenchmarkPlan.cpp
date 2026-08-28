@@ -3,14 +3,18 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -27,6 +31,7 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -622,10 +627,15 @@ inline TestBenchmarkPlan makeDeterministicPlan(std::vector<TestBenchmarkPlan::Ca
                                                const BenchmarkTestHandle& handle,
                                                std::vector<std::optional<double>> times,
                                                TestBenchmarkPlan::RecordRankingFn recordRanking
-                                               = {})
+                                               = {},
+                                               std::string benchmarkId = {})
 {
     auto timer = makeDeterministicTimer(candidates, std::move(times));
-    return {std::move(candidates), handle, std::move(timer), std::move(recordRanking)};
+    return {std::move(candidates),
+            handle,
+            std::move(timer),
+            std::move(recordRanking),
+            std::move(benchmarkId)};
 }
 
 std::vector<TestBenchmarkPlan::Candidate> threeCandidates()
@@ -768,6 +778,146 @@ TEST(TestIngestorBenchmarkPlan, EqualTimesKeepCandidateOrderPastTheInsertionSort
         EXPECT_EQ(recorded[index].kernelId, testId(static_cast<uint8_t>(index + 1)))
             << "candidate at index " << index << " moved; equal times must keep input order";
     }
+}
+
+/// The per-candidate JSON records (RFC 0019.13 §8.3).
+///
+/// The winner cache keeps one row -- the winner -- because it is also read at runtime to
+/// replay a decision. Training needs the losers too, and needs the pairs that failed to
+/// run at all, neither of which the cache may carry. The log is the only channel that has
+/// both, so its shape is a contract and not decoration.
+namespace
+{
+
+/// Every log line that parses as one of our candidate records.
+///
+/// Filtered by parsing rather than by substring: a record that stopped being valid JSON
+/// would otherwise still match an `"event":` grep and pass every assertion below.
+template <typename TRecorder>
+std::vector<nlohmann::json> candidateRecords(const TRecorder& recorder)
+{
+    std::vector<nlohmann::json> records;
+    for(const auto& recorded : recorder.getRecordedLogs())
+    {
+        const auto start = recorded.message.find('{');
+        if(start == std::string::npos)
+        {
+            continue;
+        }
+        auto parsed = nlohmann::json::parse(recorded.message.substr(start), nullptr, false);
+        if(parsed.is_discarded() || !parsed.contains("event"))
+        {
+            continue;
+        }
+        if(parsed["event"] == "ingestor.benchmark.candidate")
+        {
+            records.push_back(std::move(parsed));
+        }
+    }
+    return records;
+}
+
+} // namespace
+
+TEST(TestIngestorBenchmarkPlan, EveryTimedCandidateIsLoggedAsAParsableRecord)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        threeCandidates(), handle, {5.0, 1.0, 3.0}, {}, "deadbeef");
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 3U) << "a losing kernel's time appears here or nowhere";
+
+    for(const auto& record : records)
+    {
+        EXPECT_EQ(record["benchmark"], "deadbeef")
+            << "rows of one sweep must be groupable; a process benchmarks several graphs "
+               "and their lines interleave";
+        EXPECT_EQ(record["status"], "ok");
+        EXPECT_EQ(record["pack"], toString(testId(0xF0)));
+        EXPECT_EQ(record["dispatch"], toString(testId(0xD0)));
+        EXPECT_EQ(record["iters"], BENCHMARK_ITERATIONS);
+        EXPECT_GE(record["stddev_ms"].get<double>(), 0.0);
+        EXPECT_LE(record["min_ms"].get<double>(), record["avg_ms"].get<double>())
+            << "min must not exceed the mean it was drawn with";
+    }
+
+    std::vector<std::string> kernels;
+    for(const auto& record : records)
+    {
+        kernels.push_back(record["kernel"].get<std::string>());
+    }
+    EXPECT_THAT(kernels,
+                ::testing::UnorderedElementsAre(
+                    toString(testId(0x01)), toString(testId(0x02)), toString(testId(0x03))))
+        << "every candidate is logged, not just the winner";
+}
+
+TEST(TestIngestorBenchmarkPlan, ARecordCarriesTheTimesItsSamplesProduced)
+{
+    // One candidate, every sample identical, so the reduction cannot disguise a field
+    // that was populated from the wrong statistic: min, mean and the ranking value all
+    // equal the sample, and the spread is exactly zero.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    const auto plan = makeDeterministicPlan(std::move(candidates), handle, {4.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 1U);
+    EXPECT_DOUBLE_EQ(records[0]["min_ms"].get<double>(), 4.0);
+    EXPECT_DOUBLE_EQ(records[0]["avg_ms"].get<double>(), 4.0);
+    EXPECT_DOUBLE_EQ(records[0]["robust_mean_ms"].get<double>(), 4.0);
+    EXPECT_DOUBLE_EQ(records[0]["stddev_ms"].get<double>(), 0.0);
+}
+
+TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedToTimeIsStillLogged)
+{
+    // The case the winner cache structurally cannot cover. It omits failed candidates on
+    // purpose -- a kernel that could not be timed must never be served from a cached
+    // ranking -- so without this record the pair looks like one that was never tried,
+    // which is a different thing and trains a different model.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    const auto plan
+        = makeDeterministicPlan(threeCandidates(), handle, {5.0, std::nullopt, 3.0}, {}, "cafe");
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 3U);
+
+    const auto failed = std::find_if(records.begin(), records.end(), [](const auto& record) {
+        return record["status"] == "failed";
+    });
+    ASSERT_NE(failed, records.end()) << "the untimeable candidate must still be reported";
+    EXPECT_EQ((*failed)["kernel"], toString(testId(0x02)));
+    EXPECT_EQ((*failed)["reason"], "launch-not-timed");
+    EXPECT_FALSE(failed->contains("min_ms")) << "a failed row carries no timings to mistake "
+                                                "for a measurement";
+}
+
+TEST(TestIngestorBenchmarkPlan, NothingIsLoggedWhenLoggingIsOff)
+{
+    // The records are per-candidate per-sweep, so they must cost nothing on the default
+    // path. The guard runs before the JSON object is built, not after.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(threeCandidates(), handle, {5.0, 1.0, 3.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_TRUE(candidateRecords(recorder).empty());
 }
 
 } // namespace
