@@ -1,315 +1,490 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// One lane tests one engine, so every verdict here is a two-bit decision: does the
+// sidecar promise *this* engine for the running (arch, platform[, case]), and is
+// this engine in the ranked list the query returned.
+
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <string>
-#include <string_view>
 #include <vector>
+
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
 using hipdnn_frontend::ErrorCode;
 using hipdnn_integration_tests::bundle::baseArchToken;
-using hipdnn_integration_tests::bundle::evaluateSupport;
 using hipdnn_integration_tests::bundle::isFailure;
 using hipdnn_integration_tests::bundle::LoadedEngine;
-using hipdnn_integration_tests::bundle::observeAllSupport;
+using hipdnn_integration_tests::bundle::observeSupport;
+using hipdnn_integration_tests::bundle::promoteAcceptedClaim;
+using hipdnn_integration_tests::bundle::SupportClaimLocator;
 using hipdnn_integration_tests::bundle::SupportResult;
 using hipdnn_integration_tests::bundle::SupportVerdict;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
 namespace
 {
 
-constexpr int64_t ENGINE_A = 42;
-constexpr int64_t ENGINE_B = 7;
+constexpr int64_t UNDER_TEST_ID = 42;
+constexpr int64_t OTHER_ID = 7;
 
-const std::string BUNDLE = "bundles/ConvFprop_fp16";
-const std::string ENGINE = "MIOPEN_ENGINE";
+const std::string UNDER_TEST = "ENGINE_UNDER_TEST";
+const std::string OTHER_ENGINE = "OTHER_ENGINE";
 const std::string ARCH = "gfx942";
 const std::string PLAT = "linux";
-
-SupportResult eval(ErrorCode code,
-                   const std::vector<int64_t>& ids,
-                   int64_t engineId,
-                   bool claimed,
-                   bool hasSidecar,
-                   std::string_view queryMessage = {})
-{
-    return evaluateSupport(
-        code, ids, engineId, claimed, hasSidecar, BUNDLE, ENGINE, ARCH, PLAT, queryMessage);
-}
 
 // A plausible stand-in for what a broken backend actually puts in err_msg.
 const std::string QUERY_MSG = "hipdnnBackendFinalize failed: HIPDNN_STATUS_INTERNAL_ERROR";
 
+const LoadedEngine ENGINE{UNDER_TEST_ID, UNDER_TEST};
+
+ScopedDirectory makeScopedTestDir(const std::string& prefix)
+{
+    auto path
+        = std::filesystem::temp_directory_path()
+          / (prefix + "_"
+             + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
+    std::filesystem::remove_all(path);
+    return {path};
+}
+
+// Single-graph sidecar claiming `engines` for (arch, platform).
+SupportClaimLocator writeSidecar(const ScopedDirectory& dir,
+                                 const std::vector<std::string>& engines,
+                                 const std::string& arch = ARCH,
+                                 const std::string& platform = PLAT)
+{
+    nlohmann::json claims = nlohmann::json::object();
+    for(const auto& engine : engines)
+    {
+        claims[engine] = {{arch, nlohmann::json::array({platform})}};
+    }
+    const auto path = dir.path() / "Bundle.support.json";
+    std::ofstream(path) << nlohmann::json{{"version", 1}, {"claims", claims}}.dump();
+
+    SupportClaimLocator locator;
+    locator.sidecarPath = path;
+    locator.diagnosticPath = "dir/Bundle.json";
+    return locator;
+}
+
+// Sweep sidecar where `engine` claims `cases`; the locator selects `caseId`.
+SupportClaimLocator writeSweepSidecar(const ScopedDirectory& dir,
+                                      const std::string& engine,
+                                      const std::vector<std::string>& cases,
+                                      const std::string& caseId)
+{
+    nlohmann::json group;
+    group["cases"] = cases;
+    group["support"] = {{ARCH, nlohmann::json::array({PLAT})}};
+
+    const auto path = dir.path() / "support.json";
+    std::ofstream(path) << nlohmann::json{{"version", 1},
+                                          {"claims", {{engine, nlohmann::json::array({group})}}}}
+                               .dump();
+
+    SupportClaimLocator locator;
+    locator.sidecarPath = path;
+    locator.caseId = caseId;
+    locator.diagnosticPath = "dir/sweep.json#" + caseId;
+    return locator;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
-// claimed + resolved + present → SATISFIED
+// No sidecar → nothing evaluated. The only case that must leave sidecarChecked
+// false, because it is the only one where there was no promise to consult.
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportVerdict, ClaimedAndSupportedIsSatisfied)
+TEST(TestSupportVerdict, NoSidecarPathEvaluatesNothing)
 {
-    auto r = eval(ErrorCode::OK, {ENGINE_A, ENGINE_B}, ENGINE_A, true, true);
-    EXPECT_EQ(r.verdict, SupportVerdict::SATISFIED);
-    EXPECT_FALSE(isFailure(r.verdict));
+    const auto observation = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, {}, ENGINE, ARCH, PLAT);
+    EXPECT_FALSE(observation.sidecarChecked);
+    EXPECT_TRUE(observation.results.empty());
+    EXPECT_FALSE(observation.hasApplicableClaim());
+}
+
+TEST(TestSupportVerdict, MissingSidecarFileEvaluatesNothing)
+{
+    SupportClaimLocator locator;
+    locator.sidecarPath = "/no/such/file.support.json";
+    locator.diagnosticPath = "Bundle.json";
+
+    const auto observation
+        = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+    EXPECT_FALSE(observation.sidecarChecked);
+    EXPECT_TRUE(observation.results.empty());
 }
 
 // ---------------------------------------------------------------------------
-// claimed + resolved + absent → CLAIM_BROKEN
+// Claimed: the ranked list decides whether the promise held.
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportVerdict, ClaimedButDeclinedIsClaimBroken)
+TEST(TestSupportVerdict, ClaimedAndInRankedListIsAccepted)
 {
-    auto r = eval(ErrorCode::OK, {ENGINE_B}, ENGINE_A, true, true);
-    EXPECT_EQ(r.verdict, SupportVerdict::CLAIM_BROKEN);
-    EXPECT_TRUE(isFailure(r.verdict));
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {UNDER_TEST});
+
+    const auto observation
+        = observeSupport(ErrorCode::OK, {OTHER_ID, UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    EXPECT_EQ(observation.results.front().verdict, SupportVerdict::CLAIM_ACCEPTED);
+    EXPECT_EQ(observation.results.front().engineName, UNDER_TEST);
+    EXPECT_TRUE(observation.hasApplicableClaim());
+    EXPECT_FALSE(isFailure(observation.results.front().verdict));
 }
 
-TEST(TestSupportVerdict, ClaimedButGraphNotSupportedIsClaimBroken)
+TEST(TestSupportVerdict, ClaimedButAbsentFromRankedListIsBroken)
 {
-    auto r = eval(ErrorCode::GRAPH_NOT_SUPPORTED, {}, ENGINE_A, true, true);
-    EXPECT_EQ(r.verdict, SupportVerdict::CLAIM_BROKEN);
-    EXPECT_TRUE(isFailure(r.verdict));
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {UNDER_TEST});
+
+    const auto observation = observeSupport(ErrorCode::OK, {OTHER_ID}, locator, ENGINE, ARCH, PLAT);
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    EXPECT_EQ(observation.results.front().verdict, SupportVerdict::CLAIM_BROKEN);
+    EXPECT_TRUE(isFailure(observation.results.front().verdict));
+}
+
+TEST(TestSupportVerdict, GraphNotSupportedWithAClaimIsBroken)
+{
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {UNDER_TEST});
+
+    const auto observation
+        = observeSupport(ErrorCode::GRAPH_NOT_SUPPORTED, {}, locator, ENGINE, ARCH, PLAT);
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    EXPECT_EQ(observation.results.front().verdict, SupportVerdict::CLAIM_BROKEN);
 }
 
 // ---------------------------------------------------------------------------
-// claimed + unresolved → QUERY_ERRORED
+// Unresolved query: the ranked list cannot be trusted, so a claim can only be
+// QUERY_ERRORED. Reporting CLAIM_BROKEN would assert a decline nobody observed.
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportVerdict, ClaimedButHeuristicQueryFailedIsErroredBeforeAssert)
+TEST(TestSupportVerdict, ClaimedWithUnresolvedQueryIsErrored)
 {
-    auto r = eval(ErrorCode::HEURISTIC_QUERY_FAILED, {}, ENGINE_A, true, true);
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {UNDER_TEST});
+
+    const auto observation = observeSupport(
+        ErrorCode::HEURISTIC_QUERY_FAILED, {}, locator, ENGINE, ARCH, PLAT, QUERY_MSG);
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    const auto& r = observation.results.front();
     EXPECT_EQ(r.verdict, SupportVerdict::QUERY_ERRORED);
     EXPECT_TRUE(isFailure(r.verdict));
-}
-
-TEST(TestSupportVerdict, ClaimedButBackendErrorIsErroredBeforeAssert)
-{
-    auto r = eval(ErrorCode::HIPDNN_BACKEND_ERROR, {}, ENGINE_A, true, true);
-    EXPECT_EQ(r.verdict, SupportVerdict::QUERY_ERRORED);
-    EXPECT_TRUE(isFailure(r.verdict));
-}
-
-// Unresolved status dominates ranked-list membership: even if the id happens to
-// be in the list, the query was not trustworthy.
-TEST(TestSupportVerdict, UnresolvedWithIdPresentIsStillErroredBeforeAssert)
-{
-    auto r = eval(ErrorCode::HEURISTIC_QUERY_FAILED, {ENGINE_A}, ENGINE_A, true, true);
-    EXPECT_EQ(r.verdict, SupportVerdict::QUERY_ERRORED);
-    EXPECT_TRUE(isFailure(r.verdict));
-}
-
-// ---------------------------------------------------------------------------
-// unclaimed + hasSidecar + supported → UNCLAIMED_SUPPORT
-// ---------------------------------------------------------------------------
-
-TEST(TestSupportVerdict, UnclaimedButSupportedIsUnclaimedSupport)
-{
-    auto r = eval(ErrorCode::OK, {ENGINE_A}, ENGINE_A, false, true);
-    EXPECT_EQ(r.verdict, SupportVerdict::UNCLAIMED_SUPPORT);
-    EXPECT_FALSE(isFailure(r.verdict));
-}
-
-// ---------------------------------------------------------------------------
-// unclaimed + hasSidecar + not supported → NOT_ENFORCED
-// ---------------------------------------------------------------------------
-
-TEST(TestSupportVerdict, UnclaimedAndDeclinedIsNotEnforced)
-{
-    auto r = eval(ErrorCode::OK, {ENGINE_B}, ENGINE_A, false, true);
-    EXPECT_EQ(r.verdict, SupportVerdict::NOT_ENFORCED);
-    EXPECT_FALSE(isFailure(r.verdict));
-}
-
-TEST(TestSupportVerdict, UnclaimedAndUnresolvedIsNotEnforced)
-{
-    auto r = eval(ErrorCode::HEURISTIC_QUERY_FAILED, {}, ENGINE_A, false, true);
-    EXPECT_EQ(r.verdict, SupportVerdict::NOT_ENFORCED);
-    EXPECT_FALSE(isFailure(r.verdict));
-
-    // The two unclaimed-and-not-supported paths share a verdict but not a story:
-    // one read the ranked list and did not find the engine, the other never got a
-    // trustworthy list to read. The detail must not claim the former when it was
-    // the latter — that would be an unverified fact in a diagnostic.
-    EXPECT_EQ(r.detail.find("not in ranked list"), std::string::npos);
-    EXPECT_NE(r.detail.find("did not resolve"), std::string::npos);
-}
-
-// ---------------------------------------------------------------------------
-// queryStatus + queryMessage survive on the unclaimed-unresolved path
-//
-// This is the path that goes lossy today: the verdict is NOT_ENFORCED, shared
-// with healthy "engine doesn't do this graph", and the error code survives only
-// as prose in `detail`. On a bootstrap run every cell is unclaimed, so every
-// error lands here. The fields let a consumer separate the two without parsing.
-// ---------------------------------------------------------------------------
-
-TEST(TestSupportVerdict, UnclaimedUnresolvedCarriesQueryStatusAndMessage)
-{
-    auto r = eval(ErrorCode::HEURISTIC_QUERY_FAILED, {}, ENGINE_A, false, true, QUERY_MSG);
-    EXPECT_EQ(r.verdict, SupportVerdict::NOT_ENFORCED);
     EXPECT_EQ(r.queryStatus, ErrorCode::HEURISTIC_QUERY_FAILED);
     EXPECT_EQ(r.queryMessage, QUERY_MSG);
 }
 
-TEST(TestSupportVerdict, QueryErroredCarriesQueryStatusAndMessage)
+// Unresolved status dominates ranked-list membership: even with the id present,
+// the query was not trustworthy.
+TEST(TestSupportVerdict, UnresolvedWithIdPresentIsStillErrored)
 {
-    auto r = eval(ErrorCode::HIPDNN_BACKEND_ERROR, {}, ENGINE_A, true, true, QUERY_MSG);
-    EXPECT_EQ(r.verdict, SupportVerdict::QUERY_ERRORED);
-    EXPECT_EQ(r.queryStatus, ErrorCode::HIPDNN_BACKEND_ERROR);
-    EXPECT_EQ(r.queryMessage, QUERY_MSG);
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {UNDER_TEST});
+
+    const auto observation = observeSupport(
+        ErrorCode::HEURISTIC_QUERY_FAILED, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    EXPECT_EQ(observation.results.front().verdict, SupportVerdict::QUERY_ERRORED);
 }
 
-// Resolved queries have nothing to explain — the message is not stored.
-TEST(TestSupportVerdict, ResolvedQueryDoesNotStoreMessage)
+// An unresolved query also cannot produce drift — that would publish support
+// derived from a list nobody read.
+TEST(TestSupportVerdict, UnresolvedQueryWithNoClaimReportsNothing)
 {
-    auto r = eval(ErrorCode::OK, {ENGINE_A}, ENGINE_A, true, true, "should be dropped");
-    EXPECT_EQ(r.verdict, SupportVerdict::SATISFIED);
-    EXPECT_EQ(r.queryStatus, ErrorCode::OK);
-    EXPECT_TRUE(r.queryMessage.empty());
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {});
+
+    const auto observation = observeSupport(
+        ErrorCode::HEURISTIC_QUERY_FAILED, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+
+    EXPECT_TRUE(observation.sidecarChecked);
+    EXPECT_TRUE(observation.results.empty());
 }
 
-// queryStatus is set even on the NO_SIDECAR short-circuit, because the caller
-// did make the query and the observation is true regardless of what the sidecar
-// says. The message is still conditional on unresolved.
-TEST(TestSupportVerdict, NoSidecarStillCarriesQueryStatus)
-{
-    auto r = eval(ErrorCode::HEURISTIC_QUERY_FAILED, {}, ENGINE_A, false, false, QUERY_MSG);
-    EXPECT_EQ(r.verdict, SupportVerdict::NO_SIDECAR);
-    EXPECT_EQ(r.queryStatus, ErrorCode::HEURISTIC_QUERY_FAILED);
-    EXPECT_EQ(r.queryMessage, QUERY_MSG);
-}
-
-// ---------------------------------------------------------------------------
-// formatVerdictMessage includes queryMessage when present
-// ---------------------------------------------------------------------------
-
-TEST(TestSupportVerdict, FormatVerdictMessageIncludesQueryMessage)
-{
-    using hipdnn_integration_tests::bundle::formatVerdictMessage;
-    auto r = eval(ErrorCode::HEURISTIC_QUERY_FAILED, {}, ENGINE_A, true, true, QUERY_MSG);
-    const auto msg = formatVerdictMessage(r);
-    EXPECT_NE(msg.find(QUERY_MSG), std::string::npos);
-    EXPECT_NE(msg.find("query:"), std::string::npos);
-}
-
-TEST(TestSupportVerdict, FormatVerdictMessageOmitsQueryLineWhenEmpty)
-{
-    using hipdnn_integration_tests::bundle::formatVerdictMessage;
-    auto r = eval(ErrorCode::OK, {ENGINE_A}, ENGINE_A, true, true);
-    const auto msg = formatVerdictMessage(r);
-    EXPECT_EQ(msg.find("query:"), std::string::npos);
-}
-
-// ---------------------------------------------------------------------------
-// no sidecar at all → NO_SIDECAR regardless of query result
-//
-// Kept distinct from NOT_ENFORCED, which its caller also treats as "nothing was
-// asserted": NOT_ENFORCED means a sidecar exists and is silent about this
-// (engine, arch, platform), while NO_SIDECAR means there is no promise to check
-// at all. Only the latter is dropped instead of recorded, so collapsing the two
-// would flood the report with the graphs that carry no sidecar — nearly all of
-// them — and break the report's derived queried-count.
-// ---------------------------------------------------------------------------
-
-TEST(TestSupportVerdict, NoSidecarSupportedIsNoSidecar)
-{
-    auto r = eval(ErrorCode::OK, {ENGINE_A}, ENGINE_A, false, false);
-    EXPECT_EQ(r.verdict, SupportVerdict::NO_SIDECAR);
-    EXPECT_FALSE(isFailure(r.verdict));
-}
-
-TEST(TestSupportVerdict, NoSidecarDeclinedIsNoSidecar)
-{
-    auto r = eval(ErrorCode::OK, {ENGINE_B}, ENGINE_A, false, false);
-    EXPECT_EQ(r.verdict, SupportVerdict::NO_SIDECAR);
-}
-
-TEST(TestSupportVerdict, NoSidecarUnresolvedIsNoSidecar)
-{
-    auto r = eval(ErrorCode::HEURISTIC_QUERY_FAILED, {}, ENGINE_A, false, false);
-    EXPECT_EQ(r.verdict, SupportVerdict::NO_SIDECAR);
-}
-
-// The absent sidecar short-circuits before the query is read at all. Pinned
-// because it is what makes the verdict safe to compute on a run with no backend:
-// an unresolved status cannot turn a sidecar-free graph into a failure.
-TEST(TestSupportVerdict, NoSidecarShortCircuitsAheadOfEveryOtherSignal)
-{
-    auto r = eval(static_cast<ErrorCode>(9999), {ENGINE_A}, ENGINE_A, /*claimed=*/true, false);
-    EXPECT_EQ(r.verdict, SupportVerdict::NO_SIDECAR);
-    EXPECT_FALSE(isFailure(r.verdict));
-}
-
-// ---------------------------------------------------------------------------
-// fail-closed: a future/unknown ErrorCode is unresolved
-// ---------------------------------------------------------------------------
-
+// Fail-closed: an unknown ErrorCode is unresolved, not "resolved and empty".
 TEST(TestSupportVerdict, UnknownErrorCodeTreatedAsUnresolved)
 {
-    auto r = eval(static_cast<ErrorCode>(9999), {ENGINE_A}, ENGINE_A, true, true);
-    EXPECT_EQ(r.verdict, SupportVerdict::QUERY_ERRORED);
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {UNDER_TEST});
+
+    const auto observation = observeSupport(
+        static_cast<ErrorCode>(9999), {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    EXPECT_EQ(observation.results.front().verdict, SupportVerdict::QUERY_ERRORED);
+}
+
+// A resolved query has nothing to explain — the message is not stored.
+TEST(TestSupportVerdict, ResolvedQueryDoesNotStoreMessage)
+{
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {UNDER_TEST});
+
+    const auto observation = observeSupport(
+        ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT, "should be dropped");
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    EXPECT_TRUE(observation.results.front().queryMessage.empty());
 }
 
 // ---------------------------------------------------------------------------
-// multi-engine: one query, two engines, independent verdicts
+// Unclaimed: supported is drift, unsupported is nothing at all.
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportVerdict, TwoEnginesSameQueryIndependentVerdicts)
+TEST(TestSupportVerdict, SupportedWithoutAClaimIsDrift)
 {
-    const std::vector<int64_t> rankedIds = {ENGINE_A}; // only A ranked
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {});
 
-    auto rA = evaluateSupport(
-        ErrorCode::OK, rankedIds, ENGINE_A, true, true, BUNDLE, "ENGINE_A", ARCH, PLAT);
-    auto rB = evaluateSupport(
-        ErrorCode::OK, rankedIds, ENGINE_B, true, true, BUNDLE, "ENGINE_B", ARCH, PLAT);
+    const auto observation
+        = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
 
-    EXPECT_EQ(rA.verdict, SupportVerdict::SATISFIED);
-    EXPECT_EQ(rB.verdict, SupportVerdict::CLAIM_BROKEN);
+    ASSERT_EQ(observation.results.size(), 1u);
+    EXPECT_EQ(observation.results.front().verdict, SupportVerdict::UNCLAIMED_SUPPORT);
+    EXPECT_FALSE(isFailure(observation.results.front().verdict));
+    // Drift is not a promise.
+    EXPECT_FALSE(observation.hasApplicableClaim());
+}
+
+// Neither claimed nor supported carries no information and must not be recorded —
+// that is what keeps the verdict count proportional to what was promised.
+TEST(TestSupportVerdict, NeitherClaimedNorSupportedProducesNoRecord)
+{
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {});
+
+    const auto observation = observeSupport(ErrorCode::OK, {OTHER_ID}, locator, ENGINE, ARCH, PLAT);
+
+    EXPECT_TRUE(observation.sidecarChecked);
+    EXPECT_TRUE(observation.results.empty());
 }
 
 // ---------------------------------------------------------------------------
-// metadata flows through to the result struct
+// Another engine's claim is another lane's business. It must not be adjudicated
+// here — this run cannot execute that engine, so it has no basis to pass or fail
+// it. The sidecar is still read, so coverage still counts.
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportVerdict, ResultCarriesMetadata)
+TEST(TestSupportVerdict, ClaimForAnotherEngineIsNotAdjudicated)
 {
-    auto r = evaluateSupport(ErrorCode::OK,
-                             {ENGINE_A},
-                             ENGINE_A,
-                             true,
-                             true,
-                             "path/to/bundle",
-                             "MY_ENGINE",
-                             "gfx90a",
-                             "windows");
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {OTHER_ENGINE});
 
-    EXPECT_EQ(r.bundlePath, "path/to/bundle");
-    EXPECT_EQ(r.engineName, "MY_ENGINE");
-    EXPECT_EQ(r.arch, "gfx90a");
-    EXPECT_EQ(r.platform, "windows");
+    const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
+
+    EXPECT_TRUE(observation.sidecarChecked);
+    EXPECT_TRUE(observation.results.empty());
+    EXPECT_FALSE(observation.hasApplicableClaim());
+}
+
+TEST(TestSupportVerdict, ClaimForAnotherEngineDoesNotSuppressOurDrift)
+{
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {OTHER_ENGINE});
+
+    const auto observation
+        = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    EXPECT_EQ(observation.results.front().verdict, SupportVerdict::UNCLAIMED_SUPPORT);
+    EXPECT_EQ(observation.results.front().engineName, UNDER_TEST);
+}
+
+// ---------------------------------------------------------------------------
+// Arch / platform scoping
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportVerdict, ClaimForAnotherArchDoesNotApply)
+{
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {UNDER_TEST}, "gfx90a", PLAT);
+
+    const auto observation
+        = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    EXPECT_EQ(observation.results.front().verdict, SupportVerdict::UNCLAIMED_SUPPORT);
+    EXPECT_FALSE(observation.hasApplicableClaim());
+}
+
+// Read in full, promised nothing here, and the engine does not support it either:
+// zero verdicts, but the sidecar was still consulted. This is the pair that must
+// not be collapsed — coverage says yes, applicability says no.
+TEST(TestSupportVerdict, ClaimForAnotherPlatformIsCheckedButNotApplicable)
+{
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {UNDER_TEST}, ARCH, "windows");
+
+    const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
+
+    EXPECT_TRUE(observation.sidecarChecked);
+    EXPECT_FALSE(observation.hasApplicableClaim());
+    EXPECT_TRUE(observation.results.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Sweep dispatch: caseId selects which claim group applies.
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportVerdict, SweepClaimAppliesToNamedCase)
+{
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSweepSidecar(dir, UNDER_TEST, {"case_one", "case_two"}, "case_one");
+
+    const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    EXPECT_EQ(observation.results.front().verdict, SupportVerdict::CLAIM_BROKEN);
+    EXPECT_EQ(observation.results.front().bundlePath, "dir/sweep.json#case_one");
+}
+
+TEST(TestSupportVerdict, SweepClaimDoesNotApplyToUnnamedCase)
+{
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSweepSidecar(dir, UNDER_TEST, {"case_one"}, "case_three");
+
+    const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
+
+    EXPECT_TRUE(observation.sidecarChecked);
+    EXPECT_FALSE(observation.hasApplicableClaim());
+    EXPECT_TRUE(observation.results.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Malformed sidecars surface as exceptions, not silent empty observations.
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportVerdict, UnparseableSidecarThrows)
+{
+    const auto dir = makeScopedTestDir("verdict");
+    const auto path = dir.path() / "Bundle.support.json";
+    std::ofstream(path) << "{ this is not json";
+
+    SupportClaimLocator locator;
+    locator.sidecarPath = path;
+    locator.diagnosticPath = "dir/Bundle.json";
+
+    EXPECT_THROW(observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT),
+                 std::runtime_error);
+}
+
+// ---------------------------------------------------------------------------
+// Result metadata
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportVerdict, ResultCarriesLocatorAndCellMetadata)
+{
+    const auto dir = makeScopedTestDir("verdict");
+    const auto locator = writeSidecar(dir, {UNDER_TEST});
+
+    const auto observation
+        = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+
+    ASSERT_EQ(observation.results.size(), 1u);
+    const auto& r = observation.results.front();
+    EXPECT_EQ(r.bundlePath, "dir/Bundle.json");
+    EXPECT_EQ(r.engineName, UNDER_TEST);
+    EXPECT_EQ(r.arch, ARCH);
+    EXPECT_EQ(r.platform, PLAT);
     EXPECT_FALSE(r.detail.empty());
 }
 
 // ---------------------------------------------------------------------------
-// toString covers every enum value
+// Phase-2 promotion. CLAIM_FAILED_IN_USE is not a claim failure: the claim held,
+// and the run is already red from whatever actually broke.
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportVerdict, PromotionMapsOutcomeToVerdict)
+{
+    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/true, /*passed=*/true),
+              SupportVerdict::CLAIM_CONFIRMED);
+    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/true, /*passed=*/false),
+              SupportVerdict::CLAIM_FAILED_IN_USE);
+    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/false, /*passed=*/true),
+              SupportVerdict::CLAIM_ACCEPTED);
+    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/false, /*passed=*/false),
+              SupportVerdict::CLAIM_ACCEPTED);
+}
+
+TEST(TestSupportVerdict, OnlyBrokenAndErroredAreFailures)
+{
+    EXPECT_TRUE(isFailure(SupportVerdict::CLAIM_BROKEN));
+    EXPECT_TRUE(isFailure(SupportVerdict::QUERY_ERRORED));
+
+    EXPECT_FALSE(isFailure(SupportVerdict::CLAIM_ACCEPTED));
+    EXPECT_FALSE(isFailure(SupportVerdict::CLAIM_CONFIRMED));
+    EXPECT_FALSE(isFailure(SupportVerdict::CLAIM_FAILED_IN_USE));
+    EXPECT_FALSE(isFailure(SupportVerdict::UNCLAIMED_SUPPORT));
+}
+
+// Fail-closed: a verdict nobody has taught isFailure() about is a failure.
+TEST(TestSupportVerdict, UnknownVerdictIsFailure)
+{
+    EXPECT_TRUE(isFailure(static_cast<SupportVerdict>(9999)));
+}
+
+// ---------------------------------------------------------------------------
+// toString / formatVerdictMessage
 // ---------------------------------------------------------------------------
 
 TEST(TestSupportVerdict, ToStringCoversAllValues)
 {
     using hipdnn_integration_tests::bundle::toString;
-    EXPECT_STREQ(toString(SupportVerdict::NO_SIDECAR), "NO_SIDECAR");
-    EXPECT_STREQ(toString(SupportVerdict::SATISFIED), "SATISFIED");
     EXPECT_STREQ(toString(SupportVerdict::CLAIM_BROKEN), "CLAIM_BROKEN");
     EXPECT_STREQ(toString(SupportVerdict::QUERY_ERRORED), "QUERY_ERRORED");
-    EXPECT_STREQ(toString(SupportVerdict::ENGINE_NOT_LOADED), "ENGINE_NOT_LOADED");
-    EXPECT_STREQ(toString(SupportVerdict::NOT_ENFORCED), "NOT_ENFORCED");
+    EXPECT_STREQ(toString(SupportVerdict::CLAIM_ACCEPTED), "CLAIM_ACCEPTED");
+    EXPECT_STREQ(toString(SupportVerdict::CLAIM_CONFIRMED), "CLAIM_CONFIRMED");
+    EXPECT_STREQ(toString(SupportVerdict::CLAIM_FAILED_IN_USE), "CLAIM_FAILED_IN_USE");
     EXPECT_STREQ(toString(SupportVerdict::UNCLAIMED_SUPPORT), "UNCLAIMED_SUPPORT");
+    EXPECT_STREQ(toString(static_cast<SupportVerdict>(9999)), "UNKNOWN");
+}
+
+TEST(TestSupportVerdict, FormatVerdictMessageContainsAllFields)
+{
+    using hipdnn_integration_tests::bundle::formatVerdictMessage;
+    SupportResult r;
+    r.verdict = SupportVerdict::CLAIM_BROKEN;
+    r.bundlePath = "path/to/bundle";
+    r.engineName = "MY_ENGINE";
+    r.arch = "gfx90a";
+    r.platform = "linux";
+    r.detail = "detail";
+
+    const auto msg = formatVerdictMessage(r);
+    EXPECT_NE(msg.find("CLAIM_BROKEN"), std::string::npos);
+    EXPECT_NE(msg.find("path/to/bundle"), std::string::npos);
+    EXPECT_NE(msg.find("MY_ENGINE"), std::string::npos);
+    EXPECT_NE(msg.find("gfx90a"), std::string::npos);
+    EXPECT_NE(msg.find("linux"), std::string::npos);
+    EXPECT_EQ(msg.find("query:"), std::string::npos);
+}
+
+TEST(TestSupportVerdict, FormatVerdictMessageIncludesQueryMessage)
+{
+    using hipdnn_integration_tests::bundle::formatVerdictMessage;
+    SupportResult r;
+    r.verdict = SupportVerdict::QUERY_ERRORED;
+    r.queryMessage = QUERY_MSG;
+
+    const auto msg = formatVerdictMessage(r);
+    EXPECT_NE(msg.find(QUERY_MSG), std::string::npos);
+    EXPECT_NE(msg.find("query:"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
@@ -334,71 +509,6 @@ TEST(TestSupportVerdict, BaseArchTokenEmptyInput)
 TEST(TestSupportVerdict, BaseArchTokenColonOnly)
 {
     EXPECT_EQ(baseArchToken(":"), "");
-}
-
-// ---------------------------------------------------------------------------
-// formatVerdictMessage produces non-empty, structured output
-// ---------------------------------------------------------------------------
-
-TEST(TestSupportVerdict, FormatVerdictMessageContainsAllFields)
-{
-    using hipdnn_integration_tests::bundle::formatVerdictMessage;
-    auto r = evaluateSupport(ErrorCode::OK,
-                             {ENGINE_A},
-                             ENGINE_A,
-                             true,
-                             true,
-                             "path/to/bundle",
-                             "MY_ENGINE",
-                             "gfx90a",
-                             "linux");
-
-    const auto msg = formatVerdictMessage(r);
-    EXPECT_NE(msg.find("SATISFIED"), std::string::npos);
-    EXPECT_NE(msg.find("path/to/bundle"), std::string::npos);
-    EXPECT_NE(msg.find("MY_ENGINE"), std::string::npos);
-    EXPECT_NE(msg.find("gfx90a"), std::string::npos);
-    EXPECT_NE(msg.find("linux"), std::string::npos);
-}
-
-TEST(TestSupportVerdict, FormatVerdictMessageShowsClaimBroken)
-{
-    using hipdnn_integration_tests::bundle::formatVerdictMessage;
-    auto r = eval(ErrorCode::OK, {ENGINE_B}, ENGINE_A, true, true);
-
-    const auto msg = formatVerdictMessage(r);
-    EXPECT_NE(msg.find("CLAIM_BROKEN"), std::string::npos);
-}
-
-// ---------------------------------------------------------------------------
-// observeAllSupport: empty bundle path → empty results (no sidecar to load)
-// ---------------------------------------------------------------------------
-
-TEST(TestSupportVerdict, CheckAllEmptyWhenNoBundlePath)
-{
-    const std::vector<LoadedEngine> engines = {{ENGINE_A, "ENGINE_A"}, {ENGINE_B, "ENGINE_B"}};
-    const auto results = observeAllSupport(ErrorCode::OK, {ENGINE_A}, {}, engines);
-    EXPECT_TRUE(results.empty());
-}
-
-TEST(TestSupportVerdict, EngineNotLoadedIsNotFailure)
-{
-    EXPECT_FALSE(isFailure(SupportVerdict::ENGINE_NOT_LOADED));
-}
-
-TEST(TestSupportVerdict, ToStringCoversEngineNotLoaded)
-{
-    using hipdnn_integration_tests::bundle::toString;
-    EXPECT_STREQ(toString(SupportVerdict::ENGINE_NOT_LOADED), "ENGINE_NOT_LOADED");
-}
-
-TEST(TestSupportVerdict, CheckAllEmptyWhenSidecarDoesNotExist)
-{
-    using hipdnn_integration_tests::bundle::SupportClaimLocator;
-    const SupportClaimLocator locator{"/no/such/file.support.json", {}, "Bundle.json"};
-    const std::vector<LoadedEngine> engines = {{ENGINE_A, "ENGINE_A"}};
-    const auto results = observeAllSupport(ErrorCode::OK, {ENGINE_A}, locator, engines);
-    EXPECT_TRUE(results.empty());
 }
 
 // NOLINTEND(readability-identifier-naming)

@@ -350,7 +350,10 @@ TEST_F(TestVerificationModePathsFixture, GoldenModeWithDataPasses)
     EXPECT_FALSE(anySkipped(results));
 }
 
-TEST_F(TestVerificationModePathsFixture, GoldenModeWithoutDataSkips)
+// An explicit mode is a demand for a specific oracle, not a preference. Skipping
+// when that oracle is absent means the run did not do what it was asked and still
+// went green — `auto` is the mode with a fallback chain.
+TEST_F(TestVerificationModePathsFixture, GoldenModeWithoutDataFails)
 {
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("golden_absent", /*includeGoldenOutput=*/false),
@@ -359,8 +362,23 @@ TEST_F(TestVerificationModePathsFixture, GoldenModeWithoutDataSkips)
                  matchingRef(),
                  &results);
 
-    EXPECT_TRUE(anySkipped(results));
-    EXPECT_FALSE(anyFailed(results));
+    EXPECT_TRUE(anyFailed(results));
+    EXPECT_FALSE(anySkipped(results));
+}
+
+// A live reference is available here and would have produced an answer, but the
+// caller asked for golden. Falling back silently is the behaviour `auto` exists
+// for; `golden` must not borrow it.
+TEST_F(TestVerificationModePathsFixture, GoldenModeDoesNotFallBackToAReference)
+{
+    ::testing::TestPartResultArray results;
+    runCapturing(loadBundle("golden_absent_ref_ok", /*includeGoldenOutput=*/false),
+                 VerificationMode::GOLDEN,
+                 matchingEngine(),
+                 matchingRef(),
+                 &results);
+
+    EXPECT_TRUE(anyFailed(results));
 }
 
 // ── Explicit GPU mode ───────────────────────────────────────────────────────

@@ -24,6 +24,8 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
@@ -52,8 +54,10 @@ std::unordered_map<int64_t, void*> buildVariantPack(
 class IntegrationBundleVerificationHarness : public ::testing::Test
 {
 public:
-    explicit IntegrationBundleVerificationHarness(bool requiresDevice)
+    explicit IntegrationBundleVerificationHarness(bool requiresDevice,
+                                                  std::optional<LoadedEngine> engineUnderTest = {})
         : _requiresDevice(requiresDevice)
+        , _engineUnderTest(std::move(engineUnderTest))
     {
     }
 
@@ -101,11 +105,45 @@ protected:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
-        runComparison();
-        if(!HasFatalFailure() && !IsSkipped())
+        // Gather the claim facts before anything can short-circuit. This has to be
+        // above runComparison(): golden-check never touches the engine at all, and
+        // every other mode has an early return that skips it, so a ranked-engine
+        // query issued from inside the comparison is not guaranteed to happen. Each
+        // of those paths used to leave the graph's claims unadjudicated while the
+        // run still exited 0.
+        const auto observation = observeSupportForBundle();
+        recordClaimCoverage(observation);
+
+        // A broken or unevaluable claim means the engine declined the graph, so the
+        // comparison has nothing to run and would only stack a sentinel-buffer diff
+        // on top of the real diagnostic. Decide here, report below.
+        const std::string claimFailures = aggregateClaimFailures(observation.results);
+        const bool canRunComparison = claimFailures.empty();
+
+        if(canRunComparison)
         {
-            EXPECT_TRUE(_verified)
-                << "test completed without verifying anything for " << _bundlePath;
+            runComparison();
+
+            if(!HasFatalFailure() && !IsSkipped())
+            {
+                EXPECT_TRUE(_verified)
+                    << "test completed without verifying anything for " << _bundlePath;
+            }
+        }
+
+        // The only place a verdict reaches the report. An accepted claim is an
+        // observation about the ranked list, taken before the graph was built; it
+        // becomes confirmed support only once the engine has actually run it green.
+        //
+        // `_engineRan`, not `!IsSkipped()`: a mode can fail before ever reaching the
+        // engine (golden with no data), and only the engine having run the graph
+        // justifies promoting the claim either way.
+        commitClaims(observation.results, /*exercised=*/_engineRan);
+
+        // Last, because FAIL() returns.
+        if(!canRunComparison)
+        {
+            FAIL() << claimFailures;
         }
     }
 
@@ -122,6 +160,11 @@ protected:
     // reaching getSharedHandle(). The real implementation needs a device.
     virtual void enforceAtLevel(EnforcementLevel level);
 
+    // Virtual for the same reason: the real implementation needs a handle to build
+    // the graph and ask for the ranked engine list. Deviceless harnesses return an
+    // empty observation.
+    virtual SupportObservation observeSupportForBundle();
+
     // Protected so a stubbed enforceAtLevel() can exit the same way the real one does
     // when it cannot verify: marks the bundle accounted for, then skips.
     void skipUnverifiable(const std::string& reason);
@@ -131,13 +174,49 @@ protected:
         return _inputFillRecipes;
     }
 
+    // The single definition of "this graph's claims must be adjudicated": a sidecar
+    // exists, enforcement is on, and an engine was named to adjudicate against.
+    // Checked in the same order everywhere so a deviceless harness with no injected
+    // engine never reaches TestConfig.
+    bool shouldEnforceClaims() const
+    {
+        return _engineUnderTest.has_value() && !_claimLocator.sidecarPath.empty()
+               && std::filesystem::exists(_claimLocator.sidecarPath) && isEnforcingSupportClaims();
+    }
+
 private:
+    // Bumps the process-wide coverage counters, and fails this test if a sidecar
+    // exists that the query somehow did not reach.
+    void recordClaimCoverage(const SupportObservation& observation);
+
+    // Concatenated messages for every verdict isFailure() rejects. Empty when the
+    // claims held, which is also the signal that the comparison may run.
+    std::string aggregateClaimFailures(const std::vector<SupportResult>& results) const;
+
+    // Publishes every verdict, promoting the engine-under-test's accepted claim by
+    // the observed outcome. Called exactly once per test.
+    void commitClaims(const std::vector<SupportResult>& results, bool exercised);
+
+    // Ranked-engine query result, populated by observeSupportForBundle() and reused
+    // by the executor and the enforcement rungs so one test makes one heuristic
+    // query instead of two.
+    struct RankedQuery
+    {
+        bool ran = false;
+        hipdnn_frontend::ErrorCode statusCode = hipdnn_frontend::ErrorCode::OK;
+        std::string statusMessage;
+        std::vector<int64_t> rankedIds;
+    };
+
     bool _requiresDevice;
     mutable bool _verified = false;
+    bool _engineRan = false;
     std::filesystem::path _bundlePath;
     SupportClaimLocator _claimLocator;
     std::shared_ptr<IntegrationTestBundle> _bundle;
     InputFillRecipes _inputFillRecipes;
+    std::optional<LoadedEngine> _engineUnderTest;
+    RankedQuery _query;
 
     enum class RefStatus
     {
@@ -155,7 +234,6 @@ private:
     void runGoldenMode();
     void runExplicitRefMode(ReferenceExecutorType type);
     void runAutoMode();
-    void runGoldenCheckMode();
 
     bool ensureInputsAvailable();
     bool fillBundleInputs();

@@ -1,0 +1,77 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <unordered_map>
+
+#include <gtest/gtest.h>
+
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
+#include "harness/IReferenceGraphExecutor.hpp"
+#include "harness/TestConfig.hpp"
+#include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
+
+namespace hipdnn_integration_tests::bundle
+{
+
+/// Validates checked-in golden data against a reference executor. No engine is
+/// involved, so no support claims exist to enforce and none are queried.
+///
+/// This is deliberately a separate harness rather than a mode of the engine
+/// harness. Verifying an engine and verifying our own golden data are different
+/// jobs with different failure meanings, and folding the second into the first is
+/// what produced a "verification mode" that structurally never reached an engine —
+/// and therefore never adjudicated the claims the engine harness exists to enforce.
+///
+/// **There is no skip path.** Registration only creates a test when the bundle has
+/// golden data *and* every node type is in this reference's required-op set
+/// (see ReferenceOpCoverage.hpp). Given that, a reference that cannot run the graph
+/// is a gap in the reference, so it fails rather than skips.
+class BundleReferenceValidationHarness : public ::testing::Test
+{
+public:
+    BundleReferenceValidationHarness(ReferenceExecutorType referenceType, bool requiresDevice)
+        : _referenceType(referenceType)
+        , _requiresDevice(requiresDevice)
+    {
+    }
+
+    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle, std::filesystem::path path)
+    {
+        _bundle = std::move(bundle);
+        _bundlePath = std::move(path);
+    }
+
+    static const char* referenceLabel(ReferenceExecutorType type)
+    {
+        return type == ReferenceExecutorType::GPU ? "GpuRef" : "CpuRef";
+    }
+
+protected:
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    void SetUp() override;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    void TestBody() override;
+
+    // Seam so the deviceless unit tests can drive the body without a real executor.
+    virtual std::unique_ptr<IReferenceGraphExecutor> makeReferenceExecutor();
+
+private:
+    bool useDevice() const;
+    OutputTensors allocateOutputs() const;
+    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs) const;
+
+    ReferenceExecutorType _referenceType;
+    bool _requiresDevice;
+    std::filesystem::path _bundlePath;
+    std::shared_ptr<IntegrationTestBundle> _bundle;
+};
+
+} // namespace hipdnn_integration_tests::bundle

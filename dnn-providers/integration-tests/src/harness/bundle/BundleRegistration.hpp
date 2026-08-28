@@ -18,7 +18,9 @@
 
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/BundleReferenceValidationHarness.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/ReferenceOpCoverage.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 
@@ -175,7 +177,8 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc)
 // requires-device flag are fixed here rather than passed in. The suite name is
 // the discovered name as-is: with a single runner there is no second runner to
 // disambiguate against, so no runner suffix is appended.
-inline void registerBundles(const std::vector<LoadedBundle>& bundles)
+inline void registerBundles(const std::vector<LoadedBundle>& bundles,
+                            const std::optional<LoadedEngine>& engineUnderTest)
 {
     for(const auto& bundle : bundles)
     {
@@ -187,13 +190,65 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles)
                                 __LINE__,
                                 [loaded = bundle.bundle,
                                  path = bundle.jsonPath,
-                                 locator = bundle.claimLocator]() -> ::testing::Test* {
+                                 locator = bundle.claimLocator,
+                                 engineUnderTest]() -> ::testing::Test* {
                                     auto* test = new IntegrationBundleVerificationHarness(
-                                        /*requiresDevice=*/true);
+                                        /*requiresDevice=*/true, engineUnderTest);
                                     test->setBundle(loaded, path, locator);
                                     return test;
                                 });
     }
+}
+
+// Registers one validation test per bundle this reference is *required* to handle
+// and for which golden data exists. Both conditions are checked here rather than in
+// the body precisely so the harness has no skip path: if a test exists, it must run
+// and pass.
+//
+// Bundles that fall outside the reference's supported-op set are simply absent from
+// the suite, and the count is logged so the gap is visible rather than silent.
+inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bundles,
+                                             ReferenceExecutorType referenceType)
+{
+    const char* label = BundleReferenceValidationHarness::referenceLabel(referenceType);
+
+    size_t registered = 0;
+    size_t noGolden = 0;
+    size_t uncovered = 0;
+
+    for(const auto& bundle : bundles)
+    {
+        if(!bundle.bundle->hasGoldenOutputs)
+        {
+            noGolden++;
+            continue;
+        }
+        if(!referenceCoversGraph(
+               referenceType, bundle.bundle->graphBuffer.data(), bundle.bundle->graphBuffer.size()))
+        {
+            uncovered++;
+            continue;
+        }
+
+        ::testing::RegisterTest(
+            (bundle.suiteName + "_" + label).c_str(),
+            bundle.testName.c_str(),
+            nullptr,
+            nullptr,
+            __FILE__,
+            __LINE__,
+            [loaded = bundle.bundle, path = bundle.jsonPath, referenceType]() -> ::testing::Test* {
+                auto* test = new BundleReferenceValidationHarness(referenceType,
+                                                                  /*requiresDevice=*/true);
+                test->setBundle(loaded, path);
+                return test;
+            });
+        registered++;
+    }
+
+    std::cerr << "Golden-data validation (" << label << "): " << registered
+              << " bundle(s) registered, " << noGolden << " without golden data, " << uncovered
+              << " outside this reference's supported-op set\n";
 }
 
 } // namespace detail
@@ -212,6 +267,23 @@ inline std::filesystem::path resolveDataDir()
     }
     return hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
            / "../lib/integration-test-bundles";
+}
+
+// The engine this run tests, or nothing when --test-engine was not given. main()
+// has already exited non-zero if it named an engine that is not loaded, so a
+// non-empty result is always a loaded engine.
+inline std::optional<LoadedEngine> resolveEngineUnderTest()
+{
+    if(!LoadedEngineTable::get().isBuilt() || !TestConfig::get().hasEngineName())
+    {
+        return std::nullopt;
+    }
+
+    if(const auto* engine = LoadedEngineTable::get().find(TestConfig::get().getEngineName()))
+    {
+        return *engine;
+    }
+    return std::nullopt;
 }
 
 inline void registerBundleTests()
@@ -260,17 +332,15 @@ inline void registerBundleTests()
     // registers normally and the harness SKIPs it at run time.
     std::vector<detail::LoadedBundle> bundles;
     bundles.reserve(discovered.size());
+
+    // Enforcement needs a named engine to adjudicate against, so a run without
+    // --test-engine has nothing to count; seeding the coverage counters anyway
+    // would trip verifiedNothing() on a run that never intended to enforce.
+    const std::optional<LoadedEngine> engineUnderTest = resolveEngineUnderTest();
+    const bool enforcing = TestConfig::get().enforceSupportClaims() && engineUnderTest.has_value();
+
     for(const auto& disc : discovered)
     {
-        if(TestConfig::get().enforceSupportClaims())
-        {
-            supportClaimCoverage().graphsFound++;
-            if(std::filesystem::exists(detail::sidecarPathFor(disc)))
-            {
-                supportClaimCoverage().graphsWithClaims++;
-            }
-        }
-
         auto outcome = detail::classifyBundle(disc);
 
         if(auto* failed = std::get_if<detail::FailedLoad>(&outcome))
@@ -285,6 +355,18 @@ inline void registerBundleTests()
             continue;
         }
 
+        // Counted only for bundles that actually register a test. A bundle that
+        // failed to load can never be queried, so counting its sidecar would make
+        // the coverage guard fire on a gap it cannot close.
+        if(enforcing)
+        {
+            supportClaimCoverage().graphsFound++;
+            if(std::filesystem::exists(detail::sidecarPathFor(disc)))
+            {
+                supportClaimCoverage().graphsWithClaims++;
+            }
+        }
+
         bundles.push_back(std::move(std::get<detail::LoadedBundle>(outcome)));
     }
 
@@ -294,7 +376,16 @@ inline void registerBundleTests()
         return;
     }
 
-    detail::registerBundles(bundles);
+    // Two harnesses, never both: verifying an engine and validating our own golden
+    // data are different jobs, and a run is doing one or the other.
+    if(TestConfig::get().hasGoldenDataValidationReference())
+    {
+        detail::registerReferenceValidationTests(
+            bundles, TestConfig::get().getGoldenDataValidationReference());
+        return;
+    }
+
+    detail::registerBundles(bundles, engineUnderTest);
 
     HIPDNN_PLUGIN_LOG_INFO("Registered " << bundles.size() << " bundle test(s)");
 }

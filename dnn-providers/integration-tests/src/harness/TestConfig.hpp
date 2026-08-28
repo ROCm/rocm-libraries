@@ -43,14 +43,17 @@ enum class ReferenceExecutorType
 //   GOLDEN       — golden data only; SKIP if a bundle has no golden outputs
 //   GPU          — ignore golden; compare engine against the GPU reference executor
 //   CPU          — ignore golden; compare engine against the CPU reference executor
-//   GOLDEN_CHECK — no engine; compare golden data against CPU ref (data validation)
+//
+// Validating golden data against a reference is *not* a mode here: it involves no
+// engine, so it is a separate harness selected by --validate-golden-data. Folding
+// it in as a mode produced a "verification mode" that never reached an engine and
+// therefore never enforced the claims this harness exists to enforce.
 enum class VerificationMode
 {
     AUTO,
     GOLDEN,
     GPU,
     CPU,
-    GOLDEN_CHECK,
 };
 
 // Parse a verification-mode string (case-insensitive) into the enum. Throws
@@ -79,10 +82,12 @@ inline VerificationMode parseVerificationMode(std::string value)
     }
     if(value == "golden-check")
     {
-        return VerificationMode::GOLDEN_CHECK;
+        throw std::runtime_error(
+            "verification-mode 'golden-check' has been replaced by --validate-golden-data "
+            "(cpu|gpu), which runs a separate reference-validation suite");
     }
     throw std::runtime_error("Invalid verification mode '" + value
-                             + "'; expected 'auto', 'golden', 'gpu', 'cpu', or 'golden-check'");
+                             + "'; expected 'auto', 'golden', 'gpu', or 'cpu'");
 }
 
 // Resolve verification mode: CLI value wins, then env var, then nullopt (caller
@@ -132,6 +137,7 @@ struct TestConfigOptions
     std::optional<VerificationMode> verificationMode;
     std::optional<std::filesystem::path> captureDir;
     bool enforceSupportClaims = false;
+    std::optional<ReferenceExecutorType> goldenDataValidationReference;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -214,6 +220,7 @@ public:
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
         instance._captureDir = std::move(opts.captureDir);
         instance._enforceSupportClaims = opts.enforceSupportClaims;
+        instance._goldenDataValidationReference = opts.goldenDataValidationReference;
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -226,6 +233,14 @@ public:
         instance._currentPlatform = currentPlatform();
 
         instance._initialized = true;
+    }
+
+    // Whether initialize() has run. Every other accessor throws before that, so
+    // unit tests that drive harness code need a way to ask instead of guessing at
+    // suite ordering.
+    static bool isInitialized()
+    {
+        return get()._initialized;
     }
 
     bool hasArticlePath() const
@@ -283,6 +298,27 @@ public:
             throw std::runtime_error("getEngineId() called but --test-engine was not provided");
         }
         return hipdnn_data_sdk::utilities::engineNameToId(_engineName.value());
+    }
+
+    // Which reference to validate golden data against, when --validate-golden-data
+    // was given. Selects the reference-validation harness instead of the engine
+    // harness; the two never run in the same process.
+    bool hasGoldenDataValidationReference() const
+    {
+        throwIfNotInitialized();
+        return _goldenDataValidationReference.has_value();
+    }
+
+    ReferenceExecutorType getGoldenDataValidationReference() const
+    {
+        throwIfNotInitialized();
+        if(!_goldenDataValidationReference.has_value())
+        {
+            throw std::runtime_error(
+                "getGoldenDataValidationReference() called but --validate-golden-data was "
+                "not provided");
+        }
+        return *_goldenDataValidationReference;
     }
 
     // Get tolerance mode (always DEFAULT since only one mode exists)
@@ -434,6 +470,7 @@ private:
     bool _skipGraphValidation = false;
     bool _allowBundles = false;
     bool _enforceSupportClaims = false;
+    std::optional<ReferenceExecutorType> _goldenDataValidationReference;
     bool _initialized = false;
 };
 

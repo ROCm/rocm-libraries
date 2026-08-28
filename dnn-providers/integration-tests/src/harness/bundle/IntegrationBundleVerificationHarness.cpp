@@ -19,6 +19,7 @@
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
+#include "common/PlatformUtils.hpp"
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
@@ -50,62 +51,48 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
     auto err = graph.from_binary(handle, graphBytes);
     ASSERT_TRUE(err.is_good()) << "from_binary failed: " << err.get_message();
 
+    // Reuse the ranked list TestBody() already asked for when enforcement is on;
+    // the list is a property of (graph, handle), so a second heuristic query would
+    // fan out to every plugin again for the same answer.
     std::vector<int64_t> engineIds;
-    auto status = graph.get_ranked_engine_ids(engineIds);
+    hipdnn_frontend::ErrorCode statusCode = hipdnn_frontend::ErrorCode::OK;
+    if(_query.ran)
+    {
+        engineIds = _query.rankedIds;
+        statusCode = _query.statusCode;
+    }
+    else
+    {
+        auto status = graph.get_ranked_engine_ids(engineIds);
+        statusCode = status.get_code();
+        _query.ran = true;
+        _query.statusCode = statusCode;
+        _query.statusMessage = status.get_message();
+        _query.rankedIds = engineIds;
+    }
+    const bool queryFailed = statusCode != hipdnn_frontend::ErrorCode::OK;
 
     const auto graphSummary = [&] {
         return std::to_string(_bundle->outputTensorUids.size()) + " output tensor(s), "
                + std::to_string(engineIds.size()) + " ranked engine(s)";
     };
 
-    if(TestConfig::get().enforceSupportClaims())
+    if(_engineUnderTest.has_value())
     {
-        const auto allVerdicts = observeAllSupport(status.get_code(),
-                                                   engineIds,
-                                                   _claimLocator,
-                                                   LoadedEngineTable::get().all(),
-                                                   status.get_message());
-        if(!allVerdicts.empty())
-        {
-            supportClaimCoverage().graphsQueried++;
-        }
+        const int64_t targetEngineId = _engineUnderTest->id;
 
-        const bool hasPinnedEngine = TestConfig::get().hasEngineName();
-        const std::string pinnedName
-            = hasPinnedEngine ? std::string(TestConfig::get().getEngineName()) : std::string{};
-
-        std::string failureAggregate;
-        for(const auto& v : allVerdicts)
-        {
-            SupportClaimVerdicts::get().record(v);
-            if(isFailure(v.verdict) && (!hasPinnedEngine || v.engineName == pinnedName))
-            {
-                failureAggregate += formatVerdictMessage(v);
-            }
-        }
-        if(!failureAggregate.empty())
-        {
-            FAIL() << failureAggregate;
-            return;
-        }
-    }
-
-    if(TestConfig::get().hasEngineName())
-    {
-        const int64_t targetEngineId = TestConfig::get().getEngineId();
-
-        if(status.is_bad()
+        if(queryFailed
            || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
         {
-            throw EngineNotApplicableError(
-                "Engine " + std::string(TestConfig::get().getEngineName())
-                + " does not support this graph (" + graphSummary() + ")");
+            throw EngineNotApplicableError("Engine " + _engineUnderTest->name
+                                           + " does not support this graph (" + graphSummary()
+                                           + ")");
         }
         graph.set_preferred_engine_id_ext(targetEngineId);
     }
     else
     {
-        if(status.is_bad() || engineIds.empty())
+        if(queryFailed || engineIds.empty())
         {
             throw EngineNotApplicableError("No engine supports this graph (" + graphSummary()
                                            + ")");
@@ -166,14 +153,135 @@ bool IntegrationBundleVerificationHarness::isEnforcingSupportClaims() const
     return TestConfig::get().enforceSupportClaims();
 }
 
+// ---- support claims --------------------------------------------------------
+
+SupportObservation IntegrationBundleVerificationHarness::observeSupportForBundle()
+{
+    if(_bundle == nullptr || !shouldEnforceClaims())
+    {
+        return {};
+    }
+
+    auto handle = getSharedHandle();
+
+    const std::vector<uint8_t> graphBytes(
+        _bundle->graphBuffer.data(), _bundle->graphBuffer.data() + _bundle->graphBuffer.size());
+
+    hipdnn_frontend::graph::Graph graph;
+    auto err = graph.from_binary(handle, graphBytes);
+    if(!err.is_good())
+    {
+        // ADD_FAILURE rather than ASSERT_TRUE: this runs before runComparison(), and
+        // the executor's own ASSERT on the same call would otherwise be shadowed.
+        ADD_FAILURE() << "from_binary failed: " << err.get_message();
+        return {};
+    }
+
+    std::vector<int64_t> rankedIds;
+    auto status = graph.get_ranked_engine_ids(rankedIds);
+
+    _query.ran = true;
+    _query.statusCode = status.get_code();
+    _query.statusMessage = status.get_message();
+    _query.rankedIds = rankedIds;
+
+    return observeSupport(_query.statusCode,
+                          _query.rankedIds,
+                          _claimLocator,
+                          *_engineUnderTest,
+                          baseArchToken(TestConfig::get().getCurrentArch()),
+                          currentPlatform(),
+                          _query.statusMessage);
+}
+
+void IntegrationBundleVerificationHarness::recordClaimCoverage(
+    const SupportObservation& observation)
+{
+    if(observation.sidecarChecked)
+    {
+        supportClaimCoverage().graphsQueried++;
+        if(!observation.hasApplicableClaim())
+        {
+            // Read in full, but silent about this arch/platform/case. Counted so
+            // "we checked and it holds" is distinguishable from "we checked and
+            // nobody had said anything" — identical in the verdict tallies, and
+            // only one of them means the cell is covered.
+            supportClaimCoverage().graphsWithNoApplicableClaim++;
+        }
+    }
+
+    // Per-graph coverage invariant. The run-level guard only fires when *no* graph
+    // anywhere was queried, so a partial gap slips through it. Per graph, a future
+    // short-circuit above the query is loud immediately instead of surviving behind
+    // one healthy bundle.
+    if(shouldEnforceClaims() && !observation.sidecarChecked)
+    {
+        ADD_FAILURE() << "support claims exist for " << _bundlePath
+                      << " but were never queried; enforcement would have passed "
+                         "without checking them";
+    }
+}
+
+std::string IntegrationBundleVerificationHarness::aggregateClaimFailures(
+    const std::vector<SupportResult>& results) const
+{
+    std::string aggregate;
+    for(const auto& result : results)
+    {
+        if(isFailure(result.verdict))
+        {
+            // Aggregated rather than failed on sight so one FAIL() names every
+            // broken engine, instead of the first one hiding the rest.
+            aggregate += formatVerdictMessage(result);
+        }
+    }
+    return aggregate;
+}
+
+// An accepted claim is an observation about the ranked list, taken before the graph
+// was built or run. Publishing it as working support when the same test then failed
+// to build, execute, or match would feed a support matrix a cell that demonstrably
+// does not work — so the promotion happens here, once, and only for the engine this
+// test actually drove.
+void IntegrationBundleVerificationHarness::commitClaims(const std::vector<SupportResult>& results,
+                                                        bool exercised)
+{
+    // results is only ever non-empty when an engine was injected, so there is no
+    // unpinned case to handle here.
+    if(!_engineUnderTest.has_value())
+    {
+        return;
+    }
+
+    const bool passed = !HasFailure();
+    const std::string& underTest = _engineUnderTest->name;
+
+    for(auto record : results)
+    {
+        if(record.verdict == SupportVerdict::CLAIM_ACCEPTED && record.engineName == underTest)
+        {
+            record.verdict = promoteAcceptedClaim(exercised, passed);
+            if(record.verdict != SupportVerdict::CLAIM_ACCEPTED)
+            {
+                record.detail = record.verdict == SupportVerdict::CLAIM_CONFIRMED
+                                    ? "engine in ranked list; graph executed and verified"
+                                    : "engine accepted the graph, but the test did not pass";
+            }
+        }
+        SupportClaimVerdicts::get().record(record);
+    }
+}
+
 void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level)
 {
     ASSERT_NE(level, EnforcementLevel::FULL)
         << "enforceAtLevel() handles APPLICABILITY/BUILDABLE only; FULL uses the normal path";
 
-    if(!TestConfig::get().hasEngineName())
+    // The rung itself needs a named engine to check applicability against; claim
+    // enforcement already ran in TestBody() and is not affected by this return.
+    if(!_engineUnderTest.has_value())
     {
-        skipUnverifiable("enforcement requires --test-engine");
+        skipUnverifiable("enforcement_level requires --test-engine");
         return;
     }
 
@@ -187,54 +295,31 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
     ASSERT_TRUE(err.is_good()) << "from_binary failed: " << err.get_message();
 
     std::vector<int64_t> engineIds;
-    auto status = graph.get_ranked_engine_ids(engineIds);
+    hipdnn_frontend::ErrorCode statusCode = hipdnn_frontend::ErrorCode::OK;
+    if(_query.ran)
+    {
+        engineIds = _query.rankedIds;
+        statusCode = _query.statusCode;
+    }
+    else
+    {
+        auto status = graph.get_ranked_engine_ids(engineIds);
+        statusCode = status.get_code();
+        _query.ran = true;
+        _query.statusCode = statusCode;
+        _query.statusMessage = status.get_message();
+        _query.rankedIds = engineIds;
+    }
 
     const std::string rung
         = level == EnforcementLevel::APPLICABILITY ? "applicability" : "buildable";
 
-    if(isEnforcingSupportClaims())
-    {
-        const auto allVerdicts = observeAllSupport(status.get_code(),
-                                                   engineIds,
-                                                   _claimLocator,
-                                                   LoadedEngineTable::get().all(),
-                                                   status.get_message());
-        if(!allVerdicts.empty())
-        {
-            supportClaimCoverage().graphsQueried++;
-        }
+    const int64_t targetEngineId = _engineUnderTest->id;
 
-        const std::string pinnedName = std::string(TestConfig::get().getEngineName());
-
-        std::string failureAggregate;
-        for(const auto& v : allVerdicts)
-        {
-            SupportClaimVerdicts::get().record(v);
-            if(isFailure(v.verdict) && v.engineName == pinnedName)
-            {
-                failureAggregate += formatVerdictMessage(v);
-            }
-        }
-        if(!failureAggregate.empty())
-        {
-            FAIL() << "[rung=" << rung << "] " << failureAggregate;
-            return;
-        }
-
-        if(allVerdicts.empty())
-        {
-            skipUnverifiable("enforcement_level=" + rung
-                             + " but no support claims found for loaded engines");
-            return;
-        }
-    }
-
-    const int64_t targetEngineId = TestConfig::get().getEngineId();
-
-    if(status.is_bad()
+    if(statusCode != hipdnn_frontend::ErrorCode::OK
        || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
     {
-        skipUnverifiable("Engine " + std::string(TestConfig::get().getEngineName())
+        skipUnverifiable("Engine " + _engineUnderTest->name
                          + " does not support this graph (enforcement_level=" + rung + ")");
         return;
     }
@@ -289,9 +374,6 @@ void IntegrationBundleVerificationHarness::runComparison()
     case VerificationMode::AUTO:
         runAutoMode();
         return;
-    case VerificationMode::GOLDEN_CHECK:
-        runGoldenCheckMode();
-        return;
     default:
         FAIL() << "Unknown verification mode";
         return;
@@ -329,9 +411,14 @@ std::optional<OutputTensors> IntegrationBundleVerificationHarness::runEngineOrSk
 
 void IntegrationBundleVerificationHarness::runGoldenMode()
 {
+    // An explicit --verification-mode=golden is a demand for a specific oracle, not
+    // a preference. Skipping when that oracle is absent means the run did not do
+    // what it was asked and still went green — use `auto` if a fallback chain is
+    // what you want.
     if(!_bundle->hasGoldenOutputs)
     {
-        skipUnverifiable("no golden data (verification-mode=golden)");
+        FAIL() << "verification-mode=golden was requested but this bundle has no golden "
+                  "data; run `dvc pull` for it, or use --verification-mode=auto";
         return;
     }
     auto engineOutputs = runEngineOrSkip();
@@ -431,37 +518,6 @@ void IntegrationBundleVerificationHarness::runAutoMode()
             FAIL() << "Unknown RefStatus";
             return;
         }
-    }
-}
-
-void IntegrationBundleVerificationHarness::runGoldenCheckMode()
-{
-    if(!_bundle->hasGoldenOutputs)
-    {
-        skipUnverifiable("no golden data (verification-mode=golden-check)");
-        return;
-    }
-
-    OutputTensors cpuOutputs;
-    const RefRunResult result
-        = runReferenceCapturingOutputs(ReferenceExecutorType::CPU, cpuOutputs);
-    switch(result.status)
-    {
-    case RefStatus::CAPABILITY_MISS:
-        skipUnverifiable("CPU ref cannot run this op (golden-check): " + result.message);
-        return;
-    case RefStatus::RUNTIME_ERROR:
-        recordRefError("CPU ref errored (golden-check): " + result.message);
-        FAIL() << "CPU ref errored (golden-check): " << result.message;
-        return;
-    case RefStatus::RAN:
-        compareEach(cpuOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-            return *_bundle->tensors->at(uid);
-        });
-        return;
-    default:
-        FAIL() << "Unknown RefStatus";
-        return;
     }
 }
 
@@ -580,6 +636,11 @@ std::optional<OutputTensors>
     try
     {
         executeGraphThroughEngine(variantPack);
+        // Recorded here, not inferred from skip state in TestBody(). "The engine ran
+        // this graph" is the only basis on which an accepted claim may be promoted,
+        // and a mode can now fail before ever reaching the engine — attributing that
+        // to the engine would brand a missing .bin as a broken implementation.
+        _engineRan = true;
     }
     catch(const EngineNotApplicableError& e)
     {

@@ -4,6 +4,8 @@
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    ../src/harness/bundle/BundleReferenceValidationHarness.cpp
+    ../src/harness/bundle/ReferenceOpCoverage.cpp
     ../src/harness/bundle/SupportClaimReport.cpp
     ../src/harness/bundle/SupportClaims.cpp
     ../src/harness/bundle/SupportVerdict.cpp
@@ -34,7 +36,9 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestVerificationModePaths.cpp
     TestErrorPaths.cpp
     TestLoadedEngineTable.cpp
+    TestReferenceOpCoverage.cpp
     TestSupportClaimReport.cpp
+    TestSupportClaimEnforcement.cpp
     TestSupportVerdict.cpp
 )
 
