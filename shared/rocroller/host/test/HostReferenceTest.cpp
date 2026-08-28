@@ -60,7 +60,7 @@ namespace
             std::nullopt,
         };
 
-        const HostReferenceProblem problem
+        const auto problem
             = makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 2.0f, 3.0f);
         const Tensor reference = computeHostReference(problem);
         require(convertHostReference<float>(reference) == std::vector<float>({41, 89, 47, 103}),
@@ -135,7 +135,7 @@ namespace
             scaleTensor(Shape{1, 2}, {130, 131}),
         };
 
-        const HostReferenceProblem problem
+        const auto problem
             = makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 2, 1.0f, 0.0f);
         const Tensor reference = computeHostReference(problem);
         require(convertHostReference<float>(reference) == std::vector<float>({160}),
@@ -143,7 +143,7 @@ namespace
 
         const std::array<uint8_t, 1> singleScaleA{128};
         const std::array<uint8_t, 1> singleScaleB{130};
-        HostReferenceProblem         singleScaleProblem
+        auto singleScaleProblem
             = makeHostReferenceProblem(inputs,
                                        hostScaleTensor(DataType::E8M0, singleScaleA, 1, 4, 4),
                                        hostScaleTensor(DataType::E8M0, singleScaleB, 1, 4, 4),
@@ -232,20 +232,20 @@ namespace
 
         const HostComparisonResult boundary = compareHostReference(
             observedView, expectedView, AcceptableGEMMError{1.0, "strict boundary"});
-        require(boundary.relativeNormL2 == 1.0 && !boundary.ok
+        require(boundary.statistics.relativeFrobeniusError == 1.0 && !boundary.ok()
                     && !boundary.statistics.frobeniusPassed,
                 "rocroller-gemm comparison did not preserve strict less-than acceptance.");
 
         const HostComparisonResult aboveBoundary = compareHostReference(
             observedView, expectedView, AcceptableGEMMError{1.01, "above boundary"});
-        require(aboveBoundary.ok && aboveBoundary.statistics.passed(),
+        require(aboveBoundary.ok() && aboveBoundary.statistics.passed(),
                 "rocroller-gemm comparison rejected a relative error below tolerance.");
 
         const std::array<float, 1> zero{};
         const auto zeroResult = compareHostReference(hostOutputTensor<float>(zero, 1, 1),
                                                      hostOutputTensor<float>(zero, 1, 1),
                                                      AcceptableGEMMError{1.0, "zero reference"});
-        require(std::isnan(zeroResult.relativeNormL2) && !zeroResult.ok,
+        require(std::isnan(zeroResult.statistics.relativeFrobeniusError) && !zeroResult.ok(),
                 "rocroller-gemm comparison changed zero-reference acceptance semantics.");
 
         const std::array<float, 1> infinity{std::numeric_limits<float>::infinity()};
@@ -253,7 +253,8 @@ namespace
             = compareHostReference(hostOutputTensor<float>(infinity, 1, 1),
                                    hostOutputTensor<float>(infinity, 1, 1),
                                    AcceptableGEMMError{1.0, "matching infinity"});
-        require(std::isnan(infinityResult.relativeNormL2) && !infinityResult.ok,
+        require(std::isnan(infinityResult.statistics.relativeFrobeniusError)
+                    && !infinityResult.ok(),
                 "rocroller-gemm comparison changed matching-infinity acceptance semantics.");
     }
 }

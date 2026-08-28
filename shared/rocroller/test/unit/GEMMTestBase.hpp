@@ -939,32 +939,38 @@ namespace GEMMTests
             auto const                         referenceScaleBlockSize = gemm.scaleBlockSize > 0
                                                                              ? static_cast<size_t>(gemm.scaleBlockSize)
                                                                              : static_cast<size_t>(K);
-            HostNumerics::HostReferenceProblem referenceProblem(
-                HostNumerics::hostTensor(descA,
-                                         hostA,
-                                         gemm.scaleAMode == Operations::ScaleMode::Separate
-                                             ? HostNumerics::DataTypeInterpretation::BlockScaled
-                                             : HostNumerics::DataTypeInterpretation::Unscaled),
-                HostNumerics::hostTensor(descB,
-                                         hostB,
-                                         gemm.scaleBMode == Operations::ScaleMode::Separate
-                                             ? HostNumerics::DataTypeInterpretation::BlockScaled
-                                             : HostNumerics::DataTypeInterpretation::Unscaled),
-                HostNumerics::hostTensor(descC, hostC));
+            std::optional<roc::host_numerics::Tensor> referenceScaleA;
+            std::optional<roc::host_numerics::Tensor> referenceScaleB;
             if(gemm.scaleAMode != Operations::ScaleMode::None)
             {
-                referenceProblem.scaleA = HostNumerics::hostScaleTensor(
+                referenceScaleA = HostNumerics::hostScaleTensor(
                     gemm.scaleTypeA, hostScaleA, descA, 1, referenceScaleBlockSize);
             }
             if(gemm.scaleBMode != Operations::ScaleMode::None)
             {
-                referenceProblem.scaleB = HostNumerics::hostScaleTensor(
+                referenceScaleB = HostNumerics::hostScaleTensor(
                     gemm.scaleTypeB, hostScaleB, descB, 0, referenceScaleBlockSize);
             }
-            referenceProblem.scaleBlockSize = referenceScaleBlockSize;
-            referenceProblem.alpha          = alpha;
-            referenceProblem.beta           = beta;
-            auto floatReference             = HostNumerics::computeHostReference(referenceProblem);
+            auto referenceProblem = HostNumerics::makeHostReferenceProblem(
+                HostNumerics::hostTensor(
+                    descA,
+                    hostA,
+                    gemm.scaleAMode == Operations::ScaleMode::Separate
+                        ? HostNumerics::DataTypeInterpretation::BlockScaled
+                        : HostNumerics::DataTypeInterpretation::Unscaled),
+                HostNumerics::hostTensor(
+                    descB,
+                    hostB,
+                    gemm.scaleBMode == Operations::ScaleMode::Separate
+                        ? HostNumerics::DataTypeInterpretation::BlockScaled
+                        : HostNumerics::DataTypeInterpretation::Unscaled),
+                HostNumerics::hostTensor(descC, hostC),
+                std::move(referenceScaleA),
+                std::move(referenceScaleB),
+                referenceScaleBlockSize,
+                alpha,
+                beta);
+            auto floatReference = HostNumerics::computeHostReference(referenceProblem);
 
             std::vector<TD> h_result;
             if constexpr(std::is_same_v<TC, TD>)
@@ -1055,7 +1061,7 @@ namespace GEMMTests
                     = gemmAcceptableError<TA, TB, TD>(K, m_context->targetArchitecture().target());
                 auto res = compare(d_result, h_result, tol);
                 Log::info("RNorm is {} (acceptable {}, iteration {})",
-                          res.relativeNormL2,
+                          res.statistics.relativeFrobeniusError,
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
@@ -1089,7 +1095,7 @@ namespace GEMMTests
                         << scratchSpaceRequired[zeroedIdx] << " bytes)";
                 }
 
-                if(debuggable && !res.ok)
+                if(debuggable && !res.ok())
                 {
                     for(size_t i = 0; i < M; i++)
                     {
@@ -1109,7 +1115,7 @@ namespace GEMMTests
                         }
                     }
                 }
-                EXPECT_TRUE(res.ok) << res.message();
+                EXPECT_TRUE(res.ok()) << res.message();
             }
         }
 
