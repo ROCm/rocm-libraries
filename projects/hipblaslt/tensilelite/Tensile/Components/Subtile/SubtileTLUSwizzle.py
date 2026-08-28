@@ -57,7 +57,9 @@ class TLUColScatter:
     thread position by a bit-interleave that lands the distinguishing group bit
     at thread bit 3 (the LDS bank-pair bit).  With 8B inter-load padding the two
     phases cover complementary halves of the even bank pairs -> 1-way.  Verified
-    against the bank model (1-way, exact A round-trip) for stackM in {8,16,32}.
+    against the bank model (1-way, exact A round-trip) for stackM in {8,16}.
+    Not 32: readStrideBytes derives from cgDelta = 16 // N, which is 0 there, so
+    the K-column step would come out as no step at all.
 
     Fields are all derived from N = stackM:
       N:            loads / buffer_load instructions per strip (= stackM)
@@ -162,7 +164,9 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
         return None
     try:
         stack = int(tileInfo.subtileShape[0])
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
+        # Narrow on purpose: returning None here means "no swizzle", so a wider
+        # catch would turn a rename into silently bank-conflicting kernels.
         return None
     if float(tileInfo.bpe) != 0.5:
         return None
@@ -181,7 +185,9 @@ def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
     """
     try:
         stack = int(tileInfo.subtileShape[0])
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
+        # Narrow on purpose: returning None here means "no swizzle", so a wider
+        # catch would turn a rename into silently bank-conflicting kernels.
         return None
     if float(tileInfo.bpe) != 0.5:
         return None
