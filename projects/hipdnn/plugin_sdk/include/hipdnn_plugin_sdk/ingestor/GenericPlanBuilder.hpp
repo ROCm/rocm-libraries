@@ -10,6 +10,7 @@
 #include <exception>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -319,12 +320,19 @@ public:
         // The callback is the write-back channel, already bound to the key: it captures
         // the state manager by reference, which the engine owns and which strictly
         // outlives every plan it hands out.
+        // benchmarkId is the graph half of the winner key, not the whole key: the device
+        // half is constant for a process, and the exporter needs to group rows by problem.
+        // Hex so the value survives a log grep unambiguously.
+        std::ostringstream benchmarkId;
+        benchmarkId << std::hex << winnerKey.graph.hash();
+
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
             handle,
             [&stateManager = _stateManager, winnerKey](const std::vector<RankedEntry>& ranking) {
                 stateManager.recordWinner(winnerKey, ranking);
-            }));
+            },
+            benchmarkId.str()));
     }
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
@@ -385,10 +393,14 @@ private:
     std::unique_ptr<IPlan<THandle>>
         makeBenchmarkPlan(std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates,
                           const THandle& handle,
-                          typename BenchmarkPlan<THandle>::RecordRankingFn recordRanking) const
+                          typename BenchmarkPlan<THandle>::RecordRankingFn recordRanking,
+                          std::string benchmarkId) const
     {
-        return std::make_unique<BenchmarkPlan<THandle>>(
-            std::move(candidates), handle, _timer, std::move(recordRanking));
+        return std::make_unique<BenchmarkPlan<THandle>>(std::move(candidates),
+                                                        handle,
+                                                        _timer,
+                                                        std::move(recordRanking),
+                                                        std::move(benchmarkId));
     }
 
     /// An arch-independent pack (empty `arch` list, itself legal) passes `archSupports`
