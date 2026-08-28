@@ -105,3 +105,28 @@ shipped: evidence for a decision. **This branch fixes one of the five.**
 nothing** — a CU mask that reported 30 CUs but restricted nothing, a `--logic-filter` build
 that exited 0 having compiled zero kernels, and a sweep that produced rows at the normal rate
 which were all errors. Verify the artifact, not the exit status.
+
+## Where the next win is: NN, and it is not new tiles
+
+This branch covers the four **TN** (`Cijk_Alik_Bljk`) catalogs. **NN** (`Cijk_Ailk_Bljk`) was
+investigated separately and the brief changed twice under measurement — worth reading before
+spending time there.
+
+| hypothesis | measured | verdict |
+|---|---|---|
+| NN's grid/table is mis-mapped | current catalog delivers median **98.7%** of its own pool's best | **not the problem** — re-mapping buys ~1.3% |
+| NN lacks large tiles; port a richer pool | best transplanted kernel **0.67-0.72x** vs navi32's own stock | **fails** |
+| Generate a tuned `128x96` | **0.99x** on the one shape that selects it (pinned, ~1.4% resolution) | **fails** |
+| **The `96x96` NN already owns is under-tuned** | **1.16x and 1.39x** on the two large shapes where shipped and a freshly tuned library *both* dispatch `96x96` | **this is the lever** |
+
+**So the NN campaign is a re-tune of an existing tile, not a geometry hunt.** The last row is the
+only NN result measured at a resolution finer than the effect (DPM pinned — see
+[`NAVI32_RUNBOOK.md`](NAVI32_RUNBOOK.md) §7).
+
+**The trap that nearly hid it:** the tuned library beat the shipped catalog by geomean **1.17**,
+which reads as "the large tile works" — until `--print_kernel_info` shows it dispatches `96x96` on
+exactly the shapes where it wins, and `128x96` only where it measures 0.99. **Resolve which kernel
+each arm dispatched before attributing a library-level win to a library-level cause.**
+
+Full analysis: `wiki/05_workflow/lean_catalog_port.md` §1b in `ror-claude-skills`
+(branch `vmijovic/skills`).
