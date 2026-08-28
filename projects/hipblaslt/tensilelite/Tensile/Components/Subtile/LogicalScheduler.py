@@ -3807,20 +3807,29 @@ class LogicalScheduler:
                 cluster_size = self._kernel.get("PreloopGRClusterSize", -1) if self._kernel else -1
                 if cluster_size > 0:
                     # Change 2: use _build_clustered_preloop_ops with per-load atoms.
-                    # gr0 = MT0 GR placements; gr1 = MT1 GR placements.
-                    # depops for each batch are the SRD-advance / swap ops.
                     # Expand A/B placements to one-load atoms so cluster_size counts
                     # individual buffer_load instructions, not per-tensor placements.
-                    gr0_ops   = self._expand_gr_placements(
-                                    self._make_gr_all_tensors(0, all_tiles))
-                    gr0_deps  = self._make_depops_all_tensors(GRIncOp)
-                    gr1_deps  = []  # MT1 GRs in single-DU have no extra depops
+                    #
+                    # Correctness constraint: SRD depops (GRIncOp) advance the SRD
+                    # base address, so they MUST come after ALL gr0 loads and BEFORE
+                    # ANY gr1 loads. Distributing them between individual gr0 clusters
+                    # would make loads after the advance read from the wrong address.
+                    #
+                    # Architecture: cluster only gr0 atoms (with initC MFMA filler).
+                    # Pass gr1_ops=[] so all_grs contains only gr0 atoms. Then pass
+                    # gr1_depops = SRD-advances + expanded-gr1 so they are emitted in
+                    # order after the last gr0 cluster, preserving the correct sequence:
+                    #   [gr0 clusters] → [SRD advances] → [gr1 loads] → initC → WaitGR
+                    gr0_ops  = self._expand_gr_placements(
+                                   self._make_gr_all_tensors(0, all_tiles))
+                    gr0_deps = self._make_depops_all_tensors(GRIncOp)
+                    gr1_atoms = self._expand_gr_placements(mt1_grs)
                     ops = self._build_clustered_preloop_ops(
                         gr0_ops=gr0_ops,
-                        gr0_depops=gr0_deps,
+                        gr0_depops=[],                          # no SRD between gr0 clusters
                         initC_op=initC_op,
-                        gr1_ops=self._expand_gr_placements(mt1_grs),
-                        gr1_depops=gr1_deps,
+                        gr1_ops=[],                             # gr1 not in the clustered window
+                        gr1_depops=list(gr0_deps) + gr1_atoms, # SRD → gr1 after last gr0 cluster
                         cluster_size=cluster_size,
                         lr_tiles=lr_tiles,
                         gl2_preloop_ops=gl2_preloop_ops,
