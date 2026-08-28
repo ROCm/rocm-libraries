@@ -499,8 +499,22 @@ class WaitGRCounts:
     B: int = 0
     SA: int = 0
     SB: int = 0
+    # When True, emit_wait_gr resolves the count as
+    # tileInfoA.numGRTotal + tileInfoB.numGRTotal + SA_count + SB_count
+    # — the exact number of buffer_load instructions in flight.
+    # Used for the PGR=2 preloop GR reorder (single-partition fast path).
+    use_num_gr_total: bool = False
+    # When True, A/B/SA/SB hold raw GRPlacement counts (one per subtile atom).
+    # emit_wait_gr converts to buffer_loads via ceil(count / loadRatioGR),
+    # which is exact for any partition/GR-subtile geometry.
+    # Used for the PGR=2 preloop GR reorder when numPartitions > 1.
+    use_gr_placement_counts: bool = False
 
     def __str__(self):
+        if self.use_gr_placement_counts:
+            return f"mt1_gr_placements(A={self.A} B={self.B} SA={self.SA} SB={self.SB})"
+        if self.use_num_gr_total:
+            return "num_gr_total"
         parts = []
         for t in ('A', 'B', 'SA', 'SB'):
             v = getattr(self, t)
@@ -3182,20 +3196,27 @@ class LogicalScheduler:
             for tile_range in ranges
         ]
 
-    @staticmethod
-    def _gr1_wait_counts(gr1_ops) -> 'WaitGRCounts':
-        """Compute WaitGRCounts for a list of MT1 GR ops hoisted before WaitGR.
+    def _gr1_wait_counts(self, gr1_ops) -> 'WaitGRCounts':
+        """Compute WaitGRCounts for MT1 GR ops hoisted before WaitGR.
 
-        Counts only GRPlacement objects (not GRIncOp or other ops) per tensor.
-        The emitter multiplies each field by grMap to get the vmcnt value, so
-        the resulting WaitGROp emits vmcnt(N_gr1) — draining GR0 only and
-        leaving the N_gr1 MT1 loads in-flight past the barrier.
+        For single-partition kernels uses use_num_gr_total (fast path: exact
+        buffer_load count from tileInfo, avoids the grMap formula which
+        miscounts when loadRatioGR >= 1).  For multi-partition kernels counts
+        GRPlacement atoms per tensor and uses use_gr_placement_counts so the
+        emitter converts via ceil(count / loadRatioGR).
+
+        Mirrors _mt1_wait_gr_counts from plsin-mt1-clustered-reads.
         """
-        A = sum(1 for op in gr1_ops if isinstance(op, GRPlacement) and op.tensor == 'A')
-        B = sum(1 for op in gr1_ops if isinstance(op, GRPlacement) and op.tensor == 'B')
-        SA = sum(1 for op in gr1_ops if isinstance(op, GRPlacement) and op.tensor == 'SA')
-        SB = sum(1 for op in gr1_ops if isinstance(op, GRPlacement) and op.tensor == 'SB')
-        return WaitGRCounts(A=A, B=B, SA=SA, SB=SB)
+        if self.config.numPartitions == 1:
+            return WaitGRCounts(use_num_gr_total=True)
+        counts = {'A': 0, 'B': 0, 'SA': 0, 'SB': 0}
+        for op in gr1_ops:
+            if isinstance(op, GRPlacement):
+                counts[op.tensor] = counts.get(op.tensor, 0) + 1
+        return WaitGRCounts(
+            use_gr_placement_counts=True,
+            A=counts['A'], B=counts['B'], SA=counts['SA'], SB=counts['SB'],
+        )
 
     def _make_gr_all_tensors(self, mt: int, tiles: dict) -> List[GRPlacement]:
         """Create GR placements for all tensors and uids at the given MT iteration.
