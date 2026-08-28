@@ -181,17 +181,14 @@ endif()
 # ran over a production source root. Without that conjunction the engine never
 # registers and every pinned case FAILS rather than skipping.
 #
-# EXPECTED TO FAIL TODAY, and deliberately registered anyway. --test-engine matches
-# against the loaded engines' `engineName`, which getEngineInfos fills from
-# getEngineNameFromId(); a descriptor-registered name lives in a process-local registry
-# with hidden visibility, so this engine presents to the harness as the bare hex id
-# 0x992EB6EC552936F6 and the target exits with
-#     Error: Engine 'hipkernel:Gfx942AttentionDense' is not loaded
-# before running a case. That is pending engine-name exposure (AICK-1901), not a defect
-# in this provider and not a test failure. Nothing ships before the name lands, so
-# registering ahead of it is correct: the target goes live the moment it does, with no
-# further work here. Do NOT "fix" this by dropping ENGINE_NAME or pinning a different
-# engine -- an inert correct target beats a green misleading one.
+# --test-engine matches against the loaded engines' `engineName`. The provider's
+# Container::getEngineName now answers for descriptor-registered engines too (#11336),
+# filling the name from the UED's own `name` field -- so this pin resolves and the target
+# runs the cases against THIS engine rather than whichever one wins the graph.
+#
+# Do NOT "fix" a failure here by dropping ENGINE_NAME or pinning a different engine: the
+# whole point is that an unpinned run can report green while a different engine served
+# every case.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
    AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
