@@ -3,8 +3,15 @@
 # SPDX-License-Identifier: MIT
 """Convert UHD configuration to FlatBuffer UHD format.
 
-The output format matches hipdnn_flatbuffers_sdk.data_objects.UHD,
-which is read by UHD loader at runtime (RFC 0019 §9.2).
+The output format is hipdnn_flatbuffers_sdk.data_objects.UHD, read at runtime by
+`UhdLoader::loadFromBuffer` (RFC 0019 §9.2).
+
+Written through the flatc-generated object API rather than by hand. The previous
+version hand-rolled the vtable -- `StartObject(11)` against a 13-field table, with
+every slot from `features_signature` on one index low and `derived`/`native_symbol`
+unwritten -- so every buffer it produced failed the runtime verifier. A generated
+builder cannot drift: field identity is a name, and a schema addition renumbers
+nothing.
 """
 from __future__ import annotations
 
@@ -13,17 +20,40 @@ from pathlib import Path
 
 import flatbuffers
 
+# Importing the package puts `_generated/` on sys.path; see uhd_gen/__init__.py.
+import uhd_gen  # noqa: F401
+from hipdnn_flatbuffers_sdk.data_objects.UHD import UHDT
+from hipdnn_flatbuffers_sdk.data_objects.UhdAdapter import UhdAdapter
+from hipdnn_flatbuffers_sdk.data_objects.UhdDerivedEntry import UhdDerivedEntryT
+from hipdnn_flatbuffers_sdk.data_objects.UhdScoreMetadata import UhdScoreMetadataT
+
 logger = logging.getLogger(__name__)
 
-# File identifier for UHD FlatBuffers (from uhd.fbs)
+# File identifier for UHD FlatBuffers (from uhd.fbs).
 UHD_FILE_IDENTIFIER = b"HUHD"
 
-# UhdAdapter enum values (from uhd.fbs)
-ADAPTER_STATIC_ORDER = 0
-ADAPTER_TREE_DATA = 1
-ADAPTER_TABLE = 2
-ADAPTER_ONNX = 3
-ADAPTER_CUSTOM_LIBRARY = 4
+# Re-exported from the generated enum so the two cannot disagree. Kept as module
+# constants because callers and tests name them.
+ADAPTER_STATIC_ORDER = UhdAdapter.STATIC_ORDER
+ADAPTER_TREE_DATA = UhdAdapter.TREE_DATA
+ADAPTER_TABLE = UhdAdapter.TABLE
+ADAPTER_ONNX = UhdAdapter.ONNX
+ADAPTER_CUSTOM_LIBRARY = UhdAdapter.CUSTOM_LIBRARY
+ADAPTER_NATIVE = UhdAdapter.NATIVE
+
+ADAPTER_BY_NAME = {
+    "static_order": ADAPTER_STATIC_ORDER,
+    "tree_data": ADAPTER_TREE_DATA,
+    "table": ADAPTER_TABLE,
+    "onnx": ADAPTER_ONNX,
+    "custom_library": ADAPTER_CUSTOM_LIBRARY,
+    "native": ADAPTER_NATIVE,
+}
+
+# Adapters that score from a loaded artifact, so a path is mandatory. `native`
+# resolves an in-process symbol and `UhdLoader` rejects it outright if it also
+# carries an artifact path, so it is not in this set.
+_ARTIFACT_ADAPTERS = ("tree_data", "table", "onnx", "custom_library")
 
 
 def convert_uhd(
@@ -41,49 +71,52 @@ def convert_uhd(
     model_hash: str | None = None,
     static_order_fields: list[str] | None = None,
     custom_library_symbol: str | None = None,
+    native_symbol: str | None = None,
+    derived: list[tuple[str, str]] | None = None,
 ) -> None:
-    """Convert UHD configuration to FlatBuffer UHD.
+    """Convert UHD configuration to a FlatBuffer UHD written to @p output_path.
 
     Args:
         uhd_id: UUID/GUID identifier.
         name: Human-readable display name.
-        adapter: Adapter type ("static_order", "tree_data", "table", "onnx", "custom_library").
+        adapter: One of ADAPTER_BY_NAME's keys.
         features_signature: Ordered list of feature expressions (JsonLogic format).
         features_hash: SHA-256 hash of features_signature.
-        objective: "max" or "min".
-        score_units: Score units (e.g., "tflops", "ms").
+        objective: "max" or "min". UhdLoader rejects anything else.
+        score_units: Score units (e.g. "tflops", "ms").
         score_calibrated: True if cross-engine comparable.
-        score_transform: Transform applied to model output ("identity", "log", "log1p").
-        output_path: Output path for .uhd FlatBuffer file.
-        model_artifact_path: Relative path to model artifact (for tree_data/onnx/custom_library).
-        model_hash: Checksum of model artifact.
-        static_order_fields: Field names for static_order adapter (e.g., ["priority", "id"]).
-        custom_library_symbol: Symbol name for custom_library adapter.
+        score_transform: Transform applied to model output ("identity", "log1p", ...).
+        output_path: Destination for the .uhd.fb file.
+        model_artifact_path: Path to the model artifact, relative to this descriptor.
+        model_hash: Checksum of the model artifact.
+        static_order_fields: Sort fields for the static_order adapter.
+        custom_library_symbol: Scorer symbol inside a custom_library .so.
+        native_symbol: Scorer symbol registered in-process, for the native adapter.
+        derived: Ordered (name, JsonLogic expression) pairs forming $derived.*
+            (RFC 0019 §6.4). Evaluated in order; later entries may reference earlier.
 
     Raises:
-        ValueError: If adapter type is unknown or required fields are missing.
+        ValueError: If the adapter is unknown or a required field is missing.
     """
-    # Map string adapter to enum value
-    adapter_enum_map = {
-        "static_order": ADAPTER_STATIC_ORDER,
-        "tree_data": ADAPTER_TREE_DATA,
-        "table": ADAPTER_TABLE,
-        "onnx": ADAPTER_ONNX,
-        "custom_library": ADAPTER_CUSTOM_LIBRARY,
-    }
-    if adapter not in adapter_enum_map:
+    if adapter not in ADAPTER_BY_NAME:
         raise ValueError(f"Unknown adapter type: {adapter}")
 
-    adapter_value = adapter_enum_map[adapter]
-
-    # Validate required fields per adapter type
-    if adapter in ("tree_data", "onnx", "custom_library") and not model_artifact_path:
+    if adapter in _ARTIFACT_ADAPTERS and not model_artifact_path:
         raise ValueError(f"Adapter '{adapter}' requires model_artifact_path")
+
+    if adapter == "native" and not native_symbol:
+        raise ValueError("Adapter 'native' requires native_symbol")
+
+    if adapter == "native" and model_artifact_path:
+        raise ValueError(
+            "Adapter 'native' must not carry model_artifact_path; use "
+            "custom_library for a scorer shipped as a .so"
+        )
 
     buffer = build_uhd(
         uhd_id=uhd_id,
         name=name,
-        adapter=adapter_value,
+        adapter=ADAPTER_BY_NAME[adapter],
         features_signature=features_signature,
         features_hash=features_hash,
         objective=objective,
@@ -94,6 +127,8 @@ def convert_uhd(
         model_hash=model_hash,
         static_order_fields=static_order_fields,
         custom_library_symbol=custom_library_symbol,
+        native_symbol=native_symbol,
+        derived=derived,
     )
 
     with open(output_path, "wb") as f:
@@ -117,156 +152,57 @@ def build_uhd(
     score_units: str,
     score_calibrated: bool,
     score_transform: str,
-    model_artifact_path: str | None,
-    model_hash: str | None,
-    static_order_fields: list[str] | None,
-    custom_library_symbol: str | None,
+    model_artifact_path: str | None = None,
+    model_hash: str | None = None,
+    static_order_fields: list[str] | None = None,
+    custom_library_symbol: str | None = None,
+    native_symbol: str | None = None,
+    derived: list[tuple[str, str]] | None = None,
 ) -> bytes:
-    """Build FlatBuffer UHD from configuration.
+    """Build the FlatBuffer UHD for a configuration.
+
+    @p adapter is a UhdAdapter enum value, not a name; convert_uhd() maps names.
 
     Returns:
-        FlatBuffer bytes for UHD.
+        Finished FlatBuffer bytes, carrying the "HUHD" file identifier.
     """
-    builder = flatbuffers.Builder(1024)
+    uhd = UHDT()
+    uhd.id = uhd_id
+    uhd.name = name
+    uhd.adapter = adapter
+    uhd.featuresSignature = list(features_signature)
+    uhd.featuresHash = features_hash
+    uhd.objective = objective
 
-    # Build string offsets
-    id_offset = builder.CreateString(uhd_id)
-    name_offset = builder.CreateString(name)
-    hash_offset = builder.CreateString(features_hash)
-    objective_offset = builder.CreateString(objective)
+    score = UhdScoreMetadataT()
+    score.units = score_units
+    score.calibrated = score_calibrated
+    score.transform = score_transform
+    uhd.score = score
 
-    # Build features_signature vector
-    sig_offsets = [builder.CreateString(feature) for feature in features_signature]
-    builder.StartVector(4, len(sig_offsets), 4)
-    for offset in reversed(sig_offsets):
-        builder.PrependUOffsetTRelative(offset)
-    features_signature_vec = builder.EndVector()
+    if derived:
+        entries = []
+        for entry_name, expression in derived:
+            entry = UhdDerivedEntryT()
+            entry.name = entry_name
+            entry.expression = expression
+            entries.append(entry)
+        uhd.derived = entries
 
-    # Build UhdScoreMetadata table
-    score_units_offset = builder.CreateString(score_units)
-    score_transform_offset = builder.CreateString(score_transform)
-
-    _start_uhd_score_metadata(builder)
-    _add_uhd_score_metadata_units(builder, score_units_offset)
-    _add_uhd_score_metadata_calibrated(builder, score_calibrated)
-    _add_uhd_score_metadata_transform(builder, score_transform_offset)
-    score_metadata_offset = _end_uhd_score_metadata(builder)
-
-    # Build optional fields
-    model_artifact_offset = None
+    # Left unset rather than set empty: an absent FlatBuffer field reads back as
+    # null, which is how the loader distinguishes "not supplied" from "supplied
+    # empty" for every one of these.
     if model_artifact_path:
-        model_artifact_offset = builder.CreateString(model_artifact_path)
-
-    model_hash_offset = None
+        uhd.modelArtifactPath = model_artifact_path
     if model_hash:
-        model_hash_offset = builder.CreateString(model_hash)
-
-    static_order_vec = None
+        uhd.modelHash = model_hash
     if static_order_fields:
-        field_offsets = [builder.CreateString(field) for field in static_order_fields]
-        builder.StartVector(4, len(field_offsets), 4)
-        for offset in reversed(field_offsets):
-            builder.PrependUOffsetTRelative(offset)
-        static_order_vec = builder.EndVector()
-
-    custom_library_symbol_offset = None
+        uhd.staticOrderFields = list(static_order_fields)
     if custom_library_symbol:
-        custom_library_symbol_offset = builder.CreateString(custom_library_symbol)
+        uhd.customLibrarySymbol = custom_library_symbol
+    if native_symbol:
+        uhd.nativeSymbol = native_symbol
 
-    # Build UHD table
-    _start_uhd(builder)
-    _add_uhd_id(builder, id_offset)
-    _add_uhd_name(builder, name_offset)
-    _add_uhd_adapter(builder, adapter)
-    _add_uhd_features_signature(builder, features_signature_vec)
-    _add_uhd_features_hash(builder, hash_offset)
-    _add_uhd_objective(builder, objective_offset)
-    _add_uhd_score(builder, score_metadata_offset)
-
-    if model_artifact_offset is not None:
-        _add_uhd_model_artifact_path(builder, model_artifact_offset)
-    if model_hash_offset is not None:
-        _add_uhd_model_hash(builder, model_hash_offset)
-    if static_order_vec is not None:
-        _add_uhd_static_order_fields(builder, static_order_vec)
-    if custom_library_symbol_offset is not None:
-        _add_uhd_custom_library_symbol(builder, custom_library_symbol_offset)
-
-    uhd_offset = _end_uhd(builder)
-
-    builder.Finish(uhd_offset, file_identifier=UHD_FILE_IDENTIFIER)
+    builder = flatbuffers.Builder(1024)
+    builder.Finish(uhd.Pack(builder), file_identifier=UHD_FILE_IDENTIFIER)
     return bytes(builder.Output())
-
-
-# UhdScoreMetadata table helpers (inline, no generated bindings)
-def _start_uhd_score_metadata(builder: flatbuffers.Builder) -> None:
-    builder.StartObject(3)  # 3 fields: units, calibrated, transform
-
-
-def _add_uhd_score_metadata_units(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(0, s, 0)
-
-
-def _add_uhd_score_metadata_calibrated(builder: flatbuffers.Builder, v: bool) -> None:
-    builder.PrependBoolSlot(1, v, False)
-
-
-def _add_uhd_score_metadata_transform(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(2, s, 0)
-
-
-def _end_uhd_score_metadata(builder: flatbuffers.Builder) -> int:
-    return builder.EndObject()
-
-
-# UHD table helpers
-def _start_uhd(builder: flatbuffers.Builder) -> None:
-    builder.StartObject(11)  # 11 fields from uhd.fbs
-
-
-def _add_uhd_id(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(0, s, 0)
-
-
-def _add_uhd_name(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(1, s, 0)
-
-
-def _add_uhd_adapter(builder: flatbuffers.Builder, adapter: int) -> None:
-    builder.PrependUint8Slot(2, adapter, ADAPTER_STATIC_ORDER)
-
-
-def _add_uhd_features_signature(builder: flatbuffers.Builder, vec: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(3, vec, 0)
-
-
-def _add_uhd_features_hash(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(4, s, 0)
-
-
-def _add_uhd_objective(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(5, s, 0)
-
-
-def _add_uhd_score(builder: flatbuffers.Builder, table: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(6, table, 0)
-
-
-def _add_uhd_model_artifact_path(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(7, s, 0)
-
-
-def _add_uhd_model_hash(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(8, s, 0)
-
-
-def _add_uhd_static_order_fields(builder: flatbuffers.Builder, vec: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(9, vec, 0)
-
-
-def _add_uhd_custom_library_symbol(builder: flatbuffers.Builder, s: int) -> None:
-    builder.PrependUOffsetTRelativeSlot(10, s, 0)
-
-
-def _end_uhd(builder: flatbuffers.Builder) -> int:
-    return builder.EndObject()
