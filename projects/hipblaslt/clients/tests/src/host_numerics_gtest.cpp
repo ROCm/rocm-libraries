@@ -94,39 +94,104 @@ namespace
         }();
         const auto scaleCValue = computeInterfaceValue(scaleC);
         const auto scaleDValue = computeInterfaceValue(scaleD);
-        hipblaslt::host_numerics::hipblaslt_reference_gemm({
-            .operationA        = transA,
-            .operationB        = transB,
-            .rows              = m,
-            .columns           = n,
-            .reduction         = k,
-            .alpha             = computeInterfaceValue(alpha),
-            .beta              = computeInterfaceValue(beta),
-            .a                 = a,
-            .b                 = b,
-            .c                 = c,
-            .d                 = d,
-            .leadingDimensionA = lda,
-            .leadingDimensionB = ldb,
-            .leadingDimensionC = ldc,
-            .leadingDimensionD = ldd,
-            .alphaVector       = alphaVector,
-            .scaleA            = scaleA,
-            .scaleB            = scaleB,
-            .scaleC            = &scaleCValue,
-            .scaleD            = &scaleDValue,
-            .scaleAIsVector    = scaleAIsVector,
-            .scaleBIsVector    = scaleBIsVector,
-            .typeA             = typeA,
-            .typeB             = typeB,
-            .typeC             = typeC,
-            .typeD             = typeD,
-            .coefficientType   = coefficientType,
-            .computeInputTypeA = computeInputTypeA,
-            .computeInputTypeB = computeInputTypeB,
-            .scaleAIsMx        = scaleAIsMx,
-            .scaleBIsMx        = scaleBIsMx,
-        });
+        const auto matrixLayout = [](size_t               rows,
+                                     size_t               columns,
+                                     int64_t              leadingDimension,
+                                     hipblasOperation_t   operation) {
+            return roc::host_numerics::Layout(
+                roc::host_numerics::Shape{rows, columns},
+                {operation == HIPBLAS_OP_N ? 1 : leadingDimension,
+                 operation == HIPBLAS_OP_N ? leadingDimension : 1});
+        };
+        const auto layoutA = matrixLayout(m, k, lda, transA);
+        const auto layoutB = matrixLayout(k, n, ldb, transB);
+        const auto layoutC = matrixLayout(m, n, ldc, HIPBLAS_OP_N);
+        const auto layoutD = matrixLayout(m, n, ldd, HIPBLAS_OP_N);
+        const auto matrix = [](hipDataType type, const roc::host_numerics::Layout& layout) {
+            return hipblaslt::client::MatmulMatrix{
+                type,
+                hipblaslt::host_numerics::scalarType(type),
+                roc::host_numerics::Layout(
+                    roc::host_numerics::Shape{
+                        layout.shape()[0], layout.shape()[1], 1},
+                    {layout.stride(0), layout.stride(1), 0}),
+                layout.shape()[1] * static_cast<size_t>(layout.stride(1)),
+            };
+        };
+        const hipblaslt::client::MatmulProblem problem{
+            .m          = m,
+            .n          = n,
+            .k          = k,
+            .operationA = transA,
+            .operationB = transB,
+            .batchMode  = HIPBLASLT_BATCH_MODE_STRIDED,
+            .batchCount = 1,
+            .a          = matrix(typeA, layoutA),
+            .b          = matrix(typeB, layoutB),
+            .c          = matrix(typeC, layoutC),
+            .d          = matrix(typeD, layoutD),
+            .auxiliary  = std::nullopt,
+            .cEqualsD   = false,
+        };
+        const hipblaslt::client::MatmulDataTypes dataTypes{
+            .computeScalar = coefficientType,
+            .computeInputA = computeInputTypeA,
+            .computeInputB = computeInputTypeB,
+            .coefficient   = coefficientType,
+            .bias          = HIP_R_32F,
+            .biasStorage   = HIP_R_32F,
+            .auxiliary     = HIP_R_32F,
+        };
+        hipblaslt::client::PreparedMatmulProblem preparation;
+        preparation.alpha = computeInterfaceValue(alpha);
+        preparation.beta  = computeInterfaceValue(beta);
+
+        auto output = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            d, hipblaslt::host_numerics::scalarType(typeD), layoutD);
+        hipblaslt::host_numerics::MatmulReferenceInputs inputs(
+            hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+                a, hipblaslt::host_numerics::scalarType(typeA), layoutA),
+            hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+                b, hipblaslt::host_numerics::scalarType(typeB), layoutB),
+            hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+                c, hipblaslt::host_numerics::scalarType(typeC), layoutC),
+            output);
+        const auto vector = [&](const void* values, size_t elements) {
+            return hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+                values,
+                hipblaslt::host_numerics::scalarType(coefficientType),
+                roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                    roc::host_numerics::Shape{elements}));
+        };
+        if(alphaVector)
+            inputs.alphaVector = vector(alphaVector, static_cast<size_t>(m));
+        if(scaleA)
+            inputs.scaleA = vector(scaleA, scaleAIsVector ? static_cast<size_t>(m) : 1);
+        if(scaleB)
+            inputs.scaleB = vector(scaleB, scaleBIsVector ? static_cast<size_t>(n) : 1);
+        inputs.scaleC
+            = hipblaslt::host_numerics::realOnlyScalarValue(&scaleCValue, coefficientType);
+        inputs.scaleD = hipblaslt::host_numerics::scalarValue(&scaleDValue, coefficientType);
+
+        const auto scaleMode = [](const void* scale, bool vectorScale, bool mxScale) {
+            if(mxScale)
+                return hipblaslt_scaling_format::Block_32_UE8M0;
+            if(vectorScale)
+                return hipblaslt_scaling_format::Vector;
+            return scale ? hipblaslt_scaling_format::Scalar : hipblaslt_scaling_format::none;
+        };
+        (void)hipblaslt::host_numerics::referenceMatmulGemm(problem,
+                                                            dataTypes,
+                                                            preparation,
+                                                            std::move(inputs),
+                                                            scaleMode(scaleA,
+                                                                      scaleAIsVector,
+                                                                      scaleAIsMx),
+                                                            scaleMode(scaleB,
+                                                                      scaleBIsVector,
+                                                                      scaleBIsMx));
+        hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
+            d, roc::host_numerics::storageBytesForLayout(output.type(), output.layout()), output);
     }
 } // namespace
 
@@ -1105,51 +1170,46 @@ TEST(HostNumericsCblasBridge, AppliesScaleCInsideSharedGemm)
     float                d      = -1.0f;
     const float          scaleC = 2.0f;
     const float          scaleD = 1.0f;
-    computeTypeInterface alpha{};
-    computeTypeInterface beta{};
-    alpha.f32 = 2.0f;
-    beta.f32  = 3.0f;
-
-    hipblaslt::host_numerics::hipblaslt_reference_gemm({
-        .operationA        = HIPBLAS_OP_N,
-        .operationB        = HIPBLAS_OP_N,
-        .rows              = 1,
-        .columns           = 1,
-        .reduction         = 1,
-        .alpha             = alpha,
-        .beta              = beta,
-        .a                 = &a,
-        .b                 = &b,
-        .c                 = &c,
-        .d                 = &d,
-        .leadingDimensionA = 1,
-        .leadingDimensionB = 1,
-        .leadingDimensionC = 1,
-        .leadingDimensionD = 1,
-        .scaleC            = &scaleC,
-        .scaleD            = &scaleD,
-        .typeA             = HIP_R_32F,
-        .typeB             = HIP_R_32F,
-        .typeC             = HIP_R_32F,
-        .typeD             = HIP_R_32F,
-        .coefficientType   = HIP_R_32F,
-        .computeInputTypeA = HIP_R_32F,
-        .computeInputTypeB = HIP_R_32F,
-    });
+    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+                                      HIPBLAS_OP_N,
+                                      1,
+                                      1,
+                                      1,
+                                      2.0f,
+                                      &a,
+                                      1,
+                                      &b,
+                                      1,
+                                      3.0f,
+                                      &c,
+                                      1,
+                                      &d,
+                                      1,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      scaleD,
+                                      false,
+                                      false,
+                                      HIP_R_32F,
+                                      HIP_R_32F,
+                                      HIP_R_32F,
+                                      HIP_R_32F,
+                                      HIP_R_32F,
+                                      HIP_R_32F,
+                                      false,
+                                      false,
+                                      scaleC);
 
     EXPECT_FLOAT_EQ(d, 82.0f);
 }
 
-TEST(HostNumericsCblasBridge, RejectsUnsupportedCoefficientTypeWithoutWritingOutput)
+TEST(HostNumericsCblasBridge, RejectsUnsupportedCoefficientType)
 {
-    float                                                   output = 17.0f;
-    hipblaslt::host_numerics::HipblasltReferenceGemmRequest request;
-    request.d               = &output;
-    request.coefficientType = HIP_R_8I;
+    computeTypeInterface value{};
 
-    EXPECT_THROW(hipblaslt::host_numerics::hipblaslt_reference_gemm(request),
+    EXPECT_THROW(hipblaslt::host_numerics::scalarValue(value, HIP_R_8I),
                  std::invalid_argument);
-    EXPECT_FLOAT_EQ(output, 17.0f);
 }
 
 TEST(HostNumericsCblasBridge, MixedHalfInputs)
