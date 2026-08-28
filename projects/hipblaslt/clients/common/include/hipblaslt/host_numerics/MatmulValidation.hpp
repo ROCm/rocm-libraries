@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "hipblaslt_test.hpp"
 #include <hipblaslt/host_numerics/norm.hpp>
 #include <algorithm>
 #include <cmath>
@@ -63,6 +62,16 @@ namespace hipblaslt::host_numerics
         MatmulValidationMetrics metrics;
     };
 
+    struct MatmulValidationResult
+    {
+        size_t failedChecks = 0;
+
+        bool passed() const
+        {
+            return failedChecks == 0;
+        }
+    };
+
     inline HostComparisonReport compareMatmulOutput(const HostComparisonRequest&   source,
                                                     const MatmulValidationCase&    validationCase,
                                                     const MatmulValidationOptions& options,
@@ -95,8 +104,12 @@ namespace hipblaslt::host_numerics
         return compareHost(request);
     }
 
-    inline void validateMatmulOutputs(const MatmulValidationRequest& request)
+    inline MatmulValidationResult validateMatmulOutputs(const MatmulValidationRequest& request)
     {
+        MatmulValidationResult result;
+        const auto             record = [&](bool passed) {
+            result.failedChecks += static_cast<size_t>(!passed);
+        };
         double ulpSum           = 0.0;
         size_t ulpCount         = 0;
         // Each output is searched independently. The componentwise maxima form
@@ -125,12 +138,12 @@ namespace hipblaslt::host_numerics
             if(request.options.comparePointwise || request.options.compareNorm)
             {
                 for(const auto& report : outputReports)
-                    CHECK_SUCCESS(report.comparison.nonFiniteMismatches == 0);
+                    record(report.comparison.nonFiniteMismatches == 0);
             }
             if(request.options.comparePointwise)
             {
                 for(const auto& report : outputReports)
-                    CHECK_SUCCESS(report.comparison.passed());
+                    record(report.comparison.passed());
             }
 
             if(request.options.compareNorm)
@@ -141,11 +154,11 @@ namespace hipblaslt::host_numerics
                     request.metrics.relativeFrobeniusError += normError;
                     if(request.options.assertNorm)
                     {
-                        CHECK_SUCCESS(norm_check(normError,
-                                                 validationCase.outputs.front().type,
-                                                 request.options.computeType,
-                                                 request.options.inputTypeA,
-                                                 request.options.inputTypeB));
+                        record(norm_check(normError,
+                                          validationCase.outputs.front().type,
+                                          request.options.computeType,
+                                          request.options.inputTypeA,
+                                          request.options.inputTypeB));
                     }
                 }
             }
@@ -197,7 +210,7 @@ namespace hipblaslt::host_numerics
                                                                   false,
                                                                   false,
                                                                   false);
-                          CHECK_SUCCESS(report.comparison.passed());
+                          record(report.comparison.passed());
                       }
                       if(request.options.compareNorm)
                       {
@@ -209,13 +222,13 @@ namespace hipblaslt::host_numerics
                           request.metrics.relativeFrobeniusError += normError;
                           if(request.options.assertNorm)
                           {
-                              CHECK_SUCCESS(output->useComputeNormPolicy
-                                                ? norm_check(normError,
-                                                             output->norm.type,
-                                                             request.options.computeType,
-                                                             request.options.inputTypeA,
-                                                             request.options.inputTypeB)
-                                                : norm_check(normError, output->norm.type));
+                              record(output->useComputeNormPolicy
+                                         ? norm_check(normError,
+                                                      output->norm.type,
+                                                      request.options.computeType,
+                                                      request.options.inputTypeA,
+                                                      request.options.inputTypeB)
+                                         : norm_check(normError, output->norm.type));
                           }
                       }
                   };
@@ -232,5 +245,6 @@ namespace hipblaslt::host_numerics
         }
         if(request.options.computeUlp && ulpCount != 0)
             request.metrics.averageUlp = ulpSum / ulpCount;
+        return result;
     }
 } // namespace hipblaslt::host_numerics

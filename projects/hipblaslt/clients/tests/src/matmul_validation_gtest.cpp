@@ -4,7 +4,6 @@
 #include <hipblaslt/host_numerics/MatmulValidation.hpp>
 
 #include "utility.hpp"
-#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
@@ -16,7 +15,8 @@
 
 namespace
 {
-    double validatePointerArrayNorm(const std::array<float, 2>& observed, bool assertNorm)
+    std::pair<double, bool>
+        validatePointerArrayNorm(const std::array<float, 2>& observed, bool assertNorm)
     {
         using namespace hipblaslt::host_numerics;
 
@@ -33,17 +33,12 @@ namespace
         }
 
         double error = 0.0, absolute = 0.0, relative = 0.0, maximumUlp = 0.0, averageUlp = 0.0;
-        validateMatmulOutputs({
+        const MatmulValidationResult result = validateMatmulOutputs({
             .options = {.compareNorm = true, .assertNorm = assertNorm},
             .cases   = std::span(&testCase, 1),
             .metrics = {error, absolute, relative, maximumUlp, averageUlp},
         });
-        return error;
-    }
-
-    void validateBadFirstBatch()
-    {
-        (void)validatePointerArrayNorm({100.0f, 1.0f}, true);
+        return {error, result.passed()};
     }
 
     hipblaslt::host_numerics::HostComparisonRequest scalarComparison(const float* expected,
@@ -74,12 +69,16 @@ namespace
 
 TEST(HostNumericsMatmulValidation, PointerArrayNormCountsEachBatchOnce)
 {
-    EXPECT_DOUBLE_EQ(validatePointerArrayNorm({2.0f, 3.0f}, false), 3.0);
+    const auto [error, passed] = validatePointerArrayNorm({2.0f, 3.0f}, false);
+    EXPECT_DOUBLE_EQ(error, 3.0);
+    EXPECT_TRUE(passed);
 }
 
-TEST(HostNumericsMatmulValidation, PointerArrayNormAssertsEachBatch)
+TEST(HostNumericsMatmulValidation, PointerArrayNormChecksEachBatch)
 {
-    EXPECT_FATAL_FAILURE(validateBadFirstBatch(), "Expected equality");
+    const auto [error, passed] = validatePointerArrayNorm({100.0f, 1.0f}, true);
+    EXPECT_DOUBLE_EQ(error, 99.0);
+    EXPECT_FALSE(passed);
 }
 
 TEST(HostNumericsMatmulValidation, PointerArrayOutputsKeepCombinedAllCloseTolerance)
