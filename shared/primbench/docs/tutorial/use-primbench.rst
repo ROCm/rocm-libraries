@@ -6,9 +6,14 @@
 Benchmarking with Primbench
 *****************************
 
-To use Primbench, import |primbench.hpp|_ into your benchmarking code.
+Primbench is a single-header library. There are no build steps, package installations, or linking against Primbench binaries required. All that's needed to use Primbench is to import |primbench.hpp|_ into your benchmarking code.
 
-Use ``PRIMBENCH_REGISTER_TYPE`` to register a name for each variable type, or specialization, that you benchmark. This name is used to identify the type in the output.
+Use the |copy_benchmark.cpp|_ example and the information in this tutorial to help you use Primbench in your application.
+
+Using Primbench
+================
+
+``PRIMBENCH_REGISTER_TYPE`` is used to register a name for each variable type, or specialization, that you benchmark. This name is used to identify the type in the output.
 
 For example, in |copy_benchmark.cpp|_ the ``char`` and ``long long`` types are given the names ``"char"`` and ``"long long"``:
 

@@ -10,8 +10,10 @@ subtrees:
     entries:
       - file: how-to/configure-settings
       - file: how-to/validate-output
-      - file: how-to/use-primbench
-        title: Use Primbench
+  - caption: Tutorials
+    entries:
+      - file: tutorial/use-primbench
+        title: Using Primbench
   - caption: Reference
     entries:
       - file: reference/primbench-api

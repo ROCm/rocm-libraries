@@ -17,6 +17,9 @@ The Primbench public repository is at `ROCm/rocm-libraries <https://github.com/R
 
       * :doc:`Install Primbench <install/install>`
 
+.. grid:: 2
+   :gutter: 3
+
    .. grid-item-card:: Conceptual
 
       * :doc:`Noise reduction in Primbench <conceptual/primbench-noise-reduction>`
@@ -25,7 +28,10 @@ The Primbench public repository is at `ROCm/rocm-libraries <https://github.com/R
 
       * :doc:`Configure benchmark settings <how-to/configure-settings>`
       * :doc:`Validate benchmark output <how-to/validate-output>`
-      * :doc:`Use Primbench <how-to/use-primbench>`
+
+   .. grid-item-card:: Tutorials
+
+      * :doc:`Using Primbench <tutorial/use-primbench>`
 
    .. grid-item-card:: Reference
 
