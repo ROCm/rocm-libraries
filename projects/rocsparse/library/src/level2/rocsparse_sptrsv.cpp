@@ -893,64 +893,83 @@ namespace rocsparse
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
             if(sptrsv_descr->get_solve_mode() != rocsparse_solve_mode_triangular)
             {
-                rocsparse_csrsv_info csrsv_info = sptrsv_descr->get_csrsv_info();
-
-                rocsparse::spdiag_view diag{};
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::build_spdiag_view(A, operation, csrsv_info, &diag));
-
-                const int64_t batch_count = dnvec_descr_y->batch_count;
-                hipStream_t   stream      = handle->stream;
-
-                // The analysis pivot is typed like the CSR col index. build_csr_from_csc
-                // swaps row/col for CSC, so use row_type there; otherwise col_type. Using
-                // A->col_type directly mismatches the analysis pivot on mixed-index CSC.
-                const rocsparse_indextype pivot_indextype
-                    = (A->format == rocsparse_format_csc) ? A->row_type : A->col_type;
-
-                csrsv_info->create_singularity_numeric_exact(batch_count, pivot_indextype, stream);
-                auto numeric_exact = csrsv_info->get_singularity_numeric_exact();
-                if(pivot_indextype == rocsparse_indextype_i32)
+                switch(format)
                 {
-                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
-                        batch_count,
-                        (int32_t*)numeric_exact->get_position(),
-                        (const int32_t*)csrsv_info->get_position(),
-                        stream));
-                }
-                else
+                case rocsparse_format_csr:
+                case rocsparse_format_csc:
                 {
-                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
+                    rocsparse_csrsv_info csrsv_info = sptrsv_descr->get_csrsv_info();
+
+                    rocsparse::spdiag_view diag{};
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::build_spdiag_view(A, operation, csrsv_info, &diag));
+
+                    const int64_t batch_count = dnvec_descr_y->batch_count;
+                    hipStream_t   stream      = handle->stream;
+
+                    // The analysis pivot is typed like the CSR col index. build_csr_from_csc
+                    // swaps row/col for CSC, so use row_type there; otherwise col_type. Using
+                    // A->col_type directly mismatches the analysis pivot on mixed-index CSC.
+                    const rocsparse_indextype pivot_indextype
+                        = (A->format == rocsparse_format_csc) ? A->row_type : A->col_type;
+
+                    csrsv_info->create_singularity_numeric_exact(
+                        batch_count, pivot_indextype, stream);
+                    auto numeric_exact = csrsv_info->get_singularity_numeric_exact();
+                    if(pivot_indextype == rocsparse_indextype_i32)
+                    {
+                        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
+                            batch_count,
+                            (int32_t*)numeric_exact->get_position(),
+                            (const int32_t*)csrsv_info->get_position(),
+                            stream));
+                    }
+                    else
+                    {
+                        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
+                            batch_count,
+                            (int64_t*)numeric_exact->get_position(),
+                            (const int64_t*)csrsv_info->get_position(),
+                            stream));
+                    }
+
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::diagonal_solve(
+                        handle,
+                        operation,
+                        sptrsv_descr->get_diagonal_modifier(),
+                        alpha,
+                        A,
+                        diag,
+                        static_cast<int64_t>(1),
+                        dnvec_descr_x->const_values,
+                        dnvec_descr_x->inc,
+                        static_cast<int64_t>(0),
+                        dnvec_descr_x->batch_stride,
+                        dnvec_descr_y->values,
+                        dnvec_descr_y->inc,
+                        static_cast<int64_t>(0),
+                        dnvec_descr_y->batch_stride,
                         batch_count,
-                        (int64_t*)numeric_exact->get_position(),
-                        (const int64_t*)csrsv_info->get_position(),
-                        stream));
+                        false,
+                        numeric_exact->get_position(),
+                        1,
+                        handle->pointer_mode == rocsparse_pointer_mode_host));
+
+                    sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
+                    return rocsparse_status_success;
                 }
-
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::diagonal_solve(handle,
-                                              operation,
-                                              sptrsv_descr->get_diagonal_modifier(),
-                                              alpha,
-                                              A,
-                                              diag,
-                                              static_cast<int64_t>(1),
-                                              dnvec_descr_x->const_values,
-                                              dnvec_descr_x->inc,
-                                              static_cast<int64_t>(0),
-                                              dnvec_descr_x->batch_stride,
-                                              dnvec_descr_y->values,
-                                              dnvec_descr_y->inc,
-                                              static_cast<int64_t>(0),
-                                              dnvec_descr_y->batch_stride,
-                                              batch_count,
-                                              false,
-                                              numeric_exact->get_position(),
-                                              1,
-                                              handle->pointer_mode == rocsparse_pointer_mode_host));
-
-                sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
-                return rocsparse_status_success;
+                case rocsparse_format_coo:
+                case rocsparse_format_coo_aos:
+                case rocsparse_format_bsr:
+                case rocsparse_format_ell:
+                case rocsparse_format_bell:
+                case rocsparse_format_sell:
+                {
+                    // LCOV_EXCL_START
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+                    // LCOV_EXCL_STOP
+                }
+                }
             }
 #endif
 
