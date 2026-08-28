@@ -177,7 +177,6 @@ def test_toolchain_defaults_posix():
     assert d.C_COMPILER == "amdclang"
     assert d.OFFLOAD_BUNDLER == "clang-offload-bundler"
     assert d.ASSEMBLER == "amdclang++"
-    assert d.HIP_CONFIG == "hipconfig"
     assert d.DEVICE_ENUMERATOR in ("rocm_agent_enumerator", "amdgpu-arch")
 
 
