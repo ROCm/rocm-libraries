@@ -52,7 +52,7 @@ struct ChannelPermuteParams {
 template <typename T>
 void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) {
     const TensorShape shape{cfg.size.n, 3, cfg.size.h, cfg.size.w};  // channel_permute is 3-channel
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layout);   // RPP takes a non-const ptr
+    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);   // RPP takes a non-const ptr
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 

@@ -61,13 +61,13 @@ constexpr Tolerance kEmbossTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>
 void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layout));
+    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
     const TensorShape shape{cfg.size.n, c, cfg.size.h, cfg.size.w};
     // src carries a leading border pad: like the other KxK filters, the HIP kernel requires
     // srcDesc.offsetInBytes >= 12 * (kernelSize/2) as read-slack for the window and returns
     // RPP_ERROR_LOW_OFFSET (-3) otherwise. dst keeps offset 0 so the golden and comparator index
     // the destination from 0. Applied on both backends (HOST honours offsetInBytes identically).
-    RpptDesc srcDesc = make_descriptor(shape, cfg.dtype, cfg.layout);
+    RpptDesc srcDesc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
     RpptDesc dstDesc = srcDesc;  // same dims/strides; only src gets the pad offset
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
     const std::size_t offsetElems = offsetBytes / dtype_size(cfg.dtype);

@@ -72,12 +72,12 @@ double rmn_tolerance(DType dt, const TestConfig& cfg, const RmnParams& op) {
 
 template <typename T>
 void run_resize_mirror_normalize(const TestConfig& cfg, const RmnParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layout));
+    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
     const Rpp32u N = cfg.size.n;
     const TensorShape srcShape{N, c, cfg.size.h, cfg.size.w};
     const TensorShape dstShape{N, c, kDstH, kDstW};
-    RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layout);
-    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layout);
+    RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layoutIn);
+    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutIn);
     const std::size_t srcCount = element_count(srcDesc), dstCount = element_count(dstDesc);
     const std::size_t srcBytes = byte_size(srcDesc, cfg.dtype);
     const std::size_t dstBytes = byte_size(dstDesc, cfg.dtype);

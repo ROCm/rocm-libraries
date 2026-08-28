@@ -95,10 +95,10 @@ constexpr Tolerance kLensCorrectionTolerance = kRoundingTolerance;
 
 template <typename T>
 void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layout));
+    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
     const Rpp32u N = cfg.size.n, imgH = cfg.size.h, imgW = cfg.size.w;
     const TensorShape shape{N, c, imgH, imgW};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layout);  // src == dst
+    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // src == dst
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 

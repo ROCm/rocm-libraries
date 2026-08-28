@@ -92,20 +92,37 @@ inline std::string size_name(Size s) {
     return std::to_string(s.n) + "x" + std::to_string(s.h) + "x" + std::to_string(s.w);
 }
 
+// A layout conversion: what an op reads and what it writes. Several RPP ops fuse a layout change
+// into the operation itself -- NHWC <-> NCHW for the three-channel layouts, and PKD3/PLN3 -> PLN1
+// for colour-to-greyscale -- so the two sides are named independently. The counterpart of
+// DTypeConv in nd_config_param.hpp, and used the same way: as the grid's layout axis.
+struct LayoutConv {
+    Layout in, out;
+};
+
 // A single point in the test grid. dtypeIn == dtypeOut for now; kept as one field until
-// mixed-precision conversions (e.g. U8->F32) are exercised.
+// mixed-precision conversions (e.g. U8->F32) are exercised. The layout axis has already split,
+// mirroring NdConfig's dtypeIn/dtypeOut.
 struct TestConfig {
     RppBackend backend;
     DType dtype;
-    Layout layout;
+    Layout layoutIn, layoutOut;
     Roi roi;
     Size size;
 };
 
 // Produces the value-parameter label, e.g. "HIP_U8toU8_PKD3_FullRoi_2x36x48".
+//
+// Unlike nd_label(), which always spells the dtype conversion out ("U8toU8"), the layout token
+// names both sides only when they differ ("PKD3toPLN1"). A converting op is the exception here,
+// and every non-converting label predates this axis: the known-defect skip list matches ~140 glob
+// patterns against these names, so a same-layout config must render exactly as it always has.
 inline std::string config_name(const TestConfig& c) {
+    const std::string layout = c.layoutIn == c.layoutOut
+                                   ? layout_name(c.layoutIn)
+                                   : layout_name(c.layoutIn) + "to" + layout_name(c.layoutOut);
     return backend_name(c.backend) + "_" + dtype_name(c.dtype) + "to" + dtype_name(c.dtype) + "_" +
-           layout_name(c.layout) + "_" + roi_name(c.roi) + "_" + size_name(c.size);
+           layout + "_" + roi_name(c.roi) + "_" + size_name(c.size);
 }
 
 // The default shape for images.
@@ -114,17 +131,34 @@ inline constexpr Size kDefaultSize{2, 36, 48};
 // Cartesian product of the requested axes with every available backend. Pass the
 // dtype/layout/roi/size sets an op supports; HIP is only present when the suite was built
 // with the HIP backend (see available_backends()). Most ops take the default single size.
+//
+// The layout axis takes conversions: {{PKD3, PLN1}, {PLN3, PLN1}} grids colour-to-greyscale over
+// both of its source layouts. An op that does not convert passes plain layouts to the overload
+// below instead.
 inline std::vector<TestConfig> make_configs(const std::vector<DType>& dtypes,
-                                            const std::vector<Layout>& layouts,
+                                            const std::vector<LayoutConv>& layouts,
                                             const std::vector<Roi>& rois,
                                             const std::vector<Size>& sizes = {kDefaultSize}) {
     std::vector<TestConfig> configs;
     for (RppBackend backend : available_backends())
         for (DType dtype : dtypes)
-            for (Layout layout : layouts)
+            for (LayoutConv layout : layouts)
                 for (Roi roi : rois)
-                    for (Size size : sizes) configs.push_back({backend, dtype, layout, roi, size});
+                    for (Size size : sizes)
+                        configs.push_back({backend, dtype, layout.in, layout.out, roi, size});
     return configs;
+}
+
+// The same grid for an op that writes the layout it reads, which is most of them: each layout
+// stands for the conversion {l, l}. Mirrors the plain-dtype overload of make_nd_configs().
+inline std::vector<TestConfig> make_configs(const std::vector<DType>& dtypes,
+                                            const std::vector<Layout>& layouts,
+                                            const std::vector<Roi>& rois,
+                                            const std::vector<Size>& sizes = {kDefaultSize}) {
+    std::vector<LayoutConv> convs;
+    convs.reserve(layouts.size());
+    for (Layout l : layouts) convs.push_back({l, l});
+    return make_configs(dtypes, convs, rois, sizes);
 }
 
 // GTest name generator: turns each TestConfig into its filterable label.

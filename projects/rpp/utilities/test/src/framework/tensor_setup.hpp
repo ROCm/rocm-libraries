@@ -79,6 +79,21 @@ inline RpptDesc make_descriptor(const TensorShape& s, DType dt, Layout layout, b
     return d;
 }
 
+// The source and destination descriptors for a config, at the config's own extents. Each side's
+// channel count follows its own layout, so a conversion that changes it (PKD3 -> PLN1) is described
+// correctly without the test restating the shape; for the usual same-layout config the two are
+// identical. Ops whose output extents differ from the input's (the resize family) build their own
+// shapes and call make_descriptor() directly with cfg.layoutIn / cfg.layoutOut.
+inline RpptDesc make_src_descriptor(const TestConfig& c, bool pad = true) {
+    const TensorShape s{c.size.n, static_cast<Rpp32u>(channels_of(c.layoutIn)), c.size.h, c.size.w};
+    return make_descriptor(s, c.dtype, c.layoutIn, pad);
+}
+
+inline RpptDesc make_dst_descriptor(const TestConfig& c, bool pad = true) {
+    const TensorShape s{c.size.n, static_cast<Rpp32u>(channels_of(c.layoutOut)), c.size.h, c.size.w};
+    return make_descriptor(s, c.dtype, c.layoutOut, pad);
+}
+
 // Total element count backing the tensor (offsetInBytes is 0 for the test suite).
 inline std::size_t element_count(const RpptDesc& d) {
     return static_cast<std::size_t>(d.n) * d.strides.nStride;
@@ -158,37 +173,76 @@ void for_each_roi_plane(const RpptDesc& d, const RpptROI* roi, RpptRoiType type,
     }
 }
 
-// Invokes fn(n, c, j, i, srcIdx, dstIdx) for every element of each image's ROI.
+// Invokes fn(n, b, c, srcBase, dstBase) once per image-channel plane, the two origins addressed
+// through their own descriptor. The neighbourhood-walking counterpart of the dual-descriptor
+// for_each_roi_io below, for filters and warps under a toggled output layout.
+template <typename Fn>
+void for_each_roi_plane(const RpptDesc& sd, const RpptDesc& dd, const RpptROI* roi,
+                        RpptRoiType type, Fn fn) {
+    for (Rpp32u n = 0; n < sd.n; ++n) {
+        const RoiBounds b = roi_bounds(roi[n], type);
+        for (Rpp32u c = 0; c < sd.c; ++c) fn(n, b, c, plane_base(sd, n, c), plane_base(dd, n, c));
+    }
+}
+
+// Invokes fn(n, c, j, i, srcIdx, dstIdx) for every element of each image's ROI, addressing the
+// source through `sd` and the destination through `dd`.
 //
 // RPP pointwise ops read the source from the ROI offset but write the output packed at
 // the destination origin: for output row j / col i, the source element is at
 // (y0 + j, x0 + i) and the destination element is at (j, i) (see the kernel's
 // srcPtrChannel = srcPtrImage + ROI offset, dstPtrChannel = dstPtrImage). This is the
 // single definition of that mapping, so the reference and the comparator agree.
+//
+// Two descriptors because an op may write a layout other than the one it reads -- RPP's fused
+// output-layout toggle, NHWC <-> NCHW. Each index goes through its own descriptor's strides, so
+// the transpose is expressed entirely by the descriptors and no golden has to special-case it.
+template <typename Fn>
+void for_each_roi_io(const RpptDesc& sd, const RpptDesc& dd, const RpptROI* roi, RpptRoiType type,
+                     Fn fn) {
+    for (Rpp32u n = 0; n < sd.n; ++n) {
+        const RoiBounds b = roi_bounds(roi[n], type);
+        for (Rpp32u c = 0; c < sd.c; ++c) {
+            const std::size_t srcBase = plane_base(sd, n, c);
+            const std::size_t dstBase = plane_base(dd, n, c);
+            for (Rpp32u j = 0; j < b.h; ++j)
+                for (Rpp32u i = 0; i < b.w; ++i)
+                    fn(n, c, j, i, plane_index(sd, srcBase, b.y0 + j, b.x0 + i),
+                       plane_index(dd, dstBase, j, i));
+        }
+    }
+}
+
+// Single-descriptor form: source and destination share a layout, which is every op that does not
+// exercise the output-layout toggle.
 template <typename Fn>
 void for_each_roi_io(const RpptDesc& d, const RpptROI* roi, RpptRoiType type, Fn fn) {
-    for_each_roi_plane(d, roi, type, [&](Rpp32u n, const RoiBounds& b, Rpp32u c,
-                                         std::size_t base) {
-        for (Rpp32u j = 0; j < b.h; ++j)
-            for (Rpp32u i = 0; i < b.w; ++i)
-                fn(n, c, j, i, plane_index(d, base, b.y0 + j, b.x0 + i),
-                   plane_index(d, base, j, i));
-    });
+    for_each_roi_io(d, d, roi, type, fn);
 }
 
 // Invokes fn(n, j, i, srcPix, dstPix) once per pixel of each image's ROI, where srcPix/dstPix
-// are the channel-0 element offsets; the callback strides channels itself via channel_index().
+// are the channel-0 element offsets; the callback strides channels itself via channel_index()
+// -- through `sd` for srcPix and `dd` for dstPix, which is what makes a toggled layout work.
 // Same source-at-ROI-offset / destination-at-origin mapping as for_each_roi_io (that mapping's
 // single definition), for ops that need a whole pixel's channels together (e.g. RGB<->HSV).
 template <typename Fn>
-void for_each_roi_pixel(const RpptDesc& d, const RpptROI* roi, RpptRoiType type, Fn fn) {
-    for (Rpp32u n = 0; n < d.n; ++n) {
+void for_each_roi_pixel(const RpptDesc& sd, const RpptDesc& dd, const RpptROI* roi,
+                        RpptRoiType type, Fn fn) {
+    for (Rpp32u n = 0; n < sd.n; ++n) {
         const RoiBounds b = roi_bounds(roi[n], type);
-        const std::size_t base = plane_base(d, n, 0);
+        const std::size_t srcBase = plane_base(sd, n, 0);
+        const std::size_t dstBase = plane_base(dd, n, 0);
         for (Rpp32u j = 0; j < b.h; ++j)
             for (Rpp32u i = 0; i < b.w; ++i)
-                fn(n, j, i, plane_index(d, base, b.y0 + j, b.x0 + i), plane_index(d, base, j, i));
+                fn(n, j, i, plane_index(sd, srcBase, b.y0 + j, b.x0 + i),
+                   plane_index(dd, dstBase, j, i));
     }
+}
+
+// Single-descriptor form, as for for_each_roi_io above.
+template <typename Fn>
+void for_each_roi_pixel(const RpptDesc& d, const RpptROI* roi, RpptRoiType type, Fn fn) {
+    for_each_roi_pixel(d, d, roi, type, fn);
 }
 
 // Visits every logical element of the image, fn(n, c, y, x, idx).

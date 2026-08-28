@@ -50,9 +50,9 @@ struct CropAndPatchParams {
 
 template <typename T>
 void run_crop_and_patch(const TestConfig& cfg, const CropAndPatchParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layout));
+    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
     const TensorShape shape{cfg.size.n, c, cfg.size.h, cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layout);  // RPP takes a non-const ptr
+    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 

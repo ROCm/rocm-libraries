@@ -50,38 +50,40 @@ struct BrightnessParams {
 
 template <typename T>
 void run_brightness(const TestConfig& cfg, const BrightnessParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layout)), cfg.size.h,
-                            cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layout);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    // Non-const because RPP takes a non-const pointer. The two differ only for a layout-converting
+    // config; brightness keeps the channel count either way, so both span the same element count.
+    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Parameters live in host-accessible (pinned for HIP) memory.
-    PinnedArray<Rpp32f> alpha(cfg.backend, shape.n);
-    PinnedArray<Rpp32f> beta(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    PinnedArray<Rpp32f> alpha(cfg.backend, cfg.size.n);
+    PinnedArray<Rpp32f> beta(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         alpha[i] = op.alpha;
         beta[i] = op.beta;
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
+    // (1) Host golden model. golden and the device destination are seeded identically so the
+    // region the op leaves untouched (outside the ROI) is defined and compares equal; only the
+    // ROI is overwritten, by the reference here and by the op below.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    brightness_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                            op.alpha, op.beta);
+    brightness_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
+                            XYWH, op.alpha, op.beta);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
-    ASSERT_EQ(rppt_brightness(src.ptr(), &desc, dst.ptr(), &desc, alpha.data(), beta.data(),
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_brightness(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, alpha.data(), beta.data(),
                               roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -89,8 +91,8 @@ void run_brightness(const TestConfig& cfg, const BrightnessParams& op) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    // (4) Compare within tolerance over the ROI, addressed through the destination descriptor.
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kRoundingTolerance(cfg.dtype)));
 }
 
@@ -107,10 +109,16 @@ TEST_P(BrightnessTest, Correctness) {
     });
 }
 
+// The layout axis carries the three same-layout cases and both directions of the fused
+// output-layout conversion (NHWC <-> NCHW), which is just another point on the grid.
 INSTANTIATE_TEST_SUITE_P(Image_Color, BrightnessTest,
                          ::testing::ValuesIn(with_params<BrightnessParams>(
                              make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
                                           {Roi::Full, Roi::Partial}),
                              {BrightnessParams{1.75f, 50.0f}})),
                          op_config_name<BrightnessParams>);

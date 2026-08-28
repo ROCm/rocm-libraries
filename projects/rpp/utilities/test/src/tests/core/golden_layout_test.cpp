@@ -299,7 +299,7 @@ TEST(GoldenLayoutTest, ImagePointwise) {
     expect_image_layout_agnostic(Layout::PKD3, [](const std::vector<Rpp8u>& s1,
                                                   const std::vector<Rpp8u>&, std::vector<Rpp8u>& o,
                                                   const RpptDesc& d, const RpptROI* roi) {
-        brightness_reference<Rpp8u>(s1.data(), o.data(), d, DType::U8, roi, XYWH, 1.4, 12.0);
+        brightness_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8, roi, XYWH, 1.4, 12.0);
     });
 }
 

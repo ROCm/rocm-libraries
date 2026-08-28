@@ -71,11 +71,11 @@ double resize_tolerance(DType dt, RpptInterpolationType interp) {
 
 template <typename T>
 void run_resize(const TestConfig& cfg, const ResizeParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layout));
+    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
     const TensorShape srcShape{cfg.size.n, c, cfg.size.h, cfg.size.w};
     const TensorShape dstShape{cfg.size.n, c, op.dstH, op.dstW};
-    RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layout);
-    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layout);
+    RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layoutIn);
+    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutIn);
     const std::size_t srcCount = element_count(srcDesc), dstCount = element_count(dstDesc);
     const std::size_t srcBytes = byte_size(srcDesc, cfg.dtype);
     const std::size_t dstBytes = byte_size(dstDesc, cfg.dtype);

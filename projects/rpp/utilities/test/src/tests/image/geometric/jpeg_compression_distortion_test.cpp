@@ -67,9 +67,9 @@ constexpr Tolerance kJpegTolerance = kRoundingTolerance;
 
 template <typename T>
 void run_jpeg_compression_distortion(const TestConfig& cfg, const JpegParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layout));
+    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
     const TensorShape shape{cfg.size.n, c, cfg.size.h, cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layout);
+    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 

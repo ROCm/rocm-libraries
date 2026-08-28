@@ -78,7 +78,8 @@ std::vector<WithParams<YuvParams>> yuv_configs() {
     for (RppBackend backend : available_backends()) {
         if (backend != RPP_HIP_BACKEND) continue;
         for (const YuvParams& op : kYuvParams)
-            configs.push_back({TestConfig{backend, DType::U8, Layout::PKD3, Roi::Full, kSize}, op});
+            configs.push_back(
+                {TestConfig{backend, DType::U8, Layout::PKD3, Layout::PKD3, Roi::Full, kSize}, op});
     }
     return configs;
 }

@@ -54,13 +54,11 @@ constexpr Tolerance kColorToGreyscaleTolerance = kRoundingTolerance;
 
 template <typename T>
 void run_color_to_greyscale(const TestConfig& cfg, const ColorToGreyscaleParams& op) {
-    // The op requires a 3-channel source (PKD3/PLN3) and produces a single-channel planar output,
-    // so the two operands need separate descriptors.
-    const TensorShape srcShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layout)), cfg.size.h,
-                               cfg.size.w};
-    const TensorShape dstShape{cfg.size.n, 1, cfg.size.h, cfg.size.w};
-    RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layout);
-    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, Layout::PLN1);
+    // The op requires a 3-channel source (PKD3/PLN3) and produces a single-channel planar output.
+    // That conversion is stated by the config's layout axis (PKD3/PLN3 -> PLN1), so each descriptor
+    // takes its channel count from its own side of it.
+    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t srcCount = element_count(srcDesc), dstCount = element_count(dstDesc);
     const std::size_t srcBytes = byte_size(srcDesc, cfg.dtype);
     const std::size_t dstBytes = byte_size(dstDesc, cfg.dtype);
@@ -84,7 +82,7 @@ void run_color_to_greyscale(const TestConfig& cfg, const ColorToGreyscaleParams&
     src.write(input.data(), srcBytes);
     dst.write(dstInit.data(), dstBytes);
 
-    RppHandle handle(cfg.backend, srcShape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_color_to_greyscale(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, op.subpixel,
                                       handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -111,11 +109,13 @@ TEST_P(ColorToGreyscaleTest, Correctness) {
     });
 }
 
-// The source must be 3-channel (no PLN1) and the op takes no ROI argument (Roi::Full only).
+// The op takes no ROI argument (Roi::Full only). Both three-channel sources reduce to the same
+// single-channel planar destination, which the layout axis states outright rather than the test
+// body assuming it -- so the case labels name it too ("..._PKD3toPLN1_...").
 INSTANTIATE_TEST_SUITE_P(
     Image_DataExchange, ColorToGreyscaleTest,
     ::testing::ValuesIn(with_params<ColorToGreyscaleParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3}, {Roi::Full}),
+                     {{Layout::PKD3, Layout::PLN1}, {Layout::PLN3, Layout::PLN1}}, {Roi::Full}),
         {ColorToGreyscaleParams{RGBtype}, ColorToGreyscaleParams{BGRtype}})),
     op_config_name<ColorToGreyscaleParams>);

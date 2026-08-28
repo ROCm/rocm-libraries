@@ -52,14 +52,14 @@ constexpr Tolerance kBoxFilterTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>
 void run_box_filter(const TestConfig& cfg, const BoxFilterParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layout)), cfg.size.h,
+    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
                             cfg.size.w};
     // src carries a leading border pad: the HIP filter kernel requires
     // srcDesc.offsetInBytes >= 12 * (kernelSize/2) (read-slack for the KxK window; the border
     // itself is computed by clamping indices to the image, i.e. replicate). dst keeps offset 0,
     // so the golden and comparator index destination elements from 0. Applied on both backends
     // (the HOST path honours offsetInBytes identically) to keep one path.
-    RpptDesc srcDesc = make_descriptor(shape, cfg.dtype, cfg.layout);
+    RpptDesc srcDesc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
     RpptDesc dstDesc = srcDesc;  // same dims/strides; only src gets the pad offset
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
     const std::size_t offsetElems = offsetBytes / dtype_size(cfg.dtype);

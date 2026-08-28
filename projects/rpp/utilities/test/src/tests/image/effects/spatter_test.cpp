@@ -79,9 +79,9 @@ double spatter_band_eps(DType dt) {
 }
 
 RpptDesc descriptor_for(const TestConfig& cfg) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layout)), cfg.size.h,
+    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
                             cfg.size.w};
-    return make_descriptor(shape, cfg.dtype, cfg.layout);
+    return make_descriptor(shape, cfg.dtype, cfg.layoutIn);
 }
 
 // ---- Identity: src == spatterColor is a fixed point of the blend, at any size ----------------
