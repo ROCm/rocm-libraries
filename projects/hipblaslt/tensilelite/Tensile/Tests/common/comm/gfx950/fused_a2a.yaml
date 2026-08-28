@@ -1,21 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 # Fused GEMM+A2A (FusedGemmA2A=1) config for gfx950.
-#
-# "disabled" in the filename only makes the pytest config sweep skip this file
-# (Tests/common/config_helpers.py). Build by hand:
-#
-#     Tensile <this file> <output-dir> --build-only
-#
-# Benchmarking runs the fused client path on 4 gfx950 cards; FusedGemmA2A in the
-# ProblemType selects it, and the run takes --fused-a2a-world 4 --fused-a2a-am
-# <AM>. AM must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0 and AM<=M.
 
 GlobalParameters:
-  SyncsPerBenchmark: 0
+  SyncsPerBenchmark: 100
   SleepPercent: 0
-  NumElementsToValidate: 0
-  NumWarmups: 0
+  NumElementsToValidate: -1
+  NumWarmups: 10
   NumBenchmarks: 1
   EnqueuesPerSync: 1
   DataInitTypeAlpha: 1
@@ -54,13 +45,12 @@ BenchmarkProblems:
         - StreamK: [0]
         - WorkGroupMapping: [1]
         - MIArchVgpr: [False]
-        - UseSubtileImpl: [True]
+        - UseSubtileImpl: [True, False]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # AM is not expressible here: the client takes it as --fused-a2a-am,
-          # one value per problem in this order -- 2048,10240,10240 for these
-          # three. M is the feature (A2A) dim, N the token dim.
-          - Exact: [3072, 512, 1, 2048]     # AM 2048,  nShard 512
-          - Exact: [18432, 2048, 1, 8192]   # AM 10240, nShard 2560
-          - Exact: [18432, 4096, 1, 8192]   # AM 10240, nShard 2560
+          # AM is not expressible here; the client defaults it to M, which for
+          # these shapes satisfies AM%W==0, (AM/W)%MT0==0, AM%MT0==0 and AM<=M
+          # at both W=2 and W=4. Override with --fused-a2a-am to leave a local
+          # tail. M is the feature (A2A) dim, N the token dim.
+          - Exact: [3072, 512, 1, 2048]

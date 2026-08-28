@@ -27,7 +27,7 @@ _CONFIG = os.path.normpath(
         os.pardir,  # characterization/
         os.pardir,  # unit/
         os.pardir,  # Tensile/Tests/
-        "common", "gemm", "gfx950", "fused_a2a_disabled.yaml",
+        "common", "comm", "gfx950", "fused_a2a.yaml",
     )
 )
 
