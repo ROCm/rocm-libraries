@@ -175,89 +175,90 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   ggBackup = state["ProblemType"]["GroupedGemm"]
   wgmxccBackup = state["WorkGroupMappingXCC"]
 
-  # Encode only the fixed WGMXCC categories that change generated assembly.
-  if "WorkGroupMappingXCC" in state and state["WorkGroupMappingXCC"] != -1:
-    state["WorkGroupMappingXCC"] = (
-        2
-        if state.get("StreamK") in (4, 5)
-        and state.get("StreamKXCCMapping", 0) != 0
-        and state["WorkGroupMappingXCC"] > 1
-        else 1
-    )
+  try:
+    # Encode only the fixed WGMXCC categories that change generated assembly.
+    if "WorkGroupMappingXCC" in state and state["WorkGroupMappingXCC"] != -1:
+      state["WorkGroupMappingXCC"] = (
+          2
+          if state.get("StreamK") in (4, 5)
+          and state.get("StreamKXCCMapping", 0) != 0
+          and state["WorkGroupMappingXCC"] > 1
+          else 1
+      )
 
-  if ignoreInternalArgs:
-    # GroupedGemm is masked so kernels differing only in GroupedGemm dedup to
-    # one key. When SupportUserArgs is set the batch-offset codegen depends on
-    # GroupedGemm, so grouped and non-grouped kernels are not identical and must
-    # keep distinct keys -- preserve the real value in that case.
-    if "SupportUserArgs" not in state["ProblemType"] or not state["ProblemType"]["SupportUserArgs"]:
-      state["ProblemType"]["GroupedGemm"] = False
-    if splitGSU:
-      state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
+    if ignoreInternalArgs:
+      # GroupedGemm is masked so kernels differing only in GroupedGemm dedup to
+      # one key. When SupportUserArgs is set the batch-offset codegen depends on
+      # GroupedGemm, so grouped and non-grouped kernels are not identical and must
+      # keep distinct keys -- preserve the real value in that case.
+      if "SupportUserArgs" not in state["ProblemType"] or not state["ProblemType"]["SupportUserArgs"]:
+        state["ProblemType"]["GroupedGemm"] = False
+      if splitGSU:
+        state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
-  requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
+    requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
 
-  if ignoreInternalArgs:
-    if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:
-      requiredParametersTemp.discard("GlobalSplitU")
-  else:
-    requiredParametersTemp = requiredParametersTemp.union(["WorkGroupMapping",
-                                                          #  "WorkGroupMappingXCC", # WGMXCC affects asm code gen
-                                                           "WorkGroupMappingXCCGroup",
-                                                           "StaggerU",
-                                                           "StaggerUStride",
-                                                           "StaggerUMapping",
-                                                           "GlobalSplitUCoalesced",
-                                                           "GlobalSplitUWorkGroupMappingRoundRobin"])
-  pt = state["ProblemType"]
-  if isinstance(pt, ProblemType):
-    components = [str(pt)]
-  else:
-    components = [str(ProblemType(pt, printIndexAssignmentInfo=False))]
+    if ignoreInternalArgs:
+      if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:
+        requiredParametersTemp.discard("GlobalSplitU")
+    else:
+      requiredParametersTemp = requiredParametersTemp.union(["WorkGroupMapping",
+                                                            #  "WorkGroupMappingXCC", # WGMXCC affects asm code gen
+                                                             "WorkGroupMappingXCCGroup",
+                                                             "StaggerU",
+                                                             "StaggerUStride",
+                                                             "StaggerUMapping",
+                                                             "GlobalSplitUCoalesced",
+                                                             "GlobalSplitUWorkGroupMappingRoundRobin"])
+    pt = state["ProblemType"]
+    if isinstance(pt, ProblemType):
+      components = [str(pt)]
+    else:
+      components = [str(ProblemType(pt, printIndexAssignmentInfo=False))]
 
-  if "MacroTile0" in state \
-      and "MacroTile1" in state \
-      and "DepthU" in state:
-    components.append(f'{getParameterNameAbbreviation("MacroTile")}{state["MacroTile0"]}x{state["MacroTile1"]}x{state["DepthU"]}')
+    if "MacroTile0" in state \
+        and "MacroTile1" in state \
+        and "DepthU" in state:
+      components.append(f'{getParameterNameAbbreviation("MacroTile")}{state["MacroTile0"]}x{state["MacroTile1"]}x{state["DepthU"]}')
 
-  if "MatrixInstM" in state:
-    # Use the physical opcode dims (MIBlock) for the name, not the possibly-swapped
-    # effective MatrixInstM/N, so the kernel identity matches the user-specified MI.
-    _miName = state.get("MIBlock", [state["MatrixInstM"], state["MatrixInstN"]])
-    components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{_miName[0]}x{_miName[1]}x{state["MatrixInstB"]}')
-    requiredParametersTemp.add("MIWaveTile")
-  else:
-    requiredParametersTemp.add("ThreadTile")
+    if "MatrixInstM" in state:
+      # Use the physical opcode dims (MIBlock) for the name, not the possibly-swapped
+      # effective MatrixInstM/N, so the kernel identity matches the user-specified MI.
+      _miName = state.get("MIBlock", [state["MatrixInstM"], state["MatrixInstN"]])
+      components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{_miName[0]}x{_miName[1]}x{state["MatrixInstB"]}')
+      requiredParametersTemp.add("MIWaveTile")
+    else:
+      requiredParametersTemp.add("ThreadTile")
 
-  if state["UseCustomMainLoopSchedule"]:
-    components.append('CMS')
+    if state["UseCustomMainLoopSchedule"]:
+      components.append('CMS')
 
-  components.append('SN')
+    components.append('SN')
 
-  # Skip SFA tag if using default wgm algo
-  if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
-    requiredParametersTemp.discard("SpaceFillingAlgo")
+    # Skip SFA tag if using default wgm algo
+    if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
+      requiredParametersTemp.discard("SpaceFillingAlgo")
 
-  # These values remove or replace generated control-flow paths.
-  if state.get("DebugStreamK", 0) != 0:
-    requiredParametersTemp.add("DebugStreamK")
-  if state.get("StreamKAtomic", 0) != 0:
-    requiredParametersTemp.add("StreamKAtomic")
-  if state.get("MbskPrefetchMethod", 0) != 0:
-    requiredParametersTemp.add("MbskPrefetchMethod")
-  if state.get("DebugPersistentKernelLoopForever", False):
-    requiredParametersTemp.add("DebugPersistentKernelLoopForever")
+    # These values remove or replace generated control-flow paths.
+    if state.get("DebugStreamK", 0) != 0:
+      requiredParametersTemp.add("DebugStreamK")
+    if state.get("StreamKAtomic", 0) != 0:
+      requiredParametersTemp.add("StreamKAtomic")
+    if state.get("MbskPrefetchMethod", 0) != 0:
+      requiredParametersTemp.add("MbskPrefetchMethod")
+    if state.get("DebugPersistentKernelLoopForever", False):
+      requiredParametersTemp.add("DebugPersistentKernelLoopForever")
 
-  for key in sorted(requiredParametersTemp):
-    if key not in state or key == "CustomKernelName":
-      continue
-    components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
+    for key in sorted(requiredParametersTemp):
+      if key not in state or key == "CustomKernelName":
+        continue
+      components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
-  state["GlobalSplitU"] = gsuBackup
-  state["ProblemType"]["GroupedGemm"] = ggBackup
-  state["WorkGroupMappingXCC"] = wgmxccBackup
-
-  return '_'.join(components)
+    return '_'.join(components)
+  finally:
+    state["GlobalSplitU"] = gsuBackup
+    state["ProblemType"]["GroupedGemm"] = ggBackup
+    state["WorkGroupMappingXCC"] = wgmxccBackup
 
 
 def shortenFileBase(splitGSU, kernel):

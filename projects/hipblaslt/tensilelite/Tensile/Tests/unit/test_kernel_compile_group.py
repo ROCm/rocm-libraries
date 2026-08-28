@@ -74,6 +74,27 @@ def test_code_changing_modes_have_distinct_names(parameter, value, tag):
     assert tag in getKernelNameMin(variant, False)
 
 
+@pytest.mark.parametrize(
+    "parameter,value",
+    [
+        ("DebugStreamK", 1),
+        ("StreamKAtomic", 1),
+        ("MbskPrefetchMethod", 1),
+        ("DebugPersistentKernelLoopForever", True),
+    ],
+)
+def test_code_changing_modes_form_two_compile_groups(parameter, value):
+    baseline = _kernel()
+    variant = _kernel()
+    variant[parameter] = value
+
+    groups = groupKernelRecords([baseline, variant], False)
+
+    assert len(groups) == 2
+    assert groups[0].baseName != groups[1].baseName
+    assert all(len(group.aliases) == 1 for group in groups)
+
+
 def test_runtime_internal_args_share_one_compile_group():
     first = _kernel()
     second = _kernel()
