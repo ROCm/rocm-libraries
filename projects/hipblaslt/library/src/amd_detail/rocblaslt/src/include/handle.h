@@ -187,6 +187,17 @@ struct _rocblaslt_handle
     // draws streams from a fixed pool that tops out at 32 distinct hipStream_t
     // however many it is asked for, and a 32-way fan-out needs 33 (the streams
     // plus the default one it forks from); 64 is that working set doubled.
+    //
+    // Blocks are not recycled. A block may safely move to another stream once
+    // the owning stream's work has finished, but the library never learns that
+    // it has: the only test available is hipStreamQuery(owner), and the owner
+    // may have been destroyed since it was recorded. HIP does not validate the
+    // handle - querying a destroyed stream reads freed memory, which returns a
+    // plausible answer while that memory happens to survive and faults once it
+    // is recycled. There is no hipStreamDestroy hook to invalidate the record
+    // with, so the query cannot be made safe. Running past this bound therefore
+    // falls back to the shared GSU region rather than failing; see
+    // streamKFlagsForStream.
     static constexpr size_t c_syncSkStreamSlots = 64;
     // Allocated once at handle creation: allocating device memory mid-run would
     // break hipGraph capture, and a fixed layout keeps the lookup lock-free.
