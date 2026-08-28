@@ -9,7 +9,7 @@ config-driven emit harness and additionally exercises the helper-kernel emit
 paths (KernelWriterConversion, KernelWriterBetaOnly) that are otherwise
 under-covered by the methodology-A baseline.
 
-Target source: Tensile/KernelWriterConversion.py (115 uncovered lines in the
+Target source: tensilelite/KernelWriterConversion.py (115 uncovered lines in the
 beta-only + reduction + conversion arms per the methodology-A gap report).
 
 Phase:

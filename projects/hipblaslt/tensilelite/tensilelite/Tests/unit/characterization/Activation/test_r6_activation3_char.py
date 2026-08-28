@@ -4,7 +4,7 @@
 ################################################################################
 """R6 — Activation.py remaining-coverage characterization test.
 
-Targets the following groups of uncovered lines in Tensile/Activation.py (207
+Targets the following groups of uncovered lines in tensilelite/Activation.py (207
 statements at 76% per survey — "Activation remaining (207, 76%)"):
 
   Group A — ActivationAvailable.__init__ + ActivationTypeRegister.__init__ +

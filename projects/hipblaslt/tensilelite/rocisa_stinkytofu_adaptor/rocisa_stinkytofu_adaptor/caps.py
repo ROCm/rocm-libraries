@@ -13,7 +13,7 @@ IsaKey = Tuple[int, int, int]
 
 
 # Friendly-name aliases (``"gfx1250"`` etc.). Keep in lock-step with
-# ``Tensile/Common/Architectures.isaToGfx`` when adding ISAs.
+# ``tensilelite/Common/Architectures.isaToGfx`` when adding ISAs.
 _GFX_ALIASES: Dict[str, IsaKey] = {
     "gfx1250": (12, 5, 0),
 }
@@ -75,7 +75,7 @@ def getCaps(key: IsaKey) -> Tuple[Dict, Dict, Dict, Dict]:
     Probing uses comgr against the target ISA name (e.g.
     ``amdgcn-amd-amdhsa--gfx1250``); the host GPU identity is irrelevant.
 
-    Returns *fresh shallow copies* so callers (and Tensile's pickle of
+    Returns *fresh shallow copies* so callers (and TensileLite's pickle of
     ``rocIsa.getData()``) cannot mutate shared tables in place.
     """
 

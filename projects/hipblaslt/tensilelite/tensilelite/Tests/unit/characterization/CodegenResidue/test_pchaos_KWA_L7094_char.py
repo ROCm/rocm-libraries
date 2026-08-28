@@ -6,7 +6,7 @@
 Characterisation test — branch_id 82034243636ff093cba429f81384b737464cc0c9
 
 Predicate : kernel["SuppressNoLoadLoop"]
-Site      : Tensile/KernelWriterAssembly.py:7094  (calculateLoopNumIter, if)
+Site      : tensilelite/KernelWriterAssembly.py:7094  (calculateLoopNumIter, if)
 Solver    : z3 4.16.0  — SAT  (solver-backed-under-assumptions)
 
 What the predicate reads
@@ -46,7 +46,7 @@ pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Faithful re-implementation of the derivation (mirrors Solution.py 1828,
-# 1845-1847, 2282-2283, 3850-3869).  Pure; no Tensile import required.
+# 1845-1847, 2282-2283, 3850-3869).  Pure; no TensileLite import required.
 # ---------------------------------------------------------------------------
 
 def _derive_suppress_no_load_loop(

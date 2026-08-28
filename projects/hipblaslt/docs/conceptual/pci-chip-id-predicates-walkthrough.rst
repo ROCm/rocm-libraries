@@ -39,7 +39,7 @@ Building hardware predicates
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The source of truth for hardware predicates is in the hipBLASLt library logic (LL) files (``find . -name Logic``). In particular, as of 
-`TensileLite version 5.0.0 <https://github.com/ROCm/rocm-libraries/blob/273fcdc27e2f37d81420929d2105649494c9bb9d/projects/hipblaslt/tensilelite/Tensile/__init__.py>`_,
+`TensileLite version 5.0.0 <https://github.com/ROCm/rocm-libraries/blob/273fcdc27e2f37d81420929d2105649494c9bb9d/projects/hipblaslt/tensilelite/tensilelite/__init__.py>`_,
 the standard four-statement metadata at the top of each LL is authoritative (some LLs could have fields omitted for backwards compatibility):
 
 .. code-block:: yaml

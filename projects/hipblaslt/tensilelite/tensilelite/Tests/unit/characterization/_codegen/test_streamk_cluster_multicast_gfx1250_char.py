@@ -4,7 +4,7 @@
 """StreamK cluster multicast -- gfx1250 characterization (CPU-only).
 
 Exercises the StreamK ForceDPOnly cluster cooperative-load path added to
-``Tensile/Components/StreamK.py`` + ``Tensile/Components/ClusterLoad.py``, which
+``tensilelite/Components/StreamK.py`` + ``tensilelite/Components/ClusterLoad.py``, which
 a ``ClusterDim`` other than ``[1, 1]`` on StreamK=3 turns on.
 
 Each arm is a (PrefetchGlobalRead, ClusterDim) pair and is pinned separately.

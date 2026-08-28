@@ -45,7 +45,7 @@ def printExit(message):
 try:
   import yaml
 except ImportError:
-  printExit("You must install PyYAML to use Tensile (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions.")
+  printExit("You must install PyYAML to use TensileLite (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions.")
 
 def ensurePath( path ):
   if not os.path.exists(path):

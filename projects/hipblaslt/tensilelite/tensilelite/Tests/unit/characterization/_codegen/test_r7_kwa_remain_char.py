@@ -4,7 +4,7 @@
 ################################################################################
 """R7 — KWA remaining mid-cluster characterization.
 
-Exercises three uncovered clusters in Tensile/KernelWriterAssembly.py via
+Exercises three uncovered clusters in tensilelite/KernelWriterAssembly.py via
 direct component invocation (CPU-only, no GPU, no compile).
 
 Target missing ranges:
@@ -34,7 +34,7 @@ pytestmark = pytest.mark.unit
 def _rocisa_gfx942():
     _init_rocisa()
 
-# Force full Tensile package init before component imports.
+# Force full TensileLite package init before component imports.
 import rocisa  # noqa: F401
 import tensilelite.KernelWriter  # noqa: F401
 

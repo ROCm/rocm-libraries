@@ -4,7 +4,7 @@
 ################################################################################
 # R7 ShiftVectorComponents full-sweep characterization config for gfx942.
 #
-# Target: Tensile/Components/ShiftVectorComponents.py
+# Target: tensilelite/Components/ShiftVectorComponents.py
 # Primary target ranges: 47-200 (VALU edge shift), 552-784 (MFMA AllThread).
 # Secondary coverage: 208-546 (MFMA dispatch + PartialThread).
 #
@@ -49,7 +49,7 @@ GlobalParameters:
 BenchmarkProblems:
   ########################################
   # fp32 NT, two gfx942 MFMA shapes, AssertFree0ElementMultiple=1
-  # Shape 1 [16,16,4,1,1,2,3,2,2] validated by Tensile/Tests/common/gemm/fp32_nt.yaml
+  # Shape 1 [16,16,4,1,1,2,3,2,2] validated by tensilelite/Tests/common/gemm/fp32_nt.yaml
   # Shape 2 [32,32,2,1,1,2,1,2,2] (fp32 M=32 variant)
   # VWA=-1: auto-select; AssertFree0=1: edge shift for A
   ########################################
