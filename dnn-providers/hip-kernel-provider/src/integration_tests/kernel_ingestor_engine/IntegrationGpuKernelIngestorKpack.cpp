@@ -22,6 +22,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -58,6 +59,20 @@ namespace
 /// identity would collide on the completed metadata tuple and take that engine down with
 /// it, so this name appears nowhere in src/engines.
 constexpr const char* PACKED_ENGINE_NAME = "hipkernel:pointwise_packed";
+
+/// The same packaged pointwise catalog, ranked by a trained UHD instead of a
+/// compiled score function.
+///
+/// Its descriptors sit beside the native-ranked engine's and share their
+/// matchers and dispatch handler, so the two differ in exactly one thing: how
+/// the catalog is ordered. That is what lets a test attribute an ordering to the
+/// model rather than to anything else about the pack.
+constexpr const char* MODEL_ENGINE_NAME = "hipkernel:pointwise_model";
+
+/// The one knob both packaged pointwise engines expose. Its default is the
+/// top-ranked kernel, which is how an ordering becomes observable through the
+/// public API rather than by reaching into the engine.
+constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 
 /// The engine that ships with the provider. Its kernels are `embedded_source`, so it is
 /// reachable whatever state the packaged archive is in, and it claims the same single-node
@@ -360,6 +375,11 @@ protected:
         return hipdnn_data_sdk::utilities::engineNameToId(SHIPPED_POINTWISE_ENGINE_NAME);
     }
 
+    static int64_t modelEngineId()
+    {
+        return hipdnn_data_sdk::utilities::engineNameToId(MODEL_ENGINE_NAME);
+    }
+
     /// Pins the packaged engine and compiles. Every step asserts: the artifact is on disk,
     /// so a failure here is the regression this suite exists to catch, never a skip.
     void buildAndCompilePacked(Graph& graph)
@@ -638,6 +658,106 @@ TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnDevice)
     int64_t workspaceSize = 0;
     auto result = graph->get_workspace_size(workspaceSize);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_GE(workspaceSize, 0);
+    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+
+    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+}
+
+// ---------------------------------------------------------------------------
+// A trained UHD decides which kernel runs
+// ---------------------------------------------------------------------------
+//
+// The end of the loop RFC 0019 describes: a model trained offline by uhd_gen,
+// packaged with its engine, loaded at plan build, and deciding a dispatch that
+// then produces the right answer.
+//
+// The two packaged pointwise engines exist to make that attributable. Same
+// kernels, same matchers, same dispatch handler; one ranks with
+// `hipkernel.pointwise.score` (returns block_size, so 256 always wins) and one
+// with a UHD trained to prefer 64. Every difference in outcome between them is
+// the heuristic, because nothing else differs.
+
+TEST_F(IntegrationGpuKernelIngestorKpack, AModelRankedEngineOffersItself)
+{
+    // Separated from the ordering assertion below so a packaging failure and a
+    // ranking failure are distinguishable. If the .uhd.fb or model.bin did not
+    // reach the packed tree, the engine still loads -- it degrades to declared
+    // order -- and only this case's sibling would fail, with no clue why.
+    auto graph = buildPointwiseAddGraph();
+    ASSERT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
+
+    std::vector<int64_t> rankedEngineIds;
+    ASSERT_EQ(graph->get_ranked_engine_ids(rankedEngineIds).code, ErrorCode::OK);
+
+    EXPECT_NE(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), modelEngineId()),
+              rankedEngineIds.end())
+        << "the model-ranked engine did not offer itself for a single-node FLOAT add";
+}
+
+TEST_F(IntegrationGpuKernelIngestorKpack, TheTrainedModelPicksTheKernelItsScoreDisagreesWith)
+{
+    // The knob default is the top-ranked kernel, which is how the ordering is
+    // observable through the public API without reaching into the engine.
+    //
+    // Native-ranked engine: block_size 256. Model-ranked engine: 64. Same
+    // catalog. A UHD that failed to load would leave the model engine on
+    // declared order -- priority, then descriptor id -- and give some order that
+    // is not this one.
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    auto graph = buildPointwiseAddGraph();
+    ASSERT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
+
+    const auto blockSizeDefault = [&](int64_t engineId) -> int64_t {
+        std::vector<Knob> knobs;
+        EXPECT_EQ(graph->get_knobs_for_engine(engineId, knobs).code, ErrorCode::OK);
+        const auto knob = std::find_if(knobs.begin(), knobs.end(), [](const Knob& candidate) {
+            return candidate.knobId() == BLOCK_SIZE_KNOB;
+        });
+        EXPECT_NE(knob, knobs.end());
+        if(knob == knobs.end())
+        {
+            return -1;
+        }
+        const auto* value = std::get_if<int64_t>(&knob->defaultValue());
+        EXPECT_NE(value, nullptr);
+        return value != nullptr ? *value : -1;
+    };
+
+    EXPECT_EQ(blockSizeDefault(packedEngineId()), 256)
+        << "hipkernel.pointwise.score returns block_size, so the wide tile must win";
+    EXPECT_EQ(blockSizeDefault(modelEngineId()), 64)
+        << "the trained UHD prefers the narrow tile; 256 means it did not rank at all";
+
+    // A UHD that could not be brought up says so. Asserting the absence of that
+    // diagnostic is what separates "the model chose 64" from "the model was
+    // missing and declared order happened to start at 64".
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "uhd:"))
+        << "the heuristic reported a fault while loading. Recorded logs:\n"
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST_F(IntegrationGpuKernelIngestorKpack, TheModelsChoiceExecutesCorrectly)
+{
+    // Ranking that picks an unrunnable kernel is worse than no ranking. The
+    // reference comparison is the same one every other case in this suite uses.
+    auto graph = buildPointwiseAddGraph();
+    graph->set_preferred_engine_id_ext(modelEngineId());
+
+    ASSERT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
+    ASSERT_EQ(graph->create_execution_plans().code, ErrorCode::OK);
+    ASSERT_EQ(graph->check_support().code, ErrorCode::OK);
+    ASSERT_EQ(graph->build_plans().code, ErrorCode::OK);
+
+    int64_t servingEngineId = 0;
+    ASSERT_EQ(graph->get_execution_plan_engine_id(servingEngineId).code, ErrorCode::OK);
+    ASSERT_EQ(servingEngineId, modelEngineId())
+        << "engine id " << servingEngineId << " served the graph, not " << MODEL_ENGINE_NAME;
+
+    int64_t workspaceSize = 0;
+    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
     ASSERT_GE(workspaceSize, 0);
     const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 

@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "80cf109c-1f77-45a5-9a4c-27cf4954586c",
+  "name": "packed pointwise model selector",
+  "kind": "model",
+  "payload": "packed_pointwise_model.uhd.fb"
+}

@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f",
+  "name": "packed pointwise model variant fields",
+  "fields": [
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "operation",
+      "type": "string"
+    }
+  ]
+}
