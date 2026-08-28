@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -15,6 +16,7 @@
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -320,6 +322,26 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        // Enumerated before any test records support data (see setEngineNames); the
+        // vector keeps enumeration order for the table columns below.
+        std::vector<std::string> loadedEngineNames;
+        if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())
+        {
+            std::map<int64_t, std::string> engineNamesById;
+            size_t numEngines = 0;
+            if(hipdnnGetEngineCount_ext(handle, &numEngines) == HIPDNN_STATUS_SUCCESS)
+            {
+                for(size_t i = 0; i < numEngines; ++i)
+                {
+                    auto info = getEngineInfo(handle, i);
+                    loadedEngineNames.push_back(info.engineName);
+                    engineNamesById.emplace(info.engineId, std::move(info.engineName));
+                }
+            }
+            hipdnn_integration_tests::SupportMatrixCollector::get().setEngineNames(
+                std::move(engineNamesById));
+        }
+
         hipdnn_integration_tests::bundle::registerBundleTests();
 
         const int result = RUN_ALL_TESTS();
@@ -403,16 +425,7 @@ int main(int argc, char** argv) noexcept
             }
             else
             {
-                // Enumerate all loaded engines from the handle
-                size_t numEngines = 0;
-                if(hipdnnGetEngineCount_ext(handle, &numEngines) == HIPDNN_STATUS_SUCCESS)
-                {
-                    for(size_t i = 0; i < numEngines; ++i)
-                    {
-                        auto info = getEngineInfo(handle, i);
-                        allEngineNames.push_back(std::move(info.engineName));
-                    }
-                }
+                allEngineNames = std::move(loadedEngineNames);
             }
 
             hipdnn_integration_tests::SupportMatrixCollector::get().writeMarkdown(allEngineNames);
