@@ -182,6 +182,8 @@ public:
         // GOOGLE_TEST builds; the base allocation otherwise). teardown calls
         // free_ptr_use on the same pointer before adjusting it, so the map
         // entry is always found and mem_used returns to its pre-setup value.
+        // m_bytes includes guard pad bytes in GOOGLE_TEST builds; alloc and free
+        // are symmetric (both use m_bytes) so the ceiling delta is always zero.
         if(use_HMM)
             alloc_ptr_use(d, m_bytes);
 
@@ -198,6 +200,31 @@ public:
 #ifdef GOOGLE_TEST
         if(m_guard_len > 0)
         {
+            // Called only when memcmp detected a difference; scans byte-by-byte to report
+            // count and index of the first differing byte without paying the scan cost on
+            // the common (clean) path.
+            auto report_guard_corruption
+                = [](const T* host, const T* ref, size_t guard_bytes, const char* tag) {
+                      const auto* h         = reinterpret_cast<const unsigned char*>(host);
+                      const auto* r         = reinterpret_cast<const unsigned char*>(ref);
+                      size_t      differing = 0, first = 0;
+                      for(size_t i = 0; i < guard_bytes; ++i)
+                          if(h[i] != r[i])
+                          {
+                              if(!differing) // record index of first differing byte only once
+                                  first = i;
+                              ++differing;
+                          }
+                      // Guard: memcmp detected corruption before this lambda was called, so
+                      // differing must be > 0 and first is valid. The check defends against
+                      // any future caller that violates the precondition.
+                      if(differing > 0)
+                          ADD_FAILURE() << differing << " " << tag
+                                        << "-guard byte(s) corrupted; first at byte " << first
+                                        << " of " << guard_bytes << " (expected 0x" << std::hex
+                                        << static_cast<unsigned>(r[first]) << ", got 0x"
+                                        << static_cast<unsigned>(h[first]) << std::dec << ")";
+                  };
             // One stack buffer per guard: a failed read cannot leave the other guard's
             // stale bytes in a shared buffer and produce a false pass or miss on the next
             // comparison. Sized to MEM_MAX_GUARD_PAD (the compile-time cap on m_pad) so
@@ -214,8 +241,9 @@ public:
             EXPECT_EQ(status, hipSuccess)
                 << "cannot read the guard after the allocation: " << hipGetErrorName(status);
 
-            if(status == hipSuccess)
-                EXPECT_EQ(memcmp(after_bytes, m_guard, m_guard_len), 0) << "post-guard overwritten";
+            if(status == hipSuccess && memcmp(after_bytes, m_guard, m_guard_len) != 0)
+                report_guard_corruption(
+                    reinterpret_cast<const T*>(after_bytes), m_guard, m_guard_len, "post");
 
             // Point to the pre-guard region of the device allocation.
             d -= m_pad;
@@ -226,8 +254,9 @@ public:
             EXPECT_EQ(status, hipSuccess)
                 << "cannot read the guard before the allocation: " << hipGetErrorName(status);
 
-            if(status == hipSuccess)
-                EXPECT_EQ(memcmp(before_bytes, m_guard, m_guard_len), 0) << "pre-guard overwritten";
+            if(status == hipSuccess && memcmp(before_bytes, m_guard, m_guard_len) != 0)
+                report_guard_corruption(
+                    reinterpret_cast<const T*>(before_bytes), m_guard, m_guard_len, "pre");
         }
 #endif
     }
