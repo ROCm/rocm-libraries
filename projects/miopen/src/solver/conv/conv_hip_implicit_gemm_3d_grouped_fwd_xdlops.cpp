@@ -45,7 +45,6 @@
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR)
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARD_HEUR)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
 
 namespace miopen {
@@ -208,15 +207,9 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     }
 
     // 2. Hard-coded heuristics for BF16/FP16 on gfx942 and gfx950 only.
-    // Disable with MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARD_HEUR=0 to fall through
-    // to AI candidate selection.
-    if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARD_HEUR))
-    {
-        MIOPEN_LOG_I2("Step 2: Hard-coded heuristics disabled, proceeding to next step");
-    }
-    else if((problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf) &&
-            (ctx.GetStream().GetDeviceName() == "gfx942" ||
-             ctx.GetStream().GetDeviceName() == "gfx950"))
+    if((problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf) &&
+       (ctx.GetStream().GetDeviceName() == "gfx942" ||
+        ctx.GetStream().GetDeviceName() == "gfx950"))
     {
         MIOPEN_LOG_I2("Step 2: Attempting hard-coded heuristics for "
                       << (problem.GetInDataType() == miopenBFloat16 ? "BF16" : "FP16"));
@@ -241,7 +234,9 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         std::optional<std::size_t> found_index;
         if(ctx.GetStream().GetDeviceName() == "gfx942")
         {
-            if(index == 0 && problem.GetGroupCount() == 1 && problem.GetAlphaBetaCase() == DEFAULT)
+            if(index == 0 && problem.GetGroupCount() == 1 &&
+               problem.GetAlphaBetaCase() == DEFAULT && problem.GetInDepth() <= 4 &&
+               problem.GetInWidth() >= 256)
             {
                 int K = problem.GetOutChannels();
 
