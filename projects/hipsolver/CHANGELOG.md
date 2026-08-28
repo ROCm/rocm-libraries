@@ -16,6 +16,9 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed hipsolverDnXpotrs calling 32-bit potrs instead of 64-bit potrs.
+
 ### Known issues
 ### Upcoming changes
 

@@ -106,7 +106,7 @@ from ...helpers.pipeline import SoftwarePipeline
 from ...helpers.schedule import SchedulePolicy
 from ...helpers.spec import kernel_name_join
 from ...helpers.tensor_view import make_buffer_resource
-from ...helpers.transforms import TensorDescriptor, pad, unmerge_magic
+from ...helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
 from ._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -227,25 +227,35 @@ def make_dw_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
         unmerge('n_wg' → z, y, x, c)
         pad('z'), pad('y'), pad('x')
     """
+    # Grouped (groups>1): the weight-gradient tensor is PACKED per group —
+    # dW is [K, [Z,] Y, X, cpg] (PyTorch grouped weight [K, C/groups, kH, kW]),
+    # NOT dense over the full C.  The output channel ``k_out`` (∈ [0, K)) already
+    # encodes the group (g = k_out // kpg); the caller passes the group-absolute
+    # ``k_out = group*kpg + k_out_in_group``.  The n_wg reduction spans only
+    # ``Y*X*cpg``, so the C dim is simply ``cpg`` and there is no group→c embed
+    # (the group's channel slab is the whole packed C dim of this tensor).
+    cdim = p.cpg if p.groups > 1 else p.C
     if p.is_3d:
         return TensorDescriptor.naive(
             "dW_kzyxc",
-            lengths=[p.K, p.Z, p.Y, p.X, p.C],
+            lengths=[p.K, p.Z, p.Y, p.X, cdim],
             dtype=_ir_dtype(dtype),
             coord_names=["k_out", "z", "y", "x", "c"],
         ).transform(
-            unmerge_magic("n_wg", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C]),
+            unmerge_magic(
+                "n_wg", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, cdim]
+            ),
             pad("z", lo=0, hi=p.Z),
             pad("y", lo=0, hi=p.Y),
             pad("x", lo=0, hi=p.X),
         )
     return TensorDescriptor.naive(
         "dW_kyxc",
-        lengths=[p.K, p.Y, p.X, p.C],
+        lengths=[p.K, p.Y, p.X, cdim],
         dtype=_ir_dtype(dtype),
         coord_names=["k_out", "y", "x", "c"],
     ).transform(
-        unmerge_magic("n_wg", into=["y", "x", "c"], dims=[p.Y, p.X, p.C]),
+        unmerge_magic("n_wg", into=["y", "x", "c"], dims=[p.Y, p.X, cdim]),
         pad("y", lo=0, hi=p.Y),
         pad("x", lo=0, hi=p.X),
     )
@@ -266,9 +276,12 @@ class WgradConvSpec:
       K_wg  = N*Ho*Wo       (output positions — reduction)
 
     Pipeline, epilogue, and async-DMA options are the same as
-    :class:`~.conv_implicit_gemm.ImplicitGemmConvSpec`.  The ``groups`` field
-    is currently only supported at ``groups=1`` for the wgrad direction
-    (grouped wgrad is a follow-on).
+    :class:`~.conv_implicit_gemm.ImplicitGemmConvSpec`.  Grouped convolution
+    (``groups > 1``) is supported via grid-per-group (the group index rides on
+    block_id_z) and is orthogonal to the epilogue and split-K: every epilogue
+    (direct, cshuffle, wmma-direct, and the split-K atomic path) threads the
+    per-group ``k_out += group*kpg`` fold.  Only grouped pointwise (1x1) wgrad
+    remains a follow-on.
     """
 
     problem: ConvProblem
@@ -343,10 +356,12 @@ class WgradConvSpec:
 
     @property
     def wg_M(self) -> int:
+        # GEMM-M: per-group output channels kpg (== K when groups==1).
         return _wg_M(self.problem)
 
     @property
     def wg_N(self) -> int:
+        # GEMM-N: per-group Y*X*cpg (== Y*X*C when groups==1).
         return _wg_N(self.problem)
 
     @property
@@ -411,17 +426,13 @@ class WgradConvSpec:
                     f"split_k > 1 requires dtype_d in fp32/bf16/fp16 "
                     f"(got {self.data.dtype_d!r})"
                 )
-            if self.data.dtype_d in ("bf16", "fp16") and self.problem.C % 2 != 0:
+            if self.data.dtype_d in ("bf16", "fp16") and self.problem.cpg % 2 != 0:
                 raise ValueError(
-                    f"split_k > 1 with dtype_d={self.data.dtype_d!r} requires even C "
-                    f"(packed <2 x dtype> atomic pairs must stay within one filter position); "
-                    f"got C={self.problem.C}"
+                    f"split_k > 1 with dtype_d={self.data.dtype_d!r} requires even cpg "
+                    f"(packed <2 x dtype> atomic pairs must stay within one filter "
+                    f"position; the packed dW inner dim is cpg=C/groups); "
+                    f"got cpg={self.problem.cpg} (C={self.problem.C}, groups={self.problem.groups})"
                 )
-        if self.problem.groups != 1:
-            raise ValueError(
-                "WgradConvSpec: grouped convolution (groups > 1) is not yet supported "
-                "for the wgrad direction"
-            )
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -531,11 +542,12 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"split_k > 1 requires dtype_d in fp32/bf16/fp16 for atomic accumulation "
             f"(got {spec.data.dtype_d!r})"
         )
-    if sk > 1 and spec.data.dtype_d in ("bf16", "fp16") and spec.problem.C % 2 != 0:
+    if sk > 1 and spec.data.dtype_d in ("bf16", "fp16") and spec.problem.cpg % 2 != 0:
         return False, (
-            f"split_k > 1 with dtype_d={spec.data.dtype_d!r} requires even C "
-            f"(packed <2 x dtype> atomic pairs must stay within one filter position); "
-            f"got C={spec.problem.C}"
+            f"split_k > 1 with dtype_d={spec.data.dtype_d!r} requires even cpg "
+            f"(packed <2 x dtype> atomic pairs must stay within one filter "
+            f"position; the packed dW inner dim is cpg=C/groups); "
+            f"got cpg={spec.problem.cpg}"
         )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
@@ -549,6 +561,17 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         k=spec.warp_tile_k,
     ):
         return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
+
+    # Grouped wgrad (groups>1): grid-per-group, the group index on block_id_z.
+    # Grouping is orthogonal to the epilogue/vec/split_k -- it only shifts the dW
+    # output-channel slab, and every epilogue (direct, cshuffle, wmma-direct, and
+    # the split-K atomic path) threads the per-group fold ``k_out += group*kpg``.
+    # When split_k>1 the group and the K-slice share the z axis
+    # (z = groups*split_k; see the kernel body).  Only grouped pointwise (1x1)
+    # remains a follow-on.
+    if spec.problem.groups > 1:
+        if spec.problem.is_pointwise:
+            return False, "grouped pointwise (1x1) wgrad is not yet supported"
 
     _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
     _lds_layout = spec.effective_lds_layout()
@@ -572,8 +595,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         )
 
     if family == "wmma":
-        if atom != (16, 16, 16):
-            return False, f"WMMA wgrad supports only 16x16x16 (got {atom}) on {arch}"
+        # 16x16x16 is the RDNA WMMA hero (gfx1151/gfx1201); 16x16x32 is the
+        # gfx1250 hero (its only fp16/bf16 WMMA atom -- there is no 16x16x16 on
+        # gfx1250). Both feed the same emit_wmma_phase fragment machinery
+        # (a_frag_len 8 vs 16, assembled from 8-wide ds_read chunks).
+        if atom not in ((16, 16, 16), (16, 16, 32)):
+            return False, (
+                f"WMMA wgrad supports only 16x16x16 or 16x16x32 (got {atom}) on {arch}"
+            )
         if spec.pipeline != "mem":
             return False, (
                 f"WMMA wgrad supports only the 'mem' pipeline "
@@ -677,6 +706,10 @@ def build_implicit_gemm_conv_wgrad(
         raise ValueError(f"invalid wgrad spec for {arch}: {why}")
 
     p = spec.problem
+    # Grouped wgrad is grid-per-group: one workgroup per conv group, the group
+    # index riding on block_id_z.  The load side (dY, X, GEMM dims, grid) is built
+    # straight from the per-group problem.
+    p_load = p
     ir_dtype_a = _ir_dtype(spec.data.dtype_a)
     ir_dtype_b = _ir_dtype(spec.data.dtype_b)
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
@@ -720,10 +753,10 @@ def build_implicit_gemm_conv_wgrad(
     )
     c_per_lane = op.c_frag_len
 
-    # Wgrad GEMM dims
-    wg_M = _wg_M(p)  # K
-    wg_N = _wg_N(p)  # Y*X*C
-    wg_K = _wg_K(p)  # N*Ho*Wo
+    # Wgrad GEMM dims (per group): kpg × Y*X*cpg, reduction N*Ho*Wo.
+    wg_M = _wg_M(p_load)  # kpg  (K when groups==1)
+    wg_N = _wg_N(p_load)  # Y*X*cpg  (Y*X*C when groups==1)
+    wg_K = _wg_K(p_load)  # N*Ho*Wo (reduction; group-independent)
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
 
@@ -746,6 +779,19 @@ def build_implicit_gemm_conv_wgrad(
     c_block_k = b.const_i32(block_k)
     c_wg_K = b.const_i32(wg_K)
 
+    # Grouped wgrad: the group index rides on ``block_id_z`` (grid-per-group,
+    # matching forward).  When split_k>1 the group and the K-slice SHARE the z
+    # axis: the grid launches z = groups*split_k and every CTA decodes
+    # ``group = block_id_z // split_k`` and ``slice = block_id_z % split_k``.
+    # ``group_v`` stays None on the ungrouped path so all groups==1 IR is
+    # byte-identical to the pre-grouped kernel.
+    grouped = p_load.groups > 1
+    group_v = None
+    if grouped:
+        c_kpg = b.const_i32(p_load.kpg)  # kpg: dY output-channel slab stride
+        if not _is_split_k:
+            group_v = b.to_sgpr_u32(b.block_id_z())
+
     # Split-K K-slice bounds.  K_wg is padded to the next multiple of
     # tile_k * split_k so every slice is exactly ks = wg_K_padded // split_k
     # elements wide and ks % tile_k == 0.  Loads past the real wg_K return 0
@@ -754,7 +800,16 @@ def build_implicit_gemm_conv_wgrad(
     if _is_split_k:
         wg_K_padded = spec.wg_K_padded()
         c_ks = b.const_i32(wg_K_padded // spec.split_k)
-        k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
+        if grouped:
+            # z = group*split_k + slice: recover both from block_id_z so the
+            # group and the K-slice share the single z grid axis.
+            c_split_k = b.const_i32(spec.split_k)
+            z_id = b.block_id_z()
+            group_v = b.to_sgpr_u32(b.div(z_id, c_split_k))
+            slice_id = b.mod(z_id, c_split_k)
+            k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
+        else:
+            k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
         k_hi = b.to_sgpr_u32(b.add(k_lo, c_ks))
     else:
         k_lo = c0
@@ -815,15 +870,56 @@ def build_implicit_gemm_conv_wgrad(
     ]
 
     threads = spec.block_size
-    # A (dY, NHWK) and B (X, NHWC) are loaded along the K_wg (reduction) axis by
-    # CoalescedTileLoader.  In NHWK the stride between adjacent K_wg positions is K
-    # (= output channels); in NHWC it is C (= input channels).  Neither is 1, so
-    # buffer_load_vN would read consecutive *channel* values at the same spatial
-    # position rather than the intended next spatial position.  Force vec=1 for both
-    # operands regardless of what the auto-picker or the caller requests.
-    # TODO: Enable vec size large than 1
+    # A (dY, NHWK) and B (X, NHWC) have their GEMM reduction axis K_wg = N*Ho*Wo,
+    # which is NOT the stride-1 tensor axis: in NHWK the stride between adjacent
+    # K_wg positions is K, in NHWC it is C.  A naive vectorised load along K_wg
+    # would read consecutive *channel* values at one spatial position instead of
+    # the next spatial position (wrong data) -- hence the historical vec=1.
+    #
+    # The stride-1 axis is instead the GEMM *free* axis: k_out (= M) for dY and
+    # the inner C of N_wg for X.  So vectorise the global load along that free
+    # (row) axis and transpose it into the row-major (M/N, K) LDS tile on store
+    # (CoalescedTileLoader vector_axis="row").  The transpose-on-store fills the
+    # SAME row-major (M/N, K) LDS tile the scalar path produced (identical LDS
+    # contents; only the load/store instructions differ), so the MMA consumer --
+    # MFMA or WMMA -- reads it unchanged.
+    #
+    # Enabled for every sync path (MFMA and WMMA); only the async
+    # (raw_ptr_buffer_load_lds) path is excluded, because it writes
+    # lane-contiguous LDS and cannot host a transpose-on-store.  Correctness
+    # requires the free-axis vector to stay within one stride-1 run -- vec_a | K
+    # (dY's k_out is contiguous over the whole K dim) and vec_b | C (an X vector
+    # must not cross a (y,x) filter boundary) -- and choose_vec additionally
+    # enforces even tile distribution.  When a width > 1 is not admissible the
+    # loader falls back to the scalar vector_axis="col" path, keeping those
+    # configs byte-identical.
+    axis_a = axis_b = "col"
     load_vec_a = 1
     load_vec_b = 1
+    if not spec.async_dma:
+
+        def _free_axis_vec(chan: int, dtype: str) -> int:
+            widths = (8, 4, 2, 1) if dtype != "fp32" else (4, 2, 1)
+            return next(v for v in widths if chan % v == 0)
+
+        va = CoalescedTileLoader.choose_vec(
+            tile_rows=block_m,
+            tile_cols=block_k,
+            block_size=threads,
+            max_vec=_free_axis_vec(p_load.kpg, spec.data.dtype_a),
+            vector_axis="row",
+        )
+        vb = CoalescedTileLoader.choose_vec(
+            tile_rows=block_n,
+            tile_cols=block_k,
+            block_size=threads,
+            max_vec=_free_axis_vec(p_load.cpg, spec.data.dtype_b),
+            vector_axis="row",
+        )
+        if va > 1:
+            load_vec_a, axis_a = va, "row"
+        if vb > 1:
+            load_vec_b, axis_b = vb, "row"
 
     # For pointwise (Y=X=1, stride 1, pad 0) all descriptors collapse to flat
     # 2-D address arithmetic — no unmerge/embed/pad, just multiply+add:
@@ -840,7 +936,9 @@ def build_implicit_gemm_conv_wgrad(
         _c_wgK_ir = b.const_i32(wg_K)
     else:
         dY_desc = make_dy_descriptor(p, dtype=spec.data.dtype_a)
-        X_desc = make_x_wgrad_descriptor(p, dtype=spec.data.dtype_b)
+        # X's channel decode spans the group's cpg slab, selected by the group
+        # index (grid-per-group).
+        X_desc = make_x_wgrad_descriptor(p_load, dtype=spec.data.dtype_b)
         _c_K_ir = _c_C_ir = _c_wgM_ir = _c_wgN_ir = _c_wgK_ir = None
 
     dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
@@ -854,6 +952,11 @@ def build_implicit_gemm_conv_wgrad(
 
     def dy_descriptor(b_: IRBuilder, row: Value, col: Value):
         k_out = b_.add(block_m_off_v, row)
+        if grouped:
+            # dY is NHWK with the full K; group g owns the output-channel slab
+            # [g*kpg, (g+1)*kpg).  Fold the group base into the (stride-1) k_out
+            # coord — no descriptor change needed.
+            k_out = b_.add(k_out, b_.mul(group_v, c_kpg))
         k_wg_red = b_.add(k_off_capture[0], col)
         if p.is_pointwise:
             # Flat: offset = k_wg_red * K + k_out
@@ -872,6 +975,10 @@ def build_implicit_gemm_conv_wgrad(
             kwg_ok = b_.cmp_lt(m_val, _c_wgK_ir)
             nwg_ok = b_.cmp_lt(k_val, _c_wgN_ir)
             return off, b_.land(kwg_ok, nwg_ok)
+        if grouped:
+            # X (NHWC, full C): the grouped make_a_descriptor selects the group's
+            # channel slab via the ``group`` embed (c = group*cpg + c_in_group).
+            return X_desc.offset(b_, m=m_val, k=k_val, group=group_v)
         return X_desc.offset(b_, m=m_val, k=k_val)
 
     if spec.async_dma:
@@ -900,6 +1007,7 @@ def build_implicit_gemm_conv_wgrad(
             block_size=threads,
             load_vec=load_vec_a,
             elem_dtype=ir_dtype_a,
+            vector_axis=axis_a,
         )
         b_sync_loader = CoalescedTileLoader(
             tile_rows=block_n,
@@ -907,6 +1015,7 @@ def build_implicit_gemm_conv_wgrad(
             block_size=threads,
             load_vec=load_vec_b,
             elem_dtype=ir_dtype_b,
+            vector_axis=axis_b,
         )
 
     schedule = SchedulePolicy.for_pipeline(
@@ -1133,9 +1242,10 @@ def build_implicit_gemm_conv_wgrad(
             block_n_off_v,
             dW,
             c_per_lane,
+            group=group_v,
         )
     elif spec.epilogue == "cshuffle":
-        _emit_wgrad_cshuffle_epilogue(b, spec, final_accs, grid, dw_rsrc)
+        _emit_wgrad_cshuffle_epilogue(b, spec, final_accs, grid, dw_rsrc, group=group_v)
     elif op.family == "wmma":
         _emit_wgrad_direct_epilogue_wmma(
             b,
@@ -1149,9 +1259,10 @@ def build_implicit_gemm_conv_wgrad(
             block_n_off_v,
             dw_rsrc,
             c0,
+            group=group_v,
         )
     else:
-        _emit_wgrad_direct_epilogue(b, spec, final_accs, grid, dw_rsrc)
+        _emit_wgrad_direct_epilogue(b, spec, final_accs, grid, dw_rsrc, group=group_v)
 
     return b.kernel
 
@@ -1173,6 +1284,7 @@ def _emit_wgrad_split_k_epilogue(
     block_n_off: Value,
     dw_ptr: Value,
     c_per_lane: int,
+    group: Optional[Value] = None,
 ) -> None:
     """Atomic-add partial accumulator directly into dW for all split-K slices.
 
@@ -1232,6 +1344,17 @@ def _emit_wgrad_split_k_epilogue(
     wg_M_v = b.const_i32(_wg_M(p))
     wg_N_v = b.const_i32(_wg_N(p))
 
+    # Grouped: the accumulator row ``c_m`` is per-group ([0, kpg)); the atomic
+    # address must land in the group's absolute dW output-channel slab
+    # (k_out = group*kpg + c_m).  Bounds checks stay on the per-group ``c_m``.
+    # Ungrouped (group is None) leaves every address byte-identical.
+    _c_kpg = b.const_i32(p.kpg) if group is not None else None
+
+    def _row_addr(c_m: Value) -> Value:
+        if group is None:
+            return c_m
+        return b.add(c_m, b.mul(group, _c_kpg))
+
     def _to_dtype(v_f32: Value) -> Value:
         """Convert f32 accumulator value to dtype_d."""
         if dtype_d == "fp32":
@@ -1260,7 +1383,7 @@ def _emit_wgrad_split_k_epilogue(
             c_n_is_odd = b.mod(c_n, b.const_i32(2))
             is_odd = b.cmp_ne(c_n_is_odd, b.const_i32(0))
             c_n_even = b.sub(c_n, c_n_is_odd)  # c_n - (c_n % 2)
-            c_off_even = b.add(b.mul(c_m, wg_N_v), c_n_even)
+            c_off_even = b.add(b.mul(_row_addr(c_m), wg_N_v), c_n_even)
             # Slot 0 = even position, slot 1 = odd position.
             v_even = b.select(is_odd, zero, val)
             v_odd = b.select(is_odd, val, zero)
@@ -1273,7 +1396,7 @@ def _emit_wgrad_split_k_epilogue(
     def _emit_scalar_atomic(c_m: Value, c_n: Value, val_f32: Value) -> None:
         """OOB-guarded scalar atomic-add, dispatching on dtype_d."""
         if dtype_d == "fp32":
-            c_off = b.add(b.mul(c_m, wg_N_v), c_n)
+            c_off = b.add(b.mul(_row_addr(c_m), wg_N_v), c_n)
             with b.scf_if(b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))):
                 b.global_atomic_add(dw_ptr, c_off, val_f32)
         else:
@@ -1315,12 +1438,17 @@ def _emit_wgrad_direct_epilogue(
     accs: Sequence[Value],
     grid: WarpGrid,
     dw_rsrc: Value,
+    group: Optional[Value] = None,
 ) -> None:
     """Per-lane scalar store to dW via the weight-gradient descriptor.
 
     Delegates to :class:`rocke.helpers.epilogues.DirectEpilogue`.
     The address function maps ``(m_val=k_out, n_val=n_wg)`` to the KYXC
     linear byte offset via :func:`make_dw_descriptor`.
+
+    ``group`` (grouped wgrad only): the M-tile row ``m_val`` is per-group
+    (``[0, kpg)``); fold ``group*kpg`` into ``k_out`` for the group's output-
+    channel slab and pass ``group`` for the channel embed ``c = group*cpg + …``.
     """
     p = spec.problem
     if p.is_pointwise:
@@ -1328,6 +1456,16 @@ def _emit_wgrad_direct_epilogue(
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
+
+    elif group is not None:
+        # Grouped: dW packed [K,Y,X,cpg]; the group rides on the global k_out
+        # only (m_val is the per-group [0,kpg) row).
+        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+        _c_kpg = b.const_i32(p.kpg)
+
+        def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            m_g = b_.add(m_val, b_.mul(group, _c_kpg))
+            return dW_desc.offset(b_, k_out=m_g, n_wg=n_val)
 
     else:
         dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
@@ -1356,8 +1494,13 @@ def _emit_wgrad_direct_epilogue_wmma(
     block_n_off: Value,
     dw_rsrc: Value,
     c0: Value,
+    group: Optional[Value] = None,
 ) -> None:
-    """Per-lane store for the WMMA (gfx1151) accumulator layout into dW."""
+    """Per-lane store for the WMMA (gfx1151/gfx1250) accumulator layout into dW.
+
+    ``group`` (grouped wgrad only): fold ``group*kpg`` into the per-group M row
+    and pass ``group`` for the dW channel-slab embed.
+    """
     p = spec.problem
     mfmas_m = spec.mfmas_per_warp_m
     mfmas_n = spec.mfmas_per_warp_n
@@ -1368,6 +1511,7 @@ def _emit_wgrad_direct_epilogue_wmma(
     c_M = b.const_i32(_wg_M(p))
     c_N = b.const_i32(_wg_N(p))
     _c_wgN_wmma = b.const_i32(_wg_N(p)) if p.is_pointwise else None
+    _c_kpg = b.const_i32(p.kpg) if group is not None else None
     dW_desc = None if p.is_pointwise else make_dw_descriptor(p, dtype=spec.data.dtype_d)
     c_map = op.c_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
@@ -1398,6 +1542,9 @@ def _emit_wgrad_direct_epilogue_wmma(
                 v_f32 = b.vec_extract(acc, i)
                 if p.is_pointwise:
                     dw_off_elems = b.add(b.mul(m_val, _c_wgN_wmma), n_val)
+                elif group is not None:
+                    m_g = b.add(m_val, b.mul(group, _c_kpg))
+                    dw_off_elems, _ = dW_desc.offset(b, k_out=m_g, n_wg=n_val)
                 else:
                     dw_off_elems, _ = dW_desc.offset(b, k_out=m_val, n_wg=n_val)
                 dw_off_bytes = b.mul(dw_off_elems, b.const_i32(_elem_bytes))
@@ -1418,12 +1565,18 @@ def _emit_wgrad_cshuffle_epilogue(
     accs: Sequence[Value],
     grid: WarpGrid,
     dw_rsrc: Value,
+    group: Optional[Value] = None,
 ) -> None:
     """LDS-staged cshuffle epilogue writing to dW (KYXC layout).
 
     Delegates to :class:`rocke.helpers.epilogues.CShuffleEpilogue`.
     The address function maps ``(m_val=k_out, n_val=n_wg)`` to KYXC offset
     via :func:`make_dw_descriptor`.
+
+    ``group`` (grouped wgrad only): the M row ``m_val`` is per-group ([0, kpg));
+    fold ``group*kpg`` into ``k_out`` so the staged store lands in the group's
+    dW output-channel slab, and derive the store vector width from cpg/kpg (the
+    packed dW inner dim), not the full C/K.
     """
     p = spec.problem
     if p.is_pointwise:
@@ -1431,6 +1584,14 @@ def _emit_wgrad_cshuffle_epilogue(
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
+
+    elif group is not None:
+        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+        _c_kpg = b.const_i32(p.kpg)
+
+        def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            m_g = b_.add(m_val, b_.mul(group, _c_kpg))
+            return dW_desc.offset(b_, k_out=m_g, n_wg=n_val)
 
     else:
         dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
@@ -1442,8 +1603,12 @@ def _emit_wgrad_cshuffle_epilogue(
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
     else:
+        # Grouped: the packed dW inner (store) dim is cpg, so bound the store
+        # vector width by cpg/kpg rather than the full C/K.
+        _vc_C = p.cpg if group is not None else spec.problem.C
+        _vc_K = p.kpg if group is not None else spec.problem.K
         _, __, vec_c = WgradConvSpec.default_vector_sizes(
-            spec.problem.C, spec.problem.K, spec.data.dtype_d, split_k=spec.split_k
+            _vc_C, _vc_K, spec.data.dtype_d, split_k=spec.split_k
         )
         _cshuffle_kwargs["max_store_vec"] = vec_c
     CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(
