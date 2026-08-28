@@ -127,8 +127,12 @@ def build_conv_wgrad_workspace_reduce(
     wg_M_param = b.param("wg_M", I32)
     wg_N_param = b.param("wg_N", I32)
     split_k_param = b.param("split_k", I32)
-    _ws_bytes = b.param("ws_bytes", I32)  # noqa: F841 — ABI boundary; no bounds check performed
-    _dw_bytes = b.param("dw_bytes", I32)  # noqa: F841 — ABI boundary; no bounds check performed
+    _ws_bytes = b.param(
+        "ws_bytes", I32
+    )  # noqa: F841 — ABI boundary; no bounds check performed
+    _dw_bytes = b.param(
+        "dw_bytes", I32
+    )  # noqa: F841 — ABI boundary; no bounds check performed
 
     # Thread flat index within the workgroup.
     tid = b.thread_id_x()

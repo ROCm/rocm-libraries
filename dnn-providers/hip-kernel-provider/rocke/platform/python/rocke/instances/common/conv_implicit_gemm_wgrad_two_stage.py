@@ -73,15 +73,33 @@ def _wgrad_stage1_signature(spec: WgradConvSpec) -> list:
     mixed-dtype configurations (e.g. bf16 inputs with fp32 output) are
     described correctly.
     """
-    _dtype_map = {"fp16": "f16", "bf16": "bf16", "fp32": "f32", "f16": "f16", "f32": "f32"}
+    _dtype_map = {
+        "fp16": "f16",
+        "bf16": "bf16",
+        "fp32": "f32",
+        "f16": "f16",
+        "f32": "f32",
+    }
 
     def _ir(dt: str) -> str:
         return _dtype_map.get(dt, dt)
 
     return [
-        {"name": "A", "type": f"ptr<{_ir(spec.data.dtype_a)}, global>", "size_bytes": 8},
-        {"name": "B", "type": f"ptr<{_ir(spec.data.dtype_b)}, global>", "size_bytes": 8},
-        {"name": "D", "type": f"ptr<{_ir(spec.data.dtype_d)}, global>", "size_bytes": 8},
+        {
+            "name": "A",
+            "type": f"ptr<{_ir(spec.data.dtype_a)}, global>",
+            "size_bytes": 8,
+        },
+        {
+            "name": "B",
+            "type": f"ptr<{_ir(spec.data.dtype_b)}, global>",
+            "size_bytes": 8,
+        },
+        {
+            "name": "D",
+            "type": f"ptr<{_ir(spec.data.dtype_d)}, global>",
+            "size_bytes": 8,
+        },
         {"name": "A_bytes", "type": "i32", "size_bytes": 4},
         {"name": "B_bytes", "type": "i32", "size_bytes": 4},
         {"name": "D_bytes", "type": "i32", "size_bytes": 4},
