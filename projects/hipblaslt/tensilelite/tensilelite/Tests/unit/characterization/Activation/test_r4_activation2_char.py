@@ -4,7 +4,7 @@
 ################################################################################
 """R4 — remaining activation-function emit arms characterization test.
 
-Covers Tensile/Activation.py target ranges 489-617, 639-718, 727-836, 852-936
+Covers tensilelite/Activation.py target ranges 489-617, 639-718, 727-836, 852-936
 by directly calling ActivationModule.getModule() for the activation functions
 and data-type variants not yet exercised by the existing test_activation_char.py:
 

@@ -140,8 +140,8 @@
 /projects/hipblaslt/library/include/                @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
 
 # Internal engineering decision logs, not user-facing docs: skip the docs-reviewers group.
-/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/DECISIONS.md   @ROCm/hipblaslt-reviewers
-/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/adr/           @ROCm/hipblaslt-reviewers
+/projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/DECISIONS.md   @ROCm/hipblaslt-reviewers
+/projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/adr/           @ROCm/hipblaslt-reviewers
 
 /projects/hipcub/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/hipcub/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers

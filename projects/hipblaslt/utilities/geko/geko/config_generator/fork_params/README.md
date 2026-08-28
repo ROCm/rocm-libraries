@@ -1,6 +1,6 @@
 # `fork_params`
 
-Hardware-specific **optimization parameter** builders (non-MI fork params and Tensile `Groups` dimensions) and **post-processors** that adjust MI groups and fork params after the main generation step. Selection is by `config['ARCH']` and `config['search_space']` in [`__init__.py`](__init__.py).
+Hardware-specific **optimization parameter** builders (non-MI fork params and TensileLite `Groups` dimensions) and **post-processors** that adjust MI groups and fork params after the main generation step. Selection is by `config['ARCH']` and `config['search_space']` in [`__init__.py`](__init__.py).
 
 For YAML keys, CLI, and the full driver pipeline, see the [parent `config_generator` README](../README.md).
 
@@ -19,7 +19,7 @@ For YAML keys, CLI, and the full driver pipeline, see the [parent `config_genera
 
 ## Adding a new `ARCH`
 
-1. **`geko/constants.py`** and **`geko/config_generator/constants.py`** — Add a gfx-style id to `SUPPORTED_ARCH` in `geko/constants.py`, then add matching `_ARCH_SPECS[...]` / `HARDWARE_MAP[...]` in `config_generator/constants.py` with `CUs`, `XCC`, `ONLY_INCLUDE_MIs` (per-`DataType` MI allowlists), and Tensile `LibraryLogic` fields (fourth tuple component; reuse `_LIBRARY_LOGIC_FIELDS_GFX950` / `_LIBRARY_LOGIC_FIELDS_GFX942` or extend with new `_LIBRARY_LOGIC_FIELDS_*` as needed). If optional-field defaults differ per `ARCH`, extend [`CONFIG_DEFAULTS_BY_ARCH`](../constants.py) in [`constants.py`](../constants.py).
+1. **`geko/constants.py`** and **`geko/config_generator/constants.py`** — Add a gfx-style id to `SUPPORTED_ARCH` in `geko/constants.py`, then add matching `_ARCH_SPECS[...]` / `HARDWARE_MAP[...]` in `config_generator/constants.py` with `CUs`, `XCC`, `ONLY_INCLUDE_MIs` (per-`DataType` MI allowlists), and TensileLite `LibraryLogic` fields (fourth tuple component; reuse `_LIBRARY_LOGIC_FIELDS_GFX950` / `_LIBRARY_LOGIC_FIELDS_GFX942` or extend with new `_LIBRARY_LOGIC_FIELDS_*` as needed). If optional-field defaults differ per `ARCH`, extend [`CONFIG_DEFAULTS_BY_ARCH`](../constants.py) in [`constants.py`](../constants.py).
 
 2. **`hw_profiles/<id>/optimization_param.py`** — Subclass [`BaseOptimizationParams`](optimization_param.py): decorate methods with `@param` and `@group`; discovery is automatic via `generate_for_size`. Add a **generic** search-space variant the same way (e.g. `GFX942GAParams` subclasses `BaseOptimizationParams` in the existing profiles).
 
@@ -35,7 +35,7 @@ Until step 4 is done, `get_optimization_params` will raise `KeyError` for the ne
 
 ## Design choices
 
-- **`BaseParamBuilder`** ([`optimization_param.py`](optimization_param.py)) loads Tensile metadata once via [`param_meta.py`](param_meta.py) so `_make_param` can attach default/range comments to [`ForkParameter`](../shared_utils.py) without hard-coding strings everywhere.
+- **`BaseParamBuilder`** ([`optimization_param.py`](optimization_param.py)) loads TensileLite metadata once via [`param_meta.py`](param_meta.py) so `_make_param` can attach default/range comments to [`ForkParameter`](../shared_utils.py) without hard-coding strings everywhere.
 
 - **Split of concerns:** `MIDesign` owns MI discovery and filtering style; optimization profiles own enumerations of other fork axes and non-MI group dimensions; post-processors apply cross-cutting edits (e.g. tightening lists) without reimplementing MI logic.
 

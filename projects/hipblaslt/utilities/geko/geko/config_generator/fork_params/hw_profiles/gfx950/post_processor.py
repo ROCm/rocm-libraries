@@ -199,7 +199,7 @@ def load_CMS_groups(
     """Load CMS groups from tensilelite's kernel registry, returned as GroupDimension.
 
     *make_param* must be a bound ``_make_param`` from a ``BaseParamBuilder``
-    subclass: it attaches default Tensile metadata comments for ordinary
+    subclass: it attaches default TensileLite metadata comments for ordinary
     parameters. For ``MatrixInstruction``, that default is replaced here with
     a comment derived from ``MIDesign.calculate_mfma_parameters`` (MT, TT, WG,
     MIBlockM), matching the loop below.
@@ -230,7 +230,7 @@ def load_CMS_groups(
             from tensilelite.Common.ValidParameters import validParameters
         else:
             raise ImportError(
-                "Tensile not found. Could not locate tensilelite directory "
+                "tensilelite not found. Could not locate tensilelite directory "
                 "in parent directories of this file."
             )
     
