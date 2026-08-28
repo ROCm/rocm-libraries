@@ -56,8 +56,7 @@ bool KernelArgsBuffer::create(const std::vector<size_t>& length,
         if(itype == KIntType::U32)
         {
             if(value > std::numeric_limits<unsigned int>::max())
-                throw std::runtime_error(std::string(what)
-                                         + " overflows 32-bit kernel kint_type");
+                throw std::runtime_error(std::string(what) + " overflows 32-bit kernel kint_type");
             reinterpret_cast<unsigned int*>(array)[i] = static_cast<unsigned int>(value);
         }
         else
