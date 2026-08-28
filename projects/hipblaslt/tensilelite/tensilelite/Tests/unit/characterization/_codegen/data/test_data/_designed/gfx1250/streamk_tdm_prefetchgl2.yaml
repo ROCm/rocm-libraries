@@ -16,7 +16,7 @@
 # keeps its direct read) against more than one loop shape.
 #
 # Mirrors the fork block of the GPU test that regressed
-# (Tensile/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_pap_prefetchgl2.yaml),
+# (tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_pap_prefetchgl2.yaml),
 # reduced to a single MatrixInstruction so the emit stays cheap -- the SGPR count
 # is invariant across that config's three MatrixInstructions. StaggerU=0 still
 # selects the stagger code path (states.staggerUCode is not gated on the StaggerU

@@ -197,7 +197,7 @@ _MAJOR, _MINOR, _STEP = (int(p) for p in __version__.split("."))
 
 
 class TestVersionIsCompatible:
-    """Compatibility is keyed off the live Tensile __version__ so these stay
+    """Compatibility is keyed off the live TensileLite __version__ so these stay
     correct across version bumps."""
 
     def test_exact_version_is_compatible(self):

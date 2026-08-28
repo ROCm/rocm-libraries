@@ -4,7 +4,7 @@
 ################################################################################
 """R7 — BenchmarkProblems solution-derivation and custom-kernel paths (CPU-only).
 
-TARGET: Tensile/BenchmarkProblems.py
+TARGET: tensilelite/BenchmarkProblems.py
   miss=111; target ranges: 182-325  (_generate_single_solution,
   _getCustomKernelSolutionObj, _generateCustomKernelSolutions).
 

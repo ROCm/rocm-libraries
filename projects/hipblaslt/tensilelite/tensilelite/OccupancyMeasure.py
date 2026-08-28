@@ -44,7 +44,7 @@ def compute_occupancy_from_resources(
         max_waves_per_simd: Hardware wave cap per SIMD (8 ArchAccUnifiedRegs; 10 otherwise).
 
     Returns:
-        Max active workgroups per CU (Tensile's CUOccupancy).
+        Max active workgroups per CU (TensileLite's CUOccupancy).
     """
     # Workgroup multiplier: ceil(max(numThreads, 256) / 256) — matches getVgprOccupancy.
     # For >256-thread blocks each SIMD slot holds multiplier waves, so the aligned

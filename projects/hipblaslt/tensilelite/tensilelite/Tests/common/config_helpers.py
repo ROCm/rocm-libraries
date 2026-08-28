@@ -123,7 +123,7 @@ def configMarks(filepath, rootDir, availableArchs):
         marks.append(pytest.mark.syntax_error)
         return marks
 
-    # A Tensile config is a mapping (GlobalParameters/BenchmarkProblems/...).
+    # A TensileLite config is a mapping (GlobalParameters/BenchmarkProblems/...).
     # Top-level sequences are library logic YAMLs (e.g. characterization data
     # files), which are not standalone tensilelite.py configs. Signal the caller to
     # skip them rather than crashing on doc["BenchmarkProblems"].
@@ -260,7 +260,7 @@ def findConfigs(rootDir=None, availableArchs=None):
                 if not "test_data" in filepath:
                     marks = configMarks(filepath, rootDir, availableArchs)
                     if marks is None:
-                        # Not a Tensile config (e.g. a library logic YAML); skip.
+                        # Not a TensileLite config (e.g. a library logic YAML); skip.
                         continue
 
                     # Conditionally xfail icache_flush.yaml on rocm 7.1 due to ROCm bug.

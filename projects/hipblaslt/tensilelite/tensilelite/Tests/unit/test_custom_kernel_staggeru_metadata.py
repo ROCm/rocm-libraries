@@ -41,11 +41,12 @@ from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 import pytest
 
-from Tensile.Common.GlobalParameters import (
+
+from tensilelite.Common.GlobalParameters import (
     defaultBenchmarkCommonParameters,
     defaultInternalSupportParams,
 )
-from Tensile.CustomKernels import (
+from tensilelite.CustomKernels import (
     getAllCustomKernelNames,
     getCustomKernelContents,
     readCustomKernelConfig,

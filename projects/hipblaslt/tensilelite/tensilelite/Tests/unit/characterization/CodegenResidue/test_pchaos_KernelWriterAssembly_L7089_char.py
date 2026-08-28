@@ -6,7 +6,7 @@
 Characterisation test — branch_id 4480256b782f32e867dd3bf96665dc8ae5b6a883
 
 Predicate : tailLoop
-Site      : Tensile/KernelWriterAssembly.py:7089  (calculateLoopNumIter, if)
+Site      : tensilelite/KernelWriterAssembly.py:7089  (calculateLoopNumIter, if)
 Solver    : z3 4.16.0  — SAT  (solver-backed-under-assumptions)
 
 What the predicate reads

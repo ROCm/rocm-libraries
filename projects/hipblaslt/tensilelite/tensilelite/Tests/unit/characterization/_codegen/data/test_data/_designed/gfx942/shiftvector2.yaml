@@ -4,7 +4,7 @@
 ################################################################################
 # P4-widen ShiftVectorComponents characterization seed #2 for gfx942.
 #
-# Target: Tensile/Components/ShiftVectorComponents.py
+# Target: tensilelite/Components/ShiftVectorComponents.py
 # Primary ranges: 47-200 (ShiftVectorComponentsVALU.__call__)
 # Secondary target: 438-439 (PartialThread large-mb branch, target>64 path)
 # Dead-code proof target: 552-784 (ShiftVectorComponentsMFMAAllThread)

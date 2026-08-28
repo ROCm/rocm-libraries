@@ -1,4 +1,4 @@
-# Tensilelite
+# TensileLite
 
 ## Building and Running Tests
 
@@ -16,7 +16,7 @@ cd rocm-libraries/projects/hipblaslt/tensilelite
 tox -e py3 -- tensilelite/Tests -m common
 ```
 
-Subsequently, you can run just the Tensile unit tests via:
+Subsequently, you can run just the TensileLite unit tests via:
 
 ```
 tox -e unit -- tensilelite/Tests/unit
@@ -66,7 +66,7 @@ with `git commit --no-verify`. On a snapshot mismatch the hook prints a
 ### Build client with invoke and Run a Test (Default Path)
 
 This workflow uses `invoke` to build the C++ client into the default `build_tmp` directory.
-Tensile will search for `tensilelite-client` in `tensilelite/build_tmp` if `--prebuilt-client`
+TensileLite will search for `tensilelite-client` in `tensilelite/build_tmp` if `--prebuilt-client`
 is not specified.
 
 ```

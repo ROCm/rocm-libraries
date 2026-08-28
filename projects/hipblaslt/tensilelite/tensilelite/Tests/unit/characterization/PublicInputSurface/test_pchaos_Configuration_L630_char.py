@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurface characterization: the nodeType == "Module" dispatch
-in ExpressionEvaluator.evaluate (Tensile/Configuration.py:630).
+in ExpressionEvaluator.evaluate (tensilelite/Configuration.py:630).
 
 Branch 05506103d2678e4391d5a18d052fcc09b0d5981f. The predicate is a
 runtime nodeType dispatch inside the recursive AST walker:

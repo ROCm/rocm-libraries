@@ -10,7 +10,7 @@ are only reachable on WMMA_V3 architectures (gfx1250).  The key gate is
 ``kernel["UseF32XEmulation"]``, which is set by Solution.py when
 ``F32XdlMathOp=X`` (XFloat32, enum=10) is requested on a WMMA_V3 arch.
 
-Target missing ranges in Tensile/KernelWriterAssembly.py:
+Target missing ranges in tensilelite/KernelWriterAssembly.py:
   8646-8651  is_wmma_v3+UseF32XEmulation branch (vgprPerSet0Group=1)
   8669-8674  is_wmma_v3+UseF32XEmulation multiplyBy for group==0
   8680-8687  is_wmma_v3+UseF32XEmulation kOffsetA for group>0

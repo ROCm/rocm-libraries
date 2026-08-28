@@ -4,7 +4,7 @@
 ################################################################################
 # P2 DESIGNED subtile config for gfx950 — SubtileGREmit characterization.
 #
-# Targets the uncovered ranges in Tensile/Components/Subtile/SubtileGREmit.py:
+# Targets the uncovered ranges in tensilelite/Components/Subtile/SubtileGREmit.py:
 #   359-411  (_emitGR_TLU0 — subtile GR buffer load emit)
 #   528-639  (_grComputeSubtileOffsets_legacy, _grComputeRowPartition_legacy
 #             loadRatioGR=1.0/0.5/2.0 branches)

@@ -114,7 +114,7 @@ test_categories:
   emu-fast:
     description: "Common GEMM tests for emulation pre-submits"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS} and emu_fast"
     parallel_workers: 16
@@ -129,7 +129,7 @@ test_categories:
   emu-full:
     description: "All common GEMM tests for emulation nightly"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS}"
     parallel_workers: 16

@@ -33,7 +33,7 @@ from tensilelite.SolutionStructs.Solution import (
 pytestmark = pytest.mark.unit
 
 
-# Tensile keeps process-global, module-level default dicts (`defaultSolution`,
+# TensileLite keeps process-global, module-level default dicts (`defaultSolution`,
 # `globalParameters`) that `Solution.__init__` reads while constructing a solution.
 # Some sibling unit tests mutate these in place -- e.g. test_MatrixInstructionConversion
 # injects a "ProblemType" key into `defaultSolution`, which makes Solution.__init__'s

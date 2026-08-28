@@ -6,7 +6,7 @@
 Characterisation test -- branch_id 4108a06779b564c9652562b2d8b1fd277e5ad963
 
 Predicate : doReadB   (local variable at entry to `if doReadB:`)
-Site      : Tensile/KernelWriter.py:4145  (inside _loopBody, inner iui loop)
+Site      : tensilelite/KernelWriter.py:4145  (inside _loopBody, inner iui loop)
 Solver    : z3 4.16.0 -- SAT (solver-backed-under-assumptions)
 
 Assignment chain (KernelWriter.py lines 4023-4063)

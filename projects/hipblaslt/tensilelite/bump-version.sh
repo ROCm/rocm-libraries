@@ -24,8 +24,12 @@
 #
 ################################################################################
 
-# This script needs to be edited to bump version for new release.
-# Version will be bumped in Tensile/__init__.py and in .yaml files
+# This script needs to be edited to bump version for a new release.
+# Version is bumped in tensilelite/__init__.py and pyproject.toml. Update the
+# MinimumRequiredVersion values in YAML files only when the compatibility floor
+# changes.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 OLD_VERSION="4.32.1"
 NEW_VERSION="4.33.0"
@@ -33,13 +37,12 @@ NEW_VERSION="4.33.0"
 OLD_MINIMUM_REQUIRED_VERSION="MinimumRequiredVersion: 4.7.2"
 NEW_MINIMUM_REQUIRED_VERSION="MinimumRequiredVersion: 4.8.0"
 
-sed -i "s/${OLD_VERSION}/${NEW_VERSION}/g" Tensile/Common/Common.py
-sed -i "s/${OLD_VERSION}/${NEW_VERSION}/g" HostLibraryTests/CMakeLists.txt
-
-echo "The version number also needs to be fixed in Tensile/cmake/TensileConfigVersion.cmake ."
+sed -i "s/${OLD_VERSION}/${NEW_VERSION}/g" \
+  "${SCRIPT_DIR}/tensilelite/__init__.py" \
+  "${SCRIPT_DIR}/pyproject.toml"
 
 #only update when there is a major version change
-#for FILE in Tensile/Configs/*yaml
+#for FILE in tensilelite/Tests/**/*.yaml
 #do
 #  sed -i "s/${OLD_MINIMUM_REQUIRED_VERSION}/${NEW_MINIMUM_REQUIRED_VERSION}/" $FILE
 #done

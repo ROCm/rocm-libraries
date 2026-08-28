@@ -41,17 +41,17 @@ pytest -m unit tensilelite/Tests/unit
 
 ### Coverage is path-mode
 
-Always measure coverage with `--cov=Tensile` — a **filesystem path**, never a dotted module name — combined across `-n4` xdist workers:
+Always measure coverage with `--cov=tensilelite` — a **filesystem path**, never a dotted module name — combined across `-n4` xdist workers:
 
 ```bash
-pytest -m unit -n4 --cov=Tensile --cov-config=pyproject.toml \
+pytest -m unit -n4 --cov=tensilelite --cov-config=pyproject.toml \
   --cov-report=term-missing tensilelite/Tests/unit
 ```
 
 A dotted `--cov` target (e.g. `--cov=tensilelite.Common.DataType`) re-imports `rocisa` and SIGABRTs on duplicate nanobind registration. To read a single module's row, grep the term-missing output (the single-file path prefix does not filter the report):
 
 ```bash
-pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+pytest -m unit --cov=tensilelite --cov-config=pyproject.toml \
   --cov-report=term-missing tensilelite/Tests/unit | grep "Common/DataType.py"
 ```
 
@@ -83,7 +83,7 @@ even when the overall number looks fine.
 ### What the coverage number counts: the union of two suites
 
 The tests that run here are really two suites: the **characterization** tests (this directory) and
-the **pure unit** tests (the rest of `Tensile/Tests/unit`). Coverage is measured on the **union** of
+the **pure unit** tests (the rest of `tensilelite/Tests/unit`). Coverage is measured on the **union** of
 the two. A line counts as covered if *either* suite reaches it. The floors are measured on that
 union, so a per-file floor pins "coverage from characterization or unit, whichever reaches this
 line", not characterization alone.
@@ -201,7 +201,7 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
 2. **Raise the per-file floors.** Ratchet the baseline against that report:
 
    ```bash
-   python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json
+   python tensilelite/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json
    ```
 
    Each file's floor rises to its current coverage (rounded to two decimals), and a file with no
@@ -214,9 +214,9 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
    naming it:
 
    ```bash
-   python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update \
+   python tensilelite/Tests/unit/characterization/tools/coverage_ratchet.py update \
        --current coverage.json \
-       --allow-lower=Tensile/Components/Subtile/SubtileGREmit.py
+       --allow-lower=tensilelite/Components/Subtile/SubtileGREmit.py
    ```
 
    One `--allow-lower` per file, and it lowers only the files named. That is what keeps a run made

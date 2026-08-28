@@ -32,7 +32,7 @@ pytestmark = pytest.mark.unit
 
 # The cluster multicast is derived from ClusterDim (StreamK==3 and
 # ClusterDim[0] > 1) via this helper rather than stored as a state key.
-from Tensile.Common import streamKMulticast
+from tensilelite.Common import streamKMulticast
 
 _DESIGNED = os.path.join(
     os.path.dirname(__file__), "characterization",
@@ -52,13 +52,13 @@ class TestRegistration:
     def test_not_a_valid_parameter(self):
         """StreamKMulticast is derived-only (ClusterBarrier precedent): it must
         NOT be a user/benchmark-settable validParameter."""
-        from Tensile.Common.ValidParameters import validParameters
+        from tensilelite.Common.ValidParameters import validParameters
         assert "StreamKMulticast" not in validParameters
 
     def test_not_a_default_benchmark_parameter(self):
         """Not in defaultSolution either -- it is seeded/derived on state only by
         Solution.assignProblemIndependentDerivedParameters."""
-        from Tensile.Common.GlobalParameters import defaultSolution
+        from tensilelite.Common.GlobalParameters import defaultSolution
         assert "StreamKMulticast" not in defaultSolution
 
 
@@ -70,7 +70,7 @@ def _write_variant(tmp_path, name, *, fork_overrides=None):
     ``fork_overrides`` maps a fork parameter name to its single-element value
     list; an existing fork entry is replaced, otherwise appended.
     """
-    from Tensile import LibraryIO
+    from tensilelite import LibraryIO
     import yaml
 
     cfg = copy.deepcopy(LibraryIO.read(_STREAMK_MULTICAST))
@@ -145,7 +145,7 @@ class TestValidation:
         prefetch (PrefetchGlobalRead > 1): the prologue double-buffer prefetch
         multicast load is bracketed by a cluster-scope handshake in codegen, so
         both PrefetchGlobalRead 1 and 2 are accepted."""
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
 
         assert _validateStreamKMulticast(_mc_state(PrefetchGlobalRead=2), False, _isa_map()) is True
         assert _validateStreamKMulticast(_mc_state(PrefetchGlobalRead=1), False, _isa_map()) is True
@@ -178,7 +178,7 @@ class TestValidation:
         # ClusterDim = [2, 2] adds Ck = 2 N-axis peers on top of the Cs = 2 M-axis
         # peers, so A is multicast as well as B. It is the same cluster shape with
         # Ck > 1, accepted by the same validator.
-        from Tensile.Common import streamK2DMulticast
+        from tensilelite.Common import streamK2DMulticast
         cfg = _write_variant(tmp_path, "cd22.yaml",
                              fork_overrides={"ClusterDim": [[2, 2]]})
         states = _derive_states(cfg)
@@ -209,30 +209,30 @@ class TestValidation:
         # and _validateStreamKMulticast is a no-op (returns True) there. SK4/SK5 +
         # ClusterDim is rejected by the general Stream-K reconciliation (cluster
         # support is SK3-only), not by this validator.
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         st = _mc_state(StreamK=4)
         assert streamKMulticast(st) is False
         assert _validateStreamKMulticast(st, False, _isa_map()) is True
 
     def test_reject_xcc_mapping_direct(self):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(StreamKXCCMapping=3), False, _isa_map()) is False
 
     def test_reject_non_gfx1250_isa(self):
         # The ISA gate rejects before indexing isaInfoMap, so a foreign ISA need
         # not be present in the map.
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(ISA=[9, 4, 2]), False, _isa_map()) is False
 
     def test_reject_missing_hastdm(self):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(), False, _isa_map(has_tdm=False)) is False
 
     def test_reject_missing_hasclusterbarrier(self):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(), False, _isa_map(has_cluster_barrier=False)) is False
 
@@ -244,13 +244,13 @@ class TestTDMInstValidation:
 
     @pytest.mark.parametrize("tdminst", [1, 2])
     def test_reject_non_tdm3(self, tdminst):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         st = _mc_state(TDMInst=tdminst)
         assert _validateStreamKMulticast(st, False, _isa_map()) is False
         assert st.get("Valid") is False
 
     def test_accept_tdm3(self):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         st = _mc_state(TDMInst=3)
         assert _validateStreamKMulticast(st, False, _isa_map()) is True
 

@@ -582,7 +582,7 @@ def test_prune_library_raises_when_merge_returns_multiple(monkeypatch: pytest.Mo
 # ---------------------------------------------------------------------------
 
 def _make_tensile_mocks(calls: dict):
-    """Return (sys.modules patch dict, mock modules) for Tensile imports."""
+    """Return (sys.modules patch dict, mock modules) for TensileLite imports."""
     tensile_mod = types.ModuleType("tensilelite")
     library_io_mod = types.ModuleType("tensilelite.LibraryIO")
     custom_yaml_mod = types.ModuleType("tensilelite.CustomYamlLoader")

@@ -670,7 +670,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # makeSchedule:  Schedule work into interations.
 
-  # Tensile uses a two-level scheduler.  This the first-level, which
+  # TensileLite uses a two-level scheduler.  This the first-level, which
   # schedules global reads, global incs, and local writes into iteration.
   # Then makeSubIterSchedule schedules the instructions within the iteration.
   #
@@ -5342,7 +5342,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
 
     # TODO: Check what does this do and enable this if needed
-    # Tensile instruction pass, temporarily disable due to build time.
+    # TensileLite instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
     #ripo = rocIsaPassOption()
@@ -6779,7 +6779,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     moduleKernelBody.addBody(module)
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
 
-    # Tensile instruction pass, temporarily disable due to build time.
+    # TensileLite instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
     ripo = rocIsaPassOption()
@@ -6865,10 +6865,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.
                                "TDMLoadWaveSync": bool(kernel.get("TDMLoadWaveSync", False)),
-                               # PrefetchGlobalRead (PGR) for Tensile scheduling, and the
+                               # PrefetchGlobalRead (PGR) for TensileLite scheduling, and the
                                # InsertClusterBarrierPass Rule 3 drain threshold. Defaults to 1.
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
-                               # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
+                               # PrefetchLocalRead (PLR) for TensileLite scheduling. Defaults to 1.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
                                # Abs SW prefetch: mutually exclusive with PC-rel.
                                # Abs takes priority when both are True (backend enforces via else-if).

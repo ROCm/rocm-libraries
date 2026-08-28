@@ -4,13 +4,13 @@
 ################################################################################
 
 """PublicInputSurface characterization: the ``__name__ == "__main__"``
-module-guard in ``Tensile/tensilelite.py`` at line 25.
+module-guard in ``tensilelite/Tensile.py`` at line 25.
 
 Branch 2c7170bfd056c780a059b396e0cbb8a938384ecc. The predicate is a bare
 string-equality module guard:
 
   * TRUE branch  -> ``__name__ == "__main__"`` fires only when the file is
-                    executed directly (``python Tensile/tensilelite.py``). The
+                    executed directly (``python tensilelite/Tensile.py``). The
                     block prints a deprecation notice and calls ``exit(1)``.
   * FALSE branch -> ``__name__`` equals something other than ``"__main__"``
                     (e.g. ``"tensilelite.Tensile"`` when imported). The guard is
