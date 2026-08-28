@@ -42,6 +42,7 @@
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
+#include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
@@ -259,6 +260,9 @@ const std::vector<PassInfo> availablePasses = {
          return createBuildUseDefChainPass(clearExisting, includePseudo);
      }},
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
+    // Collapses every block back into the flat entry block, undoing
+    // CFGBuilderPass. Labels survive, so a later CFGBuilderPass splits again.
+    {"FlattenCFGPass", [](const auto&) { return createFlattenCFGPass(); }},
     // Erases blocks not reachable from the entry along CFG successor edges.
     // Run after CFGBuilderPass / LongBranchLoweringPass; an incomplete CFG
     // would make this delete live targets.
