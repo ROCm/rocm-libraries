@@ -318,19 +318,20 @@
 /*! \brief Determines the size threshold above which rocSOLVER uses the 2-stage
     algorithm (he2hb + hb2st) instead of the 1-stage algorithm (hetrd) when
     executing SYEVD/HEEVD. */
+// Tuned for single/double with vectors on MI300.
 #ifndef SYEVD_2STAGE_SWITCHSIZE
-#define SYEVD_2STAGE_SWITCHSIZE 8000
+#define SYEVD_2STAGE_SWITCHSIZE 11000
 #endif
 
 /*! \brief Bandwidth kd used by the 2-stage algorithm in SYEVD/HEEVD. */
 #ifndef SYEVD_2STAGE_KD
-#define SYEVD_2STAGE_KD 64
+#define SYEVD_2STAGE_KD 32
 #endif
 
 /*! \brief Block size nb used by he2hb in the 2-stage algorithm in SYEVD/HEEVD.
     Must satisfy nb >= kd and nb % kd == 0. */
 #ifndef SYEVD_2STAGE_NB
-#define SYEVD_2STAGE_NB (2*SYEVD_2STAGE_KD)
+#define SYEVD_2STAGE_NB SYEVD_2STAGE_KD
 #endif
 
 /*************************** sytf2/sytrf **************************************
