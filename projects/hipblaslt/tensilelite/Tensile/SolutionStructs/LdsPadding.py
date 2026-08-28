@@ -55,6 +55,24 @@ from typing import Dict
 _TDM_VALID_BLOCK_BYTES = (8, 16, 32, 64, 128, 256, 512, 1024)
 _TDM_MAX_PAD_BYTES     = 512
 
+# LdsPad in bytes must be an even number of dwords. Odd-dword padding leaves
+# the hardware in a state we do not understand, so it is never a candidate.
+_TDM_PAD_STEP_BYTES = 8
+
+def _pad_candidate_bytes():
+  """Legal LdsPad values in bytes, smallest first."""
+  return range(_TDM_PAD_STEP_BYTES, _TDM_MAX_PAD_BYTES + 1, _TDM_PAD_STEP_BYTES)
+
+def _even_dword_only(cfg: Dict[str, int], bpeDS: float) -> Dict[str, int]:
+  """Return cfg, or an all-zero config if pad is an odd number of dwords.
+
+  cfg["pad"] counts elements, so 8 bytes is 8 / bpeDS elements.
+  """
+  padStepElements = int(_TDM_PAD_STEP_BYTES / bpeDS)
+  if cfg["pad"] % padStepElements:
+    return {key: 0 for key in cfg}
+  return cfg
+
 # FP4/FP8 share ds_load_tr*_b64 (64-bit/thread, 2 banks/thread). HW
 # picks half-wave vs full-wave per instruction by per-thread address
 # alignment.
@@ -146,7 +164,7 @@ def _b64_compute_config(mt: int, bpeDS: float,
     for B in validB:
       if mtBytes % B != 0 and B % mtBytes != 0:
         continue
-      for P in range(4, _TDM_MAX_PAD_BYTES + 1, 4):
+      for P in _pad_candidate_bytes():
         if _b64_check(half0, half1, B, P, instOffs, wOffsets, shift,
                       require_pure_full_wave, require_some_full_wave):
           overhead = P / B
@@ -191,9 +209,8 @@ def _b64_emit_instOffs(mt, bpeDS, lrvw, miInputPerThread, miWaveTile):
   return tuple(sorted(instOffs))
 
 def _b64_w_offsets(miWaveGroup, matrixInstMBytes):
-  """Per-wave LDS shifts (logical bytes) for MIWaveGroup waves stacked
-  in one tile dimension: wave w reads from lroA + w * matrixInstMBytes
-  before block padding. matrixInstMBytes = MFMA_M (elements) * bpeDS."""
+  """Per-wave LDS shift in bytes before block padding: wave w reads from
+  lroA + w * matrixInstMBytes, where matrixInstMBytes is MFMA_M * bpeDS."""
   return tuple(w * matrixInstMBytes for w in range(max(miWaveGroup, 1)))
 
 @lru_cache(maxsize=None)
@@ -210,7 +227,7 @@ def _compute_fp4_config(mt: int, miWaveTile: int, miWaveGroup: int,
   return {"perBlock": result["perBlock"], "pad": result["pad"] * 2, "shift": result["shift"]}
 
 def get_fp4_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int) -> int:
-  return _compute_fp4_config(mt, miWaveTile, miWaveGroup)[key]
+  return _even_dword_only(_compute_fp4_config(mt, miWaveTile, miWaveGroup), 0.5)[key]
 
 @lru_cache(maxsize=None)
 def _compute_fp8_config(mt: int, miWaveTile: int, miWaveGroup: int,
@@ -224,20 +241,20 @@ def _compute_fp8_config(mt: int, miWaveTile: int, miWaveGroup: int,
   return _b64_compute_config(mt, 1.0, _b64_base_addrs_fp8, 16, instOffs, wOffsets)
 
 def get_fp8_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int) -> int:
-  return _compute_fp8_config(mt, miWaveTile, miWaveGroup)[key]
+  return _even_dword_only(_compute_fp8_config(mt, miWaveTile, miWaveGroup), 1.0)[key]
 
 def get_metadata_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int,
                            lrvwBytes: int, miInputPerThreadBytes: int) -> int:
-  """Sparse metadata TileMajor (enableLDSTrMetadata) padding.
-  Metadata is a byte-typed tensor (bpeDS=1), so the FP8 bank-conflict search model
-  (_compute_fp8_config) applies unchanged. Only the per-thread
-  instruction-offset iteration counts differ from plain FP8: pass
-  LocalReadVectorWidthMetadata and MIInputPerThreadMetadata already converted
-  to "metadata-byte" units.
+  """Padding for sparse metadata TileMajor (enableLDSTrMetadata).
+
+  Metadata is byte-typed, so the FP8 search applies unchanged. Only the
+  instruction-offset counts differ: pass LocalReadVectorWidthMetadata and
+  MIInputPerThreadMetadata already converted to metadata bytes.
   """
-  return _compute_fp8_config(mt, miWaveTile, miWaveGroup,
-                             lrvw=max(lrvwBytes, 1),
-                             miInputPerThread=max(miInputPerThreadBytes, 1))[key]
+  return _even_dword_only(
+    _compute_fp8_config(mt, miWaveTile, miWaveGroup,
+                        lrvw=max(lrvwBytes, 1),
+                        miInputPerThread=max(miInputPerThreadBytes, 1)), 1.0)[key]
 
 # -- FP16 b128 padding ---------------------------------------------
 
@@ -317,7 +334,7 @@ def _compute_fp16_config(mt: int, miWaveGroup: int,
   for Bcand in [b for b in _TDM_VALID_BLOCK_BYTES if b >= 16]:
     if mtBytes % Bcand != 0 and Bcand % mtBytes != 0:
       continue
-    for padBytes in range(4, _TDM_MAX_PAD_BYTES + 1, 4):
+    for padBytes in _pad_candidate_bytes():
       if _b128_check(half, Bcand, padBytes, wOffsets, instOffs):
         overhead = padBytes / Bcand
         if best is None or overhead < best[0]:
@@ -330,11 +347,11 @@ def _compute_fp16_config(mt: int, miWaveGroup: int,
 def get_fp16_mt_config(mt: int, key: str, miWaveGroup: int,
                        miInputPerThUnroll: int, lrvw: int,
                        miWaveTile: int, vw: int) -> int:
-  return _compute_fp16_config(mt, miWaveGroup,
-                              miInputPerThUnroll=miInputPerThUnroll,
-                              lrvw=lrvw,
-                              miWaveTile=miWaveTile,
-                              vw=vw)[key]
+  return _even_dword_only(_compute_fp16_config(mt, miWaveGroup,
+                                               miInputPerThUnroll=miInputPerThUnroll,
+                                               lrvw=lrvw,
+                                               miWaveTile=miWaveTile,
+                                               vw=vw), 2.0)[key]
 
 # -- FP32 b32 padding ------------------------------------------------
 
@@ -357,7 +374,7 @@ def _b32_search_padding(mt: int, rawAddrs: list, wOffsets, instOffs=(0,)):
                    if mtBytes % b == 0 or b % mtBytes == 0], reverse=True)
   best = None
   for B in validB:
-    for padDw in range(1, _TDM_MAX_PAD_BYTES // 4 + 1):
+    for padDw in range(2, _TDM_MAX_PAD_BYTES // 4 + 1, 2):
       if _b32_check(rawAddrs, B, padDw * 4, wOffsets, instOffs):
         overhead = (padDw * 4) / B
         if best is None or overhead < best[0]:
@@ -408,10 +425,10 @@ def get_fp32_mt_config(mt: int, key: str, vw: int, lrvw: int,
                        miInputPerThread: int,
                        miWaveTile: int,
                        xf32EmuPack: bool = False) -> int:
-  return _compute_fp32_config(mt, vw, lrvw, miWaveGroup,
-                              miInputPerThread=miInputPerThread,
-                              miWaveTile=miWaveTile,
-                              xf32EmuPack=xf32EmuPack)[key]
+  return _even_dword_only(_compute_fp32_config(mt, vw, lrvw, miWaveGroup,
+                                               miInputPerThread=miInputPerThread,
+                                               miWaveTile=miWaveTile,
+                                               xf32EmuPack=xf32EmuPack), 4.0)[key]
 
 @lru_cache(maxsize=None)
 def _compute_mxs_config(matrixInstK: int, mxBlock: int, vw: int) -> Dict[str, int]:
@@ -423,4 +440,6 @@ def _compute_mxs_config(matrixInstK: int, mxBlock: int, vw: int) -> Dict[str, in
   return {"perBlock": 256, "pad": 16}
 
 def get_mxs_mt_config(matrixInstK: int, mxBlock: int, vw: int, key: str) -> int:
+  # The pad is a fixed 16 bytes, already an even number of dwords, so the
+  # check the other entry points carry has nothing to do here.
   return _compute_mxs_config(matrixInstK, mxBlock, vw)[key]
