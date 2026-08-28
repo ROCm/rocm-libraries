@@ -566,11 +566,12 @@ inline KernelSource makeEmbeddedSource(const std::string& sourceFile = "Test.cpp
 }
 
 /// Defaults spell the shape the descriptor packager emits.
-inline KernelSource makeKpackSource(const std::string& library
-                                    = "kpack/hip_kernel_provider_gfx942.kpack",
-                                    const std::string& tocKey = "test-toc-key",
-                                    const std::string& symbol = "TestKernel",
-                                    const std::string& sha256 = std::string(64, 'a'))
+inline KernelSource
+    makeKpackSource(const std::string& library = "kpack/hip_kernel_provider_gfx942.kpack",
+                    const std::string& tocKey = "test-toc-key",
+                    const std::string& symbol = "TestKernel",
+                    const std::string& sha256 = std::string(64, 'a'),
+                    const std::vector<KernelArgument>& signature = {{"global_buffer", 8, 0, ""}})
 {
     KernelSource source;
     source.kind = KernelSourceKind::KPACK;
@@ -578,6 +579,7 @@ inline KernelSource makeKpackSource(const std::string& library
     source.tocKey = tocKey;
     source.symbol = symbol;
     source.sha256 = sha256;
+    source.signature = signature;
     return source;
 }
 

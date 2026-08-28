@@ -20,6 +20,7 @@ from .descriptors import (
     reachable_generic_ids,
 )
 from .errors import HkpPackError
+from .kernel_signature import kernel_signature
 from .kpack_resolver import load_kpack
 
 # The archive group every root packs under unless it names its own. One archive ships per
@@ -421,6 +422,7 @@ def _rewrite_ukd_kpack(
     arch,
     toc_key,
     sha256,
+    signature,
     toolchain_fields=None,
     rel_dir=Path("."),
     group=GROUP_NAME,
@@ -458,6 +460,7 @@ def _rewrite_ukd_kpack(
             "toc_key": toc_key,
             "symbol": ukd.symbol,
             "sha256": sha256,
+            "signature": signature,
         },
         "metadata": ukd.metadata,
         "priority": ukd.priority,
@@ -491,9 +494,9 @@ def pack_arch(
     """Pack a pruned intermediate arch into the shipped kpack release tree.
 
     Each distinct (source,build) variant .co is packed once under its own
-    toc_key; inline UKDs are rewritten hsaco->kpack, stamping toc_key + sha256
-    and moving build into a sibling provenance block. Guarded against toc_key
-    collisions (distinct inputs mapping to one key).
+    toc_key; inline UKDs are rewritten hsaco->kpack, stamping toc_key + sha256 +
+    signature and moving build into a sibling provenance block. Guarded against
+    toc_key collisions (distinct inputs mapping to one key).
     """
     arch = inter.arch
     out_arch_dir = Path(out_arch_dir)
@@ -511,6 +514,7 @@ def pack_arch(
 
     variant_bytes = {}
     variant_sha = {}
+    variant_signature = {}
     variant_source_build = {}
     for ukd in _all_ukds():
         vk = ukd.variant_key
@@ -552,6 +556,16 @@ def pack_arch(
             raise HkpPackError(
                 f"UKD '{ukd.id}' declares symbol '{ukd.symbol}' not present "
                 f"in code object for variant '{vk}'"
+            )
+        # Keyed on (variant, symbol), not on the variant alone: two UKDs
+        # differing only by entry point share one blob and one toc_key, and each
+        # has its own argument list. Caching per variant would give the second
+        # one the first's signature, which no fixture with one symbol per
+        # variant can catch.
+        signature_key = (vk, ukd.symbol)
+        if signature_key not in variant_signature:
+            variant_signature[signature_key] = kernel_signature(
+                variant_bytes[vk], ukd.symbol, f"UKD '{ukd.id}'"
             )
 
     archive = kpack_mod.PackedKernelArchive(
@@ -595,6 +609,7 @@ def pack_arch(
                         arch,
                         e.variant_key,
                         variant_sha[e.variant_key],
+                        variant_signature[(e.variant_key, e.symbol)],
                         toolchain_fields=_toolchain_for(e, hipcc, rocke_wheel_stamp),
                         # An inline UKD ships INSIDE this KDP file, so the
                         # runtime anchors its library on the KDP's directory,
@@ -620,6 +635,7 @@ def pack_arch(
             arch,
             ukd.variant_key,
             variant_sha[ukd.variant_key],
+            variant_signature[(ukd.variant_key, ukd.symbol)],
             toolchain_fields=_toolchain_for(ukd, hipcc, rocke_wheel_stamp),
             # A standalone UKD is its own file, so it anchors on its own dir.
             rel_dir=ukd.rel_dir,

@@ -5,10 +5,12 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -41,6 +43,51 @@ struct IngestorKernelCode
     std::unique_ptr<compilation::IRunnableKernel> kernel;
 };
 
+/// Fails unless the argument list a descriptor records matches the one its pack marshals.
+///
+/// A prebuilt archive is compiled out of band from the pack that launches it, and
+/// `hipModuleGetFunction` confirms only that a symbol of that name exists, so a drifted
+/// signature is otherwise undefined behaviour at launch rather than a diagnostic. Embedded
+/// source needs none -- HIPRTC compiles it against the declaration the host marshals.
+///
+/// `kind` and `size` always. `name` only where both sides carry one: it is the one thing
+/// that catches an operand permutation, but clang omits it for HIP `extern "C" __global__`
+/// kernels, and requiring it would make every such kernel undispatchable. `offset` is
+/// printed and never compared -- the kernarg layout is the driver's, not the pack's to
+/// assert.
+///
+/// Throwing rather than warning because every way this fires is a static disagreement
+/// between two authored artifacts: no configuration reaches it with a correct launch.
+inline void
+    requireSignatureMatch(const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& recorded,
+                          const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& expected,
+                          const std::string& symbol,
+                          const std::string& label)
+{
+    const auto agrees = [](const hipdnn_plugin_sdk::ingestor::KernelArgument& lhs,
+                           const hipdnn_plugin_sdk::ingestor::KernelArgument& rhs) {
+        if(lhs.kind != rhs.kind || lhs.size != rhs.size)
+        {
+            return false;
+        }
+        return lhs.name.empty() || rhs.name.empty() || lhs.name == rhs.name;
+    };
+
+    if(recorded.size() != expected.size()
+       || !std::equal(recorded.begin(), recorded.end(), expected.begin(), agrees))
+    {
+        // Both sides printed: a mismatch diagnostic naming only one of them sends the
+        // reader to the archive by hand to find out what the other was.
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "kpack kernel source for " + label + ": symbol '" + symbol
+                + "' is packaged with arguments "
+                + hipdnn_plugin_sdk::ingestor::describeKernelSignature(recorded)
+                + ", but this pack launches it with "
+                + hipdnn_plugin_sdk::ingestor::describeKernelSignature(expected));
+    }
+}
+
 /// The single place a KernelSource's `kind` decides where the code object comes from.
 ///
 /// One helper rather than a branch copied into each pack handler: ConvNative is then a
@@ -52,12 +99,17 @@ struct IngestorKernelCode
 ///                   path: a kpack blob's build defines were baked at pack time, so
 ///                   there is nothing left for them to affect. Silently ignoring them
 ///                   is the correct behaviour, not an oversight.
-inline IngestorKernelCode
-    buildIngestorKernelCode(const compilation::IKernelCompiler& compiler,
-                            const compilation::KpackKernelLoader& kpackLoader,
-                            const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                            const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
-                            const compilation::KernelCompileOptions& options)
+/// @param expectedSignature The list the calling pack declares beside its own launch.
+///                   Used only on the KPACK path, and deliberately without a default:
+///                   a pack that omits it should not compile into one that silently
+///                   skips the check.
+inline IngestorKernelCode buildIngestorKernelCode(
+    const compilation::IKernelCompiler& compiler,
+    const compilation::KpackKernelLoader& kpackLoader,
+    const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+    const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+    const compilation::KernelCompileOptions& options,
+    const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& expectedSignature)
 {
     using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 
@@ -160,6 +212,11 @@ inline IngestorKernelCode
                         + "' inside the descriptor tree '" + boundary.string() + "'");
             }
         }
+
+        // Ahead of the load: the descriptor and the pack already disagree, and opening an
+        // archive to confirm it would only delay the same diagnostic.
+        requireSignatureMatch(
+            kernel.source.signature, expectedSignature, kernel.source.symbol, label);
 
         auto program = kpackLoader.load(resolved,
                                         kernel.source.tocKey,

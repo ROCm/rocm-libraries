@@ -172,6 +172,17 @@ DescriptorId id(uint8_t seed)
     return value;
 }
 
+/// What the pointwise pack's own pointwiseKernelSignature() declares: three device
+/// pointers. A descriptor built here has to agree with it or the dispatch is refused
+/// before the archive is ever opened, which would mask the failure each case is after.
+const std::vector<KernelArgument>& pointwiseSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{s_buffer, s_buffer, s_buffer};
+    return s_signature;
+}
+
 /// A KernelDefinition whose code comes from a kpack archive at
 /// `originDirectory / library`. Metadata carries exactly what the pointwise handler
 /// reads, so the only thing that differs from the embedded-source path is the source.
@@ -202,6 +213,7 @@ KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
     kernel.source.tocKey = tocKey;
     kernel.source.symbol = symbol;
     kernel.source.sha256 = sha256;
+    kernel.source.signature = pointwiseSignature();
     kernel.originDirectory = originDirectory;
     kernel.treeRoot = treeRoot;
     kernel.metadata = {{std::string(BLOCK_SIZE_FIELD), blockSize},
@@ -364,6 +376,7 @@ DescriptorSet makeTwoPackSet(const std::filesystem::path& emptyDirectory)
     failing.source.library = "there-is-no-archive-here.kpack";
     failing.source.tocKey = "lib/libhip.so#0";
     failing.source.symbol = "PointwiseAdd";
+    failing.source.signature = pointwiseSignature();
     failing.originDirectory = emptyDirectory;
     failing.metadata = {{std::string(BLOCK_SIZE_FIELD), int64_t{256}},
                         {std::string(DTYPE_FIELD), std::string("FLOAT")}};

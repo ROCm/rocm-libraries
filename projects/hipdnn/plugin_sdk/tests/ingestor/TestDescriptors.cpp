@@ -91,6 +91,7 @@ TEST(TestIngestorDescriptors, KernelSourceDefaultsToEmbeddedSource)
     EXPECT_TRUE(source.tocKey.empty());
     EXPECT_TRUE(source.symbol.empty());
     EXPECT_TRUE(source.sha256.empty());
+    EXPECT_TRUE(source.signature.empty());
 }
 
 TEST(TestIngestorDescriptors, KernelSourceCarriesEmbeddedSourceFileAndEntryPoint)
@@ -112,14 +113,27 @@ TEST(TestIngestorDescriptors, CarriesTheKpackCoordinates)
     source.tocKey = "0f1e2d3c4b5a6978";
     source.symbol = "pointwise_add_kernel";
     source.sha256 = std::string(64, 'a');
+    source.signature = {{"global_buffer", 8, 0, ""}, {"by_value", 4, 8, "count"}};
 
     EXPECT_EQ(source.kind, KernelSourceKind::KPACK);
     EXPECT_EQ(source.library, "kpack/hip_kernel_provider_gfx942.kpack");
     EXPECT_EQ(source.tocKey, "0f1e2d3c4b5a6978");
     EXPECT_EQ(source.symbol, "pointwise_add_kernel");
     EXPECT_EQ(source.sha256, std::string(64, 'a'));
+    ASSERT_EQ(source.signature.size(), 2u);
+    EXPECT_EQ(source.signature[1].kind, "by_value");
+    EXPECT_EQ(source.signature[1].size, 4u);
+    EXPECT_EQ(source.signature[1].offset, 8u);
+    EXPECT_EQ(source.signature[1].name, "count");
     EXPECT_TRUE(source.sourceFile.empty());
     EXPECT_TRUE(source.entryPoint.empty());
+}
+
+TEST(TestIngestorDescriptors, DescribesAKernelSignatureArgumentByKindWidthAndPosition)
+{
+    EXPECT_EQ(describeKernelSignature({}), "(no arguments)");
+    EXPECT_EQ(describeKernelSignature({{"global_buffer", 8, 0, ""}, {"by_value", 4, 8, "count"}}),
+              "global_buffer:8@0, by_value:4@8 'count'");
 }
 
 TEST(TestIngestorDescriptors, KernelDescriptorOriginDirectoryDefaultsToEmpty)
