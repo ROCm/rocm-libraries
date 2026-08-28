@@ -31,13 +31,13 @@ struct GpuRMSNormFwdParams
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& inputAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& scaleAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& outputAttributes,
-        const double epsilon,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& epsilonAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invRmsAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* biasAttributes = nullptr)
         : inputTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(inputAttributes))
         , scaleTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(scaleAttributes))
         , outputTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(outputAttributes))
-        , epsilon(epsilon)
+        , epsilonTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(epsilonAttributes))
         , invRmsTensor(invRmsAttributes != nullptr
                            ? std::make_optional(
                                  hipdnn_test_sdk::detail::unpackTensorAttributes(*invRmsAttributes))
@@ -52,7 +52,7 @@ struct GpuRMSNormFwdParams
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT inputTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT scaleTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT outputTensor;
-    double epsilon;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> invRmsTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> biasTensor;
 };
@@ -120,6 +120,9 @@ public:
             variantPack.at(_params.outputTensor.uid),
             _params.outputTensor.dims,
             _params.outputTensor.strides);
+        const auto epsilonValue = static_cast<double>(
+            hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<ComputeDataType>(
+                _params.epsilonTensor, variantPack, "Epsilon"));
 
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<ComputeDataType>> invRmsTensor;
         if(_params.invRmsTensor.has_value())
@@ -142,7 +145,7 @@ public:
                 inputTensor,
                 scaleTensor,
                 outputTensor,
-                _params.epsilon,
+                epsilonValue,
                 invRmsTensor.has_value() ? &invRmsTensor.value() : nullptr,
                 biasTensor.has_value() ? &biasTensor.value() : nullptr);
     }
@@ -253,10 +256,12 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->epsilon_tensor_uid(), ComputeDataTypeEnum);
 
         std::vector<int64_t> operandUids = {nodeAttributes->x_tensor_uid(),
                                             nodeAttributes->scale_tensor_uid(),
-                                            nodeAttributes->y_tensor_uid()};
+                                            nodeAttributes->y_tensor_uid(),
+                                            nodeAttributes->epsilon_tensor_uid()};
 
         if(nodeAttributes->inv_rms_tensor_uid().has_value())
         {
@@ -274,7 +279,8 @@ public:
             operandUids.push_back(nodeAttributes->bias_tensor_uid().value());
         }
 
-        // Reject if I/O or stats tensors are runtime pass-by-value
+        // Reject if any operand is runtime pass-by-value
+        // The plan cannot resolve a PBV host scalar
         return !anyOperandIsRuntimePassByValue(tensorMap, operandUids);
     }
 
@@ -289,18 +295,16 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        GpuRMSNormFwdParams params(
-            *tensorMap.at(nodeAttributes->x_tensor_uid()),
-            *tensorMap.at(nodeAttributes->scale_tensor_uid()),
-            *tensorMap.at(nodeAttributes->y_tensor_uid()),
-            hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-                &(*tensorMap.at(nodeAttributes->epsilon_tensor_uid())), "Epsilon"),
-            nodeAttributes->inv_rms_tensor_uid().has_value()
-                ? tensorMap.at(nodeAttributes->inv_rms_tensor_uid().value())
-                : nullptr,
-            nodeAttributes->bias_tensor_uid().has_value()
-                ? tensorMap.at(nodeAttributes->bias_tensor_uid().value())
-                : nullptr);
+        GpuRMSNormFwdParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
+                                   *tensorMap.at(nodeAttributes->scale_tensor_uid()),
+                                   *tensorMap.at(nodeAttributes->y_tensor_uid()),
+                                   *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
+                                   nodeAttributes->inv_rms_tensor_uid().has_value()
+                                       ? tensorMap.at(nodeAttributes->inv_rms_tensor_uid().value())
+                                       : nullptr,
+                                   nodeAttributes->bias_tensor_uid().has_value()
+                                       ? tensorMap.at(nodeAttributes->bias_tensor_uid().value())
+                                       : nullptr);
 
         return std::make_unique<
             GpuRMSNormFwdPlan<InputDataType, ScaleDataType, OutputDataType, ComputeDataType>>(
