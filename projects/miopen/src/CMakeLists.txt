@@ -948,11 +948,13 @@ endif()
 # ---- implementation-target configuration ----
 
 # Leave AMDGPU device code uninstrumented under a host UBSan build (see the detection in the
-# top-level CMakeLists.txt). Applied here as a target option on the MIOpen library only, rather
-# than a directory-wide add_compile_options, so it does not touch host tools, generated-file
-# compiles, tests, driver, or fin.
-if(MIOPEN_APPLY_NO_GPU_SANITIZE)
-    target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-gpu-sanitize>)
+# top-level CMakeLists.txt). -Xarch_device scopes -fno-sanitize=undefined to the device
+# sub-compile only, so host code keeps UBSan. Applied as a target option on the MIOpen library
+# only, not a directory-wide add_compile_options, so it does not touch host tools, tests,
+# driver, or fin. SHELL: keeps the two tokens together and un-deduplicated.
+if(MIOPEN_DISABLE_DEVICE_UBSAN)
+    target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
 endif()
 
 # Add dependency on inlined rocrand header if it was created

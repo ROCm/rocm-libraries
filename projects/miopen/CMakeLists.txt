@@ -356,28 +356,27 @@ add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPI
 # sanitizer request (e.g. CI's debug '-fsanitize=undefined -fno-sanitize-recover=undefined')
 # also instruments AMDGPU device code. ROCm/TheRock ships a device sanitizer runtime only for
 # ASan (amdgcn asanrtl.bc); there is no device UBSan runtime, so instrumented device objects
-# fail to link with undefined __ubsan_handle_*_abort symbols. When UBSan is requested, pass
-# -fno-gpu-sanitize so device code is left uninstrumented while host code stays instrumented.
-# Gated on 'undefined' specifically, so ASan-only builds keep their working device ASan.
+# fail to link with undefined __ubsan_handle_*_abort symbols. When UBSan is requested, disable
+# UBSan on the device side only -- via '-Xarch_device -fno-sanitize=undefined' -- so device code
+# is left uninstrumented while host code stays instrumented. Gated on 'undefined' specifically,
+# so ASan-only builds keep their working device ASan.
 #
-# Detection lives here (before add_subdirectory), but the flag is applied narrowly with
-# target_compile_options on the MIOpen library target(s) in src/CMakeLists.txt -- NOT via a
-# directory-wide add_compile_options -- so it only touches the device-code library and not
-# host tools (addkernels), generated-file compiles, tests, driver, or fin.
+# NB: -fno-gpu-sanitize is deliberately NOT used. On this toolchain it drops the user -I include
+# directories from the AMDGPU device compilation pass, so device-side '#include <miopen/...>'
+# then fails with "file not found". -Xarch_device scopes the flag to the device sub-compile
+# without that side effect.
+#
+# Detection lives here (before add_subdirectory); the flag is applied narrowly with
+# target_compile_options on the MIOpen library target in src/CMakeLists.txt so it only touches
+# the device-code library and not host tools (addkernels), tests, driver, or fin.
 if(HAS_HIP)
     string(TOUPPER "${CMAKE_BUILD_TYPE}" MIOPEN_BUILD_TYPE_UPPER)
     set(MIOPEN_EFFECTIVE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${MIOPEN_BUILD_TYPE_UPPER}}")
     if(MIOPEN_EFFECTIVE_CXX_FLAGS MATCHES "-fsanitize=[^ ]*undefined")
-        check_cxx_compiler_flag("-x hip -fno-gpu-sanitize" MIOPEN_HIP_COMPILER_HAS_OPTION_NO_GPU_SANITIZE)
-        if(MIOPEN_HIP_COMPILER_HAS_OPTION_NO_GPU_SANITIZE)
-            message(STATUS "UBSan requested: will add -fno-gpu-sanitize to MIOpen device library "
-                           "targets so AMDGPU device code links without a device UBSan runtime "
-                           "(host instrumentation retained)")
-            set(MIOPEN_APPLY_NO_GPU_SANITIZE ON)
-        else()
-            message(WARNING "UBSan requested but -fno-gpu-sanitize is unsupported by the compiler; "
-                            "AMDGPU device objects may fail to link without a device UBSan runtime")
-        endif()
+        message(STATUS "UBSan requested: will disable device-side UBSan on MIOpen HIP targets via "
+                       "'-Xarch_device -fno-sanitize=undefined' so AMDGPU device code links without "
+                       "a device UBSan runtime (host instrumentation retained)")
+        set(MIOPEN_DISABLE_DEVICE_UBSAN ON)
     endif()
 endif()
 
