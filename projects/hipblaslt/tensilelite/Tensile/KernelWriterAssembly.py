@@ -4619,18 +4619,11 @@ class KernelWriterAssembly(KernelWriter):
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
 
         strideF = self.strideRef(tc, tP['tileIdx'])
-        # A host-swizzled MX scale tensor is block-linear, not row/column-major:
-        # the scale GR walks whole swizzle blocks by Strides<tc>+0 regardless of
-        # layout (see _graTileAssignmentScaleSwizzledCommon, which is the same
-        # code for every TLU).  On TLU=0 the tile index is not the fastest one,
-        # so strideRef already returns that register and the block formula below
-        # fires.  On TLU=1 the tile index IS the fastest one, so strideRef hands
-        # back a constStride literal, the block formula is skipped, and the tile
-        # falls through to the data-shaped K-window branch -- which sizes the
-        # limit from the data DepthU and macro tile and has no meaning for a
-        # scale.  Name the block stride explicitly in that case so both layouts
-        # take the same path.  TLU=0 is untouched: there strideF is already
-        # Strides<tc>+0 under a different symbol.
+        # A swizzled scale is block-linear, and its GR walks blocks by
+        # Strides<tc>+0 whatever the layout.  On TLU=1 strideRef returns a
+        # constStride literal, which would drop the scale into the data-shaped
+        # branch below; name the block stride so both layouts take the block
+        # formula.  TLU=0 already resolves to the same register.
         if isMxSwizzledScaleLayout and self.isConstUnitStride(strideF):
           strideF = sgpr("Strides%s"%tc)
         if not self.isConstUnitStride(strideF):
@@ -4671,44 +4664,24 @@ class KernelWriterAssembly(KernelWriter):
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
         elif useFixedSrd2:
-          # Unit-stride tile (free) dim: NT / free-dim-contiguous operands (TLU=1).
-          # The strided fixedSrd2 formula above does not fire because the tile dim
-          # has stride 1 and the large stride lives on the K/unroll dim. Without
-          # this branch Srd+2 stays 0 and every buffer_load returns 0.
-          #
-          # Compute a per-window buffer limit along K instead of the free dim:
-          #   Srd+2 = ((DepthU - 1) * unrollStride + MT) * bpe + prePad
-          # One main-loop K window reads K-rows 0..DepthU-1 relative to the SRD
-          # base (the base itself is advanced by DepthU*unrollStride each iter), so
-          # the last row read sits (DepthU-1)*unrollStride elements past the base,
-          # not DepthU*unrollStride.  MT adds the contiguous free-dim span of the
-          # widest load.  Using DepthU here (instead of DepthU-1) overshoots the
-          # limit by exactly one unrollStride (= free-dim size M/N); for the final
-          # K window that pushes the limit one full row past the tensor end, and
-          # once the operand is large enough that the overrun lands on an unmapped
-          # page the buffer_load never retires and the mainloop deadlocks.  It is
-          # latent for small operands (the overrun stays inside a mapped heap
-          # allocation) but a hard hang once M/N and K are both large.  DepthU and
-          # MT are compile-time bounded, so the multiply stays in 32 bits (same
-          # overflow-safety intent as the strided branch).
+          # Unit-stride tile dim (TLU=1): the strided formula above cannot fire,
+          # and without this Srd+2 stays 0 and every load returns 0.  Bound the
+          # window along K instead:
+          #   Srd+2 = ((DepthU - 1) * unrollStride + span) * bpe + prePad
+          # DepthU-1, not DepthU: the base advances a window per iteration, so
+          # DepthU overshoots by one row and hangs once that row is unmapped.
           unrollIdx = kernel["ProblemType"]["IndexUnroll"]
           unrollStride = self.strideRef(tc, unrollIdx)
           freeSpan = kernel[tP["mt"]]  # MT free elements (unit stride)
           prePadElems = self.states.srdShiftLeft[tc]
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), \
                     unrollStride, kernel["DepthU"] - 1, comment="(DepthU-1) * unrollStride (last K row in window)"))
-          # Clamp the free span to what is left of the tensor, as the strided
-          # branch above does with SMinU32.  The last workgroup owns fewer than
-          # MT whenever the size leaves a remainder, and the base has already
-          # advanced by DepthU * unrollStride, so on the final K window the
-          # overhang is off the end of the allocation -- real accesses, not
-          # clamped ones.  Needs a remainder *and* an allocation ending on a
-          # page to fault: macro tile 96 over M 2048 is one such pair.
-          #
-          # Round up to a whole load first: DirectToLds drops the LDS write for
-          # a partially out-of-range load, so cutting mid-lane leaves stale LDS
-          # for the valid elements sharing that lane.  Width from the geometry,
-          # since AB_B16_TLU1_16x1 carries 32B rather than 16B.
+          # Clamp the span to what is left of the tensor, as the strided branch
+          # does with SMinU32: the last workgroup owns fewer than MT when the
+          # size leaves a remainder, and that overhang lands off the allocation
+          # on the final K window (tile 96 over M 2048 faults).  Round up to a
+          # whole load first -- DTL drops the LDS write for a partial load, so
+          # cutting mid-lane leaves stale LDS for the valid elements in it.
           grTileInfo = self.states.a.tileInfo if tc == 'A' else \
                        (self.states.b.tileInfo if tc == 'B' else None)
           loadBytes  = int(getattr(grTileInfo, "loadWidthGR", 16) or 16)

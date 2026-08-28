@@ -5050,18 +5050,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # TODO: Move this calculation to host-side?
     if (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) and kernel["UseSubtileImpl"]:
       # The scale GR steps one group per 32 rows of the free dim, so Strides<tc>
-      # has to hold that group's byte span: paddedKBlocks * 32, where
-      # paddedKBlocks is ceil(K/mxBlock) rounded up to a multiple of 8 (the
-      # padding setMXScale applies).
-      #
-      # Strides<tc>+0 is the tensor's first non-unit stride, and which dimension
-      # that is depends on the layout.  With the free dim slow (TLU=0) it is the
-      # free-dim stride, which already equals paddedKBlocks -- so a shift by 5 is
-      # the whole conversion.  With the free dim fastest (TLU=1) it is instead
-      # the stride between K blocks, i.e. the free size, and shifting that gives
-      # a group span scaled by M or N rather than by K: every group past the
-      # first then reads beyond the scale tensor.  Compute the span from K in
-      # that case rather than from a stride that does not describe it.
+      # must hold that group's byte span: paddedKBlocks * 32.  Strides<tc>+0 is
+      # the first non-unit stride, which with the free dim slow (TLU=0) already
+      # is paddedKBlocks -- a shift by 5 finishes it.  With the free dim fastest
+      # it is the free size instead, and shifting that scales the span by M or N
+      # rather than K, so every group past the first reads off the end.
       for tc in ("MXSA", "MXSB"):
         mxBlock = kernel["ProblemType"]["MXBlock%s" % tc[-1]]
         if not mxBlock:

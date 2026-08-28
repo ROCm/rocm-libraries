@@ -204,16 +204,9 @@ def _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
 
 
 def _subtileWaveStraddlesStrip(stack, perWaveMTiles):
-  # A wave has to line up with the LDS strips it reads: either it owns whole
-  # strips (perWaveMTiles a multiple of stack) or several waves share one
-  # (stack a multiple of perWaveMTiles).  Anything else leaves a wave holding a
-  # fraction of a strip, which the per-strip soffset registers cannot address --
-  # the GR emit indexes past the end of localSubtilesRegister.
-  #
-  # Only reachable when the free dim is not a power of two, since the stack is
-  # its largest power-of-two divisor: a macro tile of 192 gives 12 tiles and a
-  # stack of 4, so two waves take 6 tiles each and straddle.  A wave group of 1
-  # on that dim always lines up.
+  # A wave must own whole strips or share one with other waves; a fraction of a
+  # strip has no soffset register, and the GR emit indexes past the end of
+  # localSubtilesRegister.  Only reachable on a non-power-of-two free dim.
   if stack <= 0 or perWaveMTiles <= 0:
     return False
   return perWaveMTiles % stack != 0 and stack % perWaveMTiles != 0
@@ -1152,33 +1145,19 @@ class Solution(collections.abc.Mapping):
           if dtype.isBFloat16() or dtype.isHalf():
             state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
           elif dtype.isFloat4():
-            # Two fp4 elements share a byte, so the free dim being the fastest
-            # one puts its extent in the leading stride: an odd extent leaves
-            # the K stride on a half byte, which the elements-to-bytes shift
-            # truncates.  Every K step then drifts and the whole tile is wrong,
-            # with nothing to signal it.  gfx1250 already constrains this for
-            # fp4 (:3193) and, layout-by-layout, for 6-bit (:3200).
-            # Only the operand whose free dim is contiguous is affected -- the
-            # K-contiguous layouts take their leading stride from K and handle
-            # an odd free dim today, so this must not become unconditional.
+            # Two fp4 share a byte, so an odd free-dim extent leaves the K
+            # stride on a half byte and the elements-to-bytes shift truncates
+            # it; every K step then drifts, silently.  Only the contiguous
+            # operand is affected, so this must not become unconditional.
             key = "AssertFree0ElementMultiple" if tc == 'A' else "AssertFree1ElementMultiple"
             state[key] = max(state[key], 2)
-            # Only fp4 here, though the row-major branch below also maps 6-bit
-            # onto this geometry: it carries a bpe of 0.5 and names fp4 as the
-            # type it supports, and both bank-conflict layouts select on a bpe
-            # of exactly 0.5.  A 6-bit solution would take fp4 strides and no
-            # swizzle at all, so leave it to the reject below until the layout
-            # covers it.
-            # The LDS strip spans the operand's whole macro-tile free dim, so one
-            # buffer_load covers as long a contiguous run as the tile allows (a
-            # full 128B cacheline once that dim reaches 256 fp4 elements).  The
-            # strip height is therefore MacroTile/instM, taken down to the
-            # largest power of two that divides it because the bank-conflict
-            # layout is defined on power-of-two stacks; for a power-of-two macro
-            # tile that is MacroTile/instM exactly.  Waves then either share a
-            # strip or own several, which TileInfo derives.
-            # Capped at 16: 16*instM*bpe is 128B, one whole cacheline, and a
-            # longer contiguous run buys nothing from the memory system.
+            # fp4 only: 6-bit shares this geometry's 0.5 bpe but neither
+            # bank-conflict layout covers it, so it falls to the reject below.
+            #
+            # The strip spans the macro-tile free dim, so one load covers as
+            # long a run as the tile allows.  Its height is MacroTile/instM
+            # rounded down to a power of two (the swizzles are defined on those)
+            # and capped at 16, where the run is a full 128B line.
             mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
             mtTiles = mtFree // state["MatrixInstM"]
             stack = 2
@@ -1186,29 +1165,21 @@ class Solution(collections.abc.Mapping):
               if mtTiles % cand == 0:
                 stack = cand
                 break
-            # A narrow stack pins m_chunk to 0 in the GR lane map, so one load
-            # spends every lane on a different K column: 64 cache lines, 16B
-            # taken from each.  Rounding the strip up to a power of two buys a
-            # full-line run per K row; the padding tiles reach LDS and are never
-            # read back (emitSingleDsRead indexes sId0 % stackM).
-            #
-            # Worth it only while the padding is cheap.  On 5376x2048x2048,
-            # 14 tiles pad to 16 for 1.14x and gain 15% (1201 -> 1386 TFLOP/s);
-            # 12 tiles pad for 1.33x and gain nothing (1467 -> 1471).
+            # A narrow stack pins m_chunk to 0, so one load spends every lane
+            # on a different K column: 64 lines, 16B from each.  Rounding the
+            # strip up buys a full-line run; the padding tiles reach LDS and are
+            # never read back.  Worth it only while the padding is cheap -- on
+            # 5376x2048x2048, 14 tiles pad for 1.14x and gain 15%, 12 tiles pad
+            # for 1.33x and gain nothing.
             rounded = min(16, 1 << (mtTiles - 1).bit_length()) if mtTiles > 1 else 2
             if rounded > stack and rounded * 4 <= mtTiles * 5:
               stack = rounded
 
-            # The waves that fetch a strip divide it by (blocks per strip) x
-            # (K windows).  When there are fewer such slots than waves in the
-            # group, the surplus waves have nowhere of their own to read and
-            # reissue a load some other wave already made, so the operand comes
-            # off memory more than once per tile.
-            # A macro tile that is not a power of two is where this shows up --
-            # 96 free-dim elements give 6 MFMA-M tiles, hence only a 2-tile
-            # stack and a 16B run per K row -- but the shortage is what matters,
-            # not the tile, and a wide wavefront or a shallow DepthU reaches it
-            # from the other direction.  Test the slots.
+            # A strip offers (blocks per strip) x (K windows) fetch slots.  With
+            # fewer slots than waves in the group the surplus waves reissue a
+            # load someone else made, so the operand comes off memory more than
+            # once.  Test the slots, not the tile shape -- a wide wavefront or a
+            # shallow DepthU reaches the same shortage.
             wgSize     = state["MIWaveGroup"][0 if tc == 'A' else 1]
             numWaves   = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
             otherWaves = max(1, numWaves // wgSize)
