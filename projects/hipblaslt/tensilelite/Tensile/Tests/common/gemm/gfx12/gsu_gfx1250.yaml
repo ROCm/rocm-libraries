@@ -1,0 +1,91 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  Architecture: gfx1250
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+
+BenchmarkProblems:
+  #######################################
+  # NN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 1
+      Activation: True
+      UseScaleAlphaVec: 1 #SAV
+      BiasDataTypeList: ['s', 'b']
+      ActivationType:  hipblaslt_all
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+          # Putting it all together:
+          #  - [32, 32, 1, 2,  1,  4, 1,  2, 2]
+          #     ^^^^^^^^^^^^   ^   ^^^^   ^^^^
+          #      MatrixInst  BlkM   WT    Wave
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,   4, 4,  2, 2]
+          - [16, 16, 32, 1,  1,   3, 4,  2, 2]
+          - [16, 16, 32, 1,  1,   6, 3,  2, 2]
+          - [16, 16, 32, 1,  1,   3, 6,  2, 2]
+          - [16, 16, 32, 1,  1,  12, 6,  2, 2]
+        - DepthU: [64, 128]
+        - TDMInst: [3]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - GlobalSplitU: [-1,2,3]
+        - GlobalSplitUCoalesced: [False, True]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [False, True]
+        - GlobalSplitUAlgorithm: [MultipleBuffer,MultipleBufferSingleKernel]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - 1LDSBuffer: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - SourceSwap: [True, False]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 511, 1, 32768]
+          - Exact: [513, 513, 1, 32768]
+          - Exact: [512, 512, 1, 32767]
+          - Exact: [512, 512, 1, 32769]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
