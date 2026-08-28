@@ -53,6 +53,22 @@ on:
         type: string
         default: ""
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
+      build_python_packages:
+        type: boolean
+        default: false
+        description: "Build ROCm Python packages"
+      build_pytorch:
+        type: boolean
+        default: false
+        description: "Build PyTorch wheels"
+      build_jax:
+        type: boolean
+        default: false
+        description: "Build JAX wheels"
+      build_native_linux:
+        type: boolean
+        default: false
+        description: "Build native Linux packages and run install tests"
 permissions:
   contents: read
   actions: read

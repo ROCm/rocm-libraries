@@ -20,6 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# Temporary no-op change to exercise TheRock Multi-Arch CI.
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 cmake_policy(VERSION 3.18...3.25)
 
