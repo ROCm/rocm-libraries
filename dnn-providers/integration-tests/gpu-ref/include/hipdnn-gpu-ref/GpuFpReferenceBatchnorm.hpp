@@ -117,6 +117,11 @@ private:
             throw std::invalid_argument("Batchnorm requires input tensor rank to be 3, 4, or 5.");
         }
 
+        if(std::find(inputDims.begin(), inputDims.end(), int64_t(0)) != inputDims.end())
+        {
+            throw std::invalid_argument("Batchnorm requires tensors to not have a zero dimension.");
+        }
+
         const auto outputDims = outputTensorProps.dims;
         if(outputDims.size() != inputDims.size())
         {

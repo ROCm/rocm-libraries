@@ -3,6 +3,7 @@
 
 #include "GpuBatchnormFwdRefTestFixture.hpp"
 #include <cstdint>
+#include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <limits>
@@ -166,6 +167,72 @@ TEST(TestGpuBatchnormFwdRefValidation, ThrowsOnNonPackedAffineLayout)
     Tensor<float> bias({1, 2}, {4, 2});
     Tensor<float> estMean({1, 2}, {4, 2});
     Tensor<float> invVar({1, 2}, {4, 2});
+
+    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuBatchnormFwdRefValidation, ThrowsOnZeroChannelDim)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Use `ShallowTensor` since `Tensor` has 0 dimension checks on object construction
+    std::array<float, 6> backing = {1.0f, 2.0f, 3.0f, 4, 5, 6};
+    const std::vector<int64_t> ioDims = {1, 0, 2, 3};
+    const std::vector<int64_t> ioStrides = {6, 6, 3, 1};
+    ShallowTensor<float> x(backing.data(), ioDims, ioStrides);
+    ShallowTensor<float> y(backing.data(), ioDims, ioStrides);
+
+    const std::vector<int64_t> affineDims = {1, 1, 1, 1};
+    const std::vector<int64_t> affineStrides = {1, 1, 1, 1};
+    ShallowTensor<float> scale(backing.data(), affineDims, affineStrides);
+    ShallowTensor<float> bias(backing.data(), affineDims, affineStrides);
+    ShallowTensor<float> estMean(backing.data(), affineDims, affineStrides);
+    ShallowTensor<float> invVar(backing.data(), affineDims, affineStrides);
+
+    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuBatchnormFwdRefValidation, ThrowsOnZeroBatchDim)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Use `ShallowTensor` since `Tensor` has 0 dimension checks on object construction
+    std::array<float, 6> backing = {1.0f, 2.0f, 3.0f, 4, 5, 6};
+    const std::vector<int64_t> ioDims = {0, 1, 2, 3};
+    const std::vector<int64_t> ioStrides = {6, 6, 3, 1};
+    ShallowTensor<float> x(backing.data(), ioDims, ioStrides);
+    ShallowTensor<float> y(backing.data(), ioDims, ioStrides);
+
+    const std::vector<int64_t> affineDims = {1, 1, 1, 1};
+    const std::vector<int64_t> affineStrides = {1, 1, 1, 1};
+    ShallowTensor<float> scale(backing.data(), affineDims, affineStrides);
+    ShallowTensor<float> bias(backing.data(), affineDims, affineStrides);
+    ShallowTensor<float> estMean(backing.data(), affineDims, affineStrides);
+    ShallowTensor<float> invVar(backing.data(), affineDims, affineStrides);
+
+    EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
+                 std::invalid_argument);
+}
+
+TEST(TestGpuBatchnormFwdRefValidation, ThrowsOnZeroSpatialDim)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Use `ShallowTensor` since `Tensor` has 0 dimension checks on object construction
+    std::array<float, 6> backing = {1.0f, 2.0f, 3.0f, 4, 5, 6};
+    const std::vector<int64_t> ioDims = {1, 1, 0, 3};
+    const std::vector<int64_t> ioStrides = {3, 3, 3, 1};
+    ShallowTensor<float> x(backing.data(), ioDims, ioStrides);
+    ShallowTensor<float> y(backing.data(), ioDims, ioStrides);
+
+    const std::vector<int64_t> affineDims = {1, 1, 1, 1};
+    const std::vector<int64_t> affineStrides = {1, 1, 1, 1};
+    ShallowTensor<float> scale(backing.data(), affineDims, affineStrides);
+    ShallowTensor<float> bias(backing.data(), affineDims, affineStrides);
+    ShallowTensor<float> estMean(backing.data(), affineDims, affineStrides);
+    ShallowTensor<float> invVar(backing.data(), affineDims, affineStrides);
 
     EXPECT_THROW(GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, y),
                  std::invalid_argument);
