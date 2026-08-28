@@ -259,7 +259,7 @@
     SYGST/HEGST will directly call the unblocked routines (SYGS2/HEGS2). However, when n is not a
     multiple of xxGST_BLOCKSIZE, the last block reduced in the blocked process is allowed to be smaller than xxGST_BLOCKSIZE.*/
 #ifndef xxGST_BLOCKSIZE
-#define xxGST_BLOCKSIZE 64
+#define xxGST_BLOCKSIZE 256
 #endif
 
 /****************************** stedc ******************************************
