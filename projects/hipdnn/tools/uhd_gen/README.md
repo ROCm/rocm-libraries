@@ -98,13 +98,21 @@ The tool generates:
 
 ```
 output_dir/
-├── uhd.fb             # FlatBuffer UHD descriptor (RFC 0019 §9.2) - runtime format
-├── uhd.json           # UHD descriptor JSON - human-readable
-├── model.bin          # FlatBuffer GbdtModel for TreeDataAdapter
-└── train_manifest.json # Training metadata
+├── <stem>.uhd.json     # the descriptor DescriptorLoader discovers
+├── <stem>.uhd.fb       # the UHD it names: features, objective, score units
+├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter
+└── train_manifest.json # training provenance
 ```
 
-**NOTE:** The runtime loads `uhd.fb`, not `uhd.json`. The JSON is for inspection/debugging only.
+`<stem>` comes from `--descriptor-name` (default `heuristic`).
+
+The three files form one chain. `DescriptorLoader` globs `<stem>.uhd.json` and
+reads its `payload` as a path relative to that file; `UhdLoader` then reads the
+`.uhd.fb`'s `model_artifact_path` relative to *itself*. Both hops are relative,
+so the directory relocates as a unit.
+
+The engine's UED has to name the heuristic by id. `train` prints the id it
+generated and records it in `train_manifest.json`.
 
 ## Generated FlatBuffers bindings
 
