@@ -247,20 +247,21 @@ struct _rocblaslt_handle
 
     // Device communicator, registered once by hipblasLtSetDeviceComm. Every rank
     // registers on its own handle; the W handles form one communicator, of which
-    // this is the local view. Absent (device_comm_registered == false) unless a
-    // caller asks for a communicating fused epilogue.
-    bool     device_comm_registered = false;
-    uint32_t device_comm_rank       = 0;
-    uint32_t device_comm_world      = 0;
-    uint32_t device_comm_channels   = 0;
+    // this is the local view. A world of zero is the absent one: registration
+    // rejects a world below one and publishes it only once it has succeeded, so
+    // nonzero here means every field below is good.
+    uint32_t device_comm_rank     = 0;
+    uint32_t device_comm_world    = 0;
+    uint32_t device_comm_channels = 0;
 
-    // Library-owned completion flags: device_comm_channels independent regions on
-    // this device, never passed in nor readable by the caller. device_comm_flags
-    // is this device's allocation; device_comm_peer_flags[j] is rank j's region as
-    // addressed from this process, which for a peer in another process means an
-    // IPC mapping this handle owns and closes.
-    void* device_comm_flags                                              = nullptr;
-    void* device_comm_peer_flags[HIPBLASLT_DEVICE_COMM_MAX_WORLD]         = {};
+    // Completion flags: device_comm_channels independent regions per rank, never
+    // passed in nor readable by the caller. device_comm_peer_flags[j] is rank j's
+    // region as addressed from this process, and is one of three kinds. Entry
+    // device_comm_rank is this handle's own allocation, which it frees. A peer in
+    // another process is an IPC mapping this handle owns and closes, which is what
+    // device_comm_peer_flags_mapped[j] marks. A peer in this process is its raw
+    // device pointer, borrowed from the handle that allocated it.
+    void* device_comm_peer_flags[HIPBLASLT_DEVICE_COMM_MAX_WORLD]        = {};
     bool  device_comm_peer_flags_mapped[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
 };
 
