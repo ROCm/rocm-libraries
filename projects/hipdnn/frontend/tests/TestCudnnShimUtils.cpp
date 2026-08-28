@@ -81,12 +81,13 @@ TEST(TestCudnnShimUtils, ShimOwnedEnumsExposeUpstreamValueNames)
 }
 
 // The reshape node is still a fail stub, but it now carries the mode so chained
-// consumer source compiles and round-trips the value it set.
+// consumer source compiles and round-trips the value it set. The default is
+// upstream's VIEW_ONLY, not the enum's NOT_SET.
 TEST(TestCudnnShimUtils, ReshapeAttributesRoundTripsMode)
 {
     fe::graph::Reshape_attributes attributes;
 
-    EXPECT_EQ(attributes.get_reshape_mode(), fe::ReshapeMode_t::NOT_SET);
+    EXPECT_EQ(attributes.get_reshape_mode(), fe::ReshapeMode_t::VIEW_ONLY);
 
     attributes.set_name("rs").set_reshape_mode(fe::ReshapeMode_t::LOGICAL);
 
@@ -160,6 +161,9 @@ TEST(TestCudnnShimUtils, AdaLayernormAttributesRoundTripPhaseAndEpsilon)
                                     .set_uid(1));
 
     fe::graph::AdaLayernorm_attributes attributes;
+
+    EXPECT_EQ(attributes.get_forward_phase(), fe::NormFwdPhase_t::NOT_SET);
+
     attributes.set_forward_phase(fe::NormFwdPhase_t::TRAINING).set_epsilon(epsilon);
 
     EXPECT_EQ(attributes.get_forward_phase(), fe::NormFwdPhase_t::TRAINING);

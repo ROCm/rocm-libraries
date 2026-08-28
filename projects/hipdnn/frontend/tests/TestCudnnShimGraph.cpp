@@ -311,6 +311,32 @@ TEST(TestCudnnShimGraph, PrintOnGraphWithoutBackendDescriptorYieldsEmptyObject)
     EXPECT_EQ(stream.str(), "{}");
 }
 
+// The native graph is held by shared_ptr, so `*_graph` is non-const even inside
+// a const member: without std::as_const the const print()/serialize() would pick
+// the native auto-lowering overloads and mutate the graph they report on. The
+// backend-descriptor refusal below only comes from the const native overload —
+// the auto-lowering one would have tried (and failed) to build a descriptor.
+TEST(TestCudnnShimGraph, ConstSerializeDoesNotLowerTheNativeGraph)
+{
+    fe::graph::Graph graph;
+    auto a = hipdnn_shim_test::makeTensor(graph, {2, 3}, {3, 1}, 1);
+    auto b = hipdnn_shim_test::makeTensor(graph, {2, 3}, {3, 1}, 2);
+    auto c = graph.pointwise(
+        a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
+    ASSERT_NE(c, nullptr);
+    c->set_output(true).set_uid(3);
+
+    const fe::graph::Graph& constGraph = graph;
+    std::vector<uint8_t> data;
+
+    auto error = constGraph.serialize(data);
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_NE(error.get_message().find("Graph has no backend descriptor"), std::string::npos);
+    EXPECT_TRUE(data.empty());
+
+    EXPECT_EQ(constGraph.print(), "{}");
+}
+
 TEST(TestCudnnShimGraph, AutotuneWorkspaceSizeIsZeroWithoutPlans)
 {
     const fe::graph::Graph graph;

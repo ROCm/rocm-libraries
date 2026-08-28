@@ -1459,7 +1459,10 @@ public:
         {
             return "{}";
         }
-        auto [text, err] = _graph->to_json();
+        // as_const: dereferencing the shared_ptr yields a non-const graph even
+        // here, and the native non-const overload lowers the graph as a side
+        // effect. A const query must not mutate what it reports on.
+        auto [text, err] = std::as_const(*_graph).to_json();
         if(err.is_bad())
         {
             CUDNN_FE_LOG_LABEL("ERROR: Serializing graph to JSON failed: " << err.get_message());
@@ -1472,16 +1475,23 @@ public:
     {
         if(!hasOperationGraphState())
         {
-            return {error_code_t::INVALID_VALUE,
-                    "Serializing a graph without a compiled operation graph is unsupported"};
+            return serializeWithoutOperationGraphError();
         }
-        return _graph->serialize(data);
+        // as_const for the same reason as print(): the const overload reports on
+        // the backend descriptor the graph already has, and refuses if it has none.
+        return std::as_const(*_graph).serialize(data);
     }
 
     error_t serialize(std::vector<uint8_t>& data)
     {
         CHECK_CUDNN_FRONTEND_ERROR(validate());
-        return std::as_const(*this).serialize(data);
+        if(!hasOperationGraphState())
+        {
+            return serializeWithoutOperationGraphError();
+        }
+        // Non-const: keep the native auto-lowering overload, so serializing a
+        // described-but-unbuilt graph still works.
+        return _graph->serialize(data);
     }
 
     error_t deserialize(cudnnHandle_t handle,
@@ -1809,6 +1819,12 @@ private:
     static error_t noExecutionPlanError()
     {
         return {error_code_t::INVALID_VALUE, "Graph has no compiled execution plan"};
+    }
+
+    static error_t serializeWithoutOperationGraphError()
+    {
+        return {error_code_t::INVALID_VALUE,
+                "Serializing a graph without a compiled operation graph is unsupported"};
     }
 
     void clearWrapperGraphState()

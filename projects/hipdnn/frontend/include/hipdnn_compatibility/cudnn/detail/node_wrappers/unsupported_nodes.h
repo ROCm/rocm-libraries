@@ -191,7 +191,8 @@ public:
     }
 
 private:
-    ReshapeMode_t _mode = ReshapeMode_t::NOT_SET;
+    // Upstream defaults the mode to VIEW_ONLY, not to the enum's NOT_SET.
+    ReshapeMode_t _mode = ReshapeMode_t::VIEW_ONLY;
 };
 
 /// @copydoc Reshape_attributes
@@ -310,7 +311,7 @@ public:
     }
 
 private:
-    NormFwdPhase_t _forwardPhase = NormFwdPhase_t::INFERENCE;
+    NormFwdPhase_t _forwardPhase = NormFwdPhase_t::NOT_SET;
     std::shared_ptr<Tensor_attributes> _epsilon;
 };
 
