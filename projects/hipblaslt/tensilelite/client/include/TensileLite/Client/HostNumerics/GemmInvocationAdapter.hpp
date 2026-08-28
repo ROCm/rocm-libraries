@@ -3,7 +3,7 @@
 
 #pragma once
 
-// Product-private translation from TensileLite GEMM descriptors to
+// TensileLite client-private translation from GEMM descriptors to
 // product-independent host-numerics operations.
 
 #include <Tensile/ContractionProblem.hpp>
@@ -21,7 +21,7 @@
 #include <variant>
 #include <vector>
 
-namespace TensileLite::Client::reference_adapter
+namespace TensileLite::Client::HostNumerics
 {
     enum class TranslationFailureCode
     {
@@ -134,4 +134,4 @@ namespace TensileLite::Client::reference_adapter
         translateGemmInvocation(ContractionProblemGemm const& problem,
                                 ContractionInputs const&      inputs,
                                 size_t                        elementsToValidate);
-} // namespace TensileLite::Client::reference_adapter
+} // namespace TensileLite::Client::HostNumerics

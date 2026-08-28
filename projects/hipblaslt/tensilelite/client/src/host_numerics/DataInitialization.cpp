@@ -6,8 +6,8 @@
 
 #include "DataInitialization.hpp"
 
-#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
-#include <roc/host_numerics/adapters/tensilelite/TensileDataGeneration.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/TensileDataGeneration.hpp>
 #include <roc/host_numerics/validation.hpp>
 
 #include <algorithm>
@@ -23,7 +23,7 @@ namespace TensileLite::Client
 {
     std::uint64_t stableDataInitializationStream(std::string_view semanticName)
     {
-        using namespace roc::host_numerics::tensilelite_adapter;
+        using namespace HostNumerics;
 
         std::uint64_t hash = dataInitializationFnvLikeOffsetBasis;
         for(const unsigned char character : semanticName)
@@ -56,7 +56,7 @@ namespace TensileLite::Client
                                                          = std::nullopt)
         {
             using namespace roc::host_numerics;
-            using namespace roc::host_numerics::tensilelite_adapter;
+            using namespace HostNumerics;
 
             const GenerationRecipeSettings settings = dataInitializationSettings(seed, sequence);
             auto realOnly = [settings](GenerationRecipe::Component component) {
@@ -284,7 +284,7 @@ namespace TensileLite::Client
             {
             case PruneSparseMode::PruneRandom:
                 pattern.selection = StructuredSparsitySelection::Random;
-                pattern.seed      = roc::host_numerics::tensilelite_adapter::sparsePruningSeed;
+                pattern.seed      = HostNumerics::sparsePruningSeed;
                 break;
             case PruneSparseMode::PruneXX00:
                 pattern.fixedPositions = {0, 1};
@@ -408,8 +408,7 @@ namespace TensileLite::Client
 
         const auto uniformRealRecipe = roc::host_numerics::GenerationRecipe::realOnly(
             roc::host_numerics::GenerationRecipe::uniformReal({.lower = lower, .upper = upper}),
-            roc::host_numerics::tensilelite_adapter::dataInitializationSettings(key.seed,
-                                                                                  key.semanticStream));
+            HostNumerics::dataInitializationSettings(key.seed, key.semanticStream));
 
         Tensor generated(ScalarType::Float64, Shape{1});
         roc::host_numerics::generate(generated, uniformRealRecipe);

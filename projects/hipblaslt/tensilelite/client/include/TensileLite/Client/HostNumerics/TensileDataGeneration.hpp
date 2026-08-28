@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <roc/host_numerics/generation.hpp>
 
-namespace roc::host_numerics::tensilelite_adapter
+namespace TensileLite::Client::HostNumerics
 {
     // Preserve the existing semantic-name hash. The offset basis is FNV-like,
     // not the standard 64-bit FNV-1a offset basis.
@@ -18,8 +18,10 @@ namespace roc::host_numerics::tensilelite_adapter
     inline constexpr uint64_t dataInitializationSeedSalt = 0x54454e53494c454cULL;
     inline constexpr uint64_t sparsePruningSeed          = 0x5350415253453234ULL;
 
-    inline GenerationRecipeSettings dataInitializationSettings(uint64_t seed, uint64_t sequence)
+    inline roc::host_numerics::GenerationRecipeSettings
+        dataInitializationSettings(uint64_t seed, uint64_t sequence)
     {
-        return {.seed = deriveDeterministicSeed(seed, dataInitializationSeedSalt, sequence)};
+        return {.seed = roc::host_numerics::deriveDeterministicSeed(
+                    seed, dataInitializationSeedSalt, sequence)};
     }
-} // namespace roc::host_numerics::tensilelite_adapter
+} // namespace TensileLite::Client::HostNumerics
