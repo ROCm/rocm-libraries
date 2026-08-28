@@ -51,7 +51,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -91,45 +90,42 @@ def _bootstrap_rocke() -> None:
 _bootstrap_rocke()
 
 from rocke.analysis.isa import analyze_hsaco  # noqa: E402
+from rocke.core.arch import ArchTarget, known_arches  # noqa: E402
 from rocke.helpers.compile import (  # noqa: E402
     compile_kernel,
     compile_kernel_via_hipcc,
 )
 
 
-# ---- arch caps (occupancy model) ---------------------------------------
+# ---- architecture target (occupancy model) -----------------------------
 
 
-@dataclass(frozen=True)
-class ArchCaps:
-    """Per-CU caps for the coarse occupancy estimate.
-
-    CDNA3+ (gfx942/gfx950) has a *unified* vector register file: VGPRs hold
-    both the MFMA accumulators and operand/address registers (no separate AGPR
-    pool), so occupancy is bounded by ``max(VGPR-per-wave, LDS-per-block)``.
-    """
-
-    name: str
-    vgpr_per_simd: int = 512
-    simd_per_cu: int = 4
-    lds_per_cu: int = 160 * 1024
-    vgpr_alloc_granularity: int = 8
+def _supports_unified_vgpr_occupancy(target: ArchTarget) -> bool:
+    """Whether the probe's coarse unified-VGPR model applies to ``target``."""
+    return (
+        target.family == "cdna"
+        and target.wave_size == 64
+        and target.memory.has_async_lds
+    )
 
 
-ARCH_BY_NAME = {
-    "gfx950": ArchCaps("gfx950", 512, 4, 160 * 1024, 8),
-    "gfx942": ArchCaps("gfx942", 512, 4, 64 * 1024, 8),
-}
+def _occupancy_arches() -> tuple[str, ...]:
+    """Catalog targets supported by the current unified-VGPR model."""
+    return tuple(
+        arch
+        for arch in known_arches()
+        if _supports_unified_vgpr_occupancy(ArchTarget.from_gfx(arch))
+    )
 
 
-def _caps_for(arch: str) -> ArchCaps:
-    try:
-        return ARCH_BY_NAME[arch]
-    except KeyError:
+def _target_for(arch: str) -> ArchTarget:
+    target = ArchTarget.from_gfx(arch)
+    if not _supports_unified_vgpr_occupancy(target):
         raise SystemExit(
-            f"probe_regs: no occupancy model for arch {arch!r} "
-            f"(known: {', '.join(sorted(ARCH_BY_NAME))})"
-        ) from None
+            f"probe_regs: no unified-VGPR occupancy model for arch {arch!r} "
+            f"(supported catalog targets: {', '.join(_occupancy_arches())})"
+        )
+    return target
 
 
 # ---- llvm tool discovery -----------------------------------------------
@@ -180,17 +176,18 @@ def _to_code_object(blob: bytes, arch: str, out: Path) -> Path:
 
 
 def estimate_occupancy(
-    *, vgpr: int, lds_bytes: int, block_size: int, caps: ArchCaps
+    *, vgpr: int, lds_bytes: int, block_size: int, target: ArchTarget
 ) -> dict:
     """Coarse blocks/CU from VGPR + LDS on a unified-VGPR arch."""
-    waves_per_block = max(block_size // 64, 1)
+    waves_per_block = max(math.ceil(block_size / target.wave_size), 1)
     v = max(vgpr, 1)
-    vgpr_alloc = (
-        math.ceil(v / caps.vgpr_alloc_granularity) * caps.vgpr_alloc_granularity
-    )
-    waves_per_simd = caps.vgpr_per_simd // vgpr_alloc
-    blocks_by_vgpr = (waves_per_simd * caps.simd_per_cu) // waves_per_block
-    blocks_by_lds = caps.lds_per_cu // (lds_bytes or 1)
+    # The supported unified-VGPR targets allocate in eight-register quanta and
+    # expose four SIMDs per CU. Register-file size and LDS capacity come from
+    # the architecture SSOT instead of a second per-arch table in this tool.
+    vgpr_alloc = math.ceil(v / 8) * 8
+    waves_per_simd = target.limits.vgprs // vgpr_alloc
+    blocks_by_vgpr = (waves_per_simd * 4) // waves_per_block
+    blocks_by_lds = target.lds_capacity_bytes // (lds_bytes or 1)
     occupancy = min(blocks_by_vgpr, blocks_by_lds)
     limiter = "LDS" if blocks_by_lds <= blocks_by_vgpr else "VGPR"
     return {
@@ -206,7 +203,7 @@ def estimate_occupancy(
 
 
 def report_code_object(
-    label: str, co_path: Path, *, block_size: int, caps: ArchCaps
+    label: str, co_path: Path, *, block_size: int, target: ArchTarget
 ) -> dict:
     """Analyze one bare code object and print the resource/ISA/occupancy lines."""
     a = analyze_hsaco(
@@ -218,11 +215,13 @@ def report_code_object(
     vspill = r.raw.get("amdhsa_vgpr_spill_count", r.raw.get("vgpr_spill_count"))
     vgpr = r.vgpr_count or 0
     lds = r.lds_bytes or 0
-    occ = estimate_occupancy(vgpr=vgpr, lds_bytes=lds, block_size=block_size, caps=caps)
+    occ = estimate_occupancy(
+        vgpr=vgpr, lds_bytes=lds, block_size=block_size, target=target
+    )
     ratio = (isa.ds_read / isa.mfma) if isa.mfma else 0.0
 
     print(
-        f"[probe:{label}] arch={caps.name} block_size={block_size} "
+        f"[probe:{label}] arch={target.gfx} block_size={block_size} "
         f"waves/block={occ['waves_per_block']}"
     )
     print(
@@ -264,7 +263,7 @@ def probe_regs(
     launch block size (``BS``) your builder reports. This function never imports
     a kernel family -- the caller supplies the already-built ``KernelDef``.
     """
-    caps = _caps_for(arch)
+    target = _target_for(arch)
     rows: list[dict] = []
     with tempfile.TemporaryDirectory() as d:
         for i, (label, kdef, block_size) in enumerate(entries):
@@ -278,7 +277,9 @@ def probe_regs(
                 print(f"[probe:{label}] BUILD-FAIL: {type(e).__name__}: {e}")
                 continue
             co = _to_code_object(art.hsaco, arch, Path(d) / f"k{i}.co")
-            rows.append(report_code_object(label, co, block_size=block_size, caps=caps))
+            rows.append(
+                report_code_object(label, co, block_size=block_size, target=target)
+            )
     return rows
 
 
@@ -286,10 +287,10 @@ def probe_regs(
 
 
 def _probe_existing(path: Path, *, arch: str, block_size: int) -> int:
-    caps = _caps_for(arch)
+    target = _target_for(arch)
     with tempfile.TemporaryDirectory() as d:
         co = _to_code_object(path.read_bytes(), arch, Path(d) / "k.co")
-        report_code_object(path.stem, co, block_size=block_size, caps=caps)
+        report_code_object(path.stem, co, block_size=block_size, target=target)
     return 0
 
 
@@ -332,11 +333,11 @@ def _probe_demo(*, arch: str, block_size: int) -> int:
     b.ret()
     # backend="python" keeps the demo deterministic and independent of a built
     # rocke_engine C++ extension.
-    caps = _caps_for(arch)
+    target = _target_for(arch)
     with tempfile.TemporaryDirectory() as d:
         art = compile_kernel(b.kernel, arch=arch, backend="python")
         co = _to_code_object(art.hsaco, arch, Path(d) / "demo.co")
-        report_code_object("demo", co, block_size=block_size, caps=caps)
+        report_code_object("demo", co, block_size=block_size, target=target)
     return 0
 
 
@@ -358,7 +359,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     p.add_argument(
         "--arch",
-        choices=list(ARCH_BY_NAME),
+        choices=_occupancy_arches(),
         required=True,
         help="target arch for the occupancy estimate and code-object unbundling",
     )
