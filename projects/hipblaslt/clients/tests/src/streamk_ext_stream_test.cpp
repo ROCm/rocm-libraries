@@ -11,43 +11,45 @@
 // at one region however many streams they run on -- exactly the aliasing the
 // per-stream regions exist to prevent.
 //
-// Which region an object holds is not visible from outside the library, but
-// how many regions the handle has handed out is: hipblasLtMatmul() claims one
-// per stream unconditionally, so it can be used to count what is left. Objects
-// run on N distinct streams have to consume at least N regions.
+// The test builds that pattern and then makes the aliasing matter: every object
+// runs concurrently on a stream of its own, so if they are all still on the
+// initialize() stream's region they clear each other's flags and the queue
+// stops draining. Nothing short of the run() stream's pointer reaching the
+// kernel gets this to the end -- rebinding the inputs without re-solving leaves
+// the old pointer baked into the arguments and deadlocks just the same.
 //
-// Sequential by design -- no concurrency, since only the accounting is under
-// test.
+// Watchdog and exit-without-unwinding as in streamk_multistream_test.cpp: a
+// deadlocked queue never drains, so a blocking wait would hang the job.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
 namespace
 {
-    // The shape the heuristic picks a Stream-K solution for on gfx950; see
-    // streamk_multistream_test.cpp. Only Stream-K solutions bind a region
-    // through the object API, so the test skips when this is not one.
+    // The shape and CU target the heuristic answers with a Stream-K solution on
+    // the remainder path; see streamk_multistream_test.cpp. Only that path reads
+    // the flags, so only it can deadlock on them.
     constexpr int64_t kM = 1024;
     constexpr int64_t kN = 7168;
     constexpr int64_t kK = 4096;
+    constexpr int32_t kSmCountTarget = 96;
 
-    // Distinct run() streams. Small: every one of them costs a region, and the
-    // probe below needs room to tell how many were taken.
-    constexpr int kExtStreams = 4;
+    // Concurrent run() streams. Each needs its own D and workspace.
+    constexpr int kExtStreams = 8;
 
-    // _rocblaslt_handle::c_syncSkStreamSlots.
-    constexpr int kCapacity = 64;
+    constexpr int kIterations = 200;
 
     constexpr size_t kWsBudgetBytes = 128ull << 20;
 
-    // Probes with a shape small enough to be free, laid over the buffers the
-    // Stream-K problem already allocated.
-    constexpr int64_t kProbeMNK = 128;
+    constexpr int kDeadlineSeconds = 120;
 
     TEST(StreamKExtStream, RunStreamOwnsTheFlagRegion)
     {
@@ -58,77 +60,12 @@ namespace
         hipblasLtHandle_t handle = nullptr;
         ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
 
-        void *dA = nullptr, *dB = nullptr, *dD = nullptr, *dWs = nullptr;
-        ASSERT_EQ(hipMalloc(&dA, static_cast<size_t>(kM * kK) * sizeof(uint16_t)), hipSuccess);
-        ASSERT_EQ(hipMalloc(&dB, static_cast<size_t>(kK * kN) * sizeof(uint16_t)), hipSuccess);
-        ASSERT_EQ(hipMalloc(&dD, static_cast<size_t>(kM * kN) * sizeof(uint16_t)), hipSuccess);
-        ASSERT_EQ(hipMalloc(&dWs, kWsBudgetBytes), hipSuccess);
-
-        const float alpha = 1.0f, beta = 0.0f;
-
-        auto makeGemm = [&]() {
-            hipblaslt_ext::GemmEpilogue epilogue;
-            hipblaslt_ext::GemmInputs   inputs;
-
-            auto gemm = std::make_unique<hipblaslt_ext::Gemm>(handle,
-                                                              HIPBLAS_OP_N,
-                                                              HIPBLAS_OP_N,
-                                                              HIP_R_16BF,
-                                                              HIP_R_16BF,
-                                                              HIP_R_16BF,
-                                                              HIP_R_16BF,
-                                                              HIPBLAS_COMPUTE_32F);
-            inputs.setA(dA);
-            inputs.setB(dB);
-            inputs.setC(dD);
-            inputs.setD(dD);
-            inputs.setAlpha(&alpha);
-            inputs.setBeta(&beta);
-            gemm->setMaxWorkspaceBytes(kWsBudgetBytes);
-            if(gemm->setProblem(kM, kN, kK, 1, epilogue, inputs) != HIPBLAS_STATUS_SUCCESS)
-                gemm.reset();
-            return gemm;
-        };
-
-        std::vector<hipblasLtMatmulHeuristicResult_t> algos;
-        {
-            auto probe = makeGemm();
-            ASSERT_NE(probe, nullptr);
-            hipblaslt_ext::GemmPreference pref;
-            pref.setMaxWorkspaceBytes(kWsBudgetBytes);
-            static_cast<void>(probe->algoGetHeuristic(1, pref, algos));
-        }
-        if(algos.empty())
-            GTEST_SKIP() << "No solution for " << kM << "x" << kN << "x" << kK;
-
-        // The pattern under test: no stream at initialize(), a different one at
-        // every run().
-        std::vector<hipStream_t>                          extStreams;
-        std::vector<std::unique_ptr<hipblaslt_ext::Gemm>> gemms;
-        for(int i = 0; i < kExtStreams; ++i)
-        {
-            hipStream_t s = nullptr;
-            ASSERT_EQ(hipStreamCreate(&s), hipSuccess);
-            extStreams.push_back(s);
-
-            auto gemm = makeGemm();
-            ASSERT_NE(gemm, nullptr);
-            ASSERT_EQ(gemm->initialize(algos[0].algo, dWs), HIPBLAS_STATUS_SUCCESS);
-            ASSERT_EQ(gemm->run(s), HIPBLAS_STATUS_SUCCESS) << "run() refused on stream " << i;
-            // One kernel in flight at a time: the shared D and workspace must
-            // not be raced on, and only the accounting is under test.
-            ASSERT_EQ(hipStreamSynchronize(s), hipSuccess);
-            gemms.push_back(std::move(gemm));
-        }
-
-        // Count what is left. hipblasLtMatmul() claims a region for every
-        // stream it sees, whatever solution it ends up running.
         hipblasLtMatrixLayout_t layA = nullptr, layB = nullptr, layD = nullptr;
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layA, HIP_R_16BF, kProbeMNK, kProbeMNK, kProbeMNK),
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layA, HIP_R_16BF, kM, kK, kM),
                   HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layB, HIP_R_16BF, kProbeMNK, kProbeMNK, kProbeMNK),
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layB, HIP_R_16BF, kK, kN, kK),
                   HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layD, HIP_R_16BF, kProbeMNK, kProbeMNK, kProbeMNK),
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layD, HIP_R_16BF, kM, kN, kM),
                   HIPBLAS_STATUS_SUCCESS);
 
         hipblasLtMatmulDesc_t desc = nullptr;
@@ -137,82 +74,133 @@ namespace
         const hipblasOperation_t opN = HIPBLAS_OP_N;
         hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN));
         hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
-
-        hipblasLtMatmulPreference_t pref = nullptr;
-        ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
-        const uint64_t wsBudget = kWsBudgetBytes;
-        hipblasLtMatmulPreferenceSetAttribute(
-            pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBudget, sizeof(wsBudget));
-
-        hipblasLtMatmulHeuristicResult_t probeHeuristic{};
-        int                              returned = 0;
-        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
-                      handle, desc, layA, layB, layD, layD, pref, 1, &probeHeuristic, &returned),
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                                  HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                  &kSmCountTarget,
+                                                  sizeof(kSmCountTarget)),
                   HIPBLAS_STATUS_SUCCESS);
 
-        std::vector<hipStream_t> probeStreams;
-        int                      admitted = 0;
-        if(returned > 0)
+        const size_t bytesA = static_cast<size_t>(kM * kK) * sizeof(uint16_t);
+        const size_t bytesB = static_cast<size_t>(kK * kN) * sizeof(uint16_t);
+        const size_t bytesD = static_cast<size_t>(kM * kN) * sizeof(uint16_t);
+
+        void *dA = nullptr, *dB = nullptr;
+        ASSERT_EQ(hipMalloc(&dA, bytesA), hipSuccess);
+        ASSERT_EQ(hipMalloc(&dB, bytesB), hipSuccess);
+        static_cast<void>(hipMemset(dA, 0, bytesA));
+        static_cast<void>(hipMemset(dB, 0, bytesB));
+
+        std::vector<void*> dD(kExtStreams, nullptr);
+        for(auto& d : dD)
+            ASSERT_EQ(hipMalloc(&d, bytesD), hipSuccess);
+
+        const float alpha = 1.0f, beta = 0.0f;
+
+        auto makeGemm = [&](void* d) {
+            auto gemm = std::make_unique<hipblaslt_ext::Gemm>(handle,
+                                                              HIPBLAS_OP_N,
+                                                              HIPBLAS_OP_N,
+                                                              HIP_R_16BF,
+                                                              HIP_R_16BF,
+                                                              HIP_R_16BF,
+                                                              HIP_R_16BF,
+                                                              HIPBLAS_COMPUTE_32F);
+            gemm->setMaxWorkspaceBytes(kWsBudgetBytes);
+            if(gemm->setProblem(desc, &alpha, dA, layA, dB, layB, &beta, d, layD, d, layD)
+               != HIPBLAS_STATUS_SUCCESS)
+                gemm.reset();
+            return gemm;
+        };
+
+        std::vector<hipblasLtMatmulHeuristicResult_t> algos;
         {
-            for(int i = 0; i < kCapacity; ++i)
+            auto probe = makeGemm(dD[0]);
+            ASSERT_NE(probe, nullptr);
+            hipblaslt_ext::GemmPreference pref;
+            pref.setMaxWorkspaceBytes(kWsBudgetBytes);
+            static_cast<void>(probe->algoGetHeuristic(1, pref, algos));
+        }
+        if(algos.empty())
+            GTEST_SKIP() << "No solution for " << kM << "x" << kN << "x" << kK;
+
+        const size_t       bytesWs = algos[0].workspaceSize;
+        std::vector<void*> dWs(kExtStreams, nullptr);
+        if(bytesWs > 0)
+            for(auto& w : dWs)
+                ASSERT_EQ(hipMalloc(&w, bytesWs), hipSuccess);
+
+        // The pattern under test: no stream at initialize(), a different one at
+        // every run(). The streams must not implicitly synchronise with the
+        // initialize() stream, which is the legacy null one, or the launches
+        // would be serialised and there would be nothing to deadlock.
+        std::vector<hipStream_t>                          extStreams;
+        std::vector<std::unique_ptr<hipblaslt_ext::Gemm>> gemms;
+        for(int i = 0; i < kExtStreams; ++i)
+        {
+            hipStream_t s = nullptr;
+            ASSERT_EQ(hipStreamCreateWithFlags(&s, hipStreamNonBlocking), hipSuccess);
+            extStreams.push_back(s);
+
+            auto gemm = makeGemm(dD[i]);
+            ASSERT_NE(gemm, nullptr);
+            ASSERT_EQ(gemm->initialize(algos[0].algo, dWs[i]), HIPBLAS_STATUS_SUCCESS);
+            gemms.push_back(std::move(gemm));
+        }
+
+        const auto deadline
+            = std::chrono::steady_clock::now() + std::chrono::seconds(kDeadlineSeconds);
+
+        for(int iter = 0; iter < kIterations; ++iter)
+        {
+            for(int i = 0; i < kExtStreams; ++i)
+                ASSERT_EQ(gemms[i]->run(extStreams[i]), HIPBLAS_STATUS_SUCCESS)
+                    << "run() refused on stream " << i << " at iteration " << iter;
+
+            bool draining = true;
+            while(draining)
             {
-                hipStream_t s = nullptr;
-                if(hipStreamCreate(&s) != hipSuccess)
-                    break;
-                probeStreams.push_back(s);
-                const hipblasStatus_t st = hipblasLtMatmul(handle,
-                                                           desc,
-                                                           &alpha,
-                                                           dA,
-                                                           layA,
-                                                           dB,
-                                                           layB,
-                                                           &beta,
-                                                           dD,
-                                                           layD,
-                                                           dD,
-                                                           layD,
-                                                           &probeHeuristic.algo,
-                                                           dWs,
-                                                           probeHeuristic.workspaceSize,
-                                                           s);
-                static_cast<void>(hipStreamSynchronize(s));
-                if(st != HIPBLAS_STATUS_SUCCESS)
-                    break;
-                ++admitted;
+                draining = false;
+                for(auto s : extStreams)
+                    if(hipStreamQuery(s) == hipErrorNotReady)
+                        draining = true;
+                if(draining && std::chrono::steady_clock::now() > deadline)
+                {
+                    std::fprintf(stderr,
+                                 "\n[  FAILED  ] StreamKExtStream.RunStreamOwnsTheFlagRegion\n"
+                                 "  %d objects initialized on one stream and run on %d others\n"
+                                 "  stopped making progress at iteration %d of %d: they are\n"
+                                 "  sharing the initialize() stream's Stream-K flag region.\n"
+                                 "  Exiting without cleanup because the queue is wedged and\n"
+                                 "  hipFree would block as well.\n\n",
+                                 kExtStreams,
+                                 kExtStreams,
+                                 iter,
+                                 kIterations);
+                    std::fflush(stderr);
+                    ADD_FAILURE() << kExtStreams
+                                  << " objects run on distinct streams deadlocked at iteration "
+                                  << iter;
+                    std::_Exit(1);
+                }
             }
         }
-        const size_t probesCreated = probeStreams.size();
+
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(hipGetLastError(), hipSuccess);
 
         gemms.clear();
-        for(auto s : probeStreams)
-            static_cast<void>(hipStreamDestroy(s));
         for(auto s : extStreams)
             static_cast<void>(hipStreamDestroy(s));
-        hipblasLtMatmulPreferenceDestroy(pref);
+        for(auto w : dWs)
+            static_cast<void>(hipFree(w));
+        for(auto d : dD)
+            static_cast<void>(hipFree(d));
+        static_cast<void>(hipFree(dA));
+        static_cast<void>(hipFree(dB));
         hipblasLtMatmulDescDestroy(desc);
         hipblasLtMatrixLayoutDestroy(layA);
         hipblasLtMatrixLayoutDestroy(layB);
         hipblasLtMatrixLayoutDestroy(layD);
-        static_cast<void>(hipFree(dA));
-        static_cast<void>(hipFree(dB));
-        static_cast<void>(hipFree(dD));
-        static_cast<void>(hipFree(dWs));
         hipblasLtDestroy(handle);
-
-        ASSERT_GT(returned, 0) << "no solution for the " << kProbeMNK << "-cubed probe";
-        ASSERT_GT(probesCreated, 0u) << "could not create any probe stream";
-
-        // Regions the object API took: the initialize() stream plus one per
-        // run() stream.
-        const int consumed = kCapacity - admitted;
-        if(consumed == 0)
-            GTEST_SKIP() << "the heuristic did not pick a Stream-K solution for " << kM << "x" << kN
-                         << "x" << kK << ", so the object API bound no flag region";
-
-        EXPECT_GE(consumed, kExtStreams)
-            << "the object API took " << consumed << " flag regions while running on "
-            << kExtStreams << " distinct streams: it bound the initialize() stream, not the run()"
-            << " one";
     }
 }

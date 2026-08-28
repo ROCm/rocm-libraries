@@ -4291,6 +4291,13 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             return rocblaslt_status_invalid_value;
         }
     }
+    // Matches makeArgument(): a re-solve on the launch path can raise this too,
+    // and it is a user-input rejection rather than an internal failure.
+    catch(const TensileLite::UniformSummationOrderError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt_status_invalid_value;
+    }
     catch(const std::exception& e)
     {
 #if 0
@@ -4492,6 +4499,13 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
             return rocblaslt_status_not_implemented;
         }
     }
+    // Matches makeArgument(): a re-solve on the launch path can raise this too,
+    // and it is a user-input rejection rather than an internal failure.
+    catch(const TensileLite::UniformSummationOrderError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt_status_invalid_value;
+    }
     catch(const std::exception& e)
     {
 #if 0
@@ -4565,6 +4579,13 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
         {
             return rocblaslt_status_not_implemented;
         }
+    }
+    // Matches makeArgument(): a re-solve on the launch path can raise this too,
+    // and it is a user-input rejection rather than an internal failure.
+    catch(const TensileLite::UniformSummationOrderError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt_status_invalid_value;
     }
     catch(const std::exception& e)
     {

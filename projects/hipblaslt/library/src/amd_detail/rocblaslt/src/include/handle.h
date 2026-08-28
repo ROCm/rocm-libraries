@@ -231,13 +231,15 @@ struct _rocblaslt_handle
             static thread_local char perThreadKey;
             key = &perThreadKey;
         }
-        else if(stream == nullptr)
+        else if(stream == nullptr || stream == hipStreamLegacy)
         {
             // The legacy null stream keys as nullptr, which is also the value
             // the loop below uses to mean "block free": the CAS would succeed
             // without marking the block owned, so this stream would reserve
             // nothing and alias whichever stream claims that block next. It
             // really is one stream shared by all threads, so a plain static.
+            // hipStreamLegacy names that same stream and so shares the key;
+            // keying it apart would spend a second block on one stream.
             static char legacyNullKey;
             key = &legacyNullKey;
         }
