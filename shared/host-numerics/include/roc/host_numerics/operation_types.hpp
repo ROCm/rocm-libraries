@@ -98,40 +98,51 @@ inline size_t nextPrimeStride(size_t value) {
 }
 }  // namespace detail
 
-// Describes which logical linear output indices an operation should evaluate.
-// Explicit indices are normalized when constructed and validated against the
-// operation's logical element count when consumed.
+// Describes which logical tensor elements an operation or comparison should
+// visit. Linear indices use indexOrder. Explicit indices are normalized when
+// constructed and validated against the tensor's logical element count when
+// consumed.
 class OutputSelection {
    public:
-    static OutputSelection all() {
-        return {};
+    static OutputSelection all(IndexOrder indexOrder = IndexOrder::LastDimensionFastest) {
+        OutputSelection result;
+        result.m_indexOrder = indexOrder;
+        return result;
     }
 
-    static OutputSelection strided(size_t first, size_t stride) {
+    static OutputSelection strided(size_t first, size_t stride,
+                                   size_t maxElements = std::numeric_limits<size_t>::max(),
+                                   IndexOrder indexOrder = IndexOrder::LastDimensionFastest) {
         if (stride == 0) throw std::invalid_argument("Output selection stride must be nonzero.");
         OutputSelection result;
         result.m_kind = OutputSelectionKind::Strided;
         result.m_first = first;
         result.m_stride = stride;
+        result.m_maxElements = maxElements;
+        result.m_indexOrder = indexOrder;
         return result;
     }
 
-    static OutputSelection explicitIndices(std::vector<size_t> indices) {
+    static OutputSelection explicitIndices(
+        std::vector<size_t> indices, IndexOrder indexOrder = IndexOrder::LastDimensionFastest) {
         OutputSelection result;
         result.m_kind = OutputSelectionKind::Explicit;
         std::sort(indices.begin(), indices.end());
         indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
         result.m_indices = std::move(indices);
+        result.m_indexOrder = indexOrder;
         return result;
     }
 
     // Chooses the smallest prime stride at least allocatedElements /
     // requestedElements. The resulting sample size is approximate.
     static OutputSelection primeStride(size_t logicalElements, size_t allocatedElements,
-                                       size_t requestedElements) {
-        if (requestedElements == 0 || requestedElements >= logicalElements) return all();
+                                       size_t requestedElements,
+                                       IndexOrder indexOrder = IndexOrder::LastDimensionFastest) {
+        if (requestedElements == 0 || requestedElements >= logicalElements) return all(indexOrder);
         const size_t candidate = std::max<size_t>(1, allocatedElements / requestedElements);
-        return strided(0, detail::nextPrimeStride(candidate));
+        return strided(0, detail::nextPrimeStride(candidate), std::numeric_limits<size_t>::max(),
+                       indexOrder);
     }
 
     OutputSelectionKind kind() const {
@@ -140,6 +151,22 @@ class OutputSelection {
 
     bool selectsAll() const {
         return m_kind == OutputSelectionKind::All;
+    }
+
+    size_t first() const {
+        return m_first;
+    }
+
+    size_t stride() const {
+        return m_stride;
+    }
+
+    size_t maxElements() const {
+        return m_maxElements;
+    }
+
+    IndexOrder indexOrder() const {
+        return m_indexOrder;
     }
 
     std::vector<size_t> indices(size_t logicalElements) const {
@@ -151,10 +178,11 @@ class OutputSelection {
             }
             case OutputSelectionKind::Strided: {
                 std::vector<size_t> result;
-                if (m_first >= logicalElements) return result;
-                const size_t count = 1 + (logicalElements - 1 - m_first) / m_stride;
+                if (m_first >= logicalElements || m_maxElements == 0) return result;
+                const size_t available = 1 + (logicalElements - 1 - m_first) / m_stride;
+                const size_t count = std::min(available, m_maxElements);
                 result.reserve(count);
-                for (size_t index = m_first; index < logicalElements;) {
+                for (size_t index = m_first; index < logicalElements && result.size() < count;) {
                     result.push_back(index);
                     if (index > std::numeric_limits<size_t>::max() - m_stride) break;
                     index += m_stride;
@@ -174,7 +202,7 @@ class OutputSelection {
                 return logicalElements;
             case OutputSelectionKind::Strided:
                 if (m_first >= logicalElements) return 0;
-                return 1 + (logicalElements - 1 - m_first) / m_stride;
+                return std::min(1 + (logicalElements - 1 - m_first) / m_stride, m_maxElements);
             case OutputSelectionKind::Explicit:
                 validateExplicitIndices(logicalElements);
                 return m_indices.size();
@@ -193,6 +221,8 @@ class OutputSelection {
     OutputSelectionKind m_kind = OutputSelectionKind::All;
     size_t m_first = 0;
     size_t m_stride = 1;
+    size_t m_maxElements = std::numeric_limits<size_t>::max();
+    IndexOrder m_indexOrder = IndexOrder::LastDimensionFastest;
     std::vector<size_t> m_indices;
 };
 }  // namespace roc::host_numerics

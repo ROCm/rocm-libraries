@@ -492,6 +492,18 @@ void testOutputSelection() {
                 d.loadAs<float>({1, 0}) == -99 && d.loadAs<float>({1, 1}) == 50,
             "Selected-output GEMM modified the wrong elements.");
 
+    Tensor firstDimensionFastestOutput =
+        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
+    GemmRequest firstDimensionFastestProblem(problem, firstDimensionFastestOutput);
+    firstDimensionFastestProblem.outputSelection =
+        OutputSelection::explicitIndices({1}, IndexOrder::FirstDimensionFastest);
+    referenceGemm(firstDimensionFastestProblem);
+    require(firstDimensionFastestOutput.loadAs<float>({0, 0}) == -99 &&
+                firstDimensionFastestOutput.loadAs<float>({0, 1}) == -99 &&
+                firstDimensionFastestOutput.loadAs<float>({1, 0}) == 43 &&
+                firstDimensionFastestOutput.loadAs<float>({1, 1}) == -99,
+            "Selected-output GEMM ignored the selection index order.");
+
     const auto prime = OutputSelection::primeStride(10, 10, 3).indices(10);
     require(prime == std::vector<size_t>({0, 3, 6, 9}), "Prime-stride output selection mismatch.");
     require(OutputSelection::primeStride(20, 9, 1).indices(20) == std::vector<size_t>({0, 11}),
@@ -502,6 +514,8 @@ void testOutputSelection() {
             "Prime-stride output selection failed after a larger squared factor.");
     require(OutputSelection::strided(2, 3).selectedCount(10) == 3,
             "Strided output selection reported the wrong count.");
+    require(OutputSelection::strided(1, 2, 1).indices(10) == std::vector<size_t>({1}),
+            "Bounded strided output selection ignored its maximum count.");
     require(OutputSelection::strided(10, 3).selectedCount(10) == 0,
             "Out-of-range strided output selection reported a nonzero count.");
     require(OutputSelection::primeStride(10, 10, 0).selectsAll(),
@@ -1622,7 +1636,7 @@ void testComparisonProgram() {
     emptyOptions.computePointwiseStatistics = false;
     emptyOptions.computeFrobenius = false;
     emptyOptions.maxReportedMismatches = 0;
-    emptyOptions.selection.indexOrder = IndexOrder::FirstDimensionFastest;
+    emptyOptions.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
     const auto compareEmpty = [&](const ComparisonOptions& options) {
         return compare(Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
                        Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
@@ -1662,10 +1676,13 @@ void testComparisonProgram() {
     requireInvalidEmptyOptions(
         missingFrobeniusEvidence,
         "Empty comparison accepted a Frobenius criterion without Frobenius evidence.");
-    ComparisonOptions zeroSelectionStride;
-    zeroSelectionStride.selection.stride = 0;
-    requireInvalidEmptyOptions(zeroSelectionStride,
-                               "Empty comparison accepted a zero selection stride.");
+    bool rejectedZeroSelectionStride = false;
+    try {
+        (void)OutputSelection::strided(0, 0);
+    } catch (const std::invalid_argument&) {
+        rejectedZeroSelectionStride = true;
+    }
+    require(rejectedZeroSelectionStride, "Output selection accepted a zero stride.");
 
     const std::array<double, 1> evidenceObserved{2.0};
     const std::array<double, 1> evidenceExpected{1.0};
@@ -1702,8 +1719,8 @@ void testComparisonProgram() {
     const Layout layout(Shape{2, 3}, {1, 3});
 
     ComparisonOptions selected;
-    selected.selection.indexOrder = IndexOrder::FirstDimensionFastest;
-    selected.selection.stride = 2;
+    selected.selection = OutputSelection::strided(0, 2, std::numeric_limits<size_t>::max(),
+                                                  IndexOrder::FirstDimensionFastest);
     selected.computeFrobenius = false;
     const auto selectedResult = compare(
         Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
@@ -1714,12 +1731,20 @@ void testComparisonProgram() {
                 selectedResult.reportedMismatches[0].coordinates == std::vector<size_t>({0, 2}) &&
                 selectedResult.reportedMismatches[0].observedOffset == 6,
             "Selected comparison reported the wrong logical location.");
+    selected.selection = OutputSelection::explicitIndices({4}, IndexOrder::FirstDimensionFastest);
+    const auto explicitSelectedResult = compare(
+        Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
+        Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), selected);
+    require(
+        explicitSelectedResult.compared == 1 && explicitSelectedResult.mismatches == 1 &&
+            explicitSelectedResult.reportedMismatches[0].coordinates == std::vector<size_t>({0, 2}),
+        "Explicit comparison selection visited the wrong logical element.");
     ComparisonOptions paddedMetrics;
     paddedMetrics.pointwise = false;
     paddedMetrics.computePointwiseStatistics = false;
     paddedMetrics.computeFrobenius = true;
     paddedMetrics.maxReportedMismatches = 0;
-    paddedMetrics.selection.indexOrder = IndexOrder::FirstDimensionFastest;
+    paddedMetrics.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
     const auto paddedMetricResult = compare(
         Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
         Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), paddedMetrics);
@@ -1907,8 +1932,7 @@ void testComparisonProgram() {
                 !nonFiniteNormResult.passed(),
             "Non-finite norm invalidation did not produce a failing NaN ratio.");
     ComparisonOptions sampledMetrics = metrics;
-    sampledMetrics.selection.first = 1;
-    sampledMetrics.selection.stride = 2;
+    sampledMetrics.selection = OutputSelection::strided(1, 2);
     const auto sampledMetricResult =
         compare(Tensor::copyNativeStorage(std::span<const double>(observed)),
                 Tensor::copyNativeStorage(std::span<const double>(expected)), sampledMetrics);
@@ -2011,7 +2035,7 @@ void testComparisonProgram() {
     ComparisonOptions magnitudePointwiseOnly = allCloseComparisonOptions(1.0, 0.0);
     magnitudePointwiseOnly.computePointwiseStatistics = false;
     magnitudePointwiseOnly.computeFrobenius = false;
-    magnitudePointwiseOnly.selection.indexOrder = IndexOrder::FirstDimensionFastest;
+    magnitudePointwiseOnly.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
     require(!compare(Tensor::copyNativeStorage(
                          std::span<const std::complex<double>>(componentwiseObserved)),
                      Tensor::copyNativeStorage(

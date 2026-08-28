@@ -410,7 +410,7 @@ class ComparisonAccumulator {
             m_result.reportedMismatches.size() < m_options.maxReportedMismatches;
         if (reportComparison || reportMismatch) {
             std::vector<size_t> coordinates(m_shape->rank(), 0);
-            coordinatesForLinearIndex(logicalIndex, *m_shape, m_options.selection.indexOrder,
+            coordinatesForLinearIndex(logicalIndex, *m_shape, m_options.selection.indexOrder(),
                                       coordinates);
             const Mismatch sample{
                 logicalIndex,
@@ -498,20 +498,31 @@ class ComparisonAccumulator {
 };
 
 template <typename Function>
-void forEachSelectedIndex(const Shape& shape, const ComparisonSelection& selection,
+void forEachSelectedIndex(const Shape& shape, const OutputSelection& selection,
                           Function&& function) {
-    if (selection.stride == 0)
-        throw std::invalid_argument("Comparison selection stride must be non-zero.");
-
     const size_t total = shape.elementCount();
     std::vector<size_t> coordinates(shape.rank(), 0);
+    if (selection.kind() == OutputSelectionKind::Explicit) {
+        for (const size_t logicalIndex : selection.indices(total)) {
+            coordinatesForLinearIndex(logicalIndex, shape, selection.indexOrder(), coordinates);
+            function(logicalIndex, std::span<const size_t>(coordinates));
+        }
+        return;
+    }
+    if (selection.selectsAll()) {
+        for (size_t logicalIndex = 0; logicalIndex < total; ++logicalIndex) {
+            coordinatesForLinearIndex(logicalIndex, shape, selection.indexOrder(), coordinates);
+            function(logicalIndex, std::span<const size_t>(coordinates));
+        }
+        return;
+    }
     size_t selected = 0;
-    for (size_t logicalIndex = selection.first;
-         logicalIndex < total && selected < selection.maxElements; ++selected) {
-        coordinatesForLinearIndex(logicalIndex, shape, selection.indexOrder, coordinates);
+    for (size_t logicalIndex = selection.first();
+         logicalIndex < total && selected < selection.maxElements(); ++selected) {
+        coordinatesForLinearIndex(logicalIndex, shape, selection.indexOrder(), coordinates);
         function(logicalIndex, std::span<const size_t>(coordinates));
-        if (selection.stride > std::numeric_limits<size_t>::max() - logicalIndex) break;
-        logicalIndex += selection.stride;
+        if (selection.stride() > std::numeric_limits<size_t>::max() - logicalIndex) break;
+        logicalIndex += selection.stride();
     }
 }
 
@@ -743,13 +754,16 @@ ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor&
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonResult result;
         result.pointwiseEvaluated = true;
-        if (options.selection.first == 0 && options.selection.stride == 1 &&
-            options.selection.indexOrder == IndexOrder::FirstDimensionFastest &&
+        if ((options.selection.selectsAll() ||
+             (options.selection.first() == 0 && options.selection.stride() == 1)) &&
+            options.selection.indexOrder() == IndexOrder::FirstDimensionFastest &&
             observed.shape().rank() != 0) {
             const Shape& shape = observed.shape();
             const size_t innerSize = shape[0];
             const size_t selectedTotal =
-                std::min(shape.elementCount(), options.selection.maxElements);
+                options.selection.selectsAll()
+                    ? shape.elementCount()
+                    : std::min(shape.elementCount(), options.selection.maxElements());
             if (selectedTotal == 0) return result;
             const size_t outerCount = (selectedTotal + innerSize - 1) / innerSize;
             std::vector<size_t> coordinates(shape.rank(), 0);

@@ -115,10 +115,15 @@ namespace TensileLite::Client::reference_adapter
         friend std::variant<GemmInvocationAdapter, TranslationFailure>
             translateGemmInvocation(ContractionProblemGemm const& problem,
                                     ContractionInputs const&      inputs,
-                                    size_t                        elementsToValidate);
+                                    roc::host_numerics::OutputSelection outputSelection);
 
         std::unique_ptr<const State> m_state;
     };
+
+    std::variant<GemmInvocationAdapter, TranslationFailure>
+        translateGemmInvocation(ContractionProblemGemm const& problem,
+                                ContractionInputs const&      inputs,
+                                roc::host_numerics::OutputSelection outputSelection);
 
     std::variant<GemmInvocationAdapter, TranslationFailure>
         translateGemmInvocation(ContractionProblemGemm const& problem,

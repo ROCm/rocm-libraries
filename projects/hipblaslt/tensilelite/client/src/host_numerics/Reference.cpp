@@ -4,6 +4,7 @@
 // Product-private TensileLite execution policy around the descriptor adapter.
 
 #include <roc/host_numerics/adapters/tensilelite/GemmInvocationAdapter.hpp>
+#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
 #include <roc/host_numerics/adapters/tensilelite/Reference.hpp>
 #include <roc/host_numerics/validation.hpp>
 
@@ -69,12 +70,13 @@ namespace TensileLite
 
         GemmRunInfo executeTranslatedGemm(ContractionProblemGemm const& problem,
                                           ContractionInputs const&      inputs,
-                                          size_t                        elementsToValidate,
+                                          OutputSelection               outputSelection,
                                           GemmBackend                    backend)
         {
             using namespace Client::reference_adapter;
 
-            auto translation = translateGemmInvocation(problem, inputs, elementsToValidate);
+            auto translation
+                = translateGemmInvocation(problem, inputs, std::move(outputSelection));
             if(std::holds_alternative<TranslationFailure>(translation))
                 throwTranslationFailure(std::get<TranslationFailure>(translation));
             GemmInvocationAdapter adapter = std::move(std::get<GemmInvocationAdapter>(translation));
@@ -101,28 +103,50 @@ namespace TensileLite
         roc::host_numerics::GemmRunInfo
             executeReferenceGemm(ContractionProblemGemm const& problem,
                                  ContractionInputs const&      inputs,
+                                 roc::host_numerics::OutputSelection outputSelection,
+                                 roc::host_numerics::GemmBackend     backend)
+        {
+            return executeTranslatedGemm(
+                problem, inputs, std::move(outputSelection), backend);
+        }
+
+        roc::host_numerics::GemmRunInfo
+            executeReferenceGemm(ContractionProblemGemm const& problem,
+                                 ContractionInputs const&      inputs,
                                  size_t                        elementsToValidate,
                                  roc::host_numerics::GemmBackend backend)
         {
-            return executeTranslatedGemm(problem, inputs, elementsToValidate, backend);
+            return executeReferenceGemm(problem,
+                                        inputs,
+                                        referenceOutputSelection(problem.d(), elementsToValidate),
+                                        backend);
         }
 
         roc::host_numerics::GemmRunInfo SolveGemmCPU(ContractionProblemGemm const& problem,
-                                                       ContractionInputs const&      inputs,
-                                                       size_t elementsToValidate)
+                                                     ContractionInputs const&      inputs,
+                                                     roc::host_numerics::OutputSelection
+                                                         outputSelection)
         {
             using roc::host_numerics::GemmRunInfo;
 
             ScopedTimer timer("solve_cpu_reference");
             return executeReferenceGemm(problem,
                                         inputs,
-                                        elementsToValidate,
+                                        std::move(outputSelection),
                                         roc::host_numerics::GemmBackend::Automatic);
+        }
+
+        roc::host_numerics::GemmRunInfo SolveGemmCPU(ContractionProblemGemm const& problem,
+                                                     ContractionInputs const&      inputs,
+                                                     size_t elementsToValidate)
+        {
+            return SolveGemmCPU(
+                problem, inputs, referenceOutputSelection(problem.d(), elementsToValidate));
         }
 
         void SolveCPU(ContractionProblem const* problem,
                       ProblemInputs const*      inputs,
-                      size_t                    elementsToValidate)
+                      std::span<const roc::host_numerics::OutputSelection> outputSelections)
         {
             if(auto groupedProblem = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
             {
@@ -131,12 +155,15 @@ namespace TensileLite
                     throw std::runtime_error("Unable to cast input to ContractionGroupedInputs.");
                 if(groupedProblem->gemms.size() != refInput->grouped.size())
                     throw std::runtime_error("Mismatched number of grouped problems and inputs.");
+                if(groupedProblem->gemms.size() != outputSelections.size())
+                    throw std::runtime_error(
+                        "Mismatched number of grouped problems and output selections.");
 
                 for(uint64_t i = 0; i < groupedProblem->gemms.size(); ++i)
                 {
                     ContractionProblemGemm groupedGemm  = groupedProblem->gemms[i];
                     ContractionInputs      groupedInput = refInput->grouped[i];
-                    SolveGemmCPU(groupedGemm, groupedInput, elementsToValidate);
+                    SolveGemmCPU(groupedGemm, groupedInput, outputSelections[i]);
                 }
                 return;
             }
@@ -146,7 +173,10 @@ namespace TensileLite
                 auto refInput = dynamic_cast<ContractionInputs const*>(inputs);
                 if(!refInput)
                     throw std::runtime_error("Unable to cast input to ContractionInputs.");
-                SolveGemmCPU(*gemmProblem, *refInput, elementsToValidate);
+                if(outputSelections.size() != 1)
+                    throw std::runtime_error(
+                        "An ungrouped GEMM requires exactly one output selection.");
+                SolveGemmCPU(*gemmProblem, *refInput, outputSelections.front());
                 return;
             }
 

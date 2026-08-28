@@ -343,8 +343,8 @@ product has copied an observed tensor into host memory:
 ```cpp
 ComparisonOptions options
     = defaultComparisonOptions(ScalarType::Float32);
-options.selection.indexOrder
-    = IndexOrder::FirstDimensionFastest;
+options.selection
+    = OutputSelection::all(IndexOrder::FirstDimensionFastest);
 options.computeUlp = true;
 options.ulpType = ScalarType::Float32;
 

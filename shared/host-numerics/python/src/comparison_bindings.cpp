@@ -23,13 +23,6 @@ void registerComparisonBindings(nb::module_& module) {
         .value("Componentwise", ComplexPointwiseMode::Componentwise)
         .value("Magnitude", ComplexPointwiseMode::Magnitude);
 
-    nb::class_<ComparisonSelection>(module, "ComparisonSelection")
-        .def(nb::init<>())
-        .def_rw("first", &ComparisonSelection::first)
-        .def_rw("stride", &ComparisonSelection::stride)
-        .def_rw("max_elements", &ComparisonSelection::maxElements)
-        .def_rw("index_order", &ComparisonSelection::indexOrder);
-
     nb::class_<ComparisonOptions>(module, "ComparisonOptions")
         .def(nb::init<>())
         .def_rw("pointwise", &ComparisonOptions::pointwise)

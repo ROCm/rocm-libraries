@@ -38,13 +38,16 @@ struct SelectedOutputBlockPlan {
 };
 
 SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selection,
-                                                 size_t logicalElements, size_t outputColumns) {
+                                                 const Shape& outputShape) {
+    const size_t logicalElements = outputShape.elementCount();
+    const size_t outputColumns = outputShape[1];
     const std::vector<size_t> selectedIndices = selection.indices(logicalElements);
     std::vector<SelectedOutputLocation> locations;
     locations.reserve(selectedIndices.size());
     for (const size_t logicalIndex : selectedIndices) {
-        const size_t row = logicalIndex / outputColumns;
-        const size_t column = logicalIndex % outputColumns;
+        const auto coordinates = outputShape.coordinates(logicalIndex, selection.indexOrder());
+        const size_t row = coordinates[0];
+        const size_t column = coordinates[1];
         locations.push_back({
             .blockRow = row / outputBlockRows,
             .blockColumn = column / outputBlockColumns,
@@ -270,7 +273,7 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
             });
     } else {
         const SelectedOutputBlockPlan plan =
-            planSelectedOutputBlocks(problem.outputSelection, problem.d.shape().elementCount(), n);
+            planSelectedOutputBlocks(problem.outputSelection, problem.d.shape());
         const std::span<const size_t> localIndices(plan.localIndices);
         for (const PlannedOutputBlock& block : plan.blocks)
             outputElementsCovered += std::min(outputBlockRows, m - block.rowBase) *
@@ -318,8 +321,8 @@ bool detail::isBlockedGemmPreferredForAutomaticExecution(const GemmRequest& prob
     if (pointwiseWork < minimumBlockedMultiplyAdds) return false;
     if (problem.outputSelection.selectsAll()) return true;
 
-    const SelectedOutputBlockPlan plan = planSelectedOutputBlocks(
-        problem.outputSelection, problem.d.shape().elementCount(), problem.d.shape()[1]);
+    const SelectedOutputBlockPlan plan =
+        planSelectedOutputBlocks(problem.outputSelection, problem.d.shape());
     size_t coveredOutputCount = 0;
     for (const PlannedOutputBlock& block : plan.blocks)
         coveredOutputCount += std::min(outputBlockRows, problem.d.shape()[0] - block.rowBase) *
