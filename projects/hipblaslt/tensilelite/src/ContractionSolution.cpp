@@ -5026,10 +5026,32 @@ namespace TensileLite
                           "the resolved StaggerU is " + std::to_string(resolvedStaggerU)
                               + " rather than 0");
 
-        if(!internalArgsSupport.staggerU && sizeMapping.staggerU != 0)
+        // Only a handwritten custom kernel can carry a stagger the host cannot
+        // reach. A generated kernel takes StaggerU exclusively from the packed
+        // internal argument: the solution's StaggerU survives code generation
+        // only as an SGPR-pool sizing input, so two solutions differing only in
+        // StaggerU -- or only in SupportCustomStaggerU -- emit byte-identical
+        // assembly, and every generated wrap site unpacks the runtime value.
+        // The clamp above therefore does reach it, and !internalArgsSupport
+        // .staggerU says nothing about whether the kernel staggers; it only
+        // says the host declines to write the field, which leaves it 0.
+        //
+        // A handwritten custom kernel is one with a non-empty customKernel.name
+        // that the generator did not produce (customKernel.generated == false);
+        // see handwrittenCustomKernel(). Those are frozen assembly and may bake
+        // a literal stagger into the loop, which no host-side clamp can undo.
+        //
+        // Defense in depth rather than a live path: the CustomKernel clause at
+        // the top of this function already refuses every handwritten custom
+        // kernel outright, so this cannot fire today. It is kept, like the
+        // ResolvedStaggerU check above, so that relaxing that clause to admit
+        // individually vetted custom kernels cannot silently admit one whose
+        // stagger is compiled in.
+        if(handwrittenCustomKernel() && sizeMapping.staggerU != 0)
             return refuse("CompiledInStaggerU",
-                          "this kernel has no runtime StaggerU and a compiled-in StaggerU="
-                              + std::to_string(sizeMapping.staggerU));
+                          "this kernel has a compiled-in StaggerU="
+                              + std::to_string(sizeMapping.staggerU)
+                              + " that the host cannot clamp");
 
         return {};
     }
