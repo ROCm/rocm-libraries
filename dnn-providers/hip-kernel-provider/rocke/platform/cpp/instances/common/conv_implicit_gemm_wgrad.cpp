@@ -320,21 +320,25 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                              s->problem.C);
                 return false;
             }
-            /* For bf16/fp16 split-K the default epilogue emits zero-fill packed
-             * atomics at the scattered MFMA layout; cshuffle produces contiguous
-             * pairs and is required.  Matches Python is_valid_wgrad_spec check. */
-            bool is_default_epi = (s->epilogue == NULL || strcmp(s->epilogue, "default") == 0);
-            if(is_default_epi)
-            {
-                if(reason && reason_cap)
-                    snprintf(reason,
-                             reason_cap,
-                             "split_k atomic with dtype_d=%s requires epilogue='cshuffle' "
-                             "(default emits zero-fill packed atomics with scattered MFMA "
-                             "layout; cshuffle produces contiguous pairs)",
-                             dt);
-                return false;
-            }
+        }
+    }
+
+    /* For bf16/fp16 output the default epilogue emits zero-fill packed atomics
+     * at the scattered MFMA layout.  Matches Python is_valid_wgrad_spec and
+     * validate(): epilogue='cshuffle' is required for these dtypes. */
+    {
+        const char* dt = s->dtype_d ? s->dtype_d : "fp16";
+        bool is_default_epi = (s->epilogue == NULL || strcmp(s->epilogue, "default") == 0);
+        if(is_default_epi && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "split_k atomic with dtype_d=%s requires epilogue='cshuffle' "
+                         "(default emits zero-fill packed atomics with scattered MFMA "
+                         "layout; cshuffle produces contiguous pairs)",
+                         dt);
+            return false;
         }
     }
 

@@ -950,11 +950,7 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
         rocke_value_t* col_v = rocke_b_mod(b, vec_idx, c_tile_n_div_vec);
         rocke_value_t* col = (sv > 1) ? rocke_b_mul(b, col_v, rocke_b_const_i32(b, sv)) : col_v;
         rocke_value_t* m_val = rocke_b_add(b, grid->block_m_off, row);
-        rocke_value_t* idx[2];
         rocke_value_t* m_ok = (bounds_m != NULL) ? rocke_b_cmp_lt(b, m_val, bounds_m) : NULL;
-
-        idx[0] = row;
-        idx[1] = col;
 
         if(_fp32_out)
         {
