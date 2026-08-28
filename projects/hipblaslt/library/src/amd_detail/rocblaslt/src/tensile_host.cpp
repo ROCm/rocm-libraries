@@ -79,6 +79,19 @@
 
 #define INTERNAL_HIPHOSTMEM_SIZE 32768
 
+// The handle allocates the synchronizer regions and TensileLite decides what
+// fits in them, so both sides carry the same three sizes. A solution sized
+// against one value and a region allocated against another writes past its own
+// block and into another problem's or another stream's, with nothing at runtime
+// to catch it. This is the one translation unit that sees both headers, so bind
+// them here and make drift a compile error.
+static_assert(TensileLite::GsuSynchronizerElements == _rocblaslt_handle::c_syncGsuSlotElements,
+              "GSU synchronizer slot size disagrees between TensileLite and the handle");
+static_assert(TensileLite::SynchronizerGroupedSlots == _rocblaslt_handle::c_syncGsuSlots,
+              "GSU synchronizer slot count disagrees between TensileLite and the handle");
+static_assert(TensileLite::StreamKFlagElements == _rocblaslt_handle::c_syncSkSlotElements,
+              "Stream-K flag region size disagrees between TensileLite and the handle");
+
 RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     trans_a,
                                                          hipblasOperation_t     trans_b,
                                                          int64_t                m,
