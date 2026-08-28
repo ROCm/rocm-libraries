@@ -148,6 +148,17 @@ class AQuantKernelConfig:
     double_smem_buffer: bool = False
     k_block_per_cu: int      = 1
 
+    # Pipeline selection, DECOUPLED from preshuffle_aquant. When None (default) the
+    # pipeline is derived from preshuffle_aquant for back-compat (preshuffle -> compv3,
+    # else mem). Set explicitly to "compv3" with preshuffle_aquant=False to request the
+    # compv3-without-preshuffle family: Old-TE builds AQuantGemmPipelineAgBgCrCompV3 with
+    # the Traits APreshuffleQuant flag set independently of the pipeline class (only the
+    # AQ-scale DRAM stride branch differs; the mainloop is identical), so
+    # compv3 + APreshuffleQuant=false is a valid ck_tile instantiation the bridge must be
+    # able to emit. See gemm_aquant_pipeline_ag_bg_cr_v3.hpp (APreshuffleQuant is a
+    # compile-time Traits flag with both-way branches).
+    pipeline: Optional[str] = None
+
     # Epilogue variant: "cshuffle" or "default". Must match the codegen spec so the
     # ctypes .so name lines up with the generated header (and the matched Old-TE stem).
     epilogue: str = "cshuffle"
@@ -157,7 +168,15 @@ class AQuantKernelConfig:
 
     @property
     def pipeline_key(self) -> str:
-        """Pipeline map key echoed in the kernel name: preshufflequant -> compv3, else mem."""
+        """Pipeline map key echoed in the kernel name, DECOUPLED from preshuffle.
+
+        Explicit ``pipeline`` wins; otherwise derive from preshuffle_aquant
+        (preshufflequant -> compv3, decode -> mem) for back-compat. This lets a
+        caller request pipeline="compv3" with preshuffle_aquant=False (the
+        compv3-without-preshuffle family) that the old coupling could not express.
+        """
+        if self.pipeline is not None:
+            return self.pipeline
         return "compv3" if self.preshuffle_aquant else "mem"
 
     @property
@@ -201,6 +220,10 @@ class AQuantKernelConfig:
                 "quant_group_k": self.quant_group_k,
             }],
             "preshuffle_aquant": self.preshuffle_aquant,
+            # Pass the RESOLVED pipeline so the codegen emits the same pipeline class
+            # this config's .name encodes, independently of preshuffle_aquant. This is
+            # what unlocks compv3 + APreshuffleQuant=false.
+            "pipeline": self.pipeline_key,
             "double_smem_buffer": self.double_smem_buffer,
             "k_block_per_cu": self.k_block_per_cu,
             "epilogues": [self.epilogue],

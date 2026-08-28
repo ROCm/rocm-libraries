@@ -159,6 +159,11 @@ class AQuantKernelSpec:
     quant_group_n: int = 1
     quant_group_k: int = 128
     preshuffle_aquant: bool = False
+    # Pipeline selection DECOUPLED from preshuffle_aquant. None -> derive from
+    # preshuffle_aquant (back-compat). Set "compv3" with preshuffle_aquant=False to emit
+    # AQuantGemmPipelineAgBgCrCompV3 with the Traits APreshuffleQuant=false branch (the
+    # compv3-without-preshuffle family Old-TE builds but the old coupling could not).
+    pipeline: Optional[str] = None
     double_smem_buffer: bool = False
     pad_m: bool = False
     pad_n: bool = False
@@ -175,7 +180,13 @@ class AQuantKernelSpec:
 
     @property
     def pipeline_key(self) -> str:
-        """Pipeline map key: preshufflequant -> compv3, else mem."""
+        """Pipeline map key, DECOUPLED from preshuffle.
+
+        Explicit ``pipeline`` wins; otherwise derive from preshuffle_aquant
+        (preshufflequant -> compv3, decode -> mem). Enables compv3 + APreshuffleQuant=false.
+        """
+        if self.pipeline is not None:
+            return self.pipeline
         return "compv3" if self.preshuffle_aquant else "mem"
 
     @property
@@ -439,6 +450,10 @@ def _build_specs(config: dict) -> List[AQuantKernelSpec]:
     # scheduler through verbatim); this only fixes the unattended default.
     default_scheduler = "intrawave"
     scheduler = config.get("scheduler", default_scheduler)
+    # Pipeline selection, DECOUPLED from preshuffle_aquant. If absent, leave None so the
+    # spec derives it from preshuffle_aquant (back-compat). An explicit "compv3" with
+    # preshuffle_aquant=False selects the compv3-without-preshuffle family.
+    pipeline = config.get("pipeline", None)
     pad_m     = config.get("pad_m", False)
     pad_n     = config.get("pad_n", False)
     pad_k     = config.get("pad_k", False)
@@ -483,6 +498,7 @@ def _build_specs(config: dict) -> List[AQuantKernelSpec]:
                 quant_group_n=qg.get("quant_group_n", 1),
                 quant_group_k=qg.get("quant_group_k", 128),
                 preshuffle_aquant=preshuffle_aquant,
+                pipeline=pipeline,
                 double_smem_buffer=double_smem_buffer,
                 pad_m=pad_m,
                 pad_n=pad_n,
