@@ -17,8 +17,7 @@ namespace
 
 /// A plausible packed archive and the entry it might hold, in bytes. Nothing here opens a
 /// file: the subject is the arithmetic that decides whether a reader-reported length is
-/// worth passing on, and that arithmetic is the only part of the guard a corrupt archive
-/// would exercise.
+/// worth passing on.
 constexpr std::uintmax_t ONE_MIB = 1024ULL * 1024;
 constexpr std::uintmax_t TWO_GIB = 2ULL * 1024 * 1024 * 1024;
 constexpr std::uintmax_t RATIO = 4096;
@@ -55,8 +54,7 @@ TEST(TestKpackArchive, StandsTheRatioDownWhenTheArchiveSizeIsUnknown)
 
 TEST(TestKpackArchive, DoesNotOverflowOnAHugeArchive)
 {
-    // The ratio is applied by dividing the reported size, not by multiplying the archive
-    // size: the multiplication wraps here and would admit every entry.
+    // The multiplication form of the ratio check wraps here and would admit every entry.
     constexpr std::uintmax_t ARCHIVE = std::numeric_limits<std::uintmax_t>::max();
     EXPECT_TRUE(isCredibleCodeObjectSize(ONE_MIB, ARCHIVE));
     EXPECT_FALSE(isCredibleCodeObjectSize(TWO_GIB + 1, ARCHIVE));

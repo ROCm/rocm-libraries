@@ -9,9 +9,8 @@
 namespace hip_kernel_provider::device
 {
 
-// The ordinal a cache lookup should be keyed and bound to: the device the application has
-// current when it asks for a kernel. Falls back to 0 rather than reporting -- whatever the
-// caller does next hits the same HIP failure and reports it in its own terms.
+// Falls back to 0 rather than reporting -- whatever the caller does next hits the same HIP
+// failure and reports it in its own terms.
 inline int currentDeviceOrdinal()
 {
     int ordinal = 0;
@@ -22,15 +21,12 @@ inline int currentDeviceOrdinal()
     return ordinal;
 }
 
-// Makes an ordinal the current device for the enclosing scope and puts back whatever was
-// current before.
-//
 // HIP binds a module to the device current at hipModuleLoadData, and binds the unload the
 // same way: keying a cache on the ordinal separates entries, it does not place them.
 // Restoring keeps asking for a kernel from being a visible side effect.
 //
 // Nothing here throws -- the caller decides whether a failed bind is fatal by reading
-// bound(). A failed restore is logged and swallowed.
+// bound().
 class ScopedDevice
 {
 public:
