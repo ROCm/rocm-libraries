@@ -715,6 +715,37 @@ function(hkp_rocke_wheel_python_interp out_interp wheel_stamp)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_find_hipcc()
+#   Resolve the hipcc that honors --genco into the HKP_HIPCC cache entry.
+#
+#   hipcc is the perl/bat driver that honors --genco; on Windows it is hipcc.exe
+#   or hipcc.bat. hipcc.bin.exe is the raw clang driver and is only a last-resort
+#   fallback.
+#
+#   The default name-major search is what holds that ordering: every directory is
+#   tried for hipcc before hipcc.bin.exe is tried anywhere, so the fallback wins
+#   only when no real driver exists anywhere on the path. NAMES_PER_DIR would
+#   demote this list to a tiebreak within one directory and let an early
+#   hipcc.bin.exe beat a later hipcc, which is the outcome the list exists to
+#   prevent.
+#
+#   HIP_HIPCC_EXECUTABLE, when a toolchain has already resolved one, names the
+#   directory to consult first. A hint and not a replacement: it is consulted
+#   ahead of the default paths but does not stop the search, so a stale value
+#   narrows nothing.
+# ---------------------------------------------------------------------------
+function(hkp_find_hipcc)
+    if(DEFINED HIP_HIPCC_EXECUTABLE)
+        get_filename_component(_hipcc_hint "${HIP_HIPCC_EXECUTABLE}" DIRECTORY)
+    else()
+        set(_hipcc_hint "")
+    endif()
+    find_program(HKP_HIPCC
+        NAMES hipcc hipcc.bat hipcc.bin.exe
+        HINTS "${_hipcc_hint}")
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_add_packaging()
 #   Gate production packaging on ONE source root plus explicit per-producer
 #   switches. The root names a location; the switches say which producers may
@@ -735,29 +766,7 @@ function(hkp_add_packaging)
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
     hkp_selected_arches(_arches)
 
-    # hipcc is the perl/bat driver that honors --genco; on Windows it is
-    # hipcc.exe or hipcc.bat. hipcc.bin.exe is the raw clang driver and is only
-    # a last-resort fallback.
-    #
-    # The default name-major search is what holds that ordering: every directory
-    # is tried for hipcc before hipcc.bin.exe is tried anywhere, so the fallback
-    # wins only when no real driver exists anywhere on the path. NAMES_PER_DIR
-    # would demote this list to a tiebreak within one directory and let an early
-    # hipcc.bin.exe beat a later hipcc, which is the outcome the list exists to
-    # prevent.
-    #
-    # HIP_HIPCC_EXECUTABLE, when a toolchain has already resolved one, names the
-    # directory to consult first. A hint and not a replacement: it is consulted
-    # ahead of the default paths but does not stop the search, so a stale value
-    # narrows nothing.
-    if(DEFINED HIP_HIPCC_EXECUTABLE)
-        get_filename_component(_hipcc_hint "${HIP_HIPCC_EXECUTABLE}" DIRECTORY)
-    else()
-        set(_hipcc_hint "")
-    endif()
-    find_program(HKP_HIPCC
-        NAMES hipcc hipcc.bat hipcc.bin.exe
-        HINTS "${_hipcc_hint}")
+    hkp_find_hipcc()
 
     hkp_install_base(_install_base)
 
