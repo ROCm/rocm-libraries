@@ -22,43 +22,36 @@
  * ************************************************************************ */
 #pragma once
 
-#include <memory>
+#include <unordered_map>
+#include <unordered_set>
 
-#include "stinkytofu/Export.hpp"
+#include "stinkytofu/core/BasicBlock.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace stinkytofu {
+class IRBase;
 
 namespace cluster_barrier {
+namespace test {
 
-/// Single toggle for Rule 3 cross-loop hoisting (0 = off, 1 = on).
-///
-/// To enable cross-loop in the pass **and** compile the cross-loop unit tests, set this macro
-/// to 1 and rebuild (rocisa / stinkytofu and `unit_tests`). The tests gate on the same
-/// `STINKY_KRULE3_CROSS_LOOP` via `IF_RULE3_CROSS_LOOP` in tests/unit/TestHelpers.hpp — there
-/// is no separate UT define; pass and tests must stay in sync.
-///
-/// `kRule3CrossLoop` mirrors this macro for runtime `if` checks. `#if STINKY_KRULE3_CROSS_LOOP`
-/// in tests reads the same value. The preprocessor cannot use `constexpr`, so change this macro
-/// (not `kRule3CrossLoop`).
-#ifndef STINKY_KRULE3_CROSS_LOOP
-#define STINKY_KRULE3_CROSS_LOOP 0
-#endif
+struct Rule3SignalAnchorResult {
+    IRBase* anchor = nullptr;
+    int hops = 0;
+    bool crossedLoopHead = false;
+    /// Set when the climb nominated a spot outside the wait's segment with no hop counted,
+    /// as it stood before the SCC correction moved it (unit tests only). Reporting such an
+    /// anchor is a hard error, so this is the only way a test can see one that was corrected
+    /// back into the segment before it got there.
+    IRBase* outOfSegmentNomination = nullptr;
+};
 
-/// Gate for Rule 3 hoisting and scheduler live-out SCC lead.
-#if STINKY_KRULE3_CROSS_LOOP
-inline constexpr bool kRule3CrossLoop = true;
-#else
-inline constexpr bool kRule3CrossLoop = false;
-#endif
+/// Unit-test entry point for the Rule 3 cycle-lead anchor search (linked from the pass TU).
+Rule3SignalAnchorResult findRule3SignalAnchorByCycleLeadForUnitTest(
+    StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
+    const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
+    int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors, int maxHops,
+    StinkyInstruction* loopHead);
 
+}  // namespace test
 }  // namespace cluster_barrier
-
-class Pass;
-
-/// \p streamKMulticast and \p pgrValue only enable the Rule 3 producer-side
-/// tensor drain for StreamK cluster multicast at PrefetchGlobalRead >= 2; the
-/// barrier placement rules themselves derive everything they need from the IR.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
-    bool streamKMulticast = false, int pgrValue = 1);
-
 }  // namespace stinkytofu
