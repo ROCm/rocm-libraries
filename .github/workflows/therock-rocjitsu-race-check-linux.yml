@@ -83,7 +83,7 @@ jobs:
         with:
           repository: ROCm/rocm-systems
           # Pin the source used by every target in the workflow run.
-          ref: bded72bb7d1fc7e25620dcf35e2cd11eade08b26
+          ref: 5471682935f6eaba6e2a16d5957b1ce4ba6be572
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
