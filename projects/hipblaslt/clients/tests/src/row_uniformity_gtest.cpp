@@ -844,12 +844,13 @@ namespace
         // checkRowUniformity accepts a clean refusal for every candidate, so it
         // can report green having exercised only the launch gate's rejection
         // path and never the repair the mode exists to perform. This driver
-        // selects candidates by the same metadata the gate reasons from -- a
-        // kernel that staggers, whose StaggerU the clamp can reach -- and then
-        // asserts the outcome. Selecting on metadata rather than on the observed
-        // result is what stops the assertion being circular, and it replaces an
-        // earlier pair of pinned solution indices that could not survive either
-        // a retune or a change of architecture.
+        // selects candidates by the same metadata the gate reasons from -- any
+        // kernel that declares a stagger, whose StaggerU the host-side clamp
+        // therefore has to settle -- and then asserts the outcome. Selecting on
+        // metadata rather than on the observed result is what stops the
+        // assertion being circular, and it replaces an earlier pair of pinned
+        // solution indices that could not survive either a retune or a change
+        // of architecture.
         void checkClampRepairedSolutions(const Problem& problem)
         {
             RowUniformityHarness harness(problem);
@@ -893,21 +894,19 @@ namespace
                 ++staggering;
                 const std::string name = harness.solutionName(candidate);
 
-                if(!stagger.clampCanReach)
-                {
-                    // The clamp writes a field this kernel never reads, so the
-                    // gate has to refuse it: admitting it would leave the
-                    // compiled-in rotation running.
+                // SupportCustomStaggerU: False does not mean the kernel found
+                // its stagger somewhere the clamp cannot reach. It means only
+                // that the host leaves the packed StaggerU field at 0, and a
+                // generated kernel reads StaggerU from that field and nowhere
+                // else. So these are admitted like any other staggering
+                // solution and held to the same bitwise row-uniformity
+                // assertion below, which is what would catch a stagger the
+                // clamp really had failed to reach. Only frozen hand-written
+                // custom kernels can carry one, and the gate refuses those.
+                if(stagger.clampCanReach)
+                    ++reachable;
+                else
                     ++unreachable;
-                    EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true),
-                              HIPBLAS_STATUS_INVALID_VALUE)
-                        << name << " declares StaggerU " << stagger.staggerU
-                        << " with no runtime StaggerU argument, so uniform summation order must "
-                           "refuse it rather than run it unclamped";
-                    continue;
-                }
-
-                ++reachable;
 
                 if(harness.run(candidate, /*uniformMode=*/false) != HIPBLAS_STATUS_SUCCESS)
                     continue;
@@ -936,8 +935,7 @@ namespace
                 const int64_t badRow = harness.firstNonUniformRowOfLastRun();
                 EXPECT_EQ(badRow, -1)
                     << "Row " << badRow << " of D differs bitwise from row 0 for " << name
-                    << ", a staggering solution the clamp reaches, with uniform summation order "
-                       "enabled";
+                    << ", a staggering solution, with uniform summation order enabled";
             }
 
             RecordProperty("algos_enumerated", enumeratedCount);
@@ -962,8 +960,8 @@ namespace
             // above witnessed a repair, and this case must not be mistaken for
             // coverage of one.
             if(repaired == 0)
-                GTEST_SKIP() << "No staggering solution the clamp reaches was both non-uniform "
-                                "with the mode off and honored with it on, so this run cannot "
+                GTEST_SKIP() << "No staggering solution was both non-uniform with the mode off "
+                                "and honored with it on, so this run cannot "
                                 "witness a repair. arch="
                              << gpuArchName() << " problem=" << problem.m << "x" << problem.n << "x"
                              << problem.k << " algos_enumerated=" << enumeratedCount
@@ -1366,7 +1364,15 @@ namespace
             << "A handwritten custom kernel must be refused under uniform summation order";
     }
 
-    TEST(RowUniformityStreamKRejection_pre_checkin, CompiledInStaggerU)
+    // SupportCustomStaggerU: False does not mean the kernel found its stagger
+    // somewhere the clamp cannot reach. It means only that the host declines to
+    // write the packed StaggerU field, which leaves it 0, and a generated
+    // kernel reads StaggerU from that field and from nowhere else -- the
+    // declared value survives code generation solely as an SGPR-pool sizing
+    // input. So a generated kernel that declares a non-zero StaggerU with no
+    // runtime StaggerU argument is reached by the clamp like any other, and
+    // must stay admitted rather than being refused for nothing.
+    TEST(RowUniformityStreamKRejection_pre_checkin, GeneratedKernelWithCompiledInStaggerU)
     {
         const auto hardware                    = probeHardware();
         auto       solution                    = probeSolution();
@@ -1375,17 +1381,44 @@ namespace
         solution->sizeMapping.staggerU         = 16;
         auto problem                           = probeProblem();
 
-        // USO clamps the *resolved* StaggerU to 0. Refusal must therefore come
-        // from the compiled-in field the clamp cannot reach, matching the
-        // launch gate.
+        // The admission below is only meaningful because the clamp really does
+        // settle this launch at StaggerU 0: it is the resolved value, not the
+        // declared one, that decides whether the summation order is uniform.
         const int32_t autoWGM
             = std::get<0>(solution->calculateAutoWGM(problem, &hardware, /*skgrid=*/0));
         EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &hardware, 0, autoWGM)), 0u)
-            << "uniform summation order clamps resolved StaggerU to 0; this case is about "
-               "the compiled-in field, not a non-zero resolved value";
+            << "uniform summation order clamps resolved StaggerU to 0";
+
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "a generated kernel takes StaggerU from the packed argument, so the clamp "
+               "reaches it and a declared StaggerU must not refuse it";
+    }
+
+    // The other half of the same rule: frozen hand-written assembly can bake a
+    // literal rotation into its main loop where no host-side clamp reaches, so
+    // a compiled-in StaggerU there must still be refused.
+    //
+    // The refusal this pins is the outcome, not one particular clause. The
+    // CustomKernel clause at the top of the predicate already refuses every
+    // hand-written custom kernel outright, so it is what fires here; the
+    // narrower CompiledInStaggerU clause sits behind it as defense in depth,
+    // for the day that first clause is relaxed to admit individually vetted
+    // custom kernels. Both are private, so the public predicate cannot say
+    // which one objected -- what matters is that this configuration never
+    // becomes admissible.
+    TEST(RowUniformityStreamKRejection_pre_checkin, HandwrittenCustomKernelWithCompiledInStaggerU)
+    {
+        const auto hardware                    = probeHardware();
+        auto       solution                    = probeSolution();
+        solution->sizeMapping.streamK          = 0;
+        solution->internalArgsSupport.staggerU = false;
+        solution->sizeMapping.staggerU         = 16;
+        solution->customKernel.name            = "DummyCustomKernel";
+        solution->customKernel.generated       = false;
+        auto problem                           = probeProblem();
 
         EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
-            << "Compiled-in StaggerU with no runtime field must be refused";
+            << "a hand-written custom kernel with a compiled-in StaggerU must be refused";
     }
 
     // The old selection filter skipped GSU when AdaptiveGemmGSUA was set, so a
