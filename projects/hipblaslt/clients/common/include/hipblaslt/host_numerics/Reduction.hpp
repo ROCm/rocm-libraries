@@ -8,7 +8,7 @@
 
 #include <cstdint>
 #include <hipblaslt/hipblaslt.h>
-#include <roc/host_numerics/validation.hpp>
+#include <roc/host_numerics/reduction.hpp>
 
 namespace hipblaslt::host_numerics
 {
