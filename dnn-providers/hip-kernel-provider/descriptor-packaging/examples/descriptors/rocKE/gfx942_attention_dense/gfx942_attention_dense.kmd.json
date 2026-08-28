@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "a8feaec1-8b6a-406e-a2ca-404f858b9183",
+  "id": "86727b7b-aea6-4c3f-ad69-743aba8e2721",
   "name": "Gfx942AttentionDense variant fields",
   "fields": [
     {
@@ -43,14 +43,29 @@
       "default_value": 1
     },
     {
+      "name": "block_m",
+      "type": "int",
+      "default_value": 256
+    },
+    {
       "name": "block_n",
       "type": "int",
       "default_value": 64
     },
     {
-      "name": "block_m",
+      "name": "waves_per_eu",
       "type": "int",
-      "default_value": 256
+      "default_value": 2
+    },
+    {
+      "name": "persistent",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "num_persistent",
+      "type": "int",
+      "default_value": 304
     }
   ]
 }

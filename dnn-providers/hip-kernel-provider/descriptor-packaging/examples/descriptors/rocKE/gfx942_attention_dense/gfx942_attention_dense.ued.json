@@ -1,20 +1,24 @@
 {
   "version": "1.0",
-  "id": "47398a11-3543-4415-b54a-83f5dacbc37f",
+  "id": "fc69e2f1-33cf-4aa1-9f57-d3b54c17351b",
   "name": "hipkernel:Gfx942AttentionDense",
   "graph_match": {
     "native": "hipkernel.gfx942_attention_dense.graph_match"
   },
-  "metadata": "a8feaec1-8b6a-406e-a2ca-404f858b9183",
-  "heuristic": "933f3010-baa9-4b08-b250-f2fa7dcdfa27",
+  "metadata": "86727b7b-aea6-4c3f-ad69-743aba8e2721",
+  "heuristic": "39cc457a-da78-4bd0-b6b6-42b3f7238b5f",
   "knobs": [
-    "block_n",
     "head_size",
     "num_query_heads",
     "num_kv_heads",
     "seqlen_q",
     "seqlen_kv",
     "batch",
-    "causal"
+    "causal",
+    "block_m",
+    "block_n",
+    "waves_per_eu",
+    "persistent",
+    "num_persistent"
   ]
 }
