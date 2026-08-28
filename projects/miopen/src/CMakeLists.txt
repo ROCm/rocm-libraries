@@ -8,6 +8,12 @@ if(MIOPEN_ENABLE_SQLITE)
     add_subdirectory(sqlite)
 endif()
 
+if(MIOPEN_USE_HIPCONV)
+    # MIOpen provides its own 1x1/pointwise path, so drop hipconv's hipBLASLt-backed one.
+    set(HIPCONV_ENABLE_POINTWISE OFF CACHE BOOL "" FORCE)
+    add_subdirectory(hipconv)
+endif()
+
 # Truncation rounding or (default) rounding to nearest even (RNE) is enabled.
 # This switch controls two related but different aspects of MIOpen behavior
 # 1.  How host code performs conversions of float to bfloat16, important only
@@ -325,6 +331,8 @@ list(APPEND MIOpen_Source tmp_dir.cpp binary_cache.cpp md5.cpp)
 if(MIOPEN_ENABLE_SQLITE)
     list(APPEND MIOpen_Source sqlite_db.cpp)
 endif()
+
+list(APPEND MIOpen_Source solver/conv/conv_hipconv.cpp)
 
 if(MIOPEN_ENABLE_SQLITE AND MIOPEN_ENABLE_SQLITE_KERN_CACHE)
     list(APPEND MIOpen_Source kern_db.cpp bz2.cpp)
@@ -1004,6 +1012,10 @@ target_include_directories(${_MIOPEN_IMPL_TARGET} SYSTEM PUBLIC $<BUILD_INTERFAC
 # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
 #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
 target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2)
+if(MIOPEN_USE_HIPCONV)
+    target_link_libraries(${_MIOPEN_IMPL_TARGET} PRIVATE hipconv)
+    target_compile_definitions(${_MIOPEN_IMPL_TARGET} PRIVATE MIOPEN_USE_HIPCONV=1)
+endif()
 miopen_generate_export_header(MIOpen)
 
 if(WIN32)

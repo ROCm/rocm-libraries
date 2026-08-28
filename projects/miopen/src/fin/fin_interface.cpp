@@ -320,6 +320,7 @@ AnySolver<miopen::ExecutionContext, miopen::conv::ProblemDescription>::AnySolver
         SetObject<miopen::solver::conv::TransposedConvMPBidirectWinograd_xdlops<6, 3>>();
         break;
     case 218: SetObject<miopen::solver::conv::ConvHipDirectFwd>(); break;
+    case 220: SetObject<miopen::solver::conv::ConvHipConv>(); break;
     // New tunable solver should be added here
     default:
         MIOPEN_THROW(miopenStatusInternalError, "Unknown solver ID (" + std::to_string(id) + ")");
