@@ -67,13 +67,14 @@ constexpr float kGrey = 0.6f;
 // NaN, overflow and wrong-intensity-space output; says nothing about the fog layer's shape.
 template <typename T>
 void run_fog(const TestConfig& cfg) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     PinnedArray<Rpp32f> intensity(cfg.backend, cfg.size.n), grey(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         intensity[i] = kIntensity;
         grey[i] = kGrey;
@@ -88,7 +89,7 @@ void run_fog(const TestConfig& cfg) {
     dst.write(input.data(), bytes);  // seeded from the source so "unchanged" means a dead kernel
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_fog(src.ptr(), &desc, dst.ptr(), &desc, intensity.data(), grey.data(),
+    ASSERT_EQ(rppt_fog(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, intensity.data(), grey.data(),
                        roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -100,7 +101,7 @@ void run_fog(const TestConfig& cfg) {
     // not the tensor handed to the op, in case the backend rewrites it from XYWH to LTRB in place.
     bool changed = false, storable = true;
     double firstBad = 0.0;
-    for_each_roi_io(desc, roiVec.data(), XYWH,
+    for_each_roi_io(srcDesc, dstDesc, roiVec.data(), XYWH,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
                         const double v = to_double(actual[dstIdx]);
                         if (to_double(input[srcIdx]) != v) changed = true;
@@ -173,10 +174,15 @@ TEST_P(FogTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(Image_Effects, FogTest,
                          ::testing::ValuesIn(make_configs(
                              {DType::U8, DType::F16, DType::F32, DType::I8},
-                             {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                             {{Layout::PKD3, Layout::PKD3},
+                              {Layout::PLN3, Layout::PLN3},
+                              {Layout::PLN1, Layout::PLN1},
+                              {Layout::PKD3, Layout::PLN3},
+                              {Layout::PLN3, Layout::PKD3}},
                              {Roi::Full, Roi::Partial})),
                          config_param_name);
 

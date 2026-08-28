@@ -41,13 +41,14 @@ namespace {
 
 template <typename T>
 void run_copy(const TestConfig& cfg) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // copy takes no ROI; the golden and compare walk the full frame (Roi::Full only).
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     // (1) Host golden model. golden starts as a copy of the input; the reference overwrites
@@ -55,7 +56,7 @@ void run_copy(const TestConfig& cfg) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    copy_reference<T>(input.data(), golden.data(), desc, roi.data(), XYWH);
+    copy_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, roi.data(), XYWH);
 
     // (2) Run RPP on the configured backend. dst is pre-filled with a distinct pattern so a
     // no-op kernel would be caught.
@@ -66,14 +67,15 @@ void run_copy(const TestConfig& cfg) {
     dst.write(dstInit.data(), bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_copy(src.ptr(), &desc, dst.ptr(), &desc, handle.get(), cfg.backend), RPP_SUCCESS);
+    ASSERT_EQ(rppt_copy(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, handle.get(), cfg.backend),
+              RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
     // (4) Compare over the frame. copy is bit-exact, so the tolerance is zero.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH, 0.0));
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 
 }  // namespace
@@ -89,8 +91,14 @@ TEST_P(CopyTest, Correctness) {
 }
 
 // copy has no ROI argument (it copies the whole buffer), so only Roi::Full is instantiated.
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_DataExchange, CopyTest,
     ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full})),
+                                     {{Layout::PKD3, Layout::PKD3},
+                                      {Layout::PLN3, Layout::PLN3},
+                                      {Layout::PLN1, Layout::PLN1},
+                                      {Layout::PKD3, Layout::PLN3},
+                                      {Layout::PLN3, Layout::PKD3}},
+                                     {Roi::Full})),
     config_param_name);

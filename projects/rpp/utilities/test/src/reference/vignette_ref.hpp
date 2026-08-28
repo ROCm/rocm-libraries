@@ -91,12 +91,12 @@ inline double vignette_scalar(double v, double weight, DType dt) {
 }
 
 template <typename T>
-void vignette_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                        RpptRoiType roiType, const Rpp32f* intensityTensor) {
-    std::vector<RoiBounds> bounds(d.n);
-    for (Rpp32u n = 0; n < d.n; ++n) bounds[n] = roi_bounds(roi[n], roiType);
+void vignette_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                        const RpptROI* roi, RpptRoiType roiType, const Rpp32f* intensityTensor) {
+    std::vector<RoiBounds> bounds(sd.n);
+    for (Rpp32u n = 0; n < sd.n; ++n) bounds[n] = roi_bounds(roi[n], roiType);
 
-    for_each_roi_io(d, roi, roiType,
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u n, Rpp32u, Rpp32u j, Rpp32u i, std::size_t srcIdx,
                         std::size_t dstIdx) {
                         const RoiBounds& b = bounds[n];

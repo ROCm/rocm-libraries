@@ -58,15 +58,16 @@ constexpr Tolerance kColorCastTolerance = kRoundingTolerance.with_i8(0.5);
 
 template <typename T>
 void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Parameters live in host-accessible (pinned for HIP) memory.
     PinnedArray<RpptRGB> rgb(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> alpha(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         rgb[i] = RpptRGB{op.r, op.g, op.b};
         alpha[i] = op.alpha;
@@ -80,8 +81,8 @@ void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    color_cast_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                            op.alpha, rgbD);
+    color_cast_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
+                            XYWH, op.alpha, rgbD);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -89,7 +90,7 @@ void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_color_cast(src.ptr(), &desc, dst.ptr(), &desc, rgb.data(), alpha.data(),
+    ASSERT_EQ(rppt_color_cast(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, rgb.data(), alpha.data(),
                               roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -98,7 +99,7 @@ void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kColorCastTolerance(cfg.dtype)));
 }
 
@@ -121,7 +122,11 @@ TEST_P(ColorCastTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(Image_Color, ColorCastTest,
                          ::testing::ValuesIn(with_params<ColorCastParams>(
                              make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
                                           {Roi::Full, Roi::Partial}),
                              {ColorCastParams{0.6f, 30, 90, 150}})),
                          op_config_name<ColorCastParams>);

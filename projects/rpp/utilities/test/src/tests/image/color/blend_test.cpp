@@ -50,13 +50,14 @@ struct BlendParams {
 
 template <typename T>
 void run_blend(const TestConfig& cfg, const BlendParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     PinnedArray<Rpp32f> alpha(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         alpha[i] = op.alpha;
         roi[i] = roiVec[i];
@@ -67,8 +68,8 @@ void run_blend(const TestConfig& cfg, const BlendParams& op) {
     fill_input<T>(input1.data(), count, cfg.dtype);
     fill_input<T>(input2.data(), count, cfg.dtype, 1);
     golden = input1;
-    blend_reference<T>(input1.data(), input2.data(), golden.data(), desc, cfg.dtype, roi.data(),
-                       XYWH, op.alpha);
+    blend_reference<T>(input1.data(), input2.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
+                       roi.data(), XYWH, op.alpha);
 
     DeviceTensor src1(cfg.backend, bytes), src2(cfg.backend, bytes), dst(cfg.backend, bytes);
     src1.write(input1.data(), bytes);
@@ -76,15 +77,15 @@ void run_blend(const TestConfig& cfg, const BlendParams& op) {
     dst.write(input1.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_blend(src1.ptr(), src2.ptr(), &desc, dst.ptr(), &desc, alpha.data(), roi.data(),
-                         XYWH, handle.get(), cfg.backend),
+    ASSERT_EQ(rppt_blend(src1.ptr(), src2.ptr(), &srcDesc, dst.ptr(), &dstDesc, alpha.data(),
+                         roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
 
     dst.read(actual.data(), bytes);
 
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kRoundingTolerance(cfg.dtype)));
 }
 
@@ -101,10 +102,15 @@ TEST_P(BlendTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(Image_Color, BlendTest,
                          ::testing::ValuesIn(with_params<BlendParams>(
                              make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
                                           {Roi::Full, Roi::Partial}),
                              {BlendParams{0.75f}})),
                          op_config_name<BlendParams>);

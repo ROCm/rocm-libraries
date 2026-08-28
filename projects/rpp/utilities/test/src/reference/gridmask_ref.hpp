@@ -111,10 +111,11 @@ inline double gridmask_scalar(double v, DType dt, bool masked) {
 
 // Mask membership is tested against the ROI-relative coordinate (i, j).
 template <typename T>
-void gridmask_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                        RpptRoiType roiType, Rpp32u tileWidth, double gridRatio, double gridAngle,
-                        Rpp32u translateX, Rpp32u translateY) {
-    for_each_roi_io(d, roi, roiType,
+void gridmask_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                        const RpptROI* roi, RpptRoiType roiType, Rpp32u tileWidth,
+                        double gridRatio, double gridAngle, Rpp32u translateX,
+                        Rpp32u translateY) {
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u, Rpp32u j, Rpp32u i, std::size_t srcIdx,
                         std::size_t dstIdx) {
                         const bool masked =

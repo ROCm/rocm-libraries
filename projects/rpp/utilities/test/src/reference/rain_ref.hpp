@@ -87,9 +87,9 @@ inline double blend_store(double v, DType dt, double alpha) {
 
 // alpha is the per-image rain blend value (rainPercentage is fixed at 0 by the test).
 template <typename T>
-void rain_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                    RpptRoiType roiType, double alpha) {
-    for_each_roi_io(d, roi, roiType,
+void rain_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                    const RpptROI* roi, RpptRoiType roiType, double alpha) {
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
                         dst[dstIdx] =
                             from_double<T>(rain_detail::blend_store(to_double(src[srcIdx]), dt, alpha));

@@ -76,9 +76,10 @@ inline double color_cast_scalar(double v, DType dt, double alpha, double c) {
 }
 
 template <typename T>
-void color_cast_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                          RpptRoiType roiType, double alpha, const double rgb[3]) {
-    for_each_roi_io(d, roi, roiType,
+void color_cast_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                          const RpptROI* roi, RpptRoiType roiType, double alpha,
+                          const double rgb[3]) {
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u c, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
                         dst[dstIdx] = from_double<T>(
                             color_cast_scalar(to_double(src[srcIdx]), dt, alpha, rgb[c]));

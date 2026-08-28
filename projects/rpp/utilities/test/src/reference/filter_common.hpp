@@ -64,7 +64,7 @@ Expression
 // base offset is `base`, clamping each neighbour to the ROI bounds (REPLICATE border), into
 // window[0 .. kernelSize*kernelSize-1] in row-major order (dy = -r..r outer, dx = -r..r inner).
 template <typename T>
-inline void gather_roi_window(const T* src, const RpptDesc& d, const RoiBounds& b,
+inline void gather_roi_window(const T* src, const RpptDesc& sd, const RoiBounds& b,
                               std::size_t base, int j, int i, int r, double* window) {
     const int roiH = static_cast<int>(b.h);
     const int roiW = static_cast<int>(b.w);
@@ -73,24 +73,28 @@ inline void gather_roi_window(const T* src, const RpptDesc& d, const RoiBounds& 
         for (int dx = -r; dx <= r; ++dx) {
             const int sy = std::min(std::max(j + dy, 0), roiH - 1);
             const int sx = std::min(std::max(i + dx, 0), roiW - 1);
-            window[k++] = to_double(src[plane_index(d, base, b.y0 + sy, b.x0 + sx)]);
+            window[k++] = to_double(src[plane_index(sd, base, b.y0 + sy, b.x0 + sx)]);
         }
 }
 
 // The one window-filter driver: per channel over each image's ROI it gathers the KxK window and
 // stores reduce(window, kk), which returns the output already in stored units. Every KxK op in the
 // suite goes through this, so the window, the border and the placement have a single definition.
+// sd and dd differ only when the op converts layout; the neighbourhood is always gathered through
+// the source's own strides and written through the destination's.
 template <typename T, typename Reduce>
-void filter_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi, RpptRoiType type,
-                      Rpp32u kernelSize, Reduce reduce) {
+void filter_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
+                      const RpptROI* roi, RpptRoiType type, Rpp32u kernelSize, Reduce reduce) {
     const int r = static_cast<int>(kernelSize / 2);
     const int kk = static_cast<int>(kernelSize * kernelSize);
     std::vector<double> window(kk);
-    for_each_roi_plane(d, roi, type, [&](Rpp32u, const RoiBounds& b, Rpp32u, std::size_t base) {
+    for_each_roi_plane(sd, dd, roi, type,
+                       [&](Rpp32u, const RoiBounds& b, Rpp32u, std::size_t srcBase,
+                           std::size_t dstBase) {
         for (int j = 0; j < static_cast<int>(b.h); ++j)
             for (int i = 0; i < static_cast<int>(b.w); ++i) {
-                gather_roi_window(src, d, b, base, j, i, r, window.data());
-                dst[plane_index(d, base, j, i)] = from_double<T>(reduce(window.data(), kk));
+                gather_roi_window(src, sd, b, srcBase, j, i, r, window.data());
+                dst[plane_index(dd, dstBase, j, i)] = from_double<T>(reduce(window.data(), kk));
             }
     });
 }
@@ -101,9 +105,10 @@ void filter_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* ro
 // (round-to-nearest, not truncate; see the systemic I8 round-vs-truncate finding). Used by
 // box_filter and gaussian_filter.
 template <typename T>
-void convolve_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                        RpptRoiType type, Rpp32u kernelSize, const std::vector<double>& kernel) {
-    filter_reference<T>(src, dst, d, roi, type, kernelSize, [&](const double* w, int kk) {
+void convolve_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                        const RpptROI* roi, RpptRoiType type, Rpp32u kernelSize,
+                        const std::vector<double>& kernel) {
+    filter_reference<T>(src, sd, dst, dd, roi, type, kernelSize, [&](const double* w, int kk) {
         double acc = 0.0;
         for (int k = 0; k < kk; ++k) acc += kernel[k] * w[k];
         return quantize_stored(acc, dt);

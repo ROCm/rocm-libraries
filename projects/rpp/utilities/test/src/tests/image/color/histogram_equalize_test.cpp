@@ -45,25 +45,27 @@ double histogram_equalize_tolerance(DType) { return 1.0; }
 
 template <typename T>
 void run_histogram_equalize(const TestConfig& cfg) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    histogram_equalize_reference<T>(input.data(), golden.data(), desc, roi.data(), XYWH);
+    histogram_equalize_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, roi.data(),
+                                    XYWH);
 
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_histogram_equalize(src.ptr(), &desc, dst.ptr(), &desc, roi.data(), XYWH,
+    ASSERT_EQ(rppt_histogram_equalize(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, roi.data(), XYWH,
                                       handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -71,7 +73,7 @@ void run_histogram_equalize(const TestConfig& cfg) {
 
     dst.read(actual.data(), bytes);
 
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                histogram_equalize_tolerance(cfg.dtype)));
 }
 
@@ -90,9 +92,14 @@ TEST_P(HistogramEqualizeTest, Correctness) {
     run_histogram_equalize<Rpp8u>(cfg);
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, HistogramEqualizeTest,
     ::testing::ValuesIn(make_configs({DType::U8},
-                                     {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                     {{Layout::PKD3, Layout::PKD3},
+                                      {Layout::PLN3, Layout::PLN3},
+                                      {Layout::PLN1, Layout::PLN1},
+                                      {Layout::PKD3, Layout::PLN3},
+                                      {Layout::PLN3, Layout::PKD3}},
                                      {Roi::Full, Roi::Partial})),
     config_param_name);

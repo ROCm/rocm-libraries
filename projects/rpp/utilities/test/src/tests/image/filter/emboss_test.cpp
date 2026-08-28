@@ -61,14 +61,12 @@ constexpr Tolerance kEmbossTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>
 void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
-    const TensorShape shape{cfg.size.n, c, cfg.size.h, cfg.size.w};
     // src carries a leading border pad: like the other KxK filters, the HIP kernel requires
     // srcDesc.offsetInBytes >= 12 * (kernelSize/2) as read-slack for the window and returns
     // RPP_ERROR_LOW_OFFSET (-3) otherwise. dst keeps offset 0 so the golden and comparator index
     // the destination from 0. Applied on both backends (HOST honours offsetInBytes identically).
-    RpptDesc srcDesc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
-    RpptDesc dstDesc = srcDesc;  // same dims/strides; only src gets the pad offset
+    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
     const std::size_t offsetElems = offsetBytes / dtype_size(cfg.dtype);
     srcDesc.offsetInBytes = static_cast<Rpp32u>(offsetBytes);
@@ -76,12 +74,12 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t imageBytes = count * dtype_size(cfg.dtype);
 
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
-    PinnedArray<Rpp32f> strength(cfg.backend, shape.n);
-    for (Rpp32u i = 0; i < shape.n; ++i) strength[i] = op.strength;
+    PinnedArray<Rpp32f> strength(cfg.backend, cfg.size.n);
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) strength[i] = op.strength;
 
     // (1) Host golden model. The src buffer is [front pad][image][back pad]; the image base sits
     // at offsetElems. golden starts as a copy of the image so the region the op leaves untouched
@@ -90,8 +88,8 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
     fill_input<T>(src.data(), src.size(), cfg.dtype);
     T* image = src.data() + offsetElems;
     golden.assign(image, image + count);
-    emboss_reference<T>(image, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH, op.strength,
-                        op.kernelSize);
+    emboss_reference<T>(image, srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
+                        op.strength, op.kernelSize);
 
     // (2) Run RPP on the configured backend. REPLICATE is the only border type the op supports.
     // RPP adds srcDesc.offsetInBytes to the src pointer internally, landing on the image base.
@@ -100,7 +98,7 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
     dst.write(image, imageBytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_emboss(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc, strength.data(),
                           op.kernelSize, RpptImageBorderType::REPLICATE, roi.data(), XYWH,
                           handle.get(), cfg.backend),
@@ -129,11 +127,17 @@ TEST_P(EmbossTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Filter, EmbossTest,
     ::testing::ValuesIn(with_params<EmbossParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {EmbossParams{1.0f, 3}, EmbossParams{1.0f, 5}, EmbossParams{2.0f, 3},
          EmbossParams{2.0f, 5}})),
     op_config_name<EmbossParams>);

@@ -70,17 +70,16 @@ double warp_affine_tolerance(DType dt, RpptInterpolationType interp) {
 
 template <typename T>
 void run_warp_affine(const TestConfig& cfg, const WarpAffineParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
-    const TensorShape shape{cfg.size.n, c, cfg.size.h, cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Per-image affine matrices (6 each) and ROIs in host-accessible (pinned for HIP) memory.
-    PinnedArray<Rpp32f> affine(cfg.backend, shape.n * 6);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    PinnedArray<Rpp32f> affine(cfg.backend, cfg.size.n * 6);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         for (int k = 0; k < 6; ++k) affine[i * 6 + k] = op.m[k];
         roi[i] = roiVec[i];
     }
@@ -90,16 +89,16 @@ void run_warp_affine(const TestConfig& cfg, const WarpAffineParams& op) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    warp_affine_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                             affine.data(), op.interp);
+    warp_affine_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
+                             XYWH, affine.data(), op.interp);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
-    ASSERT_EQ(rppt_warp_affine(src.ptr(), &desc, dst.ptr(), &desc, affine.data(), op.interp,
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_warp_affine(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, affine.data(), op.interp,
                                roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -108,7 +107,7 @@ void run_warp_affine(const TestConfig& cfg, const WarpAffineParams& op) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI-sized output region at the destination origin.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                warp_affine_tolerance(cfg.dtype, op.interp)));
 }
 
@@ -130,7 +129,12 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, WarpAffineTest,
     ::testing::ValuesIn(with_params<WarpAffineParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {WarpAffineParams{{1, 0, 0, 0, 1, 0}, NEAREST_NEIGHBOR, "identity"},
          WarpAffineParams{{1, 0, 0, 0, 1, 0}, BILINEAR, "identity"},
          WarpAffineParams{{1, 0, 5, 0, 1, -3}, NEAREST_NEIGHBOR, "shift"},

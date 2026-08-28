@@ -84,18 +84,19 @@ inline double non_linear_blend_scalar(double s1, double s2, DType dt, double gau
 }
 
 template <typename T>
-void non_linear_blend_reference(const T* src1, const T* src2, T* dst, const RpptDesc& d, DType dt,
-                                const RpptROI* roi, RpptRoiType roiType, double stdDev) {
+void non_linear_blend_reference(const T* src1, const T* src2, const RpptDesc& sd, T* dst,
+                                const RpptDesc& dd, DType dt, const RpptROI* roi,
+                                RpptRoiType roiType, double stdDev) {
     const double multiplier = -0.5 / (stdDev * stdDev);
     // Per-image gaussian center = (roiW/2, roiH/2), integer halves as in the reference definition.
-    std::vector<double> halfW(d.n), halfH(d.n);
-    for (Rpp32u n = 0; n < d.n; ++n) {
+    std::vector<double> halfW(sd.n), halfH(sd.n);
+    for (Rpp32u n = 0; n < sd.n; ++n) {
         const RoiBounds b = roi_bounds(roi[n], roiType);
         halfW[n] = static_cast<double>(static_cast<int>(b.w) / 2.0);
         halfH[n] = static_cast<double>(static_cast<int>(b.h) / 2.0);
     }
     for_each_roi_io(
-        d, roi, roiType,
+        sd, dd, roi, roiType,
         [&](Rpp32u n, Rpp32u, Rpp32u j, Rpp32u i, std::size_t srcIdx, std::size_t dstIdx) {
             const double iLoc = static_cast<double>(j) - halfH[n];
             const double jLoc = static_cast<double>(i) - halfW[n];

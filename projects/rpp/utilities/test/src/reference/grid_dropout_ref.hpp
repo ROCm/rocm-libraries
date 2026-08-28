@@ -70,12 +70,12 @@ inline double grid_dropout_scalar(double v, DType dt, bool erased) {
 
 // Hole membership is tested against the ABSOLUTE source coordinate (x0 + i, y0 + j).
 template <typename T>
-void grid_dropout_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
+void grid_dropout_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
                             const RpptROI* roi, RpptRoiType roiType,
                             const RpptRoiLtrb* boxes, Rpp32u boxesInEachImage) {
-    std::vector<RoiBounds> b(d.n);
-    for (Rpp32u n = 0; n < d.n; ++n) b[n] = roi_bounds(roi[n], roiType);
-    for_each_roi_io(d, roi, roiType,
+    std::vector<RoiBounds> b(sd.n);
+    for (Rpp32u n = 0; n < sd.n; ++n) b[n] = roi_bounds(roi[n], roiType);
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u n, Rpp32u, Rpp32u j, Rpp32u i, std::size_t srcIdx,
                         std::size_t dstIdx) {
                         const int sx = static_cast<int>(b[n].x0 + i);

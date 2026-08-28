@@ -78,9 +78,9 @@ inline int clamp_coord(int v, int lo, int hi) {
 
 // Writes the kernelSize = 1 identity result into dst.
 template <typename T>
-void jitter_identity_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi,
-                               RpptRoiType roiType) {
-    for_each_roi_io(d, roi, roiType,
+void jitter_identity_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
+                               const RpptROI* roi, RpptRoiType roiType) {
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
                         dst[dstIdx] = src[srcIdx];
                     });

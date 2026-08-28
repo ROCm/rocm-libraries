@@ -64,9 +64,10 @@ constexpr Tolerance kColorJitterTolerance = tolerance(0.0, 1e-6, 5e-4);
 
 template <typename T>
 void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Parameters live in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> brightness(cfg.backend, cfg.size.n);
@@ -74,7 +75,7 @@ void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
     PinnedArray<Rpp32f> hue(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> saturation(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         brightness[i] = op.brightness;
         contrast[i] = op.contrast;
@@ -92,8 +93,8 @@ void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(golden.data(), count, cfg.dtype, /*salt=*/23);
     const std::vector<T> dstSeed = golden;
-    color_jitter_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                              op.brightness, op.contrast, op.hue, op.saturation);
+    color_jitter_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
+                              XYWH, op.brightness, op.contrast, op.hue, op.saturation);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -101,7 +102,7 @@ void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
     dst.write(dstSeed.data(), bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_color_jitter(src.ptr(), &desc, dst.ptr(), &desc, brightness.data(),
+    ASSERT_EQ(rppt_color_jitter(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, brightness.data(),
                                 contrast.data(), hue.data(), saturation.data(), roi.data(), XYWH,
                                 handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -111,7 +112,7 @@ void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kColorJitterTolerance(cfg.dtype)));
 }
 
@@ -150,7 +151,11 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Color, ColorJitterTest,
     ::testing::ValuesIn(with_params<ColorJitterParams>(
         host_configs(make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                  {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                  {{Layout::PKD3, Layout::PKD3},
+                                   {Layout::PLN3, Layout::PLN3},
+                                   {Layout::PLN1, Layout::PLN1},
+                                   {Layout::PKD3, Layout::PLN3},
+                                   {Layout::PLN3, Layout::PKD3}},
                                   {Roi::Full, Roi::Partial})),
         {ColorJitterParams{0.0f, 0.0f, 0.0f, 1.0f},     // neutral
          ColorJitterParams{0.0f, 0.0f, 0.0f, 0.0f},     // desaturate to grey

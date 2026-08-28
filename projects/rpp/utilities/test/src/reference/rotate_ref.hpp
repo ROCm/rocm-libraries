@@ -71,7 +71,7 @@ Notes
 template <typename T>
 void rotate_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                       RpptRoiType roiType, const Rpp32f* angleDeg, RpptInterpolationType interp) {
-    geometric_reference<T>(src, dst, d, dt, roi, roiType, roi_out_sizes(d, roi, roiType), interp,
+    geometric_reference<T>(src, d, dst, d, dt, roi, roiType, roi_out_sizes(d, roi, roiType), interp,
                            [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
                                const RoiBounds b = roi_bounds(roi[n], roiType);
                                const double cx = b.w / 2.0, cy = b.h / 2.0;

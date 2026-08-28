@@ -60,12 +60,13 @@ struct GridmaskParams {
 
 template <typename T>
 void run_gridmask(const TestConfig& cfg, const GridmaskParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u n = 0; n < cfg.size.n; ++n) roi[n] = roiVec[n];
 
     RpptUintVector2D translateVector{op.tx, op.ty};
@@ -75,8 +76,8 @@ void run_gridmask(const TestConfig& cfg, const GridmaskParams& op) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    gridmask_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                          op.tileWidth, op.gridRatio, op.gridAngle, op.tx, op.ty);
+    gridmask_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
+                          XYWH, op.tileWidth, op.gridRatio, op.gridAngle, op.tx, op.ty);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -84,17 +85,17 @@ void run_gridmask(const TestConfig& cfg, const GridmaskParams& op) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(
-        rppt_gridmask(src.ptr(), &desc, dst.ptr(), &desc, op.tileWidth, op.gridRatio, op.gridAngle,
-                      translateVector, roi.data(), XYWH, handle.get(), cfg.backend),
-        RPP_SUCCESS);
+    ASSERT_EQ(rppt_gridmask(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, op.tileWidth, op.gridRatio,
+                            op.gridAngle, translateVector, roi.data(), XYWH, handle.get(),
+                            cfg.backend),
+              RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kExact(cfg.dtype)));
 }
 
@@ -122,7 +123,11 @@ TEST_P(GridmaskTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(Image_Effects, GridmaskTest,
                          ::testing::ValuesIn(with_params<GridmaskParams>(
                              make_configs({DType::U8, DType::F16, DType::F32},
-                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
                                           {Roi::Full, Roi::Partial}, {{2, 36, 48}, {2, 36, 64}}),
                              {GridmaskParams{8, 0.5f, 0.0f, 0, 0, "axis"},
                               GridmaskParams{8, 0.5f, 0.0f, 3, 2, "shift"},

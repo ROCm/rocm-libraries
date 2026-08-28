@@ -78,46 +78,46 @@ double spatter_band_eps(DType dt) {
     return (dt == DType::U8 || dt == DType::I8) ? 0.5 : kSpatterTolerance(dt);
 }
 
-RpptDesc descriptor_for(const TestConfig& cfg) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
-    return make_descriptor(shape, cfg.dtype, cfg.layoutIn);
-}
-
 // ---- Identity: src == spatterColor is a fixed point of the blend, at any size ----------------
 
 template <typename T>
 void run_spatter_identity(const TestConfig& cfg) {
-    RpptDesc desc = descriptor_for(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t srcCount = element_count(srcDesc);
+    const std::size_t dstCount = element_count(dstDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    PinnedArray<RpptROI> roi(cfg.backend, desc.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u n = 0; n < desc.n; ++n) roi[n] = roiVec[n];
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
+    for (Rpp32u n = 0; n < cfg.size.n; ++n) roi[n] = roiVec[n];
 
     // A constant image at the spatter colour. PLN1 collapses the colour to its mean, which is
-    // exact here because all three components are equal.
-    std::vector<T> input(count), golden(count), actual(count);
-    for_each_image_element(desc, [&](Rpp32u, Rpp32u c, Rpp32u, Rpp32u, std::size_t idx) {
-        input[idx] = from_double<T>(spatter_color_stored(kGreyColor, desc.c, c, cfg.dtype));
+    // exact here because all three components are equal. src and dst are each filled through
+    // their own descriptor so the pattern lands correctly under either layout.
+    std::vector<T> input(srcCount), dstInit(dstCount), golden(dstCount), actual(dstCount);
+    for_each_image_element(srcDesc, [&](Rpp32u, Rpp32u c, Rpp32u, Rpp32u, std::size_t idx) {
+        input[idx] = from_double<T>(spatter_color_stored(kGreyColor, srcDesc.c, c, cfg.dtype));
     });
-    golden = input;
-    spatter_identity_reference<T>(golden.data(), desc, cfg.dtype, roi.data(), XYWH, kGreyColor);
+    for_each_image_element(dstDesc, [&](Rpp32u, Rpp32u c, Rpp32u, Rpp32u, std::size_t idx) {
+        dstInit[idx] = from_double<T>(spatter_color_stored(kGreyColor, dstDesc.c, c, cfg.dtype));
+    });
+    golden = dstInit;
+    spatter_identity_reference<T>(golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH, kGreyColor);
 
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
-    dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
+    dst.write(dstInit.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, desc.n);
-    ASSERT_EQ(rppt_spatter(src.ptr(), &desc, dst.ptr(), &desc, kGreyColor, roi.data(), XYWH,
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_spatter(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, kGreyColor, roi.data(), XYWH,
                            handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kSpatterTolerance(cfg.dtype)));
 }
 
@@ -127,17 +127,17 @@ void run_spatter_identity(const TestConfig& cfg) {
 // segment between its source element and the documented spatter intensity for its channel --
 // whatever texel the RNG picked. eps only absorbs the store quantization.
 template <typename T>
-::testing::AssertionResult check_channel_band(const T* actual, const T* src, const RpptDesc& d,
-                                              DType dt, const RpptROI* roi, RpptRGB color,
-                                              double eps) {
+::testing::AssertionResult check_channel_band(const T* actual, const T* src, const RpptDesc& sd,
+                                              const RpptDesc& dd, DType dt, const RpptROI* roi,
+                                              RpptRGB color, double eps) {
     ::testing::AssertionResult result = ::testing::AssertionSuccess();
     bool failed = false;
-    for_each_roi_io(d, roi, XYWH,
+    for_each_roi_io(sd, dd, roi, XYWH,
                     [&](Rpp32u n, Rpp32u c, Rpp32u j, Rpp32u i, std::size_t srcIdx,
                         std::size_t dstIdx) {
                         if (failed) return;
                         const double s = to_double(src[srcIdx]);
-                        const double v = spatter_color_stored(color, d.c, c, dt);
+                        const double v = spatter_color_stored(color, sd.c, c, dt);
                         const double a = to_double(actual[dstIdx]);
                         const double lo = std::min(s, v) - eps;
                         const double hi = std::max(s, v) + eps;
@@ -155,31 +155,32 @@ template <typename T>
 
 template <typename T>
 void run_spatter_channel_band(const TestConfig& cfg) {
-    RpptDesc desc = descriptor_for(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    PinnedArray<RpptROI> roi(cfg.backend, desc.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u n = 0; n < desc.n; ++n) roi[n] = roiVec[n];
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
+    for (Rpp32u n = 0; n < cfg.size.n; ++n) roi[n] = roiVec[n];
 
     std::vector<T> input(count), actual(count);
-    fill_input_image<T>(input.data(), desc, cfg.dtype);
+    fill_input_image<T>(input.data(), srcDesc, cfg.dtype);
 
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);
 
-    RppHandle handle(cfg.backend, desc.n);
-    ASSERT_EQ(rppt_spatter(src.ptr(), &desc, dst.ptr(), &desc, kAsymmetricColor, roi.data(), XYWH,
-                           handle.get(), cfg.backend),
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_spatter(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, kAsymmetricColor, roi.data(),
+                           XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    EXPECT_TRUE(check_channel_band<T>(actual.data(), input.data(), desc, cfg.dtype, roi.data(),
-                                      kAsymmetricColor, spatter_band_eps(cfg.dtype)));
+    EXPECT_TRUE(check_channel_band<T>(actual.data(), input.data(), srcDesc, dstDesc, cfg.dtype,
+                                      roi.data(), kAsymmetricColor, spatter_band_eps(cfg.dtype)));
 }
 
 template <typename Fn>
@@ -193,10 +194,16 @@ void dispatch(DType dt, Fn fn) {
     }
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 std::vector<WithParams<SpatterParams>> spatter_configs() {
     return with_params<SpatterParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {SpatterParams{Check::Identity}, SpatterParams{Check::ChannelBand}});
 }
 

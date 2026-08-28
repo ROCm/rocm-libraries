@@ -57,9 +57,10 @@ constexpr Tolerance kColorTwistTolerance = tolerance(1.0, 3e-3, 5e-3);
 
 template <typename T>
 void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Parameters live in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> brightness(cfg.backend, cfg.size.n);
@@ -67,7 +68,7 @@ void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
     PinnedArray<Rpp32f> hue(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> saturation(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         brightness[i] = op.brightness;
         contrast[i] = op.contrast;
@@ -81,8 +82,8 @@ void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    color_twist_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                             op.brightness, op.contrast, op.hue, op.saturation);
+    color_twist_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
+                             XYWH, op.brightness, op.contrast, op.hue, op.saturation);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -90,7 +91,7 @@ void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_color_twist(src.ptr(), &desc, dst.ptr(), &desc, brightness.data(),
+    ASSERT_EQ(rppt_color_twist(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, brightness.data(),
                                contrast.data(), hue.data(), saturation.data(), roi.data(), XYWH,
                                handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -100,7 +101,7 @@ void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kColorTwistTolerance(cfg.dtype)));
 }
 
@@ -125,6 +126,10 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Color, ColorTwistTest,
     ::testing::ValuesIn(with_params<ColorTwistParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {ColorTwistParams{1.5f, 20.0f, 90.0f, 1.2f}})),
     op_config_name<ColorTwistParams>);

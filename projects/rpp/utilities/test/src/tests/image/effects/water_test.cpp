@@ -62,12 +62,13 @@ constexpr float kFreqX = 5.8f, kFreqY = 1.2f, kPhaseX = 10.0f, kPhaseY = 15.0f;
 
 template <typename T>
 void run_water(const TestConfig& cfg, const WaterParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);  // src == dst
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     PinnedArray<Rpp32f> amplX(cfg.backend, cfg.size.n), amplY(cfg.backend, cfg.size.n);
@@ -88,15 +89,16 @@ void run_water(const TestConfig& cfg, const WaterParams& op) {
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
     golden = dstInit;
-    water_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH, amplX.data(),
-                       amplY.data(), freqX.data(), freqY.data(), phaseX.data(), phaseY.data());
+    water_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
+                       amplX.data(), amplY.data(), freqX.data(), freqY.data(), phaseX.data(),
+                       phaseY.data());
 
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_water(src.ptr(), &desc, dst.ptr(), &desc, amplX.data(), amplY.data(),
+    ASSERT_EQ(rppt_water(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, amplX.data(), amplY.data(),
                          freqX.data(), freqY.data(), phaseX.data(), phaseY.data(), roi.data(), XYWH,
                          handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -106,7 +108,7 @@ void run_water(const TestConfig& cfg, const WaterParams& op) {
 
     // Compared against the caller's own ROI copy, not the tensor handed to the op, in case the
     // backend rewrites it from XYWH to LTRB in place.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH, kTol));
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH, kTol));
 }
 
 }  // namespace
@@ -126,6 +128,11 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Effects, WaterTest,
     ::testing::ValuesIn(with_params<WaterParams>(
         make_configs({DType::U8, DType::F16, DType::F32},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {WaterParams{WaterKind::Flat}, WaterParams{WaterKind::Wave}})),
     op_config_name<WaterParams>);

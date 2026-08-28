@@ -66,13 +66,14 @@ struct JitterParams {
 
 template <typename T>
 void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     PinnedArray<Rpp32u> kernelSize(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         kernelSize[i] = op.kernelSize;
         roi[i] = roiVec[i];
@@ -83,7 +84,7 @@ void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    jitter_identity_reference<T>(input.data(), golden.data(), desc, roi.data(), XYWH);
+    jitter_identity_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, roi.data(), XYWH);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -91,7 +92,7 @@ void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_jitter(src.ptr(), &desc, dst.ptr(), &desc, kernelSize.data(), /*seed=*/42u,
+    ASSERT_EQ(rppt_jitter(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, kernelSize.data(), /*seed=*/42u,
                           roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -101,7 +102,7 @@ void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
 
     // (4) kernelSize=1 collapses the offset window to {0,0} regardless of seed/RNG draw, so the
     // op is forced to identity: bit-exact, tolerance 0.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH, 0.0));
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 
 // -------- ReachableWithinWindow: structural membership invariant for kernelSize > 1 ------------
@@ -114,13 +115,14 @@ void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
 
 template <typename T>
 void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     PinnedArray<Rpp32u> kernelSize(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         kernelSize[i] = op.kernelSize;
         roi[i] = roiVec[i];
@@ -134,8 +136,8 @@ void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
     dst.write(input.data(), bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_jitter(src.ptr(), &desc, dst.ptr(), &desc, kernelSize.data(), /*seed=*/123u,
-                          roi.data(), XYWH, handle.get(), cfg.backend),
+    ASSERT_EQ(rppt_jitter(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, kernelSize.data(),
+                          /*seed=*/123u, roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
     handle.sync();
     dst.read(actual.data(), bytes);
@@ -143,7 +145,7 @@ void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
     const int r = static_cast<int>(op.kernelSize / 2);
     ASSERT_GT(r, 0) << "ReachableWithinWindow requires kernelSize > 1";
 
-    for (Rpp32u n = 0; n < desc.n; ++n) {
+    for (Rpp32u n = 0; n < srcDesc.n; ++n) {
         const RoiBounds b = roi_bounds(roi[n], XYWH);
         const int xlo = static_cast<int>(b.x0), xhi = static_cast<int>(b.x0 + b.w - 1);
         const int ylo = static_cast<int>(b.y0), yhi = static_cast<int>(b.y0 + b.h - 1);
@@ -151,7 +153,7 @@ void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
             for (Rpp32u i = 0; i < b.w; ++i) {
                 const int sx = static_cast<int>(b.x0 + i);
                 const int sy = static_cast<int>(b.y0 + j);
-                const std::size_t dstPix = plane_index(desc, plane_base(desc, n, 0), j, i);
+                const std::size_t dstPix = plane_index(dstDesc, plane_base(dstDesc, n, 0), j, i);
 
                 bool found = false;
                 for (int dy = -r; dy <= r && !found; ++dy) {
@@ -159,12 +161,12 @@ void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
                         const int csy = clamp_coord(sy + dy, ylo, yhi);
                         const int csx = clamp_coord(sx + dx, xlo, xhi);
                         bool allMatch = true;
-                        for (Rpp32u c = 0; c < desc.c; ++c) {
+                        for (Rpp32u c = 0; c < srcDesc.c; ++c) {
                             const std::size_t srcIdx =
-                                plane_index(desc, plane_base(desc, n, c),
+                                plane_index(srcDesc, plane_base(srcDesc, n, c),
                                            static_cast<std::size_t>(csy),
                                            static_cast<std::size_t>(csx));
-                            const std::size_t dstIdx = channel_index(desc, dstPix, c);
+                            const std::size_t dstIdx = channel_index(dstDesc, dstPix, c);
                             if (to_double(actual[dstIdx]) != to_double(input[srcIdx])) {
                                 allMatch = false;
                                 break;
@@ -243,9 +245,15 @@ void run_jitter_seed_invariant(const TestConfig& cfg, const JitterParams& op) {
 // purpose -- Seed runs three full kernel invocations per case, and the window invariant is a
 // per-pixel candidate search over one integer and one float dtype rather than all four.
 std::vector<WithParams<JitterParams>> jitter_configs() {
+    // Same-layout cases plus both directions of the fused output-layout conversion.
     std::vector<WithParams<JitterParams>> configs = with_params<JitterParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {JitterParams{1, Check::Identity}});
     const std::vector<WithParams<JitterParams>> window = with_params<JitterParams>(
         make_configs({DType::U8, DType::F32}, {Layout::PKD3, Layout::PLN1},

@@ -49,15 +49,13 @@ struct ErodeParams {
 
 template <typename T>
 void run_erode(const TestConfig& cfg, const ErodeParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
     // src carries a leading border pad: the HIP morphology kernel requires
     // srcDesc.offsetInBytes >= 12 * (kernelSize/2) (read-slack for the KxH window; the border
     // itself is computed by clamping indices to the image, i.e. replicate). dst keeps offset 0,
     // so the golden and comparator index destination elements from 0. Applied on both backends
     // (rppt_erode_host honours offsetInBytes identically) to keep one path.
-    RpptDesc srcDesc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
-    RpptDesc dstDesc = srcDesc;  // same dims/strides; only src gets the pad offset
+    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
     const std::size_t offsetElems = offsetBytes / dtype_size(cfg.dtype);
     srcDesc.offsetInBytes = static_cast<Rpp32u>(offsetBytes);
@@ -65,9 +63,9 @@ void run_erode(const TestConfig& cfg, const ErodeParams& op) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t imageBytes = count * dtype_size(cfg.dtype);
 
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     // (1) Host golden model. The src buffer is [front pad][image][back pad]; the image base sits
     // at offsetElems. golden/actual are the (pad-free, offset 0) destination. golden starts as a
@@ -76,7 +74,8 @@ void run_erode(const TestConfig& cfg, const ErodeParams& op) {
     fill_input<T>(src.data(), src.size(), cfg.dtype);
     T* image = src.data() + offsetElems;
     golden.assign(image, image + count);
-    erode_reference<T>(image, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH, op.kernelSize);
+    erode_reference<T>(image, srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
+                       op.kernelSize);
 
     // (2) Run RPP on the configured backend. erode exposes a separate HOST symbol (no backend
     // arg); the HIP symbol lives under GPU_SUPPORT so it is only referenced when HIP is built.
@@ -86,7 +85,7 @@ void run_erode(const TestConfig& cfg, const ErodeParams& op) {
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
     dst.write(image, imageBytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     RppStatus status;
     if (cfg.backend == RPP_HIP_BACKEND) {
 #if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
@@ -125,10 +124,15 @@ TEST_P(ErodeTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(Image_Morphological, ErodeTest,
                          ::testing::ValuesIn(with_params<ErodeParams>(
                              make_configs({DType::U8, DType::F16, DType::F32},
-                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
                                           {Roi::Full, Roi::Partial}),
                              {ErodeParams{3}, ErodeParams{5}})),
                          op_config_name<ErodeParams>);

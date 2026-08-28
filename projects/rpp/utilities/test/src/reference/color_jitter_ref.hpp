@@ -136,21 +136,21 @@ inline void color_jitter_matrix(double brightness, double contrast, double hueDe
 }
 
 template <typename T>
-void color_jitter_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                            RpptRoiType roiType, double brightness, double contrast, double hueDeg,
-                            double satFactor) {
+void color_jitter_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                            const RpptROI* roi, RpptRoiType roiType, double brightness,
+                            double contrast, double hueDeg, double satFactor) {
     double m[9], translation;
     color_jitter_matrix(brightness, contrast, hueDeg, satFactor, m, translation);
-    for_each_roi_pixel(d, roi, roiType,
+    for_each_roi_pixel(sd, dd, roi, roiType,
                        [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
-        if (d.c == 3) {
+        if (sd.c == 3) {
             double rgb[3];
             for (int c = 0; c < 3; ++c)
-                rgb[c] = to_unit(to_double(src[channel_index(d, srcPix, c)]), dt);
+                rgb[c] = to_unit(to_double(src[channel_index(sd, srcPix, c)]), dt);
             for (int c = 0; c < 3; ++c) {
                 const double x =
                     m[c * 3] * rgb[0] + m[c * 3 + 1] * rgb[1] + m[c * 3 + 2] * rgb[2] + translation;
-                dst[channel_index(d, dstPix, c)] = from_double<T>(from_unit(x, dt));
+                dst[channel_index(dd, dstPix, c)] = from_double<T>(from_unit(x, dt));
             }
         } else {
             // 1-channel: hue and saturation have no meaning on a single channel, and every row of

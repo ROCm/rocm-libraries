@@ -89,21 +89,22 @@ inline double crop_mirror_normalize_scalar(double v, DType dt, double offset, do
 // offsetTensor / multiplierTensor hold one value per channel per image; mirrorTensor one flag per
 // image.
 template <typename T>
-void crop_mirror_normalize_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
-                                     const RpptROI* roi, RpptRoiType roiType,
+void crop_mirror_normalize_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
+                                     DType dt, const RpptROI* roi, RpptRoiType roiType,
                                      const Rpp32f* offsetTensor, const Rpp32f* multiplierTensor,
                                      const Rpp32u* mirrorTensor) {
     for_each_roi_plane(
-        d, roi, roiType, [&](Rpp32u n, const RoiBounds& b, Rpp32u c, std::size_t base) {
-            const std::size_t k = static_cast<std::size_t>(n) * d.c + c;
+        sd, dd, roi, roiType,
+        [&](Rpp32u n, const RoiBounds& b, Rpp32u c, std::size_t srcBase, std::size_t dstBase) {
+            const std::size_t k = static_cast<std::size_t>(n) * sd.c + c;
             const double offset = offsetTensor[k];
             const double multiplier = multiplierTensor[k];
             const bool mirror = mirrorTensor[n] != 0;
             for (Rpp32u j = 0; j < b.h; ++j)
                 for (Rpp32u i = 0; i < b.w; ++i) {
                     const Rpp32u srcCol = b.x0 + (mirror ? (b.w - 1 - i) : i);
-                    const double v = to_double(src[plane_index(d, base, b.y0 + j, srcCol)]);
-                    dst[plane_index(d, base, j, i)] =
+                    const double v = to_double(src[plane_index(sd, srcBase, b.y0 + j, srcCol)]);
+                    dst[plane_index(dd, dstBase, j, i)] =
                         from_double<T>(crop_mirror_normalize_scalar(v, dt, offset, multiplier));
                 }
         });

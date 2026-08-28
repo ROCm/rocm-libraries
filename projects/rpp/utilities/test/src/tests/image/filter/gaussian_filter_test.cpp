@@ -54,15 +54,13 @@ constexpr Tolerance kGaussianFilterTolerance = tolerance(1.0, 1e-3, 1e-2);
 
 template <typename T>
 void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
     // src carries a leading border pad: the HIP filter kernel requires
     // srcDesc.offsetInBytes >= 12 * (kernelSize/2) (read-slack for the KxK window; the border
     // itself is computed by clamping indices to the image, i.e. replicate). dst keeps offset 0,
     // so the golden and comparator index destination elements from 0. Applied on both backends
     // (the HOST path honours offsetInBytes identically) to keep one path.
-    RpptDesc srcDesc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
-    RpptDesc dstDesc = srcDesc;  // same dims/strides; only src gets the pad offset
+    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
     const std::size_t offsetElems = offsetBytes / dtype_size(cfg.dtype);
     srcDesc.offsetInBytes = static_cast<Rpp32u>(offsetBytes);
@@ -71,10 +69,10 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
     const std::size_t imageBytes = count * dtype_size(cfg.dtype);
 
     // stdDevTensor is a per-image Rpp32f* in host-accessible (pinned for HIP) memory.
-    PinnedArray<Rpp32f> stdDev(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> stdDev(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         stdDev[i] = op.stdDev;
         roi[i] = roiVec[i];
     }
@@ -86,8 +84,8 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
     fill_input<T>(src.data(), src.size(), cfg.dtype);
     T* image = src.data() + offsetElems;
     golden.assign(image, image + count);
-    gaussian_filter_reference<T>(image, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
-                                 op.kernelSize, op.stdDev);
+    gaussian_filter_reference<T>(image, srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
+                                 XYWH, op.kernelSize, op.stdDev);
 
     // (2) Run RPP on the configured backend. gaussian_filter is a single symbol taking a backend
     // arg (no separate _host variant). RPP adds srcDesc.offsetInBytes to the src pointer
@@ -97,7 +95,7 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
     dst.write(image, imageBytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_gaussian_filter(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc, stdDev.data(),
                                    op.kernelSize, RpptImageBorderType::REPLICATE, roi.data(), XYWH,
                                    handle.get(), cfg.backend),
@@ -126,10 +124,16 @@ TEST_P(GaussianFilterTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Filter, GaussianFilterTest,
     ::testing::ValuesIn(with_params<GaussianFilterParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {GaussianFilterParams{3, 1.0f}, GaussianFilterParams{5, 1.0f}})),
     op_config_name<GaussianFilterParams>);

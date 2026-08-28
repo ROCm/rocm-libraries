@@ -71,11 +71,12 @@ double resize_tolerance(DType dt, RpptInterpolationType interp) {
 
 template <typename T>
 void run_resize(const TestConfig& cfg, const ResizeParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
-    const TensorShape srcShape{cfg.size.n, c, cfg.size.h, cfg.size.w};
-    const TensorShape dstShape{cfg.size.n, c, op.dstH, op.dstW};
+    const TensorShape srcShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)),
+                               cfg.size.h, cfg.size.w};
+    const TensorShape dstShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutOut)),
+                               op.dstH, op.dstW};
     RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layoutIn);
-    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutIn);
+    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutOut);
     const std::size_t srcCount = element_count(srcDesc), dstCount = element_count(dstDesc);
     const std::size_t srcBytes = byte_size(srcDesc, cfg.dtype);
     const std::size_t dstBytes = byte_size(dstDesc, cfg.dtype);
@@ -133,11 +134,17 @@ TEST_P(ResizeTest, Correctness) {
 
 // up: enlarge the source ROI. down: shrink it (from the partial ROI this is scale 1, a verbatim
 // resize). Each exercised with nearest-neighbour and bilinear sampling.
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, ResizeTest,
     ::testing::ValuesIn(with_params<ResizeParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {ResizeParams{72, 54, NEAREST_NEIGHBOR, "up"},
          ResizeParams{72, 54, BILINEAR, "up"},
          ResizeParams{24, 18, NEAREST_NEIGHBOR, "down"},

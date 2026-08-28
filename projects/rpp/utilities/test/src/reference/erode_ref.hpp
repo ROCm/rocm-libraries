@@ -54,9 +54,9 @@ Per-type form
   result is bit-exact for every type.
 */
 template <typename T>
-void erode_reference(const T* src, T* dst, const RpptDesc& d, DType /*dt*/, const RpptROI* roi,
-                     RpptRoiType type, Rpp32u kernelSize) {
-    filter_reference<T>(src, dst, d, roi, type, kernelSize,
+void erode_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType /*dt*/,
+                     const RpptROI* roi, RpptRoiType type, Rpp32u kernelSize) {
+    filter_reference<T>(src, sd, dst, dd, roi, type, kernelSize,
                         [](const double* w, int kk) { return *std::min_element(w, w + kk); });
 }
 

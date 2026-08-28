@@ -103,11 +103,11 @@ inline std::vector<double> emboss_kernel(Rpp32u kernelSize, double strength) {
 }
 
 template <typename T>
-void emboss_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                      RpptRoiType type, double strength, Rpp32u kernelSize) {
+void emboss_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                      const RpptROI* roi, RpptRoiType type, double strength, Rpp32u kernelSize) {
     const std::vector<double> kernel = emboss_kernel(kernelSize, strength);
     const double shift = (dt == DType::I8) ? 128.0 : 0.0;
-    filter_reference<T>(src, dst, d, roi, type, kernelSize, [&](const double* w, int kk) {
+    filter_reference<T>(src, sd, dst, dd, roi, type, kernelSize, [&](const double* w, int kk) {
         double acc = 0.0;
         for (int k = 0; k < kk; ++k) acc += kernel[k] * (w[k] + shift);
         return quantize_stored(acc - shift, dt);

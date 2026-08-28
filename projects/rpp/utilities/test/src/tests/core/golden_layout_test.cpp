@@ -308,7 +308,7 @@ TEST(GoldenLayoutTest, ImagePerPixel) {
     expect_image_layout_agnostic(Layout::PKD3, [](const std::vector<Rpp8u>& s1,
                                                   const std::vector<Rpp8u>&, std::vector<Rpp8u>& o,
                                                   const RpptDesc& d, const RpptROI* roi) {
-        hue_reference<Rpp8u>(s1.data(), o.data(), d, DType::U8, roi, XYWH, 45.0);
+        hue_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8, roi, XYWH, 45.0);
     });
 }
 
@@ -317,7 +317,7 @@ TEST(GoldenLayoutTest, ImageWindowFilter) {
     expect_image_layout_agnostic(Layout::PLN3, [](const std::vector<Rpp8u>& s1,
                                                   const std::vector<Rpp8u>&, std::vector<Rpp8u>& o,
                                                   const RpptDesc& d, const RpptROI* roi) {
-        box_filter_reference<Rpp8u>(s1.data(), o.data(), d, DType::U8, roi, XYWH, 3);
+        box_filter_reference<Rpp8u>(s1.data(), d, o.data(), d, DType::U8, roi, XYWH, 3);
     });
 }
 

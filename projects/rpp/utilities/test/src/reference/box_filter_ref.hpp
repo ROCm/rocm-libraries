@@ -49,11 +49,11 @@ Expression
   dst(j, i) = (1 / K^2) * sum{ src(j+dy, i+dx) : dy, dx in [-r, r] }
 */
 template <typename T>
-void box_filter_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                          RpptRoiType type, Rpp32u kernelSize) {
+void box_filter_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                          const RpptROI* roi, RpptRoiType type, Rpp32u kernelSize) {
     const std::size_t kk = static_cast<std::size_t>(kernelSize) * kernelSize;
     const std::vector<double> weights(kk, 1.0 / static_cast<double>(kk));
-    convolve_reference<T>(src, dst, d, dt, roi, type, kernelSize, weights);
+    convolve_reference<T>(src, sd, dst, dd, dt, roi, type, kernelSize, weights);
 }
 
 }  // namespace rpptest

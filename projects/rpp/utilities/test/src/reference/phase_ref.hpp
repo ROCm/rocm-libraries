@@ -76,9 +76,9 @@ inline double phase_scalar(double a, double b, DType dt) {
 }
 
 template <typename T>
-void phase_reference(const T* src1, const T* src2, T* dst, const RpptDesc& d, DType dt,
-                     const RpptROI* roi, RpptRoiType roiType) {
-    for_each_roi_io(d, roi, roiType,
+void phase_reference(const T* src1, const T* src2, const RpptDesc& sd, T* dst, const RpptDesc& dd,
+                     DType dt, const RpptROI* roi, RpptRoiType roiType) {
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
                         dst[dstIdx] = from_double<T>(
                             phase_scalar(to_double(src1[srcIdx]), to_double(src2[srcIdx]), dt));

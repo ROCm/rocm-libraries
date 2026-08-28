@@ -53,14 +53,15 @@ struct FlipParams {
 
 template <typename T>
 void run_flip(const TestConfig& cfg, const FlipParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     PinnedArray<Rpp32u> horizontal(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32u> vertical(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         horizontal[i] = op.horizontal;
         vertical[i] = op.vertical;
@@ -73,8 +74,8 @@ void run_flip(const TestConfig& cfg, const FlipParams& op) {
     fill_input<T>(input.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
     golden = dstInit;
-    flip_reference<T>(input.data(), golden.data(), desc, roiVec.data(), XYWH, op.horizontal,
-                      op.vertical);
+    flip_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, roiVec.data(), XYWH,
+                      op.horizontal, op.vertical);
 
     // (2) Run RPP on the configured backend. dst is pre-filled with a distinct pattern so a
     // no-op kernel would be caught even in the identity (h=0, v=0) case.
@@ -83,8 +84,8 @@ void run_flip(const TestConfig& cfg, const FlipParams& op) {
     dst.write(dstInit.data(), bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_flip(src.ptr(), &desc, dst.ptr(), &desc, horizontal.data(), vertical.data(),
-                        roi.data(), XYWH, handle.get(), cfg.backend),
+    ASSERT_EQ(rppt_flip(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, horizontal.data(),
+                        vertical.data(), roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
@@ -95,7 +96,7 @@ void run_flip(const TestConfig& cfg, const FlipParams& op) {
     // rewrites the caller's XYWH tensor to LTRB in place, so reusing roi[] here would walk the
     // wrong rectangle. flip only permutes source elements -- it computes nothing -- so every
     // dtype must be bit-exact and the tolerance is zero.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH, 0.0));
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH, 0.0));
 }
 
 }  // namespace
@@ -120,10 +121,15 @@ TEST_P(FlipTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(Image_Geometric, FlipTest,
                          ::testing::ValuesIn(with_params<FlipParams>(
                              make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
                                           {Roi::Full, Roi::Partial}),
                              {FlipParams{0, 0}, FlipParams{1, 0}, FlipParams{0, 1},
                               FlipParams{1, 1}})),

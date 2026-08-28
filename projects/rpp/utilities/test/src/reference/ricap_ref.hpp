@@ -74,8 +74,8 @@ Notes
   placement math instead of for_each_roi_io().
 */
 template <typename T>
-void ricap_reference(const T* src, T* dst, const RpptDesc& d, const Rpp32u* permutation,
-                     const RpptROI* cropRegion, RpptRoiType roiType) {
+void ricap_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
+                     const Rpp32u* permutation, const RpptROI* cropRegion, RpptRoiType roiType) {
     RoiBounds crop[4];
     for (int k = 0; k < 4; ++k) crop[k] = roi_bounds(cropRegion[k], roiType);
 
@@ -83,19 +83,19 @@ void ricap_reference(const T* src, T* dst, const RpptDesc& d, const Rpp32u* perm
     const Rpp32u originX[4] = {0, crop[0].w, 0, crop[0].w};
     const Rpp32u originY[4] = {0, 0, crop[0].h, crop[0].h};
 
-    for (Rpp32u n = 0; n < d.n; ++n)
+    for (Rpp32u n = 0; n < sd.n; ++n)
         for (int k = 0; k < 4; ++k) {
             const Rpp32u p = permutation[n * 4 + k];
-            for (Rpp32u c = 0; c < d.c; ++c) {
-                const std::size_t dstBase = plane_base(d, n, c);
-                const std::size_t srcBase = plane_base(d, p, c);
+            for (Rpp32u c = 0; c < sd.c; ++c) {
+                const std::size_t dstBase = plane_base(dd, n, c);
+                const std::size_t srcBase = plane_base(sd, p, c);
                 for (Rpp32u j = 0; j < crop[k].h; ++j)
                     for (Rpp32u i = 0; i < crop[k].w; ++i) {
                         const Rpp32u dy = originY[k] + j, dx = originX[k] + i;
                         const Rpp32u sy = crop[k].y0 + j, sx = crop[k].x0 + i;
-                        if (dy >= d.h || dx >= d.w || sy >= d.h || sx >= d.w) continue;
-                        dst[plane_index(d, dstBase, dy, dx)] =
-                            src[plane_index(d, srcBase, sy, sx)];
+                        if (dy >= dd.h || dx >= dd.w || sy >= sd.h || sx >= sd.w) continue;
+                        dst[plane_index(dd, dstBase, dy, dx)] =
+                            src[plane_index(sd, srcBase, sy, sx)];
                     }
             }
         }

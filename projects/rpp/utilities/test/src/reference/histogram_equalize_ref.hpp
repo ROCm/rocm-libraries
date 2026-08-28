@@ -96,19 +96,20 @@ inline std::array<int, 256> he_build_lut(const std::array<long, 256>& hist, long
 }
 
 template <typename T>
-void histogram_equalize_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi,
-                                  RpptRoiType type) {
-    const bool rgb = d.c == 3;
-    const std::vector<std::size_t> N = roi_pixel_counts(d, roi, type);
+void histogram_equalize_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
+                                  const RpptROI* roi, RpptRoiType type) {
+    const bool rgb = sd.c == 3;
+    const std::vector<std::size_t> N = roi_pixel_counts(sd, roi, type);
 
-    // Pass 1: per-image histogram of the equalization channel (Y for RGB).
-    std::vector<std::array<long, 256>> hist(d.n);
+    // Pass 1: per-image histogram of the equalization channel (Y for RGB). Source only, so this
+    // pass is addressed through sd alone.
+    std::vector<std::array<long, 256>> hist(sd.n);
     for (auto& h : hist) h.fill(0);
-    for_each_roi_pixel(d, roi, type, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t s, std::size_t) {
+    for_each_roi_pixel(sd, roi, type, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t s, std::size_t) {
         int y;
         if (rgb) {
-            const double r = to_double(src[s]), g = to_double(src[channel_index(d, s, 1)]),
-                         b = to_double(src[channel_index(d, s, 2)]);
+            const double r = to_double(src[s]), g = to_double(src[channel_index(sd, s, 1)]),
+                         b = to_double(src[channel_index(sd, s, 2)]);
             y = static_cast<int>(clampd(std::nearbyint(ycbcr_y(r, g, b)), 0.0, 255.0));
         } else {
             y = static_cast<int>(to_double(src[s]));
@@ -116,14 +117,14 @@ void histogram_equalize_reference(const T* src, T* dst, const RpptDesc& d, const
         hist[n][y]++;
     });
 
-    std::vector<std::array<int, 256>> lut(d.n);
-    for (Rpp32u n = 0; n < d.n; ++n) lut[n] = he_build_lut(hist[n], static_cast<long>(N[n]));
+    std::vector<std::array<int, 256>> lut(sd.n);
+    for (Rpp32u n = 0; n < sd.n; ++n) lut[n] = he_build_lut(hist[n], static_cast<long>(N[n]));
 
     // Pass 2: apply the per-image LUT (equalizing only Y for RGB, preserving Cb/Cr).
-    for_each_roi_pixel(d, roi, type, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t s, std::size_t o) {
+    for_each_roi_pixel(sd, dd, roi, type, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t s, std::size_t o) {
         if (rgb) {
-            const double r = to_double(src[s]), g = to_double(src[channel_index(d, s, 1)]),
-                         b = to_double(src[channel_index(d, s, 2)]);
+            const double r = to_double(src[s]), g = to_double(src[channel_index(sd, s, 1)]),
+                         b = to_double(src[channel_index(sd, s, 2)]);
             const int y = static_cast<int>(clampd(std::nearbyint(ycbcr_y(r, g, b)), 0.0, 255.0));
             const double cb = clampd(std::nearbyint(ycbcr_cb(r, g, b)), 0.0, 255.0);
             const double cr = clampd(std::nearbyint(ycbcr_cr(r, g, b)), 0.0, 255.0);
@@ -131,8 +132,8 @@ void histogram_equalize_reference(const T* src, T* dst, const RpptDesc& d, const
             double rr, gg, bb;
             ycbcr_to_rgb(yp, cb, cr, rr, gg, bb);
             dst[o] = from_double<T>(clampd(std::nearbyint(rr), 0.0, 255.0));
-            dst[channel_index(d, o, 1)] = from_double<T>(clampd(std::nearbyint(gg), 0.0, 255.0));
-            dst[channel_index(d, o, 2)] = from_double<T>(clampd(std::nearbyint(bb), 0.0, 255.0));
+            dst[channel_index(dd, o, 1)] = from_double<T>(clampd(std::nearbyint(gg), 0.0, 255.0));
+            dst[channel_index(dd, o, 2)] = from_double<T>(clampd(std::nearbyint(bb), 0.0, 255.0));
         } else {
             dst[o] = from_double<T>(static_cast<double>(lut[n][static_cast<int>(to_double(src[s]))]));
         }

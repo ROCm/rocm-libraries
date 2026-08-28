@@ -63,9 +63,9 @@ inline int lut_index(double v, DType dt) {
 }
 
 template <typename T>
-void lut_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                   RpptRoiType roiType, const T* lut) {
-    for_each_roi_io(d, roi, roiType,
+void lut_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                   const RpptROI* roi, RpptRoiType roiType, const T* lut) {
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
                         dst[dstIdx] = lut[lut_index(to_double(src[srcIdx]), dt)];
                     });

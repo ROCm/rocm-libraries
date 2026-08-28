@@ -46,27 +46,27 @@ namespace {
 
 template <typename T>
 void run_coarse_dropout(const TestConfig& cfg) {
-    const Rpp32u channels = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
-    const TensorShape shape{cfg.size.n, channels, cfg.size.h, cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     const Rpp32u maxBoxesPerImage = 3;
 
     // anchorBoxInfoTensor stride is maxBoxesPerImage; numBoxesTensor holds active counts.
-    PinnedArray<RpptRoiLtrb> boxes(cfg.backend, static_cast<std::size_t>(shape.n) * maxBoxesPerImage);
-    PinnedArray<Rpp32u> numBoxes(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
+    PinnedArray<RpptRoiLtrb> boxes(cfg.backend,
+                                  static_cast<std::size_t>(cfg.size.n) * maxBoxesPerImage);
+    PinnedArray<Rpp32u> numBoxes(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     // Build three mutually non-overlapping erase-regions per image, placed in distinct quadrants
     // (upper-left, upper-right, lower-left) of that image's ROI rectangle, in absolute image
     // coordinates and clamped to stay inside the ROI so they hold for both Full and Partial ROIs.
     // The same boxes feed the golden and the kernel. numBoxes exercises the stride vs active count:
     // image 0 uses all 3, image 1 uses 2 -- but every slot is still a valid in-bounds box.
-    for (Rpp32u n = 0; n < shape.n; ++n) {
+    for (Rpp32u n = 0; n < cfg.size.n; ++n) {
         const RoiBounds rb = roi_bounds(roiVec[n], XYWH);
         const int x0 = static_cast<int>(rb.x0);
         const int y0 = static_cast<int>(rb.y0);
@@ -96,25 +96,26 @@ void run_coarse_dropout(const TestConfig& cfg) {
         imgBoxes[2] = make_box(lx, by);  // lower-left
     }
     numBoxes[0] = 3;
-    if (shape.n > 1) numBoxes[1] = 2;
-    for (Rpp32u n = 2; n < shape.n; ++n) numBoxes[n] = 3;
+    if (cfg.size.n > 1) numBoxes[1] = 2;
+    for (Rpp32u n = 2; n < cfg.size.n; ++n) numBoxes[n] = 3;
 
     // (1) Host golden model. golden starts as a copy of the input so the untouched
     // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    coarse_dropout_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                                boxes.data(), numBoxes.data(), maxBoxesPerImage);
+    coarse_dropout_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
+                                roi.data(), XYWH, boxes.data(), numBoxes.data(), maxBoxesPerImage);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
-    ASSERT_EQ(rppt_coarse_dropout(src.ptr(), &desc, dst.ptr(), &desc, boxes.data(), numBoxes.data(),
-                                  maxBoxesPerImage, roi.data(), XYWH, handle.get(), cfg.backend),
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_coarse_dropout(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, boxes.data(),
+                                  numBoxes.data(), maxBoxesPerImage, roi.data(), XYWH, handle.get(),
+                                  cfg.backend),
               RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
@@ -122,7 +123,7 @@ void run_coarse_dropout(const TestConfig& cfg) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kExact(cfg.dtype)));
 }
 
@@ -145,9 +146,14 @@ TEST_P(CoarseDropoutTest, Correctness) {
 // HIP leaves the erased region unwritten under a non-full ROI (same class as the warp/rotate/remap
 // HIP partial-ROI placement bug). Do not weaken
 // the golden to force green.
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, CoarseDropoutTest,
     ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                     {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                     {{Layout::PKD3, Layout::PKD3},
+                                      {Layout::PLN3, Layout::PLN3},
+                                      {Layout::PLN1, Layout::PLN1},
+                                      {Layout::PKD3, Layout::PLN3},
+                                      {Layout::PLN3, Layout::PKD3}},
                                      {Roi::Full, Roi::Partial})),
     config_param_name);

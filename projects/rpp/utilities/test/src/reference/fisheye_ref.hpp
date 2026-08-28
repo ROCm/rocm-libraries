@@ -121,9 +121,9 @@ inline void fisheye_map(double outX, double outY, double w, double h, double x0,
 }
 
 template <typename T>
-void fisheye_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                       RpptRoiType roiType) {
-    geometric_reference<T>(src, dst, d, dt, roi, roiType, roi_out_sizes(d, roi, roiType),
+void fisheye_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                       const RpptROI* roi, RpptRoiType roiType) {
+    geometric_reference<T>(src, sd, dst, dd, dt, roi, roiType, roi_out_sizes(sd, roi, roiType),
                            NEAREST_NEIGHBOR,
                            [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
                                const RoiBounds b = roi_bounds(roi[n], roiType);

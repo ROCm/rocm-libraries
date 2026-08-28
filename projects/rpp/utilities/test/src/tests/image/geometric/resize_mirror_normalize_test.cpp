@@ -75,9 +75,9 @@ void run_resize_mirror_normalize(const TestConfig& cfg, const RmnParams& op) {
     const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
     const Rpp32u N = cfg.size.n;
     const TensorShape srcShape{N, c, cfg.size.h, cfg.size.w};
-    const TensorShape dstShape{N, c, kDstH, kDstW};
+    const TensorShape dstShape{N, static_cast<Rpp32u>(channels_of(cfg.layoutOut)), kDstH, kDstW};
     RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layoutIn);
-    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutIn);
+    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutOut);
     const std::size_t srcCount = element_count(srcDesc), dstCount = element_count(dstDesc);
     const std::size_t srcBytes = byte_size(srcDesc, cfg.dtype);
     const std::size_t dstBytes = byte_size(dstDesc, cfg.dtype);
@@ -154,7 +154,12 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, ResizeMirrorNormalizeTest,
     ::testing::ValuesIn(with_params<RmnParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {RmnParams{{0.0, 0.0, 0.0}, 1.0, 0, NEAREST_NEIGHBOR, "IdentityNN"},
          RmnParams{{0.0, 0.0, 0.0}, 1.0, 1, BILINEAR, "MirrorOnly"},
          RmnParams{{60.0, 80.0, 100.0}, 1.0, 0, BILINEAR, "Mean"},

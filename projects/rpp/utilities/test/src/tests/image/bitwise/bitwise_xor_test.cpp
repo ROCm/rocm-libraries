@@ -42,13 +42,14 @@ namespace {
 
 template <typename T>
 void run_bitwise_xor(const TestConfig& cfg) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // ROIs live in host-accessible (pinned for HIP) memory.
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     // (1) Host golden model. Two distinct operands so the op is exercised on differing bit
@@ -59,8 +60,8 @@ void run_bitwise_xor(const TestConfig& cfg) {
     for (std::size_t i = 0; i < count; ++i)
         input2[i] = from_double<T>(static_cast<double>((i * 53u + 97u) & 0xFFu));
     golden = input1;
-    bitwise_binary_reference<T>(input1.data(), input2.data(), golden.data(), desc, roi.data(), XYWH,
-                                BitwiseOp::Xor);
+    bitwise_binary_reference<T>(input1.data(), input2.data(), srcDesc, golden.data(),
+                                dstDesc, roi.data(), XYWH, BitwiseOp::Xor);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src1(cfg.backend, bytes), src2(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -69,7 +70,7 @@ void run_bitwise_xor(const TestConfig& cfg) {
     dst.write(input1.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_bitwise_xor(src1.ptr(), src2.ptr(), &desc, dst.ptr(), &desc, roi.data(), XYWH,
+    ASSERT_EQ(rppt_bitwise_xor(src1.ptr(), src2.ptr(), &srcDesc, dst.ptr(), &dstDesc, roi.data(), XYWH,
                                handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -78,7 +79,7 @@ void run_bitwise_xor(const TestConfig& cfg) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare over the ROI. bitwise_xor is bit-exact, so the tolerance is zero.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH, 0.0));
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 
 }  // namespace
@@ -92,8 +93,14 @@ TEST_P(BitwiseXorTest, Correctness) {
     run_bitwise_xor<Rpp8u>(cfg);
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(Image_Bitwise, BitwiseXorTest,
                          ::testing::ValuesIn(make_configs({DType::U8},
-                                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                                          {{Layout::PKD3, Layout::PKD3},
+                                                           {Layout::PLN3, Layout::PLN3},
+                                                           {Layout::PLN1, Layout::PLN1},
+                                                           {Layout::PKD3, Layout::PLN3},
+                                                           {Layout::PLN3, Layout::PKD3}},
                                                           {Roi::Full, Roi::Partial})),
                          config_param_name);

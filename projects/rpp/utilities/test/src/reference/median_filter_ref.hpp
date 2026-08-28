@@ -57,7 +57,7 @@ Per-type form
 template <typename T>
 void median_filter_reference(const T* src, T* dst, const RpptDesc& d, DType /*dt*/,
                              const RpptROI* roi, RpptRoiType type, Rpp32u kernelSize) {
-    filter_reference<T>(src, dst, d, roi, type, kernelSize, [](double* w, int kk) {
+    filter_reference<T>(src, d, dst, d, roi, type, kernelSize, [](double* w, int kk) {
         std::sort(w, w + kk);
         return w[kk / 2];
     });

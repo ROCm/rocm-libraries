@@ -62,11 +62,11 @@ Notes
   absolute-frame / origin-based output placement are assumed.
 */
 template <typename T>
-void warp_affine_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                           RpptRoiType roiType, const Rpp32f* affineTensor,
+void warp_affine_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                           const RpptROI* roi, RpptRoiType roiType, const Rpp32f* affineTensor,
                            RpptInterpolationType interp) {
     geometric_reference<T>(
-        src, dst, d, dt, roi, roiType, roi_out_sizes(d, roi, roiType), interp,
+        src, sd, dst, dd, dt, roi, roiType, roi_out_sizes(sd, roi, roiType), interp,
         [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
             const Rpp32f* m = affineTensor + static_cast<std::size_t>(n) * 6;
             sx = m[0] * ox + m[1] * oy + m[2];

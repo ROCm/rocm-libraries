@@ -75,14 +75,15 @@ Notes
   bug.
 */
 template <typename T>
-void random_erase_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                            RpptRoiType roiType, const RpptRoiLtrb* boxes, const T* noiseBuffer) {
+void random_erase_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                            const RpptROI* roi, RpptRoiType roiType, const RpptRoiLtrb* boxes,
+                            const T* noiseBuffer) {
     (void)dt;
-    const Rpp32u channels = d.c;
-    std::vector<RoiBounds> b(d.n);
-    for (Rpp32u n = 0; n < d.n; ++n) b[n] = roi_bounds(roi[n], roiType);
+    const Rpp32u channels = sd.c;
+    std::vector<RoiBounds> b(sd.n);
+    for (Rpp32u n = 0; n < sd.n; ++n) b[n] = roi_bounds(roi[n], roiType);
     for_each_roi_io(
-        d, roi, roiType,
+        sd, dd, roi, roiType,
         [&](Rpp32u n, Rpp32u c, Rpp32u j, Rpp32u i, std::size_t srcIdx, std::size_t dstIdx) {
             const int sx = static_cast<int>(b[n].x0 + i);
             const int sy = static_cast<int>(b[n].y0 + j);

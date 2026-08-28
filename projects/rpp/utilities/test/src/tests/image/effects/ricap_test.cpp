@@ -53,46 +53,46 @@ struct RicapParams {
 
 template <typename T>
 void run_ricap(const TestConfig& cfg, const RicapParams& op) {
-    const Rpp32u channels = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
-    const TensorShape shape{cfg.size.n, channels, cfg.size.h, cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Exactly 4 crop ROIs shared by the whole batch (not one per image): they are ricap's source
     // rectangles AND the output region extents. Host-accessible / device-visible (pinned on HIP).
     PinnedArray<RpptROI> cropRegion(cfg.backend, 4);
-    const Rpp32u regionW[4] = {op.w0, desc.w - op.w0, op.w0, desc.w - op.w0};
-    const Rpp32u regionH[4] = {op.h0, op.h0, desc.h - op.h0, desc.h - op.h0};
+    const Rpp32u regionW[4] = {op.w0, srcDesc.w - op.w0, op.w0, srcDesc.w - op.w0};
+    const Rpp32u regionH[4] = {op.h0, op.h0, srcDesc.h - op.h0, srcDesc.h - op.h0};
     for (int k = 0; k < 4; ++k) {
         cropRegion[k].xywhROI.xy.x = static_cast<int>(op.cropX[k]);
         cropRegion[k].xywhROI.xy.y = static_cast<int>(op.cropY[k]);
         cropRegion[k].xywhROI.roiWidth = static_cast<int>(regionW[k]);
         cropRegion[k].xywhROI.roiHeight = static_cast<int>(regionH[k]);
-        ASSERT_LE(op.cropX[k] + regionW[k], desc.w) << "crop " << k << " overruns image width";
-        ASSERT_LE(op.cropY[k] + regionH[k], desc.h) << "crop " << k << " overruns image height";
+        ASSERT_LE(op.cropX[k] + regionW[k], srcDesc.w) << "crop " << k << " overruns image width";
+        ASSERT_LE(op.cropY[k] + regionH[k], srcDesc.h) << "crop " << k << " overruns image height";
     }
 
     // batchSize * 4 source-image indices: region k of output image n comes from image
     // permutation[n*4 + k].
-    PinnedArray<Rpp32u> permutation(cfg.backend, static_cast<std::size_t>(shape.n) * 4);
-    for (Rpp32u n = 0; n < shape.n; ++n)
+    PinnedArray<Rpp32u> permutation(cfg.backend, static_cast<std::size_t>(cfg.size.n) * 4);
+    for (Rpp32u n = 0; n < cfg.size.n; ++n)
         for (Rpp32u k = 0; k < 4; ++k)
-            permutation[n * 4 + k] = op.distinctSources ? (n + k) % shape.n : 0u;
+            permutation[n * 4 + k] = op.distinctSources ? (n + k) % cfg.size.n : 0u;
 
     // (1) Host golden model. One tensor holds the whole batch, and fill_input's pattern advances
     // with the linear element offset, so the images already differ from each other.
     std::vector<T> in(count), golden(count), actual(count);
     fill_input<T>(in.data(), count, cfg.dtype);
-    ricap_reference<T>(in.data(), golden.data(), desc, permutation.data(), cropRegion.data(), XYWH);
+    ricap_reference<T>(in.data(), srcDesc, golden.data(), dstDesc, permutation.data(),
+                       cropRegion.data(), XYWH);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(in.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
-    ASSERT_EQ(rppt_ricap(src.ptr(), &desc, dst.ptr(), &desc, permutation.data(), cropRegion.data(),
-                         XYWH, handle.get(), cfg.backend),
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_ricap(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, permutation.data(),
+                         cropRegion.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
@@ -101,10 +101,10 @@ void run_ricap(const TestConfig& cfg, const RicapParams& op) {
 
     // (4) ricap is a verbatim copy for every dtype and it writes the entire destination frame, so
     // compare the full image bit-exact (tolerance 0).
-    PinnedArray<RpptROI> fullRoi(cfg.backend, shape.n);
-    const std::vector<RpptROI> fullVec = make_roi(desc, Roi::Full);
-    for (Rpp32u i = 0; i < shape.n; ++i) fullRoi[i] = fullVec[i];
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, fullRoi.data(), XYWH, 0.0));
+    PinnedArray<RpptROI> fullRoi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> fullVec = make_roi(dstDesc, Roi::Full);
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) fullRoi[i] = fullVec[i];
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, fullRoi.data(), XYWH, 0.0));
 }
 
 }  // namespace
@@ -134,11 +134,17 @@ TEST_P(RicapTest, Correctness) {
 //            where the output is image 0's top-left quadrant tiled 2x2.
 //   bound  - single's degenerate crops/permutation with quad's boundary (20, 16): isolates the
 //            vertical split as the only variable.
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, RicapTest,
     ::testing::ValuesIn(with_params<RicapParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full}, {{4, 36, 48}}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full}, {{4, 36, 48}}),
         {RicapParams{20, 16, {2, 10, 6, 14}, {3, 5, 12, 8}, true, "quad"},
          RicapParams{24, 18, {0, 0, 0, 0}, {0, 0, 0, 0}, false, "single"},
          RicapParams{24, 16, {2, 10, 6, 14}, {3, 5, 12, 8}, true, "quad8"},

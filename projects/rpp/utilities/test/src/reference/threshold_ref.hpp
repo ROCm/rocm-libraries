@@ -71,25 +71,26 @@ inline double threshold_white(DType dt) {
 inline double threshold_black(DType dt) { return dt == DType::I8 ? -128.0 : 0.0; }
 
 template <typename T>
-void threshold_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                         RpptRoiType roiType, const Rpp32f* minTensor, const Rpp32f* maxTensor) {
+void threshold_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                         const RpptROI* roi, RpptRoiType roiType, const Rpp32f* minTensor,
+                         const Rpp32f* maxTensor) {
     const double white = threshold_white(dt);
     const double black = threshold_black(dt);
-    for_each_roi_pixel(d, roi, roiType,
+    for_each_roi_pixel(sd, dd, roi, roiType,
                        [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
         bool inRange = true;
-        for (Rpp32u c = 0; c < d.c; ++c) {
-            const double v = to_double(src[channel_index(d, srcPix, c)]);
-            const double lo = minTensor[n * d.c + c];
-            const double hi = maxTensor[n * d.c + c];
+        for (Rpp32u c = 0; c < sd.c; ++c) {
+            const double v = to_double(src[channel_index(sd, srcPix, c)]);
+            const double lo = minTensor[n * sd.c + c];
+            const double hi = maxTensor[n * sd.c + c];
             if (v < lo || v > hi) {
                 inRange = false;
                 break;
             }
         }
         const double out = inRange ? white : black;
-        for (Rpp32u c = 0; c < d.c; ++c)
-            dst[channel_index(d, dstPix, c)] = from_double<T>(out);
+        for (Rpp32u c = 0; c < sd.c; ++c)
+            dst[channel_index(dd, dstPix, c)] = from_double<T>(out);
     });
 }
 

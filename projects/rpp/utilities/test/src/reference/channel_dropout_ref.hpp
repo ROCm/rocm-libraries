@@ -59,10 +59,11 @@ inline double channel_dropout_scalar(double v, DType dt, bool keep) {
 }
 
 template <typename T>
-void channel_dropout_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
-                               const RpptROI* roi, RpptRoiType roiType, const Rpp8u* dropout) {
-    const Rpp32u channels = d.c;
-    for_each_roi_io(d, roi, roiType,
+void channel_dropout_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
+                               DType dt, const RpptROI* roi, RpptRoiType roiType,
+                               const Rpp8u* dropout) {
+    const Rpp32u channels = sd.c;
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u n, Rpp32u c, Rpp32u, Rpp32u, std::size_t srcIdx,
                         std::size_t dstIdx) {
                         const bool keep = dropout[n * channels + c] != 0;

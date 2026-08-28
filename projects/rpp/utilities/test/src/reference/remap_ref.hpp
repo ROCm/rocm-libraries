@@ -67,12 +67,13 @@ Notes
   which is a finding, not a reference bug.
 */
 template <typename T>
-void remap_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
+void remap_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
                      const Rpp32f* rowRemapTable, const Rpp32f* colRemapTable, const RpptDesc& td,
                      const RpptROI* roi, RpptRoiType roiType, RpptInterpolationType interp) {
     const double border = dtype_black(dt);
-    for_each_roi_plane(d, roi, roiType, [&](Rpp32u n, const RoiBounds& b, Rpp32u,
-                                            std::size_t imgBase) {
+    for_each_roi_plane(sd, dd, roi, roiType,
+                       [&](Rpp32u n, const RoiBounds& b, Rpp32u, std::size_t srcBase,
+                           std::size_t dstBase) {
         const int rx0 = static_cast<int>(b.x0), ry0 = static_cast<int>(b.y0);
         const int rx1 = rx0 + static_cast<int>(b.w), ry1 = ry0 + static_cast<int>(b.h);
         const std::size_t tblBase = plane_base(td, n, 0);
@@ -82,8 +83,8 @@ void remap_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                 const double sx = colRemapTable[tblIdx];
                 const double sy = rowRemapTable[tblIdx];
                 const double v =
-                    sample(src, d, imgBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
-                dst[plane_index(d, imgBase, j, i)] = from_double<T>(quantize_stored(v, dt));
+                    sample(src, sd, srcBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
+                dst[plane_index(dd, dstBase, j, i)] = from_double<T>(quantize_stored(v, dt));
             }
     });
 }

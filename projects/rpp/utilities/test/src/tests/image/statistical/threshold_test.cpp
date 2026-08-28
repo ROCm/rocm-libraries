@@ -67,17 +67,17 @@ float cutoff_in_dtype(float raw, DType dt) {
 template <typename T>
 void run_threshold(const TestConfig& cfg, const ThresholdParams& op) {
     const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
-    const TensorShape shape{cfg.size.n, c, cfg.size.h, cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Per-image, per-channel cutoffs in host-accessible (pinned for HIP) memory.
-    PinnedArray<Rpp32f> minTensor(cfg.backend, shape.n * c);
-    PinnedArray<Rpp32f> maxTensor(cfg.backend, shape.n * c);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    PinnedArray<Rpp32f> minTensor(cfg.backend, cfg.size.n * c);
+    PinnedArray<Rpp32f> maxTensor(cfg.backend, cfg.size.n * c);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         for (Rpp32u ch = 0; ch < c; ++ch) {
             minTensor[i * c + ch] = cutoff_in_dtype(op.rawMin, cfg.dtype);
             maxTensor[i * c + ch] = cutoff_in_dtype(op.rawMax, cfg.dtype);
@@ -90,17 +90,17 @@ void run_threshold(const TestConfig& cfg, const ThresholdParams& op) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    threshold_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                           minTensor.data(), maxTensor.data());
+    threshold_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
+                           XYWH, minTensor.data(), maxTensor.data());
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
-    ASSERT_EQ(rppt_threshold(src.ptr(), &desc, dst.ptr(), &desc, minTensor.data(), maxTensor.data(),
-                             roi.data(), XYWH, handle.get(), cfg.backend),
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_threshold(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, minTensor.data(),
+                             maxTensor.data(), roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
@@ -108,7 +108,7 @@ void run_threshold(const TestConfig& cfg, const ThresholdParams& op) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kExact(cfg.dtype)));
 }
 
@@ -124,10 +124,16 @@ TEST_P(ThresholdTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Statistical, ThresholdTest,
     ::testing::ValuesIn(with_params<ThresholdParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {ThresholdParams{29.5f, 100.5f}})),
     op_config_name<ThresholdParams>);

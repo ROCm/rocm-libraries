@@ -83,9 +83,9 @@ inline double posterize_scalar(double v, DType dt, int levelBits) {
 }
 
 template <typename T>
-void posterize_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                         RpptRoiType roiType, int levelBits) {
-    for_each_roi_io(d, roi, roiType,
+void posterize_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                         const RpptROI* roi, RpptRoiType roiType, int levelBits) {
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
                         dst[dstIdx] =
                             from_double<T>(posterize_scalar(to_double(src[srcIdx]), dt, levelBits));

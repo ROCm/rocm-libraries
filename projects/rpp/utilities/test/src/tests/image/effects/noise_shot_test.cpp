@@ -68,13 +68,14 @@ constexpr Rpp32f kNontrivialFactor = 0.5f;
 
 template <typename T>
 void run_noise_shot_identity(const TestConfig& cfg) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     PinnedArray<Rpp32f> factor(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         factor[i] = 0.0f;  // the RNG-free identity corner
         roi[i] = roiVec[i];
@@ -83,21 +84,22 @@ void run_noise_shot_identity(const TestConfig& cfg) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    noise_shot_identity_reference<T>(input.data(), golden.data(), desc, roi.data(), XYWH);
+    noise_shot_identity_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, roi.data(),
+                                     XYWH);
 
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_shot_noise(src.ptr(), &desc, dst.ptr(), &desc, factor.data(), /*seed=*/42u,
-                              roi.data(), XYWH, handle.get(), cfg.backend),
+    ASSERT_EQ(rppt_shot_noise(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, factor.data(),
+                              /*seed=*/42u, roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH, 0.0));
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 
 // Runs the real kernel at a nontrivial (RNG-active) factor and asserts every ROI output element
@@ -202,9 +204,15 @@ constexpr char kHostPoissonSkip[] =
 // runs three full kernel invocations per case, and ValidRange's storable-range notion is exercised
 // on one integer and one float dtype rather than all four.
 std::vector<WithParams<NoiseShotParams>> noise_shot_configs() {
+    // Same-layout cases plus both directions of the fused output-layout conversion.
     std::vector<WithParams<NoiseShotParams>> configs = with_params<NoiseShotParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {NoiseShotParams{Check::Identity}});
     const std::vector<WithParams<NoiseShotParams>> validRange = with_params<NoiseShotParams>(
         make_configs({DType::U8, DType::F32}, {Layout::PKD3, Layout::PLN1},

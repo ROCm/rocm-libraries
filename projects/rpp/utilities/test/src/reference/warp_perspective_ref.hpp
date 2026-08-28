@@ -65,10 +65,11 @@ Notes
   share the same geometric machinery.
 */
 template <typename T>
-void warp_perspective_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
-                                const RpptROI* roi, RpptRoiType roiType,
+void warp_perspective_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
+                                DType dt, const RpptROI* roi, RpptRoiType roiType,
                                 const Rpp32f* perspectiveTensor, RpptInterpolationType interp) {
-    geometric_reference<T>(src, dst, d, dt, roi, roiType, roi_out_sizes(d, roi, roiType), interp,
+    geometric_reference<T>(src, sd, dst, dd, dt, roi, roiType, roi_out_sizes(sd, roi, roiType),
+                           interp,
                            [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
                                const Rpp32f* m =
                                    perspectiveTensor + static_cast<std::size_t>(n) * 9;

@@ -51,17 +51,19 @@ struct ChannelPermuteParams {
 
 template <typename T>
 void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) {
-    const TensorShape shape{cfg.size.n, 3, cfg.size.h, cfg.size.w};  // channel_permute is 3-channel
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);   // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    // channel_permute is 3-channel; channels_of() agrees for both PKD3 and PLN3 (the only layouts
+    // this op grids over), so the shared descriptor helpers need no special-casing here.
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Parameters live in host-accessible (pinned for HIP) memory. permutationTensor holds n
     // contiguous per-image triples. channel_permute takes no ROI; the frame is walked in full.
-    PinnedArray<Rpp32u> perm(cfg.backend, 3 * shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) {
+    PinnedArray<Rpp32u> perm(cfg.backend, 3 * cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         perm[i * 3 + 0] = op.order[0];
         perm[i * 3 + 1] = op.order[1];
         perm[i * 3 + 2] = op.order[2];
@@ -73,7 +75,8 @@ void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) 
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    channel_permute_reference<T>(input.data(), golden.data(), desc, perm.data(), roi.data(), XYWH);
+    channel_permute_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, perm.data(),
+                                 roi.data(), XYWH);
 
     // (2) Run RPP on the configured backend. dst is pre-filled with a distinct pattern so a
     // no-op kernel would be caught.
@@ -83,9 +86,9 @@ void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) 
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, shape.n);
-    ASSERT_EQ(rppt_channel_permute(src.ptr(), &desc, dst.ptr(), &desc, perm.data(), handle.get(),
-                                   cfg.backend),
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_channel_permute(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, perm.data(),
+                                   handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
@@ -97,7 +100,7 @@ void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) 
     // reads uninitialized/out-of-bounds memory for a few elements (heap/order-dependent, values
     // typically I8-black -128); a real kernel bug, not a reference/tolerance issue. Do not loosen
     // the tolerance to hide it.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH, 0.0));
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 
 }  // namespace
@@ -115,10 +118,15 @@ TEST_P(ChannelPermuteTest, Correctness) {
 
 // channel_permute is 3-channel only (c = 3) and takes no ROI, so PLN1 and Partial are not
 // instantiated. A rotation {2,0,1} moves every channel and is sensitive to the mapping direction.
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_DataExchange, ChannelPermuteTest,
     ::testing::ValuesIn(with_params<ChannelPermuteParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3}, {Roi::Full}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full}),
         {ChannelPermuteParams{{2, 0, 1}}})),
     op_config_name<ChannelPermuteParams>);

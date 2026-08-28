@@ -69,11 +69,12 @@ double resize_crop_mirror_tolerance(DType dt, RpptInterpolationType interp) {
 
 template <typename T>
 void run_resize_crop_mirror(const TestConfig& cfg, const ResizeCropMirrorParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
-    const TensorShape srcShape{cfg.size.n, c, cfg.size.h, cfg.size.w};
-    const TensorShape dstShape{cfg.size.n, c, op.dstH, op.dstW};
+    const TensorShape srcShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)),
+                               cfg.size.h, cfg.size.w};
+    const TensorShape dstShape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutOut)),
+                               op.dstH, op.dstW};
     RpptDesc srcDesc = make_descriptor(srcShape, cfg.dtype, cfg.layoutIn);
-    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutIn);
+    RpptDesc dstDesc = make_descriptor(dstShape, cfg.dtype, cfg.layoutOut);
     const std::size_t srcCount = element_count(srcDesc), dstCount = element_count(dstDesc);
     const std::size_t srcBytes = byte_size(srcDesc, cfg.dtype);
     const std::size_t dstBytes = byte_size(dstDesc, cfg.dtype);
@@ -137,7 +138,12 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, ResizeCropMirrorTest,
     ::testing::ValuesIn(with_params<ResizeCropMirrorParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {ResizeCropMirrorParams{72, 54, NEAREST_NEIGHBOR, 0, "up"},
          ResizeCropMirrorParams{72, 54, BILINEAR, 1, "upmir"},
          ResizeCropMirrorParams{24, 18, NEAREST_NEIGHBOR, 1, "downmir"},

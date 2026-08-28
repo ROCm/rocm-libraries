@@ -79,7 +79,7 @@ void sobel_filter_reference(const T* src, T* dst, const RpptDesc& d, DType dt, c
                             RpptRoiType type, Rpp32u sobelType, Rpp32u kernelSize) {
     static const double Gx[9] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
     static const double Gy[9] = {-1, -2, -1, 0, 0, 0, 1, 2, 1};
-    filter_reference<T>(src, dst, d, roi, type, kernelSize, [&](const double* w, int kk) {
+    filter_reference<T>(src, d, dst, d, roi, type, kernelSize, [&](const double* w, int kk) {
         double gx = 0.0, gy = 0.0;
         for (int k = 0; k < kk; ++k) {
             gx += Gx[k] * w[k];

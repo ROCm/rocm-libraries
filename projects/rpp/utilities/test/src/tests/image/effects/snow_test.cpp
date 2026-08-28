@@ -60,15 +60,16 @@ constexpr Tolerance kSnowTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>
 void run_snow(const TestConfig& cfg, const SnowParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     PinnedArray<Rpp32f> brightness(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> threshold(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32s> darkMode(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         brightness[i] = op.brightness;
         threshold[i] = op.threshold;
@@ -79,22 +80,23 @@ void run_snow(const TestConfig& cfg, const SnowParams& op) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    snow_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH, op.brightness,
-                      op.threshold, op.darkMode);
+    snow_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
+                      op.brightness, op.threshold, op.darkMode);
 
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_snow(src.ptr(), &desc, dst.ptr(), &desc, brightness.data(), threshold.data(),
-                        darkMode.data(), roi.data(), XYWH, handle.get(), cfg.backend),
+    ASSERT_EQ(rppt_snow(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, brightness.data(),
+                        threshold.data(), darkMode.data(), roi.data(), XYWH, handle.get(),
+                        cfg.backend),
               RPP_SUCCESS);
 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kSnowTolerance(cfg.dtype)));
 }
 
@@ -110,10 +112,16 @@ TEST_P(SnowTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, SnowTest,
     ::testing::ValuesIn(with_params<SnowParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {SnowParams{2.5f, 0.5f, 0}, SnowParams{2.5f, 0.5f, 1}})),
     op_config_name<SnowParams>);

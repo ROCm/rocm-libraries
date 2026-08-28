@@ -55,8 +55,9 @@ Expression
   dst(j, i)  = sum{ w(dy, dx) * src(j+dy, i+dx) } / sum{ w(dy, dx) }
 */
 template <typename T>
-void gaussian_filter_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                               RpptRoiType type, Rpp32u kernelSize, double stdDev) {
+void gaussian_filter_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
+                               DType dt, const RpptROI* roi, RpptRoiType type, Rpp32u kernelSize,
+                               double stdDev) {
     const int r = static_cast<int>(kernelSize / 2);
     const double twoSigmaSq = 2.0 * stdDev * stdDev;
     std::vector<double> kernel;
@@ -69,7 +70,7 @@ void gaussian_filter_reference(const T* src, T* dst, const RpptDesc& d, DType dt
             sum += w;
         }
     for (double& w : kernel) w /= sum;
-    convolve_reference<T>(src, dst, d, dt, roi, type, kernelSize, kernel);
+    convolve_reference<T>(src, sd, dst, dd, dt, roi, type, kernelSize, kernel);
 }
 
 }  // namespace rpptest

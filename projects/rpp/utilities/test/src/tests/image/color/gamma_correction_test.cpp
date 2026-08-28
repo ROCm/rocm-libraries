@@ -50,14 +50,15 @@ struct GammaCorrectionParams {
 
 template <typename T>
 void run_gamma_correction(const TestConfig& cfg, const GammaCorrectionParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Parameters live in host-accessible (pinned for HIP) memory.
     PinnedArray<Rpp32f> gamma(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         gamma[i] = op.gamma;
         roi[i] = roiVec[i];
@@ -68,8 +69,8 @@ void run_gamma_correction(const TestConfig& cfg, const GammaCorrectionParams& op
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    gamma_correction_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                                  op.gamma);
+    gamma_correction_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
+                                  roi.data(), XYWH, op.gamma);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -77,8 +78,8 @@ void run_gamma_correction(const TestConfig& cfg, const GammaCorrectionParams& op
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_gamma_correction(src.ptr(), &desc, dst.ptr(), &desc, gamma.data(), roi.data(),
-                                    XYWH, handle.get(), cfg.backend),
+    ASSERT_EQ(rppt_gamma_correction(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, gamma.data(),
+                                    roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
@@ -86,7 +87,7 @@ void run_gamma_correction(const TestConfig& cfg, const GammaCorrectionParams& op
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kRoundingTolerance(cfg.dtype)));
 }
 
@@ -103,10 +104,15 @@ TEST_P(GammaCorrectionTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(Image_Color, GammaCorrectionTest,
                          ::testing::ValuesIn(with_params<GammaCorrectionParams>(
                              make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {{Layout::PKD3, Layout::PKD3},
+                                           {Layout::PLN3, Layout::PLN3},
+                                           {Layout::PLN1, Layout::PLN1},
+                                           {Layout::PKD3, Layout::PLN3},
+                                           {Layout::PLN3, Layout::PKD3}},
                                           {Roi::Full, Roi::Partial}),
                              {GammaCorrectionParams{2.2f}})),
                          op_config_name<GammaCorrectionParams>);

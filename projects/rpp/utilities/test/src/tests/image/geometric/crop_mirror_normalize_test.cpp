@@ -62,17 +62,19 @@ double cmn_tolerance(DType dt, const CmnParams& op) {
 template <typename T>
 void run_crop_mirror_normalize(const TestConfig& cfg, const CmnParams& op) {
     const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
-    const TensorShape shape{cfg.size.n, c, cfg.size.h, cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t srcCount = element_count(srcDesc);
+    const std::size_t dstCount = element_count(dstDesc);
+    const std::size_t srcBytes = byte_size(srcDesc, cfg.dtype);
+    const std::size_t dstBytes = byte_size(dstDesc, cfg.dtype);
 
-    PinnedArray<Rpp32f> offset(cfg.backend, static_cast<std::size_t>(shape.n) * c);
-    PinnedArray<Rpp32f> multiplier(cfg.backend, static_cast<std::size_t>(shape.n) * c);
-    PinnedArray<Rpp32u> mirror(cfg.backend, shape.n);
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u n = 0; n < shape.n; ++n) {
+    PinnedArray<Rpp32f> offset(cfg.backend, static_cast<std::size_t>(cfg.size.n) * c);
+    PinnedArray<Rpp32f> multiplier(cfg.backend, static_cast<std::size_t>(cfg.size.n) * c);
+    PinnedArray<Rpp32u> mirror(cfg.backend, cfg.size.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
+    for (Rpp32u n = 0; n < cfg.size.n; ++n) {
         mirror[n] = op.mirror;
         roi[n] = roiVec[n];
         for (Rpp32u ch = 0; ch < c; ++ch) {
@@ -83,32 +85,33 @@ void run_crop_mirror_normalize(const TestConfig& cfg, const CmnParams& op) {
 
     // (1) Host golden model. golden starts as the dst init pattern so the untouched (outside-ROI)
     // region is defined; only the cropped region is overwritten by the reference.
-    std::vector<T> input(count), dstInit(count), golden(count), actual(count);
-    fill_input<T>(input.data(), count, cfg.dtype);
-    fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
+    std::vector<T> input(srcCount), dstInit(dstCount), golden(dstCount), actual(dstCount);
+    fill_input<T>(input.data(), srcCount, cfg.dtype);
+    fill_input<T>(dstInit.data(), dstCount, cfg.dtype, /*salt=*/1);
     golden = dstInit;
-    crop_mirror_normalize_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roiVec.data(),
-                                       XYWH, offset.data(), multiplier.data(), mirror.data());
+    crop_mirror_normalize_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
+                                       roiVec.data(), XYWH, offset.data(), multiplier.data(),
+                                       mirror.data());
 
     // (2) Run RPP on the configured backend. dst is pre-filled with a distinct pattern so a
     // no-op kernel would be caught even in the identity set.
-    DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
-    src.write(input.data(), bytes);
-    dst.write(dstInit.data(), bytes);
+    DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
+    src.write(input.data(), srcBytes);
+    dst.write(dstInit.data(), dstBytes);
 
-    RppHandle handle(cfg.backend, shape.n);
-    ASSERT_EQ(rppt_crop_mirror_normalize(src.ptr(), &desc, dst.ptr(), &desc, offset.data(),
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_crop_mirror_normalize(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, offset.data(),
                                          multiplier.data(), mirror.data(), roi.data(), XYWH,
                                          handle.get(), cfg.backend),
               RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
-    dst.read(actual.data(), bytes);
+    dst.read(actual.data(), dstBytes);
 
     // (4) Compare over the cropped region, bounded by the pre-call ROI copy: HIP rewrites the
     // caller's XYWH tensor from XYWH to LTRB in place.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
                                cmn_tolerance(cfg.dtype, op)));
 }
 
@@ -137,7 +140,12 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, CropMirrorNormalizeTest,
     ::testing::ValuesIn(with_params<CmnParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {CmnParams{{0.0, 0.0, 0.0}, 1.0, 0, "Identity"},
          CmnParams{{0.0, 0.0, 0.0}, 1.0, 1, "MirrorOnly"},
          CmnParams{{0.0, 0.0, 0.0}, 2.0, 0, "Scale"},

@@ -55,16 +55,17 @@ void fill_lut(T* lut, DType dt) {
 
 template <typename T>
 void run_lut(const TestConfig& cfg) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // The table is host/pinned memory even for HIP (the API keeps lutPtr host-side).
     PinnedArray<T> lut(cfg.backend, 65536);
     fill_lut<T>(lut.data(), cfg.dtype);
 
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     // (1) Host golden model. golden starts as a copy of the input so the untouched
@@ -72,7 +73,8 @@ void run_lut(const TestConfig& cfg) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    lut_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH, lut.data());
+    lut_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
+                     lut.data());
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -80,7 +82,7 @@ void run_lut(const TestConfig& cfg) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_lut(src.ptr(), &desc, dst.ptr(), &desc, lut.data(), roi.data(), XYWH,
+    ASSERT_EQ(rppt_lut(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, lut.data(), roi.data(), XYWH,
                        handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -89,7 +91,7 @@ void run_lut(const TestConfig& cfg) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare over the ROI. A look-up is a bit-exact copy of a table entry, so tolerance 0.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH, 0.0));
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH, 0.0));
 }
 
 }  // namespace
@@ -107,9 +109,14 @@ TEST_P(LutTest, Correctness) {
 // Restricted to the integer dtypes (U8/I8): the 256-entry intensity index is unambiguous
 // there, whereas the float dtypes' table-index semantics are not defined by the public API.
 // All layouts (c = 1/3) are supported.
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, LutTest,
     ::testing::ValuesIn(make_configs({DType::U8, DType::I8},
-                                     {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                     {{Layout::PKD3, Layout::PKD3},
+                                      {Layout::PLN3, Layout::PLN3},
+                                      {Layout::PLN1, Layout::PLN1},
+                                      {Layout::PKD3, Layout::PLN3},
+                                      {Layout::PLN3, Layout::PKD3}},
                                      {Roi::Full, Roi::Partial})),
     config_param_name);

@@ -68,12 +68,11 @@ double remap_tolerance(DType dt, RpptInterpolationType interp) {
 
 template <typename T>
 void run_remap(const TestConfig& cfg, const RemapParams& op) {
-    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
     const Rpp32u N = cfg.size.n, imgH = cfg.size.h, imgW = cfg.size.w;
-    const TensorShape shape{N, c, imgH, imgW};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // src == dst
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Remap tables: a SEPARATE F32, single-channel, UNPADDED tensor (row stride is exactly imgW).
     RpptDesc td{};
@@ -92,7 +91,7 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
 
     // Per-image ROIs in host-accessible (pinned for HIP) memory.
     PinnedArray<RpptROI> roi(cfg.backend, N);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < N; ++i) roi[i] = roiVec[i];
 
     // Fill both tables with ABSOLUTE source coordinates, packed at the table origin over the
@@ -135,8 +134,8 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    remap_reference<T>(input.data(), golden.data(), desc, cfg.dtype, rowT.data(), colT.data(), td,
-                       roi.data(), XYWH, op.interp);
+    remap_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, rowT.data(),
+                       colT.data(), td, roi.data(), XYWH, op.interp);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -144,7 +143,7 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, N);
-    ASSERT_EQ(rppt_remap(src.ptr(), &desc, dst.ptr(), &desc, rowT.data(), colT.data(), &td,
+    ASSERT_EQ(rppt_remap(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, rowT.data(), colT.data(), &td,
                          op.interp, roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -153,7 +152,7 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI-sized output region at the destination origin.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                remap_tolerance(cfg.dtype, op.interp)));
 }
 
@@ -176,7 +175,12 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, RemapTest,
     ::testing::ValuesIn(with_params<RemapParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {RemapParams{RemapKind::Identity, NEAREST_NEIGHBOR, "identity"},
          RemapParams{RemapKind::Hflip, NEAREST_NEIGHBOR, "hflip"},
          RemapParams{RemapKind::Identity, BILINEAR, "identity"},

@@ -52,15 +52,13 @@ constexpr Tolerance kBoxFilterTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>
 void run_box_filter(const TestConfig& cfg, const BoxFilterParams& op) {
-    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layoutIn)), cfg.size.h,
-                            cfg.size.w};
     // src carries a leading border pad: the HIP filter kernel requires
     // srcDesc.offsetInBytes >= 12 * (kernelSize/2) (read-slack for the KxK window; the border
     // itself is computed by clamping indices to the image, i.e. replicate). dst keeps offset 0,
     // so the golden and comparator index destination elements from 0. Applied on both backends
     // (the HOST path honours offsetInBytes identically) to keep one path.
-    RpptDesc srcDesc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);
-    RpptDesc dstDesc = srcDesc;  // same dims/strides; only src gets the pad offset
+    RpptDesc srcDesc = make_src_descriptor(cfg);
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
     const std::size_t offsetElems = offsetBytes / dtype_size(cfg.dtype);
     srcDesc.offsetInBytes = static_cast<Rpp32u>(offsetBytes);
@@ -68,9 +66,9 @@ void run_box_filter(const TestConfig& cfg, const BoxFilterParams& op) {
     const std::size_t count = element_count(srcDesc);
     const std::size_t imageBytes = count * dtype_size(cfg.dtype);
 
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
-    for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) roi[i] = roiVec[i];
 
     // (1) Host golden model. The src buffer is [front pad][image][back pad]; the image base sits
     // at offsetElems. golden/actual are the (pad-free, offset 0) destination. golden starts as a
@@ -79,7 +77,7 @@ void run_box_filter(const TestConfig& cfg, const BoxFilterParams& op) {
     fill_input<T>(src.data(), src.size(), cfg.dtype);
     T* image = src.data() + offsetElems;
     golden.assign(image, image + count);
-    box_filter_reference<T>(image, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
+    box_filter_reference<T>(image, srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH,
                             op.kernelSize);
 
     // (2) Run RPP on the configured backend. box_filter is a single symbol taking a backend arg
@@ -90,7 +88,7 @@ void run_box_filter(const TestConfig& cfg, const BoxFilterParams& op) {
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
     dst.write(image, imageBytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_box_filter(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc, op.kernelSize,
                               RpptImageBorderType::REPLICATE, roi.data(), XYWH, handle.get(),
                               cfg.backend),
@@ -119,10 +117,16 @@ TEST_P(BoxFilterTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Filter, BoxFilterTest,
     ::testing::ValuesIn(with_params<BoxFilterParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}),
         {BoxFilterParams{3}, BoxFilterParams{5}})),
     op_config_name<BoxFilterParams>);

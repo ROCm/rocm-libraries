@@ -68,9 +68,10 @@ inline double bitwise_binary_scalar(double a, double b, BitwiseOp op) {
 }
 
 template <typename T>
-void bitwise_binary_reference(const T* src1, const T* src2, T* dst, const RpptDesc& d,
-                              const RpptROI* roi, RpptRoiType roiType, BitwiseOp op) {
-    for_each_roi_io(d, roi, roiType,
+void bitwise_binary_reference(const T* src1, const T* src2, const RpptDesc& sd, T* dst,
+                              const RpptDesc& dd, const RpptROI* roi, RpptRoiType roiType,
+                              BitwiseOp op) {
+    for_each_roi_io(sd, dd, roi, roiType,
                     [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
                         dst[dstIdx] = from_double<T>(bitwise_binary_scalar(
                             to_double(src1[srcIdx]), to_double(src2[srcIdx]), op));

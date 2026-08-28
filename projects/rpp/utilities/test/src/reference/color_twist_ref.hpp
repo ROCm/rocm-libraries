@@ -65,21 +65,21 @@ Per-type form
     F16   as F32, stored as half
 */
 template <typename T>
-void color_twist_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                           RpptRoiType roiType, double brightness, double contrast, double hueDeg,
-                           double satFactor) {
+void color_twist_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                           const RpptROI* roi, RpptRoiType roiType, double brightness,
+                           double contrast, double hueDeg, double satFactor) {
     const double beta = contrast / 255.0;
-    for_each_roi_pixel(d, roi, roiType,
+    for_each_roi_pixel(sd, dd, roi, roiType,
                        [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
-        if (d.c == 3) {
+        if (sd.c == 3) {
             double rgb[3];
             for (int c = 0; c < 3; ++c)
-                rgb[c] = to_unit(to_double(src[channel_index(d, srcPix, c)]), dt);
+                rgb[c] = to_unit(to_double(src[channel_index(sd, srcPix, c)]), dt);
             hue_rotate_rgb(rgb[0], rgb[1], rgb[2], hueDeg);                    // Stage 1
             saturation_scale_rgb(rgb[0], rgb[1], rgb[2], satFactor);           // Stage 2
             for (int c = 0; c < 3; ++c) rgb[c] = brightness * rgb[c] + beta;  // Stage 3
             for (int c = 0; c < 3; ++c)
-                dst[channel_index(d, dstPix, c)] = from_double<T>(from_unit(rgb[c], dt));
+                dst[channel_index(dd, dstPix, c)] = from_double<T>(from_unit(rgb[c], dt));
         } else {  // 1-channel: only the Stage 3 affine (hue/saturation are no-ops)
             const double x = brightness * to_unit(to_double(src[srcPix]), dt) + beta;
             dst[dstPix] = from_double<T>(from_unit(x, dt));

@@ -191,27 +191,29 @@ inline double store_denorm(float x, DType dt) {
 
 // snowThreshold is the raw API parameter (mapped to snowCoefficient internally).
 template <typename T>
-void snow_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
-                    RpptRoiType roiType, double brightnessCoefficient, double snowThreshold,
-                    int darkMode) {
+void snow_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                    const RpptROI* roi, RpptRoiType roiType, double brightnessCoefficient,
+                    double snowThreshold, int darkMode) {
     const float bc = static_cast<float>(brightnessCoefficient);
     const float snowCoefficient =
         std::fmaf(static_cast<float>(snowThreshold), 0.5f, 0.333333333f);
 
-    if (d.c == 3) {
+    if (sd.c == 3) {
         for_each_roi_pixel(
-            d, roi, roiType, [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
+            sd, dd, roi, roiType,
+            [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
                 float rgb[3];
                 for (Rpp32u c = 0; c < 3; ++c)
-                    rgb[c] = snow_detail::load_norm(to_double(src[channel_index(d, srcPix, c)]), dt);
+                    rgb[c] =
+                        snow_detail::load_norm(to_double(src[channel_index(sd, srcPix, c)]), dt);
                 snow_detail::snow_rgb(rgb[0], rgb[1], rgb[2], bc, snowCoefficient, darkMode);
                 for (Rpp32u c = 0; c < 3; ++c)
-                    dst[channel_index(d, dstPix, c)] =
+                    dst[channel_index(dd, dstPix, c)] =
                         from_double<T>(snow_detail::store_denorm(rgb[c], dt));
             });
     } else {  // PLN1
         for_each_roi_io(
-            d, roi, roiType,
+            sd, dd, roi, roiType,
             [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
                 float p = snow_detail::load_norm(to_double(src[srcIdx]), dt);
                 snow_detail::snow_gray(p, bc, snowCoefficient, darkMode);

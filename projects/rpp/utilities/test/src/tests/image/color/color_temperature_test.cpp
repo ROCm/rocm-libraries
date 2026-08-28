@@ -52,14 +52,15 @@ constexpr Tolerance kColorTemperatureTolerance = tolerance(0.0, 2e-3, 5e-3);
 
 template <typename T>
 void run_color_temperature(const TestConfig& cfg, const ColorTemperatureParams& op) {
-    RpptDesc desc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
     // Parameters live in host-accessible (pinned for HIP) memory. adjustment is Rpp32s.
     PinnedArray<Rpp32s> adjustment(cfg.backend, cfg.size.n);
     PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         adjustment[i] = op.adjustment;
         roi[i] = roiVec[i];
@@ -70,8 +71,8 @@ void run_color_temperature(const TestConfig& cfg, const ColorTemperatureParams& 
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    color_temperature_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                                   op.adjustment);
+    color_temperature_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
+                                   roi.data(), XYWH, op.adjustment);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
@@ -79,7 +80,7 @@ void run_color_temperature(const TestConfig& cfg, const ColorTemperatureParams& 
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
-    ASSERT_EQ(rppt_color_temperature(src.ptr(), &desc, dst.ptr(), &desc, adjustment.data(),
+    ASSERT_EQ(rppt_color_temperature(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, adjustment.data(),
                                      roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -88,7 +89,7 @@ void run_color_temperature(const TestConfig& cfg, const ColorTemperatureParams& 
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kColorTemperatureTolerance(cfg.dtype)));
 }
 
@@ -105,10 +106,15 @@ TEST_P(ColorTemperatureTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, ColorTemperatureTest,
     ::testing::ValuesIn(with_params<ColorTemperatureParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, {Layout::PKD3, Layout::PLN3},
+        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
                      {Roi::Full, Roi::Partial}),
         {ColorTemperatureParams{40}})),
     op_config_name<ColorTemperatureParams>);

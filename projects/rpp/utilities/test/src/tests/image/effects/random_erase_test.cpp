@@ -46,20 +46,20 @@ namespace {
 template <typename T>
 void run_random_erase(const TestConfig& cfg) {
     const Rpp32u channels = static_cast<Rpp32u>(channels_of(cfg.layoutIn));
-    const TensorShape shape{cfg.size.n, channels, cfg.size.h, cfg.size.w};
-    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layoutIn);  // RPP takes a non-const ptr
-    const std::size_t count = element_count(desc);
-    const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
 
-    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
-    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
-    for (Rpp32u n = 0; n < shape.n; ++n) roi[n] = roiVec[n];
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
+    for (Rpp32u n = 0; n < cfg.size.n; ++n) roi[n] = roiVec[n];
 
     // One box per image, built relative to each image's ROI rectangle so it stays inside the ROI
     // for both Full and Partial. The box's absolute origin is generally not a multiple of 255, so
     // the mod-255 tiling phase is exercised even though the box itself is smaller than the tile.
-    PinnedArray<RpptRoiLtrb> boxes(cfg.backend, shape.n);
-    for (Rpp32u n = 0; n < shape.n; ++n) {
+    PinnedArray<RpptRoiLtrb> boxes(cfg.backend, cfg.size.n);
+    for (Rpp32u n = 0; n < cfg.size.n; ++n) {
         const RoiBounds rb = roi_bounds(roiVec[n], XYWH);
         RpptRoiLtrb b0{};
         b0.lt.x = static_cast<int>(rb.x0 + rb.w / 8);
@@ -81,16 +81,16 @@ void run_random_erase(const TestConfig& cfg) {
     std::vector<T> input(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
     golden = input;
-    random_erase_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
-                              boxes.data(), noiseBuffer.data());
+    random_erase_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
+                              XYWH, boxes.data(), noiseBuffer.data());
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
-    ASSERT_EQ(rppt_random_erase(src.ptr(), &desc, dst.ptr(), &desc, boxes.data(),
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_random_erase(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, boxes.data(),
                                 static_cast<void*>(noiseBuffer.data()), roi.data(), XYWH,
                                 handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -100,7 +100,7 @@ void run_random_erase(const TestConfig& cfg) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare within tolerance over the ROI.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kExact(cfg.dtype)));
 }
 
@@ -120,9 +120,14 @@ TEST_P(RandomEraseTest, Correctness) {
     });
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, RandomEraseTest,
     ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                     {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                     {{Layout::PKD3, Layout::PKD3},
+                                      {Layout::PLN3, Layout::PLN3},
+                                      {Layout::PLN1, Layout::PLN1},
+                                      {Layout::PKD3, Layout::PLN3},
+                                      {Layout::PLN3, Layout::PKD3}},
                                      {Roi::Full, Roi::Partial})),
     config_param_name);
