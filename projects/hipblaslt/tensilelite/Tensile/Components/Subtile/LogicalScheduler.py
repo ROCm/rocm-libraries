@@ -3182,6 +3182,21 @@ class LogicalScheduler:
             for tile_range in ranges
         ]
 
+    @staticmethod
+    def _gr1_wait_counts(gr1_ops) -> 'WaitGRCounts':
+        """Compute WaitGRCounts for a list of MT1 GR ops hoisted before WaitGR.
+
+        Counts only GRPlacement objects (not GRIncOp or other ops) per tensor.
+        The emitter multiplies each field by grMap to get the vmcnt value, so
+        the resulting WaitGROp emits vmcnt(N_gr1) — draining GR0 only and
+        leaving the N_gr1 MT1 loads in-flight past the barrier.
+        """
+        A = sum(1 for op in gr1_ops if isinstance(op, GRPlacement) and op.tensor == 'A')
+        B = sum(1 for op in gr1_ops if isinstance(op, GRPlacement) and op.tensor == 'B')
+        SA = sum(1 for op in gr1_ops if isinstance(op, GRPlacement) and op.tensor == 'SA')
+        SB = sum(1 for op in gr1_ops if isinstance(op, GRPlacement) and op.tensor == 'SB')
+        return WaitGRCounts(A=A, B=B, SA=SA, SB=SB)
+
     def _make_gr_all_tensors(self, mt: int, tiles: dict) -> List[GRPlacement]:
         """Create GR placements for all tensors and uids at the given MT iteration.
 
@@ -3479,20 +3494,22 @@ class LogicalScheduler:
                     preloop_ops.extend(self._make_gr_all_tensors_uid(0, all_tiles, uid))
                     preloop_ops.extend(self._make_depops_uid(GRIncOp, uid))
                 mt1_ops = []
+                mt1_grs_only = []
                 for uid in range(maxUnroll):
-                    mt1_ops.extend(self._make_preloop_mt1_grs_uid(uid))
+                    uid_grs = self._make_preloop_mt1_grs_uid(uid)
+                    mt1_grs_only.extend(uid_grs)
+                    mt1_ops.extend(uid_grs)
                     mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
                 # GR reorder (Experiment 3): MT1 GRs issued before WaitGR so both
-                # MT0 and MT1 prefetch batches are in-flight simultaneously during
-                # the barrier window. WaitGROp already uses vmcnt(0) (drain all),
-                # so no vmcnt adjustment is needed. On the last iteration
-                # (LoopCounterL==1) MT1 GRs are issued unnecessarily but harmlessly
-                # — the NLL guard still fires after ds_reads and routes the exit.
+                # MT0 and MT1 prefetch batches are in-flight simultaneously.
+                # vmcnt is set to N_gr1 (not 0) so GR0 is drained while GR1 remains
+                # in-flight past the barrier, to be drained by the mainloop's own
+                # per-subIterK WaitGROp before ds_reads(MT1).
                 emitted = self._to_emitted([
                     *preloop_ops,
                     initC_op,
                     *mt1_ops,                              # ← moved before WaitGR
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
+                    WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs_only)),
                     SyncOp(),
                     *self._make_lr_all_tensors(lr_tiles),
                     SkipOp(compare='LE', value=1, target='NLL'),
@@ -3500,13 +3517,14 @@ class LogicalScheduler:
                     SkipOp(compare='LE', value=2, target='NGLL'),
                 ])
             else:
-                # GR reorder (Experiment 3): same rationale as the multi-DU path above.
+                mt1_grs = self._make_preloop_mt1_grs()
+                # GR reorder (Experiment 3): same rationale as multi-DU path.
                 emitted = self._to_emitted([
                     *self._make_gr_all_tensors(0, all_tiles),
                     *self._make_depops_all_tensors(GRIncOp),
                     initC_op,
-                    *self._make_preloop_mt1_grs(),         # ← moved before WaitGR
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
+                    *mt1_grs,                              # ← moved before WaitGR
+                    WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs)),
                     SyncOp(),
                     *self._make_lr_all_tensors(lr_tiles),
                     SkipOp(compare='LE', value=1, target='NLL'),
