@@ -935,7 +935,10 @@ int ConvDriver<Tgpu, Tref>::GetandSetData()
     {
         out_len[0] *= miopen::deref(inputTensor).GetVectorLength();
     }
-    SetTensorNd(outputTensor, out_len, inflags.GetValueStr("out_layout"), data_type);
+    // Int8 convolution produces an int32 output.
+    const auto out_data_type =
+        (data_type == miopenInt8 || data_type == miopenInt8x4) ? miopenInt32 : data_type;
+    SetTensorNd(outputTensor, out_len, inflags.GetValueStr("out_layout"), out_data_type);
     if(inflags.GetValueStr("out_cast_type") != "-1")
     {
         const auto out_cast_type = DataTypeFromShortString(inflags.GetValueStr("out_cast_type"));
