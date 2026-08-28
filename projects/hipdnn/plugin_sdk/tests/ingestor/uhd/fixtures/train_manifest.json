@@ -1,0 +1,25 @@
+{
+  "uhd_id": "9c43b083-d7ec-4169-a023-e6c9c5902103",
+  "features": [
+    "kernel.tile_m",
+    "q.seqlen"
+  ],
+  "features_signature": [
+    "$kernel.tile_m",
+    "$q.seqlen"
+  ],
+  "features_hash": "sha256:30aa9a4e48ea3f2b",
+  "target": "tflops",
+  "objective": "max",
+  "score_units": "tflops",
+  "score_calibrated": false,
+  "score_transform": "log1p",
+  "group_by": [],
+  "num_trees": 40,
+  "num_samples": 480,
+  "input_file": "C:\\Users\\jascampb\\AppData\\Local\\Temp\\tmp_ksabymy\\bench.csv",
+  "training_arches": [
+    "gfx942"
+  ],
+  "model_version": "1.0.0"
+}

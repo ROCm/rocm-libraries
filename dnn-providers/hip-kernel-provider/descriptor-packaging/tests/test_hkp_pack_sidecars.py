@@ -119,9 +119,66 @@ class TestResolution:
         flat = load_flat_input(root, log=lambda *_: None)
 
         (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
-        (sidecar,) = uhd.sidecars
+        (sidecar,) = [s for s in uhd.sidecars if s.name == "model.uhd.fb"]
         assert sidecar.rel_dir == Path("rocKE/shared")
         assert sidecar.name == "model.uhd.fb"
+
+
+class TestModelArtifacts:
+    """The second hop, which the packer cannot read and carries by convention.
+
+    `payload` names a `.uhd.fb`; that file's own `model_artifact_path` names the
+    model. The first is a string in JSON, the second a field inside a FlatBuffer.
+    Everything beside the `.uhd.fb` therefore travels with it.
+    """
+
+    def test_a_file_beside_the_uhd_fb_is_carried(self, tmp_path: Path):
+        root = _root_with_model_uhd(tmp_path)
+        (root / "pack" / "model.bin").write_bytes(b"HGBM-stub")
+
+        flat = load_flat_input(root, log=lambda *_: None)
+
+        (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
+        assert sorted(s.name for s in uhd.sidecars) == [
+            "heuristic.uhd.fb",
+            "model.bin",
+        ]
+
+    def test_sibling_descriptors_are_not_carried_twice(self, tmp_path: Path):
+        """The walk already has them; a second copy would collide on write."""
+        root = _root_with_model_uhd(tmp_path)
+        (root / "pack" / "model.bin").write_bytes(b"HGBM-stub")
+        _write_json(root / "pack" / "other.kmd.json", {"version": "1.0", "id": "k", "name": "k", "fields": []})
+
+        flat = load_flat_input(root, log=lambda *_: None)
+
+        (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
+        assert "other.kmd.json" not in [s.name for s in uhd.sidecars]
+
+    def test_a_native_uhd_carries_nothing_from_its_folder(self, tmp_path: Path):
+        """Only a model heuristic names files. A native one shares a folder with
+        whatever else the pack author put there and must not adopt it."""
+        root = tmp_path / "src"
+        _write_json(root / "pack" / "native.uhd.json", _native_uhd())
+        (root / "pack" / "unrelated.bin").write_bytes(b"not mine")
+
+        flat = load_flat_input(root, log=lambda *_: None)
+
+        (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
+        assert uhd.sidecars == []
+
+    def test_the_artifact_reaches_the_intermediate_tree(self, tmp_path: Path):
+        root = _root_with_model_uhd(tmp_path)
+        (root / "pack" / "model.bin").write_bytes(b"HGBM-stub")
+        flat = load_flat_input(root, log=lambda *_: None)
+        inter_dir = tmp_path / "inter" / "gfx942"
+
+        compile_intermediate(
+            flat, root, "gfx942", hipcc=None, inter_arch_dir=inter_dir, log=lambda *_: None
+        )
+
+        assert (inter_dir / "pack" / "model.bin").read_bytes() == b"HGBM-stub"
+
 
 
 class TestRejection:

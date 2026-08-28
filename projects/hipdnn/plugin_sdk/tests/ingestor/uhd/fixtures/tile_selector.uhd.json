@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "9c43b083-d7ec-4169-a023-e6c9c5902103",
+  "name": "Tile selector",
+  "kind": "model",
+  "payload": "tile_selector.uhd.fb"
+}

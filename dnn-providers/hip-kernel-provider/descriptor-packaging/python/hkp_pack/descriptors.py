@@ -415,7 +415,43 @@ def _validate_uhd(desc, source_root):
     if desc.doc["kind"] != "model":
         return
 
-    desc.sidecars.append(_resolve_sidecar(desc, source_root, desc.doc["payload"]))
+    payload = _resolve_sidecar(desc, source_root, desc.doc["payload"])
+    desc.sidecars.append(payload)
+    desc.sidecars.extend(_model_artifacts(desc, source_root, payload))
+
+
+def _model_artifacts(desc, source_root, payload):
+    """The rest of the files a trained heuristic needs, beside its `.uhd.fb`.
+
+    The chain is two hops: `payload` names a `.uhd.fb`, whose own
+    `model_artifact_path` names the model. The packer can follow the first --
+    it is a string in a JSON document -- and cannot follow the second, which is
+    a field inside a FlatBuffer it has no reader for.
+
+    So the second hop is carried by convention: every non-descriptor file beside
+    the `.uhd.fb` travels with it. `uhd_gen train` writes the descriptor, the
+    UHD and the artifact into one directory as a unit, so "the folder" and "the
+    heuristic" are the same thing in every tree that exists.
+
+    The alternative was teaching the packer to parse the FlatBuffer, which means
+    either a new dependency or a hand-rolled vtable read -- the second being the
+    exact defect class that made every emitted `.uhd.fb` unloadable in the first
+    place. A convention that over-carries a stray file is the cheaper mistake.
+
+    Descriptors are excluded because the walk already has them; the `.uhd.fb`
+    itself is excluded because @p payload is it.
+    """
+    root = Path(source_root).resolve()
+    folder = payload.source.parent
+    artifacts = []
+    for candidate in sorted(folder.iterdir()):
+        if not candidate.is_file() or candidate == payload.source:
+            continue
+        if candidate.suffix == ".json" and type_from_filename(candidate) is not None:
+            continue
+        dest = candidate.resolve().relative_to(root)
+        artifacts.append(Sidecar(source=candidate.resolve(), rel_dir=dest.parent, name=dest.name))
+    return artifacts
 
 
 def _resolve_sidecar(desc, source_root, payload):
