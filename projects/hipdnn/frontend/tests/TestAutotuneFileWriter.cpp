@@ -21,6 +21,7 @@
 #include <iterator>
 #include <nlohmann/json.hpp>
 #include <set>
+#include <tuple>
 #include <utility>
 #endif
 
@@ -546,14 +547,23 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryEngineNameRoundTripsToEngineId)
 {
     constexpr int64_t LYING_ENGINE_ID = 0x5A5A;
 
-    const std::vector<std::pair<std::string, int64_t>> cases
-        = {{"MIOPEN_ENGINE", engineNameToId("MIOPEN_ENGINE")},
-           {"EXAMPLE_PROVIDER_RELU_ENGINE", engineNameToId("EXAMPLE_PROVIDER_RELU_ENGINE")},
-           {"LYING_ENGINE_NAME", LYING_ENGINE_ID}};
+    // Third element is the spelling that must reach the file. Asserting only the round-trip
+    // would not distinguish a name from a hex id, since hex round-trips by construction --
+    // a regression back to always-hex would satisfy it. The scoped spelling is what a
+    // kernel-ingestor engine persists, and nothing on the read path treats its colon
+    // specially: the override reader hashes the whole string and the only tokenizer splits
+    // on commas. A name that does not hash to its id is not trusted, so it renders as hex.
+    const std::vector<std::tuple<std::string, int64_t, std::string>> cases
+        = {{"MIOPEN_ENGINE", engineNameToId("MIOPEN_ENGINE"), "MIOPEN_ENGINE"},
+           {"EXAMPLE_PROVIDER_RELU_ENGINE",
+            engineNameToId("EXAMPLE_PROVIDER_RELU_ENGINE"),
+            "EXAMPLE_PROVIDER_RELU_ENGINE"},
+           {"hipkernel:ConvFwd", engineNameToId("hipkernel:ConvFwd"), "hipkernel:ConvFwd"},
+           {"LYING_ENGINE_NAME", LYING_ENGINE_ID, formatEngineIdHex(LYING_ENGINE_ID)}};
 
     const std::vector<std::vector<int64_t>> tensorDims = {{1, 3, 224, 224}};
 
-    for(const auto& [engineName, engineId] : cases)
+    for(const auto& [engineName, engineId, expectedPersisted] : cases)
     {
         AutotuneResult result;
         result.engineName = engineName;
@@ -562,6 +572,7 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryEngineNameRoundTripsToEngineId)
         const auto entry = buildOverrideEntry(result, config_op::CONV_FPROP, tensorDims, {});
         const auto persisted = entry[config_json::ENGINE_NAME].get<std::string>();
 
+        EXPECT_EQ(persisted, expectedPersisted) << "engine name: " << engineName;
         EXPECT_EQ(engineNameOrIdToId(persisted), engineId) << "engine name: " << engineName;
     }
 }

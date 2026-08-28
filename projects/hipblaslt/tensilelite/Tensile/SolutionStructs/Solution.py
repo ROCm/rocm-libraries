@@ -1154,6 +1154,10 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
+    if state["ClusterDim"] in ([16, 1], [1, 16]):
+      reject(state, printRejectionReason,
+              "Currently ClusterDim = 16x1 and 1x16 are not supported")
+
     # Multicast uses a mask fixed to the physical cluster position. Stream-K
     # remaps tiles per iteration except where streamKMulticast (SK3, ClusterDim
     # not [1, 1]) keeps DP peers as spatial ClusterDim neighbours. ForceDPOnly
