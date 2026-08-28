@@ -105,11 +105,10 @@ bool hasCodeObjectMagic(const void* data, size_t size)
 
 bool isCredibleCodeObjectSize(std::uintmax_t reportedBytes, std::uintmax_t archiveBytes)
 {
-    // The TOC field this size comes from is read from the same untrusted file as the magic
-    // above and handed back unchecked. Two independent ceilings, because either can be the
-    // only one available: the absolute cap holds when the file size could not be read, the
-    // ratio when a small archive declares a large entry. The ratio sits far above anything
-    // zstd achieves on a code object -- real entries land near 4x.
+    // This size comes from the same untrusted TOC as the magic above, handed back unchecked.
+    // Two independent ceilings, because either can be the only one available: the absolute
+    // cap holds when the file size could not be read, the ratio when a small archive declares
+    // a large entry. The ratio sits far above what zstd achieves -- real entries land near 4x.
     //
     // Written as reported / RATIO > archive rather than reported > archive * RATIO: the
     // multiplication overflows on a large archive and would silently admit everything.
@@ -301,9 +300,8 @@ bool KpackArchive::codeObject(const std::string& tocKey,
     }
 
     // Checked after the call rather than before it, because kpack_get_kernel is what
-    // allocates and the C API exposes no way to ask an entry's size first. The allocation
-    // has therefore already happened; what this stops is a bogus length reaching
-    // hipModuleLoadData.
+    // allocates and the C API exposes no way to ask an entry's size first; what this stops
+    // is a bogus length reaching hipModuleLoadData.
     if(!isCredibleCodeObjectSize(codeObject.size(), _archiveBytes))
     {
         error = makeError(KpackLoadStage::DECOMPRESS, KPACK_ERROR_INVALID_METADATA);

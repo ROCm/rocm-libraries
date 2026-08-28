@@ -13,8 +13,8 @@ namespace hip_kernel_provider::device
 namespace
 {
 
-/// The current device, or -1 when HIP cannot say. Tests compare it across a scope rather
-/// than against a literal, so the suite does not assume which device it was started on.
+/// Compared across a scope rather than against a literal, so the suite does not assume which
+/// device it was started on.
 int currentDevice()
 {
     int ordinal = -1;
@@ -51,9 +51,6 @@ TEST(TestGpuScopedDevice, BindsTheDeviceThatIsAlreadyCurrent)
     EXPECT_EQ(currentDevice(), before);
 }
 
-/// The half that needs two devices to mean anything: with one, the ordinal asked for is
-/// always the one already current and no switch is exercised at all. Skipped rather than
-/// weakened, so a single-GPU run does not read as evidence that restoring works.
 TEST(TestGpuScopedDevice, PutsBackThePreviousDeviceAfterASwitch)
 {
     if(deviceCount() < 2)
@@ -74,10 +71,6 @@ TEST(TestGpuScopedDevice, PutsBackThePreviousDeviceAfterASwitch)
     EXPECT_EQ(currentDevice(), before);
 }
 
-/// A refused bind has to be visible, because the caller's choice between failing the load
-/// and carrying on depends on it. The ordinal one past the last device is the cheapest
-/// refusal there is -- but with no devices that ordinal is 0, a request for a device rather
-/// than a refusal, so the case needs one to mean anything.
 TEST(TestGpuScopedDevice, ReportsARefusedBindAndLeavesTheCurrentDeviceAlone)
 {
     SKIP_IF_NO_DEVICES();
@@ -86,6 +79,7 @@ TEST(TestGpuScopedDevice, ReportsARefusedBindAndLeavesTheCurrentDeviceAlone)
     ASSERT_GE(before, 0);
 
     {
+        // One past the last device: the cheapest refusal there is.
         const ScopedDevice binding(deviceCount());
         EXPECT_FALSE(binding.bound());
         EXPECT_EQ(currentDevice(), before);

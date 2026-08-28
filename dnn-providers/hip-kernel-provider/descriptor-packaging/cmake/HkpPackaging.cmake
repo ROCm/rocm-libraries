@@ -774,6 +774,12 @@ function(hkp_require_ingestor_toolchain out_arches)
     # hipcc is the perl/bat driver that honors --genco; on Windows it is
     # hipcc.exe or hipcc.bat. hipcc.bin.exe is the raw clang driver and is only
     # a last-resort fallback.
+    #
+    # The default name-major search is what holds that ordering: every directory is
+    # tried for hipcc before hipcc.bin.exe is tried anywhere, so the fallback wins
+    # only when no real driver exists anywhere on the path. NAMES_PER_DIR would
+    # demote this list to a tiebreak within one directory and let an early
+    # hipcc.bin.exe beat a later hipcc.
     find_program(HKP_HIPCC NAMES hipcc hipcc.bat hipcc.bin.exe)
     if(NOT HKP_HIPCC)
         message(FATAL_ERROR
