@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/OptimizationRemark.hpp"
@@ -50,6 +51,8 @@ const BasicBlock* findExcludedBlock(const Function& func, const PassContext& pas
 class StinkyUnreachableBlockElimPassImpl : public Pass {
    public:
     static char ID;
+
+    explicit StinkyUnreachableBlockElimPassImpl(StinkyAsmModule* module) : module_(module) {}
 
     const char* getName() const override {
         return "StinkyUnreachableBlockElimPass";
@@ -83,6 +86,18 @@ class StinkyUnreachableBlockElimPassImpl : public Pass {
         // arena shape would describe the function that still had these blocks.
         if (func.hasAttachedSSA()) func.clearAttachedSSA();
 
+        // Let the module drop group ranges bounded by instructions in these
+        // blocks while those instructions are still alive to be identified.
+        if (module_ != nullptr) {
+            for (const std::string& groupName : module_->invalidateGroupsInBlocks(dead)) {
+                emitRemark(passCtx,
+                           {OptimizationRemark::Kind::Missed, kPassName, "ClearedGroupRange",
+                            "group '" + groupName +
+                                "' was bounded by an unreachable instruction; its range "
+                                "is cleared and downstream region passes will skip it"});
+            }
+        }
+
         for (BasicBlock* bb : dead) {
             func.removeSuccessorEdges(*bb);
             func.removePredecessorEdges(*bb);
@@ -96,6 +111,9 @@ class StinkyUnreachableBlockElimPassImpl : public Pass {
                                  " unreachable block(s)"});
         return PreservedAnalyses::none();
     }
+
+   private:
+    StinkyAsmModule* module_ = nullptr;
 };
 
 char StinkyUnreachableBlockElimPassImpl::ID = 0;
@@ -104,6 +122,10 @@ char StinkyUnreachableBlockElimPassImpl::ID = 0;
 
 namespace stinkytofu {
 std::unique_ptr<Pass> createStinkyUnreachableBlockElimPass() {
-    return std::make_unique<StinkyUnreachableBlockElimPassImpl>();
+    return std::make_unique<StinkyUnreachableBlockElimPassImpl>(nullptr);
+}
+
+std::unique_ptr<Pass> createStinkyUnreachableBlockElimPass(StinkyAsmModule& module) {
+    return std::make_unique<StinkyUnreachableBlockElimPassImpl>(&module);
 }
 }  // namespace stinkytofu
