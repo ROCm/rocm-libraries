@@ -1113,6 +1113,24 @@ inline const T* findDescriptor(const DescriptorMap<T>& map, const DescriptorId& 
     return &it->second.descriptor;
 }
 
+/// The catalog entry a cross-reference names, or nullptr when it is missing or
+/// conflicted.
+///
+/// Same lookup as findDescriptor, returning the entry rather than the descriptor so a
+/// caller can reach the provenance settleCatalog() stamped -- the file the descriptor
+/// came from and the tree root it was found under. Neither is on the descriptor itself,
+/// because a descriptor built in memory has no file.
+template <typename T>
+inline const CatalogEntry<T>* findEntry(const DescriptorMap<T>& map, const DescriptorId& id)
+{
+    const auto it = map.find(id);
+    if(it == map.end() || it->second.conflicted)
+    {
+        return nullptr;
+    }
+    return &it->second;
+}
+
 /// What a pack's `kernelDescriptors` reference resolved to, or why it did not.
 struct KernelMatch
 {
@@ -1682,14 +1700,18 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             continue;
         }
 
+        // Resolved through the entry, not the descriptor: a MODEL heuristic names a file,
+        // and the tree it was found under is the boundary that path may not cross. Only
+        // the entry carries it.
+        //
         // Only resolved when the UED names one. Naming a UHD no file defines still drops
         // the engine: the author asked for a model that did not ship, which is a broken
         // install rather than a deliberate declared-order ranking.
-        const HeuristicDescriptor* heuristic = nullptr;
+        const CatalogEntry<HeuristicDescriptor>* heuristicEntry = nullptr;
         if(engine.heuristicId.has_value())
         {
-            heuristic = detail::findDescriptor(catalog.heuristics, *engine.heuristicId);
-            if(heuristic == nullptr)
+            heuristicEntry = detail::findEntry(catalog.heuristics, *engine.heuristicId);
+            if(heuristicEntry == nullptr)
             {
                 HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                         << engine.name << "' names heuristic "
@@ -1733,9 +1755,12 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         DescriptorSet set;
         set.engine = engine;
         set.schema = *schema;
-        if(heuristic != nullptr)
+        if(heuristicEntry != nullptr)
         {
-            set.heuristic = *heuristic;
+            set.heuristic = heuristicEntry->descriptor;
+            // baseDir came from the file's own path at parse time; treeRoot is only known
+            // once the root that contributed the file has been settled.
+            set.heuristic->treeRoot = heuristicEntry->treeRoot;
         }
 
         // Keyed by id: deduplicates descriptors two packs share and orders them in one
@@ -2031,18 +2056,57 @@ inline std::vector<DescriptorSet>
             resolvable = false;
         }
 
-        // A MODEL warns where NATIVE drops. The two failures are not alike: an
-        // unregistered symbol is a build fact, so the engine could never score and is
-        // better removed, while a missing artifact is a deployment fact, and RFC 0019 §5
-        // requires that to degrade to declared order with the engine still in play.
-        if(set.heuristic.has_value() && set.heuristic->kind == HeuristicKind::MODEL
-           && !std::filesystem::exists(set.heuristic->baseDir / set.heuristic->payload))
+        // A MODEL heuristic names a file, so it gets the two checks a path needs.
+        if(set.heuristic.has_value() && set.heuristic->kind == HeuristicKind::MODEL)
         {
-            HIPDNN_PLUGIN_LOG_WARN("descriptor loader: engine '"
-                                   << set.engine.name << "' names model artifact '"
-                                   << (set.heuristic->baseDir / set.heuristic->payload).string()
-                                   << "', which is absent; kernels will rank by priority, then "
-                                      "descriptor id");
+            std::error_code ignored;
+            const auto resolved = std::filesystem::weakly_canonical(
+                set.heuristic->baseDir / set.heuristic->payload, ignored);
+
+            // Containment first, and it drops rather than warns. The artifact is
+            // author-controlled input (RFC 0019 §16, "Drop-in trust"), so a payload that
+            // climbs out of the descriptor tree is an attempt to make the loader open a
+            // file the tree does not own -- not a deployment accident to degrade around.
+            //
+            // Bounded on treeRoot, not baseDir: one archive ships per arch shard at the
+            // shard root, so a descriptor nested inside a shard legitimately climbs out of
+            // its own folder. Anchoring on the folder would reject every nested descriptor,
+            // which is the defect IngestorKernelCode.hpp already had to fix for kernels.
+            const auto boundary = set.heuristic->treeRoot.empty()
+                                      ? set.heuristic->baseDir
+                                      : std::filesystem::weakly_canonical(
+                                            set.heuristic->treeRoot, ignored);
+            const std::string relative
+                = resolved.lexically_relative(boundary).generic_string();
+            if(resolved != boundary && (relative.empty() || relative.rfind("..", 0) == 0))
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
+                                        << set.engine.name << "' names model artifact '"
+                                        << set.heuristic->payload
+                                        << "', which resolves to '" << resolved.string()
+                                        << "', outside the descriptor tree '"
+                                        << boundary.string() << "'; dropping it");
+                resolvable = false;
+            }
+            // A missing artifact warns where an escaping one drops, and where an
+            // unregistered NATIVE symbol drops. The three are not alike: an unregistered
+            // symbol is a build fact, so the engine could never score; an escaping payload
+            // is a trust fact; a missing artifact is a deployment fact, and RFC 0019 §5
+            // requires that to degrade to declared order with the engine still in play.
+            //
+            // Logged at ERROR rather than WARN even so. The engine survives, but nothing
+            // about this is expected: it means packaging dropped a file the descriptor
+            // says it needs, and the visible symptom -- a heuristic that silently stops
+            // ranking -- is one a warning buried in a busy log will not explain.
+            else if(!std::filesystem::exists(resolved))
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
+                                        << set.engine.name << "' names model artifact '"
+                                        << resolved.string()
+                                        << "', which is absent; the engine stays, but its "
+                                           "kernels will rank by priority, then descriptor "
+                                           "id, as though it shipped no heuristic");
+            }
         }
 
         // A name hashing onto an engine someone else already registered is dropped and the

@@ -354,6 +354,11 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     // A MODEL payload is a path relative to the .uhd.json that declared it, so the
     // descriptor has to carry that directory -- nothing downstream can recover it.
     EXPECT_EQ(set.heuristic->baseDir, dir.path());
+    // And the tree it was found under, which is the boundary that path may not cross.
+    // Resolution and containment are different questions: baseDir answers the first,
+    // treeRoot the second, and a nested descriptor legitimately climbs out of its own
+    // folder while nothing may climb out of the tree.
+    EXPECT_EQ(set.heuristic->treeRoot, dir.path());
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
     ASSERT_EQ(set.packs.size(), 1u);
@@ -1267,6 +1272,120 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseHeuristicIsMissing)
     writeDocuments(dir.path(), documents);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+namespace
+{
+
+/// Turns the set's UHD into a MODEL one naming @p payload, and writes the tree.
+///
+/// Returns the directory, so a case can create or withhold the artifact afterwards.
+/// Every case below differs only in whether that file exists and where it resolves.
+std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
+                                             const std::string& engineName,
+                                             const std::string& payload)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["kind"] = "model";
+    heuristic["payload"] = payload;
+    writeDocuments(root, documents);
+    return root;
+}
+
+void writeArtifact(const std::filesystem::path& path)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::binary) << "\0\0\0\0HUHD";
+}
+
+} // namespace
+
+/// A MODEL UHD whose artifact shipped loads with the engine intact.
+///
+/// The baseline the two failure cases below are read against: without it, "the engine
+/// survived" proves nothing, because an engine that never had a model survives too.
+TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_present"));
+    writeModelHeuristicSet(dir.path(), "test:model_present", "heuristic.uhd.fb");
+    writeArtifact(dir.path() / "heuristic.uhd.fb");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->kind, HeuristicKind::MODEL);
+    EXPECT_EQ(sets.front().heuristic->payload, "heuristic.uhd.fb");
+}
+
+/// A missing artifact keeps the engine and says so loudly.
+///
+/// Deliberately not a drop: RFC 0019 §5 requires a heuristic that will not come up to
+/// degrade to declared order rather than fail the request, and an engine whose kernels
+/// still run unranked is more useful than no engine. But the symptom -- a heuristic that
+/// silently stops ranking -- is invisible from the outside, so the diagnostic is the only
+/// thing standing between a packaging bug and a quiet performance regression. It is
+/// asserted here for that reason, not for its wording.
+TEST(TestDescriptorLoader, KeepsAnEngineWhoseModelArtifactIsAbsentAndReportsIt)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_absent"));
+    writeModelHeuristicSet(dir.path(), "test:model_absent", "never_packaged.uhd.fb");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:model_absent");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "never_packaged.uhd.fb"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "which is absent"));
+}
+
+/// A payload resolving outside the descriptor tree drops the engine.
+///
+/// The one MODEL failure that is not a deployment accident. The artifact is
+/// author-controlled input (RFC 0019 §16, "Drop-in trust"), so a payload climbing out of
+/// the tree is an attempt to make the loader open a file the tree does not own --
+/// degrading around it would mean honouring the rest of a descriptor that just tried it.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseModelArtifactEscapesTheTree)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_escapes"));
+    const auto tree = dir.path() / "tree";
+    writeModelHeuristicSet(tree, "test:model_escapes", "../outside.uhd.fb");
+    // Present, so the case is containment and not absence: without the file, the
+    // existence check would reject it too and prove nothing about the boundary.
+    writeArtifact(dir.path() / "outside.uhd.fb");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(tree);
+
+    EXPECT_TRUE(sets.empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "outside the descriptor tree"));
+}
+
+/// A nested descriptor may climb out of its own folder, but not out of the tree.
+///
+/// The case that makes the boundary treeRoot rather than baseDir. Production ships one
+/// arch shard per directory with shared content at the shard root, so `../shared/x` is
+/// the normal way two packs reference one artifact. Anchoring containment on the
+/// descriptor's own folder would reject every nested descriptor -- the defect
+/// IngestorKernelCode.hpp already had to fix for kernel `library` paths.
+TEST(TestDescriptorLoader, AcceptsAModelArtifactAboveTheDescriptorButInsideTheTree)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_nested"));
+    writeModelHeuristicSet(dir.path() / "pack", "test:model_nested", "../shared/model.uhd.fb");
+    writeArtifact(dir.path() / "shared" / "model.uhd.fb");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:model_nested");
 }
 
 TEST(TestDescriptorLoader, DropsEveryEngineClaimingTheSameEngineId)
