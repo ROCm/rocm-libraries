@@ -53,7 +53,17 @@ def _dense_spec(req: OperatorRequest):
     bn = _DENSE_BLOCK_N
     # MaskType.BOTTOM_RIGHT_CAUSAL. Read before the ragged gate below, which depends
     # on it.
-    bottom_right = int(req.mask_type) == _MASK_BOTTOM_RIGHT_CAUSAL
+    #
+    # Gated on sq != sk, which is not cosmetic. At equal lengths the offset is zero,
+    # so a bottom-right request IS a top-left one -- the same mask, the same emitted
+    # body. Asking for the flag anyway would cost twice: the spec refuses
+    # persistent=True, so an explicit dense_persistent="on" would decline a request
+    # this kernel serves perfectly, and the "auto" downgrade below would drop the
+    # large-Sq cohort off the grid-stride path for a diagonal that never moved. It
+    # would also mint a second `br` symbol whose body is byte-identical to the
+    # top-left kernel already in the cache. Normalising here keeps all three from
+    # happening while leaving the mask semantics untouched.
+    bottom_right = int(req.mask_type) == _MASK_BOTTOM_RIGHT_CAUSAL and sq != sk
     # On-chip ragged padding for lengths that are not a 256/block_n multiple. Normally
     # self-attention only (seqlen_q == seqlen_kv), because a shorter query block has no
     # diagonal to sit on -- EXCEPT under bottom-right, which supplies exactly that. A
@@ -81,6 +91,11 @@ def _dense_spec(req: OperatorRequest):
     # dense_persistent="on" is a caller request, so leave it and let the spec reject the
     # combination. The grid that ran stays visible: select() sets kernel_name_override
     # from the spec name, which carries persist{N} only when persistent.
+    #
+    # This only fires where the diagonal actually moves: `bottom_right` is already
+    # False at seqlen_q == seqlen_kv, so equal-length requests keep the persistent
+    # grid. Lifting the downgrade entirely needs the shifted diagonal in the
+    # persistent builder, tracked in AICK-2145.
     if bottom_right and mode == "auto":
         persistent = False
     return AttentionDenseSpec(

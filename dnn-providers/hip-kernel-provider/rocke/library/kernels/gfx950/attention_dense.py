@@ -58,8 +58,10 @@ Head-size / seqlen coverage:
     count is ceil'd to cover the partial last query block, and the partial O rows
     are dropped by a guarded store. Causal needs no key mask (padded ktok >=
     seqlen_kv > every real query, so causal drops them); non-causal adds a
-    ktok<seqlen_kv key mask. Self-attention only. The aligned path is emitted
-    byte-identically when ``ragged=False`` (no TFLOPS impact).
+    ktok<seqlen_kv key mask. Self-attention only, EXCEPT under
+    ``causal_bottom_right``, which supplies the shifted diagonal a shorter query
+    block needs (see that field). The aligned path is emitted byte-identically when
+    ``ragged=False`` (no TFLOPS impact).
 
 Experimental/negative levers from the sweep (step-2 8-cluster, K-staging, per-nsub
 staging, score truncation, PV V-prefetch) are intentionally NOT carried over — see
@@ -135,20 +137,25 @@ class AttentionDenseSpec:
     #   key 0: it builds, it runs, and it is silently wrong. MaskType
     #   BOTTOM_RIGHT_CAUSAL (2) names exactly this case.
     #
-    #   SCOPE TODAY: statically-shaped specs only, because the non-ragged path already
-    #   requires seqlen_q to be a multiple of 256 and seqlen_kv a multiple of block_n.
-    #   The offset itself is unconstrained -- the KV-tile bound is a ceil, so it need not
-    #   land on a tile boundary. The two paths that
-    #   take arbitrary lengths are both excluded -- `ragged` is self-attention only
-    #   (seqlen_q == seqlen_kv, so the offset is always 0) and `varlen` needs a runtime
-    #   per-sequence offset. A general chunked-prefill request from vLLM / SGLang, whose
-    #   KV length is arbitrary, therefore does NOT reach this path yet; extending
-    #   ragged/varlen to bottom-right is the follow-up that would get there.
+    #   SCOPE: both length regimes reach it. The non-ragged path requires seqlen_q to
+    #   be a multiple of 256 and seqlen_kv a multiple of block_n; `ragged` lifts both
+    #   under this flag (see its own field comment) and pads the boundary tiles
+    #   on-chip, which is what lets a real chunked-prefill request -- whose KV cache is
+    #   whatever length it happens to be -- reach this kernel. The offset itself is
+    #   unconstrained either way: the KV-tile bound is a ceil, so it need not land on a
+    #   tile boundary. `varlen` is the one arbitrary-length path still excluded, since
+    #   it needs a per-sequence RUNTIME offset rather than a baked one.
     #
     #   Requires causal=True and seqlen_q <= seqlen_kv. Not supported with persistent
     #   (that path derives the diagonal separately and needs its own offset), with
     #   sliding_window (the window band would have to shift with it), or with varlen
     #   (see the validation for why a baked offset is wrong there).
+    #
+    #   Composes with use_sinks. The sink is a per-query-head logit with no key
+    #   position, so it seeds m/l the same way whichever keys the mask admits -- but
+    #   both features write the same softmax, so the combination is pinned by the
+    #   bottom_right_sinks_sq512 golden case and an on-GPU parity case rather than
+    #   argued.
     #
     #   gfx950 ONLY. The gfx942 dense kernel reuses this spec class and does not read
     #   this field, so its supports_attention_dense() rejects it rather than emitting a
@@ -171,8 +178,12 @@ class AttentionDenseSpec:
     #   dropped by a guarded store. Causal masking already excludes the padded
     #   keys (their token index >= seqlen_kv > every real query), so causal needs
     #   NO extra key mask; non-causal adds a ktok<seqlen_kv key mask. Self-
-    #   attention only (seqlen_q == seqlen_kv). 0-cost when False: the aligned
-    #   kernel is emitted unchanged (byte-identical IR).
+    #   attention only (seqlen_q == seqlen_kv) UNLESS causal_bottom_right is set:
+    #   a shorter query block has nowhere to sit on a top-left diagonal, and the
+    #   bottom-right diagonal is exactly what supplies it. That pairing is what
+    #   serves a chunked-prefill request, whose KV cache is an arbitrary length.
+    #   0-cost when False: the aligned kernel is emitted unchanged (byte-identical
+    #   IR).
     ragged: bool = False
     # varlen: packed variable-length batch. Q/K/V/O are packed [total_tok, H, D]
     #   and per-sequence boundaries come from cu_seqlens_q/cu_seqlens_kv (int32
@@ -296,9 +307,18 @@ class AttentionDenseSpec:
             # The padded-key argument that lets causal skip the ktok<seqlen_kv mask still
             # holds: the last REAL query is at seqlen_q-1 and reaches
             # seqlen_q-1 + (seqlen_kv - seqlen_q) = seqlen_kv-1, so it still stops short
-            # of the partial tile's padding. Padded QUERY rows can reach past it, but
-            # they load 0 and are dropped by the guarded store, so they cannot affect
-            # the output.
+            # of the partial tile's padding. Note the margin is exactly zero -- the last
+            # real query now touches the last real key -- so anything that later lets the
+            # effective query index exceed seqlen_q-1 + DIAG_OFF breaks this silently.
+            #
+            # Padded QUERY rows do reach past it, and they are excluded by the guarded
+            # store, NOT by loading zero. The distinction matters: the ragged buffer
+            # resources bound the WHOLE tensor (B*Sq*Hq*D), not one batch element, so a
+            # padded row in batch b < B-1 reads batch b+1's real tokens rather than zero.
+            # Only the final batch element actually pads with zeros. Those rows compute
+            # garbage either way and the qtok < seqlen_q store predicate is what keeps
+            # them out of memory, so correctness rests on masking plus that predicate --
+            # the buffer bound only prevents faults.
             if self.seqlen_q != self.seqlen_kv and not self.causal_bottom_right:
                 raise ValueError(
                     "ragged is self-attention only (seqlen_q == seqlen_kv) unless "
@@ -565,6 +585,15 @@ def build_attention_dense(
     """Emit the dense flash-attention prefill kernel described by ``spec``."""
     if arch != "gfx950":
         raise NotImplementedError(f"attention_dense is gfx950-only (got {arch})")
+    # Both causal KV-loop bounds below keep the query-block term outside their ceil,
+    # which is exact only when qb*BLOCK_M is a whole number of KV tiles. supports_*
+    # rejects a block_n that breaks it, but nothing forces a caller through supports_*
+    # before build_*, and the failure mode is a short loop that drops keys silently.
+    # Assert rather than validate: the shaped rejection with the actionable message
+    # belongs to supports_attention_dense, this is only the backstop.
+    assert (
+        _BLOCK_M % spec.block_n == 0
+    ), f"block_n={spec.block_n} must divide the {_BLOCK_M}-row query tile"
 
     if spec.persistent:
         return _build_attention_dense_persistent(spec)
@@ -2073,7 +2102,10 @@ def run_attention_dense_torch(
     and the TRUE (un-rounded) ``seqlen_q``/``seqlen_kv`` and pass the true-length
     q/k/v/out tensors. The kernel pads the boundary tiles on-chip (register-zero
     OOB query rows, LDS-zero OOB keys) and drops the partial O rows; the grid is
-    ceil-sized automatically. See the ``ragged`` spec field.
+    ceil-sized automatically. See the ``ragged`` spec field. Ragged is
+    self-attention only unless ``causal_bottom_right`` is also set, which is the
+    combination a chunked-prefill request needs (short query block, arbitrary-length
+    KV cache).
 
     Varlen (``spec.varlen``): the kernel emits a 7-arg ABI (packed
     ``[total_tok, H, D]`` q/k/v/o + two int32 ``cu_seqlens`` [batch+1]); pass both
