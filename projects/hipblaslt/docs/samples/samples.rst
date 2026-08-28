@@ -10,4 +10,3 @@ The following code samples demonstrate how to use some of the hipBLASLt Extensio
 These operations are independent of any GEMM operations.
 
 *  :doc:`Softmax for a 2D tensor <./client_extop_softmax>`
-*  :doc:`Converting a 2D tensor using LayerNorm <./sample_hipblaslt_ext_op_layernorm>`

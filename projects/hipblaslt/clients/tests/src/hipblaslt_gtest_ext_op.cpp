@@ -6,17 +6,13 @@
  *******************************************************************************/
 
 #include <algorithm>
-#include <cstdlib>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt_init.hpp>
 #include <vector>
 
 #include "../include/hipblaslt_random.hpp"
-#include "../include/unit.hpp"
-#include "hipblaslt_arguments.hpp"
 
 namespace
 {
@@ -43,61 +39,12 @@ namespace
         }
     }
 
-    template <typename DType>
-    void cpuLayerNorm(DType*        out,
-                      DType*        mean,
-                      DType*        invvar,
-                      DType*        in,
-                      std::uint32_t batch,
-                      std::uint32_t length,
-                      DType         eps   = 1e-05,
-                      DType*        gamma = nullptr,
-                      DType*        beta  = nullptr)
-    {
-        // calculate mean
-        for(int i = 0; i < batch; i++)
-        {
-            int    count = 0;
-            DType* inC   = in + i * length;
-            DType* outC  = out + i * length;
-
-            for(int j = 0; j < length; j++)
-            {
-                count        = count + 1;
-                float delta  = inC[j] - mean[i];
-                mean[i]      = mean[i] + delta / count;
-                float delta2 = inC[j] - mean[i];
-                invvar[i]    = invvar[i] + delta * delta2;
-            }
-            invvar[i] = 1 / std::sqrt((invvar[i] / length) + eps);
-
-            // calculate invvar
-            for(int j = 0; j < length; j++)
-            {
-                outC[j] = (inC[j] - mean[i]) * invvar[i];
-
-                if(gamma != nullptr)
-                    outC[j] = outC[j] * gamma[j];
-
-                if(beta != nullptr)
-                    outC[j] = outC[j] + beta[j];
-            }
-        }
-    }
-
 }
 
 class ExtOpSoftmaxTest : public testing::TestWithParam<uint32_t>
 {
 };
 class ExtOpSoftmaxUnsupportedDatatypeTest : public testing::TestWithParam<hipDataType>
-{
-};
-
-class ExtOpLayerNormTest : public testing::TestWithParam<uint32_t>
-{
-};
-class ExtOpLayerNormUnsupportedDatatypeTest : public testing::TestWithParam<hipDataType>
 {
 };
 
@@ -131,93 +78,6 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     err = hipFree(gpuOutput);
 }
 
-TEST_P(ExtOpLayerNormTest, layernormSuccess)
-{
-    uint32_t m = GetParam();
-    uint32_t n = 16;
-
-    std::vector<float> output(m * n, 0.f);
-    std::vector<float> mean(m, 0.f);
-    std::vector<float> invvar(m, 0.f);
-    std::vector<float> input(m * n, 0.f);
-    std::vector<float> gamma(n, 1.f);
-    std::vector<float> beta(n, 0.f);
-
-    hipblaslt_init_hpl(input, n, m, n);
-    hipblaslt_init_hpl(gamma, n, 1, n);
-    hipblaslt_init_hpl(beta, n, 1, n);
-
-    float* gpuOutput{};
-    float* gpuMean{};
-    float* gpuInvvar{};
-    float* gpuInput{};
-    float* gpuGamma{};
-    float* gpuBeta{};
-
-    auto err = hipMalloc(&gpuOutput, m * n * sizeof(float));
-    err      = hipMalloc(&gpuMean, m * sizeof(float));
-    err      = hipMalloc(&gpuInvvar, m * sizeof(float));
-    err      = hipMalloc(&gpuInput, m * n * sizeof(float));
-    err      = hipMalloc(&gpuGamma, n * sizeof(float));
-    err      = hipMalloc(&gpuBeta, n * sizeof(float));
-
-    err = hipMemcpyHtoD(gpuInput, input.data(), m * n * sizeof(float));
-    err = hipMemcpyHtoD(gpuGamma, gamma.data(), n * sizeof(float));
-    err = hipMemcpyHtoD(gpuBeta, beta.data(), n * sizeof(float));
-
-    auto hipblasltErr = hipblasltExtLayerNorm(HIP_R_32F,
-                                              gpuOutput,
-                                              gpuMean,
-                                              gpuInvvar,
-                                              gpuInput,
-                                              m,
-                                              n,
-                                              1e-05,
-                                              gpuGamma,
-                                              gpuBeta,
-                                              nullptr);
-    EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_SUCCESS);
-    err = hipDeviceSynchronize();
-    ASSERT_EQ(err, hipSuccess);
-
-    std::vector<float> cpuRef(m * n, 0.0f);
-    std::vector<float> cpuMean(m, 0.0f);
-    std::vector<float> cpuInvvar(m, 0.0f);
-    cpuLayerNorm<float>(cpuRef.data(),
-                        cpuMean.data(),
-                        cpuInvvar.data(),
-                        input.data(),
-                        m,
-                        n,
-                        1e-05,
-                        gamma.data(),
-                        beta.data());
-
-    err = hipMemcpyDtoH(output.data(), gpuOutput, m * n * sizeof(float));
-    err = hipMemcpyDtoH(mean.data(), gpuMean, m * sizeof(float));
-    err = hipMemcpyDtoH(invvar.data(), gpuInvvar, m * sizeof(float));
-
-    for(std::size_t i = 0; i < m * n; ++i)
-    {
-        EXPECT_NEAR(output[i], cpuRef[i], 1e-5);
-    }
-    for(std::size_t i = 0; i < m; ++i)
-    {
-        EXPECT_NEAR(mean[i], cpuMean[i], 1e-5);
-    }
-    for(std::size_t i = 0; i < m; ++i)
-    {
-        EXPECT_NEAR(invvar[i], cpuInvvar[i], 1e-5);
-    }
-
-    err = hipFree(gpuOutput);
-    err = hipFree(gpuMean);
-    err = hipFree(gpuInvvar);
-    err = hipFree(gpuInput);
-    err = hipFree(gpuGamma);
-    err = hipFree(gpuBeta);
-}
-
 TEST_P(ExtOpSoftmaxUnsupportedDatatypeTest, softmaxFailureUnsupportedDatatype)
 {
     auto hipblasltErr = hipblasltExtSoftmax(GetParam(), 16, 16, 1, nullptr, nullptr, nullptr);
@@ -232,28 +92,7 @@ TEST(ExtOpTest, softmaxFailureUnsupportedShapeOrReductionDim)
     EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_NOT_SUPPORTED);
 }
 
-TEST_P(ExtOpLayerNormUnsupportedDatatypeTest, layernormFailureUnsupportedDatatype)
-{
-    auto hipblasltErr = hipblasltExtLayerNorm(
-        GetParam(), nullptr, nullptr, nullptr, nullptr, 16, 1024, 1e-05, nullptr, nullptr, nullptr);
-    EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_NOT_SUPPORTED);
-}
-
-TEST(ExtOpTest, layernormFailureInvalidValue)
-{
-    auto hipblasltErr = hipblasltExtLayerNorm(
-        HIP_R_32F, nullptr, nullptr, nullptr, nullptr, 16, 1024, 1e-05, nullptr, nullptr, nullptr);
-    EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_INVALID_VALUE);
-}
-
 INSTANTIATE_TEST_SUITE_P(ExtOpTest, ExtOpSoftmaxTest, testing::Values<uint32_t>(1, 16, 1335));
 INSTANTIATE_TEST_SUITE_P(ExtOpTest,
                          ExtOpSoftmaxUnsupportedDatatypeTest,
-                         testing::Values<hipDataType>(HIP_R_16F, HIP_R_16BF));
-
-INSTANTIATE_TEST_SUITE_P(ExtOpTest,
-                         ExtOpLayerNormTest,
-                         testing::Values<uint32_t>(1, 16, 1335, 6666));
-INSTANTIATE_TEST_SUITE_P(ExtOpTest,
-                         ExtOpLayerNormUnsupportedDatatypeTest,
                          testing::Values<hipDataType>(HIP_R_16F, HIP_R_16BF));

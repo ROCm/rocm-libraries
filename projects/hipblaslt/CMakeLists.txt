@@ -556,7 +556,6 @@ if(HIPBLASLT_ENABLE_CLIENT)
             hipblaslt-bench
             hipblaslt-api-overhead
             hipblaslt-bench-groupedgemm-fixed-mk
-            hipblaslt-bench-extop-layernorm
             hipblaslt-bench-extop-matrixtransform
             hipblaslt-bench-extop-softmax
         COMPONENT benchmarks
@@ -791,7 +790,6 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
             sample_hipblaslt_gemm_mix_precision
             sample_hipblaslt_gemm_mix_precision_ext
             sample_hipblaslt_gemm_attr_tciA_tciB
-            sample_hipblaslt_ext_op_layernorm
             sample_hipblaslt_gemm_with_TF32
             sample_hipblaslt_gemm_swizzle_a
             sample_hipblaslt_gemm_bias_swizzle_a_ext

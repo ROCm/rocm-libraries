@@ -65,34 +65,6 @@ hipblasStatus_t hipblasltExtSoftmax(hipDataType datatype,
     return hipblasltSoftmaxRun(datatype, m, n, dim, output, input, stream);
 }
 
-hipblasStatus_t hipblasltLayerNormRun(hipDataType datatype,
-                                      void*       output,
-                                      void*       mean,
-                                      void*       invvar,
-                                      void*       input,
-                                      uint32_t    m,
-                                      uint32_t    n,
-                                      float       eps,
-                                      void*       gamma,
-                                      void*       beta,
-                                      hipStream_t stream);
-
-hipblasStatus_t hipblasltExtLayerNorm(hipDataType datatype,
-                                      void*       output,
-                                      void*       mean,
-                                      void*       invvar,
-                                      void*       input,
-                                      uint32_t    m,
-                                      uint32_t    n,
-                                      float       eps,
-                                      void*       gamma,
-                                      void*       beta,
-                                      hipStream_t stream)
-{
-    return hipblasltLayerNormRun(
-        datatype, output, mean, invvar, input, m, n, eps, gamma, beta, stream);
-}
-
 namespace
 {
     constexpr uint32_t SUPPORTED_MAX_N = 256;
@@ -312,79 +284,6 @@ hipblasStatus_t hipblasltSoftmaxRun(hipDataType datatype,
                                              {numWorkgroups * WORKGROUP_SIZE, 1, 1},
                                              getLdsUsageByte(datatype, tileM, tileN),
                                              kArgs};
-
-    err = adapter->launchKernel(invocation, stream, nullptr, nullptr);
-
-    if(err)
-    {
-        return HIPBLAS_STATUS_INTERNAL_ERROR;
-    }
-
-    return HIPBLAS_STATUS_SUCCESS;
-}
-
-hipblasStatus_t hipblasltLayerNormRun(hipDataType datatype,
-                                      void*       output,
-                                      void*       mean,
-                                      void*       invvar,
-                                      void*       input,
-                                      uint32_t    m,
-                                      uint32_t    n,
-                                      float       eps,
-                                      void*       gamma,
-                                      void*       beta,
-                                      hipStream_t stream)
-{
-    if(datatype != HIP_R_32F)
-    {
-        return HIPBLAS_STATUS_NOT_SUPPORTED;
-    }
-
-    if(output == nullptr || mean == nullptr || invvar == nullptr || input == nullptr || m == 0
-       || n == 0)
-        return HIPBLAS_STATUS_INVALID_VALUE;
-
-    int         currentDeviceId{};
-    auto        err       = hipGetDevice(&currentDeviceId);
-    auto&       adapter   = extOpLibraries().at(currentDeviceId);
-    auto        gpu       = TensileLite::hip::GetCurrentDevice();
-    const auto  archName  = trimArchName(gpu->archName());
-    auto&       masterLib = getExtOpMasterLibrary();
-    const auto& lib       = masterLib
-                          .getLibrary(archName,
-                                      hipblaslt_ext::LayerNormSolutionLibrary::opName,
-                                      hipDataTypeo_char(datatype))
-                          ->as<hipblaslt_ext::LayerNormSolutionLibrary>();
-    auto sol = lib.findBestSolution(
-        hipblaslt_ext::LayerNormProblem(m, n, hipDataType_to_tensile_type(datatype)), *gpu);
-    const auto kernelName    = sol->name();
-    err                      = adapter->initKernel(kernelName);
-    const auto numWorkgroups = m;
-
-    TensileLite::KernelInvocation invocation;
-    invocation.kernelName      = kernelName;
-    invocation.codeObjectFile  = sol->getCodeObjectPath();
-    invocation.workGroupSize.x = sol->getNumWorkitems();
-    invocation.workGroupSize.y = 1;
-    invocation.workGroupSize.z = 1;
-    invocation.numWorkGroups.x = 1;
-    invocation.numWorkGroups.y = numWorkgroups;
-    invocation.numWorkGroups.z = 1;
-    invocation.numWorkItems.x  = sol->getNumWorkitems();
-    invocation.numWorkItems.y  = numWorkgroups;
-    invocation.numWorkItems.z  = 1;
-    invocation.sharedMemBytes  = 32 * sizeof(float);
-    invocation.args            = TensileLite::KernelArguments(false);
-    invocation.args.reserve(60, 9);
-    invocation.args.append("output", output);
-    invocation.args.append("mean", mean);
-    invocation.args.append("invvar", invvar);
-    invocation.args.append("input", input);
-    invocation.args.append("gamma", gamma);
-    invocation.args.append("beta", beta);
-    invocation.args.append("m", m);
-    invocation.args.append("n", n);
-    invocation.args.append("eps", eps);
 
     err = adapter->launchKernel(invocation, stream, nullptr, nullptr);
 

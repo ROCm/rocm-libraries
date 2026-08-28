@@ -75,62 +75,6 @@ HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtSoftmax(hipDataType datatype,
                                                      void*       input,
                                                      hipStream_t stream);
 
-/*! \ingroup library_module
- *  \brief Perform 2-D layernorm on a source input tensor, with the result placed in the output tensor.
- *
- *  \details
- *  This function computes layernorm on a given 2D-tensor.
- *
- *  @param[in]
- *  datatype Data type of the input and output tensors. Only supports HIP_R_32F.
- *
- *  @param[out]
- *  output Output tensor buffer. Can't be a nullptr.
- *
- *  @param[out]
- *  mean Tensor buffer. Can't be a nullptr.
- *
- *  @param[out]
- *  invvar Tensor buffer. 1 / sqrt(std).  Can't be a nullptr.
- *
- *  @param[in]
- *  input Tensor buffer. Can't be a nullptr.
- *
- *  @param[in]
- *  m The first dimension of the input and output tensors.
- *
- *  @param[in]
- *  n The second dimension of the input and output tensors.
- *
- *  @param[in]
- *  eps For sqrt to avoid inf value.
- *
- *  @param[in]
- *  gamma Tensor buffer. nullptr means the calculation doesn't involve gamma.
- *
- *  @param[in]
- *  beta Tensor buffer. nullptr means the calculation doesn't involve beta.
- *
- *  @param[in]
- *  stream The HIP stream where all the GPU work will be submitted.
- *
- *
- *  \retval HIPBLAS_STATUS_SUCCESS If it runs successfully.
- *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p m is greater than 4096.
- *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If \p datatype is not HIP_R_32F.
- */
-HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtLayerNorm(hipDataType datatype,
-                                                       void*       output,
-                                                       void*       mean,
-                                                       void*       invvar,
-                                                       void*       input,
-                                                       uint32_t    m,
-                                                       uint32_t    n,
-                                                       float       eps,
-                                                       void*       gamma,
-                                                       void*       beta,
-                                                       hipStream_t stream);
-
 // Exporting the setters of flush, rotating buffer size, cold iterations and hot iterations.
 HIPBLASLT_EXPORT void hipblasltSetFlushValue(bool newFlush);
 HIPBLASLT_EXPORT void hipblasltSetRotatingBufferSizeValue(int newrotatingBufferSize);
