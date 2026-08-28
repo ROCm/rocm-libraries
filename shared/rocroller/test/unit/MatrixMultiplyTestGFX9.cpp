@@ -833,27 +833,32 @@ namespace MatrixMultiplyTest
         TensorDescriptor referenceDescB(dataTypeB, {K, N}, transB ? "T" : "N");
         TensorDescriptor descC(DataType::Float, {M, N}, "N");
 
-        HostNumerics::HostReferenceProblem scaledProblem(
+        auto scaledProblem = HostNumerics::makeHostReferenceProblem(
             HostNumerics::hostTensor(referenceDescA, A),
             HostNumerics::hostTensor(referenceDescB, B),
-            HostNumerics::hostTensor(descC, C));
-        scaledProblem.scaleA
-            = HostNumerics::hostScaleTensor(DataType::E8M0, AX, referenceDescA, 1, scaleBlockSize);
-        scaledProblem.scaleB
-            = HostNumerics::hostScaleTensor(DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize);
-        scaledProblem.scaleBlockSize = scaleBlockSize;
-        scaledProblem.alpha          = alpha;
-        auto D                       = HostNumerics::convertHostReference<float>(
+            HostNumerics::hostTensor(descC, C),
+            HostNumerics::hostScaleTensor(
+                DataType::E8M0, AX, referenceDescA, 1, scaleBlockSize),
+            HostNumerics::hostScaleTensor(
+                DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize),
+            scaleBlockSize,
+            alpha,
+            0.0f);
+        auto D = HostNumerics::convertHostReference<float>(
             HostNumerics::computeHostReference(scaledProblem));
 
         alpha *= std::pow(2.0f, int(scaleA) - 127) * std::pow(2.0f, int(scaleB) - 127);
 
-        HostNumerics::HostReferenceProblem unscaledProblem(
+        auto unscaledProblem = HostNumerics::makeHostReferenceProblem(
             HostNumerics::hostTensor(referenceDescA, A),
             HostNumerics::hostTensor(referenceDescB, B),
-            HostNumerics::hostTensor(descC, C));
-        unscaledProblem.alpha = alpha;
-        auto reference        = HostNumerics::convertHostReference<float>(
+            HostNumerics::hostTensor(descC, C),
+            std::nullopt,
+            std::nullopt,
+            0,
+            alpha,
+            0.0f);
+        auto reference = HostNumerics::convertHostReference<float>(
             HostNumerics::computeHostReference(unscaledProblem));
 
         double rnorm = relativeNormL2(D, reference);

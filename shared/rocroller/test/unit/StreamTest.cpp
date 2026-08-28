@@ -66,7 +66,7 @@ namespace StreamTest
         // reference solution
         auto tol = AcceptableError{5 * std::sqrt(nx) * epsilon<double>(), "Sqrt(N) * epsilon"};
         auto res = compare(r, vectorAdd.referenceSolution(alpha, a, b), tol);
-        EXPECT_TRUE(res.ok) << res.message();
+        EXPECT_TRUE(res.ok()) << res.message();
 
         ASSERT_THAT(hipStreamDestroy(stream), HasHipSuccess(0));
     }

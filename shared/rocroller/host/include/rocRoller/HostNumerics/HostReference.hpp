@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/gemm.hpp>
 #include <roc/host_numerics/tensor.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
@@ -26,27 +27,6 @@
 
 namespace rocRoller::HostNumerics
 {
-    struct HostReferenceProblem
-    {
-        HostReferenceProblem(roc::host_numerics::Tensor aTensor,
-                             roc::host_numerics::Tensor bTensor,
-                             roc::host_numerics::Tensor cTensor)
-            : a(std::move(aTensor))
-            , b(std::move(bTensor))
-            , c(std::move(cTensor))
-        {
-        }
-
-        roc::host_numerics::Tensor                a;
-        roc::host_numerics::Tensor                b;
-        roc::host_numerics::Tensor                c;
-        std::optional<roc::host_numerics::Tensor> scaleA;
-        std::optional<roc::host_numerics::Tensor> scaleB;
-        size_t                                      scaleBlockSize = 0;
-        float                                       alpha          = 1.0f;
-        float                                       beta           = 0.0f;
-    };
-
     struct AcceptableGEMMError
     {
         double      relativeL2Tolerance = 0.0;
@@ -55,18 +35,10 @@ namespace rocRoller::HostNumerics
 
     struct HostComparisonResult
     {
-        bool ok = false;
-
-        double relativeNormL2   = 0.0;
-        double relativeNormInf  = 0.0;
-        double referenceNormL2  = 0.0;
-        double referenceNormInf = 0.0;
-        double observedNormL2   = 0.0;
-        double observedNormInf  = 0.0;
-
         AcceptableGEMMError                    acceptableError;
         roc::host_numerics::ComparisonResult statistics;
 
+        bool        ok() const;
         std::string message() const;
     };
 
@@ -82,7 +54,17 @@ namespace rocRoller::HostNumerics
                                                  size_t                   blockedDimension,
                                                  size_t                   blockSize);
 
-    HostReferenceProblem
+    roc::host_numerics::GemmProblem
+        makeHostReferenceProblem(roc::host_numerics::Tensor                a,
+                                 roc::host_numerics::Tensor                b,
+                                 roc::host_numerics::Tensor                c,
+                                 std::optional<roc::host_numerics::Tensor> scaleA,
+                                 std::optional<roc::host_numerics::Tensor> scaleB,
+                                 size_t                                    scaleBlockSize,
+                                 float                                     alpha,
+                                 float                                     beta);
+
+    roc::host_numerics::GemmProblem
         makeHostReferenceProblem(GeneratedGEMMInputs const&                  inputs,
                                  std::optional<roc::host_numerics::Tensor> runtimeScaleA,
                                  std::optional<roc::host_numerics::Tensor> runtimeScaleB,
@@ -90,7 +72,8 @@ namespace rocRoller::HostNumerics
                                  float                                       alpha,
                                  float                                       beta);
 
-    roc::host_numerics::Tensor computeHostReference(HostReferenceProblem const& problem);
+    roc::host_numerics::Tensor
+        computeHostReference(roc::host_numerics::GemmProblem const& problem);
 
     HostComparisonResult compareHostReference(roc::host_numerics::Tensor observed,
                                               roc::host_numerics::Tensor expected,
