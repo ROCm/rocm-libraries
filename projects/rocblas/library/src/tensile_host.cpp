@@ -58,6 +58,7 @@
 #include <iomanip>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <string>
 #include <type_traits>
@@ -637,17 +638,24 @@ namespace
         return idx < 0 ? 0 : idx; // map -1 and all negatives to default
     }
 
-    static int map_index_override_to_tensile(int idx)
+    static std::optional<int> map_index_override_to_tensile(int idx)
     {
         // Override files hold either the rocblas indices reported by
         // rocblas_gemm_ex_get_solutions, which are biased and negative for Tensile
         // solutions, or raw one based Tensile indices as written by older tuning runs.
-        // Anything else, such as a hipBLASLt or rocBLAS source kernel index, has no
-        // Tensile equivalent and is rejected by returning a negative index.
         if(rocblas_tensile_index(idx))
             return map_index_rocblas_to_tensile(idx);
 
-        return idx > 0 ? idx - 1 : -1; // 1 based to 0 based : invalid index
+        if(idx > 0)
+            return idx - 1; // 1 based to 0 based
+
+        // The reserved indices name a rocBLAS kernel rather than a Tensile solution, so
+        // there is nothing to override. rocblas-gemm-tune does not emit them, but a
+        // hand written file may, and skipping one leaves the rest of the file in place.
+        rocblas_cerr << "\nrocBLAS warning: ignoring override file solution index " << idx
+                     << ". It names no Tensile solution." << std::endl;
+
+        return std::nullopt;
     }
 
     /**************************************************

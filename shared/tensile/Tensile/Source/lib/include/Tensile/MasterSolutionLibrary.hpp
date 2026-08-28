@@ -30,6 +30,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -187,10 +188,12 @@ namespace Tensile
         /**
          * Translates the solution index of an override file entry into a library solution
          * index. Clients which report remapped indices, such as rocBLAS, supply this so
-         * that an override file can use the same indices as the client API. A negative
-         * result marks an entry the client cannot translate.
+         * that an override file can use the same indices as the client API. An empty
+         * result marks an entry which names a kernel outside this library, and is skipped
+         * rather than failing the entries around it. A negative result marks an entry the
+         * client cannot translate at all.
          */
-        using OverrideIndexMapping = std::function<int(int)>;
+        using OverrideIndexMapping = std::function<std::optional<int>(int)>;
 
         bool setOverridesFromFile(Hardware const&      hardware,
                                   const std::string&   file_path,
@@ -214,13 +217,25 @@ namespace Tensile
                 }
 
                 bool success = true;
+                int  applied = 0;
 
                 for(const auto& ps : probSols)
                 {
                     // Get solution via index, one based in the file unless the client remaps it
-                    int sol_idx = mapSolutionIndex ? mapSolutionIndex(ps.second) : ps.second - 1;
+                    std::optional<int> sol_idx = mapSolutionIndex
+                                                     ? mapSolutionIndex(ps.second)
+                                                     : std::optional<int>(ps.second - 1);
 
-                    if(sol_idx < 0)
+                    if(!sol_idx)
+                    {
+                        if(debug)
+                            std::cout << "Skipping override file solution index: " << ps.second
+                                      << ", which names no solution in this library.\n";
+
+                        continue;
+                    }
+
+                    if(*sol_idx < 0)
                     {
                         if(debug)
                             std::cout << "WARNING: override file solution index: " << ps.second
@@ -230,25 +245,29 @@ namespace Tensile
                         continue;
                     }
 
-                    std::shared_ptr<MySolution> solution = getSolutionByIndex(sol_idx);
+                    std::shared_ptr<MySolution> solution = getSolutionByIndex(*sol_idx);
                     if(!solution)
                     {
                         // Load library
                         auto problem = ps.first.problem();
                         library->findAllSolutions(problem, hardware);
-                        solution = getSolutionByIndex(sol_idx);
+                        solution = getSolutionByIndex(*sol_idx);
                     }
 
                     if(debug && !solution)
-                        std::cout << "WARNING: failed to find solution with index: " << sol_idx
+                        std::cout << "WARNING: failed to find solution with index: " << *sol_idx
                                   << ".\n"
                                   << "Possible library mismatch.\n";
 
                     // Update cache
-                    success &= lib.addToOverride(ps.first, hardware, solution);
+                    if(lib.addToOverride(ps.first, hardware, solution))
+                        ++applied;
+                    else
+                        success = false;
                 }
 
-                return success;
+                // Skipped entries do not fail the file, but a file which overrides nothing does
+                return success && applied > 0;
             }
             catch(std::bad_cast const& exc)
             {
