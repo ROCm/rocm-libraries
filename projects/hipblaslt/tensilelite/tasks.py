@@ -22,7 +22,7 @@ from tensilelite.RocisaStatus import _rocisa_install_status
 # gfx1250 v0/v1 ASIC-revision detection lives in the packaged Tensile tree
 # (invoke-free) so CI test artifacts can exercise it directly; these @task
 # wrappers only expose it on the invoke command line.
-from Tensile.GpuRevisionTarget import detect_gpu_arch, detect_gpu_revision_target
+from tensilelite.GpuRevisionTarget import detect_gpu_arch, detect_gpu_revision_target
 
 
 def _cmake_bool(value):
