@@ -68,7 +68,7 @@ namespace
         options.computeUlp                 = true;
         options.ulpType                    = scalarType<T>();
         options.maxReportedMismatches      = 0;
-        options.selection.indexOrder       = IndexOrder::FirstDimensionFastest;
+        options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
 
         const ComparisonResult report
             = compare(copyTensorFromEncodedStorage(hGPU, storageElements, layout),

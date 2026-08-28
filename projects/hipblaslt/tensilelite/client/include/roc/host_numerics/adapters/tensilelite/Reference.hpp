@@ -34,6 +34,7 @@
 
 #include <Tensile/DataTypes.hpp>
 #include <roc/host_numerics/gemm.hpp>
+#include <span>
 
 namespace TensileLite
 {
@@ -41,10 +42,15 @@ namespace TensileLite
     {
         void SolveCPU(ContractionProblem const* contraction,
                       ProblemInputs const*      inputs,
-                      size_t                    elementsToValidate);
+                      std::span<const roc::host_numerics::OutputSelection> outputSelections);
 
         // Specialized solver for ungrouped GEMM problems. Automatic execution
         // selects among the component-owned implementations.
+        roc::host_numerics::GemmRunInfo SolveGemmCPU(ContractionProblemGemm const& problem,
+                                                     ContractionInputs const&      inputs,
+                                                     roc::host_numerics::OutputSelection
+                                                         outputSelection);
+
         roc::host_numerics::GemmRunInfo SolveGemmCPU(ContractionProblemGemm const& problem,
                                                      ContractionInputs const&      inputs,
                                                      size_t elementsToValidate);
@@ -52,6 +58,13 @@ namespace TensileLite
         // Translates and executes one ungrouped GEMM. Unsupported descriptors or
         // backends throw std::invalid_argument before copying the current batch's
         // staged outputs to caller storage.
+        roc::host_numerics::GemmRunInfo
+            executeReferenceGemm(ContractionProblemGemm const&     problem,
+                                 ContractionInputs const&          inputs,
+                                 roc::host_numerics::OutputSelection outputSelection,
+                                 roc::host_numerics::GemmBackend backend
+                                 = roc::host_numerics::GemmBackend::Pointwise);
+
         roc::host_numerics::GemmRunInfo
             executeReferenceGemm(ContractionProblemGemm const&     problem,
                                  ContractionInputs const&          inputs,

@@ -20,8 +20,6 @@
 namespace roc::host_numerics {
 namespace detail {
 inline void validateComparisonOptions(const ComparisonOptions& options) {
-    if (options.selection.stride == 0)
-        throw std::invalid_argument("Comparison selection stride must be non-zero.");
     if (options.relativeFrobeniusTolerance && !options.computeFrobenius)
         throw std::invalid_argument("A relative Frobenius tolerance requires Frobenius evidence.");
     if (options.maximumUlpTolerance && !options.computeUlp)
@@ -297,27 +295,38 @@ inline bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape
 
 template <typename Function>
 void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expectedLayout,
-                               const ComparisonSelection& selection, Function&& function) {
+                               const OutputSelection& selection, Function&& function) {
     if (observedLayout.shape() != expectedLayout.shape())
         throw std::invalid_argument("Comparison offset traversal shape mismatch.");
-    if (selection.stride == 0)
-        throw std::invalid_argument("Comparison selection stride must be non-zero.");
-
     const Shape& shape = observedLayout.shape();
     const size_t total = shape.elementCount();
-    if (selection.first >= total || selection.maxElements == 0) return;
+    if (selection.kind() == OutputSelectionKind::Explicit) {
+        std::vector<size_t> coordinates(shape.rank(), 0);
+        for (const size_t logicalIndex : selection.indices(total)) {
+            coordinatesForLinearIndex(logicalIndex, shape, selection.indexOrder(), coordinates);
+            function(logicalIndex, observedLayout.elementOffset(coordinates),
+                     expectedLayout.elementOffset(coordinates));
+        }
+        return;
+    }
+    if (selection.selectsAll()) {
+        if (total == 0) return;
+    } else if (selection.first() >= total || selection.maxElements() == 0) {
+        return;
+    }
 
     if (shape.rank() == 0) {
         function(0, observedLayout.offset(), expectedLayout.offset());
         return;
     }
 
-    if (selection.first == 0 && selection.stride == 1) {
+    if (selection.selectsAll() || (selection.first() == 0 && selection.stride() == 1)) {
         const bool firstDimensionFastest =
-            selection.indexOrder == IndexOrder::FirstDimensionFastest;
+            selection.indexOrder() == IndexOrder::FirstDimensionFastest;
         const size_t innerDimension = firstDimensionFastest ? 0 : shape.rank() - 1;
         const size_t innerSize = shape[innerDimension];
-        const size_t selectedTotal = std::min(total, selection.maxElements);
+        const size_t selectedTotal =
+            selection.selectsAll() ? total : std::min(total, selection.maxElements());
         const size_t outerCount = (selectedTotal + innerSize - 1) / innerSize;
         std::vector<size_t> coordinates(shape.rank(), 0);
 
@@ -361,19 +370,19 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
     }
 
     std::vector<size_t> coordinates(shape.rank(), 0);
-    coordinatesForLinearIndex(selection.first, shape, selection.indexOrder, coordinates);
+    coordinatesForLinearIndex(selection.first(), shape, selection.indexOrder(), coordinates);
     ptrdiff_t observedOffset = observedLayout.elementOffset(coordinates);
     ptrdiff_t expectedOffset = expectedLayout.elementOffset(coordinates);
 
-    if (selection.stride == 1) {
-        size_t logicalIndex = selection.first;
+    if (selection.stride() == 1) {
+        size_t logicalIndex = selection.first();
         size_t selected = 0;
-        while (logicalIndex < total && selected < selection.maxElements) {
+        while (logicalIndex < total && selected < selection.maxElements()) {
             function(logicalIndex, observedOffset, expectedOffset);
             ++selected;
             ++logicalIndex;
-            if (logicalIndex >= total || selected >= selection.maxElements) break;
-            if (!advanceCoordinates(coordinates, shape, selection.indexOrder,
+            if (logicalIndex >= total || selected >= selection.maxElements()) break;
+            if (!advanceCoordinates(coordinates, shape, selection.indexOrder(),
                                     observedLayout.strides(), expectedLayout.strides(),
                                     observedOffset, expectedOffset))
                 break;
@@ -382,13 +391,13 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
     }
 
     size_t selected = 0;
-    for (size_t logicalIndex = selection.first;
-         logicalIndex < total && selected < selection.maxElements; ++selected) {
-        coordinatesForLinearIndex(logicalIndex, shape, selection.indexOrder, coordinates);
+    for (size_t logicalIndex = selection.first();
+         logicalIndex < total && selected < selection.maxElements(); ++selected) {
+        coordinatesForLinearIndex(logicalIndex, shape, selection.indexOrder(), coordinates);
         function(logicalIndex, observedLayout.elementOffset(coordinates),
                  expectedLayout.elementOffset(coordinates));
-        if (selection.stride > std::numeric_limits<size_t>::max() - logicalIndex) break;
-        logicalIndex += selection.stride;
+        if (selection.stride() > std::numeric_limits<size_t>::max() - logicalIndex) break;
+        logicalIndex += selection.stride();
     }
 }
 
