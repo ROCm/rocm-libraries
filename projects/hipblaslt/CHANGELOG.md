@@ -16,8 +16,9 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Removed
 
-* Removed the standalone `hipblasltExtAMax` extension operation. Fused GEMM
-  `HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER` support is unchanged.
+* Removed the standalone `hipblasltExtAMax` and `hipblasltExtLayerNorm`
+  extension operations. Fused GEMM `HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER`
+  support is unchanged.
 
 ## hipBLASLt 1.4.0
 

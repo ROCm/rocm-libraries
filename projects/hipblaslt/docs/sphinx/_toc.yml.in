@@ -45,7 +45,6 @@ subtrees:
     subtrees:
     - entries:
       - file: samples/client_extop_softmax
-      - file: samples/sample_hipblaslt_ext_op_layernorm
   - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt/clients/samples
     title: hipBLASLt client examples
 
