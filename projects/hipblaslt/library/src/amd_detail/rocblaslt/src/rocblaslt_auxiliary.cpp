@@ -46,6 +46,7 @@
 #include "handle.h"
 #include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt.h"
+#include "rocblaslt_fused_a2a_validate.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocroller_host.hpp"
 #include "tensile_host.hpp"
@@ -531,6 +532,11 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
         setTo1(matmul_descr->compute_type, (void*)problem.alpha_owned.data(), &alphaTmp);
         problem.alpha = alphaTmp;
     }
+
+    problem.fused_epilogue      = matmul_descr->fused_epilogue;
+    problem.fused_a2a_world     = handle ? handle->device_comm_world : 0;
+    problem.fused_a2a_rank      = handle ? handle->device_comm_rank : 0;
+    problem.fused_a2a_peer_flag = handle ? handle->device_comm_peer_flags : nullptr;
 
     return problem;
 }
@@ -2268,6 +2274,22 @@ rocblaslt_status
         }
         auto prob = construct_rocblaslt_problem(
             handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
+
+        if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
+        {
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            return gate;
+        }
+
+        // No match, not an error: the heuristic reports zero algos.
+        if(fused_a2a_lacks_sdma_queues(prob))
+        {
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            *returnAlgoCount = 0;
+            return rocblaslt_status_success;
+        }
 
         OverrideSingleton& override         = OverrideSingleton::getInstance();
         bool               override_success = false;

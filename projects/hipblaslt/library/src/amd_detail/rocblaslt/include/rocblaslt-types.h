@@ -694,8 +694,7 @@ struct RocblasltContractionProblem
                                 int32_t                uniform_summation_order = 0);
 };
 
-// hipblasLtFusedEpilogueDescriptor is defined only in amd_detail/hipblaslt.cpp, so this
-// layer reads it through the POD below rather than directly.
+// Fields of hipblasLtFusedEpilogueDescriptor, flattened for this layer.
 struct RocblasltFusedEpilogueInfo
 {
     bool                         hasA2APrefix      = false;
@@ -706,7 +705,7 @@ struct RocblasltFusedEpilogueInfo
     uint32_t                     commChannel       = 0;
 };
 
-// Returns false when desc is nullptr. Defined in amd_detail/hipblaslt.cpp.
+// Returns false when desc is nullptr.
 bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
                                       RocblasltFusedEpilogueInfo&                    out);
 
