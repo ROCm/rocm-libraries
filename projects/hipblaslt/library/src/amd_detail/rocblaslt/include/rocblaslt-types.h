@@ -618,6 +618,15 @@ struct RocblasltContractionProblem
     // by tensile_host.cpp.
     int32_t uniform_summation_order = 0;
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // The four below are set post-construction, not through the constructor.
+    // fused_epilogue and fused_a2a_peer_flag are non-owning.
+    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue      = nullptr;
+    uint32_t                                       fused_a2a_world     = 0;
+    uint32_t                                       fused_a2a_rank      = 0;
+    void* const*                                   fused_a2a_peer_flag = nullptr;
+#endif
+
     // gemm_ex
     // gemm_strided_batched_ex
     RocblasltContractionProblem(hipblasOperation_t     trans_a,
@@ -688,6 +697,24 @@ struct RocblasltContractionProblem
                                 int32_t                sm_count_target         = 0,
                                 int32_t                uniform_summation_order = 0);
 };
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+// hipblasLtFusedEpilogueDescriptor is defined only in amd_detail/hipblaslt.cpp, so this
+// layer reads it through the POD below rather than directly.
+struct RocblasltFusedEpilogueInfo
+{
+    bool                         hasA2APrefix      = false;
+    const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
+    void* const*                 a2aRecvPtrs       = nullptr;
+    int64_t                      a2aExtent         = 0;
+    hipblasLtA2ACompletionMode_t a2aCompletionMode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
+    uint32_t                     commChannel       = 0;
+};
+
+// Returns false when desc is nullptr. Defined in amd_detail/hipblaslt.cpp.
+bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
+                                      RocblasltFusedEpilogueInfo&                    out);
+#endif
 
 namespace rocblaslt
 {
