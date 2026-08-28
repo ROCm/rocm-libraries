@@ -37,16 +37,23 @@ namespace rocRoller::HostNumerics
     std::string HostComparisonResult::message() const
     {
         std::ostringstream output;
-        output << (ok ? "Comparison PASSED." : "Comparison FAILED.");
+        output << (ok() ? "Comparison PASSED." : "Comparison FAILED.");
         output << "  Relative norms:";
-        output << " L2 " << std::scientific << relativeNormL2;
-        output << " Inf " << std::scientific << relativeNormInf;
+        output << " L2 " << std::scientific << statistics.relativeFrobeniusError;
+        output << " Inf " << std::scientific << statistics.relativeMaximumError;
         output << "  Norms (x/ref):";
-        output << " L2 " << std::scientific << observedNormL2 << "/" << referenceNormL2;
-        output << " Inf " << std::scientific << observedNormInf << "/" << referenceNormInf;
+        output << " L2 " << std::scientific << statistics.frobeniusObserved << "/"
+               << statistics.frobeniusExpected;
+        output << " Inf " << std::scientific << statistics.maximumObservedMagnitude << "/"
+               << statistics.maximumExpectedMagnitude;
         output << "  Tolerance: " << std::scientific << acceptableError.relativeL2Tolerance;
         output << " (" << acceptableError.reasoning << ")";
         return output.str();
+    }
+
+    bool HostComparisonResult::ok() const
+    {
+        return statistics.passed();
     }
 
     roc::host_numerics::Tensor hostScaleTensor(DataType                 type,
@@ -92,7 +99,54 @@ namespace rocRoller::HostNumerics
         return Tensor::copyEncodedBackingStorage(scalarType, layout, std::as_bytes(values));
     }
 
-    HostReferenceProblem
+    roc::host_numerics::GemmProblem
+        makeHostReferenceProblem(roc::host_numerics::Tensor                a,
+                                 roc::host_numerics::Tensor                b,
+                                 roc::host_numerics::Tensor                c,
+                                 std::optional<roc::host_numerics::Tensor> scaleA,
+                                 std::optional<roc::host_numerics::Tensor> scaleB,
+                                 size_t                                    scaleBlockSize,
+                                 float                                     alpha,
+                                 float                                     beta)
+    {
+        using namespace roc::host_numerics;
+
+        if(a.shape().rank() != 2 || b.shape().rank() != 2 || c.shape().rank() != 2)
+            throw std::invalid_argument(
+                "rocRoller host GEMM requires rank-two A, B, and C tensors.");
+        if(b.shape()[0] != a.shape()[1])
+            throw std::invalid_argument(
+                "rocRoller host GEMM A and B reduction extents do not match.");
+        if(c.shape() != Shape{a.shape()[0], b.shape()[1]})
+            throw std::invalid_argument(
+                "rocRoller host GEMM C shape does not match the output shape.");
+
+        GemmOperand operandA(std::move(a));
+        GemmOperand operandB(std::move(b));
+        if(scaleA)
+            operandA.blockScale = normalizeBlockScale(std::move(*scaleA),
+                                                      operandA.values.shape()[0],
+                                                      operandA.values.shape()[1],
+                                                      scaleBlockSize,
+                                                      "A");
+        if(scaleB)
+            operandB.blockScale = normalizeBlockScale(std::move(*scaleB),
+                                                      operandB.values.shape()[1],
+                                                      operandB.values.shape()[0],
+                                                      scaleBlockSize,
+                                                      "B");
+
+        GemmProblem result(std::move(operandA),
+                           std::move(operandB),
+                           std::move(c),
+                           ScalarType::Float32,
+                           ScalarType::Float32);
+        result.epilogue.alpha = alpha;
+        result.epilogue.beta  = beta;
+        return result;
+    }
+
+    roc::host_numerics::GemmProblem
         makeHostReferenceProblem(GeneratedGEMMInputs const&                inputs,
                                  std::optional<roc::host_numerics::Tensor> runtimeScaleA,
                                  std::optional<roc::host_numerics::Tensor> runtimeScaleB,
@@ -100,68 +154,35 @@ namespace rocRoller::HostNumerics
                                  float                                     alpha,
                                  float                                     beta)
     {
-        HostReferenceProblem result(inputs.a, inputs.b, inputs.c);
-        result.scaleA
-            = runtimeScaleA
-                  ? std::move(runtimeScaleA)
-                  : (inputs.scaleA ? std::optional<roc::host_numerics::Tensor>(inputs.scaleA)
-                                   : std::nullopt);
-        result.scaleB
-            = runtimeScaleB
-                  ? std::move(runtimeScaleB)
-                  : (inputs.scaleB ? std::optional<roc::host_numerics::Tensor>(inputs.scaleB)
-                                   : std::nullopt);
-        result.scaleBlockSize = scaleBlockSize;
-        result.alpha          = alpha;
-        result.beta           = beta;
-        return result;
+        return makeHostReferenceProblem(
+            inputs.a,
+            inputs.b,
+            inputs.c,
+            runtimeScaleA ? std::move(runtimeScaleA)
+                          : (inputs.scaleA
+                                 ? std::optional<roc::host_numerics::Tensor>(inputs.scaleA)
+                                 : std::nullopt),
+            runtimeScaleB ? std::move(runtimeScaleB)
+                          : (inputs.scaleB
+                                 ? std::optional<roc::host_numerics::Tensor>(inputs.scaleB)
+                                 : std::nullopt),
+            scaleBlockSize,
+            alpha,
+            beta);
     }
 
-    roc::host_numerics::Tensor computeHostReference(HostReferenceProblem const& problem)
+    roc::host_numerics::Tensor
+        computeHostReference(roc::host_numerics::GemmProblem const& problem)
     {
         using namespace roc::host_numerics;
 
-        if(problem.a.shape().rank() != 2 || problem.b.shape().rank() != 2
-           || problem.c.shape().rank() != 2)
-            throw std::invalid_argument(
-                "rocRoller host GEMM requires rank-two A, B, and C tensors.");
-
-        const size_t rows            = problem.a.shape()[0];
-        const size_t reductionExtent = problem.a.shape()[1];
-        const size_t columns         = problem.b.shape()[1];
-        if(problem.b.shape()[0] != reductionExtent)
-            throw std::invalid_argument(
-                "rocRoller host GEMM A and B reduction extents do not match.");
-        if(problem.c.shape() != Shape{rows, columns})
-            throw std::invalid_argument(
-                "rocRoller host GEMM C shape does not match the output shape.");
+        const size_t rows = problem.a.values.shape()[0];
         if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
             throw std::overflow_error("rocRoller host GEMM output stride exceeds ptrdiff_t.");
-
-        Tensor output(ScalarType::Float32,
-                      Layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(rows)}));
-
-        GemmOperand operandA(problem.a);
-        GemmOperand operandB(problem.b);
-        if(problem.scaleA || problem.scaleB)
-        {
-            if(problem.scaleBlockSize == 0)
-                throw std::invalid_argument("rocRoller scale block size must be nonzero.");
-            if(problem.scaleA)
-                operandA.blockScale = normalizeBlockScale(
-                    *problem.scaleA, rows, reductionExtent, problem.scaleBlockSize, "A");
-            if(problem.scaleB)
-                operandB.blockScale = normalizeBlockScale(
-                    *problem.scaleB, columns, reductionExtent, problem.scaleBlockSize, "B");
-        }
-
-        GemmRequest request(
-            std::move(operandA), std::move(operandB), problem.c, output, ScalarType::Float32);
-        request.epilogue.alpha = problem.alpha;
-        request.epilogue.beta  = problem.beta;
-
-        referenceGemmWithBlasBackend(request);
-        return output;
+        GemmOutputOptions output;
+        output.layout = Layout(Shape{rows, problem.b.values.shape()[1]},
+                               {1, static_cast<ptrdiff_t>(rows)});
+        return referenceGemmWithBlasBackend(problem, output).output;
     }
 
     HostComparisonResult compareHostReference(roc::host_numerics::Tensor observed,
@@ -184,15 +205,8 @@ namespace rocRoller::HostNumerics
         ComparisonResult statistics = compare(observed, expected, options);
 
         return {
-            .ok               = statistics.passed(),
-            .relativeNormL2   = statistics.relativeFrobeniusError,
-            .relativeNormInf  = statistics.relativeMaximumError,
-            .referenceNormL2  = statistics.frobeniusExpected,
-            .referenceNormInf = statistics.maximumExpectedMagnitude,
-            .observedNormL2   = statistics.frobeniusObserved,
-            .observedNormInf  = statistics.maximumObservedMagnitude,
-            .acceptableError  = std::move(acceptableError),
-            .statistics       = std::move(statistics),
+            .acceptableError = std::move(acceptableError),
+            .statistics      = std::move(statistics),
         };
     }
 }
