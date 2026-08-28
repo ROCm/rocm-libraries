@@ -17,6 +17,7 @@ std::unique_ptr<ICompiledProgram> KpackKernelLoader::load(const std::filesystem:
                                                           const std::string& deviceArch,
                                                           int deviceOrdinal,
                                                           const std::string& symbol,
+                                                          const std::string& expectedSha256,
                                                           const std::string& descriptorLabel) const
 {
     const std::string archivePath = archive.string();
@@ -24,10 +25,12 @@ std::unique_ptr<ICompiledProgram> KpackKernelLoader::load(const std::filesystem:
     CachedKpackModule module;
     try
     {
-        // The cache key is (archivePath, tocKey, deviceArch, deviceOrdinal). `symbol` is
-        // deliberately absent: kernels differing only by entry point name the same blob
-        // and must share one hipModule_t. It is used below for the message only.
-        module = _moduleCache.getOrLoad(archivePath, tocKey, deviceArch, deviceOrdinal);
+        // The cache key is (archivePath, tocKey, deviceArch, deviceOrdinal,
+        // expectedSha256). `symbol` is deliberately absent: kernels differing only by
+        // entry point name the same blob and must share one hipModule_t. It is used below
+        // for the message only.
+        module = _moduleCache.getOrLoad(
+            archivePath, tocKey, deviceArch, deviceOrdinal, expectedSha256);
     }
     catch(const KpackModuleLoadFailure& failure)
     {

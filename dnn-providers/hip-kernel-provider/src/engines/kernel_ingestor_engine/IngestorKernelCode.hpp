@@ -166,6 +166,7 @@ inline IngestorKernelCode
                                         context.deviceProperties.gcnArchName,
                                         context.deviceId,
                                         kernel.source.symbol,
+                                        kernel.source.sha256,
                                         label);
         auto runnableKernel = program->getKernel(kernel.source.symbol);
         return IngestorKernelCode{std::move(program), std::move(runnableKernel)};

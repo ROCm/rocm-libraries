@@ -96,12 +96,14 @@ class ArchResult:
 def _sha256(data):
     """Digest of a packed blob, recorded on the shipped UKD.
 
-    Provenance only. The runtime parses `sha256` into KernelSource and never
-    reads it back (Descriptors.hpp: "Carried, not checked"), so it is not an
-    integrity guarantee on the consuming side.
+    Hashed here over the decompressed code object, before the archive's
+    compressor sees it, because that is the buffer the runtime hashes back:
+    KpackModuleCache compares this digest against what it decompressed and
+    refuses the load on a mismatch. Hashing the compressed blob or the source
+    file instead would make every kpack load fail.
 
-    Still worth computing: `expected_sha256` cross-checks it at pack time, and
-    it names the exact bytes a shipped kernel came from.
+    `expected_sha256` cross-checks it at pack time as well, so a disagreement
+    is caught at the producing end rather than only at the consuming one.
     """
     return hashlib.sha256(data).hexdigest()
 
