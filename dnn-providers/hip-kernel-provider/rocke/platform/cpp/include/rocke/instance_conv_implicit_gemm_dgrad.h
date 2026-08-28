@@ -59,7 +59,7 @@ extern "C" {
  * Field order follows the Python dataclass declaration order.
  *
  * pipeline / epilogue are compared by strcmp:
- *   pipeline : "mem" | "compv3" | "compv4"
+ *   pipeline : "mem" | "compv3" | "compv4" | "wavelet"
  *   epilogue : "default" | "cshuffle"
  *
  * split_k:
@@ -121,6 +121,11 @@ typedef struct rocke_dgrad_conv_spec
 
     /* split_k: -1 = auto, 1 = off, >1 = fixed degree. */
     int split_k; /* default 1 */
+
+    /* Wavelet pipeline (pipeline="wavelet", WMMA/gfx1250 only).
+     * num_load_waves: extra load waves appended after the math waves (default 4).
+     * launch_block_size = block_size + num_load_waves * wave_size. */
+    int num_load_waves; /* default 4 */
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
@@ -130,6 +135,10 @@ rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void);
 
 /* spec.block_size: warp_m * warp_n * wave_size. */
 int rocke_dgrad_conv_spec_block_size(const rocke_dgrad_conv_spec_t* s);
+
+/* spec.launch_block_size: block_size for non-wavelet; block_size + num_load_waves * wave_size
+ * for pipeline="wavelet". */
+int rocke_dgrad_conv_spec_launch_block_size(const rocke_dgrad_conv_spec_t* s);
 
 /* spec.k_atoms_per_tile_k: tile_k / warp_tile_k. */
 int rocke_dgrad_conv_spec_k_atoms_per_tile_k(const rocke_dgrad_conv_spec_t* s);
