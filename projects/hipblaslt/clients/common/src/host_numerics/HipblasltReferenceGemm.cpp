@@ -22,33 +22,6 @@ namespace hipblaslt::host_numerics
     {
         using namespace roc::host_numerics;
 
-        template <typename T>
-        Scalar runtimeScalar(const T& value)
-        {
-            const ScalarType type = scalarType<T>();
-            return Scalar::fromStorage(type, std::as_bytes(std::span<const T>(&value, 1)));
-        }
-
-        template <typename Coefficient>
-        constexpr ScalarType referenceAccumulatorType()
-        {
-            // I32 reference GEMM uses wide host arithmetic to avoid intermediate
-            // overflow. F16 coefficients use an F32 host accumulator.
-            if constexpr(std::is_same_v<Coefficient, int32_t>)
-                return ScalarType::Float64;
-            else if constexpr(std::is_same_v<Coefficient, hipblasLtHalf>)
-                return ScalarType::Float32;
-            else
-                return scalarType<Coefficient>();
-        }
-
-        ScalarType referenceComputeType(hipDataType type)
-        {
-            if(type == HIP_R_32I)
-                return ScalarType::Float64;
-            return scalarType(type);
-        }
-
         template <typename Coefficient>
         Tensor coefficientVector(const void* data, size_t elements)
         {
@@ -122,11 +95,11 @@ namespace hipblaslt::host_numerics
                              std::move(operandB),
                              copyTensorFromEncodedStorage(request.c, typeC, layoutC),
                              output,
-                             referenceAccumulatorType<Coefficient>());
-            gemm.epilogue.alpha       = runtimeScalar(alpha);
-            gemm.epilogue.beta        = runtimeScalar(beta);
-            gemm.epilogue.scaleC      = runtimeScalar(scaleC);
-            gemm.epilogue.outputScale = runtimeScalar(scaleD);
+                             referenceAccumulatorType(request.coefficientType));
+            gemm.epilogue.alpha       = encodedScalar(alpha);
+            gemm.epilogue.beta        = encodedScalar(beta);
+            gemm.epilogue.scaleC      = encodedScalar(scaleC);
+            gemm.epilogue.outputScale = encodedScalar(scaleD);
             if(outputType == ScalarType::Int8)
                 gemm.epilogue.outputConversion = OutputConversion::SaturatingInt8;
 
@@ -210,5 +183,54 @@ namespace hipblaslt::host_numerics
             throw std::invalid_argument(
                 "hipBLASLt reference GEMM coefficient type is unsupported.");
         }
+    }
+
+    roc::host_numerics::GemmRunInfo
+        referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,
+                            const hipblaslt::client::MatmulDataTypes&       dataTypes,
+                            const hipblaslt::client::PreparedMatmulProblem& preparation,
+                            MatmulReferenceInputs                            inputs,
+                            hipblaslt_scaling_format                         scaleAMode,
+                            hipblaslt_scaling_format                         scaleBMode)
+    {
+        using namespace roc::host_numerics;
+
+        GemmOperand operandA(std::move(inputs.a));
+        GemmOperand operandB(std::move(inputs.b));
+        operandA.conjugate = problem.operationA == HIPBLAS_OP_C;
+        operandB.conjugate = problem.operationB == HIPBLAS_OP_C;
+
+        const ScalarType computeTypeA
+            = isBlockScaling(scaleAMode) ? operandA.values.type()
+                                         : referenceComputeType(dataTypes.computeInputA);
+        const ScalarType computeTypeB
+            = isBlockScaling(scaleBMode) ? operandB.values.type()
+                                         : referenceComputeType(dataTypes.computeInputB);
+        if(computeTypeA != operandA.values.type())
+            operandA.computeType = computeTypeA;
+        if(computeTypeB != operandB.values.type())
+            operandB.computeType = computeTypeB;
+
+        if(inputs.scaleA && !isBlockScaling(scaleAMode))
+            operandA.preQuantizationScales.emplace_back(*inputs.scaleA, MatrixAxis::Row);
+        if(inputs.alphaVector)
+            operandA.preQuantizationScales.emplace_back(*inputs.alphaVector, MatrixAxis::Row);
+        if(inputs.scaleB && !isBlockScaling(scaleBMode))
+            operandB.preQuantizationScales.emplace_back(*inputs.scaleB, MatrixAxis::Column);
+
+        GemmRequest request(std::move(operandA),
+                            std::move(operandB),
+                            std::move(inputs.c),
+                            std::move(inputs.d),
+                            referenceAccumulatorType(dataTypes.computeScalar));
+        request.epilogue.alpha  = scalarValue(preparation.alpha, dataTypes.computeScalar);
+        request.epilogue.beta   = scalarValue(preparation.beta, dataTypes.computeScalar);
+        request.epilogue.scaleC = inputs.scaleC.value_or(
+            Scalar::one(scalarType(dataTypes.computeScalar)));
+        request.epilogue.outputScale = inputs.scaleD.value_or(
+            Scalar::one(scalarType(dataTypes.computeScalar)));
+        if(request.d.type() == ScalarType::Int8)
+            request.epilogue.outputConversion = OutputConversion::SaturatingInt8;
+        return referenceGemmWithBlasBackend(request);
     }
 } // namespace hipblaslt::host_numerics

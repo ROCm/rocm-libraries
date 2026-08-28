@@ -47,8 +47,10 @@
 #include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 #include <roc/host_numerics/mx.hpp>
 #endif
+#include <roc/host_numerics/backends/blas.hpp>
 #include "utility.hpp"
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -347,6 +349,25 @@ void dumpBuffer(const char* title, hipDataType To, HipHostBuffer& buf, size_t M,
     }
 
     return;
+}
+
+inline roc::host_numerics::Layout
+    hostReferenceBatchLayout(const hipblaslt::client::MatmulMatrix& matrix,
+                             size_t                                 rows,
+                             size_t                                 columns,
+                             hipblasOperation_t                     operation,
+                             size_t                                 batch,
+                             bool                                   separateBatchStorage)
+{
+    const ptrdiff_t rowStride
+        = operation == HIPBLAS_OP_N ? 1 : matrix.layout.stride(1);
+    const ptrdiff_t columnStride
+        = operation == HIPBLAS_OP_N ? matrix.layout.stride(1) : 1;
+    const std::array<size_t, 3> batchCoordinates{0, 0, batch};
+    const ptrdiff_t offset = separateBatchStorage ? 0
+                                                  : matrix.layout.elementOffset(batchCoordinates);
+    return roc::host_numerics::Layout(
+        roc::host_numerics::Shape{rows, columns}, {rowStride, columnStride}, offset);
 }
 
 std::vector<hipblaslt::host_numerics::MatmulValidationCase::PointwiseTolerance>
@@ -2803,79 +2824,129 @@ void testing_matmul_with_bias(const Arguments&                                  
         {
             const auto& problem         = matmulProblems[gemmIdx];
             const auto& preparedProblem = preparedProblems[gemmIdx];
-            const auto  alpha           = preparedProblem.alpha;
-            const auto  beta            = preparedProblem.beta;
 
             computeTypeInterface scale{};
             set_compute_type_value_from_double(scale, 1, Talpha, TiA);
-            void* scaleAVec   = (arg.scaleA == hipblaslt_scaling_format::Scalar
-                               || arg.scaleA == hipblaslt_scaling_format::Vector)
-                                    ? hScaleA[gemmIdx].buf()
-                                    : (void*)(&scale);
-            void* scaleBVec   = (arg.scaleB == hipblaslt_scaling_format::Scalar
-                               || arg.scaleB == hipblaslt_scaling_format::Vector)
-                                    ? hScaleB[gemmIdx].buf()
-                                    : (void*)(&scale);
             void* scaleCValue = arg.scaleC ? hScaleC[gemmIdx].buf() : (void*)(&scale);
             void* scaleDValue = arg.scaleD ? hScaleD[gemmIdx].buf() : (void*)(&scale);
             void* scaleEValue = arg.scaleE ? hScaleE[gemmIdx].buf() : (void*)(&scale);
 
             bool const isScaleAMXFormat = isBlockScaling(arg.scaleA);
             bool const isScaleBMXFormat = isBlockScaling(arg.scaleB);
+            const bool pointerArrayMode = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
 
             for(int batchIdx = 0; batchIdx < problem.batchCount; batchIdx++)
             {
+                const auto batchLayout = [&](const hipblaslt::client::MatmulMatrix& matrix,
+                                             size_t                                 rows,
+                                             size_t                                 columns,
+                                             hipblasOperation_t                     operation,
+                                             bool                                   separateStorage) {
+                    return hostReferenceBatchLayout(matrix,
+                                                    rows,
+                                                    columns,
+                                                    operation,
+                                                    static_cast<size_t>(batchIdx),
+                                                    separateStorage);
+                };
+                const auto hostBufferTensor = [&](std::vector<HipHostBuffer>&          buffers,
+                                                  hipDataType                          type,
+                                                  const roc::host_numerics::Layout& layout,
+                                                  bool separateStorage) {
+                    const size_t bufferIndex
+                        = separateStorage ? static_cast<size_t>(batchIdx)
+                                          : static_cast<size_t>(gemmIdx);
+                    return buffers.at(bufferIndex).tensor(
+                        hipblaslt::host_numerics::scalarType(type), layout);
+                };
+                const auto decodedMxTensor = [&](const std::vector<float>& values,
+                                                 const roc::host_numerics::Layout& layout) {
+                    const size_t elementOffset
+                        = (layout.offset() < 0) ? 0 : static_cast<size_t>(layout.offset());
+                    const auto rebased = roc::host_numerics::Layout(
+                        layout.shape(),
+                        std::vector<ptrdiff_t>(layout.strides().begin(), layout.strides().end()));
+                    const size_t elements
+                        = roc::host_numerics::storageBytesForLayout(
+                              roc::host_numerics::ScalarType::Float32, rebased)
+                          / sizeof(float);
+                    return roc::host_numerics::Tensor::copyNativeStorage<float>(
+                        rebased, std::span<const float>(values).subspan(elementOffset, elements));
+                };
+
+                const auto aLayout = batchLayout(
+                    problem.a, problem.m, problem.k, problem.operationA, pointerArrayMode);
+                const auto bLayout = batchLayout(
+                    problem.b, problem.k, problem.n, problem.operationB, pointerArrayMode);
+                const auto cLayout = batchLayout(
+                    problem.c, problem.m, problem.n, HIPBLAS_OP_N, pointerArrayMode);
+                const auto dLayout = batchLayout(problem.d,
+                                                 problem.m,
+                                                 problem.n,
+                                                 HIPBLAS_OP_N,
+                                                 pointerArrayMode
+                                                     && !preparedProblem.epilogueEnabled);
+
+                roc::host_numerics::Tensor referenceA
+                    = isScaleAMXFormat
+                          ? decodedMxTensor(refA.at(gemmIdx), aLayout)
+                          : hostBufferTensor(hA, TiA, aLayout, pointerArrayMode);
+                roc::host_numerics::Tensor referenceB
+                    = isScaleBMXFormat
+                          ? decodedMxTensor(refB.at(gemmIdx), bLayout)
+                          : hostBufferTensor(hB, TiB, bLayout, pointerArrayMode);
+                roc::host_numerics::Tensor referenceC
+                    = hostBufferTensor(hC, TiC, cLayout, pointerArrayMode);
+                roc::host_numerics::Tensor referenceD
+                    = preparedProblem.epilogueEnabled
+                          ? hostBufferTensor(hD_gold_epl, Talpha, dLayout, false)
+                          : hostBufferTensor(hD_gold, To, dLayout, pointerArrayMode);
+
+                hipblaslt::host_numerics::MatmulReferenceInputs referenceInputs(
+                    std::move(referenceA),
+                    std::move(referenceB),
+                    std::move(referenceC),
+                    std::move(referenceD));
+                if(arg.scaleAlpha_vector)
+                {
+                    referenceInputs.alphaVector = hScaleAlphaVec.at(gemmIdx).tensor(
+                        hipblaslt::host_numerics::scalarType(Tc),
+                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                            roc::host_numerics::Shape{
+                                preparedProblem.scaleAlphaElements}));
+                }
+                if(arg.scaleA == hipblaslt_scaling_format::Scalar
+                   || arg.scaleA == hipblaslt_scaling_format::Vector)
+                {
+                    referenceInputs.scaleA = hScaleA.at(gemmIdx).tensor(
+                        hipblaslt::host_numerics::scalarType(Tc),
+                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                            roc::host_numerics::Shape{preparedProblem.a.scaleElements}));
+                }
+                if(arg.scaleB == hipblaslt_scaling_format::Scalar
+                   || arg.scaleB == hipblaslt_scaling_format::Vector)
+                {
+                    referenceInputs.scaleB = hScaleB.at(gemmIdx).tensor(
+                        hipblaslt::host_numerics::scalarType(Tc),
+                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                            roc::host_numerics::Shape{preparedProblem.b.scaleElements}));
+                }
+                if(arg.scaleC)
+                    referenceInputs.scaleC
+                        = hipblaslt::host_numerics::realOnlyScalarValue(scaleCValue, Tc);
+                if(arg.scaleD && !preparedProblem.epilogueEnabled)
+                    referenceInputs.scaleD
+                        = hipblaslt::host_numerics::scalarValue(scaleDValue, Tc);
+
+                (void)hipblaslt::host_numerics::referenceMatmulGemm(problem,
+                                                                    dataTypes,
+                                                                    preparedProblem,
+                                                                    std::move(referenceInputs),
+                                                                    arg.scaleA,
+                                                                    arg.scaleB);
+
                 if(preparedProblem.epilogueEnabled)
                 {
-                    // Note: for MX types, pass the reference float instead so there is
-                    //       no need to convert them to float in hipblaslt_reference_gemm
-                    hipblaslt::host_numerics::hipblaslt_reference_gemm({
-                        .operationA = transA,
-                        .operationB = transB,
-                        .rows       = problem.m,
-                        .columns    = problem.n,
-                        .reduction  = problem.k,
-                        .alpha      = alpha,
-                        .beta       = beta,
-                        .a          = isScaleAMXFormat
-                                          ? reinterpret_cast<char*>(refA[gemmIdx].data())
-                                       + problem.a.batchStride() * batchIdx
-                                             * realDataTypeSize(HIP_R_32F)
-                                          : hA[gemmIdx].as<char>()
-                                       + problem.a.batchStride() * batchIdx * realDataTypeSize(TiA),
-                        .b          = isScaleBMXFormat
-                                          ? reinterpret_cast<char*>(refB[gemmIdx].data())
-                                       + problem.b.batchStride() * batchIdx
-                                             * realDataTypeSize(HIP_R_32F)
-                                          : hB[gemmIdx].as<char>()
-                                       + problem.b.batchStride() * batchIdx * realDataTypeSize(TiB),
-                        .c          = hC[gemmIdx].as<char>()
-                             + problem.c.batchStride() * batchIdx * realDataTypeSize(TiC),
-                        .d = hD_gold_epl[gemmIdx].as<char>()
-                             + problem.d.batchStride() * batchIdx * realDataTypeSize(Talpha),
-                        .leadingDimensionA = problem.a.leadingDimension(),
-                        .leadingDimensionB = problem.b.leadingDimension(),
-                        .leadingDimensionC = problem.c.leadingDimension(),
-                        .leadingDimensionD = problem.d.leadingDimension(),
-                        .alphaVector
-                        = arg.scaleAlpha_vector ? hScaleAlphaVec[gemmIdx].as<char>() : nullptr,
-                        .scaleA            = scaleAVec,
-                        .scaleB            = scaleBVec,
-                        .scaleC            = scaleCValue,
-                        .scaleD            = &scale,
-                        .scaleAIsVector    = arg.scaleA == hipblaslt_scaling_format::Vector,
-                        .scaleBIsVector    = arg.scaleB == hipblaslt_scaling_format::Vector,
-                        .typeA             = isScaleAMXFormat ? HIP_R_32F : TiA,
-                        .typeB             = isScaleBMXFormat ? HIP_R_32F : TiB,
-                        .typeC             = TiC,
-                        .typeD             = Talpha,
-                        .coefficientType   = Tc,
-                        .computeInputTypeA = isScaleAMXFormat ? HIP_R_32F : TciA,
-                        .computeInputTypeB = isScaleBMXFormat ? HIP_R_32F : TciB,
-                        .scaleAIsMx        = isBlockScaling(arg.scaleA),
-                        .scaleBIsMx        = isBlockScaling(arg.scaleB),
-                    });
-
                     auto                        pos    = problem.d.batchStride() * batchIdx;
                     std::vector<HipHostBuffer>* hEInst = arg.gradient ? &hE : &hE_gold;
                     void*                       ePos
@@ -2995,105 +3066,6 @@ void testing_matmul_with_bias(const Arguments&                                  
                                        transB == HIPBLAS_OP_N ? 1 : problem.b.leadingDimension());
                         }
                     }
-                }
-                else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
-                {
-                    // Note: for MX types, pass the reference float instead so there is
-                    //       no need to convert them to float in hipblaslt_reference_gemm
-
-                    // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
-                    // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
-                    // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for
-                    // --batch_mode 1, the prepared A and B element counts are zero since A is MxK
-                    // and B is KxN. In this case, we pass the pointer arrays A and B as nullptr.
-                    // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
-                    // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for
-                    // General Batched GEMM happens before the alphaNonZero check.
-                    void* ptrA
-                        = firstPreparedProblem.a.elements ? hA[batchIdx].as<char>() : nullptr;
-                    void* ptrB
-                        = firstPreparedProblem.b.elements ? hB[batchIdx].as<char>() : nullptr;
-                    hipblaslt::host_numerics::hipblaslt_reference_gemm({
-                        .operationA        = transA,
-                        .operationB        = transB,
-                        .rows              = problem.m,
-                        .columns           = problem.n,
-                        .reduction         = problem.k,
-                        .alpha             = alpha,
-                        .beta              = beta,
-                        .a                 = ptrA,
-                        .b                 = ptrB,
-                        .c                 = hC[batchIdx].as<char>(),
-                        .d                 = hD_gold[batchIdx].as<char>(),
-                        .leadingDimensionA = problem.a.leadingDimension(),
-                        .leadingDimensionB = problem.b.leadingDimension(),
-                        .leadingDimensionC = problem.c.leadingDimension(),
-                        .leadingDimensionD = problem.d.leadingDimension(),
-                        .scaleA            = scaleAVec,
-                        .scaleB            = scaleBVec,
-                        .scaleC            = scaleCValue,
-                        .scaleD            = scaleDValue,
-                        .scaleAIsVector    = arg.scaleA == hipblaslt_scaling_format::Vector,
-                        .scaleBIsVector    = arg.scaleB == hipblaslt_scaling_format::Vector,
-                        .typeA             = isScaleAMXFormat ? HIP_R_32F : TiA,
-                        .typeB             = isScaleBMXFormat ? HIP_R_32F : TiB,
-                        .typeC             = TiC,
-                        .typeD             = To,
-                        .coefficientType   = Tc,
-                        .computeInputTypeA = isScaleAMXFormat ? HIP_R_32F : TciA,
-                        .computeInputTypeB = isScaleBMXFormat ? HIP_R_32F : TciB,
-                        .scaleAIsMx        = isBlockScaling(arg.scaleA),
-                        .scaleBIsMx        = isBlockScaling(arg.scaleB),
-                    });
-                }
-                else
-                {
-                    // Note: for MX types, pass the reference float instead so there is
-                    //       no need to convert them to float in hipblaslt_reference_gemm
-                    hipblaslt::host_numerics::hipblaslt_reference_gemm({
-                        .operationA = transA,
-                        .operationB = transB,
-                        .rows       = problem.m,
-                        .columns    = problem.n,
-                        .reduction  = problem.k,
-                        .alpha      = alpha,
-                        .beta       = beta,
-                        .a          = isScaleAMXFormat
-                                          ? reinterpret_cast<char*>(refA[gemmIdx].data())
-                                       + problem.a.batchStride() * batchIdx
-                                             * realDataTypeSize(HIP_R_32F)
-                                          : hA[gemmIdx].as<char>()
-                                       + problem.a.batchStride() * batchIdx * realDataTypeSize(TiA),
-                        .b          = isScaleBMXFormat
-                                          ? reinterpret_cast<char*>(refB[gemmIdx].data())
-                                       + problem.b.batchStride() * batchIdx
-                                             * realDataTypeSize(HIP_R_32F)
-                                          : hB[gemmIdx].as<char>()
-                                       + problem.b.batchStride() * batchIdx * realDataTypeSize(TiB),
-                        .c          = hC[gemmIdx].as<char>()
-                             + problem.c.batchStride() * batchIdx * realDataTypeSize(TiC),
-                        .d = hD_gold[gemmIdx].as<char>()
-                             + problem.d.batchStride() * batchIdx * realDataTypeSize(To),
-                        .leadingDimensionA = problem.a.leadingDimension(),
-                        .leadingDimensionB = problem.b.leadingDimension(),
-                        .leadingDimensionC = problem.c.leadingDimension(),
-                        .leadingDimensionD = problem.d.leadingDimension(),
-                        .scaleA            = scaleAVec,
-                        .scaleB            = scaleBVec,
-                        .scaleC            = scaleCValue,
-                        .scaleD            = scaleDValue,
-                        .scaleAIsVector    = arg.scaleA == hipblaslt_scaling_format::Vector,
-                        .scaleBIsVector    = arg.scaleB == hipblaslt_scaling_format::Vector,
-                        .typeA             = isScaleAMXFormat ? HIP_R_32F : TiA,
-                        .typeB             = isScaleBMXFormat ? HIP_R_32F : TiB,
-                        .typeC             = TiC,
-                        .typeD             = To,
-                        .coefficientType   = Tc,
-                        .computeInputTypeA = isScaleAMXFormat ? HIP_R_32F : TciA,
-                        .computeInputTypeB = isScaleBMXFormat ? HIP_R_32F : TciB,
-                        .scaleAIsMx        = isBlockScaling(arg.scaleA),
-                        .scaleBIsMx        = isBlockScaling(arg.scaleB),
-                    });
                 }
             }
         }
