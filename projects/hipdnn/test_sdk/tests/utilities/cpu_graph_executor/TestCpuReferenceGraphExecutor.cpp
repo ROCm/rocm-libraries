@@ -432,7 +432,8 @@ public:
     }
 
     static void runLayernormBackwardTest(
-        hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+        hipdnn_flatbuffers_sdk::data_objects::DataType dyDataType,
+        hipdnn_flatbuffers_sdk::data_objects::DataType dxDataType,
         hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
         hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVarianceDataType,
         hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
@@ -440,7 +441,8 @@ public:
         const unsigned int seed = getGlobalTestSeed();
         const std::vector<int64_t> dims = {1, 3, 14, 14};
 
-        auto graph = buildLayernormBpropGraph(inputDataType,
+        auto graph = buildLayernormBpropGraph(dyDataType,
+                                              dxDataType,
                                               scaleBiasDataType,
                                               meanInvVarianceDataType,
                                               computeDataType,
@@ -994,17 +996,20 @@ TEST(TestCpuReferenceGraphExecutor, LayernormAllBFloat16)
 TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllFloats)
 {
     TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 }
 TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllHalfs)
 {
     TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
-        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF);
+        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF);
 }
 TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllBFloat16)
 {
-    TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
-        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+    TestCpuReferenceGraphExecutor::runLayernormBackwardTest(DataType::BFLOAT16,
+                                                            DataType::BFLOAT16,
+                                                            DataType::BFLOAT16,
+                                                            DataType::BFLOAT16,
+                                                            DataType::BFLOAT16);
 }
 
 TEST(TestCpuReferenceGraphExecutor, RMSNormAllFloats)

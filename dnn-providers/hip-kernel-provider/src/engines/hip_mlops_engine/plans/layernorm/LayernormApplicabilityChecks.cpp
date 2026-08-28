@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <unordered_map>
 #include <unordered_set>
 
 #include "LayernormApplicabilityChecks.hpp"
@@ -243,6 +242,34 @@ void LayernormValidator::checkTensorConfigSupported(
     ioAndStatTensorIds.insert(ioAndStatTensorIds.end(), statTensorIds.begin(), statTensorIds.end());
 
     checkTensorLayoutsAndDimsSupported(ioAndStatTensorIds);
+    checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
+    validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
+    checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
+}
+
+void LayernormValidator::checkTensorConfigSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes& lnAttr)
+{
+    const std::vector<int64_t> ioTensorIds
+        = {lnAttr.dy_tensor_uid(), lnAttr.x_tensor_uid(), lnAttr.dx_tensor_uid()};
+    const std::vector<int64_t> affineTensorIds
+        = {lnAttr.scale_tensor_uid(), lnAttr.dscale_tensor_uid(), lnAttr.dbias_tensor_uid()};
+    std::vector<int64_t> statTensorIds;
+    if(lnAttr.mean_tensor_uid().has_value())
+    {
+        statTensorIds.push_back(lnAttr.mean_tensor_uid().value());
+    }
+    if(lnAttr.inv_variance_tensor_uid().has_value())
+    {
+        statTensorIds.push_back(lnAttr.inv_variance_tensor_uid().value());
+    }
+    std::vector<int64_t> epsilonTensorIds;
+    if(lnAttr.epsilon_tensor_uid().has_value())
+    {
+        epsilonTensorIds.push_back(lnAttr.epsilon_tensor_uid().value());
+    }
+
+    checkTensorLayoutsAndDimsSupported(ioTensorIds);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
     validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
