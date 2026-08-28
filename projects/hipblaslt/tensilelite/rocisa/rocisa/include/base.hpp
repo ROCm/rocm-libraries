@@ -69,6 +69,17 @@ namespace rocisa
         std::map<std::string, bool> asm_bugs;
     };
 
+    // Read a cap value, returning `defaultValue` for an absent key; some caps are
+    // absent (e.g. counter caps on archs without the matching wait op, or before
+    // init()), so std::map::at() would throw here.
+    inline int capOrDefault(const std::map<std::string, int>& caps,
+                            const std::string&                key,
+                            int                                defaultValue = 0)
+    {
+        auto it = caps.find(key);
+        return it != caps.end() ? it->second : defaultValue;
+    }
+
     class rocIsa
     {
     public:
@@ -134,17 +145,17 @@ namespace rocisa
             return m_isainfo[isaVersion];
         }
 
-        std::map<std::string, int> getAsmCaps()
+        const std::map<std::string, int>& getAsmCaps()
         {
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].asm_caps;
         }
 
-        std::map<std::string, int> getRegCaps()
+        const std::map<std::string, int>& getRegCaps()
         {
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].reg_caps;
         }
 
-        std::map<std::string, int> getArchCaps()
+        const std::map<std::string, int>& getArchCaps()
         {
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].arch_caps;
         }
@@ -233,17 +244,17 @@ namespace rocisa
             return nullptr;
         }
 
-        std::map<std::string, int> getAsmCaps() const
+        const std::map<std::string, int>& getAsmCaps() const
         {
             return rocIsa::getInstance().getAsmCaps();
         }
 
-        std::map<std::string, int> getRegCaps() const
+        const std::map<std::string, int>& getRegCaps() const
         {
             return rocIsa::getInstance().getRegCaps();
         }
 
-        std::map<std::string, int> getArchCaps() const
+        const std::map<std::string, int>& getArchCaps() const
         {
             return rocIsa::getInstance().getArchCaps();
         }

@@ -5,7 +5,6 @@ cmake_minimum_required( VERSION 3.15 )
 
 #Add a name for the rocm-libraries location
 set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../")
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (POLICY CMP0074)
   cmake_policy(SET CMP0074 NEW)
@@ -33,6 +32,7 @@ macro(set_if_bools_are_different var in1 in2)
 endmacro()
 
 get_property(MIOPEN_GENERATOR_IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.
 if(MIOPEN_GENERATOR_IS_MULTI_CONFIG)
@@ -144,6 +144,21 @@ option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIO
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
 
+# Gate for the MIOpen public/private library split. When ON, libMIOpen.so is built
+# as a thin public wrapper forwarding to a private implementation library
+# (libMIOpen_private.so); when OFF (the default), a single libMIOpen.so is produced
+# whose public ABI is unchanged from the pre-wrapper baseline. All of the split
+# machinery is compiled only when this flag is ON.
+option(MIOPEN_ENABLE_HIPDNN_WRAPPER
+    "Build MIOpen as a public wrapper over a private implementation, with optional forwarding to hipDNN."
+    OFF)
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    message(STATUS
+        "MIOPEN_ENABLE_HIPDNN_WRAPPER: ENABLED - building libMIOpen.so as a public "
+        "wrapper over libMIOpen_private.so. The wrapper is an unconditional "
+        "pass-through; runtime forwarding to hipDNN is not implemented yet.")
+endif()
+
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
 if(MIOPEN_INCBIN)
     enable_language(ASM)
@@ -155,7 +170,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.6.0)
+rocm_setup_version(VERSION 3.6.1)
 
 include(TargetFlags)
 
@@ -273,6 +288,9 @@ option(MIOPEN_CK_UNBUNDLE_PER_ARCH
     OFF)
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
 message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
+
+option(MIOPEN_USE_HIPCONV "Enable MIOpen to use vendored hipconv convolution kernels" On)
+message(STATUS "Enable hipconv: ${MIOPEN_USE_HIPCONV}")
 
 set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU"))
 option(MIOPEN_USE_COMGR "Use comgr to build kernels instead of offline tools" ${MIOPEN_USE_COMGR_DEFAULT})
@@ -726,7 +744,7 @@ endfunction()
 # The default behaviour when no list of AMDGPU targets is supplied should be to
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1201)
+set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1151 gfx1200 gfx1201)
 set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
@@ -812,6 +830,7 @@ enable_cppcheck(
         # Ignore initializer lists in the tests
         useInitializationList:*test/*.cpp
         *:*src/sqlite/*.cpp
+        *:*src/hipconv/*
         *:*.cl
         *:*src/kernels/*.h
         # These are HIP kernel files compiled at runtime with -D defines; cppcheck

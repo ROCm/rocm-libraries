@@ -58,6 +58,14 @@ set(BUILD_SHARED_LIBS ON)
 
 project(hiptensor)
 
+# Enable the RC language so the Windows version resource (version.rc) is compiled.
+# Visual Studio generators handle .rc natively, but the Ninja/Makefile generators
+# TheRock uses with clang on Windows need RC enabled to configure CMAKE_RC_COMPILER
+# (llvm-rc).
+if(WIN32)
+    enable_language(RC)
+endif()
+
 # Set ROCM_LIBRARIES_ROOT if not already set (for monorepo builds vs standalone)
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
     set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
@@ -74,7 +82,6 @@ set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -O2 -DNDEBUG") # c
 
 # Project options
 if(CMAKE_PROJECT_NAME STREQUAL "hiptensor")
-    option(HIPTENSOR_DISABLE_DEVICE "Build hipTensor without device backend." OFF)
     option(HIPTENSOR_BUILD_TESTS "Build hiptensor tests" ON)
     option(HIPTENSOR_BUILD_SAMPLES "Build hiptensor samples" ON)
     option(HIPTENSOR_BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
@@ -151,30 +158,19 @@ endif()
 # default cached variable GPU_TARGET to "gfx900;gfx906;gfx908", where not all archs are compatible with MFMA instructions
 #
 # By rule, once cached variable is set, it cannot be overridden unless we use the FORCE option
-#
-# Three cases are distinguished here:
-#   * GPU_TARGETS / AMDGPU_TARGETS unset      -> fall back to DEFAULT_GPU_TARGETS
-#   * set to a non-empty list                 -> honor it
-#   * explicitly set to an empty string       -> no supported architecture is available for this configuration;
-#                                                build with stub implementation.
 if(GPU_TARGETS)
     set(GPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 elseif(AMDGPU_TARGETS)
     set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
     message(DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
 elseif(DEFINED GPU_TARGETS OR DEFINED AMDGPU_TARGETS)
-    # When hipTensor is configured for an architecture set that resolves to no GPU
-    # targets, the device libraries and their Composable Kernel dependency cannot
-    # be built. This option is turned on automatically so the library is still built
-    # with a stub implementation where HIPTENSOR_STATUS_NOT_SUPPORTED is returned
-    # for any call to device operations.
-    set(HIPTENSOR_DISABLE_DEVICE ON)
-    message(WARNING "GPU_TARGETS is empty; hipTensor stub libraries will be built. No device operation supported.")
+    message(FATAL_ERROR
+    "GPU_TARGETS resolved to an empty list. hipTensor requires at least one "
+    "supported GPU target; set -DGPU_TARGETS=<target gfx> (e.g. -DGPU_TARGETS=gfx942).")
 else()
     set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 endif()
 message(STATUS "GPU_TARGETS=${GPU_TARGETS}")
-message(STATUS "HIPTENSOR_DISABLE_DEVICE=${HIPTENSOR_DISABLE_DEVICE}")
 
 if(HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR)
     add_compile_definitions(HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=1)
@@ -206,11 +202,6 @@ if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600140090)
     message(STATUS "Adding the enable-post-misched=0 compiler flag")
     add_compile_options("SHELL: -mllvm -enable-post-misched=0")
 endif()
-if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
-    message(STATUS "Adding -amdgpu-early-inline-all=true and -amdgpu-function-calls=false")
-    add_compile_options("SHELL: -mllvm -amdgpu-early-inline-all=true")
-    add_compile_options("SHELL: -mllvm -amdgpu-function-calls=false")
-endif()
 
 if(HIPTENSOR_CODE_COVERAGE)
     add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
@@ -220,45 +211,29 @@ endif()
 # disable warning about 'amdgpu-waves-per-eu'
 add_compile_options(-Wno-pass-failed)
 
-# Define the stub helpers
-add_subdirectory(library/stub)
+find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
+rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
 
-if(NOT HIPTENSOR_DISABLE_DEVICE)
-    find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
-    rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
+# Configure library build
+add_subdirectory(library/src)
 
-    # Configure library build
-    add_subdirectory(library/src)
-
-    # Configure testing setup
-    if(HIPTENSOR_BUILD_TESTS OR HIPTENSOR_BUILD_SAMPLES)
-        enable_testing()
-        rocm_package_setup_component(clients)
-    endif()
-
-    # Configure tests build
-    if(HIPTENSOR_BUILD_TESTS)
-        rocm_package_setup_client_component(tests)
-        add_subdirectory(test)
-    endif()
-
-    # Configure clients build
-    if(HIPTENSOR_BUILD_SAMPLES)
-        rocm_package_setup_client_component(samples)
-        add_subdirectory(samples)
-    endif()
-else()
-    # No supported GPU target is available for this configuration, so the device
-    # library (and its Composable Kernel dependency) cannot be built. Build a
-    # host-only stub library that implements the full public API but reports
-    # HIPTENSOR_STATUS_NOT_SUPPORTED for every entry point. This keeps the
-    # package and its headers available so downstream find_package(hiptensor)
-    # and linking keep working, while giving callers a well-defined runtime error.
-    create_hiptensor_stub_library()
+# Configure testing setup
+if(HIPTENSOR_BUILD_TESTS OR HIPTENSOR_BUILD_SAMPLES)
+    enable_testing()
+    rocm_package_setup_component(clients)
 endif()
 
-# Guarantee, at build time, that the stub implements the entire public API.
-hiptensor_add_stub_api_coverage_check()
+# Configure tests build
+if(HIPTENSOR_BUILD_TESTS)
+    rocm_package_setup_client_component(tests)
+    add_subdirectory(test)
+endif()
+
+# Configure clients build
+if(HIPTENSOR_BUILD_SAMPLES)
+    rocm_package_setup_client_component(samples)
+    add_subdirectory(samples)
+endif()
 
 # Versioning via rocm-cmake
 set (VERSION_STRING "2.4.0")
@@ -267,6 +242,33 @@ rocm_setup_version(VERSION ${VERSION_STRING})
 # Configure a header file to pass the CMake version settings to the source
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h.in"
                "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h")
+
+# Configure Windows version resource file so hiptensor.dll exposes file metadata
+# (File description, version, product name, copyright) in Explorer properties.
+if(WIN32)
+    # Git is optional: a source tarball build (or a machine without Git) must not
+    # fail here. Fall back to "unknown" for the commit id.
+    set(hiptensor_VERSION_COMMIT_ID "unknown")
+
+    find_package(Git QUIET)
+    if(Git_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" log -1 --format=%H .
+            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _hiptensor_commit_id
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _hiptensor_git_result
+            ERROR_QUIET
+        )
+        if(_hiptensor_git_result EQUAL 0 AND _hiptensor_commit_id)
+            set(hiptensor_VERSION_COMMIT_ID "${_hiptensor_commit_id}")
+        endif()
+    endif()
+
+    string(TIMESTAMP HIPTENSOR_COPYRIGHT_YEAR "%Y")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
 
 # Define package dependencies for export
 set(PACKAGE_DEPENDS
