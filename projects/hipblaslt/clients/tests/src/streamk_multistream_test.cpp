@@ -277,36 +277,40 @@ namespace
     }
 
     // A handle owns a fixed number of Stream-K flag blocks, one per distinct
-    // stream, claimed on that stream's first matmul and held until the handle
-    // is destroyed. Past that the library reports an error.
+    // stream, claimed on that stream's first flag-reading matmul and held until
+    // the handle is destroyed. Past that there is no private block left.
     //
-    // Refusing is the deliberate choice: handing back an already-claimed block
-    // would put two streams back on shared flags, which is the deadlock this
-    // separation exists to prevent, and the caller would be told everything
-    // succeeded while a workgroup spins forever. This test pins that contract
-    // down so it cannot quietly regress to sharing.
+    // Running out is not an error. The launch keeps the shared region every
+    // Stream-K kernel used before these blocks existed, so it loses the
+    // isolation guarantee and nothing else -- and a stream running on its own,
+    // which is the case here, never needed it. Refusing instead would turn a
+    // working call into a failure on a handle that had merely been alive long
+    // enough, since blocks are never given back.
     //
     // Raising c_syncSkStreamSlots is a fine thing to do; it just has to be
     // matched here.
     constexpr int kStreamCapacity = 64;
+    constexpr int kStreamsPastCapacity = 8;
 
-    TEST(StreamKMultiStream, StreamsBeyondCapacityAreRejected)
+    // bf16 bit patterns. Operands of 1.0 over K = 4096 give exactly 4096.0,
+    // which bf16 holds without rounding, so the check is an equality.
+    constexpr uint16_t kBf16One      = 0x3F80;
+    constexpr uint16_t kBf16Expected = 0x4580;
+    constexpr uint16_t kBf16Poison   = 0xFFC0;
+
+    TEST(StreamKMultiStream, StreamsBeyondCapacityStillRun)
     {
         if(!gpuAvailable())
             GTEST_SKIP() << "No GPU available";
 
-        // A block is claimed on any matmul, not only a Stream-K one, so this
-        // can stay small and fast.
-        constexpr int64_t m = 1024, n = 1024, k = 1024;
-
         Resources r;
         ASSERT_EQ(hipblasLtCreate(&r.handle), HIPBLAS_STATUS_SUCCESS);
 
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layA, HIP_R_16BF, m, k, m),
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layA, HIP_R_16BF, kM, kK, kM),
                   HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layB, HIP_R_16BF, k, n, k),
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layB, HIP_R_16BF, kK, kN, kK),
                   HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layD, HIP_R_16BF, m, n, m),
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layD, HIP_R_16BF, kM, kN, kM),
                   HIPBLAS_STATUS_SUCCESS);
 
         ASSERT_EQ(hipblasLtMatmulDescCreate(&r.desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
@@ -314,6 +318,14 @@ namespace
         const hipblasOperation_t opN = HIPBLAS_OP_N;
         hipblasLtMatmulDescSetAttribute(r.desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN));
         hipblasLtMatmulDescSetAttribute(r.desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
+        // Same Stream-K remainder path as the test above: only a solution that
+        // reads the flags claims a block, so this is what puts the capacity
+        // under pressure at all.
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(r.desc,
+                                                  HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                  &kSmCountTarget,
+                                                  sizeof(kSmCountTarget)),
+                  HIPBLAS_STATUS_SUCCESS);
 
         ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&r.pref), HIPBLAS_STATUS_SUCCESS);
         const uint64_t wsBudget = kWsBudgetBytes;
@@ -334,65 +346,90 @@ namespace
                                                   &returned),
                   HIPBLAS_STATUS_SUCCESS);
         if(returned == 0)
-            GTEST_SKIP() << "No solution for " << m << "x" << n << "x" << k << " on this device";
+            GTEST_SKIP() << "No solution for " << kM << "x" << kN << "x" << kK << " on this device";
 
-        const size_t bytesA  = static_cast<size_t>(m * k) * sizeof(uint16_t);
-        const size_t bytesB  = static_cast<size_t>(k * n) * sizeof(uint16_t);
-        const size_t bytesD  = static_cast<size_t>(m * n) * sizeof(uint16_t);
+        const size_t elemsA  = static_cast<size_t>(kM * kK);
+        const size_t elemsB  = static_cast<size_t>(kK * kN);
+        const size_t elemsD  = static_cast<size_t>(kM * kN);
         const size_t bytesWs = heuristic.workspaceSize;
 
         void* ws = nullptr;
-        if(hipMalloc(&r.dA, bytesA) != hipSuccess || hipMalloc(&r.dB, bytesB) != hipSuccess
+        void* d  = nullptr;
+        if(hipMalloc(&r.dA, elemsA * sizeof(uint16_t)) != hipSuccess
+           || hipMalloc(&r.dB, elemsB * sizeof(uint16_t)) != hipSuccess
+           || hipMalloc(&d, elemsD * sizeof(uint16_t)) != hipSuccess
            || (bytesWs > 0 && hipMalloc(&ws, bytesWs) != hipSuccess))
+        {
+            static_cast<void>(hipFree(d));
             GTEST_SKIP() << "Insufficient device memory";
+        }
+        r.dD.push_back(d);
         r.dWs.push_back(ws);
-        static_cast<void>(hipMemset(r.dA, 0, bytesA));
-        static_cast<void>(hipMemset(r.dB, 0, bytesB));
 
-        // One extra stream to step past the capacity, and one D per stream so
-        // concurrent launches are not racing each other's output.
-        const int total = kStreamCapacity + 1;
+        const std::vector<uint16_t> hostA(elemsA, kBf16One);
+        const std::vector<uint16_t> hostB(elemsB, kBf16One);
+        ASSERT_EQ(hipMemcpy(r.dA, hostA.data(), elemsA * sizeof(uint16_t), hipMemcpyHostToDevice),
+                  hipSuccess);
+        ASSERT_EQ(hipMemcpy(r.dB, hostB.data(), elemsB * sizeof(uint16_t), hipMemcpyHostToDevice),
+                  hipSuccess);
+
+        // One at a time, so no two of these ever share the region concurrently.
+        // That is the case the fallback is safe for, and the one a handle that
+        // has simply seen many streams over its life is in.
+        const int total = kStreamCapacity + kStreamsPastCapacity;
         for(int i = 0; i < total; ++i)
         {
-            void* d = nullptr;
-            if(hipMalloc(&d, bytesD) != hipSuccess)
-                GTEST_SKIP() << "Insufficient device memory for " << total << " outputs";
-            r.dD.push_back(d);
-
             hipStream_t s = nullptr;
             if(hipStreamCreate(&s) != hipSuccess)
                 GTEST_SKIP() << "Could not create " << total << " streams";
             r.streams.push_back(s);
         }
 
-        const float alpha = 1.0f, beta = 0.0f;
+        std::vector<uint16_t>       hostD(elemsD);
+        const std::vector<uint16_t> poison(elemsD, kBf16Poison);
+        const float                 alpha = 1.0f, beta = 0.0f;
         for(int i = 0; i < total; ++i)
         {
-            const hipblasStatus_t status = hipblasLtMatmul(r.handle,
-                                                           r.desc,
-                                                           &alpha,
-                                                           r.dA,
-                                                           r.layA,
-                                                           r.dB,
-                                                           r.layB,
-                                                           &beta,
-                                                           r.dD[i],
-                                                           r.layD,
-                                                           r.dD[i],
-                                                           r.layD,
-                                                           &heuristic.algo,
-                                                           r.dWs[0],
-                                                           bytesWs,
-                                                           r.streams[i]);
-            if(i < kStreamCapacity)
-                EXPECT_EQ(status, HIPBLAS_STATUS_SUCCESS)
-                    << "stream " << i << " is within the " << kStreamCapacity
-                    << "-block capacity and should have been served";
-            else
-                EXPECT_EQ(status, HIPBLAS_STATUS_INTERNAL_ERROR)
-                    << "stream " << i << " is past the " << kStreamCapacity
-                    << "-block capacity, so it must be refused rather than handed a block "
-                       "another stream already owns";
+            ASSERT_EQ(hipMemcpy(r.dD[0],
+                                poison.data(),
+                                elemsD * sizeof(uint16_t),
+                                hipMemcpyHostToDevice),
+                      hipSuccess);
+
+            ASSERT_EQ(hipblasLtMatmul(r.handle,
+                                      r.desc,
+                                      &alpha,
+                                      r.dA,
+                                      r.layA,
+                                      r.dB,
+                                      r.layB,
+                                      &beta,
+                                      r.dD[0],
+                                      r.layD,
+                                      r.dD[0],
+                                      r.layD,
+                                      &heuristic.algo,
+                                      r.dWs[0],
+                                      bytesWs,
+                                      r.streams[i]),
+                      HIPBLAS_STATUS_SUCCESS)
+                << "stream " << i << " of " << total << " was refused; past the "
+                << kStreamCapacity
+                << "-block capacity the library must fall back to the shared region, not fail";
+            ASSERT_EQ(hipStreamSynchronize(r.streams[i]), hipSuccess)
+                << "stream " << i << " did not drain";
+
+            ASSERT_EQ(hipMemcpy(hostD.data(),
+                                r.dD[0],
+                                elemsD * sizeof(uint16_t),
+                                hipMemcpyDeviceToHost),
+                      hipSuccess);
+            size_t wrong = 0;
+            for(size_t e = 0; e < elemsD; ++e)
+                if(hostD[e] != kBf16Expected)
+                    ++wrong;
+            ASSERT_EQ(wrong, 0u) << "stream " << i << " of " << total << " produced " << wrong
+                                 << " wrong elements of " << elemsD;
         }
 
         EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);

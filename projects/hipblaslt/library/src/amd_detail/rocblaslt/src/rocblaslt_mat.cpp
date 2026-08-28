@@ -172,16 +172,6 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
         workspaceSizeInBytes = std::min<size_t>(workspaceSizeInBytes, algo->max_workspace_bytes);
     }
 
-    void*                  streamKFlags = nullptr;
-    const rocblaslt_status skStatus     = handle->streamKFlagsForStream(stream, 0, &streamKFlags);
-    if(skStatus != rocblaslt_status_success)
-    {
-        log_error(__func__,
-                  "no Stream-K flag region left: this handle has already handed one to "
-                  "c_syncSkStreamSlots distinct streams");
-        return skStatus;
-    }
-
     RocblasltContractionProblem problem{opA,
                                         opB,
                                         m,
@@ -249,7 +239,6 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
-    problem.streamKFlags = streamKFlags;
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 

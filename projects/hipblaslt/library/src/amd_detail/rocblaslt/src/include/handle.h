@@ -195,23 +195,21 @@ struct _rocblaslt_handle
         = c_syncSkStreamSlots * c_syncSkSlotsPerStream * c_syncSkSlotElements;
 
     // Hands back the Stream-K flag region reserved for (`stream`,
-    // `problemIndex`) in `out`. Blocks are claimed lock-free; the scan is over
-    // at most c_syncSkStreamSlots entries and hits on the first comparison once
-    // a stream owns its block.
+    // `problemIndex`) in `out`, or null when there is none. Blocks are claimed
+    // lock-free; the scan is over at most c_syncSkStreamSlots entries and hits
+    // on the first comparison once a stream owns its block.
     //
-    // Returns rocblaslt_status_internal_error once every block is taken, or for
-    // a problem index past the block. Handing back a shared region instead would
-    // silently reintroduce the cross-stream deadlock this separation exists to
-    // prevent, and the caller would report success while a workgroup spins
-    // forever.
-    rocblaslt_status streamKFlagsForStream(hipStream_t stream, size_t problemIndex, void** out)
+    // Null covers every "no region" case alike - no buffer, a problem index
+    // past the block, every block taken - and means only "no private region",
+    // never "the call must fail". A shared region is never handed back under
+    // that name: doing so would silently reintroduce the cross-stream deadlock
+    // this separation exists to prevent. Callers leave the shared GSU region
+    // bound instead, which is what they did before these blocks existed.
+    void streamKFlagsForStream(hipStream_t stream, size_t problemIndex, void** out)
     {
         *out = nullptr;
-        if(StreamKFlags == nullptr)
-            return rocblaslt_status_success;
-
-        if(problemIndex >= c_syncSkSlotsPerStream)
-            return rocblaslt_status_internal_error;
+        if(StreamKFlags == nullptr || problemIndex >= c_syncSkSlotsPerStream)
+            return;
 
         // hipStreamPerThread is a sentinel that resolves to a different stream
         // for every host thread, so every thread would present the same key and
@@ -250,11 +248,9 @@ struct _rocblaslt_handle
             {
                 *out = static_cast<char*>(StreamKFlags)
                        + (i * c_syncSkSlotsPerStream + problemIndex) * c_syncSkSlotBytes;
-                return rocblaslt_status_success;
+                return;
             }
         }
-
-        return rocblaslt_status_internal_error;
     }
 
     // Value-initialised so every block starts unowned.
