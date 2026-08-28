@@ -37,7 +37,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
   VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toF16, VCvtF32toI32, \
   VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
-  VFmaF32, VFmaF64, VFmaPKF32, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
+  VFmaF32, VFmaF64, VFmaPKF32, VFmaMixF32, VAndB32, VXorB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
   VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
 from rocisa.functions import scalarUInt32DivideAndRemainder, vectorStaticMultiply
@@ -1753,6 +1753,19 @@ class GlobalWriteBatchWriter:
     fusedA2APushPass = bool(self.kernel["ProblemType"]["FusedGemmA2A"]) and \
                        self.parentWriter.states.fusedA2ADispatchMode == "PUSH"
 
+    # f8 wave32 partner-merge: merge lane l (M..M+7) with lane l^16 (M+8..M+15, same N) into one
+    # buffer_store_b128. bpeCexternal==GSU1 excludes the GSU-MultipleBuffer workspace-f32 emission.
+    waveContigF8Merge = (
+      self.kernel.get("WaveContiguousOutput")
+      and not self.kernel.get("UseSubtileImpl")
+      and not self.edge
+      and self.kernel["WavefrontSize"] == 32
+      and self.kernel["ProblemType"]["DestDataType"].is8bitFloat()
+      and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
+      and self.kernel["BufferStore"]
+      and not self.kernel["StoreRemapVectorWidth"]
+      and self.parentWriter.states.bpeCexternal == self.parentWriter.states.bpeCexternalGSU1
+    )
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
         "UseSubtileImpl 16bit optimized store requires BufferStore=1"
@@ -2421,12 +2434,15 @@ class GlobalWriteBatchWriter:
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpInrSgpr, self.laneSGPRC), "apply exec mask"))
             self._epilogScratchFree(tmpInrSgpr)
           # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
-          # An EDGE batch under fused A2A takes this path (is16bitSubtile requires not
-          # self.edge), so it needs the same sc1 as the subtile path above.
-          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
-                                                   overrideAfterPrimerRows=_emitOverrideRows, comment="store D",
-                                                   forceSlc=fusedA2APushPass)
-          storeCodeModule.add(tmpStoreCode)
+          if waveContigF8Merge:
+            storeCodeModule.add(self._emitF8PartnerMergeStore(addrCalc, sumIdx))
+          else:
+            # An EDGE batch under fused A2A takes this path (is16bitSubtile requires not
+            # self.edge), so it needs the same sc1 as the subtile path above.
+            tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
+                                                     overrideAfterPrimerRows=_emitOverrideRows, comment="store D",
+                                                     forceSlc=fusedA2APushPass)
+            storeCodeModule.add(tmpStoreCode)
           if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
           if skipLabel is not None:
@@ -3898,6 +3914,45 @@ class GlobalWriteBatchWriter:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
 
     self._epilogScratchFree(tmpInrSgpr)
+    return module
+
+  def _emitF8PartnerMergeStore(self, addrCalc, sumIdx: int) -> Module:
+    """Merge lane l's 8 f8 M-rows with partner lane l^16's (M+8..M+15, same N) into one
+    buffer_store_b128 from the even lane-group. Packed f8 for this element is at abs vgpr sumIdx."""
+    module = Module("F8PartnerMergeStore")
+    kw      = self.parentWriter
+    wsBits  = self.kernel["WavefrontSize"] - 1
+    isGlc = isSlc = isNT = False
+
+    # Replicate addStore's SRD row advance (optSingleColVgpr shared column pointer).
+    if self.ss.optSrdIncForRow and addrCalc.rowInc:
+      module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01))
+
+    srcLo, srcHi = vgpr(sumIdx + 0), vgpr(sumIdx + 1)
+    # Batch-setup scratch (low VGPR bank, avoids gfx1250 high-vgpr MSB banking across ds_bpermute).
+    vPack     = self.cvtVgprStruct.vgprF8MergePack
+    vPermAddr = self.cvtVgprStruct.vgprF8MergePermAddr
+
+    module.add(VAndB32(dst=vgpr(vPermAddr), src0=wsBits, src1=vgpr("Serial"), comment="lane_id"))
+    module.add(VXorB32(dst=vgpr(vPermAddr), src0=16, src1=vgpr(vPermAddr), comment="partner = lane ^ 16"))
+    module.add(VLShiftLeftB32(dst=vgpr(vPermAddr), shiftHex=2, src=vgpr(vPermAddr), comment="* 4 = ds_bpermute byte addr"))
+
+    module.add(VMovB32(dst=vgpr(vPack + 0), src=srcLo, comment="own M..M+3"))
+    module.add(VMovB32(dst=vgpr(vPack + 1), src=srcHi, comment="own M+4..M+7"))
+    module.add(DSBPermuteB32(dst=vgpr(vPack + 2), src0=vgpr(vPermAddr), src1=srcLo, comment="partner M+8..M+11"))
+    module.add(DSBPermuteB32(dst=vgpr(vPack + 3), src0=vgpr(vPermAddr), src1=srcHi, comment="partner M+12..M+15"))
+    module.add(SWaitCnt(dscnt=0, comment="wait ds_bpermute"))
+
+    module.add(self.getEdgeMovInstType()(EXEC(), "0x0000ffff", "even lane-group only (lanes 0-15)"))
+    module.add(BufferStoreB128(
+      src=vgpr(vPack, 4),
+      vaddr=vgpr(addrCalc.addrDVgpr),
+      saddr=sgpr("SrdD", 4),
+      soffset=0,
+      mubuf=MUBUFModifiers(offen=True, offset12=addrCalc.globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
+      comment="f8 partner-merged dwordx4 store"
+    ))
+    module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
     return module
 
   def _emitAtomicAdd(self, module: Module):

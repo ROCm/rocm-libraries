@@ -15550,6 +15550,9 @@ class KernelWriterAssembly(KernelWriter):
     vgprFp8Temp: int   = -1
     vgprFp8Min: int    = -1
     vgprFp8Max: int    = -1
+    # f8 partner-merge scratch: 4-aligned b128 payload + ds_bpermute partner addr.
+    vgprF8MergePack: int     = -1
+    vgprF8MergePermAddr: int = -1
 
   class BF8CVTVgprStruct(NamedTuple):
     vgprBF8NanInf: int = -1
@@ -16178,6 +16181,8 @@ class KernelWriterAssembly(KernelWriter):
 
       cvtVgprStruct  = None
       cvtVgpr        = None
+      f8MergePack     = -1  # f8 partner-merge scratch (freed in cleanup below)
+      f8MergePermAddr = -1
       is16bitHPA = (kernel["ProblemType"]["DestDataType"].isBFloat16() or
                     kernel["ProblemType"]["DestDataType"].isHalf()) and \
                    kernel["ProblemType"]["HighPrecisionAccumulate"]
@@ -16205,8 +16210,14 @@ class KernelWriterAssembly(KernelWriter):
                                                vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1)
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr2")
+        # f8 partner-merge scratch, reserved here so it lands in the low VGPR bank.
+        if kernel.get("WaveContiguousOutput") and not kernel.get("UseSubtileImpl") \
+           and kernel["WavefrontSize"] == 32:
+          f8MergePack = self.vgprPool.checkOutAligned(4, 4, tag="globalWriteElements_f8MergePack")
+          f8MergePermAddr = self.vgprPool.checkOut(1, tag="globalWriteElements_f8MergePermAddr")
         cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \
-                                              vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3))
+                                              vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3), \
+                                              vgprF8MergePack=f8MergePack, vgprF8MergePermAddr=f8MergePermAddr)
       elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr3")
         cvtVgprStruct = self.BF8CVTVgprStruct(vgprBF8Temp=cvtVgpr, vgprBF8NanInf=(cvtVgpr+1), \
@@ -16418,6 +16429,10 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(tmpVgpr.idx)
       if cvtVgpr is not None:
         self.vgprPool.checkIn(cvtVgpr)
+      if f8MergePack is not None and f8MergePack != -1:
+        self.vgprPool.checkIn(f8MergePack)
+      if f8MergePermAddr is not None and f8MergePermAddr != -1:
+        self.vgprPool.checkIn(f8MergePermAddr)
       if gsuLimit > 1 and gsuLimitIdx == 0:
         if deferGSU0:
           # GSU0 store code is done. Append it to deferredGSU0 (placed after persistent loop),
