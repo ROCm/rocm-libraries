@@ -1,0 +1,111 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <roc/host_numerics/generation.hpp>
+
+namespace roc::host_numerics {
+namespace mx_generation_random_domain_version_1 {
+inline constexpr uint64_t data = 0x3f84d5b5b5470917ULL;
+inline constexpr uint64_t normal = 0x9216d5d98979fb1bULL;
+inline constexpr uint64_t unboundedData = 0xd1b54a32d192ed03ULL;
+}  // namespace mx_generation_random_domain_version_1
+
+enum class MxDataQuantization {
+    Nearest,
+    PreserveRange,
+    PreserveGeneratedEncoding,
+};
+
+struct MxRepresentedValueRange {
+    double lower = -1.0;
+    double upper = 1.0;
+};
+
+// Couples a general source-value recipe to the MX-specific quantization
+// contract used after per-block scale selection.
+class MxDataGeneration {
+   public:
+    [[nodiscard]] static MxDataGeneration quantize(GenerationRecipe recipe);
+    [[nodiscard]] static MxDataGeneration preserveRange(
+        GenerationRecipe recipe, MxRepresentedValueRange representedValueRange);
+    [[nodiscard]] static MxDataGeneration preserveGeneratedEncoding(GenerationRecipe recipe);
+
+    [[nodiscard]] const GenerationRecipe& recipe() const noexcept;
+    [[nodiscard]] MxDataQuantization quantization() const noexcept;
+    [[nodiscard]] const std::optional<MxRepresentedValueRange>& representedValueRange()
+        const noexcept;
+    [[nodiscard]] MxDataGeneration withSeed(uint64_t seed) const;
+
+   private:
+    MxDataGeneration(GenerationRecipe recipe, MxDataQuantization quantization,
+                     std::optional<MxRepresentedValueRange> representedValueRange);
+
+    GenerationRecipe recipe_;
+    MxDataQuantization quantization_;
+    std::optional<MxRepresentedValueRange> representedValueRange_;
+};
+
+// Selects how block scales are produced, independently of the data recipe.
+// Derived chooses a scale from each block's generated source values. Every
+// other mode writes one scale-specific constant to all blocks and does not
+// change the generated data values.
+enum class MxScaleGenerationMode {
+    Derived,
+    RandomFinite,
+    // Smallest encoded finite scale: numerical zero where the scale format has
+    // one, otherwise its minimum positive value (for example E8M0 raw zero).
+    Minimum,
+    One,
+    Two,
+    Maximum,
+    NaN,
+};
+
+// Describes a rank-two, block-scaled MX tensor in its natural host layout.
+// Data generation and scale selection are independent: data controls source
+// values, while scale controls only how each block scale is selected.
+struct MxGenerationProblem {
+    MxGenerationProblem(Shape shape, MxDataGeneration data);
+
+    // Packed data encoding and per-block scale encoding.
+    ScalarType dataType = ScalarType::Float4E2M1;
+    ScalarType scaleType = ScalarType::E8M0;
+
+    // Logical data shape. A zero leading dimension selects shape[0], otherwise
+    // data uses strides {1, leadingDimension}.
+    Shape shape;
+    ptrdiff_t leadingDimension = 0;
+
+    // Scales group blockSize consecutive elements along blockAxis. The other
+    // axis is the free coordinate identifying independent block sequences.
+    size_t blockAxis = 0;
+    size_t blockSize = 32;
+
+    MxDataGeneration data;
+
+    // Scale-selection policy. Derived computes scales from data; constant modes
+    // use the same encoded scale for every block.
+    MxScaleGenerationMode scale = MxScaleGenerationMode::Derived;
+};
+
+struct MxGenerationResult {
+    // Packed data with the requested leading dimension.
+    Tensor data;
+
+    // Rank-two scales in natural row-major [slow, fast] block order.
+    Tensor scales;
+
+    // UInt32 tensor mapping every logical data element to its entry in scales.
+    Tensor scaleIndices;
+
+    // Contiguous Float32 tensor equal to decoded data * selected scale.
+    Tensor reference;
+};
+
+MxGenerationResult generateMx(const MxGenerationProblem& problem);
+}  // namespace roc::host_numerics

@@ -49,7 +49,7 @@ rocRoller is a software library for generating AMDGPU kernels.
 git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-libraries.git
 cd rocm-libraries
 git sparse-checkout init --cone
-git sparse-checkout set shared/rocroller shared/host-validation
+git sparse-checkout set shared/rocroller shared/host-numerics
 git checkout develop   # or your desired branch
 ```
 

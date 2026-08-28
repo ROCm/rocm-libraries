@@ -27,10 +27,10 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_validation/Types.hpp>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <iostream>
-#include <roc/host_validation/validation.hpp>
+#include <roc/host_numerics/validation.hpp>
 #include <string>
 #include <vector>
 
@@ -102,7 +102,7 @@ int parseArgs(
     return EXIT_SUCCESS;
 }
 
-void reportComparison(const char* title, const roc::host_validation::ComparisonResult& comparison)
+void reportComparison(const char* title, const roc::host_numerics::ComparisonResult& comparison)
 {
     std::cout << "----- " << title << " result" << " -----" << std::endl;
     std::cout << "status: " << (comparison.passed() ? "PASS" : "FAIL") << std::endl;
@@ -124,7 +124,7 @@ void reportComparison(const char* title, const roc::host_validation::ComparisonR
 template <typename DType>
 void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
 {
-    hipblaslt::host_validation::initialize(data, numElements, initMethod);
+    hipblaslt::host_numerics::initialize(data, numElements, initMethod);
 }
 
 int main(int argc, char** argv)
@@ -192,42 +192,47 @@ int main(int argc, char** argv)
     hipErr = hipMemcpyDtoH(cpuMean.data(), gpuMean, m * elementNumBytes);
     hipErr = hipMemcpyDtoH(cpuInvvar.data(), gpuInvvar, m * elementNumBytes);
 
-    using namespace roc::host_validation;
-    using namespace hipblaslt::host_validation;
+    using namespace roc::host_numerics;
+    using namespace hipblaslt::host_numerics;
     const Layout tensorLayout     = Layout::contiguousLastDimensionFastest(Shape{m, n});
     const Layout statisticsLayout = Layout::contiguousLastDimensionFastest(Shape{m});
 
-    LayerNormProblem problem(tensorFromStorage(cpuInput.data(), cpuInput.size(), tensorLayout),
-                             ScalarType::Float32,
-                             1,
-                             ScalarType::Float32);
+    LayerNormProblem problem(
+        copyTensorFromEncodedStorage(cpuInput.data(), cpuInput.size(), tensorLayout),
+        ScalarType::Float32,
+        1,
+        ScalarType::Float32);
     problem.meanType            = ScalarType::Float32;
     problem.inverseVarianceType = ScalarType::Float32;
     problem.epsilon             = 1e-5;
     if(affine)
     {
         const Layout affineLayout = Layout::contiguousLastDimensionFastest(Shape{n});
-        problem.gamma = tensorFromStorage(cpuGamma.data(), cpuGamma.size(), affineLayout);
-        problem.beta  = tensorFromStorage(cpuBeta.data(), cpuBeta.size(), affineLayout);
+        problem.gamma
+            = copyTensorFromEncodedStorage(cpuGamma.data(), cpuGamma.size(), affineLayout);
+        problem.beta = copyTensorFromEncodedStorage(cpuBeta.data(), cpuBeta.size(), affineLayout);
     }
     const LayerNormResult reference = referenceLayerNorm(problem);
 
     const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
-    reportComparison("Output",
-                     roc::host_validation::compare(
-                         tensorFromStorage(cpuOutput.data(), cpuOutput.size(), tensorLayout),
-                         reference.output,
-                         comparisonOptions));
-    reportComparison("Mean",
-                     roc::host_validation::compare(
-                         tensorFromStorage(cpuMean.data(), cpuMean.size(), statisticsLayout),
-                         *reference.mean,
-                         comparisonOptions));
-    reportComparison("Invvar",
-                     roc::host_validation::compare(
-                         tensorFromStorage(cpuInvvar.data(), cpuInvvar.size(), statisticsLayout),
-                         *reference.inverseVariance,
-                         comparisonOptions));
+    reportComparison(
+        "Output",
+        roc::host_numerics::compare(
+            copyTensorFromEncodedStorage(cpuOutput.data(), cpuOutput.size(), tensorLayout),
+            reference.output,
+            comparisonOptions));
+    reportComparison(
+        "Mean",
+        roc::host_numerics::compare(
+            copyTensorFromEncodedStorage(cpuMean.data(), cpuMean.size(), statisticsLayout),
+            *reference.mean,
+            comparisonOptions));
+    reportComparison(
+        "Invvar",
+        roc::host_numerics::compare(
+            copyTensorFromEncodedStorage(cpuInvvar.data(), cpuInvvar.size(), statisticsLayout),
+            *reference.inverseVariance,
+            comparisonOptions));
 
     hipEvent_t beg, end;
     hipErr      = hipEventCreate(&beg);

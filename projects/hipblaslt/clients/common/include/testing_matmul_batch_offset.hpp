@@ -29,8 +29,8 @@
 #include "hipblaslt_test.hpp"
 #include "host_vector.hpp"
 #include "utility.hpp"
-#include <hipblaslt/host_validation/Types.hpp>
-#include <roc/host_validation/validation.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
+#include <roc/host_numerics/validation.hpp>
 #include <limits>
 #include <stdexcept>
 
@@ -78,8 +78,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     if(arg.batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
         GTEST_SKIP() << "Batch offset requires pointer-array batching";
 
-    using namespace roc::host_validation;
-    using namespace hipblaslt::host_validation;
+    using namespace roc::host_numerics;
+    using namespace hipblaslt::host_numerics;
 
     const hipblasOperation_t transA = char_to_hipblas_operation(arg.transA);
     const hipblasOperation_t transB = char_to_hipblas_operation(arg.transB);
@@ -102,20 +102,20 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     host_vector<To> observedD(dPlan.allocationElements * batchCount);
     host_vector<To> expectedD(dPlan.matrixElements * batchCount);
 
-    auto generate = [&](auto& storage,
-                        size_t rows,
-                        size_t columns,
-                        int64_t leadingDimension,
+    auto generate = [&](auto&                   storage,
+                        size_t                  rows,
+                        size_t                  columns,
+                        int64_t                 leadingDimension,
                         const OffsetMatrixPlan& plan,
                         const GenerationRecipe& recipe) {
-        auto tensor = tensorFromMutableStorage(
+        auto tensor = copyTensorFromEncodedStorage(
             storage.data(),
             storage.size(),
             Layout(Shape{rows, columns, size_t(batchCount)},
                    {1, leadingDimension, ptrdiff_t(plan.allocationElements)},
                    plan.logicalStart()));
-        roc::host_validation::generate(tensor, recipe);
-        copyTensorStorageTo(storage.data(), storage.size(), tensor);
+        roc::host_numerics::generate(tensor, recipe);
+        copyTensorEncodedBackingStorageToBuffer(storage.data(), storage.size(), tensor);
     };
 
     generate(hostA,
@@ -262,28 +262,28 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         const ptrdiff_t aColumnStride = transA == HIPBLAS_OP_N ? lda : 1;
         const ptrdiff_t bRowStride = transB == HIPBLAS_OP_N ? 1 : ldb;
         const ptrdiff_t bColumnStride = transB == HIPBLAS_OP_N ? ldb : 1;
-        auto result = tensorFromMutableStorage(
-            expectedD.data() + batch * dPlan.matrixElements,
-            dPlan.matrixElements,
-            Layout(Shape{size_t(M), size_t(N)}, {1, ldd}));
+        auto result = copyTensorFromEncodedStorage(expectedD.data() + batch * dPlan.matrixElements,
+                                                   dPlan.matrixElements,
+                                                   Layout(Shape{size_t(M), size_t(N)}, {1, ldd}));
         GemmProblem problem(
-            GemmOperand(tensorFromStorage(
+            GemmOperand(copyTensorFromEncodedStorage(
                 hostA.data() + batch * aPlan.allocationElements + aPlan.logicalStart(),
                 aPlan.matrixElements,
                 Layout(Shape{size_t(M), size_t(K)}, {aRowStride, aColumnStride}))),
-            GemmOperand(tensorFromStorage(
+            GemmOperand(copyTensorFromEncodedStorage(
                 hostB.data() + batch * bPlan.allocationElements + bPlan.logicalStart(),
                 bPlan.matrixElements,
                 Layout(Shape{size_t(K), size_t(N)}, {bRowStride, bColumnStride}))),
-            tensorFromStorage(hostC.data() + batch * cPlan.allocationElements + cPlan.logicalStart(),
-                              cPlan.matrixElements,
-                              Layout(Shape{size_t(M), size_t(N)}, {1, ldc})),
+            copyTensorFromEncodedStorage(hostC.data() + batch * cPlan.allocationElements
+                                             + cPlan.logicalStart(),
+                                         cPlan.matrixElements,
+                                         Layout(Shape{size_t(M), size_t(N)}, {1, ldc})),
             result.type(),
             scalarType<Tc>());
         problem.epilogue.alpha = static_cast<double>(alpha);
         problem.epilogue.beta  = static_cast<double>(beta);
         result.copyLogicalElementsFrom(referenceGemm(problem).output);
-        copyTensorStorageTo(
+        copyTensorEncodedBackingStorageToBuffer(
             expectedD.data() + batch * dPlan.matrixElements, dPlan.matrixElements, result);
     }
 
@@ -331,8 +331,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
             };
             options.selection.indexOrder = IndexOrder::FirstDimensionFastest;
             const auto comparison
-                = compare(tensorFromStorage(observed, dPlan.matrixElements, layout),
-                          tensorFromStorage(expected, dPlan.matrixElements, layout),
+                = compare(copyTensorFromEncodedStorage(observed, dPlan.matrixElements, layout),
+                          copyTensorFromEncodedStorage(expected, dPlan.matrixElements, layout),
                           options);
             matched &= comparison.passed();
             maximumDifference

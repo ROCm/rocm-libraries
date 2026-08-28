@@ -17,17 +17,17 @@
             }
         },
         {
-            "name": "host-validation",
+            "name": "host-numerics",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "host-validation"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "host-numerics"
             }
         },
         {
             "name": "rocroller",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "host-validation;rocroller"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "host-numerics;rocroller"
             }
         },
         {
@@ -41,7 +41,7 @@
             "name": "hipblaslt",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "host-validation;rocroller;origami;hipblas-common;hipblaslt"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "host-numerics;rocroller;origami;hipblas-common;hipblaslt"
             }
         },
         {

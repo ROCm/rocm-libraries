@@ -23,7 +23,7 @@ set_target_properties(
     mxDataGenerator
     PROPERTIES
         DEPRECATION
-            "roc::mxDataGenerator is a temporary empty compatibility target; use ROCHostValidation APIs instead."
+            "roc::mxDataGenerator is a temporary empty compatibility target; use ROCHostNumerics APIs instead."
 )
 
 option(

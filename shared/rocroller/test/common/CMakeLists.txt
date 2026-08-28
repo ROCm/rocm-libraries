@@ -9,7 +9,6 @@ target_link_libraries(common-test-utilities
         roc::rocroller-interface
         rocroller::host-numerics
         hip::host
-        OpenMP::OpenMP_CXX
 )
 
 if(ROCROLLER_ENABLE_ASAN)

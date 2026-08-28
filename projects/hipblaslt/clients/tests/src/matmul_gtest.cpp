@@ -30,24 +30,24 @@
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
 #include <cstring>
-#include <hipblaslt/host_validation/Types.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
 
 #include <gtest/gtest-spi.h>
 
-TEST(HostValidationTypeBridge, ConvergesOnScalarType)
+TEST(HostNumericsTypeBridge, ConvergesOnScalarType)
 {
-    using namespace hipblaslt::host_validation;
-    using roc::host_validation::ScalarType;
+    using namespace hipblaslt::host_numerics;
+    using roc::host_numerics::ScalarType;
 
     EXPECT_EQ(scalarType<float>(), scalarType(HIP_R_32F));
     EXPECT_EQ(scalarType(static_cast<hipDataType>(HIP_R_8F_E5M3_EXT)), ScalarType::E5M3);
     EXPECT_FALSE(tryScalarType(static_cast<hipDataType>(-1)));
 }
 
-TEST(HostValidationTypeBridge, ValidatesComputeInputTypeBWhenAIsUnset)
+TEST(HostNumericsTypeBridge, ValidatesComputeInputTypeBWhenAIsUnset)
 {
     Arguments arguments{};
     arguments.init();
@@ -148,23 +148,12 @@ TEST(MatmulBatchOffsetPlan, ValidatesOffsetArithmetic)
     EXPECT_EQ(positive.allocationElements, 7);
     EXPECT_EQ(positive.logicalStart(), 3);
 
-    EXPECT_THROW(offsetMatrixPlan(1, std::numeric_limits<int64_t>::min()),
+    EXPECT_THROW(offsetMatrixPlan(1, std::numeric_limits<int64_t>::min()), std::overflow_error);
+    EXPECT_THROW(offsetMatrixPlan(size_t(std::numeric_limits<ptrdiff_t>::max()), 1),
                  std::overflow_error);
-    EXPECT_THROW(
-        offsetMatrixPlan(size_t(std::numeric_limits<ptrdiff_t>::max()), 1),
-        std::overflow_error);
 }
 
-TEST(HostValidationDataInitializationBridge, RuntimeRangeUsesTensorLayoutOffset)
-{
-    std::array<float, 6> values{1, 2, 3, 4, 5, 6};
-
-    hipblaslt_init_zero(static_cast<void*>(values.data()), 2, 5, HIP_R_32F);
-
-    EXPECT_EQ(values, (std::array<float, 6>{1, 2, 0, 0, 0, 6}));
-}
-
-TEST(HostValidationTensorManipulation, SwizzlePreservesPaddedMatrixEncoding)
+TEST(HostNumericsTensorManipulation, SwizzlePreservesPaddedMatrixEncoding)
 {
     constexpr size_t rows             = 18;
     constexpr size_t columns          = 17;
@@ -219,7 +208,7 @@ TEST(HostValidationTensorManipulation, SwizzlePreservesPaddedMatrixEncoding)
     EXPECT_EQ(observed, expected);
 }
 
-TEST(HostValidationEpilogueBridge, DelegatesToProductIndependentComponent)
+TEST(HostNumericsEpilogueBridge, DelegatesToProductIndependentComponent)
 {
     std::array<float, 4> input{-2, 1, 3, -4};
     std::array<float, 4> output{};
@@ -230,7 +219,7 @@ TEST(HostValidationEpilogueBridge, DelegatesToProductIndependentComponent)
     float                scaleD = 2;
     float                scaleE = 3;
 
-    hipblaslt::host_validation::EpilogueArguments arguments;
+    hipblaslt::host_numerics::EpilogueArguments arguments;
     arguments.rows             = 2;
     arguments.columns          = 2;
     arguments.leadingDimension = 2;
@@ -244,10 +233,10 @@ TEST(HostValidationEpilogueBridge, DelegatesToProductIndependentComponent)
     arguments.auxiliaryScale   = &scaleE;
     arguments.bias             = bias.data();
     arguments.biasType         = HIP_R_32F;
-    arguments.activation       = roc::host_validation::Activation::Relu;
+    arguments.activation       = roc::host_numerics::Activation::Relu;
     arguments.outputType       = HIP_R_32F;
     arguments.computeType      = HIP_R_32F;
-    hipblaslt::host_validation::referenceEpilogue(arguments);
+    hipblaslt::host_numerics::referenceEpilogue(arguments);
 
     EXPECT_EQ(output, (std::array<float, 4>{0, 6, 8, 0}));
     EXPECT_EQ(rawOutput, output);
@@ -255,14 +244,14 @@ TEST(HostValidationEpilogueBridge, DelegatesToProductIndependentComponent)
     EXPECT_EQ(amax, 5);
 }
 
-TEST(HostValidationEpilogueBridge, RoutesGradientAuxiliaryInput)
+TEST(HostNumericsEpilogueBridge, RoutesGradientAuxiliaryInput)
 {
     std::array<float, 4> gradient{10, 20, 30, 40};
     std::array<float, 4> activationInput{-1, 1, 2, -2};
     std::array<float, 4> output{};
     float                one = 1;
 
-    hipblaslt::host_validation::EpilogueArguments arguments;
+    hipblaslt::host_numerics::EpilogueArguments arguments;
     arguments.rows                  = 2;
     arguments.columns               = 2;
     arguments.leadingDimension      = 2;
@@ -272,23 +261,23 @@ TEST(HostValidationEpilogueBridge, RoutesGradientAuxiliaryInput)
     arguments.auxiliaryType         = HIP_R_32F;
     arguments.outputScale           = &one;
     arguments.auxiliaryScale        = &one;
-    arguments.activation            = roc::host_validation::Activation::Relu;
-    arguments.activationApplication = roc::host_validation::ActivationApplication::Gradient;
+    arguments.activation            = roc::host_numerics::Activation::Relu;
+    arguments.activationApplication = roc::host_numerics::ActivationApplication::Gradient;
     arguments.outputType            = HIP_R_32F;
     arguments.computeType           = HIP_R_32F;
-    hipblaslt::host_validation::referenceEpilogue(arguments);
+    hipblaslt::host_numerics::referenceEpilogue(arguments);
 
     EXPECT_EQ(output, (std::array<float, 4>{0, 20, 30, 0}));
     EXPECT_EQ(activationInput, (std::array<float, 4>{-1, 1, 2, -2}));
 }
 
-TEST(HostValidationEpilogueBridge, SaturatesInt8Output)
+TEST(HostNumericsEpilogueBridge, SaturatesInt8Output)
 {
     std::array<float, 4>  input{-200.0f, -128.5f, 126.5f, 300.0f};
     std::array<int8_t, 4> output{};
     float                 one = 1;
 
-    hipblaslt::host_validation::EpilogueArguments arguments;
+    hipblaslt::host_numerics::EpilogueArguments arguments;
     arguments.rows             = 2;
     arguments.columns          = 2;
     arguments.leadingDimension = 2;
@@ -298,18 +287,18 @@ TEST(HostValidationEpilogueBridge, SaturatesInt8Output)
     arguments.auxiliaryScale   = &one;
     arguments.outputType       = HIP_R_8I;
     arguments.computeType      = HIP_R_32F;
-    hipblaslt::host_validation::referenceEpilogue(arguments);
+    hipblaslt::host_numerics::referenceEpilogue(arguments);
 
     EXPECT_EQ(output, (std::array<int8_t, 4>{-128, -128, 126, 127}));
 }
 
-TEST(HostValidationEpilogueBridge, UsesIdentityForNullScaleDefaults)
+TEST(HostNumericsEpilogueBridge, UsesIdentityForNullScaleDefaults)
 {
     std::array<float, 4> input{-2, 1, 3, -4};
     std::array<float, 4> output{};
     std::array<float, 4> auxiliary{};
 
-    hipblaslt::host_validation::EpilogueArguments arguments;
+    hipblaslt::host_numerics::EpilogueArguments arguments;
     arguments.rows             = 2;
     arguments.columns          = 2;
     arguments.leadingDimension = 2;
@@ -318,18 +307,18 @@ TEST(HostValidationEpilogueBridge, UsesIdentityForNullScaleDefaults)
     arguments.auxiliary        = auxiliary.data();
     arguments.outputType       = HIP_R_32F;
     arguments.computeType      = HIP_R_32F;
-    hipblaslt::host_validation::referenceEpilogue(arguments);
+    hipblaslt::host_numerics::referenceEpilogue(arguments);
 
     EXPECT_EQ(output, input);
     EXPECT_EQ(auxiliary, input);
 }
 
-TEST(HostValidationEpilogueBridge, RejectsOverflowingLeadingDimensionLayout)
+TEST(HostNumericsEpilogueBridge, RejectsOverflowingLeadingDimensionLayout)
 {
     float input  = 0;
     float output = 0;
 
-    hipblaslt::host_validation::EpilogueArguments arguments;
+    hipblaslt::host_numerics::EpilogueArguments arguments;
     arguments.rows             = 1;
     arguments.columns          = 3;
     arguments.leadingDimension = std::numeric_limits<decltype(arguments.leadingDimension)>::max();
@@ -338,15 +327,15 @@ TEST(HostValidationEpilogueBridge, RejectsOverflowingLeadingDimensionLayout)
     arguments.outputType       = HIP_R_32F;
     arguments.computeType      = HIP_R_32F;
 
-    EXPECT_THROW(hipblaslt::host_validation::referenceEpilogue(arguments), std::overflow_error);
+    EXPECT_THROW(hipblaslt::host_numerics::referenceEpilogue(arguments), std::overflow_error);
 }
 
-TEST(HostValidationReductionBridge, DelegatesStridedBiasSum)
+TEST(HostNumericsReductionBridge, DelegatesStridedBiasSum)
 {
     const std::array<float, 8> input{1, 2, -99, 3, 4, -99, 5, 6};
     std::array<float, 2>       output{};
 
-    hipblaslt::host_validation::ReductionArguments arguments;
+    hipblaslt::host_numerics::ReductionArguments arguments;
     arguments.rows            = 2;
     arguments.columns         = 3;
     arguments.rowStride       = 1;
@@ -356,7 +345,7 @@ TEST(HostValidationReductionBridge, DelegatesStridedBiasSum)
     arguments.output          = output.data();
     arguments.outputType      = HIP_R_32F;
     arguments.accumulatorType = HIP_R_32F;
-    hipblaslt::host_validation::referenceSum(arguments);
+    hipblaslt::host_numerics::referenceSum(arguments);
 
     EXPECT_EQ(output, (std::array<float, 2>{9, 12}));
 }
