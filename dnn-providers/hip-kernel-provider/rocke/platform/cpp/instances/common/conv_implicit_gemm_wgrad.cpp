@@ -1800,19 +1800,19 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
 
     /* dtype for dW/dY/X: rocke_b_io_ir_type handles f16/bf16 only.
      * fp32 inputs/outputs use rocke_f32() directly. */
-#define _WGRAD_ELEM_TYPE(dt_field, fallback)                                               \
-    (((dt_field) && (strcmp((dt_field), "fp32") == 0 || strcmp((dt_field), "f32") == 0))  \
-         ? rocke_f32()                                                                     \
+#define _WGRAD_ELEM_TYPE(dt_field, fallback)                                             \
+    (((dt_field) && (strcmp((dt_field), "fp32") == 0 || strcmp((dt_field), "f32") == 0)) \
+         ? rocke_f32()                                                                   \
          : rocke_b_io_ir_type(b, (dt_field) ? (dt_field) : (fallback)))
 
     const char* dtype_d_str = spec->dtype_d ? spec->dtype_d : "fp16";
     const rocke_type_t* dw_elem = _WGRAD_ELEM_TYPE(spec->dtype_d, "fp16");
     const rocke_type_t* dw_glob = rocke_ptr_type(b, dw_elem, "global");
 
-    const rocke_type_t* dy_glob = rocke_ptr_type(
-        b, _WGRAD_ELEM_TYPE(spec->dtype_a, "fp16"), "global");
-    const rocke_type_t* x_glob = rocke_ptr_type(
-        b, _WGRAD_ELEM_TYPE(spec->dtype_b, "fp16"), "global");
+    const rocke_type_t* dy_glob
+        = rocke_ptr_type(b, _WGRAD_ELEM_TYPE(spec->dtype_a, "fp16"), "global");
+    const rocke_type_t* x_glob
+        = rocke_ptr_type(b, _WGRAD_ELEM_TYPE(spec->dtype_b, "fp16"), "global");
 #undef _WGRAD_ELEM_TYPE
     rocke_value_t* dY = rocke_b_param(b, "dY", dy_glob, &ro_opts);
     rocke_value_t* X = rocke_b_param(b, "X", x_glob, &ro_opts);

@@ -214,15 +214,17 @@ def _run_two_stage_grouped(spec, arch, rt, dY_t, X_t):
         all_vals = [s1_vals]
         all_cfgs = [s1_cfg]
         for g in range(groups):
-            all_vals.append({
-                "ws_ptr": ws_dev + g * per_group_ws_bytes,
-                "dw_ptr": dW_dev + g * per_group_dw_bytes,
-                "wg_M": spec.wg_M,
-                "wg_N": spec.wg_N,
-                "split_k": spec.split_k,
-                "ws_bytes": per_group_ws_bytes,
-                "dw_bytes": per_group_dw_bytes,
-            })
+            all_vals.append(
+                {
+                    "ws_ptr": ws_dev + g * per_group_ws_bytes,
+                    "dw_ptr": dW_dev + g * per_group_dw_bytes,
+                    "wg_M": spec.wg_M,
+                    "wg_N": spec.wg_N,
+                    "split_k": spec.split_k,
+                    "ws_bytes": per_group_ws_bytes,
+                    "dw_bytes": per_group_dw_bytes,
+                }
+            )
             all_cfgs.append(
                 LaunchConfig(
                     grid=s2_grid, block=s2_block, stream=0, fence=(g == groups - 1)
@@ -387,7 +389,6 @@ class TestWgradTwoStageNumeric(unittest.TestCase):
             f"non-aligned wg_M={spec.wg_M} rel_err {rel_err:.3e} >= tol {self.TOL_FP16}",
         )
 
-
     def test_two_stage_grouped_matches_reference(self):
         """groups=2, split_k=4 two-stage output matches CPU torch reference.
 
@@ -427,7 +428,6 @@ class TestWgradTwoStageNumeric(unittest.TestCase):
             f"grouped two-stage rel_err {rel_err:.3e} >= tol {self.TOL_FP16}",
         )
 
-
     def test_two_stage_grouped_g3_and_g11(self):
         """groups=3 and groups=11 with split_k=4 match the CPU torch reference.
 
@@ -449,9 +449,13 @@ class TestWgradTwoStageNumeric(unittest.TestCase):
             with self.subTest(**cfg):
                 spec = _make_spec(
                     self.ARCH,
-                    N=2, Hi=8, Wi=8,
-                    C=cfg["C"], K=cfg["K"],
-                    Y=3, X=3,
+                    N=2,
+                    Hi=8,
+                    Wi=8,
+                    C=cfg["C"],
+                    K=cfg["K"],
+                    Y=3,
+                    X=3,
                     split_k=4,
                     groups=cfg["groups"],
                 )
