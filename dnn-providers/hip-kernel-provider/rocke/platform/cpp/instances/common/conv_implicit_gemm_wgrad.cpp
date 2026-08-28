@@ -886,7 +886,11 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
     rocke_value_t* wg_M_v = rocke_b_const_i32(b, wg_M);
     rocke_value_t* wg_N_v = rocke_b_const_i32(b, wg_N);
 
-    /* k_id = blockIdx.z — which workspace slice this CTA owns */
+    /* workspace slice index = blockIdx.z (always).
+     * Ungrouped:        z = k_id              -> slices 0..split_k-1
+     * Grouped+split_k:  z = group*split_k+k_id -> slices 0..groups*split_k-1
+     * Each (group, k_id) pair gets a unique z and thus a unique workspace region.
+     * Workspace total size = groups * split_k * wg_M * wg_N (f32 elements). */
     rocke_value_t* k_id = rocke_b_to_sgpr_u32(b, rocke_b_block_id_z(b));
     rocke_value_t* slice_off = rocke_b_mul(b, k_id, rocke_b_const_i32(b, wg_M * wg_N));
 
@@ -1794,15 +1798,22 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     d_opts.align = 16;
     d_opts.align_set = true;
 
-    /* dtype for dW: use dtype_d field */
+    /* dtype for dW/dY/X: rocke_b_io_ir_type handles f16/bf16 only.
+     * fp32 inputs/outputs use rocke_f32() directly. */
+#define _WGRAD_ELEM_TYPE(dt_field, fallback)                                               \
+    (((dt_field) && (strcmp((dt_field), "fp32") == 0 || strcmp((dt_field), "f32") == 0))  \
+         ? rocke_f32()                                                                     \
+         : rocke_b_io_ir_type(b, (dt_field) ? (dt_field) : (fallback)))
+
     const char* dtype_d_str = spec->dtype_d ? spec->dtype_d : "fp16";
-    const rocke_type_t* dw_elem = rocke_b_io_ir_type(b, dtype_d_str);
+    const rocke_type_t* dw_elem = _WGRAD_ELEM_TYPE(spec->dtype_d, "fp16");
     const rocke_type_t* dw_glob = rocke_ptr_type(b, dw_elem, "global");
 
     const rocke_type_t* dy_glob = rocke_ptr_type(
-        b, rocke_b_io_ir_type(b, spec->dtype_a ? spec->dtype_a : "fp16"), "global");
+        b, _WGRAD_ELEM_TYPE(spec->dtype_a, "fp16"), "global");
     const rocke_type_t* x_glob = rocke_ptr_type(
-        b, rocke_b_io_ir_type(b, spec->dtype_b ? spec->dtype_b : "fp16"), "global");
+        b, _WGRAD_ELEM_TYPE(spec->dtype_b, "fp16"), "global");
+#undef _WGRAD_ELEM_TYPE
     rocke_value_t* dY = rocke_b_param(b, "dY", dy_glob, &ro_opts);
     rocke_value_t* X = rocke_b_param(b, "X", x_glob, &ro_opts);
     rocke_value_t* dW = rocke_b_param(b, "dW", dw_glob, &d_opts);

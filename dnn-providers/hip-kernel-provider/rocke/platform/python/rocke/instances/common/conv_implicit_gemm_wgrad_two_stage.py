@@ -23,7 +23,7 @@ Usage::
     pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch)
 
     ws = DeviceMem(ws_nbytes)
-    runtime.memset(ws.ptr(), 0, ws_nbytes)  # required: zero-init workspace
+    runtime.memset(ws.ptr(), 0, ws_nbytes)  # optional: belt-and-suspenders; not required
 
     s1_vals = {"A": dY_ptr, "B": X_ptr, "D": dW_ptr,
                "A_bytes": dY_nb, "B_bytes": X_nb, "D_bytes": dW_nb,
@@ -58,9 +58,12 @@ from .conv_wgrad_workspace_reduce import (
 def wgrad_two_stage_workspace_nbytes(spec: WgradConvSpec) -> int:
     """Return workspace bytes required for the two-stage deterministic path.
 
-    Always f32 (4 bytes per element), shape ``[split_k, wg_M, wg_N]``.
+    Always f32 (4 bytes per element), shape ``[groups * split_k, wg_M, wg_N]``
+    where ``wg_M = kpg`` and ``wg_N = Y*X*cpg`` are the per-group GEMM dimensions.
+    ``blockIdx.z = group*split_k + k_id`` indexes directly into this flat array,
+    giving each (group, split-K slice) pair a unique workspace region.
     """
-    return spec.split_k * spec.wg_M * spec.wg_N * 4
+    return spec.problem.groups * spec.split_k * spec.wg_M * spec.wg_N * 4
 
 
 def _wgrad_stage1_signature(spec: WgradConvSpec) -> list:
@@ -126,14 +129,12 @@ def build_implicit_gemm_conv_wgrad_two_stage(
         caller must allocate before each pipeline call.
 
         The workspace has shape ``[split_k, wg_M, wg_N]`` (f32).  Stage 1
-        writes every element in ``[0, wg_M) × [0, wg_N)`` via plain stores
-        (no atomics).  Stage 2 iterates over all tile positions up to the
-        next tile_m / tile_n alignment boundary — positions beyond ``wg_M``
-        or ``wg_N`` are guarded by an OOB ``scf_if`` in Stage 2 and never
-        stored to dW, but they **are loaded** from the workspace before the
-        guard fires.  The workspace must therefore be zero-initialised before
-        launch so that those padding loads accumulate 0 rather than arbitrary
-        device memory::
+        writes every element within ``[0, wg_M) × [0, wg_N)`` via plain
+        stores (no atomics); OOB positions are skipped by a per-element
+        ``scf_if`` guard.  Stage 2 wraps its entire reduction loop in the
+        same OOB guard, so out-of-bounds threads perform no workspace loads
+        at all.  Zero-initialising the workspace is therefore not required
+        for correctness::
 
             pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch)
             ws = DeviceMem(ws_nbytes)

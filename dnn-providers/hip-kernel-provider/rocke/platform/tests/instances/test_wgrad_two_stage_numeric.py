@@ -87,10 +87,9 @@ def _run_two_stage(spec, arch, rt, dY_t, X_t):
         rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
         rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
         rt.memset(dW_dev, 0, dW_t.nbytes)
-        # Required: Stage 2 reads all tile positions including OOB-padded ones
-        # (up to tile_n / tile_m alignment) that Stage 1's scf_if guard never
-        # writes.  Without zero-init those elements contain arbitrary device
-        # memory and Stage 2 would accumulate garbage into dW.
+        # Belt-and-suspenders: Stage 2 wraps its reduction in an OOB scf_if
+        # and never loads out-of-bounds workspace elements, so zero-init is
+        # not required for correctness.  It is kept here as a safety measure.
         rt.memset(ws_dev, 0, ws_nbytes)
 
         s2_spec = WgradReduceSpec(problem=spec.problem, dtype_d=spec.data.dtype_d)
@@ -144,7 +143,110 @@ def _run_two_stage(spec, arch, rt, dY_t, X_t):
     return dW_out.float()
 
 
-def _make_spec(arch, N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, split_k=4):
+def _run_two_stage_grouped(spec, arch, rt, dY_t, X_t):
+    """Compile and launch two-stage pipeline for grouped conv; return dW as CPU fp32.
+
+    Workspace shape: ``[groups*split_k, wg_M, wg_N]`` f32, where wg_M and wg_N
+    are the per-group GEMM dimensions (kpg and Y*X*cpg).  Stage 1 covers all
+    groups in one launch (z = group*split_k + k_id).  Stage 2 runs once per
+    group with ws_ptr and dw_ptr shifted to that group's region.
+    """
+    import torch
+    from rocke.instances.common.conv_implicit_gemm_wgrad_two_stage import (
+        build_implicit_gemm_conv_wgrad_two_stage,
+    )
+    from rocke.instances.common.conv_wgrad_workspace_reduce import (
+        WgradReduceSpec,
+        wgrad_reduce_grid,
+    )
+    from rocke.runtime.launcher import LaunchConfig, PipelineLauncher
+
+    p = spec.problem
+    groups = p.groups
+    # dW packed shape for grouped: [K, Y, X, cpg].
+    dW_t = torch.zeros(p.K, p.Y, p.X, p.cpg, dtype=torch.float16)
+
+    pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch=arch)
+
+    dY_dev = rt.alloc(dY_t.nbytes)
+    X_dev = rt.alloc(X_t.nbytes)
+    dW_dev = rt.alloc(dW_t.nbytes)
+    ws_dev = rt.alloc(ws_nbytes)
+
+    try:
+        rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
+        rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
+        rt.memset(dW_dev, 0, dW_t.nbytes)
+        rt.memset(ws_dev, 0, ws_nbytes)
+
+        s2_spec = WgradReduceSpec(problem=spec.problem, dtype_d=spec.data.dtype_d)
+        s2_grid = wgrad_reduce_grid(s2_spec)
+        s2_block = (s2_spec.block_size, 1, 1)
+
+        # Stage 1: one launch covering all groups (z = group*split_k + k_id).
+        s1_grid = (
+            (spec.wg_N + spec.tile_n - 1) // spec.tile_n,
+            (spec.wg_M + spec.tile_m - 1) // spec.tile_m,
+            groups * spec.split_k,
+        )
+        s1_block = (spec.block_size, 1, 1)
+        s1_vals = {
+            "A": dY_dev,
+            "B": X_dev,
+            "D": dW_dev,
+            "A_bytes": dY_t.nbytes,
+            "B_bytes": X_t.nbytes,
+            "D_bytes": dW_t.nbytes,
+            "ws_ptr": ws_dev,
+            "ws_bytes": ws_nbytes,
+        }
+        s1_cfg = LaunchConfig(grid=s1_grid, block=s1_block, stream=0, fence=False)
+
+        # Stage 2: one launch per group.
+        # Group g's workspace region starts at g*split_k*wg_M*wg_N f32 elements.
+        # Group g's dW region starts at g*wg_M*wg_N dtype_d elements.
+        per_group_ws_bytes = spec.split_k * spec.wg_M * spec.wg_N * 4
+        per_group_dw_bytes = dW_t.nbytes // groups
+
+        s1_launcher = pipeline._stages[0]
+        s2_launcher = pipeline._stages[1]
+        all_launchers = [s1_launcher] + [s2_launcher] * groups
+        all_vals = [s1_vals]
+        all_cfgs = [s1_cfg]
+        for g in range(groups):
+            all_vals.append({
+                "ws_ptr": ws_dev + g * per_group_ws_bytes,
+                "dw_ptr": dW_dev + g * per_group_dw_bytes,
+                "wg_M": spec.wg_M,
+                "wg_N": spec.wg_N,
+                "split_k": spec.split_k,
+                "ws_bytes": per_group_ws_bytes,
+                "dw_bytes": per_group_dw_bytes,
+            })
+            all_cfgs.append(
+                LaunchConfig(
+                    grid=s2_grid, block=s2_block, stream=0, fence=(g == groups - 1)
+                )
+            )
+
+        PipelineLauncher(all_launchers)(
+            values_per_stage=all_vals,
+            configs_per_stage=all_cfgs,
+            stream=0,
+        )
+
+        dW_out = torch.empty_like(dW_t)
+        rt.memcpy_d2h(_u8(dW_out), dW_dev, dW_t.nbytes)
+    finally:
+        rt.free(dY_dev)
+        rt.free(X_dev)
+        rt.free(dW_dev)
+        rt.free(ws_dev)
+
+    return dW_out.float()
+
+
+def _make_spec(arch, N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, split_k=4, groups=1):
     """Build a WgradConvSpec with two_stage=True."""
     from rocke.instances.common._conv_implicit_gemm_common import (
         ConvDataSpec,
@@ -152,7 +254,7 @@ def _make_spec(arch, N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, split_k=4):
     )
     from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
-    p = ConvProblem(N=N, Hi=Hi, Wi=Wi, C=C, K=K, Y=Y, X=X)
+    p = ConvProblem(N=N, Hi=Hi, Wi=Wi, C=C, K=K, Y=Y, X=X, groups=groups)
     # 16x16x16 MFMA atoms work on both gfx942 and gfx950.
     return WgradConvSpec(
         problem=p,
@@ -283,6 +385,46 @@ class TestWgradTwoStageNumeric(unittest.TestCase):
             rel_err,
             self.TOL_FP16,
             f"non-aligned wg_M={spec.wg_M} rel_err {rel_err:.3e} >= tol {self.TOL_FP16}",
+        )
+
+
+    def test_two_stage_grouped_matches_reference(self):
+        """groups=2, split_k=4 two-stage output matches CPU torch reference.
+
+        Verifies the workspace partitioning for grouped conv:
+        workspace shape [groups*split_k, wg_M, wg_N] where wg_M=kpg and
+        wg_N=Y*X*cpg are per-group dimensions.  Stage 1 launches with
+        z=groups*split_k; z=group*split_k+k_id uniquely indexes each region.
+        Stage 2 runs once per group with shifted ws_ptr/dw_ptr pointers.
+        """
+        import torch
+
+        # C=16, K=16, groups=2 → cpg=8 (even ✓), kpg=8.
+        # Y=3,X=3 avoids the grouped-pointwise restriction.
+        spec = _make_spec(
+            self.ARCH, N=2, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, split_k=4, groups=2
+        )
+        self.assertEqual(spec.problem.groups, 2)
+        p = spec.problem
+
+        torch.manual_seed(13)
+        X_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
+        dY_f32 = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
+        X_t = X_f32.half()
+        dY_t = dY_f32.half()
+
+        dW_ours = _run_two_stage_grouped(spec, self.ARCH, self.rt, dY_t, X_t)
+        dW_ref = _cpu_wgrad_reference(X_f32, dY_f32, p)
+
+        max_abs = dW_ref.abs().max().item()
+        if max_abs < 1e-6:
+            self.skipTest("reference output is near-zero — problem degenerate")
+
+        rel_err = (dW_ours - dW_ref).abs().max().item() / max_abs
+        self.assertLess(
+            rel_err,
+            self.TOL_FP16,
+            f"grouped two-stage rel_err {rel_err:.3e} >= tol {self.TOL_FP16}",
         )
 
 

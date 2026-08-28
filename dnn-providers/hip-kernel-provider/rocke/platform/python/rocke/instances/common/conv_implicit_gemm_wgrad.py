@@ -1507,7 +1507,11 @@ def _emit_wgrad_workspace_store_epilogue(
     wg_M_v = b.const_i32(wg_M)
     wg_N_v = b.const_i32(wg_N)
 
-    # k_id = blockIdx.z — identifies which workspace slice this CTA owns.
+    # workspace slice index = blockIdx.z (always).
+    # Ungrouped:       z = k_id              → slices 0..split_k-1
+    # Grouped+split_k: z = group*split_k+k_id → slices 0..groups*split_k-1
+    # Each (group, k_id) pair gets a unique z and thus a unique workspace region.
+    # Workspace total size = groups * split_k * wg_M * wg_N (f32 elements).
     k_id = b.to_sgpr_u32(b.block_id_z())
     slice_off = b.mul(k_id, b.const_i32(wg_M * wg_N))
 

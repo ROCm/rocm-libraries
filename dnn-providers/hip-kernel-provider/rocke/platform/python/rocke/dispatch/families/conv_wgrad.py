@@ -306,6 +306,7 @@ def _problem(req: ConvWgradRequest) -> ConvProblem:
         pW=int(req.pad_w),
         dH=int(req.dilation_h),
         dW=int(req.dilation_w),
+        groups=int(req.G),
     )
 
 
