@@ -282,69 +282,70 @@ if(ROCROLLER_ENABLE_CLIENT OR ROCROLLER_BUILD_TESTING)
     set(_rocroller_needs_host_numerics ON)
 endif()
 
-if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation)
-    set(_rocroller_host_validation_source
-        "${CMAKE_CURRENT_SOURCE_DIR}/../host-validation"
+if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-numerics)
+    set(_rocroller_host_numerics_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../host-numerics"
     )
-    if(NOT EXISTS "${_rocroller_host_validation_source}/CMakeLists.txt")
+    if(NOT EXISTS "${_rocroller_host_numerics_source}/CMakeLists.txt")
         find_package(
-            ROCHostValidation
+            ROCHostNumerics
             CONFIG
             QUIET
-            COMPONENTS Operations BLAS MX AMDGPULayout
+            COMPONENTS Operations BLAS AMDGPULayout
         )
     endif()
-    if(NOT TARGET roc::host-validation
-       AND NOT EXISTS "${_rocroller_host_validation_source}/CMakeLists.txt")
+    if(NOT TARGET roc::host-numerics
+       AND NOT EXISTS "${_rocroller_host_numerics_source}/CMakeLists.txt")
         rocroller_materialize_monorepo_paths(
             _rocroller_materialized_root
-            shared/host-validation
+            shared/host-numerics
         )
         if(_rocroller_materialized_root)
-            set(_rocroller_host_validation_source
-                "${_rocroller_materialized_root}/shared/host-validation"
+            set(_rocroller_host_numerics_source
+                "${_rocroller_materialized_root}/shared/host-numerics"
             )
         endif()
     endif()
-    if(NOT TARGET roc::host-validation
-       AND EXISTS "${_rocroller_host_validation_source}/CMakeLists.txt")
+    if(NOT TARGET roc::host-numerics
+       AND EXISTS "${_rocroller_host_numerics_source}/CMakeLists.txt")
         block(SCOPE_FOR VARIABLES)
-            set(HOST_VALIDATION_BUILD_TESTING OFF)
-            set(HOST_VALIDATION_BUILD_BLAS_BACKEND ON)
+            set(HOST_NUMERICS_BUILD_TESTING OFF)
+            set(HOST_NUMERICS_BUILD_BLAS_BACKEND ON)
             add_subdirectory(
-                "${_rocroller_host_validation_source}"
-                "${CMAKE_CURRENT_BINARY_DIR}/host-validation"
+                "${_rocroller_host_numerics_source}"
+                "${CMAKE_CURRENT_BINARY_DIR}/host-numerics"
                 EXCLUDE_FROM_ALL
             )
         endblock()
     endif()
-    if(NOT TARGET roc::host-validation)
+    if(NOT TARGET roc::host-numerics)
         message(FATAL_ERROR
-            "rocRoller host numerics require the ROCHostValidation component. "
-            "Include shared/host-validation in a monorepo sparse checkout, "
+            "rocRoller host numerics require the ROCHostNumerics component. "
+            "Include shared/host-numerics in a monorepo sparse checkout, "
             "configure from a Git checkout that can materialize that path, or "
-            "install the ROCHostValidation package and add it to CMAKE_PREFIX_PATH."
+            "install the ROCHostNumerics package and add it to CMAKE_PREFIX_PATH."
         )
     endif()
 endif()
 
-if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation-mx)
-    message(FATAL_ERROR
-        "rocRoller host numerics require the roc::host-validation-mx target."
-    )
+if(_rocroller_needs_host_numerics
+   AND TARGET roc::host-numerics
+   AND NOT TARGET roc::host-numerics-blas
+   AND COMMAND roc_host_numerics_enable_blas_backend)
+    roc_host_numerics_enable_blas_backend()
 endif()
 
 if(_rocroller_needs_host_numerics
-   AND NOT TARGET roc::host-validation-amd-gpu-layout)
+   AND NOT TARGET roc::host-numerics-amd-gpu-layout)
     message(FATAL_ERROR
-        "rocRoller clients require the roc::host-validation-amd-gpu-layout target."
+        "rocRoller clients require the roc::host-numerics-amd-gpu-layout target."
     )
 endif()
 
-if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation-blas)
+if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-numerics-blas)
     message(FATAL_ERROR
-        "rocRoller host numerics require the roc::host-validation-blas target. "
-        "Install ROCHostValidation with its BLAS component or include shared/host-validation."
+        "rocRoller host numerics require the roc::host-numerics-blas target. "
+        "Install ROCHostNumerics with its BLAS component or include shared/host-numerics."
     )
 endif()
 

@@ -79,8 +79,8 @@
 /projects/rocwmma/                                  @ROCm/rocwmma-reviewers
 /projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
-# Temporary while the host-validation extraction remains experimental.
-/shared/host-validation/                            @newling
+# Temporary while the host-numerics extraction remains experimental.
+/shared/host-numerics/                            @newling
 /shared/mxdatagenerator/                            @newling
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
@@ -104,8 +104,8 @@
 /shared/origami/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
 
 # Temporary override matching the experimental path ownership above.
-/shared/host-validation/**/*.cmake                  @newling
-/shared/host-validation/**/CMakeLists.txt           @newling
+/shared/host-numerics/**/*.cmake                  @newling
+/shared/host-numerics/**/CMakeLists.txt           @newling
 
 /shared/rocroller/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
 /shared/rocroller/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra

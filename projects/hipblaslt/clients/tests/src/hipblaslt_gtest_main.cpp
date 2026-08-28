@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 #include "hipblaslt_data.hpp"
-#include "hipblaslt_init.hpp"
+#include <hipblaslt/host_numerics/hipblaslt_init.hpp>
 #include "hipblaslt_parse_data.hpp"
 #include "hipblaslt_test.hpp"
 #include "test_cleanup.hpp"

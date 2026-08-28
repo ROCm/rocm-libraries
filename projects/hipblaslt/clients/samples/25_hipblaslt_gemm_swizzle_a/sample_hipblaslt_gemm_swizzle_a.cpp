@@ -31,7 +31,8 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
-#include <roc/host_validation/tensor.hpp>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/tensor.hpp>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -75,9 +76,9 @@ void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
                            std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>>>;
     static_assert(sizeof(T) == sizeof(Storage));
 
-    using roc::host_validation::Layout;
-    using roc::host_validation::Shape;
-    using roc::host_validation::Tensor;
+    using roc::host_numerics::Layout;
+    using roc::host_numerics::Shape;
+    using roc::host_numerics::Tensor;
 
     size_t MiM = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
@@ -227,13 +228,13 @@ int main()
 
         auto convertToFp8 = [](std::span<const hipblasLtHalf> source,
                                std::span<std::byte>           destination) {
-            const roc::host_validation::Tensor converted
-                = hipblaslt::host_validation::tensorFromStorage(
+            const roc::host_numerics::Tensor converted
+                = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
                       source.data(),
                       source.size(),
-                      roc::host_validation::Layout::contiguousLastDimensionFastest(
-                          roc::host_validation::Shape{source.size()}))
-                      .copyConvertedTo(roc::host_validation::ScalarType::Float8E4M3Fnuz);
+                      roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                          roc::host_numerics::Shape{source.size()}))
+                      .copyConvertedTo(roc::host_numerics::ScalarType::Float8E4M3Fnuz);
             if(converted.rawEncodedBackingStorage().size() != destination.size())
                 throw std::runtime_error("Converted FP8 storage size mismatch.");
             std::memcpy(destination.data(), converted.rawEncodedBackingStorage().data(), converted.rawEncodedBackingStorage().size());
@@ -284,26 +285,30 @@ int main()
     const hipblasLtHalf* swizzledCpuD    = static_cast<hipblasLtHalf*>(swizzleRunner.d);
     const hipblasLtHalf* swizzledCpuD_F8 = static_cast<hipblasLtHalf*>(swizzleRunner_F8.d);
 
-    for(size_t i = 0; i < m * n; ++i)
+    using namespace roc::host_numerics;
+    const auto layout = Layout::contiguousLastDimensionFastest(Shape{m * n});
+    const auto expected = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float16,
+        layout,
+        std::as_bytes(std::span<const hipblasLtHalf>(regularCpuD, m * n)));
+    const auto swizzledF16 = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float16,
+        layout,
+        std::as_bytes(std::span<const hipblasLtHalf>(swizzledCpuD, m * n)));
+    const auto swizzledF8 = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float16,
+        layout,
+        std::as_bytes(std::span<const hipblasLtHalf>(swizzledCpuD_F8, m * n)));
+    const auto options = nearComparisonOptions(1e-5);
+    if(!compare(swizzledF16, expected, options).passed())
     {
-        const auto diff = std::abs(float(regularCpuD[i] - float(swizzledCpuD[i])));
-        if(diff > 1e-5)
-        {
-            std::cerr << "F16 Swizzle Validation Error at index: " << i << ", diff: " << diff
-                      << '\n';
-            break;
-        }
+        std::cerr << "F16 swizzle validation failed.\n";
+        return 1;
     }
-
-    for(size_t i = 0; i < m * n; ++i)
+    if(!compare(swizzledF8, expected, options).passed())
     {
-        const auto diff = std::abs(float(regularCpuD[i] - float(swizzledCpuD_F8[i])));
-        if(diff > 1e-5)
-        {
-            std::cerr << "F8 Swizzle Validation Error at index: " << i << ", diff: " << diff
-                      << '\n';
-            break;
-        }
+        std::cerr << "F8 swizzle validation failed.\n";
+        return 1;
     }
 
     return 0;

@@ -3,6 +3,8 @@
 
 #include "rocRoller/Serialization/YAML.hpp"
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -36,7 +38,7 @@
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
-#include <roc/host_validation/amd_gpu_layout/mx.hpp>
+#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 
 #include <CLI/CLI.hpp>
 
@@ -90,6 +92,12 @@ namespace
             throw std::runtime_error(hipGetErrorString(status));
         return result;
     }
+
+    std::shared_ptr<uint8_t> copyByteStorageToDevice(std::vector<std::byte> const& values)
+    {
+        auto owner = copyToDevice(values);
+        return {owner, reinterpret_cast<uint8_t*>(owner.get())};
+    }
 }
 
 namespace rocRoller::Client::GEMMClient
@@ -115,8 +123,8 @@ namespace rocRoller::Client::GEMMClient
                                : problemParams.k)
                         : 0;
 
-        std::optional<roc::host_validation::Tensor> runtimeScaleA;
-        std::optional<roc::host_validation::Tensor> runtimeScaleB;
+        std::optional<roc::host_numerics::Tensor> runtimeScaleA;
+        std::optional<roc::host_numerics::Tensor> runtimeScaleB;
         if(!generatedInputs.scaleA && !hostScaleA.empty())
         {
             runtimeScaleA = hostScaleTensor(problemParams.types.scaleTypeA,
@@ -266,7 +274,7 @@ namespace rocRoller::Client::GEMMClient
                 preTileSize[0] /= packing;
             }
             hostBForKernel
-                = roc::host_validation::amd_gpu_layout::preSwizzle(hostB, sizes, {}, preTileSize);
+                = roc::host_numerics::amd_gpu_layout::preSwizzle(hostB, sizes, {}, preTileSize);
         }
 
         // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout)
@@ -296,7 +304,7 @@ namespace rocRoller::Client::GEMMClient
             // The preSwizzle helper assumes column-major; so we swap sizes here.
             std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
             std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-            hostAForKernel = roc::host_validation::amd_gpu_layout::preSwizzle(
+            hostAForKernel = roc::host_numerics::amd_gpu_layout::preSwizzle(
                 hostA, swappedSizes, {}, swappedPreTileSize);
         }
 
@@ -363,16 +371,24 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileA[0]};
                 }
 
-                auto tmpScaleA = [&]() {
-                    if(problemParams.types.scaleSkipPermlane
-                       == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                        return roc::host_validation::amd_gpu_layout::preSwizzleScalesGFX950(
-                            hostScaleA, {descScaleA.sizes()[1], descScaleA.sizes()[0]});
-                    else
-                        return roc::host_validation::amd_gpu_layout::preSwizzle(
-                            hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
-                }();
-                deviceScaleA = copyToDevice(tmpScaleA);
+                if(problemParams.types.scaleSkipPermlane
+                   == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                {
+                    const auto tmpScaleA
+                        = roc::host_numerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
+                            reinterpret_cast<const std::byte*>(hostScaleA.data()),
+                            hostScaleA.size(),
+                            {descScaleA.sizes()[1], descScaleA.sizes()[0]},
+                            scaleBlockSize,
+                            roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950);
+                    deviceScaleA = copyByteStorageToDevice(tmpScaleA);
+                }
+                else
+                {
+                    const auto tmpScaleA = roc::host_numerics::amd_gpu_layout::preSwizzle(
+                        hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                    deviceScaleA = copyToDevice(tmpScaleA);
+                }
             }
             else
             {
@@ -413,16 +429,24 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileB[1]};
                 };
 
-                auto tmpScaleB = [&]() {
-                    if(problemParams.types.scaleSkipPermlane
-                       == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                        return roc::host_validation::amd_gpu_layout::preSwizzleScalesGFX950(
-                            hostScaleB, {descScaleB.sizes()[1], descScaleB.sizes()[0]});
-                    else
-                        return roc::host_validation::amd_gpu_layout::preSwizzle(
-                            hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
-                }();
-                deviceScaleB = copyToDevice(tmpScaleB);
+                if(problemParams.types.scaleSkipPermlane
+                   == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                {
+                    const auto tmpScaleB
+                        = roc::host_numerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
+                            reinterpret_cast<const std::byte*>(hostScaleB.data()),
+                            hostScaleB.size(),
+                            {descScaleB.sizes()[1], descScaleB.sizes()[0]},
+                            scaleBlockSize,
+                            roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950);
+                    deviceScaleB = copyByteStorageToDevice(tmpScaleB);
+                }
+                else
+                {
+                    const auto tmpScaleB = roc::host_numerics::amd_gpu_layout::preSwizzle(
+                        hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                    deviceScaleB = copyToDevice(tmpScaleB);
+                }
             }
             else
             {

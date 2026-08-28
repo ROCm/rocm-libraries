@@ -26,7 +26,7 @@ endif()
 target_link_libraries(sample-helper
     INTERFACE
         roc::hipblaslt
-        roc::host-validation
+        roc::host-numerics
 )
 
 add_subdirectory(01_hipblaslt_gemm)

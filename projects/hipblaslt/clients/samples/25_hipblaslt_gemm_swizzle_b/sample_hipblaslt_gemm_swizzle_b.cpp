@@ -29,7 +29,8 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
-#include <roc/host_validation/tensor.hpp>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/tensor.hpp>
 #include <span>
 #include <type_traits>
 
@@ -72,9 +73,9 @@ void swizzleTensor(T* dst, const T* src, size_t n, size_t k, bool colMaj)
                            std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>>>;
     static_assert(sizeof(T) == sizeof(Storage));
 
-    using roc::host_validation::Layout;
-    using roc::host_validation::Shape;
-    using roc::host_validation::Tensor;
+    using roc::host_numerics::Layout;
+    using roc::host_numerics::Shape;
+    using roc::host_numerics::Tensor;
 
     size_t MiN = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
@@ -186,14 +187,20 @@ int main()
     const hipblasLtHalf* regularCpuD  = static_cast<hipblasLtHalf*>(runner.d);
     const hipblasLtHalf* swizzledCpuD = static_cast<hipblasLtHalf*>(swizzleRunner.d);
 
-    for(size_t i = 0; i < m * n; ++i)
+    using namespace roc::host_numerics;
+    const auto layout = Layout::contiguousLastDimensionFastest(Shape{m * n});
+    const auto expected = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float16,
+        layout,
+        std::as_bytes(std::span<const hipblasLtHalf>(regularCpuD, m * n)));
+    const auto observed = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float16,
+        layout,
+        std::as_bytes(std::span<const hipblasLtHalf>(swizzledCpuD, m * n)));
+    if(!compare(observed, expected, nearComparisonOptions(1e-5)).passed())
     {
-        const auto diff = std::abs(float(regularCpuD[i] - float(swizzledCpuD[i])));
-        if(diff > 1e-5)
-        {
-            std::cerr << "Swizzle Validation Error at index: " << i << ", diff: " << diff << '\n';
-            break;
-        }
+        std::cerr << "Swizzle validation failed.\n";
+        return 1;
     }
 
     std::cout << "Matrix multiplication and validation completed successfully." << std::endl;

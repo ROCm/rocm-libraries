@@ -54,7 +54,7 @@ cd rocm-libraries
 git sparse-checkout init --cone
 git sparse-checkout set \
     projects/hipblaslt \
-    shared/host-validation
+    shared/host-numerics
 git checkout develop # or the branch you are starting from
 ```
 

@@ -17,10 +17,10 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
-#include <roc/host_validation/adapters/tensilelite/DataInitializationHelpers.hpp>
-#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
-#include <roc/host_validation/adapters/tensilelite/TensileDataGeneration.hpp>
-#include <roc/host_validation/validation.hpp>
+#include <roc/host_numerics/adapters/tensilelite/DataInitializationHelpers.hpp>
+#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
+#include <roc/host_numerics/adapters/tensilelite/TensileDataGeneration.hpp>
+#include <roc/host_numerics/validation.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -39,8 +39,8 @@ using TensileLite::Client::InitMode;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
 using TensileLite::Client::PruneSparseMode;
-using TensileLite::Client::toHostValidationScalarType;
-using TensileLite::Client::tryHostValidationInitialize;
+using TensileLite::Client::toHostNumericsScalarType;
+using TensileLite::Client::initializeHostBufferWithHostNumerics;
 
 // Shorthand for the production helper namespace under test (MX builds only).
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
@@ -100,16 +100,16 @@ namespace
     }
 } // namespace
 
-TEST(HostValidationDataInitialization, GeneratesStridedProblemDependentPatterns)
+TEST(HostNumericsDataInitialization, GeneratesStridedProblemDependentPatterns)
 {
     TensorDescriptor   descriptor("t", rocisa::DataType::Float, {2, 3}, {1, 4});
     std::vector<float> values(descriptor.totalAllocatedElements(), -99.0f);
 
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
-                                            InitMode::SerialIdx,
-                                            values.data(),
-                                            descriptor,
-                                            fixedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::SerialIdx,
+                                         values.data(),
+                                         descriptor,
+                                         fixedInitializationKey);
     EXPECT_EQ(values[0], 0);
     EXPECT_EQ(values[1], 1);
     EXPECT_EQ(values[4], 2);
@@ -121,22 +121,22 @@ TEST(HostValidationDataInitialization, GeneratesStridedProblemDependentPatterns)
 
     TensorDescriptor   identityDescriptor("identity", rocisa::DataType::Float, {3, 4}, {1, 3});
     std::vector<float> identity(identityDescriptor.totalAllocatedElements(), -1.0f);
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
-                                            InitMode::Identity,
-                                            identity.data(),
-                                            identityDescriptor,
-                                            fixedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Identity,
+                                         identity.data(),
+                                         identityDescriptor,
+                                         fixedInitializationKey);
     for(size_t column = 0; column < 4; ++column)
         for(size_t row = 0; row < 3; ++row)
             EXPECT_EQ(identity[row + column * 3], row == column ? 1.0f : 0.0f);
 
     TensorDescriptor halfDescriptor("half-raw-dimension", rocisa::DataType::Half, {2, 3}, {1, 4});
     std::vector<uint16_t> halfBits(halfDescriptor.totalAllocatedElements(), 0xffffU);
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Half,
-                                            InitMode::SerialDim1,
-                                            halfBits.data(),
-                                            halfDescriptor,
-                                            fixedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Half,
+                                         InitMode::SerialDim1,
+                                         halfBits.data(),
+                                         halfDescriptor,
+                                         fixedInitializationKey);
     for(size_t column = 0; column < 3; ++column)
         for(size_t row = 0; row < 2; ++row)
             EXPECT_EQ(halfBits[row + column * 4], column);
@@ -144,36 +144,71 @@ TEST(HostValidationDataInitialization, GeneratesStridedProblemDependentPatterns)
     EXPECT_EQ(halfBits[3], 0xffffU);
 }
 
-TEST(HostValidationDataInitialization, SizesDescriptorStorageForTheRequestedType)
+TEST(HostNumericsDataInitialization, SizesDescriptorStorageForTheRequestedType)
 {
     TensorDescriptor bfloat16Descriptor(
         "cross-type-bias", rocisa::DataType::BFloat16, {3, 1, 1}, {1, 3, 0});
     std::array<float, 3> floatValues{-1.0f, -1.0f, -1.0f};
 
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
-                                            InitMode::Zero,
-                                            floatValues.data(),
-                                            bfloat16Descriptor,
-                                            fixedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Zero,
+                                         floatValues.data(),
+                                         bfloat16Descriptor,
+                                         fixedInitializationKey);
     EXPECT_EQ(floatValues, (std::array<float, 3>{0.0f, 0.0f, 0.0f}));
 
     TensorDescriptor halfDescriptor(
         "cross-type-bias", rocisa::DataType::Half, {3, 1, 1}, {1, 3, 0});
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
-                                            InitMode::Random,
-                                            floatValues.data(),
-                                            halfDescriptor,
-                                            fixedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Random,
+                                         floatValues.data(),
+                                         halfDescriptor,
+                                         fixedInitializationKey);
 }
 
-TEST(HostValidationDataInitialization, HandlesIndexedAndEncodedRandomModes)
+TEST(HostNumericsDataInitialization, ThrowsForUnsupportedTypeOrRecipe)
+{
+    std::array<float, 1> value{};
+    EXPECT_THROW(initializeHostBufferWithHostNumerics(rocisa::DataType::None,
+                                                      InitMode::Zero,
+                                                      value.data(),
+                                                      value.size(),
+                                                      fixedInitializationKey),
+                 std::invalid_argument);
+    EXPECT_THROW(initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                                      InitMode::UniformLowPrecision,
+                                                      value.data(),
+                                                      value.size(),
+                                                      fixedInitializationKey),
+                 std::invalid_argument);
+}
+
+TEST(HostNumericsDataInitialization, RejectsDescriptorStrideOutsidePtrdiff)
+{
+    if constexpr(std::numeric_limits<size_t>::digits <= std::numeric_limits<ptrdiff_t>::digits)
+        GTEST_SKIP() << "size_t has no values outside ptrdiff_t range";
+
+    const size_t oversizedStride
+        = static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) + 1;
+    TensorDescriptor descriptor(
+        "oversized-stride", rocisa::DataType::Float, {1, 1}, {1, oversizedStride});
+    std::array<float, 1> value{};
+    EXPECT_THROW(initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                                      InitMode::Zero,
+                                                      value.data(),
+                                                      descriptor,
+                                                      fixedInitializationKey),
+                 std::overflow_error);
+}
+
+TEST(HostNumericsDataInitialization, HandlesIndexedAndEncodedRandomModes)
 {
     std::array<float, 4> values{-1, -1, -1, -1};
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
-                                            InitMode::RandomNarrow,
-                                            values.data(),
-                                            values.size(),
-                                            fixedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::RandomNarrow,
+                                         values.data(),
+                                         values.size(),
+                                         fixedInitializationKey);
     for(float value : values)
     {
         const uint32_t exponent = (std::bit_cast<uint32_t>(value) >> 23) & 0xffU;
@@ -181,37 +216,37 @@ TEST(HostValidationDataInitialization, HandlesIndexedAndEncodedRandomModes)
         EXPECT_LE(exponent, 127U);
     }
 
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
-                                            InitMode::Two,
-                                            values.data(),
-                                            values.size(),
-                                            fixedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Two,
+                                         values.data(),
+                                         values.size(),
+                                         fixedInitializationKey);
     EXPECT_EQ(values, (std::array<float, 4>{2, 2, 2, 2}));
 
     std::array<float, 4> randomFirst{};
     std::array<float, 4> randomSecond{};
     std::array<float, 4> randomFirstRepeat{};
     std::array<float, 4> randomOtherSeed{};
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
-                                            InitMode::Random,
-                                            randomFirst.data(),
-                                            randomFirst.size(),
-                                            firstRandomInitializationKey));
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
-                                            InitMode::Random,
-                                            randomSecond.data(),
-                                            randomSecond.size(),
-                                            secondRandomInitializationKey));
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
-                                            InitMode::Random,
-                                            randomFirstRepeat.data(),
-                                            randomFirstRepeat.size(),
-                                            firstRandomInitializationKey));
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float,
-                                            InitMode::Random,
-                                            randomOtherSeed.data(),
-                                            randomOtherSeed.size(),
-                                            otherSeedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Random,
+                                         randomFirst.data(),
+                                         randomFirst.size(),
+                                         firstRandomInitializationKey);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Random,
+                                         randomSecond.data(),
+                                         randomSecond.size(),
+                                         secondRandomInitializationKey);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Random,
+                                         randomFirstRepeat.data(),
+                                         randomFirstRepeat.size(),
+                                         firstRandomInitializationKey);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Random,
+                                         randomOtherSeed.data(),
+                                         randomOtherSeed.size(),
+                                         otherSeedInitializationKey);
     EXPECT_EQ(randomFirst, randomFirstRepeat);
     EXPECT_NE(randomFirst, randomSecond);
     EXPECT_NE(randomFirst, randomOtherSeed);
@@ -222,18 +257,18 @@ TEST(HostValidationDataInitialization, HandlesIndexedAndEncodedRandomModes)
     }
 
     std::array<uint8_t, 64> e8Values{};
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::E8,
-                                            InitMode::RandomNegPosLimited,
-                                            e8Values.data(),
-                                            e8Values.size(),
-                                            fixedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::E8,
+                                         InitMode::RandomNegPosLimited,
+                                         e8Values.data(),
+                                         e8Values.size(),
+                                         fixedInitializationKey);
 
     std::array<TensileLite::E5M3, 64> unsignedScale{};
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::E5M3,
-                                            InitMode::Random,
-                                            unsignedScale.data(),
-                                            unsignedScale.size(),
-                                            fixedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::E5M3,
+                                         InitMode::Random,
+                                         unsignedScale.data(),
+                                         unsignedScale.size(),
+                                         fixedInitializationKey);
     for(const TensileLite::E5M3 value : unsignedScale)
     {
         EXPECT_FALSE(value.is_nan());
@@ -245,11 +280,11 @@ TEST(HostValidationDataInitialization, HandlesIndexedAndEncodedRandomModes)
 #ifdef TENSILE_USE_FP4
     constexpr size_t                                  logicalFP4Elements = 65;
     std::array<uint8_t, (logicalFP4Elements + 1) / 2> packedFP4{};
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::Float4,
-                                            InitMode::RandomNarrow,
-                                            packedFP4.data(),
-                                            logicalFP4Elements,
-                                            fixedInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float4,
+                                         InitMode::RandomNarrow,
+                                         packedFP4.data(),
+                                         logicalFP4Elements,
+                                         fixedInitializationKey);
     for(size_t index = 0; index < logicalFP4Elements; ++index)
     {
         const uint8_t byte = packedFP4[index / 2];
@@ -260,27 +295,27 @@ TEST(HostValidationDataInitialization, HandlesIndexedAndEncodedRandomModes)
 #endif
 }
 
-TEST(HostValidationDataInitialization, ComplexRandomValuesAreRepeatableAndIndependent)
+TEST(HostNumericsDataInitialization, ComplexRandomValuesAreRepeatableAndIndependent)
 {
     std::array<std::complex<float>, 32> first{};
     std::array<std::complex<float>, 32> repeat{};
     std::array<std::complex<float>, 32> other{};
 
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::ComplexFloat,
-                                            InitMode::Random,
-                                            first.data(),
-                                            first.size(),
-                                            firstRandomInitializationKey));
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::ComplexFloat,
-                                            InitMode::Random,
-                                            repeat.data(),
-                                            repeat.size(),
-                                            firstRandomInitializationKey));
-    ASSERT_TRUE(tryHostValidationInitialize(rocisa::DataType::ComplexFloat,
-                                            InitMode::Random,
-                                            other.data(),
-                                            other.size(),
-                                            secondRandomInitializationKey));
+    initializeHostBufferWithHostNumerics(rocisa::DataType::ComplexFloat,
+                                         InitMode::Random,
+                                         first.data(),
+                                         first.size(),
+                                         firstRandomInitializationKey);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::ComplexFloat,
+                                         InitMode::Random,
+                                         repeat.data(),
+                                         repeat.size(),
+                                         firstRandomInitializationKey);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::ComplexFloat,
+                                         InitMode::Random,
+                                         other.data(),
+                                         other.size(),
+                                         secondRandomInitializationKey);
 
     EXPECT_EQ(first, repeat);
     EXPECT_NE(first, other);
@@ -304,14 +339,14 @@ namespace
     {
         constexpr size_t                 logicalElements = TensileLite::TypeInfo<T>::Packing;
         std::array<std::byte, sizeof(T)> observed{};
-        ASSERT_TRUE(tryHostValidationInitialize(
-            dataType, mode, observed.data(), logicalElements, fixedInitializationKey));
+        initializeHostBufferWithHostNumerics(
+            dataType, mode, observed.data(), logicalElements, fixedInitializationKey);
         EXPECT_EQ(std::memcmp(observed.data(), &expected, sizeof(T)), 0)
             << "dataType=" << dataType << " mode=" << mode;
     }
 }
 
-TEST(HostValidationDataInitialization, TypeDerivedSpecialValuesMatchTensileEncoding)
+TEST(HostNumericsDataInitialization, TypeDerivedSpecialValuesMatchTensileEncoding)
 {
     expectComponentInitializationBytes<int8_t>(
         rocisa::DataType::Int8, InitMode::Max, std::numeric_limits<int8_t>::max());
@@ -354,7 +389,7 @@ TEST(HostValidationDataInitialization, TypeDerivedSpecialValuesMatchTensileEncod
             rocisa::DataType::E8, mode, TensileLite::E8(static_cast<uint8_t>(0xff)));
 }
 
-TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
+TEST(HostNumericsStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
 {
     auto problem = makeProblem(rocisa::DataType::Int8,
                                rocisa::DataType::Int8,
@@ -391,21 +426,20 @@ TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
                        problem.metadataLayout());
 
     auto layout = [](const TensorDescriptor& descriptor) {
-        return roc::host_validation::Layout(
-            roc::host_validation::Shape(descriptor.sizes()),
-            std::vector<ptrdiff_t>(descriptor.strides().begin(), descriptor.strides().end()));
+        return TensileLite::Client::hostNumericsLayout(descriptor);
     };
-    using namespace roc::host_validation;
-    const ScalarType     scalarType = toHostValidationScalarType(denseDescriptor.dataType());
+    using namespace roc::host_numerics;
+    const ScalarType     scalarType = toHostNumericsScalarType(denseDescriptor.dataType());
     std::vector<int8_t>  componentPruned(original.size());
     std::vector<int8_t>  componentCompressed(adapterCompressed.size());
     std::vector<uint8_t> componentMetadata(adapterMetadata.size());
     const Shape          logicalMetadataShape{
         denseDescriptor.sizes()[0], denseDescriptor.sizes()[1] / 8, denseDescriptor.sizes()[2]};
+    const Layout metadataLayout = layout(metadataDescriptor);
     const Layout logicalMetadataLayout(logicalMetadataShape,
-                                       {static_cast<ptrdiff_t>(metadataDescriptor.strides()[1]),
-                                        static_cast<ptrdiff_t>(metadataDescriptor.strides()[0]),
-                                        static_cast<ptrdiff_t>(metadataDescriptor.strides()[2])});
+                                       {metadataLayout.stride(1),
+                                        metadataLayout.stride(0),
+                                        metadataLayout.stride(2)});
 
     StructuredSparsityPattern pattern;
     pattern.axis           = sparseAxis;
@@ -444,7 +478,38 @@ TEST(HostValidationStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
     EXPECT_EQ(componentMetadata, adapterMetadata);
 }
 
-TEST(HostValidationStructuredSparsity, TensileAdapterCoversModesLayoutsAndSparseSides)
+TEST(HostNumericsStructuredSparsity, ValidationFailureDoesNotMutateCallerStorage)
+{
+    const TensorDescriptor dense("dense", rocisa::DataType::Int8, {2, 4}, {1, 2});
+    const TensorDescriptor compressed("compressed", rocisa::DataType::Int8, {2, 2}, {1, 4});
+    const TensorDescriptor metadata("metadata", rocisa::DataType::Int8, {2, 2}, {1, 4});
+
+    std::vector<int8_t>  pruned(dense.totalAllocatedElements(), 11);
+    std::vector<int8_t>  compressedOutput(compressed.totalAllocatedElements(), 22);
+    std::vector<uint8_t> metadataOutput(metadata.totalAllocatedElements(), 33);
+    const auto           originalPruned     = pruned;
+    const auto           originalCompressed = compressedOutput;
+    const auto           originalMetadata   = metadataOutput;
+
+    ASSERT_GT(compressed.totalAllocatedElements(), compressed.totalLogicalElements());
+    ASSERT_GT(metadata.totalAllocatedElements(), metadata.totalLogicalElements());
+    EXPECT_THROW(initCPUSparseInput(PruneSparseMode::PruneXX00,
+                                    pruned.data(),
+                                    compressedOutput.data(),
+                                    metadataOutput.data(),
+                                    dense,
+                                    compressed,
+                                    metadata,
+                                    dense.dimensions(),
+                                    false),
+                 std::out_of_range);
+
+    EXPECT_EQ(pruned, originalPruned);
+    EXPECT_EQ(compressedOutput, originalCompressed);
+    EXPECT_EQ(metadataOutput, originalMetadata);
+}
+
+TEST(HostNumericsStructuredSparsity, TensileAdapterCoversModesLayoutsAndSparseSides)
 {
     const std::array<PruneSparseMode, 7> modes{
         PruneSparseMode::PruneRandom,
@@ -548,33 +613,39 @@ TEST(HostValidationStructuredSparsity, TensileAdapterCoversModesLayoutsAndSparse
                     compressedCoordinates = denseCoordinates;
                     for(size_t group = 0; group < groupsPerSlice; ++group)
                     {
-                        uint32_t selectedMode = static_cast<uint32_t>(mode);
+                        std::array<size_t, 2>        randomRetainedPositions{};
+                        const std::array<size_t, 2>* retained
+                            = &retainedPositionSets[static_cast<uint32_t>(mode)];
                         if(mode == PruneSparseMode::PruneRandom)
                         {
-                            const int selectedSet = roc::host_validation::indexedUniformInteger(
-                                roc::host_validation::tensilelite_adapter::sparsePruningSeed,
-                                0,
-                                slice * groupsPerSlice + group,
-                                0,
-                                static_cast<int>(PruneSparseMode::MaxPruneMode) - 2);
-                            selectedMode = 1 + static_cast<uint32_t>(selectedSet);
+                            size_t retainedCount = 0;
+                            for(size_t position = 0; position < 4; ++position)
+                            {
+                                denseCoordinates[sparseAxis] = group * 4 + position;
+                                if(pruned[denseDescriptor.index(denseCoordinates)] != 0)
+                                {
+                                    ASSERT_LT(retainedCount, randomRetainedPositions.size());
+                                    randomRetainedPositions[retainedCount++] = position;
+                                }
+                            }
+                            ASSERT_EQ(retainedCount, randomRetainedPositions.size());
+                            retained = &randomRetainedPositions;
                         }
-                        const std::array<size_t, 2>& retained = retainedPositionSets[selectedMode];
-                        const uint8_t                expectedMetadata
-                            = static_cast<uint8_t>(retained[0] | (retained[1] << 2));
+                        const uint8_t expectedMetadata
+                            = static_cast<uint8_t>((*retained)[0] | ((*retained)[1] << 2));
 
                         for(size_t position = 0; position < 4; ++position)
                         {
                             denseCoordinates[sparseAxis] = group * 4 + position;
                             const size_t denseIndex      = denseDescriptor.index(denseCoordinates);
                             const bool   isRetained
-                                = position == retained[0] || position == retained[1];
+                                = position == (*retained)[0] || position == (*retained)[1];
                             EXPECT_EQ(pruned[denseIndex], isRetained ? original[denseIndex] : 0);
                         }
-                        for(size_t retainedIndex = 0; retainedIndex < retained.size();
+                        for(size_t retainedIndex = 0; retainedIndex < retained->size();
                             ++retainedIndex)
                         {
-                            denseCoordinates[sparseAxis]      = group * 4 + retained[retainedIndex];
+                            denseCoordinates[sparseAxis] = group * 4 + (*retained)[retainedIndex];
                             compressedCoordinates[sparseAxis] = group * 2 + retainedIndex;
                             EXPECT_EQ(compressed[compressedDescriptor.index(compressedCoordinates)],
                                       original[denseDescriptor.index(denseCoordinates)]);
@@ -784,64 +855,59 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, BFloat8_OneBytePerElement)
 //   Section 4 — direct calls into TensileLite::Client::detail (MX builds only)
 // =============================================================================
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-// -----------------------------------------------------------------------------
-// 4.1  detail::hipMxScaleTypeForDataGenerator
-// -----------------------------------------------------------------------------
-TEST(HipMxScaleTypeForDataGenerator, MapsFloat8ToHIP_R_8F_E4M3)
+TEST(TensileMxGenerationTranslation, MapsTypesAndInitializationPolicy)
 {
-    EXPECT_EQ(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::Float8), HIP_R_8F_E4M3);
-}
-TEST(HipMxScaleTypeForDataGenerator, MapsE5M3ToHIP_R_8F_E5M3_EXT)
-{
-    EXPECT_EQ(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::E5M3),
-              static_cast<hipDataType>(HIP_R_8F_E5M3_EXT));
-}
-TEST(HipMxScaleTypeForDataGenerator, MapsE8AndNoneToHIP_R_8F_UE8M0)
-{
-    EXPECT_EQ(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::E8), HIP_R_8F_UE8M0);
-    EXPECT_EQ(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::None), HIP_R_8F_UE8M0);
-}
-TEST(HipMxScaleTypeForDataGenerator, ThrowsOnUnsupportedScaleType)
-{
-    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::Float4),
-                 std::invalid_argument);
-    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::BFloat8),
-                 std::invalid_argument);
-    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::Float),
-                 std::invalid_argument);
+    using namespace roc::host_numerics;
+
+    const MxGenerationProblem problem = dt::makeMxGenerationProblem(rocisa::DataType::Float4,
+                                                                    rocisa::DataType::E5M3,
+                                                                    Shape{8, 4},
+                                                                    8,
+                                                                    0,
+                                                                    4,
+                                                                    InitMode::Random,
+                                                                    InitMode::One,
+                                                                    17);
+    EXPECT_EQ(problem.dataType, ScalarType::Float4E2M1);
+    EXPECT_EQ(problem.scaleType, ScalarType::E5M3);
+    EXPECT_EQ(problem.scale, MxScaleGenerationMode::One);
+    EXPECT_EQ(problem.data.recipe().seed(), 17);
 }
 
-// -----------------------------------------------------------------------------
-// 4.2  detail::hipMxDataTypeForDataGenerator
-// -----------------------------------------------------------------------------
-TEST(HipMxDataTypeForDataGenerator, MapsFloat4ToHIP_R_4F_E2M1)
+TEST(TensileMxGenerationTranslation, MapsArchitectureToPhysicalScaleLayout)
 {
-    EXPECT_EQ(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Float4),
-              static_cast<hipDataType>(HIP_R_4F_E2M1));
+    using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
+
+    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950"), MxScaleStorageLayout::Gfx950);
+    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950:sramecc+:xnack-"),
+              MxScaleStorageLayout::Gfx950);
+    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx1250"), MxScaleStorageLayout::Gfx1250);
+    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx942"), MxScaleStorageLayout::Natural);
 }
-TEST(HipMxDataTypeForDataGenerator, MapsFloat8ToHIP_R_8F_E4M3)
+
+TEST(TensileMxGenerationTranslation, RejectsUnsupportedTypesAndModes)
 {
-    EXPECT_EQ(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Float8), HIP_R_8F_E4M3);
-}
-TEST(HipMxDataTypeForDataGenerator, MapsBFloat8ToHIP_R_8F_E5M2)
-{
-    EXPECT_EQ(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::BFloat8), HIP_R_8F_E5M2);
-}
-TEST(HipMxDataTypeForDataGenerator, MapsFloat6ToHIP_R_6F_E2M3)
-{
-    EXPECT_EQ(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Float6),
-              static_cast<hipDataType>(HIP_R_6F_E2M3));
-}
-TEST(HipMxDataTypeForDataGenerator, MapsBFloat6ToHIP_R_6F_E3M2)
-{
-    EXPECT_EQ(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::BFloat6),
-              static_cast<hipDataType>(HIP_R_6F_E3M2));
-}
-TEST(HipMxDataTypeForDataGenerator, ThrowsOnUnsupportedDataType)
-{
-    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Float), std::invalid_argument);
-    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Half), std::invalid_argument);
-    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::BFloat16),
+    using namespace roc::host_numerics;
+
+    EXPECT_THROW(generateMx(dt::makeMxGenerationProblem(rocisa::DataType::Float,
+                                                        rocisa::DataType::E8,
+                                                        Shape{8, 4},
+                                                        8,
+                                                        0,
+                                                        4,
+                                                        InitMode::Random,
+                                                        InitMode::One,
+                                                        17)),
+                 std::invalid_argument);
+    EXPECT_THROW(dt::makeMxGenerationProblem(rocisa::DataType::Float4,
+                                             rocisa::DataType::E8,
+                                             Shape{8, 4},
+                                             8,
+                                             0,
+                                             4,
+                                             InitMode::Free,
+                                             InitMode::One,
+                                             17),
                  std::invalid_argument);
 }
 

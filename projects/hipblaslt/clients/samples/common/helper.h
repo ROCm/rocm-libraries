@@ -28,9 +28,9 @@
 #include <functional>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_validation/Types.hpp>
-#include <roc/host_validation/generation.hpp>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
+#include <roc/host_numerics/generation.hpp>
 
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(error)                    \
@@ -89,17 +89,19 @@ namespace hipblaslt_sample_detail
     void generateUniformInteger(Type* values, size_t elements, std::uint64_t sequence)
     {
         const std::uint64_t recipeSeed
-            = hipblaslt::host_validation::initialization::seedForSequence(
-                hipblaslt::host_validation::defaultInitializationSeed, sequence);
-        const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
-            roc::host_validation::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
+            = hipblaslt::host_numerics::initialization::seedForSequence(
+                hipblaslt::host_numerics::defaultInitializationSeed, sequence);
+        const auto recipe = roc::host_numerics::GenerationRecipe::realOnly(
+            roc::host_numerics::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
             {.seed = recipeSeed});
-        auto generated = hipblaslt::host_validation::tensorFromMutableStorage(
+        auto generated = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
             values,
             elements,
-            roc::host_validation::Layout::contiguousLastDimensionFastest(roc::host_validation::Shape{elements}));
-        roc::host_validation::generate(generated, recipe);
-        hipblaslt::host_validation::copyTensorStorageTo(values, elements, generated);
+            roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                roc::host_numerics::Shape{elements}));
+        roc::host_numerics::generate(generated, recipe);
+        hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
+            values, elements, generated);
     }
 } // namespace hipblaslt_sample_detail
 

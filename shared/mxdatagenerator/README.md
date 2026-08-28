@@ -1,7 +1,7 @@
 # Temporary mxDataGenerator compatibility project
 
 The mxDataGenerator implementation has been removed. Its live CPU numerical
-functionality and physical layout transforms now live in ROCHostValidation.
+functionality and physical layout transforms now live in ROCHostNumerics.
 
 This directory contains no numerical code or installed headers. It exists only
 because the TheRock revision currently pinned by rocm-libraries still

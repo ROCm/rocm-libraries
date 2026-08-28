@@ -4,7 +4,7 @@
 #pragma once
 
 #include "hipblaslt_arguments.hpp"
-#include <hipblaslt/host_validation/Types.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -27,8 +27,8 @@ namespace hipblaslt::client
     struct MatmulMatrix
     {
         hipDataType                      apiType;
-        roc::host_validation::ScalarType hostType;
-        roc::host_validation::Layout     layout;
+        roc::host_numerics::ScalarType hostType;
+        roc::host_numerics::Layout     layout;
         size_t                           allocationElements;
 
         int64_t rows() const

@@ -116,7 +116,7 @@ namespace MatrixMultiplyTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f32_16x16x4_f32);
             }
 
-            if((isF8<TA> || isF8<TB>)&&(wave_k >= 64))
+            if((isF8<TA> || isF8<TB>) && (wave_k >= 64))
             {
                 REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4,
                                         GPUCapability::HasWMMA_f8f6f4);
@@ -447,8 +447,8 @@ namespace MatrixMultiplyTest
                 auto c_D               = HostNumerics::convertHostReference<TD>(
                     HostNumerics::computeHostReference(referenceProblem));
 
-                auto tol = gemmAcceptableError<TA, TB, TD>(
-                    M, N, K, m_context->targetArchitecture().target());
+                auto tol
+                    = gemmAcceptableError<TA, TB, TD>(K, m_context->targetArchitecture().target());
                 auto res = compare(D, c_D, tol);
 
                 Log::info("RNorm is {}", res.relativeNormL2);
@@ -684,8 +684,8 @@ namespace MatrixMultiplyTest
                 auto c_D = HostNumerics::convertHostReference<TD>(
                     HostNumerics::computeHostReference(referenceProblem));
 
-                auto tol = gemmAcceptableError<TA, TB, TD>(
-                    M, N, K, m_context->targetArchitecture().target());
+                auto tol
+                    = gemmAcceptableError<TA, TB, TD>(K, m_context->targetArchitecture().target());
                 auto res = compare(D, c_D, tol);
 
                 Log::info("RNorm is {}", res.relativeNormL2);
@@ -835,8 +835,8 @@ namespace MatrixMultiplyTest
                 auto c_D              = HostNumerics::convertHostReference<T>(
                     HostNumerics::computeHostReference(referenceProblem));
 
-                auto tol = gemmAcceptableError<T, T, T>(
-                    M, N, K, m_context->targetArchitecture().target());
+                auto tol
+                    = gemmAcceptableError<T, T, T>(K, m_context->targetArchitecture().target());
                 auto res = compare(D, c_D, tol);
 
                 Log::info("RNorm is {}", res.relativeNormL2);

@@ -13,7 +13,7 @@
 "project: hipblaslt":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
-  - any-glob-to-any-file: 'shared/host-validation/**/*'
+  - any-glob-to-any-file: 'shared/host-numerics/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
   - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
@@ -127,10 +127,6 @@
 "project: rpp":
 - changed-files:
   - any-glob-to-any-file: 'projects/rpp/**/*'
-
-"shared: host-validation":
-- changed-files:
-  - any-glob-to-any-file: 'shared/host-validation/**/*'
 
 "shared: origami":
 - changed-files:

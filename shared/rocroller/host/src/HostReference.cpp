@@ -6,21 +6,14 @@
 #include <sstream>
 #include <utility>
 
-#include <roc/host_validation/backends/blas.hpp>
-#include <roc/host_validation/gemm.hpp>
+#include <roc/host_numerics/backends/blas.hpp>
+#include <roc/host_numerics/gemm.hpp>
 
 namespace rocRoller::HostNumerics
 {
     namespace
     {
-        using namespace roc::host_validation;
-
-        size_t checkedElementCount(size_t first, size_t second, char const* description)
-        {
-            if(second != 0 && first > std::numeric_limits<size_t>::max() / second)
-                throw std::overflow_error(description);
-            return first * second;
-        }
+        using namespace roc::host_numerics;
 
         BlockScaleBinding normalizeBlockScale(Tensor      values,
                                               size_t      freeExtent,
@@ -56,13 +49,13 @@ namespace rocRoller::HostNumerics
         return output.str();
     }
 
-    roc::host_validation::Tensor hostScaleTensor(DataType                 type,
-                                                 std::span<const uint8_t> values,
-                                                 size_t                   freeExtent,
-                                                 size_t                   reductionExtent,
-                                                 size_t                   blockSize)
+    roc::host_numerics::Tensor hostScaleTensor(DataType                 type,
+                                               std::span<const uint8_t> values,
+                                               size_t                   freeExtent,
+                                               size_t                   reductionExtent,
+                                               size_t                   blockSize)
     {
-        using namespace roc::host_validation;
+        using namespace roc::host_numerics;
         auto const scalarType = hostScalarType(type);
         if(scalarTypeInfo(scalarType).category != ScalarCategory::Scale)
             throw std::invalid_argument("rocRoller runtime scale requires a scale data type.");
@@ -76,13 +69,13 @@ namespace rocRoller::HostNumerics
             scalarType, Layout(Shape{freeExtent, blockCount}, {0, 0}), std::as_bytes(values));
     }
 
-    roc::host_validation::Tensor hostScaleTensor(DataType                 type,
-                                                 std::span<const uint8_t> values,
-                                                 TensorDescriptor const&  dataDescriptor,
-                                                 size_t                   blockedDimension,
-                                                 size_t                   blockSize)
+    roc::host_numerics::Tensor hostScaleTensor(DataType                 type,
+                                               std::span<const uint8_t> values,
+                                               TensorDescriptor const&  dataDescriptor,
+                                               size_t                   blockedDimension,
+                                               size_t                   blockSize)
     {
-        using namespace roc::host_validation;
+        using namespace roc::host_numerics;
 
         auto const layout     = hostScaleLayout(dataDescriptor, blockedDimension, blockSize);
         auto const scalarType = hostScalarType(type);
@@ -100,23 +93,23 @@ namespace rocRoller::HostNumerics
     }
 
     HostReferenceProblem
-        makeHostReferenceProblem(GeneratedGEMMInputs const&                  inputs,
-                                 std::optional<roc::host_validation::Tensor> runtimeScaleA,
-                                 std::optional<roc::host_validation::Tensor> runtimeScaleB,
-                                 size_t                                      scaleBlockSize,
-                                 float                                       alpha,
-                                 float                                       beta)
+        makeHostReferenceProblem(GeneratedGEMMInputs const&                inputs,
+                                 std::optional<roc::host_numerics::Tensor> runtimeScaleA,
+                                 std::optional<roc::host_numerics::Tensor> runtimeScaleB,
+                                 size_t                                    scaleBlockSize,
+                                 float                                     alpha,
+                                 float                                     beta)
     {
         HostReferenceProblem result(inputs.a, inputs.b, inputs.c);
         result.scaleA
             = runtimeScaleA
                   ? std::move(runtimeScaleA)
-                  : (inputs.scaleA ? std::optional<roc::host_validation::Tensor>(inputs.scaleA)
+                  : (inputs.scaleA ? std::optional<roc::host_numerics::Tensor>(inputs.scaleA)
                                    : std::nullopt);
         result.scaleB
             = runtimeScaleB
                   ? std::move(runtimeScaleB)
-                  : (inputs.scaleB ? std::optional<roc::host_validation::Tensor>(inputs.scaleB)
+                  : (inputs.scaleB ? std::optional<roc::host_numerics::Tensor>(inputs.scaleB)
                                    : std::nullopt);
         result.scaleBlockSize = scaleBlockSize;
         result.alpha          = alpha;
@@ -124,9 +117,9 @@ namespace rocRoller::HostNumerics
         return result;
     }
 
-    roc::host_validation::Tensor computeHostReference(HostReferenceProblem const& problem)
+    roc::host_numerics::Tensor computeHostReference(HostReferenceProblem const& problem)
     {
-        using namespace roc::host_validation;
+        using namespace roc::host_numerics;
 
         if(problem.a.shape().rank() != 2 || problem.b.shape().rank() != 2
            || problem.c.shape().rank() != 2)
@@ -148,48 +141,18 @@ namespace rocRoller::HostNumerics
         Tensor output(ScalarType::Float32,
                       Layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(rows)}));
 
-        GemmOperand           operandA(problem.a);
-        GemmOperand           operandB(problem.b);
-        std::optional<Tensor> unitScaleA;
-        std::optional<Tensor> unitScaleB;
+        GemmOperand operandA(problem.a);
+        GemmOperand operandB(problem.b);
         if(problem.scaleA || problem.scaleB)
         {
             if(problem.scaleBlockSize == 0)
                 throw std::invalid_argument("rocRoller scale block size must be nonzero.");
-            const size_t blockCount
-                = reductionExtent / problem.scaleBlockSize
-                  + static_cast<size_t>(reductionExtent % problem.scaleBlockSize != 0);
-            if(!problem.scaleA)
-            {
-                const std::vector<float> values(
-                    checkedElementCount(
-                        rows, blockCount, "rocRoller A scale element count overflow."),
-                    1.0f);
-                unitScaleA = Tensor::copyValuesWithConversion(
-                    ScalarType::Float32, Shape{rows, blockCount}, std::span<const float>(values));
-            }
-            if(!problem.scaleB)
-            {
-                const std::vector<float> values(
-                    checkedElementCount(
-                        columns, blockCount, "rocRoller B scale element count overflow."),
-                    1.0f);
-                unitScaleB = Tensor::copyValuesWithConversion(ScalarType::Float32,
-                                                Shape{columns, blockCount},
-                                                std::span<const float>(values));
-            }
-            operandA.blockScale
-                = normalizeBlockScale(problem.scaleA ? *problem.scaleA : *unitScaleA,
-                                      rows,
-                                      reductionExtent,
-                                      problem.scaleBlockSize,
-                                      "A");
-            operandB.blockScale
-                = normalizeBlockScale(problem.scaleB ? *problem.scaleB : *unitScaleB,
-                                      columns,
-                                      reductionExtent,
-                                      problem.scaleBlockSize,
-                                      "B");
+            if(problem.scaleA)
+                operandA.blockScale = normalizeBlockScale(
+                    *problem.scaleA, rows, reductionExtent, problem.scaleBlockSize, "A");
+            if(problem.scaleB)
+                operandB.blockScale = normalizeBlockScale(
+                    *problem.scaleB, columns, reductionExtent, problem.scaleBlockSize, "B");
         }
 
         GemmRequest request(
@@ -197,47 +160,33 @@ namespace rocRoller::HostNumerics
         request.epilogue.alpha = problem.alpha;
         request.epilogue.beta  = problem.beta;
 
-        static const TransformingBlasGemmBackend backend;
-        referenceGemm(request,
-                      {
-                          .backend                 = GemmBackend::Blas,
-                          .requireRequestedBackend = false,
-                      },
-                      &backend);
+        referenceGemmWithBlasBackend(request);
         return output;
     }
 
-    HostComparisonResult compareHostReference(roc::host_validation::Tensor observed,
-                                              roc::host_validation::Tensor expected,
-                                              AcceptableGEMMError          acceptableError)
+    HostComparisonResult compareHostReference(roc::host_numerics::Tensor observed,
+                                              roc::host_numerics::Tensor expected,
+                                              AcceptableGEMMError        acceptableError)
     {
-        using namespace roc::host_validation;
+        using namespace roc::host_numerics;
 
         ComparisonOptions options;
-        options.pointwise                  = false;
-        options.computePointwiseStatistics = true;
-        options.computeFrobenius           = true;
-        options.computeUlp                 = false;
-        options.maxReportedMismatches      = 0;
+        options.pointwise                              = false;
+        options.computePointwiseStatistics             = true;
+        options.computeFrobenius                       = true;
+        options.computeUlp                             = false;
+        options.maxReportedMismatches                  = 0;
+        options.relativeFrobeniusTolerance             = acceptableError.relativeL2Tolerance;
+        options.strictTolerance                        = true;
+        options.zeroExpectedNormIsNaN                  = true;
+        options.nonFiniteValuesInvalidateRelativeNorms = true;
 
         ComparisonResult statistics = compare(observed, expected, options);
-        const bool hasNonFinite = statistics.matchedNaNs != 0 || statistics.matchedInfinities != 0
-                                  || statistics.nonFiniteMismatches != 0;
-        const double relativeNormL2
-            = hasNonFinite ? std::numeric_limits<double>::quiet_NaN()
-                           : statistics.frobeniusDifference / statistics.frobeniusExpected;
-        const double relativeNormInf
-            = hasNonFinite ? std::numeric_limits<double>::quiet_NaN()
-                           : statistics.maxAbsoluteDifference / statistics.maximumExpectedMagnitude;
-        const bool passed = relativeNormL2 < acceptableError.relativeL2Tolerance;
-
-        statistics.relativeFrobeniusError = relativeNormL2;
-        statistics.frobeniusPassed        = passed;
 
         return {
-            .ok               = passed,
-            .relativeNormL2   = relativeNormL2,
-            .relativeNormInf  = relativeNormInf,
+            .ok               = statistics.passed(),
+            .relativeNormL2   = statistics.relativeFrobeniusError,
+            .relativeNormInf  = statistics.relativeMaximumError,
             .referenceNormL2  = statistics.frobeniusExpected,
             .referenceNormInf = statistics.maximumExpectedMagnitude,
             .observedNormL2   = statistics.frobeniusObserved,

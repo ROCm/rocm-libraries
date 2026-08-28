@@ -32,13 +32,13 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_validation/GroupedGemmDataInitialization.hpp>
-#include <hipblaslt/host_validation/Types.hpp>
+#include <hipblaslt/host_numerics/GroupedGemmDataInitialization.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt_arguments.hpp>
-#include <hipblaslt_vector.hpp>
+#include <hipblaslt/host_numerics/hipblaslt_vector.hpp>
 #include <iostream>
 #include <limits>
-#include <roc/host_validation/validation.hpp>
+#include <roc/host_numerics/validation.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -104,20 +104,20 @@ inline const char* ToString(ActivationType act)
     }
 }
 
-roc::host_validation::Activation toHostValidationActivation(ActivationType activation)
+roc::host_numerics::Activation toHostNumericsActivation(ActivationType activation)
 {
     switch(activation)
     {
     case ActivationType::NONE:
-        return roc::host_validation::Activation::None;
+        return roc::host_numerics::Activation::None;
     case ActivationType::RELU:
-        return roc::host_validation::Activation::Relu;
+        return roc::host_numerics::Activation::Relu;
     case ActivationType::GELU:
-        return roc::host_validation::Activation::Gelu;
+        return roc::host_numerics::Activation::Gelu;
     case ActivationType::SWISH:
-        return roc::host_validation::Activation::Swish;
+        return roc::host_numerics::Activation::Swish;
     case ActivationType::CLAMP:
-        return roc::host_validation::Activation::Clamp;
+        return roc::host_numerics::Activation::Clamp;
     }
 
     throw std::invalid_argument("Unsupported grouped GEMM activation.");
@@ -621,7 +621,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
         h_bias[i].resize(size_bias[i]);
 
         // initial data on host
-        hipblaslt::host_validation::initializeGroupedGemm(ha[i],
+        hipblaslt::host_numerics::initializeGroupedGemm(ha[i],
                                                           size_a[i],
                                                           hb[i],
                                                           size_b[i],
@@ -887,8 +887,8 @@ int test_hipblaslt(hipDataType                 in_datatype,
                 bool passed = true;
                 for(int i3 = 0; i3 < batch_count[i]; i3++)
                 {
-                    using namespace roc::host_validation;
-                    using namespace hipblaslt::host_validation;
+                    using namespace roc::host_numerics;
+                    using namespace hipblaslt::host_numerics;
                     auto storageElements = [](size_t    rows,
                                               size_t    columns,
                                               ptrdiff_t rowStride,
@@ -906,27 +906,29 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     const size_t cElements = storageElements(size_t(m[i]), size_t(n[i]), 1, ldc[i]);
                     const size_t dElements = storageElements(size_t(m[i]), size_t(n[i]), 1, ldd[i]);
 
-                    auto referenceOutput = tensorFromMutableStorage(
+                    auto referenceOutput = copyTensorFromEncodedStorage(
                         d_ptr + i3 * stride_d[i],
                         dElements,
                         Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]}));
-                    GemmRequest problem(
-                        GemmOperand(tensorFromStorage(a_ptr + i3 * stride_a[i],
-                                                      aElements,
-                                                      Layout(Shape{size_t(m[i]), size_t(k[i])},
-                                                             {a_stride_1[i], a_stride_2[i]}))),
-                        GemmOperand(tensorFromStorage(b_ptr + i3 * stride_b[i],
-                                                      bElements,
-                                                      Layout(Shape{size_t(k[i]), size_t(n[i])},
-                                                             {b_stride_1[i], b_stride_2[i]}))),
-                        tensorFromStorage(c_ptr + i3 * stride_c[i],
-                                          cElements,
-                                          Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]})),
-                        referenceOutput,
-                        ScalarType::Float32);
+                    GemmRequest problem(GemmOperand(copyTensorFromEncodedStorage(
+                                            a_ptr + i3 * stride_a[i],
+                                            aElements,
+                                            Layout(Shape{size_t(m[i]), size_t(k[i])},
+                                                   {a_stride_1[i], a_stride_2[i]}))),
+                                        GemmOperand(copyTensorFromEncodedStorage(
+                                            b_ptr + i3 * stride_b[i],
+                                            bElements,
+                                            Layout(Shape{size_t(k[i]), size_t(n[i])},
+                                                   {b_stride_1[i], b_stride_2[i]}))),
+                                        copyTensorFromEncodedStorage(
+                                            c_ptr + i3 * stride_c[i],
+                                            cElements,
+                                            Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]})),
+                                        referenceOutput,
+                                        ScalarType::Float32);
                     problem.epilogue.alpha      = static_cast<double>(alpha[i]);
                     problem.epilogue.beta       = static_cast<double>(beta[i]);
-                    problem.epilogue.activation = toHostValidationActivation(actType[i]);
+                    problem.epilogue.activation = toHostNumericsActivation(actType[i]);
                     if(bias_ptr)
                         problem.epilogue.bias
                             = VectorBinding{Tensor::copyNativeStorage<float>(
@@ -941,7 +943,8 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         problem.epilogue.activationParameter1 = 1.0;
                     }
                     referenceGemm(problem);
-                    copyTensorStorageTo(d_ptr + i3 * stride_d[i], dElements, referenceOutput);
+                    copyTensorEncodedBackingStorageToBuffer(
+                        d_ptr + i3 * stride_d[i], dElements, referenceOutput);
 
                     ComparisonOptions comparisonOptions{
                         .symmetricRelativeTolerance = std::nextafter(0.001, 0.0),
@@ -950,10 +953,10 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         = IndexOrder::FirstDimensionFastest;
                     const Layout comparisonLayout(
                         Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]});
-                    const auto comparison = roc::host_validation::compare(
-                        hipblaslt::host_validation::tensorFromStorage(
+                    const auto comparison = roc::host_numerics::compare(
+                        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
                             hd[i].data() + i3 * stride_d[i], dElements, comparisonLayout),
-                        hipblaslt::host_validation::tensorFromStorage(
+                        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
                             d_ptr + i3 * stride_d[i], dElements, comparisonLayout),
                         comparisonOptions);
                     passed = passed && comparison.passed();

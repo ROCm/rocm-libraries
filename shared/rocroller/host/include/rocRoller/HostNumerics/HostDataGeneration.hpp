@@ -14,7 +14,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <roc/host_validation/tensor.hpp>
+#include <roc/host_numerics/tensor.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
@@ -60,38 +60,38 @@ namespace rocRoller::HostNumerics
 
     struct GeneratedTensor
     {
-        roc::host_validation::Tensor                data;
-        std::optional<roc::host_validation::Tensor> scales;
+        roc::host_numerics::Tensor                data;
+        std::optional<roc::host_numerics::Tensor> scales;
         // Retained only when generateHostTensor(..., includeReference=true).
-        std::optional<roc::host_validation::Tensor> reference;
+        std::optional<roc::host_numerics::Tensor> reference;
     };
 
     struct GeneratedGEMMInputs
     {
-        roc::host_validation::Tensor                a;
-        roc::host_validation::Tensor                b;
-        roc::host_validation::Tensor                c;
-        std::optional<roc::host_validation::Tensor> scaleA;
-        std::optional<roc::host_validation::Tensor> scaleB;
+        roc::host_numerics::Tensor                a;
+        roc::host_numerics::Tensor                b;
+        roc::host_numerics::Tensor                c;
+        std::optional<roc::host_numerics::Tensor> scaleA;
+        std::optional<roc::host_numerics::Tensor> scaleB;
     };
 
-    roc::host_validation::ScalarType hostScalarType(DataType               type,
+    roc::host_numerics::ScalarType hostScalarType(DataType               type,
                                                     DataTypeInterpretation interpretation
                                                     = DataTypeInterpretation::Unscaled);
 
-    roc::host_validation::Layout hostTensorLayout(TensorDescriptor const& descriptor);
+    roc::host_numerics::Layout hostTensorLayout(TensorDescriptor const& descriptor);
 
     /**
      * Returns the canonical [free dimension, reduction block] scale layout.
      * Its physical order follows the data descriptor so the scale bytes can
      * be uploaded directly before any explicitly requested pre-swizzle.
      */
-    roc::host_validation::Layout hostScaleLayout(TensorDescriptor const& descriptor,
+    roc::host_numerics::Layout hostScaleLayout(TensorDescriptor const& descriptor,
                                                  size_t                  blockedDimension,
                                                  size_t                  blockSize);
 
     /**
-     * Generates one real-valued rocRoller tensor from a typed host-validation
+     * Generates one real-valued rocRoller tensor from a typed host-numerics
      * recipe. The caller supplies only the random seed; component random
      * domains remain an implementation detail, and ordinary generation uses
      * explicit real-only complex semantics. Descriptor strides select the
@@ -129,7 +129,7 @@ namespace rocRoller::HostNumerics
                                            uint32_t                  seed);
 
     template <typename T>
-    std::vector<T> copyTensorStorage(roc::host_validation::Tensor const& tensor)
+    std::vector<T> copyTensorStorage(roc::host_numerics::Tensor const& tensor)
     {
         static_assert(std::is_trivially_copyable_v<T>);
 
@@ -150,7 +150,7 @@ namespace rocRoller::HostNumerics
     }
 
     template <typename T>
-    roc::host_validation::Tensor hostTensor(TensorDescriptor const& descriptor,
+    roc::host_numerics::Tensor hostTensor(TensorDescriptor const& descriptor,
                                             std::span<const T>      values,
                                             DataTypeInterpretation  interpretation
                                             = DataTypeInterpretation::Unscaled)
@@ -159,7 +159,7 @@ namespace rocRoller::HostNumerics
 
         auto const type          = hostScalarType(descriptor.dataType(), interpretation);
         auto const layout        = hostTensorLayout(descriptor);
-        auto const requiredBytes = roc::host_validation::storageBytesForLayout(type, layout);
+        auto const requiredBytes = roc::host_numerics::storageBytesForLayout(type, layout);
         if(requiredBytes > std::numeric_limits<size_t>::max() - (sizeof(T) - 1))
             throw std::overflow_error("rocRoller host tensor storage size overflow.");
 
@@ -170,12 +170,12 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument(
                 "rocRoller host tensor storage does not match its descriptor and packing.");
 
-        return roc::host_validation::Tensor::copyEncodedBackingStorage(
+        return roc::host_numerics::Tensor::copyEncodedBackingStorage(
             type, layout, std::as_bytes(values));
     }
 
     template <typename T, typename Allocator>
-    roc::host_validation::Tensor hostTensor(TensorDescriptor const&          descriptor,
+    roc::host_numerics::Tensor hostTensor(TensorDescriptor const&          descriptor,
                                             std::vector<T, Allocator> const& values,
                                             DataTypeInterpretation           interpretation
                                             = DataTypeInterpretation::Unscaled)

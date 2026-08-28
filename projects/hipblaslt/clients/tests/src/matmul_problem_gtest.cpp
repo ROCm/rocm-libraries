@@ -59,7 +59,7 @@ namespace
                       size_t                                 allocationElements)
     {
         EXPECT_EQ(matrix.apiType, type);
-        EXPECT_EQ(matrix.hostType, hipblaslt::host_validation::scalarType(type));
+        EXPECT_EQ(matrix.hostType, hipblaslt::host_numerics::scalarType(type));
         ASSERT_EQ(matrix.layout.shape().rank(), 3);
         EXPECT_EQ(matrix.layout.shape().extent(0), rows);
         EXPECT_EQ(matrix.layout.shape().extent(1), columns);

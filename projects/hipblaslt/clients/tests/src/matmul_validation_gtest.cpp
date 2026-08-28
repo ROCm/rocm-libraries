@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <hipblaslt/host_validation/MatmulValidation.hpp>
+#include <hipblaslt/host_numerics/MatmulValidation.hpp>
 
 #include "utility.hpp"
 #include <gtest/gtest-spi.h>
@@ -11,13 +11,14 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace
 {
     double validatePointerArrayNorm(const std::array<float, 2>& observed, bool assertNorm)
     {
-        using namespace hipblaslt::host_validation;
+        using namespace hipblaslt::host_numerics;
 
         const std::array<float, 2> expected{1.0f, 1.0f};
         MatmulValidationCase       testCase;
@@ -34,7 +35,7 @@ namespace
         double error = 0.0, absolute = 0.0, relative = 0.0, maximumUlp = 0.0, averageUlp = 0.0;
         validateMatmulOutputs({
             .options = {.compareNorm = true, .assertNorm = assertNorm},
-            .cases = std::span(&testCase, 1),
+            .cases   = std::span(&testCase, 1),
             .metrics = {error, absolute, relative, maximumUlp, averageUlp},
         });
         return error;
@@ -44,16 +45,72 @@ namespace
     {
         (void)validatePointerArrayNorm({100.0f, 1.0f}, true);
     }
+
+    hipblaslt::host_numerics::HostComparisonRequest scalarComparison(const float* expected,
+                                                                     const float* observed)
+    {
+        hipblaslt::host_numerics::HostComparisonRequest output;
+        output.rows = output.columns = output.leadingDimension = output.batchCount = 1;
+        output.expected                                                            = expected;
+        output.observed                                                            = observed;
+        output.type                                                                = HIP_R_32F;
+        return output;
+    }
+
+    std::pair<double, double>
+        validateAllClose(std::span<const hipblaslt::host_numerics::MatmulValidationCase> cases)
+    {
+        using namespace hipblaslt::host_numerics;
+
+        double error = 0.0, absolute = 0.0, relative = 0.0, maximumUlp = 0.0, averageUlp = 0.0;
+        validateMatmulOutputs({
+            .options = {.searchAllClose = true},
+            .cases   = cases,
+            .metrics = {error, absolute, relative, maximumUlp, averageUlp},
+        });
+        return {absolute, relative};
+    }
 }
 
-TEST(HostValidationMatmulValidation, PointerArrayNormCountsEachBatchOnce)
+TEST(HostNumericsMatmulValidation, PointerArrayNormCountsEachBatchOnce)
 {
     EXPECT_DOUBLE_EQ(validatePointerArrayNorm({2.0f, 3.0f}, false), 3.0);
 }
 
-TEST(HostValidationMatmulValidation, PointerArrayNormAssertsEachBatch)
+TEST(HostNumericsMatmulValidation, PointerArrayNormAssertsEachBatch)
 {
     EXPECT_FATAL_FAILURE(validateBadFirstBatch(), "Expected equality");
+}
+
+TEST(HostNumericsMatmulValidation, PointerArrayOutputsKeepCombinedAllCloseTolerance)
+{
+    using namespace hipblaslt::host_numerics;
+
+    const std::array<float, 3> expected{0.0f, 1.0f, 1.0f};
+    const std::array<float, 3> observed{0.005f, 1.005f, 1.0f};
+    MatmulValidationCase       testCase;
+    for(size_t output = 0; output < expected.size(); ++output)
+        testCase.outputs.push_back(scalarComparison(&expected[output], &observed[output]));
+
+    const auto [absolute, relative]
+        = validateAllClose(std::span<const MatmulValidationCase>(&testCase, 1));
+    EXPECT_DOUBLE_EQ(absolute, 1e-2);
+    EXPECT_DOUBLE_EQ(relative, 1e-2);
+}
+
+TEST(HostNumericsMatmulValidation, GroupedCasesKeepEarlierAllCloseFailure)
+{
+    using namespace hipblaslt::host_numerics;
+
+    const std::array<float, 2>          expected{0.0f, 1.0f};
+    const std::array<float, 2>          observed{2.0f, 1.0f};
+    std::array<MatmulValidationCase, 2> cases;
+    for(size_t problem = 0; problem < cases.size(); ++problem)
+        cases[problem].outputs.push_back(scalarComparison(&expected[problem], &observed[problem]));
+
+    const auto [absolute, relative] = validateAllClose(cases);
+    EXPECT_DOUBLE_EQ(absolute, 1.0);
+    EXPECT_DOUBLE_EQ(relative, 1.0);
 }
 
 TEST(MatmulAlgoIndex, MixedValidityContract)
