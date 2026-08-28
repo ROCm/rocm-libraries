@@ -84,7 +84,7 @@ from ._conv_implicit_gemm_common import (
     _emit_mfma,
     _emit_smem_load,
     _ir_dtype,
-    build_wavelet_loaders,
+    _make_wavelet_loaders,
     compute_wavelet_epi_barriers,
     emit_wavelet_kloop,
 )
@@ -1355,7 +1355,7 @@ def _build_tilde_dgrad(
         vector_axis=axis_b,
     )
     if spec.pipeline == "wavelet":
-        a_wavelet_loader, b_wavelet_loader = build_wavelet_loaders(
+        a_wavelet_loader, b_wavelet_loader = _make_wavelet_loaders(
             num_load_waves=spec.num_load_waves,
             wave_size=spec.wave_size,
             block_m=block_m,

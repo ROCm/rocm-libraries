@@ -49,7 +49,7 @@ from .conv_implicit_gemm import (
     ConvAccumulatorEpilogue,
     ConvProblem,
     ImplicitGemmConvSpec,
-    build_implicit_gemm_conv,
+    _build_implicit_gemm_conv_with_overrides,
     is_valid_spec as is_valid_conv_spec,
     _apply_accumulator_epilogue,
     _resolve_conv_op,
@@ -1376,7 +1376,7 @@ def build_deep_fused_conv_pool(spec: DeepFusedConvPoolSpec, *, arch: str = "gfx9
                 b, spec, conv1_smem, y_rsrc, grid, epilogue=deferred_epi
             )
 
-    return build_implicit_gemm_conv(
+    return _build_implicit_gemm_conv_with_overrides(
         conv_spec,
         arch=arch,
         extra_params=extra_params,

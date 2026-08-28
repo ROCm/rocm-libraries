@@ -21,7 +21,7 @@ What lives here
   ``_choose_load_vec_for`` — the LDS-load + MFMA emission plumbing reused by
   both the forward and wgrad K-loop bodies.
 * Wavelet pipeline helpers: :func:`compute_wavelet_epi_barriers`,
-  :func:`build_wavelet_loaders`, :func:`emit_wavelet_kloop` — shared by
+  :func:`_make_wavelet_loaders`, :func:`emit_wavelet_kloop` — shared by
   forward, wgrad, and dgrad wavelet (gfx1250/WMMA) K-loop emission.
 """
 
@@ -568,7 +568,7 @@ def compute_wavelet_epi_barriers(epilogue: str, cshuffle_no_alias: bool) -> int:
     return 0
 
 
-def build_wavelet_loaders(
+def _make_wavelet_loaders(
     num_load_waves: int,
     wave_size: int,
     block_m: int,

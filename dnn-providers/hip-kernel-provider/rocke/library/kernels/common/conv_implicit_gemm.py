@@ -90,7 +90,7 @@ from ._conv_implicit_gemm_common import (  # noqa: F401 — re-exported for call
     _emit_mfma,
     _emit_smem_load,
     _ir_dtype,
-    build_wavelet_loaders,
+    _make_wavelet_loaders,
     compute_wavelet_epi_barriers,
     emit_wavelet_kloop,
     make_a_descriptor,
@@ -745,7 +745,16 @@ def make_d_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
 # ---------------------------------------------------------------------
 
 
-def build_implicit_gemm_conv(
+def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec, *, arch: str = "gfx950") -> KernelDef:
+    """Build the IR for one implicit-GEMM conv instance (clean public entry point).
+
+    For internal use by deep_fused_conv_pool which needs override callbacks,
+    call _build_implicit_gemm_conv_with_overrides directly.
+    """
+    return _build_implicit_gemm_conv_with_overrides(spec, arch=arch)
+
+
+def _build_implicit_gemm_conv_with_overrides(
     spec: ImplicitGemmConvSpec,
     *,
     arch: str = "gfx950",
@@ -1132,7 +1141,7 @@ def build_implicit_gemm_conv(
         # exceed the tile dimensions, writing LDS at wrong addresses and
         # producing NaN outputs.
         if spec.pipeline == "wavelet":
-            a_wavelet_loader, b_wavelet_loader = build_wavelet_loaders(
+            a_wavelet_loader, b_wavelet_loader = _make_wavelet_loaders(
                 num_load_waves=spec.num_load_waves,
                 wave_size=spec.wave_size,
                 block_m=block_m,
