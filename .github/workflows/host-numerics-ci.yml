@@ -1,0 +1,144 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+name: Host numerics standalone CI
+
+on:
+  pull_request:
+    paths:
+      - "shared/host-numerics/**"
+      - ".github/scripts/validate_host_numerics_install.py"
+      - ".github/workflows/host-numerics-ci.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "shared/host-numerics/**"
+      - ".github/scripts/validate_host_numerics_install.py"
+      - ".github/workflows/host-numerics-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer commit makes an in-flight validation run for the same ref obsolete.
+  group: host-numerics-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Match nested CPU-library worker pools to the explicit two-way build budget.
+  BLIS_NUM_THREADS: "2"
+  GOTO_NUM_THREADS: "2"
+  MKL_NUM_THREADS: "2"
+  OMP_NUM_THREADS: "2"
+  OPENBLAS_NUM_THREADS: "2"
+  VECLIB_MAXIMUM_THREADS: "2"
+
+jobs:
+  standalone:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libopenblas-dev ninja-build
+          python -m pip install --upgrade pip
+          python -m pip install ml_dtypes nanobind numpy
+
+      - name: Configure
+        run: |
+          cmake -S shared/host-numerics \
+            -B "${RUNNER_TEMP}/host-numerics-build" \
+            -G Ninja \
+            -DHOST_NUMERICS_BUILD_TESTING=ON \
+            -DHOST_NUMERICS_BUILD_PYTHON=ON \
+            -DHOST_NUMERICS_BUILD_BLAS_BACKEND=ON \
+            -DHOST_NUMERICS_BUILD_BENCHMARKS=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build and test
+        run: |
+          cmake --build "${RUNNER_TEMP}/host-numerics-build" --parallel 2
+          ctest \
+            --test-dir "${RUNNER_TEMP}/host-numerics-build" \
+            --output-on-failure
+
+      - name: Install and test package consumers
+        run: |
+          cmake --install "${RUNNER_TEMP}/host-numerics-build" \
+            --prefix "${RUNNER_TEMP}/host-numerics-install"
+          # The source include tree is the public API inventory for the manifest.
+          python .github/scripts/validate_host_numerics_install.py \
+            --source-dir shared/host-numerics \
+            --build-dir "${RUNNER_TEMP}/host-numerics-build" \
+            --install-prefix "${RUNNER_TEMP}/host-numerics-install"
+          cmake -S shared/host-numerics/tests/package \
+            -B "${RUNNER_TEMP}/host-numerics-package-test" \
+            -G Ninja \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/host-numerics-install"
+          cmake --build "${RUNNER_TEMP}/host-numerics-package-test" --parallel 2
+          cmake -S shared/host-numerics/tests/package/core_only \
+            -B "${RUNNER_TEMP}/host-numerics-core-package-test" \
+            -G Ninja \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/host-numerics-install" \
+            -DCMAKE_DISABLE_FIND_PACKAGE_BLAS=TRUE \
+            -DCMAKE_DISABLE_FIND_PACKAGE_OpenMP=TRUE
+          cmake --build "${RUNNER_TEMP}/host-numerics-core-package-test" --parallel 2
+          # CTest discovers package consumers registered by the test project.
+          ctest \
+            --test-dir "${RUNNER_TEMP}/host-numerics-package-test" \
+            --no-tests=error \
+            --output-on-failure
+          PYTHONPATH="$(find "${RUNNER_TEMP}/host-numerics-install" \
+            -type d -path '*/site-packages' -print -quit)" \
+            python -c "import roc_host_numerics"
+
+      - name: Test AMD GPU layout module without OpenMP
+        run: |
+          cmake -S shared/host-numerics \
+            -B "${RUNNER_TEMP}/host-numerics-no-layout-openmp" \
+            -G Ninja \
+            -DHOST_NUMERICS_BUILD_TESTING=ON \
+            -DHOST_NUMERICS_BUILD_PYTHON=OFF \
+            -DHOST_NUMERICS_AMD_GPU_LAYOUT_ENABLE_OPENMP=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "${RUNNER_TEMP}/host-numerics-no-layout-openmp" \
+            --target host-numerics-amd-gpu-layout-tests \
+            --parallel 2
+          ctest \
+            --test-dir "${RUNNER_TEMP}/host-numerics-no-layout-openmp" \
+            --tests-regex "^(PreSwizzle|host-numerics-amd-gpu-layout-boundary)" \
+            --output-on-failure
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libopenblas-dev ninja-build
+
+      - name: Configure, build, and test with sanitizers
+        run: |
+          cmake -S shared/host-numerics \
+            -B "${RUNNER_TEMP}/host-numerics-sanitizers" \
+            -G Ninja \
+            -DHOST_NUMERICS_BUILD_TESTING=ON \
+            -DHOST_NUMERICS_BUILD_PYTHON=OFF \
+            -DHOST_NUMERICS_BUILD_BLAS_BACKEND=ON \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build "${RUNNER_TEMP}/host-numerics-sanitizers" --parallel 2
+          ctest \
+            --test-dir "${RUNNER_TEMP}/host-numerics-sanitizers" \
+            --output-on-failure

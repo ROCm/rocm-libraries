@@ -3,12 +3,12 @@
 
 #include <gtest/gtest.h>
 
-#include <roc/host_validation/adapters/tensilelite/Reference.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
-#include <roc/host_validation/adapters/tensilelite/TensileDataGeneration.hpp>
-#include <roc/host_validation/comparison.hpp>
-#include <roc/host_validation/generation.hpp>
+#include <roc/host_numerics/adapters/tensilelite/Reference.hpp>
+#include <roc/host_numerics/adapters/tensilelite/TensileDataGeneration.hpp>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/generation.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -24,6 +24,9 @@ using namespace TensileLite::Client;
 
 namespace
 {
+    constexpr roc::host_numerics::GemmBackend requireBlockedExecution
+        = roc::host_numerics::GemmBackend::Blocked;
+
     ContractionProblemGemm makeMXProblem(rocisa::DataType typeA,
                                          rocisa::DataType typeB,
                                          size_t           M,
@@ -63,13 +66,13 @@ namespace
 
     template <typename T>
     void generateValues(std::vector<T>&                                   values,
-                        roc::host_validation::ScalarType                  type,
-                        roc::host_validation::GenerationRecipe::Component component,
+                        roc::host_numerics::ScalarType                  type,
+                        roc::host_numerics::GenerationRecipe::Component component,
                         std::uint64_t                                     seed,
                         std::uint64_t                                     stream)
     {
         static_assert(std::is_trivially_copyable_v<T>);
-        using namespace roc::host_validation;
+        using namespace roc::host_numerics;
 
         const auto recipe = GenerationRecipe::realOnly(
             std::move(component),
@@ -105,7 +108,7 @@ namespace
         inputs.mxsa = mxsa.data();
         inputs.mxsb = mxsb.data();
 
-        ASSERT_TRUE(tryReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, ReferenceGemmExecution::BlockedRequired));
+        executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, requireBlockedExecution);
         EXPECT_EQ(d, (std::vector<float>{128, 128, 128, 128}));
     }
 #endif
@@ -133,7 +136,7 @@ TEST(ReferenceMXFastPath, SupportsMixedInputTypesWithMXFP4)
     inputs.mxsa = mxsa.data();
     inputs.mxsb = mxsb.data();
 
-    ASSERT_TRUE(tryReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, ReferenceGemmExecution::BlockedRequired));
+    executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, requireBlockedExecution);
     EXPECT_EQ(d[0], 64);
 }
 
@@ -145,6 +148,27 @@ TEST(ReferenceMXFastPath, SupportsNonE8ScaleStorage)
 {
     expectBlockedNonE8MXScale<E5M3>(rocisa::DataType::E5M3);
     expectBlockedNonE8MXScale<Float8>(rocisa::DataType::Float8);
+}
+
+TEST(ReferenceMXFastPath, TreatsE8RawZeroAsZero)
+{
+    constexpr size_t K       = 32;
+    constexpr int    mxBlock = 32;
+    auto problem
+        = makeMXProblem(rocisa::DataType::Float8, rocisa::DataType::Float8, 1, 1, K, mxBlock);
+
+    std::vector<Float8> a(K, Float8(1.0f));
+    std::vector<Float8> b(K, Float8(1.0f));
+    std::vector<float>  c(1, 0.0f);
+    std::vector<float>  d(1, -99.0f);
+    std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements(), E8(uint8_t{0}));
+    std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements(), E8(1.0f));
+    ContractionInputs   inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.mxsa = mxsa.data();
+    inputs.mxsb = mxsb.data();
+
+    executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1);
+    EXPECT_EQ(d[0], 0.0f);
 }
 
 TEST(ReferenceMXFastPath, MatchesPointwiseForScaledFP8Gemm)
@@ -166,13 +190,13 @@ TEST(ReferenceMXFastPath, MatchesPointwiseForScaledFP8Gemm)
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
     const auto binaryValues
-        = roc::host_validation::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
+        = roc::host_numerics::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
     const auto scaleValues
-        = roc::host_validation::GenerationRecipe::candidateSet({.values = {1.0, 2.0, 4.0}});
-    generateValues(a, roc::host_validation::ScalarType::Float8E4M3, binaryValues, 12345, 0);
-    generateValues(b, roc::host_validation::ScalarType::Float8E4M3, binaryValues, 12345, 1);
-    generateValues(mxsa, roc::host_validation::ScalarType::E8M0, scaleValues, 12345, 2);
-    generateValues(mxsb, roc::host_validation::ScalarType::E8M0, scaleValues, 12345, 3);
+        = roc::host_numerics::GenerationRecipe::candidateSet({.values = {1.0, 2.0, 4.0}});
+    generateValues(a, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 12345, 0);
+    generateValues(b, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 12345, 1);
+    generateValues(mxsa, roc::host_numerics::ScalarType::E8M0Zero, scaleValues, 12345, 2);
+    generateValues(mxsb, roc::host_numerics::ScalarType::E8M0Zero, scaleValues, 12345, 3);
 
     EXPECT_TRUE(std::ranges::any_of(a, [](Float8 value) { return float(value) != 0.0f; }));
     EXPECT_TRUE(std::ranges::any_of(b, [](Float8 value) { return float(value) != 0.0f; }));
@@ -187,13 +211,13 @@ TEST(ReferenceMXFastPath, MatchesPointwiseForScaledFP8Gemm)
     inputsBlocked.mxsa = mxsa.data();
     inputsBlocked.mxsb = mxsb.data();
 
-    ASSERT_TRUE(tryReferenceGemm(problem, inputsPointwise, /*elementsToValidate=*/-1));
-    ASSERT_TRUE(tryReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, ReferenceGemmExecution::BlockedRequired));
+    executeReferenceGemm(problem, inputsPointwise, /*elementsToValidate=*/-1);
+    executeReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, requireBlockedExecution);
 
-    const auto comparison = roc::host_validation::compare(
-        roc::host_validation::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
-        roc::host_validation::Tensor::copyNativeStorage(std::span<const float>(dPointwise)),
-        roc::host_validation::nearComparisonOptions(1e-3));
+    const auto comparison = roc::host_numerics::compare(
+        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
+        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(dPointwise)),
+        roc::host_numerics::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
         << " max_absolute_difference=" << comparison.maxAbsoluteDifference;
@@ -221,17 +245,17 @@ TEST(ReferenceMXFastPath, MatchesPointwiseWithBetaAndBias)
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
     const auto binaryValues
-        = roc::host_validation::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
+        = roc::host_numerics::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
     const auto scaleValues
-        = roc::host_validation::GenerationRecipe::candidateSet({.values = {1.0, 2.0, 4.0}});
-    const auto cValues    = roc::host_validation::GenerationRecipe::constant({.value = 0.25});
-    const auto biasValues = roc::host_validation::GenerationRecipe::constant({.value = 0.5});
-    generateValues(a, roc::host_validation::ScalarType::Float8E4M3, binaryValues, 54321, 0);
-    generateValues(b, roc::host_validation::ScalarType::Float8E4M3, binaryValues, 54321, 1);
-    generateValues(mxsa, roc::host_validation::ScalarType::E8M0, scaleValues, 54321, 2);
-    generateValues(mxsb, roc::host_validation::ScalarType::E8M0, scaleValues, 54321, 3);
-    generateValues(c, roc::host_validation::ScalarType::Float32, cValues, 54321, 4);
-    generateValues(bias, roc::host_validation::ScalarType::Float32, biasValues, 54321, 5);
+        = roc::host_numerics::GenerationRecipe::candidateSet({.values = {1.0, 2.0, 4.0}});
+    const auto cValues    = roc::host_numerics::GenerationRecipe::constant({.value = 0.25});
+    const auto biasValues = roc::host_numerics::GenerationRecipe::constant({.value = 0.5});
+    generateValues(a, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 54321, 0);
+    generateValues(b, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 54321, 1);
+    generateValues(mxsa, roc::host_numerics::ScalarType::E8M0Zero, scaleValues, 54321, 2);
+    generateValues(mxsb, roc::host_numerics::ScalarType::E8M0Zero, scaleValues, 54321, 3);
+    generateValues(c, roc::host_numerics::ScalarType::Float32, cValues, 54321, 4);
+    generateValues(bias, roc::host_numerics::ScalarType::Float32, biasValues, 54321, 5);
 
     EXPECT_TRUE(std::ranges::any_of(a, [](Float8 value) { return float(value) != 0.0f; }));
     EXPECT_TRUE(std::ranges::any_of(b, [](Float8 value) { return float(value) != 0.0f; }));
@@ -250,13 +274,13 @@ TEST(ReferenceMXFastPath, MatchesPointwiseWithBetaAndBias)
     inputsBlocked.mxsb = mxsb.data();
     inputsBlocked.bias = bias.data();
 
-    ASSERT_TRUE(tryReferenceGemm(problem, inputsPointwise, /*elementsToValidate=*/-1));
-    ASSERT_TRUE(tryReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, ReferenceGemmExecution::BlockedRequired));
+    executeReferenceGemm(problem, inputsPointwise, /*elementsToValidate=*/-1);
+    executeReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, requireBlockedExecution);
 
-    const auto comparison = roc::host_validation::compare(
-        roc::host_validation::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
-        roc::host_validation::Tensor::copyNativeStorage(std::span<const float>(dPointwise)),
-        roc::host_validation::nearComparisonOptions(1e-3));
+    const auto comparison = roc::host_numerics::compare(
+        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
+        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(dPointwise)),
+        roc::host_numerics::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
         << " max_absolute_difference=" << comparison.maxAbsoluteDifference;

@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include <roc/host_validation/mx.hpp>
+#include <roc/host_numerics/mx.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
@@ -21,12 +21,15 @@ namespace
 {
     using namespace rocRoller;
     using namespace rocRoller::HostNumerics;
-    using roc::host_validation::Layout;
-    using roc::host_validation::MxDataRecipe;
-    using roc::host_validation::MxGenerationProblem;
-    using roc::host_validation::ScalarType;
-    using roc::host_validation::Shape;
-    using roc::host_validation::Tensor;
+    using roc::host_numerics::GenerationRecipe;
+    using roc::host_numerics::IndexOrder;
+    using roc::host_numerics::Layout;
+    using roc::host_numerics::MxDataGeneration;
+    using roc::host_numerics::MxGenerationProblem;
+    using roc::host_numerics::MxScaleGenerationMode;
+    using roc::host_numerics::ScalarType;
+    using roc::host_numerics::Shape;
+    using roc::host_numerics::Tensor;
 
     void require(bool condition, std::string const& message)
     {
@@ -267,15 +270,22 @@ namespace
                                           size_t     blockAxis,
                                           uint32_t   seed)
     {
-        MxGenerationProblem problem;
+        MxDataGeneration data
+            = MxDataGeneration::preserveGeneratedEncoding(GenerationRecipe::realOnly(
+                GenerationRecipe::uniformFiniteEncodedValue(),
+                {
+                    .seed       = seed,
+                    .indexOrder = IndexOrder::FirstDimensionFastest,
+                    .randomDomain
+                    = roc::host_numerics::mx_generation_random_domain_version_1::unboundedData,
+                }));
+        MxGenerationProblem problem(std::move(shape), std::move(data));
         problem.dataType         = dataType;
         problem.scaleType        = scaleType;
-        problem.shape            = std::move(shape);
         problem.leadingDimension = leadingDimension;
         problem.blockAxis        = blockAxis;
         problem.blockSize        = 4;
-        problem.data             = MxDataRecipe::unbounded();
-        problem.seed             = seed;
+        problem.scale            = MxScaleGenerationMode::RandomFinite;
         return problem;
     }
 
@@ -301,9 +311,9 @@ namespace
                     && generated.scaleB->layout() == Layout(Shape{5, 2}, {2, 1}),
                 "K-contiguous canonical scale layout mismatch.");
 
-        auto expectedA = roc::host_validation::generateMx(
+        auto expectedA = roc::host_numerics::generateMx(
             expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E4M3, Shape{8, 3}, 8, 0, 31416u));
-        auto expectedB = roc::host_validation::generateMx(
+        auto expectedB = roc::host_numerics::generateMx(
             expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E5M3, Shape{8, 5}, 8, 0, 31417u));
         require(bytes(generated.a) == bytes(expectedA.data)
                     && bytes(*generated.scaleA) == bytes(expectedA.scales),
@@ -327,9 +337,9 @@ namespace
                     && noncontiguous.scaleB->layout() == Layout(Shape{5, 2}, {1, 5}),
                 "K-strided canonical scale layout mismatch.");
 
-        auto expectedNoncontiguousA = roc::host_validation::generateMx(
+        auto expectedNoncontiguousA = roc::host_numerics::generateMx(
             expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E4M3, Shape{3, 8}, 3, 1, 31416u));
-        auto expectedNoncontiguousB = roc::host_validation::generateMx(
+        auto expectedNoncontiguousB = roc::host_numerics::generateMx(
             expectedMxProblem(ScalarType::Float4E2M1, ScalarType::E5M3, Shape{5, 8}, 5, 1, 31417u));
         require(bytes(noncontiguous.a) == bytes(expectedNoncontiguousA.data)
                     && bytes(*noncontiguous.scaleA) == bytes(expectedNoncontiguousA.scales),

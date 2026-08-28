@@ -13,7 +13,7 @@ FILTER="${GTEST_FILTER:-*}"
 # or existing negative exclusions.
 POSITIVE_FILTER="${FILTER%%-*}"
 if [[ -n "${POSITIVE_FILTER}" && "${POSITIVE_FILTER}" != "*" ]]; then
-    for REQUIRED_FILTER in "*HostValidation*" "HipBuffer.smoke_Move*"; do
+    for REQUIRED_FILTER in "*HostNumerics*" "HipBuffer.smoke_Move*"; do
         if [[ "${POSITIVE_FILTER}" != *"${REQUIRED_FILTER}"* ]]; then
             POSITIVE_FILTER="${POSITIVE_FILTER}:${REQUIRED_FILTER}"
         fi

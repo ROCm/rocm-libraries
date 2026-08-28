@@ -13,7 +13,7 @@
 #include "GPUContextFixture.hpp"
 
 #include <common/GEMMProblem.hpp>
-#include <roc/host_validation/amd_gpu_layout/mx.hpp>
+#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 
 namespace GEMMTests
 {
@@ -24,8 +24,8 @@ namespace GEMMTests
     concept isF8 = std::is_same_v<T, rocRoller::FP8> || std::is_same_v<T, rocRoller::BF8>;
 
     template <typename T>
-    concept isF6F4 = std::is_same_v<T, rocRoller::FP6> || std::is_same_v<T, rocRoller::BF6> || std::
-        is_same_v<T, rocRoller::FP4>;
+    concept isF6F4 = std::is_same_v<T, rocRoller::FP6> || std::is_same_v<T, rocRoller::BF6>
+                     || std::is_same_v<T, rocRoller::FP4>;
 
     template <typename... Ts>
     class BaseGEMMContextFixture
@@ -80,7 +80,7 @@ namespace GEMMTests
                                         GPUCapability::HasWMMA_f8f6f4);
             }
 
-            if((isF8<TA> || isF8<TB>)&&(gemm.waveK >= 64))
+            if((isF8<TA> || isF8<TB>) && (gemm.waveK >= 64))
             {
                 REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4,
                                         GPUCapability::HasWMMA_f8f6f4,
@@ -329,7 +329,7 @@ namespace GEMMTests
                 // The preSwizzle helper assumes column-major; so we swap sizes here.
                 std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
                 std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-                hostAForKernel = roc::host_validation::amd_gpu_layout::preSwizzle(
+                hostAForKernel = roc::host_numerics::amd_gpu_layout::preSwizzle(
                     hostA, swappedSizes, {}, swappedPreTileSize);
             }
 
@@ -361,8 +361,8 @@ namespace GEMMTests
                     sizes[0] /= packing;
                     preTileSize[0] /= packing;
                 }
-                hostBForKernel = roc::host_validation::amd_gpu_layout::preSwizzle(
-                    hostB, sizes, {}, preTileSize);
+                hostBForKernel
+                    = roc::host_numerics::amd_gpu_layout::preSwizzle(hostB, sizes, {}, preTileSize);
             }
 
             auto deviceA = make_shared_device<TA>(hostAForKernel);
@@ -397,7 +397,7 @@ namespace GEMMTests
                                     "Can only pre-tile scale A if A is TransposeType::T");
                         preTileSize = {gemm.scalePretileA[1], gemm.scalePretileA[0]};
                     }
-                    auto tmpScaleA = roc::host_validation::amd_gpu_layout::preSwizzle(
+                    auto tmpScaleA = roc::host_numerics::amd_gpu_layout::preSwizzle(
                         hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
                     deviceScaleA = make_shared_device(tmpScaleA);
                 }
@@ -430,7 +430,7 @@ namespace GEMMTests
                                     "Can only pre-tile scale B if B is TransposeType::N");
                         preTileSize = {gemm.scalePretileB[0], gemm.scalePretileB[1]};
                     }
-                    auto tmpScaleB = roc::host_validation::amd_gpu_layout::preSwizzle(
+                    auto tmpScaleB = roc::host_numerics::amd_gpu_layout::preSwizzle(
                         hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
                     deviceScaleB = make_shared_device(tmpScaleB);
                 }
@@ -632,7 +632,7 @@ namespace GEMMTests
                 auto tagCvt
                     = srCvtSeed.has_value()
                           ? cvtOp.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
-                              tagStoreD, tagLoadSeed, dataTypeD))
+                                tagStoreD, tagLoadSeed, dataTypeD))
                           : cvtOp.addXOp(rocRoller::Operations::E_Cvt(tagStoreD, dataTypeD));
                 tagStoreD = command->addOperation(std::move(cvtOp));
                 command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
@@ -1051,8 +1051,8 @@ namespace GEMMTests
                         d_result.data(), deviceD.get(), M * N * sizeof(TD), hipMemcpyDeviceToHost),
                     HasHipSuccess(0));
 
-                auto tol = gemmAcceptableError<TA, TB, TD>(
-                    M, N, K, m_context->targetArchitecture().target());
+                auto tol
+                    = gemmAcceptableError<TA, TB, TD>(K, m_context->targetArchitecture().target());
                 auto res = compare(d_result, h_result, tol);
                 Log::info("RNorm is {} (acceptable {}, iteration {})",
                           res.relativeNormL2,

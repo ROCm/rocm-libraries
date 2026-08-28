@@ -25,11 +25,11 @@
  *******************************************************************************/
 
 #include "ReferenceValidator.hpp"
-#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
+#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
 
-#include <roc/host_validation/adapters/tensilelite/Reference.hpp>
+#include <roc/host_numerics/adapters/tensilelite/Reference.hpp>
 
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/hip/HipUtils.hpp>
@@ -234,10 +234,10 @@ namespace TensileLite
                                               size_t                  validationStride,
                                               double                  threshold)
         {
-            using namespace roc::host_validation;
+            using namespace roc::host_numerics;
 
             const ScalarType scalarType
-                = toHostValidationScalarType(tensor.dataType());
+                = toHostNumericsScalarType(tensor.dataType());
             const size_t storageBits = scalarTypeInfo(scalarType).storageBits;
             if(storageBits % 8 != 0)
             {

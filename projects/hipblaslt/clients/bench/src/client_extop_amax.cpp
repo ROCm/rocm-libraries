@@ -28,14 +28,14 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_validation/Types.hpp>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt_datatype2string.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
-#include <roc/host_validation/comparison.hpp>
-#include <roc/host_validation/validation.hpp>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/validation.hpp>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -131,24 +131,24 @@ void dumpBuffer(const char* title, Dtype* data, int N)
 template <typename T>
 void compare(const char* title, const std::vector<T>& cpuOutput, const std::vector<T>& refOutput)
 {
-    const auto report
-        = roc::host_validation::compare(hipblaslt::host_validation::tensorFromStorage(
-                                            cpuOutput.data(),
-                                            cpuOutput.size(),
-                                            roc::host_validation::Layout::contiguousLastDimensionFastest(
-                                                roc::host_validation::Shape{cpuOutput.size()})),
-                                        hipblaslt::host_validation::tensorFromStorage(
-                                            refOutput.data(),
-                                            refOutput.size(),
-                                            roc::host_validation::Layout::contiguousLastDimensionFastest(
-                                                roc::host_validation::Shape{refOutput.size()})));
+    const auto report = roc::host_numerics::compare(
+        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            cpuOutput.data(),
+            cpuOutput.size(),
+            roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                roc::host_numerics::Shape{cpuOutput.size()})),
+        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            refOutput.data(),
+            refOutput.size(),
+            roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                roc::host_numerics::Shape{refOutput.size()})));
     std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
 
 template <typename DType>
 void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
 {
-    hipblaslt::host_validation::initialize(data, numElements, initMethod);
+    hipblaslt::host_numerics::initialize(data, numElements, initMethod);
 }
 
 template <typename Ti, typename To>
@@ -179,15 +179,16 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
 
     hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, toNumBytes);
 
-    using namespace roc::host_validation;
-    Tensor referenceOutput = hipblaslt::host_validation::tensorFromMutableStorage(
+    using namespace roc::host_numerics;
+    Tensor referenceOutput = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
         refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
-    referenceMaximumAbsolute(
-        hipblaslt::host_validation::tensorFromStorage(
-            cpuInput.data(), cpuInput.size(), Layout::contiguousLastDimensionFastest(Shape{numElements})),
-        referenceOutput,
-        ScalarType::Float32);
-    hipblaslt::host_validation::copyTensorStorageTo(
+    referenceMaximumAbsolute(hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+                                 cpuInput.data(),
+                                 cpuInput.size(),
+                                 Layout::contiguousLastDimensionFastest(Shape{numElements})),
+                             referenceOutput,
+                             ScalarType::Float32);
+    hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
         refOutput.data(), refOutput.size(), referenceOutput);
 
     // dumpBuffer("Input", cpuInput.data(), m * n);

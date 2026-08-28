@@ -38,7 +38,7 @@ target_link_libraries(rocroller-gemm
     PRIVATE
         roc::rocroller-interface
         rocroller::host-numerics
-        roc::host-validation-amd-gpu-layout
+        roc::host-numerics-amd-gpu-layout
         CLI11::CLI11
 )
 target_include_directories(rocroller-gemm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
