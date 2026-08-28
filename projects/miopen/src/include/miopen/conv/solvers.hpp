@@ -4872,6 +4872,64 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
+/// Tuning state for ConvDepthwiseDirect: an index into the solver's curated
+/// candidate table (best-first per kernel size) plus a checksum of the selected
+/// row so a perf-db entry written against an older table is rejected on restore
+/// rather than silently mapping to a different kernel.
+struct PerformanceConfigConvDepthwiseDirect : PerfConfigBase<PerformanceConfigConvDepthwiseDirect>
+{
+    int index             = -1; // index into the full candidate table
+    std::string config_id = ""; // describe() of the selected row; guards table drift
+
+    PerformanceConfigConvDepthwiseDirect() = default;
+    PerformanceConfigConvDepthwiseDirect(int idx) : index(idx) {}
+    PerformanceConfigConvDepthwiseDirect(bool) : index(0) {}
+
+    template <class Self, class F>
+    static void Visit(Self&& self, F f)
+    {
+        f(self.index, "index");
+        f(self.config_id, "config_id");
+    }
+
+    void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
+    bool IsValidValue() const { return index >= 0; }
+    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription&) const;
+    bool operator==(const PerformanceConfigConvDepthwiseDirect& other) const;
+};
+
+/// Standalone MIOpen-native depthwise convolution solver (forward, NHWC/NDHWC,
+/// FP16/BF16). Harvests the hand-written hipconv VALU kernels into MIOpen's
+/// JIT/tuning structure: a curated candidate table selected per (kernel-size,
+/// shape class), JIT-compiled per config via HIPRTC. RDNA (wave32) is live; the
+/// gfx942/CDNA3 track is scaffolded (see conv_depthwise_direct.cpp).
+struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseDirect final
+    : ConvTunableSolver<PerformanceConfigConvDepthwiseDirect>
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvDepthwiseDirect>(); }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return false; }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    PerformanceConfigConvDepthwiseDirect
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConfigConvDepthwiseDirect&) const override;
+    PerformanceConfigConvDepthwiseDirect Search(const ExecutionContext&,
+                                                const miopen::conv::ProblemDescription&,
+                                                const AnyInvokeParams& invoke_ctx) const override;
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConfigConvDepthwiseDirect&) const override;
+};
+
 } // namespace conv
 } // namespace solver
 } // namespace miopen

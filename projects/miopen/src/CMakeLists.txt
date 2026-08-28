@@ -249,6 +249,7 @@ set( MIOpen_Source
     solver/conv/gemm_wrw.cpp
     solver/conv/conv_ck_grouped_conv_fwd.cpp
     solver/conv/conv_3d_depthwise_fwd.cpp
+    solver/conv/conv_depthwise_direct.cpp
     solver/conv_asm_1x1u_bias_activ_fused.cpp
     solver/conv_bin_winoRxS_fused.cpp
     solver/conv_ck_igemm_grp_fwd_activ_fused.cpp
@@ -377,6 +378,8 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/configuration.hpp
         kernels/default_configurations.hpp
         kernels/gpu_reference_kernel/fp8_kern_types.h
+        kernels/miopen_depthwise_valu_kernels.hpp
+        kernels/miopen_depthwise_mfma_kernels.hpp
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride1.inc
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dec.inc
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dil.inc
@@ -534,6 +537,8 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         ${GPU_BATCHED_TRANSPOSE_KERNEL_HIP}
         ${GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE}
         kernels/miopen_conv3d_depthwise_fwd.cpp
+        kernels/miopen_depthwise_valu.cpp
+        kernels/miopen_depthwise_mfma.cpp
         kernels/MIOpenAdam.cpp
         kernels/MIOpenAddLayerNorm.cpp
         kernels/MIOpenCat.cpp

@@ -817,6 +817,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
              miopenConvolutionAlgoDirect);
     //  IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     //  space between this comment and the newly registered solver(s)!
+    RegisterWithSolver(registry, ++id, conv::ConvDepthwiseDirect{}, miopenConvolutionAlgoDirect);
 }
 
 } // namespace solver
