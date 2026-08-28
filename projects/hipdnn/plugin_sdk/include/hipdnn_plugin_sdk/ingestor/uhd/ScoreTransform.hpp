@@ -28,7 +28,7 @@ namespace score_transform
 /// the model was trained on the raw target.
 ///
 /// Kept in sync with the `transform` field's documented vocabulary in
-/// flatbuffers_sdk/schemas/uhd.fbs — a name the schema advertises but this list
+/// RFC 0019 §4 — a name the descriptor may declare but this list
 /// omits is a descriptor that passes schema review and then fails to load.
 inline constexpr std::array<const char*, 6> SUPPORTED_TRANSFORMS
     = {"", "identity", "log1p", "log", "exp", "sqrt"};

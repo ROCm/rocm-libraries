@@ -5,7 +5,7 @@
   "graph_match": {
     "native": "hipkernel.pointwise.graph_match"
   },
-  "heuristic": "80cf109c-1f77-45a5-9a4c-27cf4954586c",
+  "heuristic": "727e5401-3b99-49ff-a2fc-68fd4eedbb54",
   "metadata": "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f",
   "knobs": [
     "block_size"

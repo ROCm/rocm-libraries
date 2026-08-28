@@ -7,7 +7,7 @@ import sys
 
 __version__ = "0.1.0"
 
-# `_generated/` holds the flatc-produced Python bindings for uhd.fbs and
+# `_generated/` holds the flatc-produced Python bindings for
 # gbdt_model.fbs. They declare the schemas' own namespace
 # (`hipdnn_flatbuffers_sdk.data_objects`) and import each other absolutely, so the
 # directory holding that namespace has to be importable.

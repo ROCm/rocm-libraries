@@ -164,7 +164,6 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/resample_fwd_attributes.fbs
         schemas/resample_bwd_attributes.fbs
         schemas/tensor_attributes.fbs
-        schemas/uhd.fbs
         schemas/gbdt_model.fbs
         schemas/table_model.fbs
         schemas/moe_grouped_matmul_attributes.fbs
@@ -189,7 +188,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
     hipdnn_generate_flatbuffer_python(
         NAME uhd_gen
         TARGET hipdnn_flatbuffers_sdk
-        SCHEMAS schemas/uhd.fbs schemas/gbdt_model.fbs
+        SCHEMAS schemas/gbdt_model.fbs
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
         OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tools/uhd_gen/_generated"
     )
