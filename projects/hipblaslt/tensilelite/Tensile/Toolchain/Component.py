@@ -101,6 +101,14 @@ def get_rocm_version() -> SemanticVersion:
                 except OSError:
                     continue
     if not version_str:
+        # Fallback for TheRock pip installs where ROCM_PATH is not set and
+        # /opt/rocm does not exist. rocm_sdk.__version__ is the ROCm version.
+        try:
+            import rocm_sdk
+            version_str = rocm_sdk.__version__
+        except ImportError:
+            pass
+    if not version_str:
         raise RuntimeError("Failed to get ROCm version: ROCM_VERSION not set and "
                            ".info/version not found in ROCM_PATH, HIP_PATH, or /opt/rocm")
     return SemanticVersion(*[int(c.split("-")[0]) for c in version_str.split(".")[:3]])
