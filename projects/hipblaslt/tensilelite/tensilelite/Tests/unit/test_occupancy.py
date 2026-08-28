@@ -252,7 +252,7 @@ class TestGetOccupancyGfx950:
     def test_lds_permits_two_workgroups_case4(self):
         """Case 4 kernel LDS (68864 B) allows 2 workgroups/CU on gfx950.
 
-        This is the *correct* occupancy that Tensile should report for case 4
+        This is the *correct* occupancy that TensileLite should report for case 4
         when given the actual compiled-kernel register counts (vgprs=16,
         accvgprs=240, total=256) instead of the code-gen pool overestimate.
         """
@@ -265,24 +265,24 @@ class TestGetOccupancyGfx950:
         )
 
     def test_vgpr_pool_overestimate_causes_case4_mismatch(self):
-        """Tensile code-gen typically over-allocates VGPRs vs compiled result.
+        """TensileLite code-gen typically over-allocates VGPRs vs compiled result.
 
         MIWT10_6 allocates 240 accVGPRs.  If the regular pool is even 64
         VGPRs (a typical code-gen estimate), the combined total is 304 and
-        Tensile computes occ=1 – while HIP reports occ=2 for the compiled
+        TensileLite computes occ=1 – while HIP reports occ=2 for the compiled
         kernel (numRegs=256, i.e., 256 unified VGPRs per lane).
 
         This test documents the known discrepancy: it asserts the *wrong*
-        (Tensile code-gen) occupancy is 1 and the *right* (HIP oracle)
+        (TensileLite code-gen) occupancy is 1 and the *right* (HIP oracle)
         occupancy is 2 for these register counts.
         """
-        code_gen_vgprs = 64   # typical Tensile pool overestimate
+        code_gen_vgprs = 64   # typical TensileLite pool overestimate
         code_gen_acc   = 240  # 60 MI tiles × 4 acc VGPRs
         # ceil(64/8)*8 + 240 = 304 → 512//304 = 1
         tensile_occ = _occ(self.kw, numThreads=256,
                            vgprs=code_gen_vgprs, accvgprs=code_gen_acc,
                            sgprs=64, ldsBytes=68864)
-        assert tensile_occ == 1, "Tensile code-gen estimate gives occ=1"
+        assert tensile_occ == 1, "TensileLite code-gen estimate gives occ=1"
 
         compiled_vgprs = 16   # compiler reduces total to 256 unified
         compiled_acc   = 240
@@ -418,7 +418,7 @@ def test_max_waves_per_simd_prevents_overclaim_on_gfx950(isa, should_be_capped):
     """
     kw = _make_writer(_init_rocisa(isa))
     archCaps = kw.states.archCaps
-    # Use doubleVgpr only for ArchAccUnifiedRegs (as Tensile's code-gen does).
+    # Use doubleVgpr only for ArchAccUnifiedRegs (as TensileLite's code-gen does).
     double = bool(archCaps["ArchAccUnifiedRegs"])
     # 48 VGPRs per thread.
     # gfx950 (doubleVgpr=True):  totalVgprs=512, 512//48=10 → capped to 8 ✓

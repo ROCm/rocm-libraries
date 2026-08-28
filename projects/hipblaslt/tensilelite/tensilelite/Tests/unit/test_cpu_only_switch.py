@@ -367,7 +367,7 @@ def test_synthetic_csv_schema(tmp_path, arch, monkeypatch):
         header assert makes writer-side unit drift fail loudly.
 
     (2) Reader side -- addFromCSV consumes the schema and records one winner per seeded
-        exact size, through the SAME ``UseEffLike=True`` branch the real Tensile flow
+        exact size, through the SAME ``UseEffLike=True`` branch the real TensileLite flow
         takes by default (the prior version forced ``UseEffLike=False``, exercising a
         branch the benchmark path never uses). ``read_max_freq()`` is env-only (reads
         ``MAX_FREQ``, LibraryLogic.py:1546), not a device probe, so both sub-cases run
@@ -405,7 +405,7 @@ def test_synthetic_csv_schema(tmp_path, arch, monkeypatch):
         analyzer.addFromCSV(resultsFileName, numSolutions, solutionMap)
         return analyzer
 
-    # (2) Reader side on the real-flow branch: UseEffLike=True (the Tensile default).
+    # (2) Reader side on the real-flow branch: UseEffLike=True (the TensileLite default).
     monkeypatch.setitem(globalParameters, "UseEffLike", True)
 
     # 2a. MAX_FREQ unset -> read_max_freq() returns None -> perf == round(GFlops).

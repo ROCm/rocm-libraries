@@ -109,10 +109,10 @@ def make_dummy_enum(full_name: str, values: Iterable[str]) -> Type[Any]:
     ``DataTypeEnum``, ``CacheScope``, ...).
 
     Note (was originally a "structural-only" dummy):
-        Tensile's import-time machinery in ``Tensile/Common/DataType.py``
+        TensileLite's import-time machinery in ``tensilelite/Common/DataType.py``
         reads ``e['enum'].value`` and ``e['enum'].name`` while building the
         ``DataType`` lookup table, so a bare ``int`` placeholder is not
-        enough to pass ``import Tensile``. ``IntEnum`` gives us both the
+        enough to pass ``import tensilelite``. ``IntEnum`` gives us both the
         attribute surface and the raw-int behaviour the rest of the code
         treats it as.
 

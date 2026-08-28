@@ -4,7 +4,7 @@
 ################################################################################
 # Unit tests for the ClusterLoad (TDM multicast) component.
 #
-# Covers Tensile/Components/ClusterLoad.py: capability-based selection, the
+# Covers tensilelite/Components/ClusterLoad.py: capability-based selection, the
 # topology decision (usesCombinedMask / maskSgprName), the SGPR
 # declare/undeclare, and the emitted assembly of computeMasks /
 # applyToDescriptor. These emit no GPU work themselves, so the asm string is the
@@ -29,7 +29,7 @@ WAVESIZE_32 = 32
 
 def _init_rocisa_gfx1250():
     from rocisa import rocIsa
-    from Tensile.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Architectures import gfxToIsa
     ri = rocIsa.getInstance()
     isa = gfxToIsa("gfx1250")
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
@@ -47,7 +47,7 @@ def _rocisa_gfx1250():
 
 
 def _c():
-    from Tensile.Components.ClusterLoad import ClusterLoadTDM
+    from tensilelite.Components.ClusterLoad import ClusterLoadTDM
     return ClusterLoadTDM()
 
 
@@ -113,16 +113,16 @@ class TestFind:
     # Mirrors the production call sites, which resolve the component via the
     # concrete ClusterLoadTDM.find(writer) (capability-gated selection).
     def test_find_returns_tdm_impl_on_gfx1250(self):
-        from Tensile.Components.ClusterLoad import ClusterLoadTDM
+        from tensilelite.Components.ClusterLoad import ClusterLoadTDM
         comp = ClusterLoadTDM.find(_StubWriter(has_tdm=True, tdm_inst=3))
         assert isinstance(comp, ClusterLoadTDM)
 
     def test_find_returns_none_without_tdm(self):
-        from Tensile.Components.ClusterLoad import ClusterLoadTDM
+        from tensilelite.Components.ClusterLoad import ClusterLoadTDM
         assert ClusterLoadTDM.find(_StubWriter(has_tdm=False, tdm_inst=0)) is None
 
     def test_find_returns_none_when_tdm_inst_not_3(self):
-        from Tensile.Components.ClusterLoad import ClusterLoadTDM
+        from tensilelite.Components.ClusterLoad import ClusterLoadTDM
         assert ClusterLoadTDM.find(_StubWriter(has_tdm=True, tdm_inst=0)) is None
 
 

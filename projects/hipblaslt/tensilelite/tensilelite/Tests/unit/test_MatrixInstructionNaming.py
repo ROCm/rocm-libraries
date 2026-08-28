@@ -11,12 +11,12 @@ all (silent no-op).
 import pytest
 import rocisa
 
-from Tensile.Common.DataType import DataType
-from Tensile.Common.MatrixInstructionNaming import (
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.MatrixInstructionNaming import (
     backendCapsLoaded,
     matrixInstructionMnemonic,
 )
-from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
     unsupportedMatrixInstructionMnemonic,
     useF32XEmulationFor,
 )
@@ -40,8 +40,8 @@ def capsLoaded():
     """
     if backendCapsLoaded(GFX1250):
         return
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     try:
         makeIsaInfoMap([GFX1250], validateToolchain("amdclang++"))
@@ -248,7 +248,7 @@ def test_restores_the_kernel_after_the_query(monkeypatch, unpinned):
     capabilities without pinning its own ISA would silently see GFX1250's,
     rather than the defaults (or a loud error) it started with.
     """
-    import Tensile.Common.MatrixInstructionNaming as naming
+    import tensilelite.Common.MatrixInstructionNaming as naming
 
     real = naming.rocIsa.getInstance()
 
@@ -307,7 +307,7 @@ def test_declines_when_the_backend_has_no_capabilities_for_the_isa(monkeypatch):
     its checks in joblib workers, so that miss reached a shipping solution and
     failed the build; declining is the only safe answer without capabilities.
     """
-    import Tensile.SolutionStructs.Validators.MatrixInstruction as validator
+    import tensilelite.SolutionStructs.Validators.MatrixInstruction as validator
 
     # A pair the suite above proves is rejected once capabilities are loaded.
     assert unsupported(solutionFor("half"), [16, 16, 4, 1]) is not None

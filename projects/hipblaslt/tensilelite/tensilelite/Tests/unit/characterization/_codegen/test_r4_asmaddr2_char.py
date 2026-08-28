@@ -5,7 +5,7 @@
 """R4 -- gfx942 AsmAddressCalculation advanced-addressing arms characterization.
 
 Two configs exercise the 64-bit / edge / multi-batch addressing arms of
-Tensile/AsmAddressCalculation.py that are NOT covered by the existing
+tensilelite/AsmAddressCalculation.py that are NOT covered by the existing
 test_r3_addrstore_char.py:
 
 Config A: fp32 NT batched, MIWaveTile=[2,8] MIWaveGroup=[2,2], SourceSwap=1.

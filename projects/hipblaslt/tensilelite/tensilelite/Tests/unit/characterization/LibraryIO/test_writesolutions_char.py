@@ -48,7 +48,7 @@ pytestmark = pytest.mark.unit
 
 
 def _norm(text):
-    """Normalise the embedded Tensile version to a stable token."""
+    """Normalise the embedded TensileLite version to a stable token."""
     return text.replace(__version__, "<VERSION>")
 
 
