@@ -488,6 +488,79 @@ def default_scenarios() -> List[Scenario]:
             block_size=64,
             dtype=torch.bfloat16,
         ),
+        # fp16 no-sinks baselines — isolate whether errors above are fp16-specific
+        # or sinks-specific. Mirror of combo_bf16_d64_b32_gqa8_64x8 (Gate 1
+        # cohort) and the Gate 2 single-seq shape, both without use_sinks.
+        Scenario(
+            name="fp16_d64_no_sinks_gate1_cohort",
+            seq_lens=[(512, 1024), (512, 1024)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.float16,
+        ),
+        Scenario(
+            name="fp16_d64_no_sinks_gate2_cohort",
+            seq_lens=[(2048, 2048)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            dtype=torch.float16,
+            num_blocks=512,
+        ),
+        Scenario(
+            name="fp16_d64_sinks_gate1",
+            seq_lens=[(640, 704), (640, 768)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.float16,
+            use_sinks=True,
+            num_blocks=1024,
+        ),
+        Scenario(
+            name="fp16_d64_sinks_gate2",
+            seq_lens=[(2048, 2048)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            dtype=torch.float16,
+            use_sinks=True,
+            num_blocks=512,
+        ),
+        # fp16 SWA-sink correctness — both tuned gates (Gate 1 combo, Gate 2 wpe3)
+        # exclude sliding_window, so these fall to the untuned path. The purpose
+        # is to confirm the fp16 SWA+sinks path is numerically correct, not to
+        # exercise a tuned gate. sliding_window=512 is ≥ block_size for both
+        # cohorts and is a realistic short-context window.
+        Scenario(
+            name="fp16_d64_sinks_gate1_swa",
+            seq_lens=[(640, 704), (640, 768)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.float16,
+            use_sinks=True,
+            sliding_window=512,
+            num_blocks=1024,
+        ),
+        Scenario(
+            name="fp16_d64_sinks_gate2_swa",
+            seq_lens=[(2048, 2048)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            dtype=torch.float16,
+            use_sinks=True,
+            sliding_window=512,
+            num_blocks=512,
+        ),
     ]
 
 
@@ -1154,7 +1227,7 @@ def make_inputs(s: Scenario, seed: int = 0):
         0, s.num_blocks, (num_seqs, max_blocks), dtype=torch.int32, device="cuda"
     )
     sinks = (
-        torch.randn(s.num_query_heads, dtype=torch.bfloat16, device="cuda")
+        torch.randn(s.num_query_heads, dtype=s.dtype, device="cuda")
         if s.use_sinks
         else None
     )
@@ -1329,6 +1402,7 @@ def _run_rocke(
     kq_swizzle: bool = False,
     kq_pad: int = 0,
     probe_occupancy: bool = False,
+    force_wpe: Optional[int] = None,
 ):
     """Run CK DSL `run_unified_attention_torch` with the requested path forced.
 
@@ -1370,6 +1444,7 @@ def _run_rocke(
         use_fp8=False,
         num_cus=120,
         compile_backend=os.environ.get("ROCKE_ATTENTION_COMPILE_BACKEND") or None,
+        waves_per_eu=force_wpe,
     )
 
     hip_stream = _bench_stream_handle()
@@ -1770,6 +1845,15 @@ def _main_impl() -> int:
         help="comma-separated list of paths to run: auto, 2d, 3d",
     )
     parser.add_argument(
+        "--force-wpe",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Pin waves_per_eu=N on UnifiedAttentionProblem for the CK auto lane, "
+        "overriding all gate logic. Use 2 vs 3 to A/B the Gate-2 occupancy hint "
+        "without modifying production selectors.",
+    )
+    parser.add_argument(
         "--set",
         choices=("default", "creative", "fmha", "all"),
         default="default",
@@ -1920,6 +2004,7 @@ def _main_impl() -> int:
                                 path="auto",
                                 warmup=args.warmup,
                                 attempts=args.attempts,
+                                force_wpe=args.force_wpe,
                             )
                         )
                         if ck_auto:
