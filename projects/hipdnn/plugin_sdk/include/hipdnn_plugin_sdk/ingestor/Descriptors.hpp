@@ -129,8 +129,8 @@ struct MetadataSchema
 /// Which adapter builds an engine's IKernelHeuristic from a UHD's `payload`.
 enum class HeuristicKind
 {
-    NATIVE, ///< NativeRegistry score symbol. Only kind with an adapter today.
-    MODEL, ///< Trained model artifact plus feature signature. No adapter yet.
+    NATIVE, ///< NativeRegistry score symbol, resolved in-process.
+    MODEL, ///< Trained model artifact plus feature signature; see UhdKernelHeuristic.
 };
 
 /// UHD: the kernel-selection model for one engine.
@@ -150,6 +150,19 @@ struct HeuristicDescriptor
     /// Empty for descriptors built in memory rather than parsed from disk, and ignored
     /// by NATIVE, which resolves a symbol rather than a path.
     std::filesystem::path baseDir;
+    /// The descriptor tree @ref baseDir was found under -- the root the loader was
+    /// pointed at, not the file's own folder.
+    ///
+    /// Same split as KernelDescriptor's originDirectory/treeRoot pair, and for the same
+    /// reason: resolution and CONTAINMENT are different questions. A MODEL payload
+    /// resolves against baseDir, but the boundary it may not cross is the tree, so a
+    /// descriptor nested in an arch shard can legitimately name `../shared/model.uhd.fb`
+    /// while nothing may climb out of the tree entirely. The artifact is
+    /// author-controlled input ([RFC 0019] §16 "Drop-in trust"), so the bound is a
+    /// security boundary and not a tidiness rule.
+    ///
+    /// Empty for descriptors built in memory. Filled by the loader, never authored.
+    std::filesystem::path treeRoot;
 };
 
 /// UED: the engine itself, carrying no logic of its own. `name` hashes into hipDNN's
