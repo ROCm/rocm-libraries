@@ -5,6 +5,17 @@ string↔enum parsers and scaling-format helpers in `hipblaslt_datatype2string.h
 "Host-only" means no device code and no GPU needed at run time, not plain host
 C++: see [Why `hip::device`](#why-hipdevice) below.
 
+## Quick start
+
+From the build tree (path varies by preset):
+
+```bash
+./clients/hipblaslt-test-hostunit
+./clients/hipblaslt-test-hostunit --gtest_filter='*HostUnit*'
+```
+
+No GPU or device initialization is required.
+
 ## Two targets, one set of sources
 
 Files listed in `HIPBLASLT_HOST_UNIT_TEST_SOURCES` (`CMakeLists.txt`) compile
@@ -48,18 +59,24 @@ device code: the client headers require compilation as HIP. Without the
 `PRIVATE`, so it arrives at consumers as `$<LINK_ONLY:hip::device>`, which
 carries no compile options.
 
+## CI selection: `HostUnit` vs `smoke_`
+
+Both naming conventions target the same cases through different paths. Use both
+when adding a test.
+
+| Naming | Where you set it | What selects it | When it matters |
+| --- | --- | --- | --- |
+| `HostUnit` suite prefix | gtest suite name (e.g. `HostUnitFoo`) | `"*HostUnit*"` in every tier of `../test_categories.yaml`, baked into the `hipblaslt-test` ctest entry as a gtest filter | Primary path today: PR-CI runs `ctest` with label selection against the installed tree |
+| `smoke_` test-name prefix | each `TEST(...)` name | `test/therock/test_hipblaslt.py` execs `hipblaslt-test` with `--gtest_filter=*smoke*` on its quick tier | Belt-and-braces if hipblaslt moves off the ctest-label path |
+
 ## Adding a host-only test
 
 1. Drop the source file in this directory and add it to
    `HIPBLASLT_HOST_UNIT_TEST_SOURCES` in `CMakeLists.txt`. That compiles it
    into both targets described above.
-2. Name the suite with a `HostUnit` prefix (e.g. `HostUnitFoo`) so it matches
-   the `"*HostUnit*"` pattern in every tier of `../test_categories.yaml`.
-3. Prefix each test name with `smoke_`, matching the convention already used
-   in `tests/src/caching_library_gtest.cpp`. This is belt-and-braces: it keeps
-   the cases selected by `test/therock/test_hipblaslt.py`, which execs the
-   binary directly with `--gtest_filter=*smoke*` on its quick tier, in case
-   hipblaslt ever moves off the ctest-label path above.
+2. Name the suite with a `HostUnit` prefix and prefix each test name with
+   `smoke_`, per the table above. The `smoke_` convention matches
+   `tests/src/caching_library_gtest.cpp`.
 
 ## Enum coverage is enforced by the compiler
 
