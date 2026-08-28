@@ -12,9 +12,12 @@
 # contiguous span on one scale and the K-contiguous one on the other.
 #
 # Sizes keep the free-dim contiguous operand's extent even -- M for NT and NN, N
-# for NT and TT.  That dim is the fastest one there, so an odd extent starts a
-# row mid-byte for a 4-bit type.  It is a property of the data path rather than
-# the scales: non-MX F4 fails the same sizes.
+# for NT and TT.  That dim is the fastest one there, so an odd extent leaves the
+# leading stride on a half byte for a 4-bit type; the geometry sets
+# AssertFree0/1ElementMultiple, so the library never routes such a problem here.
+# The benchmark harness does not apply that predicate, so an odd size added to
+# this file would still dispatch, and fail.  Either way it belongs to the data
+# path rather than the scales -- non-MX F4 carries the same constraint.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
