@@ -260,21 +260,36 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    uint32_t synchronizerSize
-                        = problem.groupedGemm()
-                              ? GsuSynchronizerElements
-                              : GsuSynchronizerElements * SynchronizerGroupedSlots;
+                    uint32_t synchronizerUsage
+                        = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
+                           * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
+                          * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2];
 
-                    return debugEvalCmp(
-                        problem,
-                        stream,
-                        "prob",
-                        (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                         * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
-                            * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2],
-                        ">=",
-                        "limit",
-                        synchronizerSize);
+                    // Report both halves of the grouped condition: a group wider
+                    // than the slots is rejected however small its usage, and a
+                    // usage row on its own would read as a pass next to the
+                    // verdict.
+                    if(problem.groupedGemm())
+                        return debugEvalCmp(problem,
+                                            stream,
+                                            "prob",
+                                            synchronizerUsage,
+                                            "<=",
+                                            "limit",
+                                            GsuSynchronizerElements,
+                                            "gemms",
+                                            problem.groupedGemmCount(),
+                                            "<=",
+                                            "slots",
+                                            SynchronizerGroupedSlots);
+
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        synchronizerUsage,
+                                        "<=",
+                                        "limit",
+                                        GsuSynchronizerElements * SynchronizerGroupedSlots);
                 }
             };
 
