@@ -214,7 +214,8 @@ namespace hipblaslt::host_numerics
             options.maxReportedMismatches      = 0;
             break;
         }
-        options.selection.indexOrder = IndexOrder::FirstDimensionFastest;
+        options.selection
+            = ::roc::host_numerics::OutputSelection::all(IndexOrder::FirstDimensionFastest);
 
         if(request.requireSpecialValueConsistency)
         {
@@ -233,7 +234,8 @@ namespace hipblaslt::host_numerics
             unitsInLastPlaceOptions.computeUlp                 = true;
             unitsInLastPlaceOptions.ulpType                    = scalarType(request.type);
             unitsInLastPlaceOptions.maxReportedMismatches      = 0;
-            unitsInLastPlaceOptions.selection.indexOrder       = IndexOrder::FirstDimensionFastest;
+            unitsInLastPlaceOptions.selection
+                = ::roc::host_numerics::OutputSelection::all(IndexOrder::FirstDimensionFastest);
             report.unitsInLastPlaceComparison
                 = compare(observed, expected, unitsInLastPlaceOptions);
         }
@@ -250,7 +252,8 @@ namespace hipblaslt::host_numerics
             frobeniusOptions.computePointwiseStatistics = false;
             frobeniusOptions.computeFrobenius           = true;
             frobeniusOptions.maxReportedMismatches      = 0;
-            frobeniusOptions.selection.indexOrder       = IndexOrder::FirstDimensionFastest;
+            frobeniusOptions.selection
+                = ::roc::host_numerics::OutputSelection::all(IndexOrder::FirstDimensionFastest);
 
             for(int64_t batch = 0; batch < request.batchCount; ++batch)
             {
@@ -276,7 +279,8 @@ namespace hipblaslt::host_numerics
             allCloseOptions.computePointwiseStatistics = false;
             allCloseOptions.computeFrobenius           = false;
             allCloseOptions.maxReportedMismatches      = 0;
-            allCloseOptions.selection.indexOrder       = IndexOrder::FirstDimensionFastest;
+            allCloseOptions.selection
+                = ::roc::host_numerics::OutputSelection::all(IndexOrder::FirstDimensionFastest);
 
             constexpr std::array<double, 6> candidates{
                 1e-6,

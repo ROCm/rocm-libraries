@@ -270,7 +270,7 @@ namespace TensileLite::Client::reference_adapter
 
         std::optional<TranslationFailure> preflight(ContractionProblemGemm const& problem,
                                                     ContractionInputs const&      inputs,
-                                                    size_t elementsToValidate)
+                                                    OutputSelection outputSelection)
         {
             using namespace roc::host_numerics;
             using detail::failure;
@@ -500,27 +500,21 @@ namespace TensileLite::Client::reference_adapter
                 = problem.outputAmaxD()
                   || (useGradient && useBias && biasSource == ContractionProblemGemm::D);
             const OutputSelection globalSelection
-                = requiresCompleteD
-                      ? OutputSelection::all()
-                      : OutputSelection::primeStride(problem.d().totalLogicalElements(),
-                                                     problem.d().totalAllocatedElements(),
-                                                     elementsToValidate);
+                = requiresCompleteD ? OutputSelection::all(outputSelection.indexOrder())
+                                    : std::move(outputSelection);
             std::vector<std::vector<size_t>> selectedByBatch;
             if(!globalSelection.selectsAll())
             {
                 selectedByBatch.resize(batches);
+                const Shape outputShape(problem.d().sizes());
                 for(const size_t logicalIndex :
                     globalSelection.indices(problem.d().totalLogicalElements()))
                 {
-                    std::vector<int64_t> coordinate(problem.d().dimensions());
-                    CoordNumbered(logicalIndex,
-                                  coordinate.begin(),
-                                  coordinate.end(),
-                                  problem.d().sizes().begin(),
-                                  problem.d().sizes().end());
-                    const size_t selectedBatch = static_cast<size_t>(coordinate[batchD]);
-                    const size_t row           = static_cast<size_t>(coordinate[indexMD]);
-                    const size_t column        = static_cast<size_t>(coordinate[indexND]);
+                    const std::vector<size_t> coordinate
+                        = outputShape.coordinates(logicalIndex, globalSelection.indexOrder());
+                    const size_t selectedBatch = coordinate[batchD];
+                    const size_t row           = coordinate[indexMD];
+                    const size_t column        = coordinate[indexND];
                     selectedByBatch.at(selectedBatch).push_back(row * n + column);
                 }
             }
@@ -1163,12 +1157,13 @@ namespace TensileLite::Client::reference_adapter
     std::variant<GemmInvocationAdapter, TranslationFailure>
         translateGemmInvocation(ContractionProblemGemm const& problem,
                                 ContractionInputs const&      inputs,
-                                size_t                        elementsToValidate)
+                                roc::host_numerics::OutputSelection outputSelection)
     {
         try
         {
             auto state = std::make_unique<GemmInvocationAdapter::State>();
-            if(auto preflightFailure = state->preflight(problem, inputs, elementsToValidate))
+            if(auto preflightFailure
+               = state->preflight(problem, inputs, std::move(outputSelection)))
                 return std::move(*preflightFailure);
             return GemmInvocationAdapter(std::move(state));
         }
@@ -1184,5 +1179,16 @@ namespace TensileLite::Client::reference_adapter
         {
             return detail::failure(TranslationFailureCode::InvalidDescriptor, error.what());
         }
+    }
+
+    std::variant<GemmInvocationAdapter, TranslationFailure>
+        translateGemmInvocation(ContractionProblemGemm const& problem,
+                                ContractionInputs const&      inputs,
+                                size_t                        elementsToValidate)
+    {
+        return translateGemmInvocation(
+            problem,
+            inputs,
+            referenceOutputSelection(problem.d(), elementsToValidate));
     }
 } // namespace TensileLite::Client::reference_adapter
