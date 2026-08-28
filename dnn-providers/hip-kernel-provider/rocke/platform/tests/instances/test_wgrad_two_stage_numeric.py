@@ -8,7 +8,6 @@ torch reference within the expected floating-point tolerance.
 
 Also verifies:
 - Bit-exact reproducibility across two consecutive runs (determinism claim).
-- That missing workspace zero-init produces incorrect results (contract test).
 
 Run on a gfx942 (or gfx950) device with the rocke venv:
   PYTHONPATH=python /root/rocke-venv/bin/python -m pytest \\
@@ -88,7 +87,10 @@ def _run_two_stage(spec, arch, rt, dY_t, X_t):
         rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
         rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
         rt.memset(dW_dev, 0, dW_t.nbytes)
-        # Required: zero-init workspace so OOB-padded elements read as 0 in Stage 2.
+        # Required: Stage 2 reads all tile positions including OOB-padded ones
+        # (up to tile_n / tile_m alignment) that Stage 1's scf_if guard never
+        # writes.  Without zero-init those elements contain arbitrary device
+        # memory and Stage 2 would accumulate garbage into dW.
         rt.memset(ws_dev, 0, ws_nbytes)
 
         s2_spec = WgradReduceSpec(problem=spec.problem, dtype_d=spec.data.dtype_d)

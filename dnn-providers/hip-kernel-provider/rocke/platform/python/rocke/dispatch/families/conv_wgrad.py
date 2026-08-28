@@ -206,7 +206,38 @@ def compute_wgrad_workspace_spec(
     """Compute workspace requirements without allocating anything.
 
     This is a pure function: no HIP calls, no side effects.
+
+    Special values of ``split_k``:
+      * ``split_k == 1``  — no two-stage path; workspace is 0 bytes and
+        ``workspace_fits`` is ``True`` (no allocation needed).
+      * ``split_k == -1`` — auto-select: resolved via
+        :func:`~rocke.helpers.split_k.select_split_k_wgrad` using the
+        problem geometry and ``req.arch``.
     """
+    if split_k == 1:
+        # split_k=1 runs a single-pass wgrad with no workspace.
+        return ConvWgradWorkspaceSpec(
+            preferred_bytes=0,
+            minimum_bytes=0,
+            preferred_split_k=1,
+            fallback_split_k=1,
+            workspace_fits=True,
+            hard_cap=hard_cap,
+            fallback_reason="",
+        )
+    if split_k == -1:
+        # Auto: resolve to the heuristic split_k for this problem, then recurse.
+        p = _problem(req)
+        decision = select_split_k_wgrad(
+            wg_M=_wg_M(p),
+            wg_N=_wg_N(p),
+            wg_K=_wg_K(p),
+            tile_m=64,
+            tile_n=64,  # smallest registered tile gives largest base_grid
+            tile_k=64,  # and therefore the most conservative (lowest) split_k estimate
+            arch=req.arch,
+        )
+        return compute_wgrad_workspace_spec(req, decision.split_k, hard_cap)
     p = _problem(req)
     wg_m = _wg_M(p)
     wg_n = _wg_N(p)
@@ -240,14 +271,16 @@ def query_wgrad_support(
 
     Keys:
         workspace:              :class:`ConvWgradWorkspaceSpec`
-        supports_deterministic: True when workspace fits within the hard cap.
+        supports_deterministic: True when the two-stage pipeline can run —
+            i.e. split_k > 1 and the workspace fits within the hard cap.
+            False for split_k=1 (no two-stage path; no workspace allocated).
         supports_fast_atomic:   Always False (Part 3).
         abi_version:            The ABI version string for this family.
     """
     ws = compute_wgrad_workspace_spec(req, split_k, hard_cap)
     return {
         "workspace": ws,
-        "supports_deterministic": ws.workspace_fits,
+        "supports_deterministic": ws.workspace_fits and ws.preferred_split_k > 1,
         "supports_fast_atomic": False,
         "abi_version": CONV_WGRAD_ABI_VERSION,
     }
@@ -585,10 +618,21 @@ def dispatch_conv_wgrad(
         grid_explanation = f"stage1_grid={s1_grid} stage2_grid={s2_grid}"
     else:
         grid_explanation = f"grid={s1_grid}"
-    # Recompute workspace spec so the fallback reason (if any) is visible in the
-    # explanation tuple.  Callers who skipped two_stage due to a workspace cap
-    # overflow can detect this from the explanation without inspecting internals.
-    ws_spec = compute_wgrad_workspace_spec(req, spec.split_k)
+    # Compute the workspace spec against the *preferred* (pre-fallback) split_k
+    # so the fallback reason is visible when the cap was exceeded.  spec.split_k
+    # is already the effective (post-fallback) value; re-running select_split_k_wgrad
+    # gives us the original heuristic decision before the cap check.
+    _p = _problem(req)
+    _preferred_decision = select_split_k_wgrad(
+        wg_M=_wg_M(_p),
+        wg_N=_wg_N(_p),
+        wg_K=_wg_K(_p),
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+        arch=req.arch,
+    )
+    ws_spec = compute_wgrad_workspace_spec(req, _preferred_decision.split_k)
     explanation: tuple = (
         f"selected {candidate.name} for wgrad on {req.arch}",
         f"algorithm={candidate.algorithm}",

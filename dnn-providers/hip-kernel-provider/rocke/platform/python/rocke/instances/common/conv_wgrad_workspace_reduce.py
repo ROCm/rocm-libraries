@@ -20,8 +20,8 @@ Kernel signature::
     wg_M    : i32   — number of output-channel tiles (GEMM M dimension)
     wg_N    : i32   — filter-spatial × input-channel dimension (GEMM N)
     split_k : i32   — number of K partitions written by Stage 1
-    ws_bytes: i32   — workspace buffer byte size (for bounds checking)
-    dw_bytes: i32   — dW buffer byte size
+    ws_bytes: i32   — workspace buffer byte size (ABI boundary; not used for bounds checking in the kernel body)
+    dw_bytes: i32   — dW buffer byte size (ABI boundary; not used for bounds checking in the kernel body)
 
 Grid: ``(ceil(wg_N / tile_n), ceil(wg_M / tile_m), 1)``
 Block: ``(block_size, 1, 1)`` where ``block_size = tile_m * tile_n`` (flat)
@@ -127,8 +127,8 @@ def build_conv_wgrad_workspace_reduce(
     wg_M_param = b.param("wg_M", I32)
     wg_N_param = b.param("wg_N", I32)
     split_k_param = b.param("split_k", I32)
-    _ws_bytes = b.param("ws_bytes", I32)  # noqa: F841
-    _dw_bytes = b.param("dw_bytes", I32)  # noqa: F841
+    _ws_bytes = b.param("ws_bytes", I32)  # noqa: F841 — ABI boundary; no bounds check performed
+    _dw_bytes = b.param("dw_bytes", I32)  # noqa: F841 — ABI boundary; no bounds check performed
 
     # Thread flat index within the workgroup.
     tid = b.thread_id_x()

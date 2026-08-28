@@ -22,8 +22,8 @@
  *   wg_M    : i32
  *   wg_N    : i32
  *   split_k : i32
- *   ws_bytes: i32
- *   dw_bytes: i32
+ *   ws_bytes: i32  -- ABI boundary; not used for bounds checking in the kernel body
+ *   dw_bytes: i32  -- ABI boundary; not used for bounds checking in the kernel body
  *
  * Grid: (ceil(wg_N / tile_n), ceil(wg_M / tile_m), 1)
  * Block: (tile_m * tile_n, 1, 1)

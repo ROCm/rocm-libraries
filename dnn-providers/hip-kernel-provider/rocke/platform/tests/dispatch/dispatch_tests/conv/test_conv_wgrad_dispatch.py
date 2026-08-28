@@ -49,9 +49,15 @@ class TestConvWgradWorkspaceSpec(unittest.TestCase):
         self.assertEqual(spec.minimum_bytes, 0)
         self.assertGreater(len(spec.fallback_reason), 0)
 
-    def test_query_wgrad_support_fits(self):
+    def test_query_wgrad_support_split_k1_not_deterministic(self):
+        # split_k=1 bypasses the two-stage path entirely; must report False.
         req = _wgrad("gfx950")
         info = query_wgrad_support(req, split_k=1)
+        self.assertFalse(info["supports_deterministic"])
+
+    def test_query_wgrad_support_split_k_gt1_fits(self):
+        req = _wgrad("gfx950")
+        info = query_wgrad_support(req, split_k=8)
         self.assertTrue(info["supports_deterministic"])
 
     def test_query_wgrad_support_fallback(self):

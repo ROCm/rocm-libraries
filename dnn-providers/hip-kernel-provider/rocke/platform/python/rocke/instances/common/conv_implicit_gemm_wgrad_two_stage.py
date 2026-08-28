@@ -23,7 +23,7 @@ Usage::
     pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch)
 
     ws = DeviceMem(ws_nbytes)
-    runtime.memset(ws.ptr(), 0, ws_nbytes)  # zero-init workspace
+    runtime.memset(ws.ptr(), 0, ws_nbytes)  # required: zero-init workspace
 
     s1_vals = {"A": dY_ptr, "B": X_ptr, "D": dW_ptr,
                "A_bytes": dY_nb, "B_bytes": X_nb, "D_bytes": dW_nb,
@@ -68,11 +68,23 @@ def _wgrad_stage1_signature(spec: WgradConvSpec) -> list:
 
     Extends the standard conv ABI (A/B/D + byte sizes) with two extra
     parameters for the workspace: ``ws_ptr`` and ``ws_bytes``.
-    """
-    from ...helpers.manifest import conv_args_signature
 
-    base = conv_args_signature(spec.data.dtype_a)
-    return base + [
+    A (dY), B (X), and D (dW) each carry their own element type so that
+    mixed-dtype configurations (e.g. bf16 inputs with fp32 output) are
+    described correctly.
+    """
+    _dtype_map = {"fp16": "f16", "bf16": "bf16", "fp32": "f32", "f16": "f16", "f32": "f32"}
+
+    def _ir(dt: str) -> str:
+        return _dtype_map.get(dt, dt)
+
+    return [
+        {"name": "A", "type": f"ptr<{_ir(spec.data.dtype_a)}, global>", "size_bytes": 8},
+        {"name": "B", "type": f"ptr<{_ir(spec.data.dtype_b)}, global>", "size_bytes": 8},
+        {"name": "D", "type": f"ptr<{_ir(spec.data.dtype_d)}, global>", "size_bytes": 8},
+        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
+        {"name": "B_bytes", "type": "i32", "size_bytes": 4},
+        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
         {"name": "ws_ptr", "type": "ptr<f32, global>", "size_bytes": 8},
         {"name": "ws_bytes", "type": "i32", "size_bytes": 4},
     ]
@@ -97,12 +109,13 @@ def build_implicit_gemm_conv_wgrad_two_stage(
 
         The workspace has shape ``[split_k, wg_M, wg_N]`` (f32).  Stage 1
         writes every element in ``[0, wg_M) × [0, wg_N)`` via plain stores
-        (no atomics); Stage 2 reads exactly those elements in fixed sequential
-        order.  OOB elements (coordinates ≥ wg_M or ≥ wg_N) are guarded by
-        ``scf_if`` and never written by Stage 1, but Stage 2 also never reads
-        beyond ``wg_M × wg_N`` per slice, so unwritten padding does not affect
-        the result.  Zero-initialising the workspace before launch is
-        belt-and-suspenders safe practice but is not required for correctness::
+        (no atomics).  Stage 2 iterates over all tile positions up to the
+        next tile_m / tile_n alignment boundary — positions beyond ``wg_M``
+        or ``wg_N`` are guarded by an OOB ``scf_if`` in Stage 2 and never
+        stored to dW, but they **are loaded** from the workspace before the
+        guard fires.  The workspace must therefore be zero-initialised before
+        launch so that those padding loads accumulate 0 rather than arbitrary
+        device memory::
 
             pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch)
             ws = DeviceMem(ws_nbytes)
