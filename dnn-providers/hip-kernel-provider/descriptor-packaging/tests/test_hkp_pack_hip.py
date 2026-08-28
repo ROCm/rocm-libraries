@@ -7,6 +7,7 @@ import pytest
 from hkp_pack.hip_compile import hip_variant_key as variant_key
 from hkp_pack.descriptors import load_flat_input, reachable_generic_ids
 from hkp_pack.errors import HkpPackError
+from hkp_pack.kernel_signature import kernel_signature
 from hkp_pack.pipeline import run_pipeline
 
 ARCHES = ["gfx942", "gfx950", "gfx90a"]
@@ -260,6 +261,35 @@ def test_rewrite_kpack_form_and_provenance(built):
     # the rewrite.
     assert kdp["version"] == "0.1"
     assert ukd["version"] == "0.1"
+
+
+def test_rewrite_stamps_the_signature_read_from_the_object(built, rocm_kpack_dir):
+    """The stamped list comes from the compiled object, per symbol.
+
+    Recomputed from the archived blob rather than compared against a literal: a
+    hand-written expectation would be satisfied just as well by a stamp derived
+    from the authored descriptor, and derivation from the binary is the entire
+    reason the field is worth comparing at dispatch.
+
+    Both inline UKDs are checked because they share one toc_key and one blob.
+    Extracting once per variant and reusing the result would give the second its
+    neighbour's signature and pass every fixture with one symbol per variant.
+    """
+    kpack = _load_kpack(rocm_kpack_dir)
+    archive = kpack.PackedKernelArchive.read(
+        built["out"] / "gfx942" / "kpack" / "hip_kernel_provider_gfx942.kpack"
+    )
+    ukds = _inline_ukds(built["out"] / "gfx942", "pointwise.kdp.json")
+    assert len({u["kernel_source"]["symbol"] for u in ukds}) == len(ukds)
+
+    for ukd in ukds:
+        ks = ukd["kernel_source"]
+        blob = bytes(archive.get_kernel(ks["toc_key"], "gfx942"))
+        assert ks["signature"] == kernel_signature(blob, ks["symbol"], "test")
+        # PointwiseAdd(const T*, const T*, T*) and its neighbour: three device
+        # pointers each, and no names -- clang records none for HIP.
+        assert [a["kind"] for a in ks["signature"]] == ["global_buffer"] * 3
+        assert all("name" not in a for a in ks["signature"])
 
 
 def test_distinct_variant_storage(built):
@@ -610,10 +640,13 @@ def test_standalone_ukd_copied_to_both_arch_shards(built):
 
 def test_standalone_ukd_matches_inline_kpack_shape(built):
     # A standalone UKD's shipped kernel_source is kpack-form with the same
-    # structure as an inline UKD's (library/toc_key/symbol/sha256 + provenance).
+    # structure as an inline UKD's (library/toc_key/symbol/sha256/signature +
+    # provenance).
     ukd = _read(built["out"] / "gfx942" / _STANDALONE_UKD_FILE)
     ks = ukd["kernel_source"]
-    assert set(["kind", "library", "toc_key", "symbol", "sha256"]).issubset(ks)
+    assert set(
+        ["kind", "library", "toc_key", "symbol", "sha256", "signature"]
+    ).issubset(ks)
     assert "file" not in ks and "build" not in ks
     assert ks["symbol"] == "PointwiseAdd"
     prov = ukd["provenance"]
