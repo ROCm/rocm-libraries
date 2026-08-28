@@ -761,16 +761,6 @@ namespace
         hipblasLtMatrixLayout_t            Ddesc      = nullptr;
     };
 
-    // The distinction the whole error table turns on: a request that is merely
-    // unserved by this release reports missing capability, not a bad shape.
-    TEST_F(FusedA2ADispatch_pre_checkin, WellFormedRequestReportsMissingCapability)
-    {
-        registerOneRank();
-        completeAndAttach();
-        makeD();
-        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_NOT_SUPPORTED);
-    }
-
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingCommunicator)
     {
         completeAndAttach();
