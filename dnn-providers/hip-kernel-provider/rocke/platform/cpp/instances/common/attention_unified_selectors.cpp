@@ -140,7 +140,7 @@ static bool enable_combo_2d(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(strcmp(p->dtype, "bf16") != 0)
+    if(strcmp(p->dtype, "bf16") != 0 && strcmp(p->dtype, "fp16") != 0)
     {
         return false;
     }
@@ -428,13 +428,14 @@ static bool enable_gfx942_sink_prefill_tuned(const rocke_unified_attn_problem_t*
            && p->sliding_window == 0 && p->softcap == 0 && !p->use_alibi && !p->use_qq_bias;
 }
 
-/* Python: _enable_gfx950_sink_prefill_wpe3(problem). gfx950 full-causal bf16
+/* Python: _enable_gfx950_sink_prefill_wpe3(problem). gfx950 full-causal bf16/fp16
  * attention-sink prefill -> waves_per_eu=3 (occupancy hint only). */
 static bool enable_gfx950_sink_prefill_wpe3(const rocke_unified_attn_problem_t* p)
 {
-    return arch_is("gfx950") && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8 && p->head_size == 64
-           && p->block_size == 16 && p->num_seqs <= 1 && p->max_seqlen_q > 1 && p->use_sinks
-           && p->sliding_window == 0 && p->softcap == 0 && !p->use_alibi && !p->use_qq_bias;
+    return arch_is("gfx950") && (strcmp(p->dtype, "bf16") == 0 || strcmp(p->dtype, "fp16") == 0)
+           && !p->use_fp8 && p->head_size == 64 && p->block_size == 16 && p->num_seqs <= 1
+           && p->max_seqlen_q > 1 && p->use_sinks && p->sliding_window == 0 && p->softcap == 0
+           && !p->use_alibi && !p->use_qq_bias;
 }
 
 /* Python: _gfx942_flash_wide_setting(). The HIPDNN_GFX942_FLASH_WIDE env knob
