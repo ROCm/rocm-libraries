@@ -6,6 +6,7 @@ This stub re-exports all symbols for backwards compatibility.
 Import from kernels.common.conv_direct_grouped instead.
 """
 import warnings as _w
+
 _w.warn(
     "rocke.instances.common.conv_direct_grouped is deprecated; "
     "import from kernels.common.conv_direct_grouped",

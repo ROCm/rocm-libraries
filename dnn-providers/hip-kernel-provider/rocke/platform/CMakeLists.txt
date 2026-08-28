@@ -285,6 +285,7 @@ if(ROCKE_INSTALL_TESTS)
       # Install library test suite (CPU-only conv dispatch + signature tests).
       # Excludes: parity .c emitters (compiled separately), GPU correctness tests
       # (need hardware), and differential/run_all.py (dev-only).
+      # cmake-lint: disable=E1122
       install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/tests/"
               DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests"
               PATTERN "__pycache__" EXCLUDE

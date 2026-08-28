@@ -6,6 +6,7 @@ This stub re-exports all symbols for backwards compatibility.
 Import from kernels.common.img2col instead.
 """
 import warnings as _w
+
 _w.warn(
     "rocke.instances.common.img2col is deprecated; "
     "import from kernels.common.img2col",

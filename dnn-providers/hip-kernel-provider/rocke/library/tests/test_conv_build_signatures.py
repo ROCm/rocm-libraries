@@ -30,12 +30,10 @@ def test_conv_builders_have_keyword_only_arch():
         fn = getattr(kernels, name)
         params = list(inspect.signature(fn).parameters.values())
         kw_only = [p for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY]
-        assert kw_only, (
-            f"{name}: no keyword-only parameters — missing '*' in signature"
-        )
-        assert kw_only[0].name == "arch", (
-            f"{name}: first keyword-only parameter is '{kw_only[0].name}', expected 'arch'"
-        )
+        assert kw_only, f"{name}: no keyword-only parameters — missing '*' in signature"
+        assert (
+            kw_only[0].name == "arch"
+        ), f"{name}: first keyword-only parameter is '{kw_only[0].name}', expected 'arch'"
 
 
 def test_conv_builders_first_param_is_spec():
@@ -47,6 +45,6 @@ def test_conv_builders_first_param_is_spec():
             inspect.Parameter.POSITIONAL_ONLY,
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
         ), f"{name}: first parameter '{params[0].name}' is not positional"
-        assert params[0].name == "spec", (
-            f"{name}: first parameter is '{params[0].name}', expected 'spec'"
-        )
+        assert (
+            params[0].name == "spec"
+        ), f"{name}: first parameter is '{params[0].name}', expected 'spec'"

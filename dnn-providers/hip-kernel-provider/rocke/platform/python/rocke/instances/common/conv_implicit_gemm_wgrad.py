@@ -6,6 +6,7 @@ This stub re-exports all symbols for backwards compatibility.
 Import from kernels.common.conv_implicit_gemm_wgrad instead.
 """
 import warnings as _w
+
 _w.warn(
     "rocke.instances.common.conv_implicit_gemm_wgrad is deprecated; "
     "import from kernels.common.conv_implicit_gemm_wgrad",

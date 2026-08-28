@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """DEPRECATED: deep_fused_conv_pool has moved to library/kernels/gfx950/deep_fused_conv_pool.py."""
 import warnings as _w
+
 _w.warn(
     "rocke.instances.gfx950.deep_fused_conv_pool is deprecated; "
     "import from kernels.gfx950.deep_fused_conv_pool",

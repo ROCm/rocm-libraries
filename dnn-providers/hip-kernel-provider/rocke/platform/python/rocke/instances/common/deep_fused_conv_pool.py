@@ -6,6 +6,7 @@ This stub re-exports all symbols for backwards compatibility.
 Import from kernels.common.deep_fused_conv_pool instead.
 """
 import warnings as _w
+
 _w.warn(
     "rocke.instances.common.deep_fused_conv_pool is deprecated; "
     "import from kernels.common.deep_fused_conv_pool",

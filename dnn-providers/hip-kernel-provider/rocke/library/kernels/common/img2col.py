@@ -51,7 +51,10 @@ from rocke.helpers.distribution import (
     make_static_tile_distribution,
 )
 from rocke.helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
-from rocke.helpers.tensor_view import make_buffer_resource, view_from_transforms_descriptor
+from rocke.helpers.tensor_view import (
+    make_buffer_resource,
+    view_from_transforms_descriptor,
+)
 from rocke.helpers.transforms import TensorDescriptor, unmerge_magic
 from .conv_implicit_gemm import ConvProblem, make_a_descriptor
 
