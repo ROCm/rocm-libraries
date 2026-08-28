@@ -33,8 +33,8 @@ Returns (LdsBlockSizePerPad, ldsPad, shift) for the ds_load_tr* read paths:
 
 Each path builds every legal (block, pad) candidate, including no padding,
 and takes the lowest rank: largest per-wave cost, summed cost, LDS overhead
-pad / block, then pad. Cost of one instruction is the largest number of
-threads on one bank.
+pad / block, then the larger block. Cost of one instruction is the largest
+number of threads on one bank.
 
 ldsPad in bytes is always an even number of dwords.
 
@@ -169,8 +169,8 @@ def _valid_blocks(incBytes, readBases, readOffs, writeMinBytes, writeRowBytes):
 def _search_padding(validB, padStep, shifts, floorFn, costFn):
   """Rank every legal (B, P, shift) candidate and return the best one.
 
-  Rank: largest per-wave cost, summed cost, LDS overhead P / B, then P. No
-  padding, (0, 0), is a candidate at every shift.
+  Rank: largest per-wave cost, summed cost, LDS overhead P / B, then the
+  larger block. No padding, (0, 0), is a candidate at every shift.
 
   floorFn(shift) gives the lowest cost a wave can reach at that shift, or
   None when every candidate at that shift is illegal. Growing P past the
@@ -200,9 +200,15 @@ def _search_padding(validB, padStep, shifts, floorFn, costFn):
 def _pick_best(candidates, costFn):
   """Return the candidate with the lowest rank, or None if all are illegal.
 
-  Rank: largest per-wave cost, summed cost, LDS overhead P / B, then P.
-  Every candidate starts with (B, P). costFn returns the per-wave costs of
-  one candidate, or None when it is illegal.
+  Rank: largest per-wave cost, summed cost, LDS overhead P / B, then the
+  larger block. Every candidate starts with (B, P). costFn returns the
+  per-wave costs of one candidate, or None when it is illegal.
+
+  The last key prefers the larger block because the block also bounds how
+  wide a chunk TDM writes to LDS at a time, which the read-side cost above
+  does not see. Two candidates tie on LDS overhead when P / B is equal, and
+  the larger block then carries a proportionally larger P, so preferring it
+  costs no extra LDS.
   """
   best = None
   bestKey = None
@@ -212,7 +218,7 @@ def _pick_best(candidates, costFn):
     if costs is None:
       continue
     # The no-padding candidate is (0, 0), so B == 0 means zero overhead.
-    key = (max(costs), sum(costs), P / B if B else 0, P)
+    key = (max(costs), sum(costs), P / B if B else 0, -B)
     if bestKey is None or key < bestKey:
       bestKey = key
       best = cand

@@ -77,10 +77,10 @@ def test_fp4(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
 @pytest.mark.parametrize(
     "mt, miWaveTile, miWaveGroup, perBlock, pad, shift",
     [
-        ( 32, 1, 2, 256,  8, 0),
+        ( 32, 1, 2, 512, 16, 0),
         ( 64, 2, 2, 128, 16, 0),
-        (128, 4, 2, 256,  8, 0),
-        (256, 8, 2, 256,  8, 0),
+        (128, 4, 2, 512, 16, 0),
+        (256, 8, 2, 512, 16, 0),
     ],
 )
 def test_fp8(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
@@ -100,7 +100,7 @@ def test_fp8(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
         ( 16, 1, 1,   0,  0),
         ( 32, 2, 1, 256, 16),
         ( 64, 2, 2, 256, 16),
-        (256, 2, 8, 256,  8),
+        (256, 2, 8, 512, 16),
     ],
 )
 def test_fp16(mt, miWaveGroup, miWaveTile, perBlock, pad):
@@ -116,8 +116,8 @@ def test_fp16(mt, miWaveGroup, miWaveTile, perBlock, pad):
 @pytest.mark.parametrize(
     "mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile, perBlock, pad",
     [
-        ( 32, 1, 2, 2, 2, 1,   64,  4),
-        ( 64, 2, 2, 2, 2, 2,  128,  8),
+        ( 32, 1, 2, 2, 2, 1,  256, 16),
+        ( 64, 2, 2, 2, 2, 2,  512, 32),
         (128, 4, 2, 2, 2, 4, 1024,  2),
         (256, 4, 2, 2, 2, 8,  128,  2),
     ],
@@ -144,9 +144,9 @@ def test_fp32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
 @pytest.mark.parametrize(
     "mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile, perBlock, pad",
     [
-        ( 32, 1, 4, 2, 16, 1,   64,  2),
-        ( 64, 2, 4, 2, 16, 2,  128,  4),
-        (128, 2, 4, 2, 16, 4,  128,  2),
+        ( 32, 1, 4, 2, 16, 1,  512, 16),
+        ( 64, 2, 4, 2, 16, 2, 1024, 32),
+        (128, 2, 4, 2, 16, 4, 1024, 16),
     ],
 )
 def test_xf32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
