@@ -1966,10 +1966,12 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     wmmaIssueConfig.issuedCount = 0;
     hasWMMAInRegion_ = false;
+    std::unordered_set<StinkyInstruction*> regionInsts;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
         auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!instPtr) continue;
         StinkyInstruction& inst = *instPtr;
+        regionInsts.insert(instPtr);
 
         if (isMatrixInstruction(inst)) {
             wmmaIssueConfig.issuedCount++;
@@ -2066,8 +2068,47 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             buildExclusiveGroups(/*useSrcTokens=*/false, /*fromAfterMap=*/false);
         const int totalWmma = std::max(1, wmmaIssueConfig.issuedCount);
         const int targetTensorLoadWmmaSpace = this->tensorLoadWmmaSpace();
-        for (auto& afterGroup : exclusiveAfterGroups) {
-            for (auto& beforeGroup : exclusiveBeforeGroups) {
+
+        // Collect transitive def-use descendants of \p seeds matching \p isMatch. Traversal
+        // stops at instructions outside this scheduling region: their own descendants can
+        // never map to a valid hard constraint (the scheduler only knows about in-region
+        // instructions), so there is nothing to gain by walking past them.
+        auto collectDescendants = [&](const std::vector<StinkyInstruction*>& seeds,
+                                      auto&& isMatch) {
+            std::vector<StinkyInstruction*> pending(seeds.begin(), seeds.end());
+            std::unordered_set<StinkyInstruction*> visited;
+            std::vector<StinkyInstruction*> result;
+            while (!pending.empty()) {
+                StinkyInstruction* descendant = pending.back();
+                pending.pop_back();
+                if (!visited.insert(descendant).second) continue;
+                if (isMatch(*descendant)) result.push_back(descendant);
+                if (!regionInsts.contains(descendant)) continue;
+                for (StinkyInstruction* user : descendant->getUsers()) pending.push_back(user);
+            }
+            return result;
+        };
+
+        // Computed once per group (not once per after x before pair): each depends on only
+        // one side of the overlap check below.
+        std::vector<std::vector<StinkyInstruction*>> afterGroupTensorLoads(
+            exclusiveAfterGroups.size());
+        for (size_t i = 0; i < exclusiveAfterGroups.size(); ++i)
+            afterGroupTensorLoads[i] =
+                collectDescendants(exclusiveAfterGroups[i].barriers,
+                                   [](StinkyInstruction& inst) { return isTensorLoad(inst); });
+
+        std::vector<std::vector<StinkyInstruction*>> beforeGroupDsLoads(
+            exclusiveBeforeGroups.size());
+        for (size_t i = 0; i < exclusiveBeforeGroups.size(); ++i)
+            beforeGroupDsLoads[i] =
+                collectDescendants(exclusiveBeforeGroups[i].barriers,
+                                   [](StinkyInstruction& inst) { return isDSRead(inst); });
+
+        for (size_t afterIdx = 0; afterIdx < exclusiveAfterGroups.size(); ++afterIdx) {
+            auto& afterGroup = exclusiveAfterGroups[afterIdx];
+            for (size_t beforeIdx = 0; beforeIdx < exclusiveBeforeGroups.size(); ++beforeIdx) {
+                auto& beforeGroup = exclusiveBeforeGroups[beforeIdx];
                 int adjustedAfterEnd = afterGroup.threshold;
                 int adjustedBeforeBegin = beforeGroup.threshold;
                 PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion after-before exclusive overlap] "
@@ -2092,41 +2133,15 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     }
 
                     // Also keep tensor_load descendants of barrierAfter ahead of the
-                    // barrierBefore group. Traverse the transitive def-use users; edges
-                    // whose endpoints are outside this scheduling region are ignored by
-                    // the region scheduler.
-                    std::vector<StinkyInstruction*> pending(afterGroup.barriers.begin(),
-                                                            afterGroup.barriers.end());
-                    std::unordered_set<StinkyInstruction*> visited;
-                    std::vector<StinkyInstruction*> descendantTensorLoads;
-                    while (!pending.empty()) {
-                        StinkyInstruction* descendant = pending.back();
-                        pending.pop_back();
-                        if (!visited.insert(descendant).second) continue;
-                        if (isTensorLoad(*descendant)) descendantTensorLoads.push_back(descendant);
-                        for (StinkyInstruction* user : descendant->getUsers())
-                            pending.push_back(user);
-                    }
+                    // barrierBefore group, and prevent them from interleaving with ds_load
+                    // descendants of barrierBefore: all matching tensor_loads must issue
+                    // first. Both descendant sets were precomputed once per group above.
+                    const auto& descendantTensorLoads = afterGroupTensorLoads[afterIdx];
+                    const auto& descendantDsLoads = beforeGroupDsLoads[beforeIdx];
                     for (StinkyInstruction* tensorLoad : descendantTensorLoads) {
                         for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
                             hardConstraints.emplace_back(tensorLoad, barrierBefore);
                         }
-                    }
-
-                    // Prevent these tensor_loads from interleaving with ds_load descendants
-                    // of barrierBefore: all matching tensor_loads must issue first.
-                    pending.assign(beforeGroup.barriers.begin(), beforeGroup.barriers.end());
-                    visited.clear();
-                    std::vector<StinkyInstruction*> descendantDsLoads;
-                    while (!pending.empty()) {
-                        StinkyInstruction* descendant = pending.back();
-                        pending.pop_back();
-                        if (!visited.insert(descendant).second) continue;
-                        if (isDSRead(*descendant)) descendantDsLoads.push_back(descendant);
-                        for (StinkyInstruction* user : descendant->getUsers())
-                            pending.push_back(user);
-                    }
-                    for (StinkyInstruction* tensorLoad : descendantTensorLoads) {
                         for (StinkyInstruction* dsLoad : descendantDsLoads) {
                             hardConstraints.emplace_back(tensorLoad, dsLoad);
                         }
