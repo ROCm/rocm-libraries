@@ -338,46 +338,18 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         float2* fftOutput = reinterpret_cast<float2*>(windowOutput + dstDescPtr->n * windowOutputStride);
         Rpp32u fftOutputStride = maxNumWindows * numBins;
 
-        // Create rocFFT plan description for real-to-complex transform
-        rocfft_plan_description desc = nullptr;
-        if (rocfft_plan_description_create(&desc) != rocfft_status_success)
-            return RPP_ERROR_NOT_ENOUGH_MEMORY;  // rocFFT plan description creation failed
-
-        size_t lengths[1] = {static_cast<size_t>(nfft)};
-        size_t inStride[1] = {1};
-        size_t outStride[1] = {1};
-
-        if (rocfft_plan_description_set_data_layout(desc,
-                                                     rocfft_array_type_real,
-                                                     rocfft_array_type_hermitian_interleaved,
-                                                     nullptr, nullptr,
-                                                     1, inStride, static_cast<size_t>(nfft),
-                                                     1, outStride, static_cast<size_t>(numBins))
-            != rocfft_status_success) {
-            rocfft_plan_description_destroy(desc);
-            return RPP_ERROR_INVALID_ARGUMENTS;  // rocFFT data layout configuration failed
-        }
-
-        // Create rocFFT plan
+        // Get or create cached rocFFT plan for this (nfft, totalWindows) combination
+        int totalWindows = maxNumWindows * dstDescPtr->n;
         rocfft_plan plan = nullptr;
-        if (rocfft_plan_create(&plan,
-                               rocfft_placement_notinplace,
-                               rocfft_transform_type_real_forward,
-                               rocfft_precision_single,
-                               1, lengths,
-                               maxNumWindows * dstDescPtr->n,
-                               desc) != rocfft_status_success) {
-            rocfft_plan_description_destroy(desc);
-            return RPP_ERROR_NOT_ENOUGH_MEMORY;  // rocFFT plan creation failed
-        }
+        rocfft_plan_description desc = nullptr;
+        RppStatus status = get_rocfft_plan(handle, nfft, totalWindows, &plan, &desc);
+        if (status != RPP_SUCCESS)
+            return status;
 
         // Get work buffer size
         size_t workBufferSize = 0;
-        if (rocfft_plan_get_work_buffer_size(plan, &workBufferSize) != rocfft_status_success) {
-            rocfft_plan_destroy(plan);
-            rocfft_plan_description_destroy(desc);
+        if (rocfft_plan_get_work_buffer_size(plan, &workBufferSize) != rocfft_status_success)
             return RPP_ERROR;
-        }
 
         // Allocate work buffer if needed
         void* workBuffer = nullptr;
@@ -388,27 +360,21 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                 rocfft_execution_info_set_work_buffer(execInfo, workBuffer, workBufferSize) != rocfft_status_success) {
                 if (workBuffer) (void)hipFree(workBuffer);
                 if (execInfo) rocfft_execution_info_destroy(execInfo);
-                rocfft_plan_destroy(plan);
-                rocfft_plan_description_destroy(desc);
                 return RPP_ERROR_NOT_ENOUGH_MEMORY;  // rocFFT work buffer allocation failed
             }
             if (rocfft_execution_info_set_stream(execInfo, handle.GetStream()) != rocfft_status_success) {
                 if (workBuffer) (void)hipFree(workBuffer);
                 rocfft_execution_info_destroy(execInfo);
-                rocfft_plan_destroy(plan);
-                rocfft_plan_description_destroy(desc);
                 return RPP_ERROR_HIP_RUNTIME;  // rocFFT stream configuration failed
             }
         }
 
-        // Execute rocFFT for the entire batch
+        // Execute rocFFT for the entire batch (plan includes correct batch count)
         void* inBuffers[1] = {windowOutput};
         void* outBuffers[1] = {fftOutput};
         if (rocfft_execute(plan, inBuffers, outBuffers, execInfo) != rocfft_status_success) {
             if (workBuffer) (void)hipFree(workBuffer);
             if (execInfo) rocfft_execution_info_destroy(execInfo);
-            rocfft_plan_destroy(plan);
-            rocfft_plan_description_destroy(desc);
             return RPP_ERROR_HIP_RUNTIME;  // rocFFT execution failed
         }
 
@@ -424,11 +390,9 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                            numWindowsTensor, make_int2(numBins, power), vertical);
         HIP_CHECK_LAUNCH_RETURN();
 
-        // Clean up rocFFT resources
+        // Clean up temporary rocFFT resources (plan is cached and reused)
         if (workBuffer) (void)hipFree(workBuffer);
         if (execInfo) rocfft_execution_info_destroy(execInfo);
-        rocfft_plan_destroy(plan);
-        rocfft_plan_description_destroy(desc);
 
         RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         return RPP_SUCCESS;
