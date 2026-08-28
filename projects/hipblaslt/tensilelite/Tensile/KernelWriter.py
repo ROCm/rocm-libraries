@@ -7131,18 +7131,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
         granularity rounds B's 2KB of strips up to A's 16KB.
         """
         raw = int(numSubtiles * ti.subtileSize + rowPad + swzPad)
-        if self.states.version[:2] == (12, 5) or not getattr(ti.gr.config, "tlu", False):
-          # Two subtiles are consumed per read here -- gfx1250's DTL pairs them
-          # on every path, and the row-major (TLU=0) layout pairs them on every
-          # arch.  A region holding an odd number of subtiles must round up so
-          # the trailing pair does not run into the next operand's region.
-          align = int(2 * ti.subtileSize)
-        else:
-          # gfx950 TLU=1: one subtile per DTL read, and the strips (subtileSize
-          # plus swizzle pad) tile the region exactly, so nothing reads past the
-          # end.  Keep just enough to land each region on an LDS bank row, so
-          # the bank-conflict swizzle maps the same way in B's region as in A's.
-          align = int(ldsRowBankSize)
+        # The region is measured in subtiles but filled by DTL writes covering
+        # loadRatioGR of them, so a subtile count that is not a multiple of that
+        # leaves a trailing partial group writing into the next operand.  Round
+        # to the write, not to a constant: a fixed 2 over-pads the common
+        # loadRatioGR <= 1 case and under-pads the wide wave groups, where the
+        # ratio reaches 4 or 8.  Floor at an LDS bank row so the bank-conflict
+        # swizzle maps the same way in B's region as in A's.
+        ratio = float(getattr(ti, "loadRatioGR", 0) or 0)
+        unit  = math.ceil(ratio) if ratio > 1 else 0
+        align = max(int(unit * ti.subtileSize), int(ldsRowBankSize))
         return int(((raw + align - 1) // align) * align)
 
       sizeA = subtileRegionSize(aTileInfo, numASubtiles, padA, swzPadA)
