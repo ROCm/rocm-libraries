@@ -104,6 +104,11 @@ namespace TensileLite::Client::reference_adapter
 
         size_t batchCount() const;
 
+        // Executes every preflighted batch in the required order, including
+        // post-GEMM operations and copies back to caller-owned storage.
+        roc::host_numerics::GemmRunInfo
+            execute(roc::host_numerics::GemmBackend backend) const;
+
         std::variant<TranslatedGemmBatch, TranslationFailure>
             translateBatch(size_t batch) const;
 
