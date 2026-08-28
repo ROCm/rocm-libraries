@@ -359,15 +359,21 @@ add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPI
 # fail to link with undefined __ubsan_handle_*_abort symbols. When UBSan is requested, pass
 # -fno-gpu-sanitize so device code is left uninstrumented while host code stays instrumented.
 # Gated on 'undefined' specifically, so ASan-only builds keep their working device ASan.
+#
+# Detection lives here (before add_subdirectory), but the flag is applied narrowly with
+# target_compile_options on the MIOpen library target(s) in src/CMakeLists.txt -- NOT via a
+# directory-wide add_compile_options -- so it only touches the device-code library and not
+# host tools (addkernels), generated-file compiles, tests, driver, or fin.
 if(HAS_HIP)
     string(TOUPPER "${CMAKE_BUILD_TYPE}" MIOPEN_BUILD_TYPE_UPPER)
     set(MIOPEN_EFFECTIVE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${MIOPEN_BUILD_TYPE_UPPER}}")
     if(MIOPEN_EFFECTIVE_CXX_FLAGS MATCHES "-fsanitize=[^ ]*undefined")
         check_cxx_compiler_flag("-x hip -fno-gpu-sanitize" MIOPEN_HIP_COMPILER_HAS_OPTION_NO_GPU_SANITIZE)
         if(MIOPEN_HIP_COMPILER_HAS_OPTION_NO_GPU_SANITIZE)
-            message(STATUS "UBSan requested: adding -fno-gpu-sanitize so AMDGPU device code links "
-                           "without a device UBSan runtime (host instrumentation retained)")
-            add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-gpu-sanitize>)
+            message(STATUS "UBSan requested: will add -fno-gpu-sanitize to MIOpen device library "
+                           "targets so AMDGPU device code links without a device UBSan runtime "
+                           "(host instrumentation retained)")
+            set(MIOPEN_APPLY_NO_GPU_SANITIZE ON)
         else()
             message(WARNING "UBSan requested but -fno-gpu-sanitize is unsupported by the compiler; "
                             "AMDGPU device objects may fail to link without a device UBSan runtime")
