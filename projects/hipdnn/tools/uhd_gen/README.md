@@ -7,7 +7,8 @@ Train and export heuristic models for hipDNN's Universal Heuristic Descriptor (U
 This tool takes benchmark timing data and produces:
 1. A trained LightGBM model
 2. A FlatBuffer model artifact (`model.bin`) for `TreeDataAdapter`
-3. The UHD itself (`heuristic.uhd.json`), the descriptor the runtime loads (RFC 0019 §4)
+3. A UHD FlatBuffer descriptor (`uhd.fb`) for UHD loader (RFC 0019 §9.2)
+4. A human-readable UHD JSON (`uhd.json`)
 
 ## Installation
 
@@ -97,19 +98,57 @@ The tool generates:
 
 ```
 output_dir/
-├── heuristic.uhd.json  # The UHD (RFC 0019 §4) - what the runtime loads
-├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter
+├── uhd.fb             # FlatBuffer UHD descriptor (RFC 0019 §9.2) - runtime format
+├── uhd.json           # UHD descriptor JSON - human-readable
+├── model.bin          # FlatBuffer GbdtModel for TreeDataAdapter
 └── train_manifest.json # Training metadata
 ```
 
-The descriptor is named `<stem>.uhd.json` because `DescriptorLoader` discovers a heuristic
-by that suffix; a bare `uhd.json` would be invisible to it.
+**NOTE:** The runtime loads `uhd.fb`, not `uhd.json`. The JSON is for inspection/debugging only.
 
-### heuristic.uhd.json
+## Generated FlatBuffers bindings
+
+`uhd.fb` and `model.bin` are written through flatc-generated Python bindings that
+live in `_generated/`, committed alongside the tool the same way the C++
+`*_generated.h` headers are committed alongside the SDK.
+
+```
+_generated/hipdnn_flatbuffers_sdk/data_objects/
+├── UHD.py, UhdAdapter.py, UhdDerivedEntry.py, UhdScoreMetadata.py   # uhd.fbs
+└── GbdtModel.py, GbdtTree.py                                        # gbdt_model.fbs
+```
+
+`uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import
+hipdnn_flatbuffers_sdk.data_objects.UHD` resolves to the bindings that match the
+schemas shipping beside this tool rather than to any other copy installed on the
+system.
+
+Regenerate after editing either schema — a build with `HIPDNN_GENERATE_SDK_HEADERS=ON`
+does it automatically, and so does the `flatc-hipdnn` pre-commit hook:
+
+```bash
+python projects/hipdnn/scripts/run_flatc.py \
+    projects/hipdnn/flatbuffers_sdk/schemas/uhd.fbs \
+    projects/hipdnn/flatbuffers_sdk/schemas/gbdt_model.fbs
+```
+
+That command emits both the C++ headers and these bindings from one invocation, so
+the two cannot drift. Requires flatc 25.9.23 on PATH (see
+`projects/hipdnn/CONTRIBUTING.md`).
+
+**Do not hand-write FlatBuffers vtables here.** Both writers previously did, and the
+UHD one declared `StartObject(11)` against a 13-field table: `derived` and
+`native_symbol` were never written, and every field from `features_signature` on
+landed one slot low, so every `uhd.fb` the tool produced failed `UhdLoader`'s
+verifier. Nothing caught it, because the only structural assertion in the test suite
+was the four-byte file identifier — which sits before the root table and survives any
+vtable error.
+
+### uhd.json
 
 ```json
 {
-  "version": "1.0",
+  "schema": "hipdnn.uhd/v1",
   "id": "...",
   "name": "GEMM UHD",
   "adapter": "tree_data",
@@ -117,7 +156,7 @@ by that suffix; a bare `uhd.json` would be invisible to it.
   "features_hash": "sha256:...",
   "objective": "max",
   "score": {"units": "tflops", "calibrated": false, "transform": "log1p"},
-  "tree_data": {"artifact": "model.bin"}
+  "model": {"artifact": "model.bin"}
 }
 ```
 
@@ -140,11 +179,10 @@ pytest tests/ -v
 The output files are loaded by hipDNN's UHD system:
 
 ```cpp
-// The descriptor IS the UHD: DescriptorLoader parses it, and the heuristic is built
-// from those fields directly (RFC 0019 §4).
-auto config = UhdKernelHeuristic::configFrom(heuristicDescriptor);
+// Load UHD descriptor (RFC 0019 §9.2)
+auto uhd = UhdLoader::load("uhd.fb");
 
 // TreeDataAdapter loads the model artifact
-auto adapter = TreeDataAdapter::load(config.modelArtifactPath, config.featuresHash);
+auto adapter = TreeDataAdapter::load("model.bin", uhd.features_hash);
 double score = adapter->score(featureVector);
 ```

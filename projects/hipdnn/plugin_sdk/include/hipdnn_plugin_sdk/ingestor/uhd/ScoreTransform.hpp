@@ -7,7 +7,6 @@
 
 #include <array>
 #include <cmath>
-#include <limits>
 #include <string>
 
 namespace hipdnn_plugin_sdk::ingestor::uhd
@@ -28,9 +27,9 @@ namespace score_transform
 /// Transform names this runtime can invert. An empty name and "identity" both mean
 /// the model was trained on the raw target.
 ///
-/// Kept in sync with the `score.transform` vocabulary a UHD descriptor may declare
-/// (RFC 0019 §4) — a name the format advertises but this list omits is a descriptor
-/// that passes review and then fails to load.
+/// Kept in sync with the `transform` field's documented vocabulary in
+/// flatbuffers_sdk/schemas/uhd.fbs — a name the schema advertises but this list
+/// omits is a descriptor that passes schema review and then fails to load.
 inline constexpr std::array<const char*, 6> SUPPORTED_TRANSFORMS
     = {"", "identity", "log1p", "log", "exp", "sqrt"};
 
@@ -86,11 +85,7 @@ inline double applyInverse(double rawScore, const std::string& transform)
     }
     if(transform == "sqrt")
     {
-        // Squaring is the inverse only on the domain sqrt actually produces. A negative
-        // prediction is out of that domain, and squaring it silently maps it to a *positive*
-        // score -- so a model predicting -0.5 outranks one predicting +0.25. NaN says
-        // out-of-domain, which is what the log branches above already say for the same reason.
-        return rawScore < 0.0 ? std::numeric_limits<double>::quiet_NaN() : rawScore * rawScore;
+        return rawScore * rawScore;
     }
     // "" or "identity": the model was trained on the raw target.
     return rawScore;

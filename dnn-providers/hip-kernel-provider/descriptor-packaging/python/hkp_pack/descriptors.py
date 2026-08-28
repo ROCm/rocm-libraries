@@ -1,7 +1,7 @@
 import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 from .errors import HkpPackError
 
@@ -227,31 +227,6 @@ def _reject_nonbare_arch(archs, where):
             raise HkpPackError(f"{where}: arch '{arch}' is not usable -- {hint}")
 
 
-def _validate_embedded_source_file(source_file, where):
-    """Reject an embedded_source `source_file` that cannot act as an identity.
-
-    The value names the source file and is not normalised anywhere. A '..'
-    segment lets one file be named by two different spellings, so one file
-    takes two identities. An absolute path names a location on one machine,
-    and the emitted key must be the same on every machine.
-    """
-    if not isinstance(source_file, str) or not source_file:
-        raise HkpPackError(
-            f"{where} kernel_source 'source_file' must be a non-empty string"
-        )
-    posix = source_file.replace("\\", "/")
-    if ".." in posix.split("/"):
-        raise HkpPackError(
-            f"{where} kernel_source source_file '{source_file}' must not "
-            "contain a '..' segment"
-        )
-    if posix.startswith("/") or PureWindowsPath(source_file).is_absolute():
-        raise HkpPackError(
-            f"{where} kernel_source source_file '{source_file}' must be "
-            "relative to its descriptor, not absolute"
-        )
-
-
 def _validate_ukd_fields(ukd, where, log=print):
     """Validate the shape shared by inline and standalone UKDs.
 
@@ -287,13 +262,10 @@ def _validate_ukd_fields(ukd, where, log=print):
         _require(ks, ["file", "symbol"], where)
     elif kind == "kpack":
         _require(ks, ["library", "toc_key", "symbol", "sha256"], where)
-    elif kind == "embedded_source":
-        _require(ks, ["source_file", "entry_point"], where)
-        _validate_embedded_source_file(ks["source_file"], where)
     else:
         raise HkpPackError(
             f"{where} kernel_source has unsupported kind '{kind}' "
-            "(expected 'hip', 'rocke', 'hsaco', 'kpack', or 'embedded_source')"
+            "(expected 'hip', 'rocke', 'hsaco', or 'kpack')"
         )
 
 
@@ -311,10 +283,9 @@ def _validate_standalone_ukd(desc, log=print):
     """A standalone `<name>.ukd.json` carries the same fields as an inline UKD.
 
     Kind-specific checks are delegated to _validate_ukd_fields, so a standalone
-    UKD may be of any kind that function accepts. Its optional `arch` narrows
-    the shards it ships in (empty/omitted = wildcard, applying to every
-    referencing arch) and must be a subset of each referencing KDP's arch,
-    checked in _validate_references.
+    UKD may be hip or rocke. Its optional `arch` narrows the shards it ships in
+    (empty/omitted = wildcard, applying to every referencing arch) and must be a
+    subset of each referencing KDP's arch, checked in _validate_references.
     """
     doc = desc.doc
     where = f"standalone UKD {desc.path.name}"
@@ -361,12 +332,7 @@ def _validate_ued(desc):
 # DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
 # metadataTypeFromString.
 _MATCH_SCOPES = ("graph", "kernel")
-_UHD_ADAPTERS = ("static_order", "native", "tree_data", "table", "custom_library")
-
-# The adapters whose body names a file rather than a symbol. `static_order` scores
-# from the descriptor's own fields and `native` names a symbol the provider
-# registered in-process; neither has anything on disk.
-_ARTIFACT_ADAPTERS = ("tree_data", "table", "custom_library")
+_HEURISTIC_KINDS = ("native", "model")
 _METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
 
 
@@ -397,32 +363,11 @@ def _validate_udd(desc):
 
 
 def _validate_uhd(desc):
-    """UHD: adapter is a closed enum, and the adapter-scoped body it selects has
-    to carry what that adapter cannot work without. Mirrors
-    parseHeuristicDescriptor.
-
-    The UHD is the whole descriptor now, not a stub naming a FlatBuffer, so the
-    fields checked here are the ones the runtime reads -- a body naming no
-    artifact drops the model at load and the engine ranks by declared order,
-    silently.
-    """
+    """UHD: kind is a closed enum, payload required. Mirrors
+    parseHeuristicDescriptor."""
     where = f"UHD {desc.path.name}"
-    _require(desc.doc, ["name", "adapter"], where)
-    _require_enum(desc.doc, "adapter", _UHD_ADAPTERS, where)
-
-    adapter = desc.doc["adapter"]
-    if adapter == "native":
-        body = desc.doc.get("native")
-        if not isinstance(body, dict) or not body.get("symbol"):
-            raise HkpPackError(f"{where} adapter 'native' requires 'native.symbol'")
-        return
-
-    if adapter not in _ARTIFACT_ADAPTERS:
-        return
-
-    body = desc.doc.get(adapter)
-    if not isinstance(body, dict) or not body.get("artifact"):
-        raise HkpPackError(f"{where} adapter '{adapter}' requires '{adapter}.artifact'")
+    _require(desc.doc, ["name", "kind", "payload"], where)
+    _require_enum(desc.doc, "kind", _HEURISTIC_KINDS, where)
 
 
 def _validate_kmd(desc):
@@ -488,11 +433,9 @@ def load_flat_input(root, log=print):
     sources the UKDs name. Each descriptor's type is derived from its
     `<name>.<type>.json` filename. A `*.json` whose name carries no type token
     is not one of ours: warn and skip it rather than aborting the pack, so an
-    incidental file in the source folder is tolerated. A hidden path -- any
-    dot-prefixed segment, or a dot-prefixed filename -- is warned and skipped
-    the same way, so nothing the walk passes over is invisible. Raises
-    HkpPackError on any malformed / missing-field / unknown-type /
-    dangling-reference descriptor that IS type-tagged.
+    incidental file in the source folder is tolerated. Raises HkpPackError on any
+    malformed / missing-field / unknown-type / dangling-reference descriptor that
+    IS type-tagged.
 
     There is exactly ONE root. Child folders under it scope the content (a
     `hip/` tree and a `rocKE/` tree, per-integration folders beneath those);
@@ -506,16 +449,8 @@ def load_flat_input(root, log=print):
 
     descriptors = []
     for jp in sorted(root.rglob("*.json")):
-        rel_path = jp.relative_to(root)
-        # A dot-prefixed segment at any depth, or a dot-prefixed filename. The
-        # source root is user-supplied and plausibly a checkout, so `.git/`,
-        # `.venv/` and friends are skipped rather than refused, unlike the
-        # reserved `kpack/` below -- a hidden path collides with nothing.
-        if any(part.startswith(".") for part in rel_path.parts):
-            log(f"skipping hidden path {rel_path}")
-            continue
         if type_from_filename(jp) is None:
-            log(f"skipping non-descriptor file {rel_path}")
+            log(f"skipping non-descriptor file {jp.relative_to(root)}")
             continue
         rel_dir = jp.parent.relative_to(root)
         # `kpack/` at the arch root is where the archive itself is written, and
@@ -524,7 +459,7 @@ def load_flat_input(root, log=print):
         # intermixed with the archive -- today they survive only because the
         # archive happens to be written last. Refuse the name rather than depend
         # on write order.
-        # The comparison is case-insensitive. On Linux `KPACK/` and `kpack/` are
+        # Compared case-insensitively. On Linux `KPACK/` and `kpack/` are
         # distinct directories and coexist harmlessly (verified), so a
         # case-sensitive check would be correct here -- but the packed tree also
         # gets built and consumed on Windows, where they are the SAME directory

@@ -5,7 +5,6 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,11 +46,6 @@ struct UhdConfig
     std::vector<std::string> staticOrderFields = {"priority", "id"}; // for static_order
     std::string customLibrarySymbol; // for custom_library: symbol name in .so
     std::string nativeSymbol; // for native: symbol registered with NativeScorerRegistry
-
-    /// RFC 0019 §6.5: field -> (string value -> code), for features that read a string field.
-    /// Empty when none does, which is the common case and must hash identically to a UHD
-    /// that predates the field.
-    std::map<std::string, std::map<std::string, int32_t>> categoricalEncoding;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor::uhd

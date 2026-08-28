@@ -20,6 +20,7 @@
 #include "config/ConfigBuiltIn.hpp"
 #include "static_ordering/StaticOrderingBuiltIn.hpp"
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include "uhd/UhdBuiltIn.hpp"
 #endif
 
 namespace hipdnn_backend::plugin
@@ -35,10 +36,12 @@ void HeuristicPluginManager::registerBuiltIns()
         hipdnn_backend::heuristics::static_ordering::populateFunctionTable(),
         "built-in:SelectionHeuristic::StaticOrdering"));
 
-    // RFC 0019 §5 puts kernel ranking in the engine ("the engine owns the UHD that ranks
-    // it"), and the heuristic-plugin ABI carries engine ids only. The built-in that used to
-    // register here computed a kernel ranking it could not return and always reported
-    // applied=0; the live path is the ingestor's UhdKernelHeuristic.
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    // RFC 0019 UHD selection ships with the kernel ingestor (RFC 0017).
+    registerPlugin(
+        HeuristicPlugin::createBuiltIn(hipdnn_backend::heuristics::uhd::populateFunctionTable(),
+                                       "built-in:SelectionHeuristic::UHD"));
+#endif
 }
 
 } // namespace hipdnn_backend::plugin

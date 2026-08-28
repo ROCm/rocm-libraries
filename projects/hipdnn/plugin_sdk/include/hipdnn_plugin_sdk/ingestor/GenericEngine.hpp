@@ -116,9 +116,8 @@ public:
 
         auto knobs = builder.CreateVector(knobOffsets);
         auto behaviorNotes = builder.CreateVector(_engine.behaviorNotes);
-        auto name = builder.CreateString(_engine.name);
         auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
-            builder, _id, knobs, behaviorNotes, name);
+            builder, _id, knobs, behaviorNotes);
         builder.Finish(engineDetails);
 
         // Detached buffer outlives this call; the handle takes ownership.

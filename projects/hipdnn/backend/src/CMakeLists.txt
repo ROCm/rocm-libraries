@@ -19,7 +19,7 @@ set(HIP_DNN_BACKEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/back
 set(HIP_DNN_BACKEND_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(
-    hipdnn_backend_private STATIC
+    hipdnn_backend_private
     descriptors/BatchnormBackwardOperationDescriptor.cpp
     descriptors/BatchnormInferenceOperationDescriptor.cpp
     descriptors/BatchnormOperationDescriptor.cpp
@@ -115,6 +115,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_sources(
         hipdnn_backend_private
         PRIVATE
+        heuristics/uhd/EngineRegistry.cpp
+        heuristics/uhd/SelectionEngine.cpp
+        heuristics/uhd/UhdBuiltIn.cpp
+        heuristics/uhd/adapters/OnnxAdapter.cpp
+        heuristics/uhd/adapters/CustomLibraryAdapter.cpp
     )
 endif()
 
