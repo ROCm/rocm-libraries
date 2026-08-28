@@ -23,7 +23,6 @@
 #include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/UhdConfig.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/UhdLoader.hpp>
 
 /// @file UhdKernelHeuristic.hpp
 /// @brief Ranks an engine's kernels with a trained UHD (RFC 0019 §5).
@@ -144,45 +143,94 @@ public:
     {
         try
         {
-            const auto path = descriptor.baseDir / descriptor.payload;
-            auto config = uhd::UhdLoader::load(path);
-            if(!config.has_value())
-            {
-                return nullptr;
-            }
+            const auto config = configFrom(descriptor);
 
-            auto adapter = uhd::makeUhdAdapter(*config);
+            auto adapter = uhd::makeUhdAdapter(config);
             if(adapter == nullptr)
             {
                 HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " names adapter '"
-                                                << config->adapterType
+                                                << config.adapterType
                                                 << "', which built no scorer");
                 return nullptr;
             }
 
-            auto extractor = std::make_shared<const uhd::FeatureExtractor>(
-                config->featuresSignature, config->derived);
+            auto extractor = std::make_shared<const uhd::FeatureExtractor>(config.featuresSignature,
+                                                                          config.derived);
 
             // RFC 0019 §6.3: the signature the model was trained against must be the one
             // the extractor will produce. Both sides carry the hash; disagreeing means the
             // pair was assembled from two different training runs.
-            if(extractor->getSignatureHash() != config->featuresHash)
+            if(extractor->getSignatureHash() != config.featuresHash)
             {
                 HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " signature hashes disagree -- "
-                                                << "descriptor declares '" << config->featuresHash
+                                                << "descriptor declares '" << config.featuresHash
                                                 << "', signature computes '"
                                                 << extractor->getSignatureHash() << "'");
                 return nullptr;
             }
 
             return std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
-                std::move(*config), std::move(adapter), std::move(extractor), describedBy));
+                config, std::move(adapter), std::move(extractor), describedBy));
         }
         catch(const std::exception& e)
         {
             HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " failed to load: " << e.what());
             return nullptr;
         }
+    }
+
+    /// The descriptor's own fields, with the artifact path resolved against the file it
+    /// was declared in.
+    ///
+    /// A straight copy, because the descriptor IS the UHD -- there is no second document
+    /// to reconcile it against. It used to be a four-field stub naming a FlatBuffer that
+    /// held these fields, which made the descriptor unreadable to save 134 bytes on a
+    /// file read once per engine.
+    static uhd::UhdConfig configFrom(const HeuristicDescriptor& descriptor)
+    {
+        uhd::UhdConfig config;
+        config.uhdId = toString(descriptor.id);
+        config.name = descriptor.name;
+        config.featuresSignature = descriptor.featuresSignature;
+        config.featuresHash = descriptor.featuresHash;
+        config.objective = descriptor.objective;
+        config.scoreUnits = descriptor.score.units;
+        config.scoreCalibrated = descriptor.score.calibrated;
+        config.scoreTransform = descriptor.score.transform;
+        config.staticOrderFields = descriptor.staticOrderFields;
+        config.nativeSymbol = descriptor.nativeSymbol;
+
+        for(const auto& entry : descriptor.derived)
+        {
+            config.derived.emplace_back(entry.name, entry.expression);
+        }
+
+        switch(descriptor.adapter)
+        {
+        case UhdAdapter::STATIC_ORDER:
+            config.adapterType = "static_order";
+            break;
+        case UhdAdapter::NATIVE:
+            config.adapterType = "native";
+            break;
+        case UhdAdapter::TREE_DATA:
+            config.adapterType = "tree_data";
+            break;
+        case UhdAdapter::TABLE:
+            config.adapterType = "table";
+            break;
+        // -Wswitch-default. The enum is closed and every member is handled above.
+        default:
+            config.adapterType = "static_order";
+            break;
+        }
+
+        if(!descriptor.modelArtifactPath.empty())
+        {
+            config.modelArtifactPath
+                = (descriptor.baseDir / descriptor.modelArtifactPath).string();
+        }
+        return config;
     }
 
     /// Scores one kernel, extracting the whole row. rank() does not use this -- it shares

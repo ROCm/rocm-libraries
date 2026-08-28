@@ -1,7 +1,19 @@
 {
   "version": "1.0",
-  "id": "80cf109c-1f77-45a5-9a4c-27cf4954586c",
+  "id": "727e5401-3b99-49ff-a2fc-68fd4eedbb54",
   "name": "packed pointwise model selector",
-  "kind": "model",
-  "payload": "packed_pointwise_model.uhd.fb"
+  "adapter": "tree_data",
+  "features_signature": [
+    "$kernel.block_size"
+  ],
+  "features_hash": "sha256:bc673de29ad2cc2c",
+  "objective": "max",
+  "score": {
+    "units": "tflops",
+    "calibrated": false,
+    "transform": "log1p"
+  },
+  "tree_data": {
+    "artifact": "model.bin"
+  }
 }

@@ -44,14 +44,14 @@ class Sidecar:
 
     The packer is otherwise JSON-only: discovery globs `*.json`, so a file that
     is not a descriptor is invisible to validation, staging and install alike.
-    A trained UHD needs one anyway -- `kind: "model"` names a `.uhd.fb`, which in
-    turn names a model artifact -- so those files are resolved at discovery and
-    carried alongside the descriptor that named them.
+    A trained UHD needs one anyway -- `adapter: "tree_data"` names a model
+    artifact -- so those files are resolved at discovery and carried alongside
+    the descriptor that named them.
 
     Fields are a resolved absolute source and the destination it keeps in an arch
     tree. The destination preserves the authored layout rather than flattening to
-    the descriptor's own folder, so `payload` stays valid verbatim in the packed
-    tree and the runtime's `originDirectory / payload` join resolves the same way
+    the descriptor's own folder, so the authored path stays valid verbatim in the
+    packed tree and the runtime's `baseDir / artifact` join resolves the same way
     it did in the source. This mirrors `kernel_source.library`, the only other
     descriptor field naming a file the packer must carry.
     """
@@ -360,7 +360,12 @@ def _validate_ued(desc):
 # DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
 # metadataTypeFromString.
 _MATCH_SCOPES = ("graph", "kernel")
-_HEURISTIC_KINDS = ("native", "model")
+_UHD_ADAPTERS = ("static_order", "native", "tree_data", "table")
+
+# The adapters whose body names a file the packed tree has to carry. `static_order`
+# scores from the descriptor's own fields and `native` names a symbol the provider
+# registered in-process; neither has anything on disk.
+_ARTIFACT_ADAPTERS = ("tree_data", "table")
 _METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
 
 
@@ -391,17 +396,8 @@ def _validate_udd(desc):
 
 
 def _validate_uhd(desc, source_root):
-    """UHD: kind is a closed enum, payload required. Mirrors
-    parseHeuristicDescriptor.
-
-    `payload` means different things per kind, and only one of them is a file:
-
-      native -- a ScoreRegistry symbol name, resolved in-process. Nothing to
-                carry; a symbol the provider never registered is caught at load,
-                not here, because the packer cannot see the provider's registry.
-      model  -- a `.uhd.fb` path relative to this descriptor. It is a real file
-                that has to reach the packed tree, so it is resolved and recorded
-                as a sidecar.
+    """UHD: adapter is a closed enum, and an adapter that reads a model has to
+    name one. Mirrors parseHeuristicDescriptor.
 
     A missing model artifact is a hard error rather than a warning. The runtime
     treats an absent one as a reason to degrade to declared order, so shipping a
@@ -409,49 +405,18 @@ def _validate_uhd(desc, source_root):
     using its model -- the failure mode this check exists to prevent.
     """
     where = f"UHD {desc.path.name}"
-    _require(desc.doc, ["name", "kind", "payload"], where)
-    _require_enum(desc.doc, "kind", _HEURISTIC_KINDS, where)
+    _require(desc.doc, ["name", "adapter"], where)
+    _require_enum(desc.doc, "adapter", _UHD_ADAPTERS, where)
 
-    if desc.doc["kind"] != "model":
+    adapter = desc.doc["adapter"]
+    if adapter not in _ARTIFACT_ADAPTERS:
         return
 
-    payload = _resolve_sidecar(desc, source_root, desc.doc["payload"])
-    desc.sidecars.append(payload)
-    desc.sidecars.extend(_model_artifacts(desc, source_root, payload))
+    body = desc.doc.get(adapter)
+    if not isinstance(body, dict) or not body.get("artifact"):
+        raise HkpPackError(f"{where} adapter '{adapter}' requires '{adapter}.artifact'")
 
-
-def _model_artifacts(desc, source_root, payload):
-    """The rest of the files a trained heuristic needs, beside its `.uhd.fb`.
-
-    The chain is two hops: `payload` names a `.uhd.fb`, whose own
-    `model_artifact_path` names the model. The packer can follow the first --
-    it is a string in a JSON document -- and cannot follow the second, which is
-    a field inside a FlatBuffer it has no reader for.
-
-    So the second hop is carried by convention: every non-descriptor file beside
-    the `.uhd.fb` travels with it. `uhd_gen train` writes the descriptor, the
-    UHD and the artifact into one directory as a unit, so "the folder" and "the
-    heuristic" are the same thing in every tree that exists.
-
-    The alternative was teaching the packer to parse the FlatBuffer, which means
-    either a new dependency or a hand-rolled vtable read -- the second being the
-    exact defect class that made every emitted `.uhd.fb` unloadable in the first
-    place. A convention that over-carries a stray file is the cheaper mistake.
-
-    Descriptors are excluded because the walk already has them; the `.uhd.fb`
-    itself is excluded because @p payload is it.
-    """
-    root = Path(source_root).resolve()
-    folder = payload.source.parent
-    artifacts = []
-    for candidate in sorted(folder.iterdir()):
-        if not candidate.is_file() or candidate == payload.source:
-            continue
-        if candidate.suffix == ".json" and type_from_filename(candidate) is not None:
-            continue
-        dest = candidate.resolve().relative_to(root)
-        artifacts.append(Sidecar(source=candidate.resolve(), rel_dir=dest.parent, name=dest.name))
-    return artifacts
+    desc.sidecars.append(_resolve_sidecar(desc, source_root, body["artifact"]))
 
 
 def _resolve_sidecar(desc, source_root, payload):

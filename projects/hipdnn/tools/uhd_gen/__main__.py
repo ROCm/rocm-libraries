@@ -41,7 +41,6 @@ from .benchmark_log import main as benchmark_log_main
 from .features import build_features_signature, compute_features_hash
 from .lgbm_to_flatbuffer import convert
 from .train_uhd import train_model
-from .uhd_to_flatbuffer import convert_uhd
 
 logging.basicConfig(
     level=logging.INFO,
@@ -202,10 +201,9 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         dest="descriptor_name",
         default="heuristic",
         help=(
-            "Stem for the emitted descriptor pair, producing <stem>.uhd.json and "
-            "<stem>.uhd.fb (default: heuristic). DescriptorLoader discovers a "
-            "heuristic by the <name>.uhd.json suffix, so a bare 'uhd.json' is "
-            "invisible to it."
+            "Stem for the emitted descriptor, producing "
+            "<stem>.uhd.json (default: heuristic). DescriptorLoader discovers a "
+            "heuristic by that suffix, so a bare 'uhd.json' is invisible to it."
         ),
     )
 
@@ -288,41 +286,33 @@ def _run_train(args: argparse.Namespace) -> int:
 
     uhd_id = str(uuid.uuid4())
     stem = args.descriptor_name
-    uhd_fb_name = f"{stem}.uhd.fb"
-    uhd_fb_path = output_dir / uhd_fb_name
 
-    # The UHD itself: features, objective, score units, and the artifact it names.
-    # `model_artifact_path` is relative to this file, which is where UhdLoader
-    # resolves it from, so the pair relocates together.
-    convert_uhd(
-        uhd_id=uhd_id,
-        name=args.name,
-        adapter="tree_data",
-        features_signature=features_signature,
-        features_hash=features_hash,
-        objective=args.objective,
-        score_units=args.score_units or args.target,
-        score_calibrated=args.calibrated,
-        # log1p because train_uhd.train_model always fits on log1p(target); the
-        # runtime inverts it to recover the declared units.
-        score_transform="log1p",
-        output_path=uhd_fb_path,
-        model_artifact_path=fb_path.name,
-    )
-    logger.info("Generated UHD: %s", uhd_fb_path)
-
-    # The descriptor the ingestor actually discovers. DescriptorLoader globs
-    # `<name>.uhd.json` and reads `payload` as a path relative to that file; the
-    # previous `uhd.json` matched no glob and named no artifact, so nothing loaded
-    # it. Its human-readable content is not reproduced here -- a third spelling of
-    # the same fields is the drift RFC 0019.13 §6.3 exists to prevent. Read the
-    # emitted .uhd.fb, or the manifest below.
+    # The whole UHD, in the descriptor. RFC 0019 §4 always specified JSON; an earlier
+    # design put these fields in a FlatBuffer that a four-field stub pointed at, which
+    # made the UHD the only descriptor in the family a human could not read, diff or
+    # review -- to save 134 bytes on a file read once per engine.
+    #
+    # `model.bin` stays binary. It is read once per candidate score, and at a realistic
+    # 500 trees it is 3.7 MB; that one earns its format.
     descriptor = {
         "version": "1.0",
         "id": uhd_id,
         "name": args.name,
-        "kind": "model",
-        "payload": uhd_fb_name,
+        "adapter": "tree_data",
+        "features_signature": features_signature,
+        "features_hash": features_hash,
+        "objective": args.objective,
+        "score": {
+            "units": args.score_units or args.target,
+            "calibrated": args.calibrated,
+            # log1p because train_uhd.train_model always fits on log1p(target); the
+            # runtime inverts it to recover the declared units.
+            "transform": "log1p",
+        },
+        # The body key equals the adapter value (RFC 0019 §4). `artifact` is relative to
+        # this file, which is where the loader resolves it from, so the pair relocates
+        # together.
+        "tree_data": {"artifact": fb_path.name},
     }
     descriptor_path = output_dir / f"{stem}.uhd.json"
     with open(descriptor_path, "w", encoding="utf-8") as handle:
@@ -354,7 +344,6 @@ def _run_train(args: argparse.Namespace) -> int:
 
     print("\nUHD generation complete")
     print(f"  descriptor:     {descriptor_path}")
-    print(f"  UHD:            {uhd_fb_path}")
     print(f"  model artifact: {fb_path} ({model.num_trees()} trees)")
     print(f"  features hash:  {features_hash}")
     print(

@@ -51,16 +51,14 @@ SDKS = {
 # Schemas that additionally need Python bindings, mapped to the directory the
 # generated package tree is written into (relative to the hipdnn root).
 #
-# Only these two: uhd_gen writes a UHD and a GbdtModel, and nothing else in the tree
-# builds a FlatBuffer from Python. Generating all 38 would ship modules no one
-# imports. Kept here rather than inferred so adding a schema to the list is a
-# deliberate act.
+# Only this one: uhd_gen writes a GbdtModel, and nothing else in the tree builds a
+# FlatBuffer from Python. The UHD itself is JSON (RFC 0019 §4). Kept here rather than
+# inferred so adding a schema to the list is a deliberate act.
 #
 # The C++ flag set is not reused. --gen-compare and --scoped-enums are C++-only and
 # flatc rejects them for --python; --gen-object-api is required because the writers
 # are built on the object API.
 PYTHON_BINDING_SCHEMAS = {
-    "uhd.fbs": os.path.join("tools", "uhd_gen", "_generated"),
     "gbdt_model.fbs": os.path.join("tools", "uhd_gen", "_generated"),
 }
 PYTHON_FLATC_FLAGS = ["--python", "--gen-object-api"]

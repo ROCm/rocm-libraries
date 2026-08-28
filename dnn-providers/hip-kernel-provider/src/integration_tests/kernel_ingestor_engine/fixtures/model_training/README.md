@@ -1,9 +1,9 @@
 # Inputs for the packaged fixtures' trained heuristics
 
-Kept out of `packaged/` on purpose. Every non-descriptor file beside a
-`kind: "model"` UHD is carried into the packed tree with it (see
-`_model_artifacts` in `hkp_pack/descriptors.py`), so anything left in that folder
-ships to a customer. Training inputs are provenance, not payload.
+Kept out of `packaged/` on purpose. A packed tree should contain what ships, and
+training inputs are provenance, not payload. The packer no longer over-carries
+them -- it stages exactly the file `tree_data.artifact` names -- but a source
+tree that mixes the two still invites the mistake.
 
 ## `pointwise_model_training_data.csv`
 

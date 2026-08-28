@@ -6,9 +6,8 @@ loop.
 
 | File | What it is |
 |---|---|
-| `tile_selector.uhd.json` | the descriptor `DescriptorLoader` discovers (`kind: "model"`) |
-| `tile_selector.uhd.fb` | the UHD it names: `features_signature`, objective, score units |
-| `model.bin` | the GBDT artifact the UHD names |
+| `tile_selector.uhd.json` | the UHD: `features_signature`, objective, score units, and the artifact it names |
+| `model.bin` | the GBDT artifact |
 | `train_manifest.json` | provenance, including the `features_hash` both sides must agree on |
 | `training_data.csv` | the input, so the model is reproducible rather than magic |
 
@@ -29,9 +28,8 @@ python -m uhd_gen train \
     --features kernel.tile_m q.seqlen \
     --target tflops \
     --output-dir <this dir> \
-    --name "Tile selector" \
+    --name "Tile Selector UHD" \
     --descriptor-name tile_selector \
-    --num-boost-round 40 \
     --training-arches gfx942 \
     --model-version 1.0.0
 ```
@@ -43,6 +41,6 @@ inputs. That is expected; nothing asserts on either.
 ## Why these are committed rather than built
 
 The point of the test that reads them is that the *tool's own output* loads:
-that the vtable the Python writer emits is the one `UhdLoader` verifies, and
-that the `features_hash` Python computed is the one the C++ `FeatureExtractor`
-recomputes. Rebuilding them from the C++ side under test would assert nothing.
+that the descriptor the Python tool emits is the one `DescriptorLoader` parses,
+and that the `features_hash` Python computed is the one the C++
+`FeatureExtractor` recomputes. Rebuilding them from the C++ side under test would assert nothing.

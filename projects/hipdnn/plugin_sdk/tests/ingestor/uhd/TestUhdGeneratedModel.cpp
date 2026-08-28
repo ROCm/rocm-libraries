@@ -31,11 +31,11 @@
  *
  * Three contracts hold this together, and each of them has already been broken:
  *
- *  - the FlatBuffer layout, verified by `UhdLoader` before a field is read
+ *  - the descriptor JSON, parsed by `DescriptorLoader` before a field is read
  *  - `features_hash`, computed by Python and recomputed by C++ from the
  *    signature in the same file; a mismatch refuses the load
- *  - `model_artifact_path`, relative to the `.uhd.fb`, itself named by a
- *    `payload` relative to the `.uhd.json`
+ *  - the artifact path in `tree_data`, relative to the `.uhd.json` that
+ *    declares it
  *
  * What is deliberately NOT here: executing the chosen kernel. That needs a
  * packaged descriptor tree and a device, and lives with the provider's
@@ -57,21 +57,17 @@ std::filesystem::path fixtureDir()
     return std::filesystem::path(HIPDNN_UHD_GENERATED_FIXTURE_DIR);
 }
 
-/// The heuristic descriptor the loader would have produced for the committed
-/// `tile_selector.uhd.json`.
+/// The committed `tile_selector.uhd.json`, through the loader's own parser.
 ///
-/// Built here rather than parsed so the test needs no descriptor tree; the
-/// fields are exactly what `parseHeuristicDescriptor` fills, and
-/// TestDescriptorLoader covers the parse itself.
+/// Parsed rather than retyped: a descriptor built here would pass whatever the
+/// tool emitted through a second, hand-maintained spelling of the schema, and
+/// the seam this suite exists to hold is exactly that the tool writes what the
+/// parser reads.
 HeuristicDescriptor generatedDescriptor()
 {
-    HeuristicDescriptor descriptor;
-    descriptor.id.fill(0);
-    descriptor.id[0] = 0xAA;
-    descriptor.name = "generated tile selector";
-    descriptor.kind = HeuristicKind::MODEL;
-    descriptor.payload = "tile_selector.uhd.fb";
-    descriptor.baseDir = fixtureDir();
+    const auto path = fixtureDir() / "tile_selector.uhd.json";
+    std::ifstream stream(path);
+    auto descriptor = detail::parseHeuristicDescriptor(nlohmann::json::parse(stream), path);
     descriptor.treeRoot = fixtureDir();
     return descriptor;
 }
@@ -111,10 +107,10 @@ Catalog catalogAgainstPriority(int64_t seqlen)
 
 TEST(TestIngestorUhdGeneratedModel, TheToolsOwnOutputLoads)
 {
-    // The whole chain in one assertion: the .uhd.fb passes the verifier, its
-    // features_hash matches what the C++ extractor recomputes from the signature
-    // beside it, and model.bin resolves relative to the .uhd.fb and loads. Any
-    // one of the three failing returns nullptr here.
+    // The whole chain in one assertion: the descriptor parses, its features_hash
+    // matches what the C++ extractor recomputes from the signature beside it, and
+    // model.bin resolves relative to the descriptor and loads. Any one of the
+    // three failing returns nullptr here.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
@@ -168,19 +164,17 @@ TEST(TestIngestorUhdGeneratedModel, TheSameCatalogRanksDifferentlyForADifferentP
 
 TEST(TestIngestorUhdGeneratedModel, TheCommittedDescriptorNamesTheCommittedArtifact)
 {
-    // The two relative hops, checked as files rather than inferred from a
-    // successful load: `payload` from the .uhd.json, then `model_artifact_path`
-    // from the .uhd.fb. A fixture regenerated with a different --descriptor-name
+    // The artifact reference, checked as a file rather than inferred from a
+    // successful load. A fixture regenerated with a different --descriptor-name
     // would still load while silently no longer matching what the docs describe.
     const auto descriptorPath = fixtureDir() / "tile_selector.uhd.json";
     ASSERT_TRUE(std::filesystem::exists(descriptorPath));
 
     std::ifstream stream(descriptorPath);
     const auto document = nlohmann::json::parse(stream);
-    EXPECT_EQ(document.at("kind"), "model");
-    EXPECT_EQ(document.at("payload"), "tile_selector.uhd.fb");
+    EXPECT_EQ(document.at("adapter"), "tree_data");
+    EXPECT_EQ(document.at("tree_data").at("artifact"), "model.bin");
 
-    EXPECT_TRUE(std::filesystem::exists(fixtureDir() / "tile_selector.uhd.fb"));
     EXPECT_TRUE(std::filesystem::exists(fixtureDir() / "model.bin"));
 }
 

@@ -520,14 +520,14 @@ TEST_F(TestUhdSelectionFlow, RegisterAcceptsEverySupportedScoreTransform)
 
 TEST_F(TestUhdSelectionFlow, SupportedTransformsCoverTheSchemaVocabulary)
 {
-    // flatbuffers_sdk/schemas/uhd.fbs documents the transform field as
+    // RFC 0019 §4 documents the transform field as
     // (e.g., "identity", "log1p", "exp"). A name the schema advertises but the runtime
     // rejects is a descriptor that passes schema review and then fails to load.
     namespace xform = hipdnn_backend::heuristics::uhd::score_transform;
 
     for(const auto* documented : {"identity", "log1p", "exp"})
     {
-        EXPECT_TRUE(xform::isSupported(documented)) << "uhd.fbs documents transform '" << documented
+        EXPECT_TRUE(xform::isSupported(documented)) << "RFC 0019 documents transform '" << documented
                                                     << "' but the runtime cannot invert it";
     }
 }

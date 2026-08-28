@@ -27,7 +27,6 @@
 
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/uhd_generated.h>
 
 #include <nlohmann/json.hpp>
 #include <hipdnn_plugin_sdk/HeuristicValidation.hpp>

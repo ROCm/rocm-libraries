@@ -1,7 +1,20 @@
 {
   "version": "1.0",
-  "id": "9c43b083-d7ec-4169-a023-e6c9c5902103",
-  "name": "Tile selector",
-  "kind": "model",
-  "payload": "tile_selector.uhd.fb"
+  "id": "8d63aa4a-2510-4b56-9a5d-f586354e392c",
+  "name": "Tile Selector UHD",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$kernel.tile_m",
+    "$q.seqlen"
+  ],
+  "features_hash": "sha256:30aa9a4e48ea3f2b",
+  "objective": "max",
+  "score": {
+    "units": "tflops",
+    "calibrated": false,
+    "transform": "log1p"
+  },
+  "tree_data": {
+    "artifact": "model.bin"
+  }
 }
