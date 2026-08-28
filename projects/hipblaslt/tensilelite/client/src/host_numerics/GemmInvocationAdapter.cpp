@@ -971,6 +971,46 @@ namespace TensileLite::Client::reference_adapter
         return m_state->batchPlans.size();
     }
 
+    roc::host_numerics::GemmRunInfo
+        GemmInvocationAdapter::execute(roc::host_numerics::GemmBackend backend) const
+    {
+        using namespace roc::host_numerics;
+
+        GemmRunInfo combined;
+        bool        hasRunInfo = false;
+        for(size_t batch = 0; batch < batchCount(); ++batch)
+        {
+            auto translation = translateBatch(batch);
+            if(std::holds_alternative<TranslationFailure>(translation))
+            {
+                const auto& failure = std::get<TranslationFailure>(translation);
+                throw std::invalid_argument("TensileLite host-numerics translation failed: "
+                                            + failure.reason);
+            }
+
+            TranslatedGemmBatch translated
+                = std::move(std::get<TranslatedGemmBatch>(translation));
+            const GemmRunInfo runInfo = referenceGemm(translated.gemm(), backend);
+            translated.runPostGemmOperationsAndCopyOutputs();
+
+            if(!hasRunInfo)
+            {
+                combined.backendUsed    = runInfo.backendUsed;
+                combined.fallbackReason = runInfo.fallbackReason;
+                hasRunInfo              = true;
+            }
+            else if(combined.backendUsed != runInfo.backendUsed)
+            {
+                combined.backendUsed = GemmBackend::Mixed;
+            }
+            combined.outputElementsWritten += runInfo.outputElementsWritten;
+            combined.outputElementsCovered += runInfo.outputElementsCovered;
+            if(!combined.fallbackReason && runInfo.fallbackReason)
+                combined.fallbackReason = runInfo.fallbackReason;
+        }
+        return combined;
+    }
+
     std::variant<TranslatedGemmBatch, TranslationFailure> GemmInvocationAdapter::translateBatch(
         size_t batch) const
     {

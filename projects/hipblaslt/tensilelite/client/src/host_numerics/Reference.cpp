@@ -21,46 +21,7 @@ namespace TensileLite
     {
         using namespace roc::host_numerics;
         using Client::reference_adapter::GemmInvocationAdapter;
-        using Client::reference_adapter::TranslatedGemmBatch;
         using Client::reference_adapter::TranslationFailure;
-
-        class RunInfoRecorder
-        {
-        public:
-            void record(const GemmRunInfo& runInfo)
-            {
-                if(!m_hasRunInfo)
-                {
-                    m_combined.backendUsed    = runInfo.backendUsed;
-                    m_combined.fallbackReason = runInfo.fallbackReason;
-                    m_hasRunInfo              = true;
-                }
-                else if(m_combined.backendUsed != runInfo.backendUsed)
-                {
-                    m_combined.backendUsed = GemmBackend::Mixed;
-                }
-                m_combined.outputElementsWritten += runInfo.outputElementsWritten;
-                m_combined.outputElementsCovered += runInfo.outputElementsCovered;
-                if(!m_combined.fallbackReason && runInfo.fallbackReason)
-                    m_combined.fallbackReason = runInfo.fallbackReason;
-            }
-
-            GemmRunInfo result() const
-            {
-                return m_combined;
-            }
-
-        private:
-            GemmRunInfo m_combined;
-            bool        m_hasRunInfo = false;
-        };
-
-        void executeGemmBatch(TranslatedGemmBatch& translated,
-                              GemmBackend          backend,
-                              RunInfoRecorder&     recorder)
-        {
-            recorder.record(referenceGemm(translated.gemm(), backend));
-        }
 
         [[noreturn]] void throwTranslationFailure(const TranslationFailure& failure)
         {
@@ -80,21 +41,7 @@ namespace TensileLite
             if(std::holds_alternative<TranslationFailure>(translation))
                 throwTranslationFailure(std::get<TranslationFailure>(translation));
             GemmInvocationAdapter adapter = std::move(std::get<GemmInvocationAdapter>(translation));
-
-            RunInfoRecorder recorder;
-
-            for(size_t batch = 0; batch < adapter.batchCount(); ++batch)
-            {
-                auto batchTranslation = adapter.translateBatch(batch);
-                if(std::holds_alternative<TranslationFailure>(batchTranslation))
-                    throwTranslationFailure(std::get<TranslationFailure>(batchTranslation));
-                TranslatedGemmBatch translated
-                    = std::move(std::get<TranslatedGemmBatch>(batchTranslation));
-
-                executeGemmBatch(translated, backend, recorder);
-                translated.runPostGemmOperationsAndCopyOutputs();
-            }
-            return recorder.result();
+            return adapter.execute(backend);
         }
     } // namespace
 
