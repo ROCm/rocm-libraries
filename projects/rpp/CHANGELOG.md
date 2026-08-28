@@ -2,6 +2,18 @@
 
 Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/rpp/en/latest](https://rocm.docs.amd.com/projects/rpp/en/latest)
 
+## (Unreleased) RPP 3.3.0
+
+### Added
+
+- rocFFT GPU acceleration for audio spectrogram with plan caching for improved performance (1.6x faster than previous implementation)
+- In-house CPU FFT implementation for audio augmentations (removes external FFTS dependency)
+
+### Changed
+
+- Audio augmentations (`RPP_AUDIO_SUPPORT`) now enabled by default
+
+
 ## (Unreleased) RPP 3.2.0
 
 ### Added

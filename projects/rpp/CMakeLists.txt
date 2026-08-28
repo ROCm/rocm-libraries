@@ -69,7 +69,7 @@ endif()
 
 # RPP Version
 # NOTE: package version and rpp_version.h is generated with this version
-set(VERSION "3.2.0")
+set(VERSION "3.3.0")
 
 # Set Project Version and Language
 project(rpp VERSION ${VERSION} LANGUAGES CXX)
@@ -95,8 +95,8 @@ endif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 # RPP Default Options
 set(DEFAULT_BUILD_TYPE "Release")
 
-### RPP_AUDIO_SUPPORT - default = OFF, NOTE: enabled automatically when FFTS is found
-option(RPP_AUDIO_SUPPORT      "Build RPP with Audio Support"         OFF)
+### RPP_AUDIO_SUPPORT - default = ON (uses in-house FFT for CPU, rocFFT for GPU)
+option(RPP_AUDIO_SUPPORT      "Build RPP with Audio Support"         ON)
 
 ### CODE_COVERAGE - default = OFF, instruments librpp.so for LLVM coverage
 option(CODE_COVERAGE          "Build RPP with code coverage instrumentation (LLVM)"  OFF)
