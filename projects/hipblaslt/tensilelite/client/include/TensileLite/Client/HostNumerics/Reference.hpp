@@ -26,7 +26,7 @@
 
 #pragma once
 
-// Product-private TensileLite adapter.
+// TensileLite client-private adapter.
 
 // TensileLite reference API owned by the shared host-numerics component.
 
