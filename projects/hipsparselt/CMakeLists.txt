@@ -60,7 +60,16 @@ if(HIPSPARSELT_ENABLE_CUDA AND HIPSPARSELT_ENABLE_HIP)
     message(FATAL_ERROR "Cannot enable CUDA and HIP support simultaneously.")
 endif()
 
-option(HIPSPARSELT_BUILD_SHARED_LIBS "Build the hipSPARSELt shared library." ON)
+set(_hipsparselt_build_shared_default ON)
+if(DEFINED BUILD_SHARED_LIBS AND NOT "${BUILD_SHARED_LIBS}" STREQUAL "")
+    set(_hipsparselt_build_shared_default "${BUILD_SHARED_LIBS}")
+endif()
+option(HIPSPARSELT_BUILD_SHARED_LIBS
+    "Build the hipSPARSELt shared library."
+    "${_hipsparselt_build_shared_default}"
+)
+unset(_hipsparselt_build_shared_default)
+set(BUILD_SHARED_LIBS "${HIPSPARSELT_BUILD_SHARED_LIBS}")
 option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
 option(HIPSPARSELT_BUILD_COVERAGE "Build tests with coverage enabled." OFF)
 
@@ -78,10 +87,6 @@ option(HIPSPARSELT_ENABLE_OPENMP "Enable OpenMP support." ON)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSELT_ENABLE_FETCH "Fetch dependencies." OFF)
 option(HIPSPARSELT_ENABLE_THEROCK "Enable TheRock support." OFF)
-
-set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
-    CACHE PATH "Path to hipblaslt directory."
-)
 set(HIPSPARSELT_COVERAGE_GTEST_FILTER "" CACHE STRING "GTest filter for coverage tests.")
 
 if(NOT HIPSPARSELT_ENABLE_CUDA)
@@ -150,48 +155,59 @@ if(HIPSPARSELT_ENABLE_CUDA)
 endif()
 
 if(HIPSPARSELT_ENABLE_HIP)
-    set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
-    if(NOT EXISTS "${HIPBLASLT_PATH}")
-        message(FATAL_ERROR "hipBLASLt required but no not found at ${HIPBLASLT_PATH}.")
-    endif()
+    message(STATUS "hipSPARSELt links the installed hipBLASLt package.")
+    find_package(hipblaslt CONFIG REQUIRED)
 
-    block(SCOPE_FOR VARIABLES)
-    set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
-    # Builds tensilelite's device libraries (.co/.dat)
-    set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
-    set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
-    set(TENSILELITE_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
-    set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
-    # hipSPARSELt does not use ExtOp or MatrixTransform artifacts
-    set(HIPBLASLT_ENABLE_EXTOPS OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_ENABLE_MATRIX_TRANSFORM OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_LIBLOGIC_PATH
-        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
-        CACHE STRING "" FORCE
-    )
-    # hipSPARSELt's corpus has a unified gfx1250 tree. It shares hipBLASLt's
-    # device-library CMake machinery, which can still build a gfx1250v0 target,
-    # but that target must not imply this separate corpus owns a v0 overlay.
-    set(HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY OFF)
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
         CACHE FILEPATH "License file for package" FORCE
     )
 
-    if(WIN32)
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
-            CACHE PATH "path to tensile library" FORCE
+    if(HIPSPARSELT_ENABLE_DEVICE)
+        if(NOT HIPBLASLT_TENSILELITE_PATH)
+            set(HIPBLASLT_TENSILELITE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt/tensilelite")
+        endif()
+        if(NOT EXISTS "${HIPBLASLT_TENSILELITE_PATH}/Tensile/bin/TensileLogic")
+            message(FATAL_ERROR
+                "hipSPARSELt device codegen needs the hipBLASLt tensilelite source at "
+                "'${HIPBLASLT_TENSILELITE_PATH}'; set -DHIPBLASLT_TENSILELITE_PATH.")
+        endif()
+        set(HIPBLASLT_CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}")
+
+        find_package(origami CONFIG REQUIRED)
+
+        set(_hipsparselt_rocisa_dir "$<IF:$<PLATFORM_ID:Windows>,$<TARGET_FILE_DIR:roc::tensilelite-host>/../lib/hipblaslt/rocisa,$<TARGET_FILE_DIR:roc::tensilelite-host>/hipblaslt/rocisa>")
+        get_filename_component(_hipsparselt_hip_bindir "${hip_DIR}/../../../bin" ABSOLUTE)
+        get_filename_component(_hipsparselt_cxx_bindir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+
+        set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
+        set(_hipsparselt_codegen_flags "")
+        if(HIPSPARSELT_ENABLE_ASAN)
+            list(APPEND _hipsparselt_codegen_flags ASAN)
+        endif()
+        hipblaslt_make_python_command(HIPBLASLT_PYTHON_COMMAND
+            PYTHONPATH_DIRS "$<IF:$<PLATFORM_ID:Windows>,$<TARGET_FILE_DIR:roc::tensilelite-host>/../lib/hipblaslt,$<TARGET_FILE_DIR:roc::tensilelite-host>/hipblaslt>" "${HIPBLASLT_CODEGEN_ROOT}"
+            RUNTIME_LIB_DIRS "$<TARGET_FILE_DIR:roc::origami>" "${_hipsparselt_rocisa_dir}"
+            TOOL_BIN_DIRS "${_hipsparselt_hip_bindir}" "${_hipsparselt_cxx_bindir}"
+            ${_hipsparselt_codegen_flags}
         )
-    else()
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR
-            "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
-            CACHE PATH "path to tensile library" FORCE
+        create_device_library(
+            LOGIC_PATH "${TENSILELITE_LIBLOGIC_PATH}"
+            OUTPUT_DIR "${_hipsparselt_tensile_out}"
+            PYTHON_COMMAND "${HIPBLASLT_PYTHON_COMMAND}"
+            ASAN "${HIPSPARSELT_ENABLE_ASAN}"
+        )
+
+        if(WIN32)
+            set(_hipsparselt_tensile_install_dir "${CMAKE_INSTALL_BINDIR}/hipsparselt")
+        else()
+            set(_hipsparselt_tensile_install_dir "${CMAKE_INSTALL_LIBDIR}/hipsparselt")
+        endif()
+        install(
+            DIRECTORY "${_hipsparselt_tensile_out}/library"
+            DESTINATION "${_hipsparselt_tensile_install_dir}"
+            COMPONENT runtime
         )
     endif()
-
-    add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
-    endblock()
 endif()
 
 add_subdirectory(library)
@@ -213,6 +229,24 @@ if(HIPSPARSELT_ENABLE_CLIENT)
 endif()
 
 # --- Packaging and installation ---
+
+if(HIPSPARSELT_ENABLE_HIP)
+    if(HIPSPARSELT_BUILD_SHARED_LIBS)
+        rocm_package_add_dependencies(
+            COMPONENT runtime
+            DEPENDS "hipblaslt >= ${hipblaslt_VERSION}"
+        )
+    else()
+        rocm_package_add_deb_dependencies(
+            COMPONENT devel
+            DEPENDS "hipblaslt-static-dev >= ${hipblaslt_VERSION}"
+        )
+        rocm_package_add_rpm_dependencies(
+            COMPONENT devel
+            DEPENDS "hipblaslt-static-devel >= ${hipblaslt_VERSION}"
+        )
+    endif()
+endif()
 
 if(HIPSPARSELT_ENABLE_CLIENT)
     include(rocm_client_prerequisites)
@@ -272,6 +306,11 @@ rocm_install(
     COMPONENT "devel"
 )
 
+set(_hipsparselt_export_depends PACKAGE hip)
+if(HIPSPARSELT_ENABLE_HIP)
+    list(APPEND _hipsparselt_export_depends PACKAGE hipblaslt)
+endif()
+
 rocm_export_targets(
     NAMESPACE
     roc::
@@ -280,9 +319,9 @@ rocm_export_targets(
     EXPORT
     hipsparselt-targets
     DEPENDS
-    PACKAGE
-    hip
+    ${_hipsparselt_export_depends}
 )
+unset(_hipsparselt_export_depends)
 
 if(HIPSPARSELT_ENABLE_CLIENT)
     if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)

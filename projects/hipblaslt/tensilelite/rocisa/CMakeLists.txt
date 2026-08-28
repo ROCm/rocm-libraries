@@ -348,12 +348,35 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
             # A static stinkytofu is already inside _rocisa, and TARGET_SONAME_FILE below
             # is only valid for SHARED targets.
             install(FILES $<TARGET_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
-            if(NOT WIN32)
+            if(NOT WIN32 AND BUILD_SHARED_LIBS)
                 install(FILES $<TARGET_SONAME_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
             endif()
         endif()
         # Installed stinkytofu ships in its own ROCm package; it is not bundled here.
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
+    endif()
+
+    if(HIPBLASLT_INSTALL_ROCISA AND NOT ROCISA_STANDALONE)
+        set(_rocisa_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa")
+        install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
+            DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
+        if(_stinkytofu_from_subdirectory AND BUILD_SHARED_LIBS)
+            # Bundled shared stinkytofu: vendor it next to _rocisa. On Linux
+            # _rocisa's INSTALL_RPATH=$ORIGIN (set above) resolves it; on Windows
+            # the loader searches the module's own directory (registered via
+            # os.add_dll_directory() in __init__.py), so the DLL must sit here too.
+            # hipBLASLt packaging is component-scoped (COMPONENT devel); stinkytofu's
+            # own install is Unspecified-component, so it would otherwise be dropped.
+            install(FILES $<TARGET_FILE:stinkytofu::stinkytofu>
+                DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
+            if(NOT WIN32)
+                # Linux soname symlink (libstinkytofu.so.0); _rocisa's DT_NEEDED
+                # references it. Invalid for a Windows .dll, so guarded.
+                install(FILES $<TARGET_SONAME_FILE:stinkytofu::stinkytofu>
+                    DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
+            endif()
+        endif()
     endif()
 
     # Example plugin — the target only exists when stinkytofu is configured with

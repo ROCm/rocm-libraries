@@ -20,19 +20,23 @@ include(dependencies)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 
-option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE})
+set(_origami_build_shared_default "${ORIGAMI_STANDALONE}")
+if(DEFINED BUILD_SHARED_LIBS AND NOT "${BUILD_SHARED_LIBS}" STREQUAL "")
+    set(_origami_build_shared_default "${BUILD_SHARED_LIBS}")
+endif()
+option(ORIGAMI_BUILD_SHARED_LIBS
+    "Build shared libraries."
+    "${_origami_build_shared_default}"
+)
+unset(_origami_build_shared_default)
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
 find_package(hip REQUIRED)
 
-if(ORIGAMI_BUILD_SHARED_LIBS OR (BUILD_SHARED_LIBS AND ORIGAMI_STANDALONE))
-    set(ORIGAMI_LIBRARY_TYPE SHARED)
-else()
-    set(ORIGAMI_LIBRARY_TYPE STATIC)
-endif()
-add_library(origami ${ORIGAMI_LIBRARY_TYPE})
+set(BUILD_SHARED_LIBS "${ORIGAMI_BUILD_SHARED_LIBS}")
+add_library(origami)
 
 rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
@@ -152,15 +156,17 @@ rocm_install(
     "${CMAKE_INSTALL_LIBDIR}/cmake/origami" COMPONENT devel
 )
 
-set(BUILD_SHARED_LIBS ${ORIGAMI_BUILD_SHARED_LIBS})
-set(ORIGAMI_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
-    CACHE PATH "Path placed into ldconfig file"
-)
+if(ROCM_LIBS_SUPERBUILD OR ORIGAMI_STANDALONE)
+    set(BUILD_SHARED_LIBS ${ORIGAMI_BUILD_SHARED_LIBS})
+    set(ORIGAMI_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+        CACHE PATH "Path placed into ldconfig file"
+    )
 
-rocm_create_package(
-    NAME origami
-    DESCRIPTION "Origami: Analytical Solution Selection for GEMM"
-    MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
-    LDCONFIG
-    LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
-)
+    rocm_create_package(
+        NAME origami
+        DESCRIPTION "Origami: Analytical Solution Selection for GEMM"
+        MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
+        LDCONFIG
+        LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
+    )
+endif()

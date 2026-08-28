@@ -39,6 +39,32 @@ def _candidate_dll_dirs(dep_dlls, ext_dir):
     return ordered
 
 
+def _installed_dll_dirs(ext_dir):
+    """Windows dependency dirs for an installed _rocisa (no _dll_dirs.py present).
+
+    A build tree gets exact dependency paths from _dll_dirs.py; an install does
+    not, and since Python 3.8 the extension loader ignores PATH. The installed
+    extension sits at <prefix>/lib/hipblaslt/rocisa while its dependency DLLs
+    (HIP runtime, comgr, origami, stinkytofu) live in the merged ROCm
+    <prefix>/bin. Return that bin/ (three levels up) plus the bin/ of any standard
+    ROCM_PATH/HIP_PATH/ROCM_HOME, mirroring hipdnn_frontend. Callers guard each
+    entry with os.path.isdir, so a wrong guess is a harmless no-op. Pure and
+    host-agnostic so it can be unit-tested off Windows.
+    """
+    import os
+
+    dirs = [
+        os.path.normpath(
+            os.path.join(ext_dir, os.pardir, os.pardir, os.pardir, "bin")
+        )
+    ]
+    for var in ("ROCM_PATH", "HIP_PATH", "ROCM_HOME"):
+        root = os.environ.get(var)
+        if root:
+            dirs.append(os.path.join(root, "bin"))
+    return dirs
+
+
 def _register_win_dll_dirs() -> None:
     """Register _candidate_dll_dirs via os.add_dll_directory on Windows.
 
@@ -49,12 +75,16 @@ def _register_win_dll_dirs() -> None:
     """
     import os
 
+    ext_dir = os.path.dirname(__file__)
     try:
         # Source/integrated build: CMake emits the resolved dependency DLL paths.
         from ._dll_dirs import DEP_DLLS
     except ImportError:
         DEP_DLLS = []  # Installed package: deps resolve via the merged layout.
-    for d in _candidate_dll_dirs(DEP_DLLS, os.path.dirname(__file__)):
+    dll_dirs = _candidate_dll_dirs(DEP_DLLS, ext_dir)
+    if not DEP_DLLS:
+        dll_dirs = dll_dirs + _installed_dll_dirs(ext_dir)
+    for d in dll_dirs:
         if os.path.isdir(d):
             try:
                 os.add_dll_directory(d)
