@@ -26,6 +26,7 @@ enum class KpackLoadStage
     ARCH_LOOKUP,
     ENTRY_LOOKUP,
     DECOMPRESS,
+    DIGEST_MISMATCH,
     MODULE_LOAD,
 };
 
