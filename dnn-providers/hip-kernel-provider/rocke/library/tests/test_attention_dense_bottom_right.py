@@ -219,6 +219,63 @@ def test_equal_lengths_collapse_to_top_left():
 
 
 # --------------------------------------------------------------------------- #
+# Composition with attention sinks
+# --------------------------------------------------------------------------- #
+def test_bottom_right_composes_with_sinks():
+    """A sink is a per-query-head logit with no key position, so it is orthogonal to
+    which keys the diagonal admits. Both features nevertheless write the same softmax
+    -- the sink seeds m/l before the KV loop and the offset changes what that loop
+    admits -- so the combination is asserted rather than assumed.
+
+    The symbol matters as much as acceptance: if only one of the two tokens reached
+    the name, two kernels that differ in the other would share a launcher-cache entry
+    and one would silently serve the other.
+    """
+    spec = _spec(seqlen_q=512, seqlen_kv=1024, causal_bottom_right=True, use_sinks=True)
+    ok, why = supports_attention_dense(spec, arch="gfx950")
+    assert ok, why
+    name = spec.kernel_name()
+    assert "_br" in name and "sinks" in name
+
+
+def test_ragged_bottom_right_composes_with_sinks():
+    """The arbitrary-length route as well, where the offset lands mid-tile and the
+    sink has to seed a softmax whose last KV tile is partly on-chip padding."""
+    spec = _spec(
+        seqlen_q=300,
+        seqlen_kv=1234,
+        num_query_heads=4,
+        num_kv_heads=1,
+        ragged=True,
+        causal_bottom_right=True,
+        use_sinks=True,
+    )
+    ok, why = supports_attention_dense(spec, arch="gfx950")
+    assert ok, why
+
+
+def test_sinks_and_bottom_right_each_move_the_body_independently():
+    """Guards the composition itself. If either feature were dropped whenever the
+    other is set, two of these four bodies would coincide."""
+    cross = dict(seqlen_q=512, seqlen_kv=1024)
+    bodies = {
+        _ll(_spec(**cross), anonymize=True),
+        _ll(_spec(**cross, use_sinks=True), anonymize=True),
+        _ll(_spec(**cross, causal_bottom_right=True), anonymize=True),
+        _ll(_spec(**cross, causal_bottom_right=True, use_sinks=True), anonymize=True),
+    }
+    assert len(bodies) == 4
+
+
+def test_equal_lengths_collapse_to_top_left_with_sinks():
+    """The Sq == Skv collapse must not quietly depend on the sink being absent."""
+    eq = dict(seqlen_q=2048, seqlen_kv=2048, use_sinks=True)
+    tl = _ll(_spec(**eq), anonymize=True)
+    br = _ll(_spec(**eq, causal_bottom_right=True), anonymize=True)
+    assert tl == br
+
+
+# --------------------------------------------------------------------------- #
 # Dispatch wiring
 # --------------------------------------------------------------------------- #
 def test_dispatch_maps_mask_type_2_to_bottom_right():
@@ -325,6 +382,84 @@ def test_dispatch_produces_ragged_bottom_right_at_arbitrary_lengths(sq, skv):
     assert ok, why
 
 
+def _dense_req(**over):
+    """A dispatch-layer ``attention_dense`` request, bottom-right by default. The
+    candidate is opt-in, so ``algorithm`` has to name it or nothing selects it."""
+    from dispatch.attention.common import AttentionRequest
+
+    kw = dict(
+        arch="gfx950",
+        batch=1,
+        seqlen_q=256,
+        seqlen_k=512,
+        nhead_q=32,
+        nhead_k=8,
+        hdim_q=128,
+        hdim_v=128,
+        dtype="bf16",
+        mask_type=2,
+        algorithm="attention_dense",
+    )
+    kw.update(over)
+    return AttentionRequest(**kw)
+
+
+def test_dispatch_auto_downgrades_the_grid_only_when_the_diagonal_moves():
+    """Under "auto" the caller never chose a grid, so dispatch picks the one that can
+    serve the mask. But that downgrade costs the grid-stride path, so it must apply
+    ONLY where the diagonal actually moves.
+
+    All three requests below carry work = nqb*Hq*B = 32*32 = 1024, well past the
+    256-CTA persistent threshold, so the heuristic wants persistent for every one of
+    them. The earlier dispatch test uses Sq=256, where work is 32 and persistent is
+    off regardless -- it cannot see this behaviour at all.
+    """
+    from dispatch.attention.gfx950 import dense_spec_for_request
+
+    moved = dense_spec_for_request(_dense_req(seqlen_q=8192, seqlen_k=16384))
+    assert moved.causal_bottom_right is True
+    assert moved.persistent is False, "the shifted diagonal is non-persistent only"
+
+    # Same mask_type and same work, but Sq == Skv so the offset is 0 and the mask is
+    # the top-left one. Downgrading here would cap throughput for nothing.
+    flat = dense_spec_for_request(_dense_req(seqlen_q=8192, seqlen_k=8192))
+    assert flat.causal_bottom_right is False
+    assert flat.persistent is True, "equal lengths must keep the grid-stride path"
+    assert "_br" not in flat.kernel_name(), "no second symbol for an identical body"
+
+    # A genuine top-left request of the same size is untouched, as before.
+    tl = dense_spec_for_request(_dense_req(seqlen_q=8192, seqlen_k=8192, mask_type=1))
+    assert tl.persistent is True and tl.causal_bottom_right is False
+
+
+def test_dispatch_declines_explicit_persistent_on_when_the_diagonal_moves():
+    """``dense_persistent="on"`` is a caller instruction rather than a heuristic, so
+    it is not overridden: the spec refuses the combination and the candidate declines,
+    which lets dispatch fall through to another candidate instead of answering with a
+    top-left mask."""
+    from dispatch.attention.gfx950 import _make_gfx950_attention_dense_candidate
+
+    cand = _make_gfx950_attention_dense_candidate()
+    ok, why = cand.admits(
+        _dense_req(seqlen_q=8192, seqlen_k=16384, dense_persistent="on")
+    )
+    assert not ok
+    assert "persistent" in why
+
+
+def test_dispatch_still_serves_explicit_persistent_on_at_equal_lengths():
+    """The capability the Sq != Skv gate restores. Without it, mask_type=2 at equal
+    lengths was declined under "on" -- a request this kernel serves exactly, refused
+    over a diagonal offset of zero."""
+    from dispatch.attention.gfx950 import _make_gfx950_attention_dense_candidate
+
+    cand = _make_gfx950_attention_dense_candidate()
+    ok, why = cand.admits(
+        _dense_req(seqlen_q=8192, seqlen_k=8192, dense_persistent="on")
+    )
+    assert ok, why
+
+
 def test_dispatch_leaves_top_left_alone():
     from dispatch.attention.common import AttentionRequest
     from dispatch.attention.gfx950 import dense_spec_for_request
@@ -387,7 +522,14 @@ def _run_and_reference(spec, *, top_left=False, seed=0):
     k = torch.randn(bsz, skv, hkv, d, device=dev, dtype=torch.bfloat16)
     v = torch.randn(bsz, skv, hkv, d, device=dev, dtype=torch.bfloat16)
     out = torch.empty(bsz, sq, hq, d, device=dev, dtype=torch.bfloat16)
-    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    # One learned logit per QUERY head. The launcher rejects a sinks tensor when the
+    # spec does not ask for one, so this stays None off the sink path.
+    sinks = (
+        torch.randn(hq, device=dev, dtype=torch.bfloat16) if spec.use_sinks else None
+    )
+    run_attention_dense_torch(
+        spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
+    )
 
     rep = hq // hkv
     qh = q.transpose(1, 2).float()
@@ -401,28 +543,47 @@ def _run_and_reference(spec, *, top_left=False, seed=0):
         qi = torch.arange(sq, device=dev).view(-1, 1)
         ki = torch.arange(skv, device=dev).view(1, -1)
         mask = ki <= qi + (skv - sq)
-    ref = torch.nn.functional.scaled_dot_product_attention(
-        qh, kh, vh, attn_mask=mask, scale=scale
-    ).transpose(1, 2)
+    if sinks is None:
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            qh, kh, vh, attn_mask=mask, scale=scale
+        ).transpose(1, 2)
+    else:
+        # SDPA has no notion of a sink, so the softmax is built by hand: the sink is
+        # one extra column carrying a constant per-head logit and a zero value vector,
+        # so it lands in the denominator and then drops straight back out. Masked
+        # positions go to -inf, and the sink column is what keeps a fully-masked row
+        # from becoming 0/0 -- which is the same job it does in the kernel.
+        attn = torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale
+        attn = attn.masked_fill(~mask.view(1, 1, sq, skv), float("-inf"))
+        sink_col = sinks.float().view(1, hq, 1, 1).expand(bsz, hq, sq, 1)
+        p = torch.softmax(torch.cat([attn, sink_col], dim=-1), dim=-1)[..., :-1]
+        ref = torch.einsum("bhqk,bhkd->bhqd", p, vh).transpose(1, 2)
     return out, ref
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not _gpu_ready(), reason="needs a gfx950 GPU")
 @pytest.mark.parametrize(
-    "sq, skv",
+    "sq, skv, batch",
     [
         # Arbitrary lengths, which is what a real chunked-prefill request looks like:
         # neither a multiple of the 256 query tile nor of block_n, and an offset that
         # lands mid-tile. Reaching these at all depends on the KV-tile bound being a
         # ceil; getting them RIGHT depends on the partial last tile still being masked.
-        (197, 400),
-        (300, 1234),
-        (512, 4097),
-        (100, 8000),
+        (197, 400, 1),
+        (300, 1234, 1),
+        (512, 4097, 1),
+        (100, 8000, 1),
+        # batch > 1 is a materially different case, not just a bigger one. The ragged
+        # buffer resources bound the WHOLE tensor rather than one batch element, so a
+        # padded query row in batch 0 reads batch 1's real tokens instead of zero.
+        # Correctness then rests entirely on the qtok < Sq store predicate, and this
+        # is the shape that proves it -- Sq and Skv both non-multiples, so batch 0 has
+        # padded query rows with a live neighbour behind them.
+        (300, 1000, 2),
     ],
 )
-def test_ragged_bottom_right_matches_shifted_mask_oracle(sq, skv):
+def test_ragged_bottom_right_matches_shifted_mask_oracle(sq, skv, batch):
     """Bottom-right on the ragged path, where the lengths are arbitrary.
 
     The interesting risk here is the partial last KV tile. Ragged visits it (the tile
@@ -432,6 +593,7 @@ def test_ragged_bottom_right_matches_shifted_mask_oracle(sq, skv):
     the last real query reaches key seqlen_kv-1 exactly, and no further.
     """
     spec = _spec(
+        batch=batch,
         seqlen_q=sq,
         seqlen_kv=skv,
         num_query_heads=4,
@@ -452,12 +614,47 @@ def test_bottom_right_matches_shifted_mask_oracle(sq, skv):
     ``is_causal=True`` is deliberately NOT used as the oracle: it is top-left, so it
     would disagree here -- which is exactly the bug this guards.
     """
-    import torch
-
     spec = _spec(seqlen_q=sq, seqlen_kv=skv, causal_bottom_right=True)
     out, ref = _run_and_reference(spec)
     assert (out.float() - ref).abs().max().item() < 2e-2
 
     # And it must NOT match the top-left oracle, or the offset is not doing anything.
+    _, ref_tl = _run_and_reference(spec, top_left=True)
+    assert (out.float() - ref_tl).abs().max().item() > 1e-3
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not _gpu_ready(), reason="needs a gfx950 GPU")
+@pytest.mark.parametrize(
+    "sq, skv, ragged",
+    [
+        # Aligned: the offset is a whole number of KV tiles.
+        (512, 1024, False),
+        # Arbitrary: the offset lands mid-tile and the last KV tile is part padding,
+        # so the sink seeds a softmax over a partially-padded key range.
+        (300, 1234, True),
+    ],
+)
+def test_bottom_right_with_sinks_matches_shifted_mask_oracle(sq, skv, ragged):
+    """The two features share a softmax, so numbers are the only proof that composing
+    them is right: the sink seeds m/l before the KV loop and the shifted diagonal
+    decides which keys that loop admits.
+
+    The oracle puts the sink in the denominator as a zero-value column, so a kernel
+    that dropped the sink, or applied the shift only to the non-sink part, disagrees.
+    """
+    spec = _spec(
+        seqlen_q=sq,
+        seqlen_kv=skv,
+        num_query_heads=4,
+        num_kv_heads=1,
+        ragged=ragged,
+        causal_bottom_right=True,
+        use_sinks=True,
+    )
+    out, ref = _run_and_reference(spec)
+    assert (out.float() - ref).abs().max().item() < 2e-2
+
+    # Still a bottom-right mask, not a top-left one wearing a sink.
     _, ref_tl = _run_and_reference(spec, top_left=True)
     assert (out.float() - ref_tl).abs().max().item() > 1e-3

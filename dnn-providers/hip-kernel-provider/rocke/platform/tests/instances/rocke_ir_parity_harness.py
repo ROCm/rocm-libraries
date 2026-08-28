@@ -1901,11 +1901,14 @@ def cases():
         ("fp16_h64_sq512", {"dtype": "fp16", "head_size": 64}),
         ("bn128_sq512", {"block_n": 128}),
         ("noncausal_sq512", {"causal": False}),
-        # --- bottom-right diagonal. Two cases, because the offset reaches the codegen
-        # by different routes: tile-aligned lengths fold it to the same constant the
-        # top-left path uses, while ragged lengths make it arbitrary and put the
-        # KV-tile ceil to work. Without both, a regression in either could land
-        # without moving a hash.
+        # --- bottom-right diagonal. Three cases, because the offset reaches the
+        # codegen by different routes: tile-aligned lengths fold it to the same
+        # constant the top-left path uses, while ragged lengths make it arbitrary and
+        # put the KV-tile ceil to work. Without both, a regression in either could
+        # land without moving a hash. The third pins the sink interaction: the sink
+        # seeds m/l before the KV loop and the shifted diagonal changes which keys
+        # that loop admits, so the two features touch the same softmax and a
+        # regression in their composition would otherwise be invisible here.
         (
             "bottom_right_sq512",
             {"seqlen_kv": 1024, "causal_bottom_right": True},
@@ -1918,6 +1921,10 @@ def cases():
                 "ragged": True,
                 "causal_bottom_right": True,
             },
+        ),
+        (
+            "bottom_right_sinks_sq512",
+            {"seqlen_kv": 1024, "causal_bottom_right": True, "use_sinks": True},
         ),
         # --- persistent (grid-stride) grid + decode variants ---
         ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
