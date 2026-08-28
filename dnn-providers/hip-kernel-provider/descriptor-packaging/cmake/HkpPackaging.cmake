@@ -337,8 +337,7 @@ endfunction()
 #   packaged artifacts. Without that edge the kpacks would keep shipping kernels
 #   compiled from stale wheel contents.
 #
-#   Empty ARCHES wires nothing and warns either way, never fatally; the body says
-#   why each root gets its own wording.
+#   Empty ARCHES wires nothing and warns either way, never fatally.
 # ---------------------------------------------------------------------------
 function(hkp_wire_root)
     set(_one NAME GROUP SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR
@@ -350,8 +349,7 @@ function(hkp_wire_root)
         # Every root speaks. The wording differs because the consequences do: a
         # release installs an empty descriptor tree, while a fixture root leaves
         # hkp_descriptor_staging undefined and every test that loads it skipping.
-        # Both are silent-empty-package failures, and a lane that packs nothing
-        # is indistinguishable from a lane that works unless the root says so.
+        # Both are silent-empty-package failures.
         #
         # Warning, never FATAL_ERROR: GPU_TARGETS values that hkp_selected_arches
         # drops are reachable in normal use, and a fatal here would turn a lane
@@ -726,13 +724,11 @@ endfunction()
 #   tried for hipcc before hipcc.bin.exe is tried anywhere, so the fallback wins
 #   only when no real driver exists anywhere on the path. NAMES_PER_DIR would
 #   demote this list to a tiebreak within one directory and let an early
-#   hipcc.bin.exe beat a later hipcc, which is the outcome the list exists to
-#   prevent.
+#   hipcc.bin.exe beat a later hipcc.
 #
-#   HIP_HIPCC_EXECUTABLE, when a toolchain has already resolved one, names the
-#   directory to consult first. A hint and not a replacement: it is consulted
-#   ahead of the default paths but does not stop the search, so a stale value
-#   narrows nothing.
+#   HIP_HIPCC_EXECUTABLE, when a toolchain has already resolved one, contributes its
+#   directory as a hint -- consulted first, but it does not stop the search, so a stale
+#   value narrows nothing.
 # ---------------------------------------------------------------------------
 function(hkp_find_hipcc)
     if(DEFINED HIP_HIPCC_EXECUTABLE)

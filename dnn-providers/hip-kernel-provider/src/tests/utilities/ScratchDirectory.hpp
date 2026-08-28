@@ -22,8 +22,8 @@ namespace hip_kernel_provider::tests
 /// and create_directory is atomic, so testing a name and taking it are one step. Retry
 /// rather than clear: the name may belong to a live process whose fixture would go with it.
 ///
-/// @param label Names the calling suite, so a directory left behind by a crash says which
-///              binary made it.
+/// `label` names the calling suite, so a directory left behind by a crash says which binary
+/// made it.
 [[nodiscard]] inline hipdnn_test_sdk::utilities::ScopedDirectory
     claimScratchDirectory(const std::string& label)
 {

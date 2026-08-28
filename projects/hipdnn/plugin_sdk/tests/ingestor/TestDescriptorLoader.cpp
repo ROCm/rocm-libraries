@@ -2427,10 +2427,10 @@ void expectSha256Rejected(const std::string& digest, const std::string& scratchL
 
 } // namespace
 
-/// A digest one character short is what a truncated copy-paste produces, and it is the case
-/// a plain non-empty check cannot see.
 TEST(TestDescriptorLoader, RejectsASha256ThatIsTooShort)
 {
+    // One character short is what a truncated copy-paste produces, and it is the case a plain
+    // non-empty check cannot see.
     expectSha256Rejected(std::string(63, 'a'), "sha256_short");
 }
 
@@ -2439,24 +2439,22 @@ TEST(TestDescriptorLoader, RejectsASha256ThatIsTooLong)
     expectSha256Rejected(std::string(65, 'a'), "sha256_long");
 }
 
-/// Uppercase is a real digest of the right length from a tool that spells hex the other way.
-/// Rejected rather than folded, because the packer emits `hexdigest()` and nothing else, and
-/// two spellings of one digest would compare unequal wherever the field is compared as text.
 TEST(TestDescriptorLoader, RejectsASha256WithUppercaseHex)
 {
+    // Rejected rather than folded: the packer emits `hexdigest()` and nothing else, and two
+    // spellings of one digest compare unequal wherever the field is compared as text.
     expectSha256Rejected(std::string(64, 'A'), "sha256_upper");
 }
 
-/// Right length, wrong alphabet -- a placeholder or a digest from a different encoding.
 TEST(TestDescriptorLoader, RejectsASha256WithANonHexCharacter)
 {
     expectSha256Rejected(std::string(63, 'a') + "z", "sha256_nonhex");
 }
 
-/// requireString already refuses an empty value, so this pins which of the two rules speaks.
-/// It is here because the length rule must own the case even if requireString ever softens.
 TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
 {
+    // requireString already refuses an empty value; the length rule must own the case anyway,
+    // in case requireString ever softens.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_empty"));
@@ -2467,11 +2465,10 @@ TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
         << recorder.getRecordedLogsAsString();
 }
 
-/// The positive half: the shape check must not reject what the packer actually emits. Pinned
-/// as a real hexdigest rather than 64 repeated characters so the case would still hold if the
-/// rule were ever tightened past "64 of [0-9a-f]".
 TEST(TestDescriptorLoader, AcceptsAConformingSha256)
 {
+    // A real hexdigest rather than 64 repeated characters, so the case still holds if the rule
+    // is ever tightened past "64 of [0-9a-f]".
     const std::string digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_ok"));
     writePackagedKernelWithSha256(dir.path(), digest);

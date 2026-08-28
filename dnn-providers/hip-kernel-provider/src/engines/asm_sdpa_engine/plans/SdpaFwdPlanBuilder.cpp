@@ -95,10 +95,9 @@ static std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::D
 
 static bool isMi308Device(hipStream_t stream)
 {
-    // Seeded to -1, not left indeterminate: some HIP runtimes return hipSuccess from
+    // Seeded, not left indeterminate: some HIP runtimes return hipSuccess from
     // hipStreamGetDevice without writing the out-parameter, so the status alone does not mean
-    // an ordinal was produced. Reading it unseeded is undefined behaviour, and the value then
-    // reaches hipDeviceGetAttribute below as a device index.
+    // an ordinal was produced.
     int deviceId = -1;
     auto status = hipStreamGetDevice(stream, &deviceId);
     if(status != hipSuccess || deviceId < 0)

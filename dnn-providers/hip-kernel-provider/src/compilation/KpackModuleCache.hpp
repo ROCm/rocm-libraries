@@ -64,10 +64,6 @@ using CachedKpackModule = std::shared_ptr<const KpackModule>;
 /// Why not rocm-kpack's own cache: kpack_cache_* caches the decompressed code-object
 /// *blob*, not the loaded hipModule_t, so it would still leave a hipModuleLoadData on
 /// every dispatch. Building on compilation::ModuleCache also matches SdpaModuleCache.
-///
-/// The device ordinal is both a key component and a binding -- keying alone separates the
-/// entries without placing them. load() makes it current across the load (see ScopedDevice)
-/// and KpackModule carries it for the unload.
 class KpackModuleCache : public ModuleCache<KpackModuleCache,
                                             CachedKpackModule,
                                             const std::string& /*archivePath*/,

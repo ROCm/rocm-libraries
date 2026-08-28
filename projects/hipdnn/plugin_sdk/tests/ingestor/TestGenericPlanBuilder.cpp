@@ -1276,12 +1276,6 @@ TEST(TestIngestorGenericPlanBuilder, NamesEveryCandidateReasonWhenNothingCanBeBu
     }
 }
 
-/// The benchmarking half of RethrowsAMalformedDescriptorInsteadOfServingTheNextKernel.
-///
-/// Same handler, same kernels, only the benchmarking knob differs -- which is the point:
-/// whether a malformed descriptor is reported or absorbed must not be a consequence of a
-/// tuning setting. Nothing is sampled, so the builder needs no timer: the throw happens
-/// while candidates are still being constructed.
 TEST(TestIngestorGenericPlanBuilder, RethrowsAMalformedDescriptorWhileBenchmarking)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1297,6 +1291,8 @@ TEST(TestIngestorGenericPlanBuilder, RethrowsAMalformedDescriptorWhileBenchmarki
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig
         = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    // The only difference from RethrowsAMalformedDescriptorInsteadOfServingTheNextKernel:
+    // whether a malformed descriptor is reported or absorbed must not follow a tuning setting.
     const TestGraph graph(makeGraphId(0xB9));
 
     KnobFilterSettings settings;
@@ -1321,10 +1317,6 @@ TEST(TestIngestorGenericPlanBuilder, RethrowsAMalformedDescriptorWhileBenchmarki
     }
 }
 
-/// The benchmarking half of NamesEveryCandidateReasonWhenNothingCanBeBuilt.
-///
-/// Pins that the thrown message carries every dropped candidate's reason -- the per-kernel
-/// WARN lines that also carry them are hidden at the default log level.
 TEST(TestIngestorGenericPlanBuilder, NamesEveryCandidateReasonWhenBenchmarkingBuildsNothing)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1340,6 +1332,7 @@ TEST(TestIngestorGenericPlanBuilder, NamesEveryCandidateReasonWhenBenchmarkingBu
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig
         = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    // The benchmarking half of NamesEveryCandidateReasonWhenNothingCanBeBuilt.
     const TestGraph graph(makeGraphId(0xBA));
 
     KnobFilterSettings settings;

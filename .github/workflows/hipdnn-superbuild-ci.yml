@@ -183,13 +183,10 @@ jobs:
 
       # Packing is skipped with a STATUS message, so a resolution regression
       # would otherwise pass CI while producing no archives.
-      # Both producers, asserted separately. The staged tree proves the whole ingestor chain
-      # -- pack, then stage under the root the descriptor loader walks. The ASM SDPA engine
-      # writes to its own build-tree .kpack directory and never appears under arch_content,
-      # so a single glob over either one leaves the other unobserved.
-      # The build/*/ segment is the stage root, which differs per platform: hip-kernel-provider
-      # sets HIPDNN_PLUGIN_ENGINE_ROOTDIR to bin on Windows and lib elsewhere. A portable glob is
-      # what lets both jobs keep this step textually identical.
+      # Both producers, asserted separately: the ASM SDPA engine writes to its own build-tree
+      # .kpack directory and never appears under arch_content, so one glob leaves the other
+      # unobserved. The build/*/ segment is the stage root -- hip-kernel-provider sets
+      # HIPDNN_PLUGIN_ENGINE_ROOTDIR to bin on Windows and lib elsewhere.
       - name: Verify kpack archives were produced
         shell: bash
         run: |
@@ -390,7 +387,7 @@ jobs:
       # artifact, while GPU_TARGETS is a codegen arch list that reaches hipcc as
       # --offload-arch and has to name a concrete gfx. Consumers reject the alias rather
       # than expanding it -- hkp packs nothing for it and warns, hipBLASLt validates
-      # against a fixed arch list -- so the alias produced no arch-specific output.
+      # against a fixed arch list -- so the alias yields no arch-specific output.
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
@@ -421,13 +418,10 @@ jobs:
 
       # Packing is skipped with a STATUS message, so a resolution regression
       # would otherwise pass CI while producing no archives.
-      # Both producers, asserted separately. The staged tree proves the whole ingestor chain
-      # -- pack, then stage under the root the descriptor loader walks. The ASM SDPA engine
-      # writes to its own build-tree .kpack directory and never appears under arch_content,
-      # so a single glob over either one leaves the other unobserved.
-      # The build/*/ segment is the stage root, which differs per platform: hip-kernel-provider
-      # sets HIPDNN_PLUGIN_ENGINE_ROOTDIR to bin on Windows and lib elsewhere. A portable glob is
-      # what lets both jobs keep this step textually identical.
+      # Both producers, asserted separately: the ASM SDPA engine writes to its own build-tree
+      # .kpack directory and never appears under arch_content, so one glob leaves the other
+      # unobserved. The build/*/ segment is the stage root -- hip-kernel-provider sets
+      # HIPDNN_PLUGIN_ENGINE_ROOTDIR to bin on Windows and lib elsewhere.
       - name: Verify kpack archives were produced
         run: |
           set -euo pipefail

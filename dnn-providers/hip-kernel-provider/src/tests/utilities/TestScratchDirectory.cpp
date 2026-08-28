@@ -55,10 +55,6 @@ private:
     ScopedEnvironmentVariableSetter _tempdir;
 };
 
-/// The counter only moves forward, so re-creating a name a claim already returned would
-/// never collide: the name to squat on has to be computed from it. The sentinel is what
-/// separates retry from clear -- a helper that cleared the taken name would pass every
-/// other assertion here.
 TEST(TestScratchDirectory, WalksPastANameSomethingElseAlreadyHoldsAndLeavesItIntact)
 {
     const ScopedDirectory first = claimScratchDirectory(SCRATCH_LABEL);
@@ -71,6 +67,8 @@ TEST(TestScratchDirectory, WalksPastANameSomethingElseAlreadyHoldsAndLeavesItInt
         = first.path().parent_path()
           / (name.substr(0, separator + 1) + std::to_string(firstCounter + 1));
     ASSERT_TRUE(std::filesystem::create_directory(squatted));
+    // Separates retry from clear: a helper that cleared the taken name would pass every other
+    // assertion here.
     const std::filesystem::path sentinel = squatted / "held-by-someone-else";
     std::ofstream{sentinel} << "occupied";
     ASSERT_TRUE(std::filesystem::exists(sentinel));
@@ -85,9 +83,8 @@ TEST(TestScratchDirectory, WalksPastANameSomethingElseAlreadyHoldsAndLeavesItInt
     std::filesystem::remove_all(squatted);
 }
 
-/// WalksPastANameSomethingElseAlreadyHoldsAndLeavesItIntact computes the next name by
-/// taking the trailing counter apart, so it only proves anything for as long as the names
-/// keep that shape.
+// WalksPastANameSomethingElseAlreadyHoldsAndLeavesItIntact takes the trailing counter apart,
+// so it only proves anything while the names keep this shape.
 TEST(TestScratchDirectory, NamesTheDirectoryAfterItsLabelAndACounter)
 {
     const ScopedDirectory claimed = claimScratchDirectory(SCRATCH_LABEL);
@@ -100,14 +97,13 @@ TEST(TestScratchDirectory, NamesTheDirectoryAfterItsLabelAndACounter)
     EXPECT_TRUE(std::filesystem::is_directory(claimed.path()));
 }
 
-/// A handler with the two catches ordered the other way round compiles, passes the two cases
-/// above, and reports a missing temp directory as a shortage of free names.
 TEST(TestScratchDirectory, ReportsAnUnusableTempDirectoryRatherThanNameExhaustion)
 {
     const ScopedDirectory real = claimScratchDirectory(SCRATCH_LABEL);
     const std::filesystem::path absent = real.path() / "no-such-directory";
     ASSERT_FALSE(std::filesystem::exists(absent));
 
+    // With the two catches ordered the other way round, this reports as name exhaustion.
     const ScopedTempDirOverride override(absent.string());
     EXPECT_THROW((void)claimScratchDirectory(SCRATCH_LABEL), std::filesystem::filesystem_error);
 }

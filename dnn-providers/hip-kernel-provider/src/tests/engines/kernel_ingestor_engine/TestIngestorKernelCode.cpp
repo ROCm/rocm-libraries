@@ -90,8 +90,7 @@ class GuardHarness
 {
 public:
     /// KernelCompileOptions has no default constructor and reads its tensor argument
-    /// eagerly, so it is built from the fixture's graph rather than stubbed. The KPACK path
-    /// never consults it, but the parameter is by reference.
+    /// eagerly, so it is built from the fixture's graph rather than stubbed.
     GuardHarness()
         : _options(&firstTensorOf(_fixture), _fixture.deviceProperties().gcnArchName)
     {
@@ -128,12 +127,9 @@ private:
 constexpr const char* OUTSIDE_THE_TREE = "outside the descriptor tree";
 
 // ---------------------------------------------------------------------------
-// Path confinement -- the guard is called, not reproduced
+// Path confinement
 // ---------------------------------------------------------------------------
 
-/// The escape the guard exists to stop. Both halves of the message are asserted: the
-/// resolved path says what was asked for and the boundary says what it was measured
-/// against, and a reader needs the pair to tell a bad descriptor from a bad tree root.
 TEST(TestIngestorKernelCode, RejectsALibraryThatEscapesTheDescriptorTree)
 {
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
@@ -151,6 +147,8 @@ TEST(TestIngestorKernelCode, RejectsALibraryThatEscapesTheDescriptorTree)
     catch(const HipdnnPluginException& error)
     {
         EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        // Both halves: the resolved path says what was asked for, the boundary says what it
+        // was measured against, and a reader needs the pair to place the fault.
         const std::string what = error.what();
         EXPECT_NE(what.find(OUTSIDE_THE_TREE), std::string::npos) << what;
         EXPECT_NE(what.find("x.kpack"), std::string::npos) << what;
@@ -158,9 +156,6 @@ TEST(TestIngestorKernelCode, RejectsALibraryThatEscapesTheDescriptorTree)
     }
 }
 
-/// `..` is not the only way out. An absolute path bypasses originDirectory entirely, and
-/// weakly_canonical normalises it rather than rejecting it, so without the guard any
-/// readable file on the machine could be handed to the loader as executable code.
 TEST(TestIngestorKernelCode, RejectsAnAbsoluteLibraryOutsideTheTree)
 {
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
@@ -170,6 +165,8 @@ TEST(TestIngestorKernelCode, RejectsAnAbsoluteLibraryOutsideTheTree)
     ASSERT_TRUE(std::filesystem::create_directory(elsewhere));
 
     GuardHarness harness;
+    // An absolute path bypasses originDirectory entirely, and weakly_canonical normalises it
+    // rather than rejecting it.
     const auto kernel = makeKpackKernel(tree, tree, (elsewhere / "x.kpack").generic_string());
 
     try
@@ -185,12 +182,6 @@ TEST(TestIngestorKernelCode, RejectsAnAbsoluteLibraryOutsideTheTree)
     }
 }
 
-/// The over-rejection case. Packing preserves the authored subpath, so a descriptor sits
-/// in a child folder while the archive sits at the shard root above it, and a boundary at
-/// originDirectory would reject exactly that while flat fixture trees stayed green.
-///
-/// Asserts on which failure arrives, not that none does: the archive is absent, so the
-/// call fails at archive-open. What must not happen is failing at the guard.
 TEST(TestIngestorKernelCode, AcceptsALibraryThatClimbsOutOfItsOwnDirectoryButStaysInTheTree)
 {
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
@@ -200,6 +191,8 @@ TEST(TestIngestorKernelCode, AcceptsALibraryThatClimbsOutOfItsOwnDirectoryButSta
     ASSERT_TRUE(std::filesystem::create_directory(nested));
 
     GuardHarness harness;
+    // Packing preserves the authored subpath, so a boundary at originDirectory rather than
+    // the tree root would reject this while flat fixture trees stayed green.
     const auto kernel = makeKpackKernel(nested, tree, "../absent.kpack");
 
     try
@@ -216,9 +209,6 @@ TEST(TestIngestorKernelCode, AcceptsALibraryThatClimbsOutOfItsOwnDirectoryButSta
     }
 }
 
-/// A string-prefix containment test would read `/base-evil` as inside `/base`.
-/// lexically_relative walks components instead, which is why the guard is written on it;
-/// this case is what would notice if it were ever rewritten as a prefix compare.
 TEST(TestIngestorKernelCode, DoesNotConfuseASiblingPrefixWithTheTree)
 {
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
@@ -228,6 +218,8 @@ TEST(TestIngestorKernelCode, DoesNotConfuseASiblingPrefixWithTheTree)
     ASSERT_TRUE(std::filesystem::create_directory(sibling));
 
     GuardHarness harness;
+    // A string-prefix containment test would read `/base-evil` as inside `/base`;
+    // lexically_relative walks components instead.
     const auto kernel = makeKpackKernel(tree, tree, "../base-evil/x.kpack");
 
     try
@@ -247,10 +239,8 @@ TEST(TestIngestorKernelCode, DoesNotConfuseASiblingPrefixWithTheTree)
 // Link substitution -- a symlink or junction inside the tree
 // ---------------------------------------------------------------------------
 
-/// Creates a real directory symlink at `link` pointing at `target`, and reports whether the
-/// platform let it. One mechanism everywhere: Windows needs Developer Mode or
-/// SeCreateSymbolicLinkPrivilege, and without either the case skips rather than silently
-/// falling back to a junction.
+/// One mechanism everywhere: Windows needs Developer Mode or SeCreateSymbolicLinkPrivilege,
+/// and without either the case skips rather than silently falling back to a junction.
 bool createDirectoryLink(const std::filesystem::path& link,
                          const std::filesystem::path& target,
                          std::string& failure)
@@ -275,12 +265,6 @@ bool createDirectoryLink(const std::filesystem::path& link,
     return true;
 }
 
-/// The substitution the guard mitigates: the descriptor's own directory holds a component that
-/// is a link, so the path the guard measured and the file the loader opens can be
-/// different objects.
-///
-/// Both paths stay inside the tree, so the containment check above passes and this can
-/// only be the symlink walk.
 TEST(TestIngestorKernelCode, RejectsALibraryReachedThroughALinkInsideTheTree)
 {
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
@@ -293,8 +277,8 @@ TEST(TestIngestorKernelCode, RejectsALibraryReachedThroughALinkInsideTheTree)
     std::string failure;
     if(!createDirectoryLink(link, real, failure))
     {
-        GTEST_SKIP() << "could not create a directory link, so I5 has no executed evidence "
-                        "on this machine: "
+        GTEST_SKIP() << "could not create a directory link, so link rejection has no executed "
+                        "evidence on this machine: "
                      << failure;
     }
 
@@ -308,6 +292,8 @@ TEST(TestIngestorKernelCode, RejectsALibraryReachedThroughALinkInsideTheTree)
         << link;
 
     GuardHarness harness;
+    // Both paths stay inside the tree, so the containment check passes and only the symlink
+    // walk can reject this.
     const auto kernel = makeKpackKernel(tree, tree, "link/x.kpack");
 
     try
@@ -325,10 +311,6 @@ TEST(TestIngestorKernelCode, RejectsALibraryReachedThroughALinkInsideTheTree)
 }
 
 #ifdef _WIN32
-/// Why the guard tests the kind rather than asking is_symlink. MSVC gives a junction its own
-/// file_type, so is_symlink answers false, and mklink /J needs no privilege -- the
-/// substitution a Windows caller can actually perform, on the machines where the symlink
-/// case above skips. mklink is a cmd builtin, so this shells out.
 TEST(TestIngestorKernelCode, RejectsALibraryReachedThroughAJunctionInsideTheTree)
 {
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
@@ -338,6 +320,8 @@ TEST(TestIngestorKernelCode, RejectsALibraryReachedThroughAJunctionInsideTheTree
     ASSERT_TRUE(std::filesystem::create_directory(tree));
     ASSERT_TRUE(std::filesystem::create_directory(real));
 
+    // mklink /J needs no privilege, so it is the substitution a Windows caller can actually
+    // perform on the machines where the symlink case skips. It is a cmd builtin, hence system().
     const std::string command
         = "mklink /J \"" + junction.string() + "\" \"" + real.string() + "\" >nul 2>&1";
     if(std::system(command.c_str()) != 0)
@@ -346,6 +330,8 @@ TEST(TestIngestorKernelCode, RejectsALibraryReachedThroughAJunctionInsideTheTree
                         "evidence on this machine";
     }
 
+    // MSVC gives a junction its own file_type, so is_symlink answers false -- which is why the
+    // guard tests the kind rather than asking is_symlink.
     const std::filesystem::file_type kind = std::filesystem::symlink_status(junction).type();
     ASSERT_EQ(kind, std::filesystem::file_type::junction) << junction;
     ASSERT_FALSE(std::filesystem::is_symlink(junction)) << junction;
