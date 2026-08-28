@@ -24,6 +24,7 @@
 ################################################################################
 import pytest
 
+import Tensile.SolutionStructs.LdsPadding as _L
 from Tensile.SolutionStructs.LdsPadding import (
     get_fp4_mt_config,
     get_fp8_mt_config,
@@ -43,9 +44,9 @@ from Tensile.SolutionStructs.LdsPadding import (
     "mt, miWaveTile, miWaveGroup, perBlock, pad, shift",
     [
         ( 32, 1, 2,  512, 16, 0),
-        ( 64, 2, 2, 1024, 16, 4),
+        ( 64, 2, 2, 1024, 16, 0),
         (128, 4, 2,  128, 16, 0),
-        (256, 8, 2,    0,  0, 0),
+        (256, 8, 2,  512, 16, 0),
     ],
 )
 def test_fp4(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
@@ -65,8 +66,8 @@ def test_fp4(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
     [
         ( 32, 1, 2, 256,  8, 0),
         ( 64, 2, 2, 128, 16, 0),
-        (128, 4, 2, 128,  8, 4),
-        (256, 8, 2, 128,  8, 4),
+        (128, 4, 2, 256,  8, 0),
+        (256, 8, 2, 256,  8, 0),
     ],
 )
 def test_fp8(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
@@ -83,10 +84,10 @@ def test_fp8(mt, miWaveTile, miWaveGroup, perBlock, pad, shift):
 @pytest.mark.parametrize(
     "mt, miWaveGroup, miWaveTile, perBlock, pad",
     [
-        ( 16, 1, 1,   0, 0),
-        ( 32, 2, 1,  32, 8),
-        ( 64, 2, 2,  64, 8),
-        (256, 2, 8, 256, 8),
+        ( 16, 1, 1,   0,  0),
+        ( 32, 2, 1, 256, 16),
+        ( 64, 2, 2, 256, 16),
+        (256, 2, 8, 256,  8),
     ],
 )
 def test_fp16(mt, miWaveGroup, miWaveTile, perBlock, pad):
@@ -102,8 +103,8 @@ def test_fp16(mt, miWaveGroup, miWaveTile, perBlock, pad):
 @pytest.mark.parametrize(
     "mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile, perBlock, pad",
     [
-        ( 32, 1, 2, 2, 2, 1,  256, 16),
-        ( 64, 2, 2, 2, 2, 2,  512, 32),
+        ( 32, 1, 2, 2, 2, 1,   64,  4),
+        ( 64, 2, 2, 2, 2, 2,  128,  8),
         (128, 4, 2, 2, 2, 4, 1024,  2),
         (256, 4, 2, 2, 2, 8,  128,  2),
     ],
@@ -126,9 +127,9 @@ def test_fp32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
 @pytest.mark.parametrize(
     "mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile, perBlock, pad",
     [
-        ( 32, 1, 4, 2, 16, 1,  512, 16),
-        ( 64, 2, 4, 2, 16, 2, 1024, 32),
-        (128, 2, 4, 2, 16, 4, 1024, 16),
+        ( 32, 1, 4, 2, 16, 1,   64,  2),
+        ( 64, 2, 4, 2, 16, 2,  128,  4),
+        (128, 2, 4, 2, 16, 4,  128,  2),
     ],
 )
 def test_xf32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
@@ -155,6 +156,12 @@ def test_xf32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
 def test_mxs(mxBlock, vw, perBlock, pad):
     assert get_mxs_mt_config(128, mxBlock, vw, "perBlock") == perBlock
     assert get_mxs_mt_config(128, mxBlock, vw, "pad")      == pad
+
+
+@pytest.mark.parametrize("matrixInstK", [0, -1, -64])
+def test_mxs_rejects_non_positive_matrix_inst_k(matrixInstK):
+    assert get_mxs_mt_config(matrixInstK, 32, 8, "perBlock") == 0
+    assert get_mxs_mt_config(matrixInstK, 32, 8, "pad")      == 0
 
 
 # Every public entry point must return a pad whose byte size is an even number
@@ -218,3 +225,138 @@ def test_mxs_pad_is_even_dwords():
             for vw in (1, 2, 4, 8):
                 pad = get_mxs_mt_config(matrixInstK, mxBlock, vw, "pad")
                 assert _pad_bytes_x2(pad, 1.0) % 16 == 0, (matrixInstK, mxBlock, vw, pad)
+
+
+def test_max_threads_per_bank_counts_each_bank_a_thread_touches():
+    # Two threads, 2 banks each, starting at byte 0 and byte 4: banks
+    # {0,1} and {1,2}. Bank 1 carries two threads.
+    assert _L._max_threads_per_bank([0, 4], 2) == 2
+    # Same two threads 8 bytes apart: banks {0,1} and {2,3}, no sharing.
+    assert _L._max_threads_per_bank([0, 8], 2) == 1
+
+
+def test_b64_wave_costs_doubles_when_not_8_byte_aligned():
+    # 32 threads, 8 bytes apart, no padding: each thread owns 2 banks and all
+    # 64 bank slots are distinct, so one batch costs 1. At shift 4 the same
+    # addresses are 4-byte aligned, the hardware takes two batches of 16, and
+    # each batch is still distinct, so the cost is 2.
+    half0 = [8 * i for i in range(16)]
+    half1 = [128 + 8 * i for i in range(16)]
+    assert _L._b64_wave_costs(half0, half1, 0, 0, (0,), (0,), 0) == [1]
+    assert _L._b64_wave_costs(half0, half1, 0, 0, (0,), (0,), 4) == [2]
+
+
+def test_b64_wave_costs_rejects_addresses_below_dword_alignment():
+    half0 = [1] * 16
+    half1 = [1] * 16
+    assert _L._b64_wave_costs(half0, half1, 256, 8, (0,), (0,), 0) is None
+
+
+def test_b64_config_is_legal_over_the_reachable_shapes():
+    for wg in _WAVE_GROUPS:
+        for wt in _WAVE_TILES:
+            mt = 16 * wt * wg
+            for getter, bpeDS in ((get_fp8_mt_config, 1.0), (get_fp4_mt_config, 0.5)):
+                perBlock = getter(mt, "perBlock", wt, wg)
+                pad = getter(mt, "pad", wt, wg)
+                shift = getter(mt, "shift", wt, wg)
+                assert shift in (0, 4), (mt, wt, wg, shift)
+                if perBlock == 0:
+                    assert pad == 0, (mt, wt, wg, pad)
+                    assert shift == 0, (mt, wt, wg, shift)
+                    continue
+                assert perBlock in _L._TDM_VALID_BLOCK_BYTES, (mt, wt, wg, perBlock)
+                padBytes = int(round(pad * bpeDS))
+                assert padBytes % 8 == 0, (mt, wt, wg, padBytes)
+                assert 0 < padBytes <= _L._TDM_MAX_PAD_BYTES, (mt, wt, wg, padBytes)
+
+
+def test_b128_wave_costs_pads_the_instruction_offset_on_its_own():
+    # Instruction offset 16 is not a multiple of the block size, so padding it
+    # on its own is not the same as padding it together with the base address.
+    # Padded on its own it is added as a constant and every bank stays
+    # distinct, giving cost 1. Folded into the base it would push two threads
+    # onto one bank, giving cost 2, so this value pins the address expression.
+    half = _L._b128_base_addrs_fp16(16)
+    assert _L._b128_wave_costs(half, 256, 16, (0,), (16,)) == [1]
+
+
+def test_b128_wave_costs_rejects_addresses_below_16_byte_alignment():
+    half = [0, 16, 32, 48, 64, 80, 96, 112]
+    # P = 8 breaks 16-byte alignment for every address past the first block.
+    assert _L._b128_wave_costs(half, 16, 8, (0,), (0,)) is None
+
+
+def test_fp16_config_is_legal_over_the_reachable_shapes():
+    for wg in _WAVE_GROUPS:
+        for wt in _WAVE_TILES:
+            mt = 16 * wt * wg
+            for mipt, lrvw in ((16, 8), (16, 16), (32, 8)):
+                perBlock = get_fp16_mt_config(mt, "perBlock", wg, mipt, lrvw, wt, 1)
+                pad = get_fp16_mt_config(mt, "pad", wg, mipt, lrvw, wt, 1)
+                if perBlock == 0:
+                    assert pad == 0, (mt, wt, wg, pad)
+                    continue
+                assert perBlock in _L._TDM_VALID_BLOCK_BYTES, (mt, wt, wg, perBlock)
+                padBytes = pad * 2
+                assert padBytes % 8 == 0, (mt, wt, wg, padBytes)
+                assert 0 < padBytes <= _L._TDM_MAX_PAD_BYTES, (mt, wt, wg, padBytes)
+
+
+def test_b64_compute_config_picks_shift_4_when_only_it_is_legal(monkeypatch):
+    # No reachable shape drives shift to 4 today (see
+    # test_b64_config_is_legal_over_the_reachable_shapes), so nothing else
+    # exercises that branch of _b64_compute_config. Force it by rejecting
+    # every candidate except (B=16, P=8, shift=4), so the ranking has to
+    # return that one, keeping the shift plumbing covered.
+    monkeypatch.setattr(
+        _L, "_b64_wave_costs",
+        lambda half0, half1, B, P, instOffs, wOffsets, shift:
+            [1] * len(wOffsets) if (B == 16 and P == 8 and shift == 4) else None)
+    cfg = _L._b64_compute_config(128, 0.5, _L._b64_base_addrs_fp4, 8, (0,), (0,))
+    assert cfg == {"perBlock": 16, "pad": 8, "shift": 4}
+
+
+def test_b32_wave_costs_counts_one_bank_per_thread():
+    # 32 threads, 4 bytes apart, no padding: banks 0..31, all distinct.
+    raw = [4 * i for i in range(32)]
+    assert _L._b32_wave_costs(raw, 0, 0, (0,), (0,)) == [1]
+    # Every thread 256 bytes apart lands on bank 0.
+    raw = [256 * i for i in range(32)]
+    assert _L._b32_wave_costs(raw, 0, 0, (0,), (0,)) == [32]
+
+
+def test_b32_wave_costs_rejects_addresses_below_dword_alignment():
+    assert _L._b32_wave_costs([1] * 32, 0, 0, (0,), (0,)) is None
+
+
+def test_fp32_config_is_legal_over_the_reachable_shapes():
+    for wg in _WAVE_GROUPS:
+        for wt in _WAVE_TILES:
+            mt = 16 * wt * wg
+            for vw in (1, 2, 4):
+                if wt % vw:
+                    continue
+                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt)
+                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt)
+                if perBlock == 0:
+                    assert pad == 0, (mt, wt, wg, vw, pad)
+                    continue
+                assert perBlock in _L._TDM_VALID_BLOCK_BYTES, (mt, wt, wg, vw, perBlock)
+                padBytes = pad * 4
+                assert padBytes % 8 == 0, (mt, wt, wg, vw, padBytes)
+                assert 0 < padBytes <= _L._TDM_MAX_PAD_BYTES, (mt, wt, wg, vw, padBytes)
+
+
+def test_pick_best_ranks_cost_over_overhead():
+    # A candidate with lower cost but higher LDS overhead (P / B) must win
+    # over one with higher cost but lower overhead. If the key tuple were
+    # ever reordered so overhead came before cost, this would flip.
+    high_cost_low_overhead = (64, 8)
+    low_cost_high_overhead = (16, 8)
+    candidates = [high_cost_low_overhead, low_cost_high_overhead]
+
+    def costFn(cand):
+        return [5] if cand == high_cost_low_overhead else [1]
+
+    assert _L._pick_best(candidates, costFn) == low_cost_high_overhead
