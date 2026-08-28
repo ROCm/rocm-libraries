@@ -5,6 +5,8 @@
 
 // Product-private hipBLASLt adapter.
 
+#include "datatype_interface.hpp"
+
 #include <complex>
 #include <cstdint>
 #include <cstring>
@@ -125,6 +127,82 @@ namespace hipblaslt::host_numerics
             return ScalarType::E8M0;
         else
             static_assert(!sizeof(Type), "C++ type has no host-numerics scalar mapping.");
+    }
+
+    template <typename T>
+    inline ::roc::host_numerics::Scalar encodedScalar(const T& value)
+    {
+        return ::roc::host_numerics::Scalar::fromStorage(
+            scalarType<T>(), std::as_bytes(std::span<const T>(&value, 1)));
+    }
+
+    inline ::roc::host_numerics::Scalar scalarValue(const computeTypeInterface& value,
+                                                     hipDataType                type)
+    {
+        switch(type)
+        {
+        case HIP_C_32F:
+            return encodedScalar(value.cf);
+        case HIP_C_64F:
+            return encodedScalar(value.cd);
+        case HIP_R_16F:
+            return encodedScalar(value.f16);
+        case HIP_R_32F:
+            return encodedScalar(value.f32);
+        case HIP_R_64F:
+            return encodedScalar(value.f64);
+        case HIP_R_32I:
+            return encodedScalar(value.i32);
+        default:
+            throw std::invalid_argument(
+                "hipBLASLt coefficient type has no host-numerics scalar mapping.");
+        }
+    }
+
+    inline ::roc::host_numerics::Scalar scalarValue(const void* storage, hipDataType type);
+
+    inline ::roc::host_numerics::Scalar realOnlyScalarValue(const void* storage,
+                                                             hipDataType type)
+    {
+        if(storage == nullptr)
+            throw std::invalid_argument("Cannot read a host-numerics scalar from null storage.");
+        if(type == HIP_C_32F)
+        {
+            const auto value = static_cast<const std::complex<float>*>(storage)->real();
+            return encodedScalar(std::complex<float>{value, 0.0f});
+        }
+        if(type == HIP_C_64F)
+        {
+            const auto value = static_cast<const std::complex<double>*>(storage)->real();
+            return encodedScalar(std::complex<double>{value, 0.0});
+        }
+        return scalarValue(storage, type);
+    }
+
+    inline ::roc::host_numerics::Scalar scalarValue(const void* storage, hipDataType type)
+    {
+        if(storage == nullptr)
+            throw std::invalid_argument("Cannot read a host-numerics scalar from null storage.");
+        const ScalarType scalar = scalarType(type);
+        const size_t     bytes  = (scalarTypeInfo(scalar).storageBits + 7U) / 8U;
+        return ::roc::host_numerics::Scalar::fromStorage(
+            scalar, std::span<const std::byte>(static_cast<const std::byte*>(storage), bytes));
+    }
+
+    inline ScalarType referenceAccumulatorType(hipDataType coefficientType)
+    {
+        // Integer hipBLASLt reference GEMM historically uses wide host
+        // arithmetic. F16 coefficients use an F32 host accumulator.
+        if(coefficientType == HIP_R_32I)
+            return ScalarType::Float64;
+        if(coefficientType == HIP_R_16F)
+            return ScalarType::Float32;
+        return scalarType(coefficientType);
+    }
+
+    inline ScalarType referenceComputeType(hipDataType type)
+    {
+        return type == HIP_R_32I ? ScalarType::Float64 : scalarType(type);
     }
 
     // Copies an encoded buffer into Tensor-owned storage. The explicit-byte

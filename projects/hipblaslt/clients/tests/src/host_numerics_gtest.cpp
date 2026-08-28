@@ -1036,6 +1036,67 @@ TEST(HostNumericsCblasBridge, DistinctHalfCAndFloatD)
     EXPECT_FLOAT_EQ(d[3], 2 * 154 + 3 * 2 * static_cast<float>(originalC[4]));
 }
 
+TEST(HostNumericsCblasBridge, ConsumesNormalizedMatmulProblemAndTensorBindings)
+{
+    using namespace roc::host_numerics;
+
+    const Layout matrixLayout = Layout::contiguousLastDimensionFastest(Shape{2, 2});
+    const Layout batchedLayout(Shape{2, 2, 1}, {1, 2, 4});
+    const hipblaslt::client::MatmulMatrix matrix{
+        HIP_R_32F, ScalarType::Float32, batchedLayout, 4};
+    const hipblaslt::client::MatmulProblem problem{
+        .m          = 2,
+        .n          = 2,
+        .k          = 2,
+        .operationA = HIPBLAS_OP_N,
+        .operationB = HIPBLAS_OP_N,
+        .batchMode  = HIPBLASLT_BATCH_MODE_STRIDED,
+        .batchCount = 1,
+        .a          = matrix,
+        .b          = matrix,
+        .c          = matrix,
+        .d          = matrix,
+        .auxiliary  = std::nullopt,
+        .cEqualsD   = false,
+    };
+    const hipblaslt::client::MatmulDataTypes dataTypes{
+        .computeScalar = HIP_R_32F,
+        .computeInputA = HIP_R_32F,
+        .computeInputB = HIP_R_32F,
+        .coefficient   = HIP_R_32F,
+        .bias          = HIP_R_32F,
+        .biasStorage   = HIP_R_32F,
+        .auxiliary     = HIP_R_32F,
+    };
+    hipblaslt::client::PreparedMatmulProblem preparation;
+    preparation.alpha.f32 = 2.0f;
+    preparation.beta.f32  = 3.0f;
+
+    const std::array<float, 4> a{1, 2, 3, 4};
+    const std::array<float, 4> b{5, 6, 7, 8};
+    const std::array<float, 4> c{1, 1, 1, 1};
+    Tensor                     d(ScalarType::Float32, matrixLayout);
+    hipblaslt::host_numerics::MatmulReferenceInputs inputs(
+        Tensor::copyNativeValues<float>(Shape{2, 2}, a),
+        Tensor::copyNativeValues<float>(Shape{2, 2}, b),
+        Tensor::copyNativeValues<float>(Shape{2, 2}, c),
+        d);
+
+    const GemmRunInfo runInfo = hipblaslt::host_numerics::referenceMatmulGemm(
+        problem,
+        dataTypes,
+        preparation,
+        std::move(inputs),
+        hipblaslt_scaling_format::none,
+        hipblaslt_scaling_format::none);
+
+    EXPECT_EQ(runInfo.outputElementsWritten, 4);
+    EXPECT_FLOAT_EQ(d.loadAs<float>({0, 0}), 41.0f);
+    EXPECT_FLOAT_EQ(d.loadAs<float>({0, 1}), 47.0f);
+    EXPECT_FLOAT_EQ(d.loadAs<float>({1, 0}), 89.0f);
+    EXPECT_FLOAT_EQ(d.loadAs<float>({1, 1}), 103.0f);
+}
+
 TEST(HostNumericsCblasBridge, AppliesScaleCInsideSharedGemm)
 {
     const float          a      = 4.0f;
