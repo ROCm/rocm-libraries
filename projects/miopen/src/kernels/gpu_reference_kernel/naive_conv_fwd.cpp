@@ -627,6 +627,7 @@ DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, float, float, float, 1)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, half, float, half, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, hip_bfloat16, float, hip_bfloat16, 0)
 // int8
+DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, int8_t, int32_t, int8_t, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, int8_t, int32_t, int32_t, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, int8_t, int32_t, float, 0)
 
@@ -641,5 +642,6 @@ DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, float, float, float, 1)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, half, float, half, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, hip_bfloat16, float, hip_bfloat16, 0)
 // int8
+DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, int8_t, int32_t, int8_t, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, int8_t, int32_t, int32_t, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, int8_t, int32_t, float, 0)
