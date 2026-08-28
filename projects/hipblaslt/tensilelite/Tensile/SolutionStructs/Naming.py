@@ -238,11 +238,6 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
-  # Only name LDSSegmentInterleave when applied (==1), so the applied kernel is distinct from its
-  # baseline twin without tagging every other kernel. Same idiom as WorkGroupMappingXCC above.
-  if state.get("LDSSegmentInterleave") == 1:
-    requiredParametersTemp.add("LDSSegmentInterleave")
-
   # These values remove or replace generated control-flow paths.
   if state.get("DebugStreamK", 0) != 0:
     requiredParametersTemp.add("DebugStreamK")

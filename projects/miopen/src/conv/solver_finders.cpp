@@ -360,6 +360,12 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                 {
                     // Update the performance config with the collected samples
                     AddInvokerTimes(samples);
+                    // Emit this solver's record now. Relying on the *next* LogSolutionName() to
+                    // flush loses the record of the last solver evaluated in a Find -- which is
+                    // always a Direct-algorithm solver, i.e. ConvDirectNaiveConv*, because the
+                    // Direct finder runs last. Flushing here makes every evaluated solver
+                    // observable in the performance logs.
+                    FlushJsonAccumulator();
                 }
                 // Remove outliers that are more than 2 positive modified z-score's away, and get
                 // the mean.
@@ -461,6 +467,11 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
             "MIOPEN_DEBUG_COMPILE_ONLY is enabled, escaping forward convolution. Search skipped.");
 
     // Evaluate Invokers
+    // Solver selection benchmarking. Without an explicit phase the thread-local default
+    // (KernelPhase::Unknown) is used, so every solver timed here is logged as
+    // "phase":"unknown". EvaluateConvSolutions() already scopes its identical call to
+    // EvaluateInvokers() with SolverTuning; match it so Find timings are attributable.
+    ScopedKernelPhase phase_scope(KernelPhase::SolverTuning);
     AutoEnableProfiling enableProfiling{handle};
     const auto network_config = problem.MakeNetworkConfig();
     auto ret                  = FindCoreResult();
