@@ -3442,6 +3442,41 @@ class LogicalScheduler:
             cursor += size
         return slices
 
+    def _expand_gr_placements(self, placements: List['GRPlacement']) -> List['GRPlacement']:
+        """Expand each A/B GRPlacement into one placement per individual buffer_load.
+
+        A single GRPlacement for tensor A may cover N tileIds × K subIterK steps,
+        causing emit_gr() to emit N×K buffer_load instructions in a flat loop.
+        Clustering at GRPlacement granularity therefore groups entire tensors rather
+        than individual loads.
+
+        This method decomposes each A/B placement into one placement per (tileId, k)
+        pair so that _build_clustered_preloop_ops operates at individual-load granularity.
+        SA/SB placements already emit a single buffer_load each and are passed through
+        unchanged.
+
+        The ordering within each original placement is preserved: tileId outer loop,
+        k inner loop, matching the order emit_gr() uses.
+        """
+        cfg = self.config
+        result = []
+        for pl in placements:
+            if pl.tensor not in ('A', 'B'):
+                result.append(pl)
+                continue
+            gr = cfg.grA if pl.tensor == 'A' else cfg.grB
+            for tileId in range(pl.tiles.tileId_start, pl.tiles.tileId_end, gr.mn):
+                for k in range(pl.tiles.subIterK_start, pl.tiles.subIterK_end, gr.k):
+                    result.append(GRPlacement(
+                        tensor=pl.tensor,
+                        mtIteration=pl.mtIteration,
+                        tiles=MFMATileRange(k, k + gr.k, tileId, tileId + gr.mn),
+                        subIterK_slot=pl.subIterK_slot,
+                        partition=pl.partition,
+                        unrollId=pl.unrollId,
+                    ))
+        return result
+
     def _build_clustered_preloop_ops(
         self,
         gr0_ops: list,
@@ -3771,17 +3806,20 @@ class LogicalScheduler:
                 # always available here.
                 cluster_size = self._kernel.get("PreloopGRClusterSize", -1) if self._kernel else -1
                 if cluster_size > 0:
-                    # Change 2: use _build_clustered_preloop_ops.
+                    # Change 2: use _build_clustered_preloop_ops with per-load atoms.
                     # gr0 = MT0 GR placements; gr1 = MT1 GR placements.
                     # depops for each batch are the SRD-advance / swap ops.
-                    gr0_ops   = self._make_gr_all_tensors(0, all_tiles)
+                    # Expand A/B placements to one-load atoms so cluster_size counts
+                    # individual buffer_load instructions, not per-tensor placements.
+                    gr0_ops   = self._expand_gr_placements(
+                                    self._make_gr_all_tensors(0, all_tiles))
                     gr0_deps  = self._make_depops_all_tensors(GRIncOp)
                     gr1_deps  = []  # MT1 GRs in single-DU have no extra depops
                     ops = self._build_clustered_preloop_ops(
                         gr0_ops=gr0_ops,
                         gr0_depops=gr0_deps,
                         initC_op=initC_op,
-                        gr1_ops=mt1_grs,
+                        gr1_ops=self._expand_gr_placements(mt1_grs),
                         gr1_depops=gr1_deps,
                         cluster_size=cluster_size,
                         lr_tiles=lr_tiles,
