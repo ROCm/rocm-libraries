@@ -81,6 +81,7 @@ additions to the template; everything else follows it.
 - Incident write-ups, headed *How this one was learned*:
   - [Why the net came before the tests](#how-this-one-was-learned-why-the-net-came-before-the-tests)
   - [One number and three months](#how-this-one-was-learned-one-number-and-three-months)
+  - [A naming drift silently dropped a working kernel](#how-this-one-was-learned-a-naming-drift-silently-dropped-a-working-kernel)
 
 **What we test, and how**
 
@@ -353,6 +354,55 @@ It is not a gate and does not run in CI. Accepted equivalent mutants
 and every `# pragma: no mutate` are justified in `DECISIONS.md`. A series of PRs widening the
 mutation-hardened surface starts at
 [PR #10133](https://github.com/ROCm/rocm-libraries/pull/10133); those are still in draft.
+
+#### Logic-corpus consistency regression tests
+
+A third category sits outside the unit/characterization split: regression tests that scan the
+*entire production logic YAML corpus* for cross-file naming and metadata invariants, rather than
+exercising a fixture or pinning current behavior. Two files carry this today:
+[`test_PlaceholderMerge.py`](tensilelite/Tensile/Tests/unit/test_PlaceholderMerge.py) (sibling
+`DeviceNames` consistency, `_ID<chipid>` placeholder-suffix gating) and
+[`test_GpuRevisionTarget.py`](tensilelite/Tensile/Tests/unit/test_GpuRevisionTarget.py) (the
+gfx1250 v0/v1 overlay's logic-tree shape, 4 more tests behind the same gate). In spirit this is
+closer to [`TensileLogic --check-all`](#build-time-validation-of-library-logic) than to a unit
+test: both validate tuning data rather than code. The difference is placement.
+`TensileLogic --check-all` is a mandatory build step that cannot be skipped. These are pytest tests
+gated on whether the raw corpus
+(`library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full`) happens to be present, which it is
+not everywhere these tests run (see
+[Known Bugs and Expected Failures](#known-bugs-and-expected-failures) and
+[CI visibility and gating](#ci-visibility-and-gating)).
+
+#### How this one was learned: a naming drift silently dropped a working kernel
+
+> [!IMPORTANT]
+>
+> **A naming rule that quietly fell out of step with a runtime hardware check made the library
+> throw away a working kernel with no error at all, and gfx942 users found out only when real GEMM
+> calls stopped finding any kernel to run.**
+>
+> <details>
+> <summary>The full account: how a filename drift turned into a missing kernel</summary>
+>
+> In February 2026 ([PR #6946](https://github.com/ROCm/rocm-libraries/pull/6946), ROCM-23637), GEMM
+> calls on gfx942 started failing outright with "no solution found," for problem sizes that had
+> worked before. Nothing crashed and no test caught it in advance.
+>
+> hipBLASLt decides which compiled kernel to run in two places that are supposed to always agree
+> with each other: a runtime check of which GPU chip is actually in front of it, and a naming
+> convention baked into the kernel files when the library is built. A recent change had let those two
+> drift apart for one family of kernels. The runtime check still considered two kernel files
+> identical, but the build now gave them different names. The step that assembles the final library
+> trusted the names over the runtime check, treated the two as unrelated, and quietly kept only one
+> of them. No error, no log line, just a kernel that had existed a moment before and no longer did.
+>
+> The fix closed both ends: it put the naming rule back in step with the runtime check, and it
+> straightened out the affected kernels' metadata so that files describing the same kernel agreed
+> with each other again. It also added `test_PlaceholderMerge.py`, so that a naming/runtime
+> disagreement like this one gets caught immediately instead of surfacing as a mysterious missing
+> kernel later.
+>
+> </details>
 
 #### C++ library and clients (weak, and structurally blocked)
 
@@ -932,9 +982,9 @@ A flaky test is not an accepted final state, and neither is an aging quarantine 
 
 ### Known Bugs and Expected Failures
 
-hipBLASLt suppresses or records known-bad behavior in seven different places. They accumulated
+hipBLASLt suppresses or records known-bad behavior in eight different places. They accumulated
 independently, they use different formats, and they are not governed as one thing. Anyone reasoning
-about "what do we currently know is broken" has to check all seven.
+about "what do we currently know is broken" has to check all eight.
 
 | Mechanism | What it suppresses | Ticket linkage | Detects its own fix? |
 | --- | --- | --- | --- |
@@ -945,6 +995,18 @@ about "what do we currently know is broken" has to check all seven.
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string | **Yes**, when written `strict=True` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
+| `_needs_logic_dir` environment-conditional `pytest.mark.xfail` ([`test_PlaceholderMerge.py`](tensilelite/Tensile/Tests/unit/test_PlaceholderMerge.py), duplicated in [`test_GpuRevisionTarget.py`](tensilelite/Tensile/Tests/unit/test_GpuRevisionTarget.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
+
+This last mechanism is a different shape from the other seven: it is not quarantining a *known* bug
+at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
+quarantine list for a more permanent reason. In TheRock CI's installed-artifact layout, the corpus
+this precondition checks for never exists by design (see
+[CI visibility and gating](#ci-visibility-and-gating)), so the tests behind it (2 in
+`test_PlaceholderMerge.py`, 4 in `test_GpuRevisionTarget.py`) cannot execute for real in that lane,
+ever, independent of whether the underlying data is correct. [PR #7716](https://github.com/ROCm/rocm-libraries/pull/7716)
+narrowed the marker from a module-wide xfail (which was false-XPASSing 3 unrelated tests) to just
+the 2 tests that need the corpus; it fixed the XPASS problem it was solving but left this shape
+intact.
 
 **The distinction that matters is the last column.** Format is cosmetic; what separates a healthy
 suppression from rot is whether the mechanism can tell you the underlying bug got fixed. That sorts
@@ -1454,6 +1516,20 @@ Ordered by value per unit of effort, not by ambition.
    minimum add a test that asserts they agree. They can drift today, and a drift produces confusing
    test-selection behavior rather than an obvious failure.
 4. **Extract validation ahead of dispatch** so argument-error paths are reachable without a GPU.
+5. **Fold the data-consistency checks in `test_PlaceholderMerge.py` and `test_GpuRevisionTarget.py`
+   into `TensileLogic --check-all`.** Two tests in the former (sibling-`DeviceNames` consistency, the
+   chip-ID-aware-arch lock) and all four in the latter validate the same class of thing that checker
+   already owns: logic YAML data, no code, no GPU. Today they only run inside the pytest suite,
+   gated on the raw corpus being on disk (`_needs_logic_dir`), which is permanently false in
+   TheRock CI's installed-artifact layout and conditionally skipped in Math CI on YAML-only diffs
+   (see [CI visibility and gating](#ci-visibility-and-gating)). `TensileLogic --check-all` runs
+   unconditionally wherever kernels are generated, so moving these checks there closes both gaps at
+   once. The other three tests in `test_PlaceholderMerge.py`, an AST scan of `SolutionLibrary.py`
+   plus two function-level unit tests, validate code rather than data and should stay pytest tests.
+   This needs `TensileLogic/known_bugs.yaml`'s schema extended to key on a basename or file pair
+   rather than one path plus `SolutionNameMin`, since a sibling mismatch is inherently about two
+   files, and it trades the pytest tests' per-node test report for the existing checker's
+   build-blocking, unnamed-check failure mode, a real cost worth weighing against the reach it buys.
 
 ### Longer term, the real gap
 
@@ -1528,6 +1604,8 @@ this table should drive.
 | The installed-artifact lane silently skips the snapshot tests, since syrupy is not in the installed tree | Low | Low | The goldens are enforced upstream; the skip is stated in `conftest.py` but reads like an accident |  |
 | Tiers above `quick` apply no filter in the TheRock lane, so the taxonomy is half-real | Medium | Medium | CTest honors the tiers correctly when used |  |
 | Submodule-bump pull requests run a reduced test set relative to source changes | Medium | Medium | Owned outside this component; noted because failures have been merged past |  |
+| Math CI's `preliminary` job appears to skip the `Tensile/Tests/unit` suite entirely on YAML-only diffs, running only numeric/solution-correctness checks instead | High | High if hit | None observed. Confirmed by the 2026-08-27 `develop` break: a 444-file, YAML-only PR (#11274) never ran the suite containing the sibling-`DeviceNames` check, and the resulting data bug only surfaced on a later, unrelated PR that happened to touch `.py` files |  |
+| The `_needs_logic_dir` xfail (see [Known Bugs and Expected Failures](#known-bugs-and-expected-failures)) is unconditional in TheRock CI, so the logic-corpus consistency checks it guards never execute there | Medium | High if hit | Math CI can still catch it when its own suite actually runs, but see the row above for when it does not | |
 
 ### Known bugs and flaky tests
 
