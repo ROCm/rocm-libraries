@@ -6141,6 +6141,22 @@ namespace rocisa
         {
             return std::make_shared<VPermlane16SwapB32>(*this);
         }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            // Swap: both dst and src are read-write dests (mirror VSwapB32).
+            auto dsts = CommonInstruction::getDstParams();
+            dsts.insert(dsts.end(), srcs.begin(), srcs.end());
+            return dsts;
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
+        }
     };
 
     struct VPermlane32SwapB32 : public CommonInstruction
@@ -6162,6 +6178,22 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VPermlane32SwapB32>(*this);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            // Swap: both dst and src are read-write dests (mirror VSwapB32).
+            auto dsts = CommonInstruction::getDstParams();
+            dsts.insert(dsts.end(), srcs.begin(), srcs.end());
+            return dsts;
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
         }
     };
 
