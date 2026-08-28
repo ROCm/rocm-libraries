@@ -53,10 +53,15 @@ __device__ void block_sync_lds()
     // both lgkmcnt AND vmcnt) or nothing at all, both of which are wrong.
     // This is a known LLVM bug (issue #120131). Using the fence here causes
     // LDS read-before-write races and incorrect numerical results, verified
-    // on gfx90a (MI210). The explicit waitcnt constant is the only safe
-    // approach for this target.
-    __builtin_amdgcn_s_waitcnt(0xc07f);
-    __builtin_amdgcn_s_barrier();
+    // on gfx90a (MI210).
+    //
+    // Instead, use inline asm with a "memory" clobber. The clobber gives the
+    // compiler a real ordering constraint (preventing LDS store sinking)
+    // while the explicit lgkmcnt(0) encoding (0xc07f) ensures we wait only
+    // for LDS/SMEM ops and not vmcnt. This is the gfx9-safe equivalent of
+    // the release/acquire fence pattern used on gfx11/gfx12.
+    asm volatile("s_waitcnt lgkmcnt(0)" : : : "memory");
+    asm volatile("s_barrier"            : : : "memory");
 #endif
 #else
     __syncthreads();
