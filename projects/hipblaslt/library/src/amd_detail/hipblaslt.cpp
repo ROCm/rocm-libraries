@@ -220,13 +220,12 @@ namespace
 
         // Registration is optional, but it is not a fallback: an all-to-all stage
         // without a communicator is an error, not a silent unfused GEMM.
-        if(!handle->device_comm_registered)
+        const uint32_t world = handle->device_comm_world;
+        if(world == 0)
         {
             log_error(__func__, "all-to-all stage requires hipblasLtSetDeviceComm on this handle");
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
-
-        const uint32_t world = handle->device_comm_world;
 
         if(desc->comm_channel >= handle->device_comm_channels)
         {
@@ -343,14 +342,17 @@ namespace
 
     // What each rank contributes to the registration allgather. Opaque to the
     // caller, which must neither interpret nor reorder it. A peer in this process
-    // is reached through its raw device pointer; one in another process through
-    // the IPC handle, which is why both travel.
+    // is reached through its raw device pointer, once peer access to its device
+    // is enabled, which is what the ordinal is for; one in another process is
+    // reached through the IPC handle. All of it travels because which case a peer
+    // falls into is only known once the payloads are in hand.
     struct DeviceCommExchange
     {
         uint32_t          magic;
         uint32_t          rank;
         uint32_t          world;
         uint32_t          nChannels;
+        int32_t           device;
         uint64_t          pid;
         void*             flags;
         uint32_t          ipcValid;
@@ -359,24 +361,28 @@ namespace
 
     constexpr uint32_t kDeviceCommMagic = 0x41324131u; // "1A2A"
 
+    // Undoes whatever hipblasLtSetDeviceComm managed to put on the handle, from
+    // any point in it, and leaves the handle unregistered. Each of the three
+    // kinds of entry is released the way it was acquired, and a peer in this
+    // process is another handle's allocation, so it is left alone.
     void release_device_comm(rocblaslt_handle handle)
     {
         for(uint32_t j = 0; j < HIPBLASLT_DEVICE_COMM_MAX_WORLD; ++j)
         {
-            if(handle->device_comm_peer_flags_mapped[j]
-               && handle->device_comm_peer_flags[j] != nullptr)
+            void* region = handle->device_comm_peer_flags[j];
+            if(region != nullptr)
             {
-                static_cast<void>(hipIpcCloseMemHandle(handle->device_comm_peer_flags[j]));
+                if(j == handle->device_comm_rank)
+                    static_cast<void>(hipFree(region));
+                else if(handle->device_comm_peer_flags_mapped[j])
+                    static_cast<void>(hipIpcCloseMemHandle(region));
             }
             handle->device_comm_peer_flags[j]        = nullptr;
             handle->device_comm_peer_flags_mapped[j] = false;
         }
-        if(handle->device_comm_flags != nullptr)
-        {
-            static_cast<void>(hipFree(handle->device_comm_flags));
-            handle->device_comm_flags = nullptr;
-        }
-        handle->device_comm_registered = false;
+        handle->device_comm_rank     = 0;
+        handle->device_comm_channels = 0;
+        handle->device_comm_world    = 0;
     }
 }
 
@@ -950,11 +956,21 @@ try
 
     // Exactly once per handle, matching arguments or not. That is what makes world
     // immutable, and world participates in solution selection.
-    if(h->device_comm_registered)
+    if(h->device_comm_world != 0)
     {
         log_error(__func__, "this handle already carries a communicator");
         rocblaslt::Debug::Instance().markerStop();
         return HIPBLAS_STATUS_INVALID_VALUE;
+    }
+
+    // Travels in the payload: a peer in this process is reached from here only
+    // once peer access to its device is enabled, and that call names the ordinal.
+    int myDevice = 0;
+    if(hipGetDevice(&myDevice) != hipSuccess)
+    {
+        log_error(__func__, "could not resolve this rank's device ordinal");
+        rocblaslt::Debug::Instance().markerStop();
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
     }
 
     void*        flags = nullptr;
@@ -979,6 +995,7 @@ try
     mine.rank      = rank;
     mine.world     = world;
     mine.nChannels = nChannels;
+    mine.device    = myDevice;
     mine.pid       = (uint64_t)getpid();
     mine.flags     = flags;
     // Only needed by a peer in another process; a failure here is reported when
@@ -995,7 +1012,10 @@ try
         return status;
     }
 
-    h->device_comm_flags = flags;
+    // The handle owns the allocation from here on: it is this rank's own entry,
+    // and rank is what release_device_comm looks at to tell it from the peers.
+    h->device_comm_rank             = rank;
+    h->device_comm_peer_flags[rank] = flags;
 
     for(uint32_t j = 0; j < world; ++j)
     {
@@ -1011,6 +1031,22 @@ try
 
         if(j == rank || peer.pid == mine.pid)
         {
+            // A pointer from this process is addressable as it stands only on
+            // this device; reaching another one takes peer access, or the copy
+            // engine faults on a region it was handed. Already-enabled is a
+            // success, since in one process the W handles enable each other
+            // pairwise and either direction may be established first.
+            if(j != rank && peer.device != mine.device)
+            {
+                const hipError_t peerAccess = hipDeviceEnablePeerAccess(peer.device, 0);
+                if(peerAccess != hipSuccess && peerAccess != hipErrorPeerAccessAlreadyEnabled)
+                {
+                    log_error(__func__, "cannot reach a peer's device from this one; rank", (int)j);
+                    release_device_comm(h);
+                    rocblaslt::Debug::Instance().markerStop();
+                    return HIPBLAS_STATUS_NOT_SUPPORTED;
+                }
+            }
             h->device_comm_peer_flags[j]        = peer.flags;
             h->device_comm_peer_flags_mapped[j] = false;
             continue;
@@ -1029,10 +1065,9 @@ try
         h->device_comm_peer_flags_mapped[j] = true;
     }
 
-    h->device_comm_rank       = rank;
-    h->device_comm_world      = world;
-    h->device_comm_channels   = nChannels;
-    h->device_comm_registered = true;
+    h->device_comm_channels = nChannels;
+    // Last, and what makes the handle registered: every peer's region is in hand.
+    h->device_comm_world = world;
 
     rocblaslt::Debug::Instance().markerStop();
     return HIPBLAS_STATUS_SUCCESS;
