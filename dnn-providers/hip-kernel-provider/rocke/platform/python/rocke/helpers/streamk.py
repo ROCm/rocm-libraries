@@ -53,7 +53,6 @@ from typing import NamedTuple
 
 from ..core.ir import IRBuilder, Value
 
-
 __all__ = [
     "StreamKPartition",
     "StreamKReductionStrategy",

@@ -134,7 +134,6 @@ from .topk_softmax import (
     topk_softmax_signature,
 )
 
-
 __all__ = [
     "FusedMoeForward",
     "FusedMoeForwardSpec",

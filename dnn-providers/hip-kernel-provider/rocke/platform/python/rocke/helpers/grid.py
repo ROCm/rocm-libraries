@@ -30,7 +30,6 @@ from typing import Tuple
 
 from ..core.ir import IRBuilder, Value
 
-
 # Default chiplet counts per AMDGPU family. Override at the call site
 # for other GPUs.
 NUM_XCDS_MI300X = 8  # CDNA3

@@ -42,7 +42,6 @@ from __future__ import annotations
 
 from ..core.ir import IRBuilder, PtrType, Value
 
-
 __all__ = [
     "gather_row_offset",
     "load_sorted_token_id",

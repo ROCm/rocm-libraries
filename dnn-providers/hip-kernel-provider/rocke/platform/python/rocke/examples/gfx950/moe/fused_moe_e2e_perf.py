@@ -83,7 +83,6 @@ from rocke.instances import (  # noqa: E402
     FusedMoeForwardSpec,
 )
 
-
 _CK_ROOT = os.environ.get("CK_ROOT", "")
 CK_TILE_BIN = (
     Path(_CK_ROOT) / "build" / "bin" / "tile_example_fused_moe"

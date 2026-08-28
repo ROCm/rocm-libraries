@@ -13,7 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Dict, Iterable, Literal, Mapping, Tuple
 
-
 ARCH = "gfx1250"
 ISA = "amdgcn-amd-amdhsa--gfx1250"
 DTYPE = "bf16"

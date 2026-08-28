@@ -31,7 +31,6 @@ from typing import Callable, List, Literal, Tuple
 
 from ..core.ir import F32, I32, IRBuilder, Value
 
-
 __all__ = [
     "ReduceCombine",
     "IndexCombine",

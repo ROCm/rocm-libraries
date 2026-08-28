@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the advisory self-check (pure, no GPU)."""
+
 import unittest
 
 from rocke.benchmark.perf import schema

@@ -77,7 +77,6 @@ from rocke.examples.gfx950.fused_mega_moe.levels._build_by_path import (  # noqa
 # Production kernel (the FINAL best; all levers default-on).
 from rocke.instances.common import moe_fused_mega_fp8 as PROD  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Self-contained constants + helpers (inlined; asm-free).
 #   Timing knobs + parity tolerance + fp8 quant/reference machinery, copied
@@ -751,7 +750,7 @@ def _grid_for(mod, lvl: LevelDef, s: Scenario, spec, padded):
     nmb = padded["num_m_blocks"]
     if lvl.grid_mode == "persistent":
         # Production persistent ABI (L11): (P,1,1) + grid_x/total_work/P.
-        (grid, grid_x, total_work, P) = mod.moe_fused_mega_fp8_persistent_grid(
+        grid, grid_x, total_work, P = mod.moe_fused_mega_fp8_persistent_grid(
             nmb, inter, spec
         )
         return grid, {"grid_x": grid_x, "total_work": total_work, "P": P}

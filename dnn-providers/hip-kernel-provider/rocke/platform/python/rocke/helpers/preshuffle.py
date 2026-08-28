@@ -49,7 +49,6 @@ from typing import Tuple
 
 from ..core.ir import IRBuilder, Value
 
-
 __all__ = [
     "PreshuffleBSpec",
     "emit_preshuffleb_offset",

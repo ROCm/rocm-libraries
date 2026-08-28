@@ -59,7 +59,6 @@ from typing import Callable, Iterator, Optional
 
 from ..core.ir import IRBuilder, Value
 
-
 __all__ = [
     "build_persistent_counter_init",
     "persistent_tile_loop",

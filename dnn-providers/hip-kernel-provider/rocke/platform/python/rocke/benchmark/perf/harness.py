@@ -13,6 +13,7 @@ separated from wall timing because replay perturbs time.
 Stdlib only. Needs a GPU + rocprofv3 for `counters`; degrades to wall-only if the
 profiler is unavailable.
 """
+
 from __future__ import annotations
 
 import csv

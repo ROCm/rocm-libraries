@@ -433,7 +433,7 @@ class TestInstalledLayout(unittest.TestCase):
                 for name in ("core/ir.py", "helpers/loads.py", "instances/common/x.py")
             }
         finally:
-            (ir_mod._CORE_PREFIX, ir_mod._ROCKE_PREFIX, ir_mod._FRAME_ROLE) = saved
+            ir_mod._CORE_PREFIX, ir_mod._ROCKE_PREFIX, ir_mod._FRAME_ROLE = saved
 
     def test_installed_and_checkout_agree(self):
         self.assertEqual(
@@ -465,7 +465,7 @@ class TestInstalledLayout(unittest.TestCase):
                 "runner",
             )
         finally:
-            (ir_mod._ROCKE_PREFIX, ir_mod._FRAME_ROLE) = saved
+            ir_mod._ROCKE_PREFIX, ir_mod._FRAME_ROLE = saved
 
     def test_a_directory_named_site_packages_experiments_is_user_code(self):
         """The runner rule matches a path component, not a substring."""

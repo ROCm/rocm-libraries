@@ -62,7 +62,6 @@ from .gemm_universal import (
     UniversalGemmSpec,
 )
 
-
 MAX_A = 4
 MAX_B = 4
 AOperand = Tuple[str, str]  # (param_name, dtype_str)

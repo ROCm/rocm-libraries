@@ -69,7 +69,6 @@ from .geometry import WarpGrid
 from .layouts import LdsLayout
 from .tensor_view import make_lds_view
 
-
 AddrFn = Callable[[IRBuilder, Value, Value], Tuple[Value, Optional[Value]]]
 
 

@@ -42,7 +42,6 @@ import re
 import sys
 from typing import Any, List, Optional
 
-
 _IS_WINDOWS = sys.platform == "win32"
 
 

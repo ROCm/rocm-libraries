@@ -242,6 +242,35 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     ),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
+    # --- Convolution specs ---
+    "kernels.common._conv_implicit_gemm_common.ConvAccumulatorEpilogue": (),
+    "kernels.common._conv_implicit_gemm_common.ConvDataSpec": (),
+    "kernels.common._conv_implicit_gemm_common.ConvProblem": (
+        "C",
+        "Hi",
+        "K",
+        "N",
+        "Wi",
+        "X",
+        "Y",
+    ),
+    "kernels.common.conv_direct_grouped.DirectConv16cSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConv4cSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConvProblem": (
+        "H",
+        "N",
+        "W",
+        "cpg",
+        "groups",
+        "kpg",
+    ),
+    "kernels.common.conv_implicit_gemm.ImplicitGemmConvSpec": ("problem",),
+    "kernels.common.conv_implicit_gemm_dgrad.DgradConvSpec": ("problem",),
+    "kernels.common.conv_implicit_gemm_wgrad.WgradConvSpec": ("problem",),
+    "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),
+    "kernels.common.deep_fused_conv_pool.FusedConvPoolProblem": ("conv",),
+    "kernels.common.img2col.Img2ColSpec": ("problem",),
+    "kernels.gfx1151.deep_fused_conv_pool.Gfx1151DeepFusedConvPoolSpec": ("problem",),
 }
 
 

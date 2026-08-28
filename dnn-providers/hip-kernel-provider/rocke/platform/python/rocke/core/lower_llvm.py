@@ -51,7 +51,6 @@ from .ir import (
     split_loc,
 )
 
-
 # Datalayout / triple. Copied verbatim from clang's output for the same
 # target on this box: clang -target amdgcn-amd-amdhsa -mcpu=gfx950
 # -emit-llvm -S. The string is LLVM-version-keyed, not gfx-keyed: every

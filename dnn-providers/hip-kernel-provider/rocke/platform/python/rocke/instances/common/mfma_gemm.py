@@ -95,7 +95,6 @@ from ...helpers.mfma_gemm_inner import (
 )
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 
-
 # P53 + P88: bf16 lands via the same helper-side atom dispatch
 # (``mfma_atom_for_dtype``) plus a typed-pointer flip in the kernel
 # signature. fp8 / bf8 paths require more plumbing (lane-decode +

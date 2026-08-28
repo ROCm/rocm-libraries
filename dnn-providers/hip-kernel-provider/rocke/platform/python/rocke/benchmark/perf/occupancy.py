@@ -12,6 +12,7 @@ occupancy use rocprofv3 at runtime.
 
 Returns a dict for the record's `resources` section. Stdlib only.
 """
+
 from __future__ import annotations
 
 import re

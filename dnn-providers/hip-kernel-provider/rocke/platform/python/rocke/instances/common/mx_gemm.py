@@ -69,7 +69,6 @@ from ...helpers.mx_scale import decode_mx_scale_e8m0
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 
-
 MxMantissaDType = Literal["fp8e4m3", "bf8e5m2"]
 
 

@@ -17,7 +17,6 @@ from rocke.dispatch.gemm import build_kernel
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
 from rocke.runtime.hip_module import get_device_arch
 
-
 # The runtime bodies below build+launch a gfx950 code object, so gate on the exact arch
 # (via the rocke HIP runtime, no torch): on any other device the launch would fail with
 # hipError(209) no kernel image.

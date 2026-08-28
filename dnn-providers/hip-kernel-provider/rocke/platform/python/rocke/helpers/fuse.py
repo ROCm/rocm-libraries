@@ -80,7 +80,6 @@ from ..core.ir import (
 from .activations import _sigmoid_via_exp2, _tanh_via_exp2
 from .autotune import Autotuner, AutotuneConfig
 
-
 __all__ = [
     "EpilogueOp",
     "BiasAdd",

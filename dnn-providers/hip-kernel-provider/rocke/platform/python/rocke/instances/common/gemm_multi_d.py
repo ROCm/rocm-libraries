@@ -66,7 +66,6 @@ from .gemm_universal import (
     build_universal_gemm,
 )
 
-
 MAX_D = 8
 DOp = Tuple[str, str]  # (param_name, "add" | "mul")
 DLoadKind = Literal["stock", "tiled", "vector"]

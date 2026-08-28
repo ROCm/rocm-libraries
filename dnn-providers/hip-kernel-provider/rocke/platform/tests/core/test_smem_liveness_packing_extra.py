@@ -44,7 +44,6 @@ from rocke.core.ir import (
 )
 from rocke.core.lower_llvm import _Lowerer
 
-
 # ---------------------------------------------------------------------------
 # helpers (mirrors test_smem_liveness_packing.py)
 # ---------------------------------------------------------------------------

@@ -31,7 +31,6 @@ from typing import List, Optional, Tuple
 from ._ctypes_bind import _LazyFn
 from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
 
-
 # Status codes.
 AMD_COMGR_STATUS_SUCCESS = 0
 

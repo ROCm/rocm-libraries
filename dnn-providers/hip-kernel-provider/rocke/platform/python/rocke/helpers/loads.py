@@ -51,7 +51,6 @@ from typing import Callable, Optional, Tuple
 
 from ..core.ir import F16, I64, IRBuilder, Type, Value
 
-
 # A descriptor callback maps (row, col) in the tile-local coordinate
 # system to (element_offset_in_global_array, valid_predicate). The
 # returned offset is in *elements*; the loader scales by the element

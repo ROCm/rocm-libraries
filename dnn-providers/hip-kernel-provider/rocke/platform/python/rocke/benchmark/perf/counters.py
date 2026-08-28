@@ -12,6 +12,7 @@ same arch, so missing counters on one arch (null) are fine.
 `parse_list_avail` / `select` / `wanted_map` / `group_counters` are pure (testable
 without a GPU); `discover` runs the profiler. Stdlib only.
 """
+
 from __future__ import annotations
 
 import re

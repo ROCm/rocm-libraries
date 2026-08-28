@@ -34,7 +34,6 @@ from rocke.core.ir_serialize import (
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.verify import ERROR, verify, verify_or_raise
 
-
 # --------------------------------------------------------------------------
 # Build a corpus of REAL kernels from the instances catalog.
 # --------------------------------------------------------------------------

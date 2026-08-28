@@ -58,7 +58,6 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from .compile import KernelArtifact
 
-
 MANIFEST_SCHEMA = "ck.dsl.example.manifest/v1"
 
 

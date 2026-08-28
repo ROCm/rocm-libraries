@@ -50,7 +50,6 @@ from typing import Callable, List, Optional, Sequence
 from ..core.ir import IRBuilder, Value
 from .tensor_view import TileWindow
 
-
 __all__ = [
     "RowChunkSweepResult",
     "pass2_row_chunks",

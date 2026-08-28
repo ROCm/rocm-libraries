@@ -15,7 +15,6 @@ from abc import ABC, abstractmethod
 import numpy as np
 import pandas as pd
 
-
 DTYPE_BYTES = {
     "fp32": 4.0,
     "fp16": 2.0,

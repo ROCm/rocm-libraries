@@ -32,7 +32,6 @@ from typing import Optional, Tuple
 
 from ..core.ir import IRBuilder, Value
 
-
 # Closed-form XOR swizzle parameters per tile shape, for fp16/bf16 (2-byte)
 # data. Read these as: for a byte offset ``off`` into the tile, the
 # swizzled offset is ``off ^ (((off % period) >> shift) << bits)``.

@@ -69,7 +69,6 @@ from .distribution import (
     make_static_tile_distribution,
 )
 
-
 # --- Distribution-driven softmax row reduce (CK Tile BlockReduce2dSync) -------
 #
 # The online-softmax row max / row sum fold each lane's per-row scalar across

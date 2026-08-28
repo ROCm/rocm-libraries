@@ -45,7 +45,6 @@ from rocke.runtime.launcher import (  # noqa: E402
     time_launches,
 )
 
-
 # Codegen arch for the whole harness. This is a *launch* harness, so it
 # defaults to the running device's arch (falling back to gfx950); ``main``
 # overrides it from ``--arch``.

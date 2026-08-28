@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the occupancy primitive's pure logic (no GPU)."""
+
 import unittest
 
 from rocke.benchmark.perf import occupancy

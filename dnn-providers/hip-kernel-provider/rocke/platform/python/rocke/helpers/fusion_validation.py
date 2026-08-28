@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 import math
 from typing import Any, Callable, Dict, Iterable, List, Sequence, Tuple
 
-
 __all__ = [
     "BackendTiming",
     "BenchmarkCase",

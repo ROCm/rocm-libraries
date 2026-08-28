@@ -37,7 +37,6 @@ from ..analysis.ir import LlvmIrStats
 from ..core.ir import IRBuilder
 from .atoms import MfmaAtom
 
-
 # Element storage size in bytes, used by the ds_read2 16-byte heuristic and the
 # ds_read issue-cycle pick. Mirrors ``sizeof(ADataType)`` in the CK schedulers.
 _DTYPE_BYTES = {

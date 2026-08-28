@@ -12,6 +12,7 @@ means the same formatter serves the local tool and an external framework alike.
 
 Pure, stdlib-only (`json`): reads records, writes nothing.
 """
+
 from __future__ import annotations
 
 import json

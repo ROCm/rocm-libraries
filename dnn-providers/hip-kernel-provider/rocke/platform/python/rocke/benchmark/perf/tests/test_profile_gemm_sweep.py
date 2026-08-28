@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the GEMM-sweep example's pure wiring (no GPU, no rocKE)."""
+
 import tempfile
 import unittest
 from types import SimpleNamespace

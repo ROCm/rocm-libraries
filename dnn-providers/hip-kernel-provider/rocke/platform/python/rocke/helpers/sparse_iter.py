@@ -28,7 +28,6 @@ from typing import Callable
 
 from ..core.ir import IRBuilder, PtrType, Value
 
-
 __all__ = [
     "BlockSparseSpec",
     "VsaSparseSpec",

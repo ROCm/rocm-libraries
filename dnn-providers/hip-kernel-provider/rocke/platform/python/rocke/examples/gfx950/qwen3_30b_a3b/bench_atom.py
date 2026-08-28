@@ -77,7 +77,6 @@ import os
 import statistics
 import time
 
-
 WARMUP_REPEATS = 2  # full generate() calls to discard (full KV length, proper warmup)
 MEASURE_REPEATS = 30  # generate() calls to time; mean is reported
 

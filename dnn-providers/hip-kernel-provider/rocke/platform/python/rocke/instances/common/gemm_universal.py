@@ -69,7 +69,6 @@ from ...helpers.io import io_ir_type
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
 
-
 # ---------------------------------------------------------------------
 # Spec dataclasses
 # ---------------------------------------------------------------------

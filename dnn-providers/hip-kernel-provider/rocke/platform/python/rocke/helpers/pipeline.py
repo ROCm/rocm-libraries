@@ -11,7 +11,6 @@ from typing import Any, Callable, Optional, Sequence, Tuple, Union
 from ..core.ir import IRBuilder
 from .schedule import SchedulePolicy
 
-
 BufferPair = Tuple[Any, Any]
 LoadFn = Callable[[int, BufferPair], None]
 ComputeFn = Callable[[int, BufferPair, Any], Any]

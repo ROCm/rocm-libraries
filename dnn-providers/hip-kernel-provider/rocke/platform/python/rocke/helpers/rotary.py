@@ -54,7 +54,6 @@ from typing import Literal, Tuple
 
 from ..core.ir import F32, IRBuilder, PtrType, Value
 
-
 __all__ = [
     "RotaryLayout",
     "RotarySpec",

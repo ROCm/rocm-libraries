@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from ..core.ir import IRBuilder, Value
 
-
 __all__ = ["_sigmoid_via_exp2", "_tanh_via_exp2"]
 
 

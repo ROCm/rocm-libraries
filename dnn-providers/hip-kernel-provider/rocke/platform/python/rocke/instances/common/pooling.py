@@ -77,7 +77,6 @@ from ...helpers.spec import (
 from ...helpers.tensor_view import make_buffer_resource, make_buffer_view
 from ...helpers.transforms import TensorDescriptor, embed, unmerge_magic
 
-
 DType = Literal["f16", "bf16"]
 PoolOp = Literal["max", "avg", "sum"]
 

@@ -28,7 +28,6 @@ from __future__ import annotations
 
 from ..core.ir import I32, IRBuilder, Value, VectorType
 
-
 # The f8f6f4 MFMA srcA/srcB operand type the AMDGPU backend accepts under the
 # inline-asm ``a`` (AGPR) constraint: a 256-bit ``<8 x i32>`` (8 AGPRs). The
 # backend register allocator REJECTS an ``<32 x i8>`` operand on this asm

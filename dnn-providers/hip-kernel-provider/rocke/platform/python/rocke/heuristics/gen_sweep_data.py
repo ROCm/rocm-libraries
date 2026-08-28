@@ -67,7 +67,6 @@ import pandas as pd
 from ..core.lower_llvm import lower_kernel_to_llvm
 from ..runtime.comgr import build_hsaco_from_llvm_ir
 
-
 # ---------------------------------------------------------------------
 # Generic per-op build record
 # ---------------------------------------------------------------------

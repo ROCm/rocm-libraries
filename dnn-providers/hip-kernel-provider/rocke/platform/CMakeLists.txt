@@ -276,12 +276,27 @@ if(ROCKE_INSTALL_TESTS)
     # still configures; keep the guard, it is the copy-able contract.
     set(_ROCKE_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../library")
     if(EXISTS "${_ROCKE_LIBRARY_DIR}/kernels")
-      foreach(_rocke_lib_pkg kernels builders)
+      foreach(_rocke_lib_pkg kernels builders dispatch benchmarks)
         install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/${_rocke_lib_pkg}"
                 DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library"
                 PATTERN "__pycache__" EXCLUDE
                 REGEX "\\.pyc$" EXCLUDE)
       endforeach()
+      # Install library test suite (CPU-only conv dispatch + signature tests).
+      # Excludes: parity .c emitters (compiled separately), GPU correctness tests
+      # (need hardware), and differential/run_all.py (dev-only).
+      # cmake-lint: disable=E1122
+      install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/tests/"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests"
+              PATTERN "__pycache__" EXCLUDE
+              PATTERN "*.pyc" EXCLUDE
+              PATTERN "*.c" EXCLUDE
+              PATTERN "*.cpp" EXCLUDE
+              PATTERN "differential" EXCLUDE
+              PATTERN "run_all.py" EXCLUDE
+              PATTERN "test_conv_fwd_correctness.py" EXCLUDE
+              PATTERN "test_conv_wgrad_correctness.py" EXCLUDE
+              PATTERN "test_conv_dgrad_correctness.py" EXCLUDE)
     else()
       message(WARNING
               "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
@@ -343,6 +358,22 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=.\"\n"
            "  TIMEOUT 300)\n")
+
+    # CPU-only library conv tests: dispatch, signature guard, layering, parity
+    # imports. Excludes GPU correctness tests (separate GPU nightly target).
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_conv_pytest python -m pytest"
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests\""
+           " -k \"conv or layering\""
+           " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_conv_fwd_correctness.py\""
+           " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_conv_wgrad_correctness.py\""
+           " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_conv_dgrad_correctness.py\""
+           " -v --timeout=60)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 120)\n")
   endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
