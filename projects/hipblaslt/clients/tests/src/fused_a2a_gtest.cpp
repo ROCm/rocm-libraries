@@ -20,7 +20,11 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace
@@ -79,6 +83,52 @@ namespace
         (void)userData;
         memcpy(recvbuf, sendbuf, bytesPerRank);
         memcpy(static_cast<char*>(recvbuf) + bytesPerRank, sendbuf, bytesPerRank);
+        return HIPBLAS_STATUS_SUCCESS;
+    }
+
+    // A real allgather for ranks that are threads of one process: each publishes
+    // into its own slot and waits for the rest before reading the whole buffer
+    // back. Registration cannot return until every peer has contributed, so this
+    // rendezvous is the only way more than one rank registers in one process. The
+    // wait is bounded so a rank that never arrives fails the test instead of
+    // hanging it.
+    struct Rendezvous
+    {
+        std::mutex              mutex;
+        std::condition_variable arrival;
+        std::vector<char>       slots;
+        uint32_t                arrived = 0;
+        uint32_t                world   = 0;
+    };
+
+    struct RendezvousRank
+    {
+        Rendezvous* shared;
+        uint32_t    rank;
+    };
+
+    hipblasStatus_t
+        rendezvousAllgather(void* userData, const void* sendbuf, void* recvbuf, size_t bytesPerRank)
+    {
+        RendezvousRank& self   = *static_cast<RendezvousRank*>(userData);
+        Rendezvous&     shared = *self.shared;
+
+        std::unique_lock<std::mutex> lock(shared.mutex);
+        if(shared.slots.empty())
+            shared.slots.resize(bytesPerRank * shared.world);
+        memcpy(shared.slots.data() + bytesPerRank * self.rank, sendbuf, bytesPerRank);
+
+        if(++shared.arrived == shared.world)
+        {
+            shared.arrival.notify_all();
+        }
+        else if(!shared.arrival.wait_for(
+                    lock, std::chrono::seconds(30), [&] { return shared.arrived == shared.world; }))
+        {
+            return HIPBLAS_STATUS_INTERNAL_ERROR;
+        }
+
+        memcpy(recvbuf, shared.slots.data(), bytesPerRank * shared.world);
         return HIPBLAS_STATUS_SUCCESS;
     }
 
@@ -511,6 +561,50 @@ namespace
     {
         EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 4, memcpyAllgather, nullptr),
                   HIPBLAS_STATUS_SUCCESS);
+    }
+
+    // The one path a single process can drive all the way through: two ranks, two
+    // handles, each finding the other's flag region among the payloads. Where
+    // there are two devices the ranks take one each, so registration has to make
+    // the peer's region reachable rather than merely record its address. Both
+    // handles are then destroyed, which is where the three kinds of entry have to
+    // be told apart: a rank frees its own region and leaves its peer's alone.
+    TEST(FusedA2ACommPeers_pre_checkin, TwoRanksInOneProcessRegister)
+    {
+        if(!gpuAvailable())
+            GTEST_SKIP() << "No GPU available";
+
+        int deviceCount = 0;
+        ASSERT_EQ(hipGetDeviceCount(&deviceCount), hipSuccess);
+
+        constexpr uint32_t kWorld = 2;
+
+        Rendezvous shared;
+        shared.world = kWorld;
+
+        RendezvousRank  args[kWorld] = {{&shared, 0}, {&shared, 1}};
+        hipblasStatus_t status[kWorld]
+            = {HIPBLAS_STATUS_NOT_INITIALIZED, HIPBLAS_STATUS_NOT_INITIALIZED};
+        std::thread ranks[kWorld];
+
+        for(uint32_t r = 0; r < kWorld; ++r)
+        {
+            ranks[r] = std::thread([&, r] {
+                if(hipSetDevice((int)r % deviceCount) != hipSuccess)
+                    return;
+                hipblasLtHandle_t handle = nullptr;
+                if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
+                    return;
+                status[r]
+                    = hipblasLtSetDeviceComm(handle, r, kWorld, 1, rendezvousAllgather, &args[r]);
+                EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+            });
+        }
+        for(std::thread& rank : ranks)
+            rank.join();
+
+        for(uint32_t r = 0; r < kWorld; ++r)
+            EXPECT_EQ(status[r], HIPBLAS_STATUS_SUCCESS) << "rank " << r;
     }
 
     /************************************************************************
