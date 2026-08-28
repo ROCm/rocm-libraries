@@ -1465,13 +1465,14 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
                               FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
-                #(256, 256) : [FmhaFwdTileSize( 64,  32,  64, 256,  64,  256,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
+                (256, 256) : [FmhaFwdTileSize( 64, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
         elif dtype in cls._DT_FP8FP32:
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
                 (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
                               FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
+                (256, 256) : [FmhaFwdTileSize( 64, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
         else:
             raise ValueError(f"unsupported dtype={dtype}")
@@ -1504,6 +1505,25 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # NOTE: dropout is not yet implemented in qr_tdm — only emit
             # dropout="f" so dropout workloads fall through to qr.
             # Logits soft cap is not implemented either, so pin logits="f".
+            #
+            # d=256 emits a narrowed trait set: no bias, no LSE. Because qr_tdm
+            # wins the dispatch by list order, a full sweep here would silently
+            # take over every working qr kernel at 256. Withholding LSE keeps the
+            # LSE-producing d=256 cases (test_fmha_fwd.cpp's def_lse=true suites)
+            # on qr_ks_vs, so qr stays exercised at this head dim.
+            if hdim == 256 and hdim_v == 256:
+                for logits, mask, bias, lse, sink in itertools.product(
+                    ["f"],
+                    get_mask_map(mask_impl).keys(),
+                    ["no"],
+                    ["f"],
+                    ["t", "f"],
+                ):
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+
             if hdim == 128 and hdim_v == 128:
                 for logits, mask, bias, lse, sink in itertools.product(
                     ["f"],
@@ -1533,6 +1553,26 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
             # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a
             # slope-dependent quantization bias the OUT gain check reads as a systematic error.
+            #
+            # d=256 has no qr fallback at all: the qr list below only takes tiles with
+            # k0_loops >= 2, and the single (256,256) tile has loops == 1. So qr_tdm is
+            # the sole provider here, and a failure loses the shape rather than
+            # degrading to a slower path. Bias and LSE stay out to match the fp16/bf16
+            # d=256 trait set.
+            if (hdim, hdim_v) == (256, 256):
+                for logits, qscale, mask, bias, lse, sink in itertools.product(
+                    ["f"],
+                    ["no", "pertensor", "perhead", "blockscale"],
+                    get_mask_map(mask_impl).keys(),
+                    ["no"],
+                    ["f"],
+                    ["f", "t"],
+                ):
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+
             if (hdim, hdim_v) in ((128, 128), (64, 64)):
                 for logits, qscale, mask, bias, lse, sink in itertools.product(
                     ["f"],
