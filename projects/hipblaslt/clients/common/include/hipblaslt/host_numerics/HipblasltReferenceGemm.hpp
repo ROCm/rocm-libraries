@@ -8,6 +8,11 @@
 #include "datatype_interface.hpp"
 
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/client/MatmulPreparation.hpp>
+#include <roc/host_numerics/gemm.hpp>
+
+#include <optional>
+#include <utility>
 
 namespace hipblaslt::host_numerics
 {
@@ -47,4 +52,36 @@ namespace hipblaslt::host_numerics
     };
 
     void hipblaslt_reference_gemm(const HipblasltReferenceGemmRequest& request);
+
+    struct MatmulReferenceInputs
+    {
+        MatmulReferenceInputs(roc::host_numerics::Tensor aTensor,
+                              roc::host_numerics::Tensor bTensor,
+                              roc::host_numerics::Tensor cTensor,
+                              roc::host_numerics::Tensor dTensor)
+            : a(std::move(aTensor))
+            , b(std::move(bTensor))
+            , c(std::move(cTensor))
+            , d(std::move(dTensor))
+        {
+        }
+
+        roc::host_numerics::Tensor                a;
+        roc::host_numerics::Tensor                b;
+        roc::host_numerics::Tensor                c;
+        roc::host_numerics::Tensor                d;
+        std::optional<roc::host_numerics::Tensor> alphaVector;
+        std::optional<roc::host_numerics::Tensor> scaleA;
+        std::optional<roc::host_numerics::Tensor> scaleB;
+        std::optional<roc::host_numerics::Scalar> scaleC;
+        std::optional<roc::host_numerics::Scalar> scaleD;
+    };
+
+    roc::host_numerics::GemmRunInfo
+        referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,
+                            const hipblaslt::client::MatmulDataTypes&       dataTypes,
+                            const hipblaslt::client::PreparedMatmulProblem& preparation,
+                            MatmulReferenceInputs                            inputs,
+                            hipblaslt_scaling_format                         scaleAMode,
+                            hipblaslt_scaling_format                         scaleBMode);
 } // namespace hipblaslt::host_numerics
