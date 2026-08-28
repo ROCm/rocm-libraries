@@ -498,11 +498,14 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
                              });
     } else {
         const auto selected = problem.outputSelection.indices(logicalElements);
+        const auto& outputShape = problem.d.shape();
         outputElementsWritten = selected.size();
         forEachParallelIndex(selected.size(), saturatedProduct(selected.size(), reductionWork),
                              parallelOutput, 500'000, [&](size_t selectionIndex) {
                                  const size_t logicalIndex = selected[selectionIndex];
-                                 computeOutput(logicalIndex / n, logicalIndex % n);
+                                 const auto coordinates = outputShape.coordinates(
+                                     logicalIndex, problem.outputSelection.indexOrder());
+                                 computeOutput(coordinates[0], coordinates[1]);
                              });
     }
 

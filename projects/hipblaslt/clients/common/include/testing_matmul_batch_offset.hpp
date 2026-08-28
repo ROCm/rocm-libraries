@@ -329,7 +329,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 .absoluteTolerance = std::nextafter(tolerance, 0.0),
                 .maxReportedMismatches = 0,
             };
-            options.selection.indexOrder = IndexOrder::FirstDimensionFastest;
+            options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
             const auto comparison
                 = compare(copyTensorFromEncodedStorage(observed, dPlan.matrixElements, layout),
                           copyTensorFromEncodedStorage(expected, dPlan.matrixElements, layout),

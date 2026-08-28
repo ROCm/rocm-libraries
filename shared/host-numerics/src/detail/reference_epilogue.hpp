@@ -359,8 +359,11 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueRequest& problem) {
         }
     } else {
         const auto selected = problem.outputSelection.indices(logicalElements);
-        for (const size_t logicalIndex : selected)
-            computeOutput(logicalIndex / columns, logicalIndex % columns);
+        for (const size_t logicalIndex : selected) {
+            const auto coordinates = problem.output.shape().coordinates(
+                logicalIndex, problem.outputSelection.indexOrder());
+            computeOutput(coordinates[0], coordinates[1]);
+        }
         computedElements = selected.size();
     }
 

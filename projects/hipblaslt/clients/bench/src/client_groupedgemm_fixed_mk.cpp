@@ -949,8 +949,8 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     ComparisonOptions comparisonOptions{
                         .symmetricRelativeTolerance = std::nextafter(0.001, 0.0),
                         .maxReportedMismatches      = 10};
-                    comparisonOptions.selection.indexOrder
-                        = IndexOrder::FirstDimensionFastest;
+                    comparisonOptions.selection
+                        = OutputSelection::all(IndexOrder::FirstDimensionFastest);
                     const Layout comparisonLayout(
                         Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]});
                     const auto comparison = roc::host_numerics::compare(

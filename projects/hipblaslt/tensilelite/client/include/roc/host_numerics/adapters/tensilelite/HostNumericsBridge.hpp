@@ -159,6 +159,17 @@ namespace TensileLite::Client
         return defaultComparisonOptions(scalarType, toleranceOverride);
     }
 
+    inline roc::host_numerics::OutputSelection
+        referenceOutputSelection(TensorDescriptor const& descriptor,
+                                 size_t                  elementsToValidate)
+    {
+        return roc::host_numerics::OutputSelection::primeStride(
+            descriptor.totalLogicalElements(),
+            descriptor.totalAllocatedElements(),
+            elementsToValidate,
+            roc::host_numerics::IndexOrder::FirstDimensionFastest);
+    }
+
     inline roc::host_numerics::ComparisonResult
         compareHostBuffers(rocisa::DataType                               type,
                            const void*                                    observed,

@@ -889,8 +889,9 @@ class TensorAndGemmTests(unittest.TestCase):
         )
 
         selected = hv.ComparisonOptions()
-        selected.selection.index_order = hv.IndexOrder.FirstDimensionFastest
-        selected.selection.stride = 2
+        selected.selection = hv.OutputSelection.strided(
+            0, 2, index_order=hv.IndexOrder.FirstDimensionFastest
+        )
         selected_report = hv.compare(observed, expected, selected)
         expected_flat_fortran = expected_values.reshape(-1, order="F")
         observed_flat_fortran = observed_values.reshape(-1, order="F")
