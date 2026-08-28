@@ -352,6 +352,29 @@ message(STATUS "Hip compiler flags: ${HIP_COMPILER_FLAGS}")
 
 add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPILER_FLAGS}>)
 
+# MIOpen's HIP device code is compiled in the same translation units as host code, so a host
+# sanitizer request (e.g. CI's debug '-fsanitize=undefined -fno-sanitize-recover=undefined')
+# also instruments AMDGPU device code. ROCm/TheRock ships a device sanitizer runtime only for
+# ASan (amdgcn asanrtl.bc); there is no device UBSan runtime, so instrumented device objects
+# fail to link with undefined __ubsan_handle_*_abort symbols. When UBSan is requested, pass
+# -fno-gpu-sanitize so device code is left uninstrumented while host code stays instrumented.
+# Gated on 'undefined' specifically, so ASan-only builds keep their working device ASan.
+if(HAS_HIP)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" MIOPEN_BUILD_TYPE_UPPER)
+    set(MIOPEN_EFFECTIVE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${MIOPEN_BUILD_TYPE_UPPER}}")
+    if(MIOPEN_EFFECTIVE_CXX_FLAGS MATCHES "-fsanitize=[^ ]*undefined")
+        check_cxx_compiler_flag("-x hip -fno-gpu-sanitize" MIOPEN_HIP_COMPILER_HAS_OPTION_NO_GPU_SANITIZE)
+        if(MIOPEN_HIP_COMPILER_HAS_OPTION_NO_GPU_SANITIZE)
+            message(STATUS "UBSan requested: adding -fno-gpu-sanitize so AMDGPU device code links "
+                           "without a device UBSan runtime (host instrumentation retained)")
+            add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-gpu-sanitize>)
+        else()
+            message(WARNING "UBSan requested but -fno-gpu-sanitize is unsupported by the compiler; "
+                            "AMDGPU device objects may fail to link without a device UBSan runtime")
+        endif()
+    endif()
+endif()
+
 # HIP
 if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     if(MIOPEN_USE_COMPOSABLEKERNEL)
