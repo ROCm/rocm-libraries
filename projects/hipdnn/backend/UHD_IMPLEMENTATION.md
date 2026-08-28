@@ -40,8 +40,7 @@ src/heuristics/uhd/
 ├── EngineRegistry.*       # Engine/candidate lookup (mock)
 ├── JsonLogicEvaluator.*   # Derived values expressions
 ├── ScoreTransform.hpp     # Score transforms (log1p, sqrt, etc.)
-├── Sha256.*               # Hash validation
-└── UhdLoader.*            # FlatBuffer UHD loading
+└── Sha256.*               # Hash validation
 ```
 
 ### Data Flow
@@ -210,7 +209,7 @@ entry.uhdConfig.modelHash = sha256(modelBytes);
 | JsonLogic | `TestJsonLogicEvaluator.cpp` | Operators, edge cases |
 | Selection flow | `TestUhdSelectionFlow.cpp` | End-to-end: register → select → rank |
 | Score transforms | (in `TestUhdSelectionFlow.cpp`) | log1p, sqrt, identity round-trips |
-| UHD loader | `uhd/TestUhdLoader.cpp` | FlatBuffer UHD deserialization |
+| Descriptor parse | `plugin_sdk/tests/ingestor/TestDescriptorLoader.cpp` | The RFC 0019 §4 header, `derived` included |
 
 ### Running Tests
 

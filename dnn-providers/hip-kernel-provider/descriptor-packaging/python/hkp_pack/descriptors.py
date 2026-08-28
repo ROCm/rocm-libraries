@@ -426,7 +426,7 @@ def _resolve_sidecar(desc, source_root, payload):
     compile_hip_variant: a fallback fires exactly when the local file is missing,
     so a typo would stop being an error and bind silently to a same-named file
     elsewhere in the tree. Sharing one artifact between sibling folders stays
-    expressible by saying so -- `"../shared/model.uhd.fb"`.
+    expressible by saying so -- `"../shared/model.bin"`.
 
     The destination keeps the resolved path's position under the root, so an
     authored `../shared/...` lands in the packed tree where the same relative
