@@ -23,6 +23,7 @@ set(HIPDNN_IT_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(HIPDNN_IT_ALWAYS_BUILT_SOURCES
     IntegrationIsSupportedExtPerformance.cpp
     conv/IntegrationConvForwardSerializeRoundTrip.cpp
+    layernorm/IntegrationGpuLayernormBackward.cpp
 )
 
 foreach(_rel IN LISTS HIPDNN_IT_ALWAYS_BUILT_SOURCES)
