@@ -2849,7 +2849,7 @@ _VAddPKF32 = _make_scalar_alu_class("VAddPKF32", "v_pk_add_f32", InstType.INST_F
 # logicalIR: VAddPKF32
 VAddPKF32 = _make_scalar_alu_class("VAddPKF32", "v_pk_add_f32", InstType.INST_F32)
 # logicalIR: VAdd3U32
-VAdd3U32 = _make_scalar_alu_class("VAdd3U32", "v_add3_u32", InstType.INST_U32)
+VAdd3U32 = _make_ternary_class("VAdd3U32", "v_add3_u32", InstType.INST_U32)
 # logicalIR: VMulF16
 VMulF16 = _make_scalar_alu_class("VMulF16", "v_mul_f16", InstType.INST_F16)
 # VMulF32 — real class (see Vector ALU section above)

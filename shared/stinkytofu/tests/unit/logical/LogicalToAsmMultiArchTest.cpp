@@ -51,7 +51,7 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
         case logical::VAddPKF16:
             return VAddPKF16(vgpr(0), vgpr(1), vgpr(2));
         case logical::VAdd3U32:
-            return VAdd3U32(vgpr(0), vgpr(1), vgpr(2));
+            return VAdd3U32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VSubF32:
             return VSubF32(vgpr(0), vgpr(1), vgpr(2));
         case logical::VSubI32:
