@@ -602,3 +602,292 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                                           MIOPEN_SOFTMAX_LOG),
                                           testing::Values(MIOPEN_SOFTMAX_MODE_INSTANCE,
                                                           MIOPEN_SOFTMAX_MODE_CHANNEL)));
+
+// --- Misaligned int4 vectorized load/store -------------------------
+// The vectorized fast path casts &src[i + offset] to int4* (16 bytes). With
+// stride==1 the per-block base offset is o * INNER_SIZE; this is 16-byte
+// aligned only when INNER_SIZE is a multiple of load_factor (4 for fp32,
+// 8 for fp16). For inner sizes that are NOT a multiple, the odd-o blocks
+// could issue a final vector load/store that could be 16-byte-misaligned
+// -> UB (memory fault or wrong result).
+// Reuses SoftmaxCommon's full CPU-vs-GPU comparison.
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Softmax_FP32,
+                         testing::Values(
+                             // INSTANCE inner = C*H*W, none a multiple of 4:
+                             TestCase{{2, 50, 1, 1},
+                                      {1.0f, 0.0f},
+                                      MIOPEN_SOFTMAX_ACCURATE,
+                                      MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                      miopenTensorNCHW},
+                             TestCase{{3, 10, 1, 1},
+                                      {1.0f, 0.0f},
+                                      MIOPEN_SOFTMAX_ACCURATE,
+                                      MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                      miopenTensorNCHW},
+                             TestCase{{2, 6, 1, 1},
+                                      {0.5f, 0.5f},
+                                      MIOPEN_SOFTMAX_ACCURATE,
+                                      MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                      miopenTensorNCHW},
+                             TestCase{{2, 50, 1, 1},
+                                      {1.0f, 0.0f},
+                                      MIOPEN_SOFTMAX_LOG,
+                                      MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                      miopenTensorNCHW},
+                             // NHWC-channel: inner = C, stride = 1, outer = N*H*W:
+                             TestCase{{2, 50, 1, 1},
+                                      {1.0f, 0.0f},
+                                      MIOPEN_SOFTMAX_ACCURATE,
+                                      MIOPEN_SOFTMAX_MODE_CHANNEL,
+                                      miopenTensorNHWC}));
+
+// fp16/bf16 elements are 2 bytes, so an ODD inner size makes the odd-o base
+// offset 2-byte aligned -> the int4 (dwordx4) load is below the 4-byte hardware
+// alignment CDNA requires. (An EVEN fp16 inner size is still >=4-byte aligned
+// and does NOT fault on gfx942, same as fp32 -- so odd sizes are the real test.)
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Softmax_FP16,
+                         testing::Values(TestCase{{2, 13, 1, 1},
+                                                  {1.0f, 0.0f},
+                                                  MIOPEN_SOFTMAX_ACCURATE,
+                                                  MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                                  miopenTensorNCHW},
+                                         TestCase{{2, 21, 1, 1},
+                                                  {1.0f, 0.0f},
+                                                  MIOPEN_SOFTMAX_ACCURATE,
+                                                  MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                                  miopenTensorNCHW},
+                                         TestCase{{3, 101, 1, 1},
+                                                  {1.0f, 0.0f},
+                                                  MIOPEN_SOFTMAX_ACCURATE,
+                                                  MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                                  miopenTensorNCHW}));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Softmax_BFP16,
+                         testing::Values(TestCase{{2, 13, 1, 1},
+                                                  {1.0f, 0.0f},
+                                                  MIOPEN_SOFTMAX_ACCURATE,
+                                                  MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                                  miopenTensorNCHW},
+                                         TestCase{{2, 21, 1, 1},
+                                                  {1.0f, 0.0f},
+                                                  MIOPEN_SOFTMAX_ACCURATE,
+                                                  MIOPEN_SOFTMAX_MODE_INSTANCE,
+                                                  miopenTensorNCHW}));
+
+// --- Non-contiguous (non-packed) tensor ----------------------------
+// GetStride/GetOuterSize/GetInnerSize derive geometry from lengths + layout
+// enum only and ignore the descriptor's real strides. A prior implementation passed the
+// real N/C/H/W strides into the kernel (with IS_*_CONTIGUOUS handling); the new
+// code assumes a packed layout, so a padded (non-packed) tensor is addressed
+// wrongly. Here the N stride is padded to 32 (packed would be 16).
+// Currently disabled as no kernel can pick up non-packed tensors at the moment, but it can still be
+// ran using
+//   ./bin/test_soft_max --gtest_also_run_disabled_tests --gtest_filter='*Softmax_NonContiguous*'
+struct GPU_Softmax_NonContiguous_FP32 : public testing::Test
+{
+};
+
+TEST_F(GPU_Softmax_NonContiguous_FP32, DISABLED_ChannelPaddedNStride)
+{
+    auto&& handle = get_handle();
+
+    const std::vector<size_t> dims    = {2, 4, 2, 2};  // N, C, H, W
+    const std::vector<size_t> strides = {32, 4, 2, 1}; // packed N stride would be 16
+
+    auto input  = tensor<float>{dims, strides};
+    auto output = tensor<float>{dims, strides};
+
+    // Poison every element (incl. the 16-element inter-batch padding), then set
+    // only the real elements. If the kernel assumes a packed layout it will read
+    // the poisoned padding and/or write batch 1 to the wrong offset.
+    std::fill(input.data.begin(), input.data.end(), 1e30f);
+    std::fill(output.data.begin(), output.data.end(), -42.0f);
+    for(size_t n = 0; n < dims[0]; ++n)
+        for(size_t c = 0; c < dims[1]; ++c)
+            for(size_t h = 0; h < dims[2]; ++h)
+                for(size_t w = 0; w < dims[3]; ++w)
+                    input(n, c, h, w) = static_cast<float>((n * 13 + c * 7 + h * 3 + w + 1) % 5);
+
+    const float alpha = 1.0f, beta = 0.0f;
+    auto in_dev  = handle.Write(input.data);
+    auto out_dev = handle.Write(output.data);
+
+    miopen::SoftmaxForward(handle,
+                           &alpha,
+                           &beta,
+                           input.desc,
+                           in_dev.get(),
+                           output.desc,
+                           out_dev.get(),
+                           MIOPEN_SOFTMAX_ACCURATE,
+                           MIOPEN_SOFTMAX_MODE_CHANNEL);
+    auto res = handle.Read<float>(out_dev, output.data.size());
+
+    // CPU reference over the real strides: softmax over C for each (n,h,w).
+    auto off = [&](size_t n, size_t c, size_t h, size_t w) {
+        return n * strides[0] + c * strides[1] + h * strides[2] + w * strides[3];
+    };
+    double max_err = 0.0;
+    for(size_t n = 0; n < dims[0]; ++n)
+        for(size_t h = 0; h < dims[2]; ++h)
+            for(size_t w = 0; w < dims[3]; ++w)
+            {
+                float mx = std::numeric_limits<float>::lowest();
+                for(size_t c = 0; c < dims[1]; ++c)
+                    mx = std::max(mx, input(n, c, h, w));
+                double sum = 0.0;
+                for(size_t c = 0; c < dims[1]; ++c)
+                    sum += std::exp(input(n, c, h, w) - mx);
+                for(size_t c = 0; c < dims[1]; ++c)
+                {
+                    double ref = std::exp(input(n, c, h, w) - mx) / sum;
+                    max_err    = std::max(max_err, std::abs(ref - res[off(n, c, h, w)]));
+                }
+            }
+    EXPECT_LT(max_err, 1e-4) << "Non-packed tensor mis-addressed: GPU output does not "
+                                "match strided CPU reference (max abs err "
+                             << max_err << ").";
+}
+
+// --- Extra coverage: non-zero x/y offsets --
+// Findings from the tests below (both DISABLED -- see caveats):
+//   * The Softmax solver DOES honor offsets correctly.
+//   * But SoftmaxForward runs Find over {AttnSoftmax, Softmax}; AttnSoftmax
+//     ignores the offsets and can
+//     win the Find race even for ordinary softmax shapes -> SoftmaxForward with
+//     a non-zero offset then writes to the un-offset location (wrong result).
+struct GPU_Softmax_Offset_FP32 : public testing::Test
+{
+};
+
+static double RunOffsetCase(int x_offset, int y_offset, const std::vector<size_t>& dims)
+{
+    auto&& handle = get_handle();
+
+    auto in_host = tensor<float>{miopenTensorNCHW, dims}.generate(tensor_elem_gen_integer{5});
+    const size_t n_elems = in_host.data.size();
+
+    // Over-allocated device buffers; real data lives at [offset, offset+n_elems).
+    std::vector<float> xbuf(n_elems + x_offset, 7.0f);
+    std::vector<float> ybuf(n_elems + y_offset, 3.0f);
+    std::copy(in_host.data.begin(), in_host.data.end(), xbuf.begin() + x_offset);
+
+    auto x_dev = handle.Write(xbuf);
+    auto y_dev = handle.Write(ybuf);
+
+    const float alpha = 1.0f, beta = 0.0f;
+    miopen::SoftmaxForward(handle,
+                           &alpha,
+                           &beta,
+                           in_host.desc,
+                           x_dev.get(),
+                           in_host.desc,
+                           y_dev.get(),
+                           MIOPEN_SOFTMAX_ACCURATE,
+                           MIOPEN_SOFTMAX_MODE_INSTANCE,
+                           x_offset,
+                           y_offset);
+    auto res = handle.Read<float>(y_dev, ybuf.size());
+
+    const auto [n, c, h, w] = miopen::tien<4>(dims);
+    double max_err          = 0.0;
+    for(size_t o = 0; o < n; ++o)
+    {
+        float mx = std::numeric_limits<float>::lowest();
+        for(size_t i = 0; i < c * h * w; ++i)
+            mx = std::max(mx, in_host.data[o * c * h * w + i]);
+        double sum = 0.0;
+        for(size_t i = 0; i < c * h * w; ++i)
+            sum += std::exp(in_host.data[o * c * h * w + i] - mx);
+        for(size_t i = 0; i < c * h * w; ++i)
+        {
+            double ref = std::exp(in_host.data[o * c * h * w + i] - mx) / sum;
+            double got = res[y_offset + o * c * h * w + i];
+            max_err    = std::max(max_err, std::abs(ref - got));
+        }
+    }
+    return max_err;
+}
+
+// Non-zero offset via the public SoftmaxForward API. FLAKY by nature: passes
+// when Find selects the Softmax solver (offsets honored), fails when Find
+// selects AttnSoftmax (offsets dropped). DISABLED; run intentionally with
+//   ./bin/test_soft_max --gtest_also_run_disabled_tests --gtest_filter='*Offset*'
+TEST_F(GPU_Softmax_Offset_FP32, DISABLED_ForwardNonZeroOffset_FindRace)
+{
+    const std::vector<size_t> dims = {2, 13, 1, 1};
+
+    double err0 = RunOffsetCase(0, 0, dims);
+    EXPECT_LT(err0, 1e-4) << "zero-offset baseline wrong (harness bug?) err=" << err0;
+
+    double err1 = RunOffsetCase(32, 48, dims);
+    EXPECT_LT(err1, 1e-4) << "non-zero offset dropped (Find selected AttnSoftmax?); max abs err "
+                          << err1;
+}
+
+// --- Divergent __syncthreads() deadlock ----------------------------
+// CSR-Stream path (NUM_BATCH>1) with grid_size not a multiple of num_batch:
+// whole wavefronts hit `if(o >= OUTER_SIZE) return;` and skip the block-wide
+// __syncthreads() inside reduce_block(), while surviving lanes wait on it
+// forever. {3,8,1,1} INSTANCE ACCURATE: inner=8 (aligned, so no fault masks the
+// hang), outer=3, local=1024 -> num_batch=512; batches 3..511 (waves 1..15)
+// early-return while wave 0 reaches the barrier -> hang.
+//
+// DISABLED because it WILL WEDGE THE GPU. Run intentionally only, under an
+// external timeout:
+//   ./bin/test_soft_max --gtest_also_run_disabled_tests \
+//       --gtest_filter='*Softmax_Deadlock*'
+struct GPU_Softmax_Deadlock_FP32 : public testing::Test
+{
+};
+
+TEST_F(GPU_Softmax_Deadlock_FP32, DISABLED_CsrStreamPartialBlock)
+{
+    auto&& handle = get_handle();
+
+    // Each candidate is a CSR-Stream config (inner<local, BATCH_SIZE>1) whose
+    // grid is not a multiple of num_batch, so the last block mixes surviving
+    // lanes (which reach reduce_block's __syncthreads) with early-returning
+    // lanes / whole wavefronts.
+    struct Cand
+    {
+        std::vector<size_t> dims;
+        miopenSoftmaxMode_t mode;
+    };
+    const std::vector<Cand> cands = {
+        {{3, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // 15/16 waves return, 1 survives
+        {{7, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},
+        {{70, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},  // ~2 waves survive, rest return
+        {{100, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // multiple surviving waves
+        {{5, 16, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE},
+        {{2, 8, 3, 3}, MIOPEN_SOFTMAX_MODE_CHANNEL}, // stride=H*W=9 path
+    };
+
+    for(const auto& cand : cands)
+    {
+        auto input =
+            tensor<float>{miopenTensorNCHW, cand.dims}.generate(tensor_elem_gen_integer{5});
+        auto output = tensor<float>{miopenTensorNCHW, cand.dims};
+
+        const float alpha = 1.0f, beta = 0.0f;
+        auto in_dev  = handle.Write(input.data);
+        auto out_dev = handle.Write(output.data);
+
+        miopen::SoftmaxForward(handle,
+                               &alpha,
+                               &beta,
+                               input.desc,
+                               in_dev.get(),
+                               output.desc,
+                               out_dev.get(),
+                               MIOPEN_SOFTMAX_ACCURATE,
+                               cand.mode);
+        handle.Finish(); // a hang would manifest here
+        auto res = handle.Read<float>(out_dev, output.data.size());
+        for(auto v : res)
+            EXPECT_TRUE(std::isfinite(v));
+    }
+}

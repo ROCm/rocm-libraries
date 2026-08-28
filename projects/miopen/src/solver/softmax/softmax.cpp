@@ -66,6 +66,10 @@ bool Softmax::IsApplicable(
         {
             return false;
         }
+        if(!problem.GetXDesc().IsPacked() && !problem.GetYDesc().IsPacked())
+        {
+            return false;
+        }
     }
     if(!problem.IsForward())
     {
@@ -84,6 +88,11 @@ bool Softmax::IsApplicable(
         }
         if(problem.GetYDesc().GetLayoutEnum() != problem.GetdYDesc().GetLayoutEnum() ||
            problem.GetYDesc().GetLayoutEnum() != problem.GetdXDesc().GetLayoutEnum())
+        {
+            return false;
+        }
+        if(!problem.GetYDesc().IsPacked() || !problem.GetdYDesc().IsPacked() ||
+           !problem.GetdXDesc().IsPacked())
         {
             return false;
         }
