@@ -232,6 +232,68 @@ class PredictionLibrary:
     def __init__(self, table):
         self.table = table
 
+
+class FixedLinearArbiterLibrary:
+    Tag = "FixedLinearArbiter"
+    StateKeys = [("type", "tag"), ("model_id", "modelId"),
+                 ("feature_schema", "featureSchema"), "weights", ("cu_count", "cuCount"),
+                 ("g0_library", "g0Library"), ("o3_library", "o3Library")]
+
+    @classmethod
+    def FromOriginalState(cls, d, solutions):
+        g0 = MatchingLibrary.FromOriginalState(d["g0"], solutions)
+        o3 = PredictionLibrary.FromOriginalState({"table": d["o3_table"]}, solutions)
+        return cls(d["model_id"], d["feature_schema"], d["weights"], d["cu_count"], g0, o3)
+
+    @property
+    def tag(self):
+        return self.__class__.Tag
+
+    def merge(self, other):
+        raise RuntimeError("FixedLinearArbiterLibrary does not support merging.")
+
+    def remapSolutionIndices(self, indexMap):
+        self.g0Library.remapSolutionIndices(indexMap)
+        self.o3Library.remapSolutionIndices(indexMap)
+
+    def __init__(self, modelId, featureSchema, weights, cuCount, g0Library, o3Library):
+        self.modelId = modelId
+        self.featureSchema = featureSchema
+        self.weights = weights
+        self.cuCount = cuCount
+        self.g0Library = g0Library
+        self.o3Library = o3Library
+
+
+class FixedLinearCatalogLibrary:
+    Tag = "FixedLinearCatalog"
+    StateKeys = [("type", "tag"), "table", ("model_id", "modelId"),
+                 ("feature_schema", "featureSchema"), "weights", ("cu_count", "cuCount")]
+
+    @classmethod
+    def FromOriginalState(cls, d, solutions):
+        start, count = d["table"]
+        table = [IndexSolutionLibrary(solutions[i]) for i in range(start, start + count)]
+        return cls(table, d["model_id"], d["feature_schema"], d["weights"], d["cu_count"])
+
+    @property
+    def tag(self):
+        return self.__class__.Tag
+
+    def merge(self, other):
+        raise RuntimeError("FixedLinearCatalogLibrary does not support merging.")
+
+    def remapSolutionIndices(self, indexMap):
+        pass
+
+    def __init__(self, table, modelId, featureSchema, weights, cuCount):
+        self.table = table
+        self.modelId = modelId
+        self.featureSchema = featureSchema
+        self.weights = weights
+        self.cuCount = cuCount
+
+
 class MLPClassificationLibrary:
     Tag = "MLPClassification"
     StateKeys = [("type", "tag"), "table", "mlp", "problemFeatures"]
@@ -486,6 +548,18 @@ class MasterSolutionLibrary:
                 regressionLib = MLPClassificationLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": regressionLib})
+            elif d["LibraryType"] == "FixedLinearArbiter":
+                predicate = Properties.Predicate(tag="PredictionMatching")
+
+                arbiterLib = FixedLinearArbiterLibrary.FromOriginalState(d["Library"], solutions)
+                library = PredicateLibrary(tag="Problem")
+                library.rows.append({"predicate": predicate, "library": arbiterLib})
+            elif d["LibraryType"] == "FixedLinearCatalog":
+                predicate = Properties.Predicate(tag="PredictionMatching")
+
+                linearLib = FixedLinearCatalogLibrary.FromOriginalState(d["Library"], solutions)
+                library = PredicateLibrary(tag="Problem")
+                library.rows.append({"predicate": predicate, "library": linearLib})
             else:
                 assert 0 and "Unrecognized LibraryType."
 

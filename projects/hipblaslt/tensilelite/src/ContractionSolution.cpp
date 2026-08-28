@@ -426,6 +426,8 @@ namespace TensileLite
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Range)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::FreeSize)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Prediction)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::FixedLinearArbiter)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::FixedLinearCatalog)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Experimental)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Others)}};
         return MatchingTag2String;
@@ -4354,9 +4356,39 @@ namespace TensileLite
 
                     TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
 
+                    // Grid-only CU divisor: shrink the CU count the ADAPTIVE GRID
+                    // sees so StreamK streams on big shapes, WITHOUT touching
+                    // Origami's ranking/occupancy model (which still uses the true
+                    // N_CU everywhere else). This path is launch-only; it does not
+                    // feed selection. Env-gated, default 1 = shipped behaviour.
+                    //   ORIGAMI_RDNA_GRID_CU_DIV   integer divisor (>1 to enable)
+                    //   ORIGAMI_RDNA_GRID_DIV_FLOP 0 = flat (all shapes); >0 = only
+                    //                              when 2*M*N*K*batch >= threshold
+                    static const size_t s_gridDiv = []() -> size_t {
+                        const char* e = std::getenv("ORIGAMI_RDNA_GRID_CU_DIV");
+                        long v = e ? std::atol(e) : 1;
+                        return v > 0 ? static_cast<size_t>(v) : 1;
+                    }();
+                    static const double s_gridDivFlop = []() -> double {
+                        const char* e = std::getenv("ORIGAMI_RDNA_GRID_DIV_FLOP");
+                        return e ? std::atof(e) : 0.0;
+                    }();
+                    // Cheap copy (scalars + one tuple); divide N_CU only when the
+                    // divisor applies, else identical to the shipped hardware.
+                    origami::hardware_t gridHw = *(hipAMDGPU->analyticalHardware);
+                    if(s_gridDiv > 1)
+                    {
+                        const double flops = 2.0 * static_cast<double>(x) * static_cast<double>(y)
+                                             * static_cast<double>(z) * static_cast<double>(batch);
+                        if(s_gridDivFlop <= 0.0 || flops >= s_gridDivFlop)
+                        {
+                            gridHw.N_CU = std::max<size_t>(1, gridHw.N_CU / s_gridDiv);
+                        }
+                    }
+
                     skGrid = origami::streamk::select_grid_size(
                         origami_problem,
-                        *(hipAMDGPU->analyticalHardware),
+                        gridHw,
                         origami_config,
                         static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
                 }
