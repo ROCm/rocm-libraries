@@ -176,8 +176,8 @@ _COL_SCATTER_STACKS = frozenset({8, 16})
 def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
     """Return the col_scatter layout for this tile's stack, or None.
 
-    Mutually exclusive with selectTLUSwizzle: the XOR path handles 2x1/4x1, the
-    col_scatter path handles 8x1 (and, once wired, 16x1/32x1).  Guarded to fp4.
+    Mutually exclusive with selectTLUSwizzle: the XOR path handles 2x1/4x1 and
+    the col_scatter path 8x1 and 16x1.  Guarded to fp4.
     """
     try:
         stack = int(tileInfo.subtileShape[0])
