@@ -1140,6 +1140,17 @@ class Solution(collections.abc.Mapping):
           if dtype.isBFloat16() or dtype.isHalf():
             state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
           elif dtype.isFloat4():
+            # Two fp4 elements share a byte, so the free dim being the fastest
+            # one puts its extent in the leading stride: an odd extent leaves
+            # the K stride on a half byte, which the elements-to-bytes shift
+            # truncates.  Every K step then drifts and the whole tile is wrong,
+            # with nothing to signal it.  gfx1250 already constrains this for
+            # fp4 (:3193) and, layout-by-layout, for 6-bit (:3200).
+            # Only the operand whose free dim is contiguous is affected -- the
+            # K-contiguous layouts take their leading stride from K and handle
+            # an odd free dim today, so this must not become unconditional.
+            key = "AssertFree0ElementMultiple" if tc == 'A' else "AssertFree1ElementMultiple"
+            state[key] = max(state[key], 2)
             # Only fp4 here, though the row-major branch below also maps 6-bit
             # onto this geometry: it carries a bpe of 0.5 and names fp4 as the
             # type it supports, and both bank-conflict layouts select on a bpe
