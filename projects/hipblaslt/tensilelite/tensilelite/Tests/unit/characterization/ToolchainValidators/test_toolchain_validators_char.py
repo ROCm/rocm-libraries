@@ -27,21 +27,27 @@ def test_supported_component_matches_basename():
     assert not Validators._supportedComponent("amdclang", ["clang"])
 
 
-def test_current_supported_component_predicates():
-    assert Validators.supportedCxxCompiler("amdclang++")
-    assert Validators.supportedCxxCompiler("clang++")
-    assert not Validators.supportedCxxCompiler("g++")
-    assert Validators.supportedCCompiler("amdclang")
-    assert Validators.supportedCCompiler("clang")
-    assert not Validators.supportedCCompiler("gcc")
-    assert Validators.supportedOffloadBundler("clang-offload-bundler")
-    assert not Validators.supportedOffloadBundler("clang-offload-bundlerx")
-    assert Validators.supportedHip("hipcc")
-    assert Validators.supportedHip("hipconfig")
-    assert not Validators.supportedHip("hipcc.exe")
-    assert Validators.supportedDeviceEnumerator("offload-arch")
-    assert Validators.supportedDeviceEnumerator("amdgpu-arch")
-    assert not Validators.supportedDeviceEnumerator("device-enumerator")
+@pytest.mark.parametrize(
+    "predicate,name,expected",
+    [
+        (Validators.supportedCxxCompiler, "amdclang++", True),
+        (Validators.supportedCxxCompiler, "clang++", True),
+        (Validators.supportedCxxCompiler, "g++", False),
+        (Validators.supportedCCompiler, "amdclang", True),
+        (Validators.supportedCCompiler, "clang", True),
+        (Validators.supportedCCompiler, "gcc", False),
+        (Validators.supportedOffloadBundler, "clang-offload-bundler", True),
+        (Validators.supportedOffloadBundler, "clang-offload-bundlerx", False),
+        (Validators.supportedHip, "hipcc", True),
+        (Validators.supportedHip, "hipconfig", True),
+        (Validators.supportedHip, "hipcc.exe", False),
+        (Validators.supportedDeviceEnumerator, "offload-arch", True),
+        (Validators.supportedDeviceEnumerator, "amdgpu-arch", True),
+        (Validators.supportedDeviceEnumerator, "device-enumerator", False),
+    ],
+)
+def test_current_supported_component_predicates(predicate, name, expected):
+    assert predicate(name) is expected
 
 
 def test_validate_toolchain_resolves_a_relative_component(monkeypatch, tmp_path):
