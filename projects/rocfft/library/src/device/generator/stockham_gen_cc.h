@@ -54,8 +54,8 @@ struct StockhamKernelCC : public StockhamKernel
     //
     // locals
     //
-    Variable tile_index{"tile_index", rtc_kint_type(KIntType::U32)};
-    Variable num_of_tiles{"num_of_tiles", rtc_kint_type(KIntType::U32)};
+    Variable tile_index{"tile_index", "integer_type"};
+    Variable num_of_tiles{"num_of_tiles", "integer_type"};
     Variable in_bound{"in_bound", "bool"};
     Variable thread{"thread", rtc_kint_type(KIntType::U32)}; // replacing tid_ver
     Variable tid_hor{"tid_hor", rtc_kint_type(KIntType::U32)}; // id along row
@@ -193,9 +193,9 @@ struct StockhamKernelCC : public StockhamKernel
     StatementList calculate_offsets() override
     {
         Variable d{"d", rtc_kint_type(KIntType::U32)};
-        Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
-        Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
-        Variable plength{"plength", rtc_kint_type(KIntType::U32)};
+        Variable index_along_d{"index_along_d", "integer_type"};
+        Variable remaining{"remaining", "integer_type"};
+        Variable plength{"plength", "integer_type"};
         Variable global_stride_in{"global_stride_in", "const integer_type"};
         Variable global_stride_out{"global_stride_out", "const integer_type"};
 

@@ -82,9 +82,9 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
     StatementList calculate_offsets() override
     {
         Variable d{"d", rtc_kint_type(KIntType::U32)};
-        Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
-        Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
-        Variable remaining_pp{"remaining_pp", rtc_kint_type(KIntType::U32)};
+        Variable index_along_d{"index_along_d", "integer_type"};
+        Variable remaining{"remaining", "integer_type"};
+        Variable remaining_pp{"remaining_pp", "integer_type"};
 
         StatementList stmts;
         stmts += Declaration{thread};

@@ -662,7 +662,7 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Variable output{"output", "scalar_type", true, true};
     Variable odist{"odist", "integer_type"};
     Variable twiddles{"twiddles", "scalar_type", true, true};
-    Variable lengths{"lengths", rtc_kint_type(KIntType::U32), true, true};
+    Variable lengths{"lengths", "integer_type", true, true};
     Variable inStride{"inStride", "integer_type", true, true};
     Variable outStride{"outStride", "integer_type", true, true};
     Variable gridY{"gridY", "const " + std::string(rtc_kint_type(KIntType::U32))};

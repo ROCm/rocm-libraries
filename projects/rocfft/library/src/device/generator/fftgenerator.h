@@ -245,9 +245,13 @@ struct FFTComputeOffsets
 
     std::shared_ptr<Context> context;
 
-    Variable transform{"transform", rtc_kint_type(KIntType::U32)};
-    Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
-    Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
+    // transform is blockIdx.x scaled by transforms_per_block, so it
+    // outgrows 32 bits while the grid itself is still legal; remaining
+    // and index_along_d are decomposed from it against lengths.  d only
+    // counts dimensions, so it stays narrow.
+    Variable transform{"transform", "integer_type"};
+    Variable remaining{"remaining", "integer_type"};
+    Variable index_along_d{"index_along_d", "integer_type"};
     Variable d{"d", rtc_kint_type(KIntType::U32)};
 
     FFTComputeOffsets() = delete;
@@ -1067,7 +1071,7 @@ struct StockhamTransform
 
     Variable dim{"dim", rtc_kint_type(KIntType::U32)};
     Variable nbatch{"nbatch", "integer_type"};
-    Variable lengths{"lengths", rtc_kint_type(KIntType::U32), true, true};
+    Variable lengths{"lengths", "integer_type", true, true};
     Variable stride{"stride", "integer_type", true, true};
     Variable offset{"offset", "integer_type"};
 
@@ -1167,7 +1171,7 @@ struct BluesteinTransform
 
     Variable dim{"dim", rtc_kint_type(KIntType::U32)};
     Variable nbatch{"nbatch", "integer_type"};
-    Variable lengths{"lengths", rtc_kint_type(KIntType::U32), true, true};
+    Variable lengths{"lengths", "integer_type", true, true};
     Variable stride{"stride", "integer_type", true, true};
     Variable offset{"offset", "integer_type"};
 

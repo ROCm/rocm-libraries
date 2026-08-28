@@ -183,8 +183,8 @@ struct StockhamKernelRC : public StockhamKernel
         StatementList offset_2d;
 
         Variable d{"d", rtc_kint_type(KIntType::U32)};
-        Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
-        Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
+        Variable index_along_d{"index_along_d", "integer_type"};
+        Variable remaining{"remaining", "integer_type"};
 
         // offset_2d += CommentLines{"calculate offset for each tile:",
         //                       "  num_of_tiles_in_plane now means number of tiles along dim1",

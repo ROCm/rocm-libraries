@@ -103,14 +103,13 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     Variable output_var{"output", "scalar_type", true, true};
     Variable twiddles_large_var{"twiddles_large", "const scalar_type", true, true};
     Variable dim_var{"dim", rtc_kint_type(KIntType::U32)};
-    Variable length0_var{"length0", rtc_kint_type(KIntType::U32)};
-    Variable length1_var{"length1", rtc_kint_type(KIntType::U32)};
-    Variable length2_var{"length2", rtc_kint_type(KIntType::U32)};
+    Variable length0_var{"length0", "integer_type"};
+    Variable length1_var{"length1", "integer_type"};
+    Variable length2_var{"length2", "integer_type"};
     Variable gridX{"gridX", "const " + std::string(rtc_kint_type(KIntType::U32))};
     Variable gridY{"gridY", "const " + std::string(rtc_kint_type(KIntType::U32))};
     Variable gridZ{"gridZ", "const " + std::string(rtc_kint_type(KIntType::U32))};
-    Variable lengths_var{
-        "lengths", "const " + std::string(rtc_kint_type(KIntType::U32)), true, true};
+    Variable lengths_var{"lengths", "const integer_type", true, true};
     Variable stride_in0_var{"stride_in0", "integer_type"};
     Variable stride_in1_var{"stride_in1", "integer_type"};
     Variable stride_in2_var{"stride_in2", "integer_type"};

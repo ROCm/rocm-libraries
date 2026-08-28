@@ -239,11 +239,11 @@ struct StockhamKernelFused2D : public StockhamKernelRR
                              "  (1 2d slab per thread block)"};
 
         Variable d{"d", rtc_kint_type(KIntType::U32)};
-        Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
-        Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
-        Variable plength{"plength", rtc_kint_type(KIntType::U32)};
+        Variable index_along_d{"index_along_d", "integer_type"};
+        Variable remaining{"remaining", "integer_type"};
+        Variable plength{"plength", "integer_type"};
 
-        Variable batch0{"batch0", rtc_kint_type(KIntType::U32)};
+        Variable batch0{"batch0", "integer_type"};
 
         Variable SB_1ST{"SB_1ST", "const StrideBin"};
         Variable SB_2ND{"SB_2ND", "const StrideBin"};

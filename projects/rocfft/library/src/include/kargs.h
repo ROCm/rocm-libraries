@@ -37,12 +37,17 @@
 // the last stride in each stride array, i.e. stride_in[dim] is the
 // batch stride.
 //
-// Lengths are always 32-bit, since kernels only ever index and divide
-// by them.  Strides and dists are as wide as the kint_type of the
-// kernel that reads the buffer, so the layout - and therefore the
-// offset of each array - depends on the KIntType this was created
-// with.  The kernel's kint_type must be decided the same way, or it
-// will read the arrays at the wrong width.
+// All three arrays are as wide as the kint_type of the kernel that
+// reads the buffer, so the layout - and therefore the offset of each
+// array - depends on the KIntType this was created with.  The kernel's
+// kint_type must be decided the same way, or it will read the arrays
+// at the wrong width.
+//
+// Lengths ride on the same width as the strides rather than getting a
+// width of their own: a length above 2^32 makes compute_ptrdiff exceed
+// 2^32 for any stride >= 1, so such a node already resolves to U64 via
+// MaxKernelIndex.  One width therefore covers both, and kernel names
+// need no suffix beyond the existing i32/i64.
 class KernelArgsBuffer
 {
 public:
@@ -69,9 +74,9 @@ public:
     }
 
 private:
-    static size_t lengths_bytes()
+    size_t lengths_bytes() const
     {
-        return KERN_ARGS_ARRAY_WIDTH * sizeof(unsigned int);
+        return KERN_ARGS_ARRAY_WIDTH * rtc_kint_type_size(itype);
     }
 
     size_t strides_bytes() const

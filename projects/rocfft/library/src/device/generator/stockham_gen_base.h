@@ -120,7 +120,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable dim{"dim", "const " + std::string(rtc_kint_type(KIntType::U32))};
 
     // transform lengths
-    Variable lengths{"lengths", "const " + std::string(rtc_kint_type(KIntType::U32)), true, true};
+    Variable lengths{"lengths", "const integer_type", true, true};
 
     // input/output array strides
     Variable stride{"stride", "const integer_type", true, true};

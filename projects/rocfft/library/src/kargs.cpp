@@ -25,6 +25,7 @@
 #include <cassert>
 #include <limits>
 #include <stdexcept>
+#include <string>
 
 // malloc device buffer; copy host buffer to device buffer
 bool KernelArgsBuffer::create(const std::vector<size_t>& length,
@@ -51,33 +52,29 @@ bool KernelArgsBuffer::create(const std::vector<size_t>& length,
 
     std::vector<char> host(total_bytes, 0);
 
-    auto lengths_host = reinterpret_cast<unsigned int*>(host.data());
+    auto store = [&](char* array, size_t i, size_t value, const char* what) {
+        if(itype == KIntType::U32)
+        {
+            if(value > std::numeric_limits<unsigned int>::max())
+                throw std::runtime_error(std::string(what)
+                                         + " overflows 32-bit kernel kint_type");
+            reinterpret_cast<unsigned int*>(array)[i] = static_cast<unsigned int>(value);
+        }
+        else
+            reinterpret_cast<unsigned long long*>(array)[i] = value;
+    };
+
     for(size_t i = 0; i < length.size(); ++i)
-    {
-        if(length[i] > std::numeric_limits<unsigned int>::max())
-            throw std::runtime_error("length overflows 32-bit kernel length");
-        lengths_host[i] = static_cast<unsigned int>(length[i]);
-    }
+        store(host.data(), i, length[i], "length");
 
     // NB: iDist is right after the last inStride[dim-1], i.e. inStride[dim] = batch-in-stride
     //     oDist is right after the last outStride[dim-1], i.e. outStride[dim] = batch-out-stride
     auto pack_strides = [&](size_t array_idx, const std::vector<size_t>& stride, size_t dist) {
         char* array = host.data() + lengths_bytes() + array_idx * strides_bytes();
 
-        auto store = [&](size_t i, size_t value) {
-            if(itype == KIntType::U32)
-            {
-                if(value > std::numeric_limits<unsigned int>::max())
-                    throw std::runtime_error("stride overflows 32-bit kernel kint_type");
-                reinterpret_cast<unsigned int*>(array)[i] = static_cast<unsigned int>(value);
-            }
-            else
-                reinterpret_cast<unsigned long long*>(array)[i] = value;
-        };
-
         for(size_t i = 0; i < stride.size(); ++i)
-            store(i, stride[i]);
-        store(stride.size(), dist);
+            store(array, i, stride[i], "stride");
+        store(array, stride.size(), dist, "dist");
     };
 
     pack_strides(0, inStride, iDist);

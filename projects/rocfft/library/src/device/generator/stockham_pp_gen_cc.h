@@ -191,9 +191,9 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
     StatementList calculate_offsets() override
     {
         Variable d{"d", std::string(rtc_kint_type(KIntType::U32))};
-        Variable index_along_d{"index_along_d", rtc_kint_type(KIntType::U32)};
-        Variable remaining{"remaining", rtc_kint_type(KIntType::U32)};
-        Variable plength{"plength", std::string(rtc_kint_type(KIntType::U32))};
+        Variable index_along_d{"index_along_d", "integer_type"};
+        Variable remaining{"remaining", "integer_type"};
+        Variable plength{"plength", "integer_type"};
 
         StatementList stmts;
         stmts += Declaration{tile_index};

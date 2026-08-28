@@ -142,9 +142,9 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
 
     auto num_lengths = data.node->length.size();
     kargs.append_kint(num_lengths, KIntType::U32);
-    kargs.append_kint(data.node->length[0], KIntType::U32);
-    kargs.append_kint(data.node->length[1], KIntType::U32);
-    kargs.append_kint(num_lengths > 2 ? data.node->length[2] : 1, KIntType::U32);
+    kargs.append_kint(data.node->length[0]);
+    kargs.append_kint(data.node->length[1]);
+    kargs.append_kint(num_lengths > 2 ? data.node->length[2] : 1);
     kargs.append_ptr(data.node->devKernArg.lengths());
 
     kargs.append_kint(data.node->inStride[0]);
