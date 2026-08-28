@@ -370,7 +370,7 @@ class RuntimeGemmFinalizer {
 };
 
 template <typename Accumulator>
-GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
+GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem, Tensor* selectedOutput = nullptr) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
@@ -386,6 +386,9 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem, quantizeAccumulator);
     const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
                                                         problem.epilogue.outputConversion);
+    std::optional<RuntimeMatrixOutputWriter<Accumulator>> selectedOutputWriter;
+    if (selectedOutput != nullptr)
+        selectedOutputWriter.emplace(*selectedOutput, problem.epilogue.outputConversion);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
 
@@ -406,7 +409,7 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
     const size_t k = problem.a.values.shape()[1];
     const size_t n = problem.b.values.shape()[1];
 
-    auto computeOutput = [&](size_t row, size_t column) {
+    auto computeOutput = [&](size_t row, size_t column, size_t selectedIndex) {
         Accumulator sum = Accumulator(0);
 
         if (!finalizer.alphaIsZero() && (blockScaleA || blockScaleB)) {
@@ -483,7 +486,11 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
             }
         }
 
-        output.store(row, column, finalizer.finalize(row, column, sum));
+        const Accumulator value = finalizer.finalize(row, column, sum);
+        if (selectedOutputWriter)
+            selectedOutputWriter->store(0, selectedIndex, value);
+        else
+            output.store(row, column, value);
     };
 
     const size_t logicalElements = problem.d.shape().elementCount();
@@ -494,7 +501,7 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
         outputElementsWritten = logicalElements;
         forEachParallelIndex(logicalElements, saturatedProduct(logicalElements, reductionWork),
                              parallelOutput, 500'000, [&](size_t logicalIndex) {
-                                 computeOutput(logicalIndex / n, logicalIndex % n);
+                                 computeOutput(logicalIndex / n, logicalIndex % n, logicalIndex);
                              });
     } else {
         const auto selected = problem.outputSelection.indices(logicalElements);
@@ -505,7 +512,7 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
                                  const size_t logicalIndex = selected[selectionIndex];
                                  const auto coordinates = outputShape.coordinates(
                                      logicalIndex, problem.outputSelection.indexOrder());
-                                 computeOutput(coordinates[0], coordinates[1]);
+                                 computeOutput(coordinates[0], coordinates[1], selectionIndex);
                              });
     }
 
@@ -531,6 +538,34 @@ inline GemmRunInfo runPointwiseGemm(const GemmRequest& problem) {
             return runPointwiseGemmTyped<std::complex<float>>(problem);
         case ScalarType::ComplexFloat64:
             return runPointwiseGemmTyped<std::complex<double>>(problem);
+        default:
+            throw std::invalid_argument("Unsupported runtime reference GEMM accumulator type.");
+    }
+}
+
+inline GemmRunInfo runPointwiseGemmToSelectedOutput(const GemmRequest& problem,
+                                                    Tensor& selectedOutput) {
+    if (problem.outputSelection.selectsAll())
+        throw std::invalid_argument("Streaming pointwise GEMM requires a partial selection.");
+    const size_t selectedCount =
+        problem.outputSelection.selectedCount(problem.d.shape().elementCount());
+    if (selectedOutput.type() != problem.outputType ||
+        selectedOutput.shape() != Shape{1, selectedCount})
+        throw std::invalid_argument("Streaming pointwise GEMM output shape or type mismatch.");
+
+    switch (problem.accumulatorType) {
+        case ScalarType::Float16:
+        case ScalarType::BFloat16:
+        case ScalarType::Float32:
+            return runPointwiseGemmTyped<float>(problem, &selectedOutput);
+        case ScalarType::Float64:
+            return runPointwiseGemmTyped<double>(problem, &selectedOutput);
+        case ScalarType::Int32:
+            return runPointwiseGemmTyped<int32_t>(problem, &selectedOutput);
+        case ScalarType::ComplexFloat32:
+            return runPointwiseGemmTyped<std::complex<float>>(problem, &selectedOutput);
+        case ScalarType::ComplexFloat64:
+            return runPointwiseGemmTyped<std::complex<double>>(problem, &selectedOutput);
         default:
             throw std::invalid_argument("Unsupported runtime reference GEMM accumulator type.");
     }
