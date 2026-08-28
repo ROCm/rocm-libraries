@@ -53,10 +53,10 @@ class TestConvFwdDispatch(unittest.TestCase):
         with self.assertRaises(ValueError):
             dispatch_conv_grouped(_fwd("gfx950", dtype="fp8"))
 
-    def test_gfx1250_wgrad_not_supported(self):
-        # gfx1250 has a fwd candidate but no wgrad candidate yet.
-        with self.assertRaises((ValueError, RuntimeError)):
-            dispatch_conv_grouped(_fwd("gfx1250", direction="wgrad"))
+    def test_gfx1250_wgrad_dispatches(self):
+        # gfx1250 wgrad candidate added alongside fwd.
+        r = dispatch_conv_grouped(_fwd("gfx1250", direction="wgrad"))
+        self.assertIsNotNone(r.candidate)
 
     # ---- gfx950 selection --------------------------------------------------
 

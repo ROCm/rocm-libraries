@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Grouped convolution dispatcher (forward + backward-weight).
+"""Grouped convolution dispatcher (forward, backward-weight).
 
 Covers ``implicit_gemm_conv`` (forward NHWC × KYXC → NHWK) and
 ``implicit_gemm_conv_wgrad`` (dY × X → dW weight gradient), sharing a single
@@ -399,6 +399,20 @@ def _epilogue_for(req: ConvGroupedRequest) -> str:
     return "cshuffle" if _vec_size_c(req) > 1 else "default"
 
 
+def _wgrad_grouped_overrides(req: ConvGroupedRequest) -> Tuple[str, int]:
+    """(epilogue, split_k) for a wgrad spec.
+
+    Grouping is orthogonal to the epilogue and split-K: every epilogue (direct,
+    cshuffle, and the split-K atomic path) threads the per-group fold
+    ``k_out += group*kpg`` into the dW store, and when split_k>1 the group rides
+    block_id_z alongside the K-slice (z = groups*split_k).  So grouped uses the
+    same vec-derived epilogue and auto split-K formula (split_k=-1) as ungrouped.
+    (WMMA grouped is handled by its own candidate, which forces
+    default@split_k=1 -- WMMA has neither a cshuffle nor a split-K path.)
+    """
+    return _epilogue_for(req), -1
+
+
 def _data_spec(req: ConvGroupedRequest) -> ConvDataSpec:
     return ConvDataSpec(
         dtype_a=req.dtype.lower(),
@@ -497,15 +511,24 @@ class ConvGroupedSpec:
 
         target = ArchTarget.from_gfx(self.arch)
         p = problem
-        resolved_split_k = select_split_k_wgrad(
-            wg_M=p.K,
-            wg_N=(p.Z if p.is_3d else 1) * p.Y * p.X * p.C,
-            wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
-            tile_m=self.tile_m,
-            tile_n=self.tile_n,
-            tile_k=self.tile_k,
-            arch=self.arch,
-        ).split_k
+        # Honor a concrete split-K fixed by the candidate (WMMA forces 1 -- it
+        # has no split-K path); otherwise auto-resolve via the CK formula on the
+        # per-group GEMM dims (== full dims when groups==1).  Grouped rides the
+        # group on block_id_z alongside the K-slice (z = groups*split_k), so
+        # grouped split-K is valid on MFMA.
+        if self.split_k != -1:
+            resolved_split_k = self.split_k
+        else:
+            spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
+            resolved_split_k = select_split_k_wgrad(
+                wg_M=p.K // p.groups,
+                wg_N=spatial * (p.C // p.groups),
+                wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
+                tile_m=self.tile_m,
+                tile_n=self.tile_n,
+                tile_k=self.tile_k,
+                arch=self.arch,
+            ).split_k
         return WgradConvSpec(
             problem=problem,
             name=self.name,
@@ -546,8 +569,13 @@ def _fwd_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, in
 def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, int]:
     assert isinstance(req, ConvGroupedRequest)
     p = _problem(req)
-    wg_M = p.K  # output channels
-    wg_N = (p.Z if p.is_3d else 1) * p.Y * p.X * p.C  # filter spatial × input channel
+    spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
+    # Per-group GEMM dims. For the ungrouped path G==1 these reduce to wg_M=K,
+    # wg_N=spatial*C.
+    kpg = p.K // p.groups
+    cpg = p.C // p.groups
+    wg_M = kpg  # per-group output channels
+    wg_N = spatial * cpg  # per-group filter spatial × input channel
     wg_K = p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1)  # output spatial positions
     gx = (wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (wg_M + spec.tile_m - 1) // spec.tile_m
@@ -565,7 +593,10 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
         ).split_k
     else:
         split_k = spec.split_k
-    return (gx, gy, split_k)
+    # The group index rides on block_id_z alongside the K-slice: z = groups*
+    # split_k, decoded in-kernel as group = z // split_k, slice = z % split_k.
+    # For G==1 this reduces to (gx, gy, split_k); for split_k==1 to (gx, gy, groups).
+    return (gx, gy, p.groups * split_k)
 
 
 def _block(spec: ConvGroupedSpec) -> Tuple[int, int, int]:
@@ -920,6 +951,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
 
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        _ep, _sk = _wgrad_grouped_overrides(req)
         return WgradConvSpec(
             problem=_problem(req),
             name=name,
@@ -934,8 +966,8 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             warp_tile_k=wtk,
             wave_size=ArchTarget.from_gfx(req.arch).wave_size,
             pipeline=_PIPELINE,
-            epilogue=_epilogue_for(req),
-            split_k=-1,
+            epilogue=_ep,
+            split_k=_sk,
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -961,6 +993,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, ConvGroupedRequest)
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        _ep, _sk = _wgrad_grouped_overrides(req)
         return ConvGroupedSpec(
             direction="wgrad",
             tile_m=tm,
@@ -971,10 +1004,10 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             warp_tile_mn=wtmn,
             warp_tile_k=wtk,
             pipeline=_PIPELINE,
-            epilogue=_epilogue_for(req),
+            epilogue=_ep,
             dtype=req.dtype.lower(),
             arch=req.arch,
-            split_k=-1,
+            split_k=_sk,
             name=name,
         )
 
@@ -1010,7 +1043,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
 
     Epilogue derived from vec_size_c (cshuffle when >1, default otherwise).
     Split-K forwarded from request (1=disabled, -1=auto CK formula, >1=fixed).
-    gfx1250 wgrad is not yet supported.
+    gfx1250 wgrad is handled by ``_make_gfx1250_wgrad_candidate`` (WMMA 16x16x32).
     """
     name = "implicit_gemm_conv_wgrad"
     spec_id = "igemm_conv_wgrad_64x64"
@@ -1029,6 +1062,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
 
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        _ep, _sk = _wgrad_grouped_overrides(req)
         return WgradConvSpec(
             problem=_problem(req),
             name=name,
@@ -1043,8 +1077,8 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             warp_tile_k=wtk,
             wave_size=ArchTarget.from_gfx(req.arch).wave_size,
             pipeline=_PIPELINE,
-            epilogue=_epilogue_for(req),
-            split_k=-1,
+            epilogue=_ep,
+            split_k=_sk,
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -1054,6 +1088,113 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
         assert isinstance(req, ConvGroupedRequest)
         if not _is_gfx950(req):
             return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
+        if req.direction != "wgrad":
+            return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
+        ok, why = _selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        ok, why = _wgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
+        if not ok:
+            return False, why
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> ConvGroupedSpec:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, ConvGroupedRequest)
+        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        _ep, _sk = _wgrad_grouped_overrides(req)
+        return ConvGroupedSpec(
+            direction="wgrad",
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            warp_m=wm,
+            warp_n=wn,
+            warp_tile_mn=wtmn,
+            warp_tile_k=wtk,
+            pipeline=_PIPELINE,
+            epilogue=_ep,
+            dtype=req.dtype.lower(),
+            arch=req.arch,
+            split_k=_sk,
+            name=name,
+        )
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY_WGRAD,
+        algorithm=algorithm,
+        spec_id=spec_id,
+        abi_version=CONV_GROUPED_ABI_VERSION,
+        priority=10,
+        capability=Capability(
+            arches=("gfx950",),
+            dtypes=("fp16", "bf16"),
+            layouts=("NHWC",),
+        ),
+        _supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=_wgrad_grid,
+        block=_block,
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+    )
+    return candidate
+
+
+def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
+    """Backward-weight conv for gfx1250: 32x32x32, 2x2, 16x16x32 WMMA (wave32).
+
+    gfx1250's only fp16/bf16 atom is 16x16x32 (there is no 16x16x16). WMMA wgrad
+    requires split_k=1 and the direct-store ('default') epilogue, so both are
+    forced here regardless of the request. Grouped Gm=1 is supported (the kernel
+    is validated dual-engine by test_gfx1250_grouped_wgrad_dual_engine); group
+    merging (Gm>1) is MFMA-only and is rejected by is_valid_wgrad_spec.
+    """
+    name = "implicit_gemm_conv_wgrad_gfx1250"
+    spec_id = "igemm_conv_wgrad_gfx1250_32x32"
+    algorithm = "implicit_gemm_wgrad_gfx1250"
+
+    def _tile(req: ConvGroupedRequest):
+        return (
+            _GFX1250_TILE_M,
+            _GFX1250_TILE_N,
+            _GFX1250_TILE_K,
+            _GFX1250_WARP_M,
+            _GFX1250_WARP_N,
+            _GFX1250_WARP_TILE_MN,
+            _GFX1250_WARP_TILE_K,
+        )
+
+    def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
+        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        return WgradConvSpec(
+            problem=_problem(req),
+            name=name,
+            data=_data_spec(req),
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            warp_m=wm,
+            warp_n=wn,
+            warp_tile_m=wtmn,
+            warp_tile_n=wtmn,
+            warp_tile_k=wtk,
+            wave_size=32,
+            pipeline=_PIPELINE,
+            epilogue="default",
+            split_k=1,
+        )
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, ConvGroupedRequest)
+        if not _is_gfx1250(req):
+            return False, f"gfx1250 candidate requires arch=gfx1250 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
         ok, why = _selector_matches(req, candidate)
@@ -1080,10 +1221,10 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             warp_tile_mn=wtmn,
             warp_tile_k=wtk,
             pipeline=_PIPELINE,
-            epilogue=_epilogue_for(req),
+            epilogue="default",
             dtype=req.dtype.lower(),
             arch=req.arch,
-            split_k=-1,
+            split_k=1,
             name=name,
         )
 
@@ -1095,7 +1236,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
         abi_version=CONV_GROUPED_ABI_VERSION,
         priority=10,
         capability=Capability(
-            arches=("gfx950",),
+            arches=("gfx1250",),
             dtypes=("fp16", "bf16"),
             layouts=("NHWC",),
         ),
@@ -1149,6 +1290,7 @@ CONV_WGRAD_REGISTRY = CandidateRegistry(
 )
 CONV_WGRAD_REGISTRY.register(_make_gfx942_wgrad_candidate())
 CONV_WGRAD_REGISTRY.register(_make_gfx950_wgrad_candidate())
+CONV_WGRAD_REGISTRY.register(_make_gfx1250_wgrad_candidate())
 
 
 def _registry_for(req: ConvGroupedRequest) -> CandidateRegistry:

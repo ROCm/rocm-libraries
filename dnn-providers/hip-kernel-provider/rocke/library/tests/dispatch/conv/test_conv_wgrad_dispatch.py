@@ -53,10 +53,10 @@ class TestConvWgradDispatch(unittest.TestCase):
         with self.assertRaises(ValueError):
             dispatch_conv_grouped(_wgrad("gfx950", dtype="fp8"))
 
-    def test_gfx1250_wgrad_not_supported(self):
-        # gfx1250 has no wgrad candidate; must raise.
-        with self.assertRaises((ValueError, RuntimeError)):
-            dispatch_conv_grouped(_wgrad("gfx1250"))
+    def test_gfx1250_wgrad_dispatches(self):
+        # gfx1250 wgrad candidate added in the parallel migration.
+        r = dispatch_conv_grouped(_wgrad("gfx1250"))
+        self.assertIsNotNone(r.candidate)
 
     # ---- gfx950 selection --------------------------------------------------
 

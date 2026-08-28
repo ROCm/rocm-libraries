@@ -54,6 +54,7 @@ void AsmPrinter::printRegister(const StinkyRegister& reg) {
             //         os << prefix << "[" << reg.getSymbolicName() << ":" << reg.getSymbolicName()
             //            << "+" << (reg.reg.num - 1) << "]";
             // }
+            if (reg.reg.isMinus) os << "-";
             if (reg.reg.num == 1)
                 os << prefix << reg.reg.idx;
             else
