@@ -117,7 +117,7 @@ spending time there.
 | NN's grid/table is mis-mapped | current catalog delivers median **98.7%** of its own pool's best | **not the problem** — re-mapping buys ~1.3% |
 | NN lacks large tiles; port a richer pool | best transplanted kernel **0.67-0.72x** vs navi32's own stock | **fails** |
 | Generate a tuned `128x96` | **0.99x** on the one shape that selects it (pinned, ~1.4% resolution) | **fails** |
-| **The `96x96` NN already owns is under-tuned** | **1.16x and 1.39x** on the two large shapes where shipped and a freshly tuned library *both* dispatch `96x96` | **this is the lever** |
+| **The `96x96` NN already owns is under-tuned** | **geomean +19.7%** (n=5, range +13.6% to +39.1%, every shape positive) on shapes where shipped and a freshly tuned library *both* dispatch `96x96` | **this is the lever** |
 
 **So the NN campaign is a re-tune of an existing tile, not a geometry hunt.** The last row is the
 only NN result measured at a resolution finer than the effect (DPM pinned — see
