@@ -13,7 +13,6 @@ GlobalParameters:
   EnqueuesPerSync: 1
   SyncsPerBenchmark: 0
   NumElementsToValidate: 128
-  Platform: 0
   Device: 0
   KernelTime: True
   SleepPercent: 0
