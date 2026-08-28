@@ -37,6 +37,10 @@ Documentation for hipFFT is available at
   optimize the combined code.  Instead, users should specify JIT callbacks with `hipfftXtSetJITCallback` before
   initializing the plan.
 
+### Resolved issues
+
+* Fixed a hang when creating a plan with a zero length or zero batch. These now return `HIPFFT_INVALID_SIZE`.
+
 ## hipFFT 1.0.25 for ROCm 10.0
 
 ### Changed
