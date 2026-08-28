@@ -167,6 +167,7 @@ def getRequiredParametersMin() -> set:
         'DtlPlusLdsBuf',
         'TDMPlusLdsBuf',
         'MinGRIncPerMfma',
+        'PreloopGRClusterSize',
         'UsePLRPack',
         'UseSubtileImpl',
         'ClusterDim',

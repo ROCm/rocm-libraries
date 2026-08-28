@@ -1434,6 +1434,9 @@ def test_128x128_fp4_pgr1():
     )
 
 
+# Updated for Change 1: MT1 GRs moved before WaitGR (inside fast-path, before PreloopEnd).
+# Old order: initC → wait_gr(0) → sync → LR → skip(NLL) → MT1 GRs → skip(NGLL)
+# New order: initC → MT1 GRs     → wait_gr(num_gr_total) → sync → LR → skip(NLL) → skip(NGLL)
 EXPECTED_PRELOOP_256x256_FP4_1x1 = """\
 MAINLOOP:
   Partition 0:
@@ -1447,17 +1450,17 @@ MAINLOOP:
       [ 6] gr_inc     gr_inc(SA)
       [ 7] gr_inc     gr_inc(SB)
       [ 8] inline     inline(initC_overlap)
-      [ 9] wait_gr    wait_gr(0)
-      [10] sync       sync
-      [11] lr         LR A  (MT n, subIterK [0]) [0-7]
-      [12] lr         LR B  (MT n, subIterK [0]) [0-7]
-      [13] lr         LR SA (MT n, subIterK [0,1]) [0-7]
-      [14] lr         LR SB (MT n, subIterK [0,1]) [0-7]
-      [15] skip       skip(LE:1:NLL)
-      [16] gr         GR A (MT n+1, subIterK [0,1]) ids [0-7]
-      [17] gr         GR B (MT n+1, subIterK [0,1]) ids [0-7]
-      [18] gr         GR SA (MT n+1, subIterK [0,1]) ids [0-7]
-      [19] gr         GR SB (MT n+1, subIterK [0,1]) ids [0-7]
+      [ 9] gr         GR A (MT n+1, subIterK [0,1]) ids [0-7]
+      [10] gr         GR B (MT n+1, subIterK [0,1]) ids [0-7]
+      [11] gr         GR SA (MT n+1, subIterK [0,1]) ids [0-7]
+      [12] gr         GR SB (MT n+1, subIterK [0,1]) ids [0-7]
+      [13] wait_gr    wait_gr(num_gr_total)
+      [14] sync       sync
+      [15] lr         LR A  (MT n, subIterK [0]) [0-7]
+      [16] lr         LR B  (MT n, subIterK [0]) [0-7]
+      [17] lr         LR SA (MT n, subIterK [0,1]) [0-7]
+      [18] lr         LR SB (MT n, subIterK [0,1]) [0-7]
+      [19] skip       skip(LE:1:NLL)
       [20] skip       skip(LE:2:NGLL)
 """
 
@@ -1510,6 +1513,7 @@ def test_256x256_fp4_preloop_pgr1_1x1():
     )
 
 
+# Updated for Change 1: MT1 GRs moved before WaitGR (fast-path, before PreloopEnd).
 EXPECTED_PRELOOP_320x320_BF16_1x5_OFFSET1 = """\
 MAINLOOP:
   Partition 0:
@@ -1519,13 +1523,13 @@ MAINLOOP:
       [ 2] gr_inc     gr_inc(A)
       [ 3] gr_inc     gr_inc(B)
       [ 4] inline     inline(initC_overlap)
-      [ 5] wait_gr    wait_gr(0)
-      [ 6] sync       sync
-      [ 7] lr         LR A  (MT n, subIterK [0]) [0-9]
-      [ 8] lr         LR B  (MT n, subIterK [0]) [0-1]
-      [ 9] skip       skip(LE:1:NLL)
-      [10] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
-      [11] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
+      [ 5] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
+      [ 6] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
+      [ 7] wait_gr    wait_gr(mt1_gr_placements(A=1 B=1 SA=0 SB=0))
+      [ 8] sync       sync
+      [ 9] lr         LR A  (MT n, subIterK [0]) [0-9]
+      [10] lr         LR B  (MT n, subIterK [0]) [0-1]
+      [11] skip       skip(LE:1:NLL)
       [12] skip       skip(LE:2:NGLL)
 """
 
@@ -1538,17 +1542,17 @@ MAINLOOP:
       [ 2] gr_inc     gr_inc(A)
       [ 3] gr_inc     gr_inc(B)
       [ 4] inline     inline(initC_overlap)
-      [ 5] wait_gr    wait_gr(0)
-      [ 6] sync       sync
-      [ 7] lr         LR A  (MT n, subIterK [0]) [0-9]
-      [ 8] lr         LR B  (MT n, subIterK [0]) [0-1]
-      [ 9] skip       skip(LE:1:NLL)
-      [10] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
-      [11] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
-      [12] gr         GR B (MT n+1, subIterK [0,1]) ids [2-3]
-      [13] gr         GR B (MT n+1, subIterK [0,1]) ids [4-5]
-      [14] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7]
-      [15] gr         GR B (MT n+1, subIterK [0,1]) ids [8-9]
+      [ 5] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
+      [ 6] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
+      [ 7] gr         GR B (MT n+1, subIterK [0,1]) ids [2-3]
+      [ 8] gr         GR B (MT n+1, subIterK [0,1]) ids [4-5]
+      [ 9] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7]
+      [10] gr         GR B (MT n+1, subIterK [0,1]) ids [8-9]
+      [11] wait_gr    wait_gr(mt1_gr_placements(A=1 B=5 SA=0 SB=0))
+      [12] sync       sync
+      [13] lr         LR A  (MT n, subIterK [0]) [0-9]
+      [14] lr         LR B  (MT n, subIterK [0]) [0-1]
+      [15] skip       skip(LE:1:NLL)
       [16] skip       skip(LE:2:NGLL)
 """
 

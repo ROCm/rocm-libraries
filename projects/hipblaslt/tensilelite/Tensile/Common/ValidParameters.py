@@ -501,6 +501,9 @@ validParameters = { # we need to make sure this matches develop
     # For mid/small MT size case, we have chance to improve Global Read scheduling by putting more GRInc instructions
     # regardless of miLatencyLeft (overhead of GR inst is often more than the latency of GR inc inst)
     "MinGRIncPerMfma": [-1] + list(range(1,10)),
+    # Cluster size for the fused preloop GR interleaving (UseSubtileImpl + PGR=2).
+    # -1 = off (default). N > 0 = emit N buffer_loads per cluster with SRD/LRA/MFMA filler.
+    "PreloopGRClusterSize": [-1] + list(range(1, 17)),
     # Interleave alpha scale calculation with beta loads and address calcs - rather
     # than as a separate block of instructions
     "InterleaveAlpha": [0, 1],
