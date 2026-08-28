@@ -202,6 +202,95 @@ static void build_wait_counters(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+static void build_standalone_controls(rocke_ir_builder_t* b)
+{
+    const int shape[] = {1};
+    rocke_value_t* barrier = rocke_b_smem_alloc(b, rocke_i64(), shape, 1, "named_barrier");
+    rocke_value_t* barrier_ptr = rocke_b_smem_addr_of(b, barrier);
+    rocke_value_t* members = rocke_b_const_i32(b, 2);
+    rocke_b_s_wait_tensorcnt(b, 3);
+    rocke_b_s_barrier_signal(b, 1);
+    rocke_b_s_barrier_wait(b, 1);
+    rocke_b_s_barrier_init(b, barrier_ptr, members);
+    rocke_b_s_barrier_signal_var(b, barrier_ptr, members);
+    rocke_b_s_barrier_join(b, barrier_ptr);
+    rocke_b_s_wakeup_barrier(b, barrier_ptr);
+    rocke_b_s_barrier_leave(b, 1);
+    rocke_b_s_delay_alu(b, 0x1234);
+    rocke_b_s_wait_alu(b, 0x2345);
+    rocke_b_s_clause(b, 0x3456);
+    rocke_b_s_wait_xcnt(b, 0x4567);
+    rocke_b_ret(b);
+}
+
+static void build_async_store(rocke_ir_builder_t* b)
+{
+    const int shape[] = {4};
+    rocke_param_opts_t o;
+    memset(&o, 0, sizeof(o));
+    o.noalias = true;
+    o.noalias_set = true;
+    o.align = 16;
+    o.align_set = true;
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, rocke_i32(), "global"), &o);
+    rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "store_src");
+    rocke_value_t* lds_ptr = rocke_b_smem_addr_of(b, smem);
+    const int widths[] = {1, 4, 8, 16};
+    for(int i = 0; i < 4; ++i)
+        rocke_b_global_store_async_from_lds(
+            b, out, lds_ptr, widths[i], widths[i], /*cachepolicy=*/3);
+    rocke_b_ret(b);
+}
+
+static void global_tr16(rocke_ir_builder_t* b, const rocke_type_t* elem)
+{
+    rocke_param_opts_t src_o;
+    rocke_param_opts_t out_o;
+    memset(&src_o, 0, sizeof(src_o));
+    memset(&out_o, 0, sizeof(out_o));
+    src_o.noalias = true;
+    src_o.noalias_set = true;
+    src_o.readonly = true;
+    src_o.readonly_set = true;
+    src_o.align = 16;
+    src_o.align_set = true;
+    out_o.noalias = true;
+    out_o.noalias_set = true;
+    out_o.align = 16;
+    out_o.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, elem, "global"), &src_o);
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, elem, "global"), &out_o);
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* value = rocke_b_global_load_tr16_b128(b, src, elem);
+    rocke_b_global_store(b, out, zero, value, /*align=*/1);
+    rocke_b_ret(b);
+}
+
+static void build_global_tr16_f16(rocke_ir_builder_t* b)
+{
+    global_tr16(b, rocke_f16());
+}
+
+static void build_global_tr16_bf16(rocke_ir_builder_t* b)
+{
+    global_tr16(b, rocke_bf16());
+}
+
+static void build_global_tr16_i16(rocke_ir_builder_t* b)
+{
+    global_tr16(b, rocke_i16());
+}
+
+static void build_tensor_transfers(rocke_ir_builder_t* b)
+{
+    rocke_value_t* d4 = rocke_b_zero_vec(b, rocke_i32(), 4);
+    rocke_value_t* d8 = rocke_b_zero_vec(b, rocke_i32(), 8);
+    rocke_b_tensor_load_to_lds(b, d4, d8, d4, d4, d8, 5);
+    rocke_b_tensor_store_from_lds(b, d4, d8, d4, d4, d8, 5);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -228,6 +317,12 @@ static const config_t CONFIGS[] = {
     {build_barrier_drains, "gfx950"},
     {build_wait_counters, "gfx1250"},
     {build_wait_counters, "gfx950"},
+    {build_standalone_controls, "gfx1250"},
+    {build_async_store, "gfx1250"},
+    {build_global_tr16_f16, "gfx1250"},
+    {build_global_tr16_bf16, "gfx1250"},
+    {build_global_tr16_i16, "gfx1250"},
+    {build_tensor_transfers, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
