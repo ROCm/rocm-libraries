@@ -649,7 +649,7 @@ void testing_matmul_with_bias(const Arguments&                                  
 
     // These two vectors store the float values of MX data. Host numerics
     // generates MX data and returns the corresponding float values. The float
-    // values can be directly used for CPU verification (hipblaslt_reference_gemm) instead
+    // values can be directly used for CPU reference GEMM instead
     // of converting the MX data to float again.
     std::vector<std::vector<float>> refA, refB;
 
