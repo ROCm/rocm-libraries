@@ -89,7 +89,10 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         # dense_pipe is the ring-sliced K path; sliding-window is not implemented
         # for it (D128 SW prefill goes through the non-ring flash path).
         if problem.sliding_window > 0:
-            return False, "gfx942 fp16 flash not eligible for this shape (sliding_window)"
+            return (
+                False,
+                "gfx942 fp16 flash not eligible for this shape (sliding_window)",
+            )
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
