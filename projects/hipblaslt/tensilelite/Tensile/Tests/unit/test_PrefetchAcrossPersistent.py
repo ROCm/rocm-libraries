@@ -154,6 +154,8 @@ class _ClassicPapWriter:
 
 _ClassicPapWriter.setupPrefetchAcrossPersistentLoads = KernelWriter.setupPrefetchAcrossPersistentLoads
 _ClassicPapWriter._nextLdsToken = KernelWriter._nextLdsToken
+_ClassicPapWriter._dcpDivergent = kwa_module.KernelWriterAssembly._dcpDivergent
+_ClassicPapWriter._dcpThickThinIssueOrder = KernelWriter._dcpThickThinIssueOrder
 
 
 class _SetupNewTilePapTdmWriter:

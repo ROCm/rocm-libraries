@@ -621,14 +621,12 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             imod.add(writer.codes.gl2Prefetch)
     else:
         # put everything in the header (original behavior for PGR=0/1):
-        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
-        writer.codes.unrollLoopHeader.add(writer.codes.globalReadA)
-        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSA)
-        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA)
-        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSB)
-        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB)
-        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
-        writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
+        for tc in writer._dcpThickThinIssueOrder(kernel):
+            writer.codes.unrollLoopHeader.add(getattr(writer.codes, f"dtlsM0Update{tc}"))
+            writer.codes.unrollLoopHeader.add(getattr(writer.codes, f"globalRead{tc}"))
+            mx = "MXSA" if tc == "A" else "MXSB"
+            writer.codes.unrollLoopHeader.add(getattr(writer.codes, f"dtlsM0Update{mx}"))
+            writer.codes.unrollLoopHeader.add(getattr(writer.codes, f"globalRead{mx}"))
         writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata) if kernel["ProblemType"]["Sparse"] else None
         writer.codes.unrollLoopHeader.add(globalReadIncACode)
         writer.codes.unrollLoopHeader.add(globalReadIncBCode)

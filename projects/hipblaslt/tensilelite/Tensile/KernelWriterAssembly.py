@@ -428,6 +428,11 @@ class KernelWriterAssembly(KernelWriter):
       return tPB, tPA
     return tPA, tPB
 
+  def _tdmSecondMemberIsOdd(self, kernel, tP1, tP2):
+    sideA, sideB = (tP1, tP2) if tP1["tensorChar"].endswith("A") else (tP2, tP1)
+    _, odd = self._tdmPairedParityOrder(kernel, sideA, sideB)
+    return odd["tensorChar"] == tP2["tensorChar"]
+
   def _emitTdmCompId(self, mod, kernel, tc, dstIdx, waveIdxSgpr="WaveIdx"):
     """Leave tensor `tc`'s TDM component id in SGPR `dstIdx`."""
     numComp, compShift = tdmWaveComponents(kernel, tc)
@@ -11513,7 +11518,9 @@ class KernelWriterAssembly(KernelWriter):
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       useSplitTokens = bool(kernel["TDMSplit"]) and not kernel["ProblemType"]["Sparse"]
       tdmParity = self.states.ldsTensorTokenIdx
-      if useSplitTokens:
+      if hasattr(self.states, "memTokenLdsDcp"):
+        comp.setMemToken(self._dcpTdmIssueTokens(kernel, "A"))
+      elif useSplitTokens:
         comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][0]])
       else:
         comp.setMemToken([self.states.ldsTensorTokenIdx])
@@ -11616,7 +11623,10 @@ class KernelWriterAssembly(KernelWriter):
       if self.tdmFuseAMx(kernel) or self.tdmFusePaired(kernel):
         return imod
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      comp.setMemToken([self.states.ldsTensorTokenIdx])
+      if hasattr(self.states, "memTokenLdsDcp"):
+        comp.setMemToken(self._dcpTdmIssueTokens(kernel, "MXSA"))
+      else:
+        comp.setMemToken([self.states.ldsTensorTokenIdx])
       if kernel["ProblemType"]["MXBlockA"]:
         if self.states.inTailLoop and not kernel["1LDSBuffer"] and kernel["StreamK"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSAGroup0")
@@ -11642,7 +11652,10 @@ class KernelWriterAssembly(KernelWriter):
       # it differs (parity when de-aliased, every wave at TDMFuse=2 and 5).
       if self.tdmSeparateABDescriptors(kernel):
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-        comp.setMemToken([self.states.ldsTensorTokenIdx])
+        if hasattr(self.states, "memTokenLdsDcp"):
+          comp.setMemToken(self._dcpTdmIssueTokens(kernel, "B"))
+        else:
+          comp.setMemToken([self.states.ldsTensorTokenIdx])
         isIterB = kernel.get("_TDMIterateModeB", False)
         tdmBGroup2 = "tdmBGroup2" if isIterB else None
         tdmBGroup3 = "tdmBGroup3" if isIterB else None
@@ -11998,6 +12011,13 @@ class KernelWriterAssembly(KernelWriter):
     """
     _numComp, waves = tdmWavePartition(kernel, tc)
     return (tc, partner) if 0 in waves else (partner, tc)
+
+  def _dcpTdmIssueTokens(self, kernel, tc):
+    """Return the LDS tokens owned by tensor tc's TDM issue."""
+    if tc in ("A", "B") and self.tdmSeparateABDescriptors(kernel):
+      return [self._dcpCurrentToken("Tensor", tc)]
+    return [self._dcpCurrentToken("Tensor", "A"),
+            self._dcpCurrentToken("Tensor", "B")]
 
   def _dcpDivergent(self, kernel):
     """True only when A and B carry different LDS block counts.
@@ -21191,7 +21211,6 @@ class KernelWriterAssembly(KernelWriter):
     tcB: str = tPB["tensorChar"]
     numWaves: int = kernel["NumWaves"]
     wavelen: int = kernel["WavefrontSize"]
-    tPA, tPB = self._tdmPairedParityOrder(kernel, tPA, tPB)
     tcA, tcB = tPA["tensorChar"], tPB["tensorChar"]
     numCompA, compShiftA = tdmWaveComponents(kernel, tcA)
     numCompB, compShiftB = tdmWaveComponents(kernel, tcB)
@@ -21265,7 +21284,8 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
       mod.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
       mod.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
-      mod.add(SCBranchSCC1(tdmResetTailLblB.getLabelName(), "Jump to B if wId is odd"))
+      branchToSecond = SCBranchSCC1 if self._tdmSecondMemberIsOdd(kernel, tPA, tPB) else SCBranchSCC0
+      mod.add(branchToSecond(tdmResetTailLblB.getLabelName(), f"Jump to {tcB} on its wave parity"))
 
       wOfstSgprId = None if unrolledMajorA and not isMXSA else waveOfstSgprIdx
       if not unrolledMajorA or mxKSplittingA:
