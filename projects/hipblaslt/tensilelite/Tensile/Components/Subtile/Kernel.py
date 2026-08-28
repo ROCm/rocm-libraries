@@ -495,20 +495,13 @@ class TileInfo:
       # loadRatioGR uses the global GR tile size (subtileShape * subtileCount),
       # which is the full hardware granularity for one cooperative load round.
       _isTLU1 = isinstance(getattr(gr_cfg, "tag", None), GRTag_TLU1)
-      # Waves that COOPERATE ON THE FETCH.  Distinct from grWavesPerStrip, which
-      # counts the waves that share a strip when reading it back and which picks
-      # the bank-conflict layout -- that stays as it is.  An operand's contents
-      # depend on one axis only, so the other axis' waves need the same bytes in
-      # LDS but do not have to fetch them themselves.  Spreading the fetch over
-      # every wave covers the strip exactly once instead of once per other-axis
-      # wave.  Guarded on the strip's load blocks dividing evenly, else a wave
-      # would own a fractional block.
-      #
-      # The fetch group for one strip is grWavesPerStrip axis-waves times the
-      # other-axis waves that would otherwise refetch it.  That is numWaves when
-      # the axis-waves already share the strip, and otherWaves when a wave owns
-      # whole strips -- using numWaves there would under-fetch, because the axis
-      # split has already divided the work.
+      # Waves that COOPERATE ON THE FETCH -- distinct from grWavesPerStrip,
+      # which counts waves sharing a strip on read-back and picks the swizzle.
+      # An operand depends on one axis only, so the other axis' waves need the
+      # bytes but need not fetch them; spreading the fetch covers the strip once
+      # instead of once per other-axis wave.  The group is grWavesPerStrip times
+      # those other waves: numWaves when axis-waves already share a strip,
+      # otherWaves when a wave owns whole ones (numWaves would under-fetch).
       _otherWaves = max(1, self.numWaves // self.waveGroupSize)
       _coopWaves = self.grWavesPerStrip if _isTLU1 else self.numWaves
       _winSplit = 1
@@ -519,8 +512,8 @@ class TileInfo:
           if _cand > _coopWaves and _stripBytes % gr_cfg.bytesPerLoad(_cand) == 0:
             _coopWaves = _cand
         else:
-          # One K window of a strip only holds _stripBytes/bytesPerLoad(1) load
-          # blocks, so a fetch group larger than that cannot be absorbed by K
+          # One K window holds _stripBytes/bytesPerLoad(1) blocks, so a larger
+          # fetch group cannot be absorbed by K
           # slices alone -- bytesPerLoad(_cand) would exceed the strip and push
           # loadRatioGR above 1, which the emitter cannot express.  Spread the
           # leftover factor over the K windows instead: a window is just a
