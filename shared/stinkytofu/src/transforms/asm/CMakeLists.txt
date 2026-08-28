@@ -13,6 +13,7 @@ target_sources(stinkytofu_objs PRIVATE
     BuildDefUseChain.cpp
     DefUseAnalysisCleanup.cpp
     CFGBuilderPass.cpp
+    FlattenCFGPass.cpp
     StinkyUnreachableBlockElimPass.cpp
     LongBranchLoweringPass.cpp
     PeepholeOptimizationPass.cpp
