@@ -20,9 +20,9 @@ struct SupportClaimCoverage
 {
     size_t graphsFound = 0; // seeded by registration
     size_t graphsWithClaims = 0; // seeded by registration
-    // Bumped once per graph whose sidecar was read, from SupportObservation::
-    // sidecarChecked — never from the verdict count. A sidecar naming only
-    // engines this build does not load yields no verdicts and must still count.
+    // Bumped once per graph whose sidecar was read, from SupportObservation::sidecar
+    // — never from the verdict count. A sidecar naming only engines this build does
+    // not load leaves no verdicts and must still count.
     size_t graphsQueried = 0;
     // Of those queried, how many carried a sidecar that promised nothing about the
     // arch/platform (or sweep case) this run is on. Not a failure — but it is the

@@ -22,6 +22,7 @@
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
+#include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
@@ -58,6 +59,14 @@ SupportResult makeVerdict(SupportVerdict verdict, std::string engineName = ENGIN
     return result;
 }
 
+// What the stubbed reference executor does when the fallback chain reaches it.
+enum class RefBehavior
+{
+    MATCHES, ///< writes what the engine wrote, so the comparison passes
+    CAPABILITY_MISS, ///< no oracle can run this op — the chain ends in a skip
+    ERRORS, ///< the reference itself is broken, which is not the engine's fault
+};
+
 // Drives the real TestBody() with a canned observation and a stubbed engine.
 class EnforcementHarness : public IntegrationBundleVerificationHarness
 {
@@ -76,6 +85,17 @@ public:
     bool comparisonReached() const
     {
         return _comparisonReached;
+    }
+
+    void setRefBehavior(RefBehavior behavior)
+    {
+        _refBehavior = behavior;
+    }
+
+    // Stands in for a real enforcement rung, which needs a device to reach.
+    void setEnforceOutcome(VerificationOutcome outcome)
+    {
+        _enforceOutcome = std::move(outcome);
     }
 
 protected:
@@ -102,8 +122,23 @@ protected:
             ptr, ptr + K_OUTPUT_ELEMS, _engineSucceeds ? K_OUTPUT_VALUE : K_OUTPUT_VALUE + 100.0f);
     }
 
-    void runReferenceExecutor(ReferenceExecutorType, std::unordered_map<int64_t, void*>&) override
+    void runReferenceExecutor(ReferenceExecutorType,
+                              std::unordered_map<int64_t, void*>& variantPack) override
     {
+        switch(_refBehavior)
+        {
+        case RefBehavior::CAPABILITY_MISS:
+            throw ReferenceCapabilityError("stub: unsupported op");
+        case RefBehavior::ERRORS:
+            throw std::runtime_error("stub: reference exploded");
+        case RefBehavior::MATCHES:
+        default:
+        {
+            auto* ptr = static_cast<float*>(variantPack.at(K_OUTPUT_UID));
+            std::fill(ptr, ptr + K_OUTPUT_ELEMS, K_OUTPUT_VALUE);
+            return;
+        }
+        }
     }
 
     std::unique_ptr<IReferenceGraphExecutor> makeReferenceExecutor(ReferenceExecutorType) override
@@ -113,9 +148,13 @@ protected:
 
     void applyMetadataGuards() const override {}
 
-    void enforceAtLevel(EnforcementLevel) override
+    VerificationOutcome enforceAtLevel(EnforcementLevel) override
     {
-        skipUnverifiable("enforceAtLevel stubbed (deviceless)");
+        if(_enforceOutcome.has_value())
+        {
+            return *_enforceOutcome;
+        }
+        return unverifiable("enforceAtLevel stubbed (deviceless)");
     }
 
 private:
@@ -123,6 +162,8 @@ private:
     SupportObservation _observation;
     bool _engineSucceeds;
     bool _comparisonReached = false;
+    RefBehavior _refBehavior = RefBehavior::MATCHES;
+    std::optional<VerificationOutcome> _enforceOutcome;
 };
 
 class TestSupportClaimEnforcement : public ::testing::Test
@@ -230,6 +271,19 @@ protected:
         return locator;
     }
 
+    // Runs a fully configured harness against a bundle, with the reporter in place.
+    void drive(EnforcementHarness& harness,
+               const std::shared_ptr<IntegrationTestBundle>& bundle,
+               ::testing::TestPartResultArray* results)
+    {
+        harness.setBundle(bundle, "test/bundle", makeLocator());
+
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
+        harness.SetUp();
+        harness.TestBody();
+    }
+
     void run(VerificationMode mode,
              SupportObservation observation,
              bool includeGoldenOutput,
@@ -238,19 +292,20 @@ protected:
              bool* comparisonReached = nullptr)
     {
         EnforcementHarness harness(mode, std::move(observation), engineSucceeds);
-        harness.setBundle(loadBundle("Bundle", includeGoldenOutput), "test/bundle", makeLocator());
-
-        {
-            const ::testing::ScopedFakeTestPartResultReporter reporter(
-                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
-            harness.SetUp();
-            harness.TestBody();
-        }
+        drive(harness, loadBundle("Bundle", includeGoldenOutput), results);
 
         if(comparisonReached != nullptr)
         {
             *comparisonReached = harness.comparisonReached();
         }
+    }
+
+    // The single verdict recorded for this run, for tests that care which one it is.
+    static SupportVerdict onlyVerdict()
+    {
+        const auto& all = SupportClaimVerdicts::get().all();
+        EXPECT_EQ(all.size(), 1u);
+        return all.empty() ? SupportVerdict::CLAIM_BROKEN : all.front().verdict;
     }
 
     static bool anyFailed(const ::testing::TestPartResultArray& results)
@@ -267,7 +322,7 @@ protected:
 
     static SupportObservation observed(std::vector<SupportResult> results)
     {
-        return SupportObservation{/*sidecarChecked=*/true, std::move(results)};
+        return SupportObservation{SidecarState::CHECKED, std::move(results)};
     }
 };
 
@@ -307,14 +362,7 @@ TEST_F(TestSupportClaimEnforcement, NonFullBundleStillQueriesClaims)
                                /*engineSucceeds=*/true);
     auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::APPLICABILITY;
-    harness.setBundle(bundle, "test/bundle", makeLocator());
-
-    {
-        const ::testing::ScopedFakeTestPartResultReporter reporter(
-            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, &results);
-        harness.SetUp();
-        harness.TestBody();
-    }
+    drive(harness, bundle, &results);
 
     EXPECT_EQ(supportClaimCoverage().graphsQueried, 1u);
     EXPECT_EQ(SupportClaimVerdicts::get().total(), 1u);
@@ -332,16 +380,12 @@ TEST_F(TestSupportClaimEnforcement, EvaluatedSidecarWithNoVerdictsStillCountsAsQ
     EXPECT_EQ(SupportClaimVerdicts::get().total(), 0u);
 }
 
-// The per-graph invariant. The run-level guard only fires when nothing anywhere was
+// The per-graph check. The run-level guard only fires when nothing anywhere was
 // queried, so a partial gap needs its own signal.
 TEST_F(TestSupportClaimEnforcement, UnqueriedSidecarFailsTheTest)
 {
     ::testing::TestPartResultArray results;
-    run(VerificationMode::AUTO,
-        SupportObservation{/*sidecarChecked=*/false, {}},
-        true,
-        true,
-        &results);
+    run(VerificationMode::AUTO, SupportObservation{SidecarState::NONE, {}}, true, true, &results);
 
     EXPECT_TRUE(anyFailed(results));
     EXPECT_EQ(supportClaimCoverage().graphsQueried, 0u);
@@ -386,7 +430,7 @@ TEST_F(TestSupportClaimEnforcement, ErroredQueryFailsBeforeReachingTheEngine)
 
 // ---------------------------------------------------------------------------
 // Two-phase commit: an accepted claim is an observation about the ranked list, not
-// a verification. Only execution can promote it.
+// a verification. Only reaching the depth the bundle declares can promote it.
 // ---------------------------------------------------------------------------
 
 TEST_F(TestSupportClaimEnforcement, AcceptedBecomesConfirmedWhenTheTestPasses)
@@ -403,30 +447,96 @@ TEST_F(TestSupportClaimEnforcement, AcceptedBecomesConfirmedWhenTheTestPasses)
     EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::CLAIM_ACCEPTED), 0u);
 }
 
-// The promotion policy itself. Kept off the TestBody() path on purpose:
-// ScopedFakeTestPartResultReporter diverts failures and skips away from the
-// enclosing test's result, so HasFailure()/IsSkipped() cannot observe a stubbed
-// engine's outcome from inside a fixture. The mapping is the part with the
-// decisions in it, so it is pinned directly.
-TEST_F(TestSupportClaimEnforcement, PromotionMapsOutcomeToVerdict)
+// The engine ran the graph green and the comparison caught a mismatch. The claim
+// held — the engine did accept the graph — but the cell must not be published as
+// working support.
+TEST_F(TestSupportClaimEnforcement, MismatchDemotesTheClaimToFailedInUse)
 {
-    // Ran and green — the only combination that is evidence of working support.
-    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/true, /*passed=*/true),
-              SupportVerdict::CLAIM_CONFIRMED);
+    ::testing::TestPartResultArray results;
+    run(VerificationMode::GOLDEN,
+        observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)}),
+        /*includeGoldenOutput=*/true,
+        /*engineSucceeds=*/false,
+        &results);
 
-    // The defect this phase exists for: the engine accepted the graph and then got
-    // it wrong. Publishing that cell as satisfied support would feed a support
-    // matrix a combination the same run just proved does not work.
-    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/true, /*passed=*/false),
-              SupportVerdict::CLAIM_FAILED_IN_USE);
-
-    // Never ran, so the run has no evidence either way; the claim stays where the
-    // query left it rather than being confirmed by a test that did nothing.
-    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/false, /*passed=*/true),
-              SupportVerdict::CLAIM_ACCEPTED);
-    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/false, /*passed=*/false),
-              SupportVerdict::CLAIM_ACCEPTED);
+    EXPECT_TRUE(anyFailed(results));
+    EXPECT_EQ(onlyVerdict(), SupportVerdict::CLAIM_FAILED_IN_USE);
 }
+
+// The regression this rework exists for. The engine executed the graph, then the
+// fallback chain ran out of oracles and the test skipped. Nothing verified the
+// outputs, so confirming the cell would publish support on the strength of a run
+// that compared nothing.
+TEST_F(TestSupportClaimEnforcement, ExecutedWithoutAnOracleStaysAccepted)
+{
+    ::testing::TestPartResultArray results;
+
+    EnforcementHarness harness(VerificationMode::AUTO,
+                               observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)}),
+                               /*engineSucceeds=*/true);
+    harness.setRefBehavior(RefBehavior::CAPABILITY_MISS);
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/false), &results);
+
+    EXPECT_TRUE(harness.comparisonReached()) << "the engine must have run for this to be the case";
+    EXPECT_FALSE(anyFailed(results));
+    EXPECT_EQ(onlyVerdict(), SupportVerdict::CLAIM_ACCEPTED);
+}
+
+// A reference executor that blew up makes the run red without saying anything about
+// the engine. Demoting the claim there would print "do not publish this cell" over
+// somebody else's defect.
+TEST_F(TestSupportClaimEnforcement, ReferenceErrorDoesNotDemoteTheClaim)
+{
+    ::testing::TestPartResultArray results;
+
+    EnforcementHarness harness(VerificationMode::CPU,
+                               observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)}),
+                               /*engineSucceeds=*/true);
+    harness.setRefBehavior(RefBehavior::ERRORS);
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/false), &results);
+
+    EXPECT_TRUE(anyFailed(results)) << "a broken reference must still fail the test";
+    EXPECT_EQ(onlyVerdict(), SupportVerdict::CLAIM_ACCEPTED);
+}
+
+// Confirmation is measured against the depth the bundle declares, not against a
+// fixed "outputs were compared". A buildable bundle whose plans compiled has done
+// everything it promises, so its claim is confirmed rather than stuck at accepted.
+TEST_F(TestSupportClaimEnforcement, BuildableBundleConfirmsAtItsOwnDepth)
+{
+    ::testing::TestPartResultArray results;
+
+    EnforcementHarness harness(VerificationMode::AUTO,
+                               observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)}),
+                               /*engineSucceeds=*/true);
+    harness.setEnforceOutcome(VerificationOutcome::passed(VerificationDepth::BUILDABLE));
+    auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
+    bundle->metadata.enforcementLevel = EnforcementLevel::BUILDABLE;
+    drive(harness, bundle, &results);
+
+    EXPECT_FALSE(anyFailed(results));
+    EXPECT_EQ(onlyVerdict(), SupportVerdict::CLAIM_CONFIRMED);
+}
+
+// An enforcement rung that could not even establish applicability leaves the claim
+// exactly where the ranked-list query put it.
+TEST_F(TestSupportClaimEnforcement, UnreachedEnforcementRungStaysAccepted)
+{
+    ::testing::TestPartResultArray results;
+
+    EnforcementHarness harness(VerificationMode::AUTO,
+                               observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)}),
+                               /*engineSucceeds=*/true);
+    auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
+    bundle->metadata.enforcementLevel = EnforcementLevel::BUILDABLE;
+    drive(harness, bundle, &results);
+
+    EXPECT_EQ(onlyVerdict(), SupportVerdict::CLAIM_ACCEPTED);
+}
+
+// The promotion policy itself is pinned in TestSupportVerdict.cpp, where it needs no
+// fixture; these cases cover the combinations the deviceless harness can actually
+// drive end to end.
 
 // Only the engine this test drove can be promoted. Another engine's claim was
 // adjudicated from the same ranked list but never executed, so the run has no
@@ -445,17 +555,20 @@ TEST_F(TestSupportClaimEnforcement, OnlyTheEngineUnderTestIsPromoted)
     EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::CLAIM_ACCEPTED), 1u);
 }
 
-// Non-promotable verdicts pass through the commit untouched.
-TEST_F(TestSupportClaimEnforcement, UnclaimedSupportIsRecordedUnchanged)
+// Positive drift keeps its verdict — there is no claim to promote — but picks up how
+// far the run got, which is what separates "this cell works, write it down" from
+// "the ranked list said so and nothing tried it".
+TEST_F(TestSupportClaimEnforcement, UnclaimedSupportKeepsItsVerdictAndGainsTheDepth)
 {
     ::testing::TestPartResultArray results;
     run(VerificationMode::GOLDEN,
         observed({makeVerdict(SupportVerdict::UNCLAIMED_SUPPORT)}),
-        true,
-        true,
+        /*includeGoldenOutput=*/true,
+        /*engineSucceeds=*/true,
         &results);
 
     EXPECT_EQ(SupportClaimVerdicts::get().count(SupportVerdict::UNCLAIMED_SUPPORT), 1u);
+    EXPECT_NE(SupportClaimVerdicts::get().all().front().detail.find("verified"), std::string::npos);
 }
 
 // Every observed verdict reaches the report exactly once, including on the terminal

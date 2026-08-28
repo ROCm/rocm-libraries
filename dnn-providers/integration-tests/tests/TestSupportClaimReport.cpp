@@ -175,8 +175,8 @@ TEST_F(TestSupportClaimReport, CoverageResetsToZero)
 
 // ---------------------------------------------------------------------------
 // The nesting invariant: queried ⊆ withClaims ⊆ found. The queried count is its
-// own counter, driven by SupportObservation::sidecarChecked, because one graph
-// can produce several verdicts (one per engine that had something to say).
+// own counter, driven by SupportObservation::sidecar, because one graph can produce
+// several verdicts (one per engine that had something to say).
 // ---------------------------------------------------------------------------
 
 TEST_F(TestSupportClaimReport, QueriedCountIsIndependentOfVerdictCount)
@@ -229,7 +229,7 @@ TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
 }
 
 // "accepted" and "confirmed" are different facts and the header has to say so,
-// because only one of them survived execution.
+// because only one of them reached the depth its bundle declares.
 TEST_F(TestSupportClaimReport, PrintDistinguishesAcceptedFromConfirmed)
 {
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_ACCEPTED));
@@ -238,7 +238,7 @@ TEST_F(TestSupportClaimReport, PrintDistinguishesAcceptedFromConfirmed)
 
     EXPECT_NE(output.find("accepted: 1"), std::string::npos);
     EXPECT_NE(output.find("confirmed: 0"), std::string::npos);
-    EXPECT_NE(output.find("only confirmed was executed and verified"), std::string::npos);
+    EXPECT_NE(output.find("confirmed = the run reached the depth"), std::string::npos);
 }
 
 TEST_F(TestSupportClaimReport, PrintLevel2ShowsFailureDetail)

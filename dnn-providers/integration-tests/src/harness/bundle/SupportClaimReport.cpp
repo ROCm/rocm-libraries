@@ -53,8 +53,8 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
        << "  confirmed: " << confirmed << "  accepted: " << accepted
        << "  failed-in-use: " << failedInUse << "  broken: " << broke << "  errored: " << err
        << "  unclaimed: " << unc << "\n"
-       << "  (accepted = engine advertises support; only confirmed was executed and "
-          "verified)\n";
+       << "  (accepted = engine advertises support; confirmed = the run reached the "
+          "depth this bundle's enforcement_level declares)\n";
 
     // Discovery counts every claim-bearing bundle; only selected tests run. A
     // selected one cannot go unqueried — the harness fails the test if its sidecar

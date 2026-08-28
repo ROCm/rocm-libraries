@@ -12,6 +12,7 @@
 #include <hipdnn_frontend/Error.hpp>
 
 #include "harness/bundle/SupportClaims.hpp"
+#include "harness/bundle/VerificationOutcome.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -28,8 +29,9 @@ struct LoadedEngine;
 /// at all.
 ///
 /// CLAIM_ACCEPTED is taken from the query alone, before the graph is built or run.
-/// It says the engine advertises support, not that the graph works — only execution
-/// can promote it. See IntegrationBundleVerificationHarness::TestBody().
+/// It says the engine advertises support, not that the graph works — only a run that
+/// reaches the depth the bundle's enforcement_level declares can promote it. See
+/// IntegrationBundleVerificationHarness::TestBody().
 enum class SupportVerdict
 {
     CLAIM_BROKEN, ///< claimed, but absent from the ranked list — FAIL
@@ -47,13 +49,17 @@ bool isFailure(SupportVerdict verdict);
 
 /// Phase-2 promotion for a CLAIM_ACCEPTED verdict, once the test outcome is known.
 ///
-///   exercised — the engine under test actually ran this graph (the body neither
-///               skipped nor bailed before execution)
-///   passed    — the test finished green
+///   outcome  — what the test body did: how far it got, and who broke if anything
+///   required — the depth this bundle's enforcement_level asks for
 ///
-/// Split out from the harness so the policy is testable without GTest result state,
-/// which a fake part-result reporter intercepts and hides.
-SupportVerdict promoteAcceptedClaim(bool exercised, bool passed);
+/// A claim is confirmed when the run got as far as its bundle asks. So a
+/// `buildable` bundle whose plans compiled is confirmed, while a `full` bundle that
+/// ran the graph and then found no oracle is not — nothing checked its output, and
+/// confirmed is the column a support matrix publishes.
+///
+/// Kept out of the harness so it can be tested without GTest result state, which a
+/// fake part-result reporter hides.
+SupportVerdict promoteAcceptedClaim(const VerificationOutcome& outcome, VerificationDepth required);
 
 struct SupportResult
 {
@@ -68,32 +74,42 @@ struct SupportResult
     std::string queryMessage;
 };
 
-/// What one graph's sidecar had to say, and whether it was consulted at all.
+/// Did this graph have a sidecar, and did we read it?
 ///
-/// `sidecarChecked` names the sidecar, not the claims, on purpose. It promises the
-/// file existed, parsed, and was adjudicated — nothing about the contents. A legal
-/// sidecar may claim nothing at all, or claim only another arch/platform/case, and
-/// still set it. It is the run-time counterpart of the registration-time predicate
-/// that seeds graphsWithClaims (`exists(sidecarPathFor(disc))`), so the two count
-/// the same population and `withClaims >= queried` stays meaningful.
+/// An enum, not a bool, so nobody works it out from `results`. A sidecar we read in
+/// full can still leave zero verdicts behind: it may claim only another arch,
+/// another platform, another sweep case, or engines this build does not load. Those
+/// runs did everything they could and must count as covered, but `results.empty()`
+/// cannot tell them apart from "there was no sidecar" — the one case that must not
+/// count. Working it out that way is what used to fail healthy runs.
 ///
-/// It MUST NOT be derived from `results`. Once the neither-claimed-nor-supported
-/// quadrant stops being emitted, a fully adjudicated sidecar can yield zero
-/// verdicts for exactly the reasons above. Those runs did everything they could and
-/// must count as covered; `results.empty()` cannot tell them apart from "there was
-/// no sidecar", which is the one case that must not count. Deriving it is what made
-/// the coverage guard fail healthy runs before this split existed.
+/// Registration counts the same thing when it seeds `graphsWithClaims` (does the
+/// file exist?), which is what keeps `withClaims >= queried` true.
+enum class SidecarState : uint8_t
+{
+    /// No sidecar file. Normal and fine — claims are optional, and a missing one
+    /// means "nobody said", not "not supported". A sidecar that exists but does not
+    /// parse throws instead of landing here.
+    NONE,
+    /// The sidecar was read and checked against this run's engine, arch and
+    /// platform. Says nothing about what was in it: a sidecar that promised nothing
+    /// still counts as checked.
+    CHECKED,
+};
+
+/// What one graph's sidecar had to say, and whether we got to read it.
 struct SupportObservation
 {
-    bool sidecarChecked = false; ///< a sidecar existed and was adjudicated
+    SidecarState sidecar = SidecarState::NONE;
     std::vector<SupportResult> results; ///< claimed engines, plus positive drift
 
-    /// Whether the sidecar actually promised anything about the cell this run is on.
+    /// Did the sidecar promise anything about the arch, platform and case this run
+    /// is on?
     ///
-    /// Safe to derive — unlike sidecarChecked, this one *should* be false when the
-    /// sidecar covers only another arch, platform, or sweep case, or claims nothing
-    /// at all. Every verdict except UNCLAIMED_SUPPORT names an engine the sidecar
-    /// claimed, so their absence is exactly "nothing was promised here".
+    /// Safe to work out from `results`, unlike `sidecar`: this one *should* be false
+    /// when the sidecar covers only another arch, platform, or sweep case, or claims
+    /// nothing at all. Every verdict except UNCLAIMED_SUPPORT names an engine the
+    /// sidecar claimed, so having none means nothing was promised here.
     bool hasApplicableClaim() const
     {
         return std::any_of(results.begin(), results.end(), [](const SupportResult& r) {
@@ -102,17 +118,17 @@ struct SupportObservation
     }
 };
 
-/// Adjudicate this graph's claim for the engine under test, from one ranked-engine
+/// Decide this graph's claim for the engine under test, from one ranked-engine
 /// query.
 ///
 /// `errorCode` / `rankedIds` come from one `Graph::get_ranked_engine_ids()` call.
 /// `arch` / `platform` are passed in rather than read from TestConfig so this stays
 /// a pure function.
 ///
-/// Yields at most one result: the claim's verdict if the sidecar names this engine
-/// for this cell, otherwise UNCLAIMED_SUPPORT if the engine accepts the graph
-/// anyway, otherwise nothing — the sidecar was still read, so `sidecarChecked` is
-/// set either way.
+/// Returns at most one result: the claim's verdict if the sidecar names this engine
+/// for this cell, otherwise UNCLAIMED_SUPPORT if the engine takes the graph anyway,
+/// otherwise nothing — the sidecar was still read, so `sidecar` is CHECKED either
+/// way.
 ///
 /// Throws std::runtime_error if the sidecar exists but cannot be opened or parsed.
 SupportObservation observeSupport(hipdnn_frontend::ErrorCode errorCode,

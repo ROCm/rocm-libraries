@@ -18,14 +18,20 @@
 #include "harness/bundle/SupportVerdict.hpp"
 
 using hipdnn_frontend::ErrorCode;
+using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::bundle::baseArchToken;
+using hipdnn_integration_tests::bundle::FailureOrigin;
 using hipdnn_integration_tests::bundle::isFailure;
 using hipdnn_integration_tests::bundle::LoadedEngine;
 using hipdnn_integration_tests::bundle::observeSupport;
 using hipdnn_integration_tests::bundle::promoteAcceptedClaim;
+using hipdnn_integration_tests::bundle::requiredDepth;
+using hipdnn_integration_tests::bundle::SidecarState;
 using hipdnn_integration_tests::bundle::SupportClaimLocator;
 using hipdnn_integration_tests::bundle::SupportResult;
 using hipdnn_integration_tests::bundle::SupportVerdict;
+using hipdnn_integration_tests::bundle::VerificationDepth;
+using hipdnn_integration_tests::bundle::VerificationOutcome;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -101,14 +107,14 @@ SupportClaimLocator writeSweepSidecar(const ScopedDirectory& dir,
 } // namespace
 
 // ---------------------------------------------------------------------------
-// No sidecar → nothing evaluated. The only case that must leave sidecarChecked
-// false, because it is the only one where there was no promise to consult.
+// No sidecar → nothing read. The only case that must leave `sidecar` at NONE,
+// because it is the only one where there was no promise to look at.
 // ---------------------------------------------------------------------------
 
 TEST(TestSupportVerdict, NoSidecarPathEvaluatesNothing)
 {
     const auto observation = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, {}, ENGINE, ARCH, PLAT);
-    EXPECT_FALSE(observation.sidecarChecked);
+    EXPECT_EQ(observation.sidecar, SidecarState::NONE);
     EXPECT_TRUE(observation.results.empty());
     EXPECT_FALSE(observation.hasApplicableClaim());
 }
@@ -121,7 +127,7 @@ TEST(TestSupportVerdict, MissingSidecarFileEvaluatesNothing)
 
     const auto observation
         = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
-    EXPECT_FALSE(observation.sidecarChecked);
+    EXPECT_EQ(observation.sidecar, SidecarState::NONE);
     EXPECT_TRUE(observation.results.empty());
 }
 
@@ -213,7 +219,7 @@ TEST(TestSupportVerdict, UnresolvedQueryWithNoClaimReportsNothing)
     const auto observation = observeSupport(
         ErrorCode::HEURISTIC_QUERY_FAILED, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
 
-    EXPECT_TRUE(observation.sidecarChecked);
+    EXPECT_EQ(observation.sidecar, SidecarState::CHECKED);
     EXPECT_TRUE(observation.results.empty());
 }
 
@@ -271,24 +277,24 @@ TEST(TestSupportVerdict, NeitherClaimedNorSupportedProducesNoRecord)
 
     const auto observation = observeSupport(ErrorCode::OK, {OTHER_ID}, locator, ENGINE, ARCH, PLAT);
 
-    EXPECT_TRUE(observation.sidecarChecked);
+    EXPECT_EQ(observation.sidecar, SidecarState::CHECKED);
     EXPECT_TRUE(observation.results.empty());
 }
 
 // ---------------------------------------------------------------------------
-// Another engine's claim is another lane's business. It must not be adjudicated
-// here — this run cannot execute that engine, so it has no basis to pass or fail
-// it. The sidecar is still read, so coverage still counts.
+// Another engine's claim is another lane's business. It must not be decided here —
+// this run cannot execute that engine, so it has no basis to pass or fail it. The
+// sidecar is still read, so coverage still counts.
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportVerdict, ClaimForAnotherEngineIsNotAdjudicated)
+TEST(TestSupportVerdict, ClaimForAnotherEngineIsNotDecidedHere)
 {
     const auto dir = makeScopedTestDir("verdict");
     const auto locator = writeSidecar(dir, {OTHER_ENGINE});
 
     const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
 
-    EXPECT_TRUE(observation.sidecarChecked);
+    EXPECT_EQ(observation.sidecar, SidecarState::CHECKED);
     EXPECT_TRUE(observation.results.empty());
     EXPECT_FALSE(observation.hasApplicableClaim());
 }
@@ -333,7 +339,7 @@ TEST(TestSupportVerdict, ClaimForAnotherPlatformIsCheckedButNotApplicable)
 
     const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
 
-    EXPECT_TRUE(observation.sidecarChecked);
+    EXPECT_EQ(observation.sidecar, SidecarState::CHECKED);
     EXPECT_FALSE(observation.hasApplicableClaim());
     EXPECT_TRUE(observation.results.empty());
 }
@@ -361,7 +367,7 @@ TEST(TestSupportVerdict, SweepClaimDoesNotApplyToUnnamedCase)
 
     const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
 
-    EXPECT_TRUE(observation.sidecarChecked);
+    EXPECT_EQ(observation.sidecar, SidecarState::CHECKED);
     EXPECT_FALSE(observation.hasApplicableClaim());
     EXPECT_TRUE(observation.results.empty());
 }
@@ -410,16 +416,70 @@ TEST(TestSupportVerdict, ResultCarriesLocatorAndCellMetadata)
 // and the run is already red from whatever actually broke.
 // ---------------------------------------------------------------------------
 
+// Confirmation is measured against the depth the bundle declares, so the policy
+// takes the outcome and that depth rather than a pair of booleans.
 TEST(TestSupportVerdict, PromotionMapsOutcomeToVerdict)
 {
-    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/true, /*passed=*/true),
+    const auto verified = VerificationDepth::VERIFIED;
+
+    // Reached the declared depth — the only thing that is evidence of working
+    // support.
+    EXPECT_EQ(promoteAcceptedClaim(VerificationOutcome::passed(verified), verified),
               SupportVerdict::CLAIM_CONFIRMED);
-    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/true, /*passed=*/false),
+
+    // A shallower bundle is satisfied by a shallower run; a deeper one is not.
+    EXPECT_EQ(promoteAcceptedClaim(VerificationOutcome::passed(VerificationDepth::BUILDABLE),
+                                   VerificationDepth::BUILDABLE),
+              SupportVerdict::CLAIM_CONFIRMED);
+    EXPECT_EQ(promoteAcceptedClaim(VerificationOutcome::passed(VerificationDepth::APPLICABLE),
+                                   VerificationDepth::BUILDABLE),
+              SupportVerdict::CLAIM_ACCEPTED);
+
+    // Short of the declared depth the run has no evidence either way — including the
+    // case that motivated this shape: the engine executed the graph and then found
+    // no oracle to compare it against.
+    EXPECT_EQ(promoteAcceptedClaim(
+                  VerificationOutcome::skipped(VerificationDepth::EXECUTED, "no oracle"), verified),
+              SupportVerdict::CLAIM_ACCEPTED);
+    EXPECT_EQ(
+        promoteAcceptedClaim(
+            VerificationOutcome::skipped(VerificationDepth::NOT_REACHED, "declined"), verified),
+        SupportVerdict::CLAIM_ACCEPTED);
+
+    // The engine accepted the graph and then got it wrong. Publishing that cell as
+    // satisfied support would feed a support matrix a combination the same run just
+    // proved does not work.
+    EXPECT_EQ(promoteAcceptedClaim(
+                  VerificationOutcome::failed(verified, FailureOrigin::COMPARISON, {}), verified),
               SupportVerdict::CLAIM_FAILED_IN_USE);
-    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/false, /*passed=*/true),
+    EXPECT_EQ(promoteAcceptedClaim(VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                                               FailureOrigin::ENGINE,
+                                                               "build failed"),
+                                   verified),
+              SupportVerdict::CLAIM_FAILED_IN_USE);
+
+    // Failures that are not the engine's leave the claim alone. The run is already
+    // red for the real reason, and demoting here would print "do not publish this
+    // cell" over somebody else's defect.
+    EXPECT_EQ(promoteAcceptedClaim(VerificationOutcome::failed(VerificationDepth::EXECUTED,
+                                                               FailureOrigin::ORACLE,
+                                                               "ref exploded"),
+                                   verified),
               SupportVerdict::CLAIM_ACCEPTED);
-    EXPECT_EQ(promoteAcceptedClaim(/*exercised=*/false, /*passed=*/false),
+    EXPECT_EQ(promoteAcceptedClaim(VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                                               FailureOrigin::HARNESS,
+                                                               "no golden data"),
+                                   verified),
               SupportVerdict::CLAIM_ACCEPTED);
+}
+
+// requiredDepth() is the one place enforcement_level becomes a depth; a level that
+// silently demanded less would confirm cells nothing checked.
+TEST(TestSupportVerdict, EnforcementLevelMapsToRequiredDepth)
+{
+    EXPECT_EQ(requiredDepth(EnforcementLevel::APPLICABILITY), VerificationDepth::APPLICABLE);
+    EXPECT_EQ(requiredDepth(EnforcementLevel::BUILDABLE), VerificationDepth::BUILDABLE);
+    EXPECT_EQ(requiredDepth(EnforcementLevel::FULL), VerificationDepth::VERIFIED);
 }
 
 TEST(TestSupportVerdict, OnlyBrokenAndErroredAreFailures)

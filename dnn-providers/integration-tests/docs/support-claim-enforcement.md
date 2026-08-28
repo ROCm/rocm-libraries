@@ -80,9 +80,9 @@ promised.
 |---|---|---|
 | `CLAIM_BROKEN` | claimed, but absent from the ranked list | **yes** |
 | `QUERY_ERRORED` | claimed, but the query did not resolve, so acceptance is unknown | **yes** |
-| `CLAIM_ACCEPTED` | claimed and in the ranked list; not exercised by this test | no |
-| `CLAIM_CONFIRMED` | accepted, **and** the engine ran the graph green | no |
-| `CLAIM_FAILED_IN_USE` | accepted, but the engine failed the graph | no |
+| `CLAIM_ACCEPTED` | claimed and in the ranked list; the run did not get far enough to say more | no |
+| `CLAIM_CONFIRMED` | accepted, **and** the run reached the depth the bundle declares | no |
+| `CLAIM_FAILED_IN_USE` | accepted, but the engine itself failed the graph | no |
 | `UNCLAIMED_SUPPORT` | in the ranked list with no claim — positive drift | no |
 
 There is no `ENGINE_NOT_LOADED`: `main()` exits non-zero at startup if
@@ -92,7 +92,7 @@ engine under test is always present.
 `isFailure()` is a whitelist of the non-failures, so a verdict added later without
 being classified is fatal by default.
 
-Two notes on the non-obvious ones:
+Three notes on the non-obvious ones:
 
 - **`QUERY_ERRORED` is not `CLAIM_BROKEN`.** Only `OK` and `GRAPH_NOT_SUPPORTED`
   mean the ranked list can be trusted. Anything else makes **A** unknown, and
@@ -100,31 +100,41 @@ Two notes on the non-obvious ones:
 - **`CLAIM_FAILED_IN_USE` is not a claim failure.** The claim held — the engine did
   accept the graph — and the run is already red from whatever actually broke.
   Failing it again would double-report one defect and bury the real diagnostic.
+- **`CLAIM_FAILED_IN_USE` is only for the engine's own failures.** A reference
+  executor that errored, or a bundle whose golden `.bin` was never pulled, fails the
+  run without saying anything about the engine. Demoting the claim there would
+  publish "do not use this cell" over somebody else's defect, so those outcomes
+  leave the claim at `CLAIM_ACCEPTED` — red run, untouched claim.
 
 ---
 
 ## Lifecycle in `TestBody()`
 
+Three phases, in order, each producing a value the next one consumes. Nothing under
+`TestBody()` calls `GTEST_SKIP()` or `FAIL()` where it stands — the body returns a
+`VerificationOutcome`, and the verdict and the test result are both derived from it
+in one place each.
+
 ```mermaid
 graph TD
-  A["observeSupportForBundle()<br/>ONE ranked-engine query"] --> B{"sidecarChecked?"}
+  A["observeSupportForBundle()<br/>ONE ranked-engine query"] --> B{"sidecar read?"}
   B -->|yes| C["graphsQueried++"]
   B -->|no| D{"but a sidecar<br/>exists on disk?"}
   D -->|yes| E["ADD_FAILURE<br/>coverage invariant"]
   D -->|no| F
-  C --> F["hold verdicts in _pendingClaims"]
-  F --> G{"any CLAIM_BROKEN<br/>or QUERY_ERRORED?"}
-  G -->|yes| H["commitClaims(false)<br/>FAIL · return"]
-  G -->|no| I["runComparison()<br/>mode dispatch, unchanged"]
-  I --> J["EXPECT_TRUE(_verified)"]
-  J --> K["commitClaims(true)<br/>ACCEPTED → CONFIRMED / FAILED_IN_USE"]
+  C --> F{"any CLAIM_BROKEN<br/>or QUERY_ERRORED?"}
+  F -->|yes| G["outcome = FAILED · ENGINE<br/>comparison not attempted"]
+  F -->|no| H["outcome = runComparison()<br/>mode dispatch, fallback chain intact"]
+  G --> I["commitClaims(outcome)<br/>ACCEPTED → CONFIRMED / FAILED_IN_USE"]
+  H --> I
+  I --> J["reportOutcome(outcome)<br/>the only SKIP / FAIL"]
 ```
 
 ### Phase 1 — query, above everything
 
 `observeSupportForBundle()` builds the graph, makes one `get_ranked_engine_ids()`
 call, and hands the result to `observeSupport()` for the set comparison. It returns
-`{sidecarChecked, results}`.
+`{sidecar, results}`.
 
 It sits **above `runComparison()` on purpose.** The query needs only `from_binary`
 plus the ranked list — no inputs, no outputs, no golden data, no execution — so
@@ -140,46 +150,68 @@ unit harnesses run `TestBody()` without ever reaching `getSharedHandle()`.
 
 Two facts, deliberately not derived from each other:
 
-- **`sidecarChecked` → `graphsQueried++`.** A bool, *not* `results.empty()`. A
-  sidecar that claims another arch, another platform, another sweep case, or only
-  other engines produces zero verdicts but was still read in full, and must count
-  as covered.
+- **`sidecar == CHECKED` → `graphsQueried++`.** A named state, *not* `results.empty()`.
+  A sidecar that claims another arch, another platform, another sweep case, or only
+  other engines leaves zero verdicts but was still read in full, and must count as
+  covered.
 - **Per-graph invariant.** If a sidecar exists on disk and enforcement is on but the
   query did not happen, the test fails. The run-level guard only fires when *no*
   graph anywhere was queried, so a partial gap slips past it; this makes any future
   short-circuit above the query loud immediately instead of surviving behind one
   healthy bundle.
 
-### Verdicts are held, not published
-
-Every verdict goes into `_pendingClaims`. Nothing reaches the report until
-`commitClaims()`, which is called from exactly two places — the terminal-failure
-path and the normal path. This is what lets a verdict taken *before* execution be
-corrected by what execution proved.
-
 ### A broken claim is terminal
 
 `CLAIM_BROKEN` means the engine declined the graph. Running the comparison anyway
 would execute nothing, leave the NaN sentinel output buffers untouched, and print a
-full tensor diff on top of the real diagnostic. So the body commits what it knows,
-fails once with the aggregated message, and returns.
+full tensor diff on top of the real diagnostic. So the comparison is not attempted,
+and the aggregated claim message becomes the outcome's failure text.
 
-### Phase 2 — commit with the outcome
+### Phase 2 — what the run achieved
+
+`runComparison()` returns a `VerificationOutcome`: a status, a depth, who broke, and
+the text to print. The depth is the ladder the enforcement rungs and the comparison
+share:
+
+| Depth | Reached when |
+|---|---|
+| `NOT_REACHED` | the engine never got the graph — declined, or a mode failed first |
+| `APPLICABLE` | the engine is in the ranked list (`enforcement_level=applicability`) |
+| `BUILDABLE` | plans compiled (`enforcement_level=buildable`) |
+| `EXECUTED` | the graph ran, but no oracle compared its outputs |
+| `VERIFIED` | outputs compared against golden data or a reference |
+
+The fallback chain is unchanged — golden → GPU ref → CPU ref → skip — it just
+returns these values instead of skipping from six levels down.
+
+### Phase 3 — commit with the outcome
 
 `CLAIM_ACCEPTED` is an observation about the ranked list, taken before the graph was
 built or run. Only the engine this test actually drove can be promoted:
 
 ```cpp
-const bool exercised = outcomeKnown && !IsSkipped();
-const bool passed    = !HasFailure();
-record.verdict = promoteAcceptedClaim(exercised, passed);   // for the engine under test only
+const VerificationDepth required = requiredDepth(bundle.metadata.enforcementLevel);
+record.verdict = promoteAcceptedClaim(outcome, required);   // engine under test only
+record.detail  = describeOutcome(outcome, required);
 ```
 
 | Outcome | Verdict |
 |---|---|
-| ran, green | `CLAIM_CONFIRMED` |
-| ran, red | `CLAIM_FAILED_IN_USE` |
-| skipped / never ran | stays `CLAIM_ACCEPTED` |
+| reached `required`, not failed | `CLAIM_CONFIRMED` |
+| failed, and the engine or the comparison is at fault | `CLAIM_FAILED_IN_USE` |
+| failed, but the reference or the harness is at fault | stays `CLAIM_ACCEPTED` |
+| short of `required` (skipped, no oracle, rung not reached) | stays `CLAIM_ACCEPTED` |
+
+**Confirmation is measured against the bundle's own `enforcement_level`, not against
+a fixed "outputs were compared".** A `buildable` bundle whose plans compiled has done
+everything it promises, so its claim is confirmed. A `full` bundle that executed and
+then found no oracle has not, so its claim stays accepted — nothing verified it, and
+`confirmed` is the column a published support matrix reads.
+
+`describeOutcome()` writes the depth into the verdict's detail, so the report says
+*how far* a cell got rather than only that it got somewhere. `UNCLAIMED_SUPPORT` for
+the engine under test picks up the same annotation: positive drift that actually ran
+green is a stronger "add this to the sidecar" than one the ranked list merely named.
 
 Other engines' verdicts pass through untouched — this test never ran them, so the
 run has no evidence either way about their claims.
@@ -192,7 +224,8 @@ run has no evidence either way about their claims.
 ==== SUPPORT CLAIM SUMMARY ====
   graphs: 3 found, 3 with claims, 3 queried (3 verdicts)
   confirmed: 0  accepted: 1  failed-in-use: 0  broken: 1  errored: 0  unclaimed: 1
-  (accepted = engine advertises support; only confirmed was executed and verified)
+  (accepted = engine advertises support; confirmed = the run reached the depth
+   this bundle's enforcement_level declares)
 ```
 
 - **`queried`** counts graphs whose sidecar was read; **`verdicts`** counts the
@@ -200,8 +233,9 @@ run has no evidence either way about their claims.
   test's — and zero when the sidecar says nothing about this cell, so
   `verdicts ≤ queried`.
 - **`found ⊇ with claims ⊇ queried`** is the nesting invariant.
-- **`accepted` is weaker than `confirmed`.** Only `confirmed` was executed and
-  verified. A published support matrix should carry `confirmed`.
+- **`accepted` is weaker than `confirmed`.** Only `confirmed` reached the depth its
+  bundle declares; the detail column names how far each cell actually got. A
+  published support matrix should carry `confirmed`.
 
 A shortfall between `with claims` and `queried` is attributed explicitly:
 

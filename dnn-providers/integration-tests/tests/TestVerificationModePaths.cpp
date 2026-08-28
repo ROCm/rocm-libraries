@@ -78,14 +78,13 @@ protected:
 
     // Record the routing decision instead of running it. The real implementation
     // calls getSharedHandle(), which this deviceless harness must not reach.
-    // skipUnverifiable() is how the real enforceAtLevel() exits when it cannot
-    // verify; using it here keeps TestBody()'s "verified nothing" guard satisfied,
-    // which a bare GTEST_SKIP() would not once the reporter intercepts the skip.
-    // Assertions read enforcedLevel(), so they prove routing specifically.
-    void enforceAtLevel(EnforcementLevel level) override
+    // unverifiable() is how the real enforceAtLevel() exits when it cannot verify,
+    // so the stub returns the same shape of outcome. Assertions read enforcedLevel(),
+    // so they prove routing specifically.
+    VerificationOutcome enforceAtLevel(EnforcementLevel level) override
     {
         _enforcedLevel = level;
-        skipUnverifiable("enforceAtLevel stubbed (deviceless)");
+        return unverifiable("enforceAtLevel stubbed (deviceless)");
     }
 
 public:

@@ -60,16 +60,26 @@ bool isFailure(SupportVerdict verdict)
     }
 }
 
-SupportVerdict promoteAcceptedClaim(bool exercised, bool passed)
+SupportVerdict promoteAcceptedClaim(const VerificationOutcome& outcome, VerificationDepth required)
 {
-    if(!exercised)
+    if(outcome.status == OutcomeStatus::FAILED)
     {
-        // The engine never ran this graph, so the run has no evidence either way.
-        // Leaving it accepted is the honest answer; confirming it would publish
-        // support nothing verified.
-        return SupportVerdict::CLAIM_ACCEPTED;
+        // Only the engine's own failures are evidence against the engine. A
+        // reference executor that errored, or a bundle whose golden data is not
+        // pulled, makes the run red without saying anything about the claim —
+        // demoting it there would publish "do not use this cell" over a defect that
+        // lives somewhere else entirely.
+        const bool engineIsAtFault = outcome.origin == FailureOrigin::ENGINE
+                                     || outcome.origin == FailureOrigin::COMPARISON;
+        return engineIsAtFault ? SupportVerdict::CLAIM_FAILED_IN_USE
+                               : SupportVerdict::CLAIM_ACCEPTED;
     }
-    return passed ? SupportVerdict::CLAIM_CONFIRMED : SupportVerdict::CLAIM_FAILED_IN_USE;
+
+    // Short of the bundle's declared depth the run has no evidence either way, so
+    // leaving it accepted is the honest answer; confirming it would publish support
+    // that nothing verified.
+    return outcome.depth >= required ? SupportVerdict::CLAIM_CONFIRMED
+                                     : SupportVerdict::CLAIM_ACCEPTED;
 }
 
 namespace
@@ -175,7 +185,7 @@ SupportObservation observeSupport(hipdnn_frontend::ErrorCode errorCode,
           && std::find(rankedIds.begin(), rankedIds.end(), engineUnderTest.id) != rankedIds.end();
 
     SupportObservation observation;
-    observation.sidecarChecked = true;
+    observation.sidecar = SidecarState::CHECKED;
 
     if(claimed && !resolved)
     {

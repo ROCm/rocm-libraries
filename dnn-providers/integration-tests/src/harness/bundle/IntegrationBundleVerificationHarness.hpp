@@ -27,7 +27,13 @@
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
+#include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
+
+namespace hipdnn_frontend::graph
+{
+class Graph;
+}
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -105,46 +111,28 @@ protected:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
-        // Gather the claim facts before anything can short-circuit. This has to be
-        // above runComparison(): golden-check never touches the engine at all, and
-        // every other mode has an early return that skips it, so a ranked-engine
-        // query issued from inside the comparison is not guaranteed to happen. Each
-        // of those paths used to leave the graph's claims unadjudicated while the
-        // run still exited 0.
+        // Phase 1: read the claim facts before anything can cut the test short. This
+        // has to sit above runComparison(): every mode has an early return that would
+        // otherwise leave the graph's claims undecided while the run exited 0.
         const auto observation = observeSupportForBundle();
         recordClaimCoverage(observation);
 
-        // A broken or unevaluable claim means the engine declined the graph, so the
-        // comparison has nothing to run and would only stack a sentinel-buffer diff
-        // on top of the real diagnostic. Decide here, report below.
-        const std::string claimFailures = aggregateClaimFailures(observation.results);
-        const bool canRunComparison = claimFailures.empty();
+        // Phase 2: run as far as this bundle asks for. A broken claim means the
+        // engine will not take the graph, so the comparison has nothing to run and
+        // would only pile a sentinel-buffer diff on top of the real message — it is
+        // reported as an engine failure without being tried.
+        const std::optional<VerificationOutcome> blocked = claimBlocked(observation);
+        const VerificationOutcome outcome = blocked ? *blocked : runComparison();
 
-        if(canRunComparison)
-        {
-            runComparison();
+        // Kept as a live check because "the test did nothing and went green" is the
+        // failure this harness exists to catch.
+        const VerificationDepth required = bundleRequiredDepth();
+        EXPECT_FALSE(outcome.status == OutcomeStatus::PASSED && outcome.depth < required)
+            << "test passed without reaching " << toString(required) << " for " << _bundlePath;
 
-            if(!HasFatalFailure() && !IsSkipped())
-            {
-                EXPECT_TRUE(_verified)
-                    << "test completed without verifying anything for " << _bundlePath;
-            }
-        }
-
-        // The only place a verdict reaches the report. An accepted claim is an
-        // observation about the ranked list, taken before the graph was built; it
-        // becomes confirmed support only once the engine has actually run it green.
-        //
-        // `_engineRan`, not `!IsSkipped()`: a mode can fail before ever reaching the
-        // engine (golden with no data), and only the engine having run the graph
-        // justifies promoting the claim either way.
-        commitClaims(observation.results, /*exercised=*/_engineRan);
-
-        // Last, because FAIL() returns.
-        if(!canRunComparison)
-        {
-            FAIL() << claimFailures;
-        }
+        // Phase 3: one verdict, then one pass/fail/skip, both from the same outcome.
+        commitClaims(observation.results, outcome);
+        reportOutcome(outcome);
     }
 
     virtual void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack);
@@ -158,16 +146,18 @@ protected:
 
     // Virtual so deviceless tests can observe the non-FULL routing decision without
     // reaching getSharedHandle(). The real implementation needs a device.
-    virtual void enforceAtLevel(EnforcementLevel level);
+    virtual VerificationOutcome enforceAtLevel(EnforcementLevel level);
 
     // Virtual for the same reason: the real implementation needs a handle to build
     // the graph and ask for the ranked engine list. Deviceless harnesses return an
     // empty observation.
     virtual SupportObservation observeSupportForBundle();
 
-    // Protected so a stubbed enforceAtLevel() can exit the same way the real one does
-    // when it cannot verify: marks the bundle accounted for, then skips.
-    void skipUnverifiable(const std::string& reason);
+    // Protected so a stubbed enforceAtLevel() can exit the same way the real one
+    // does when it cannot verify: records the bundle as unverifiable and yields the
+    // skip outcome for TestBody() to issue.
+    VerificationOutcome unverifiable(const std::string& reason,
+                                     VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
     InputFillRecipes& inputFillRecipes()
     {
@@ -189,13 +179,24 @@ private:
     // exists that the query somehow did not reach.
     void recordClaimCoverage(const SupportObservation& observation);
 
-    // Concatenated messages for every verdict isFailure() rejects. Empty when the
-    // claims held, which is also the signal that the comparison may run.
-    std::string aggregateClaimFailures(const std::vector<SupportResult>& results) const;
+    // nullopt when the claims held and the comparison may run; otherwise the outcome
+    // that stands in for it, carrying every failing verdict's message.
+    std::optional<VerificationOutcome> claimBlocked(const SupportObservation& observation) const;
 
     // Publishes every verdict, promoting the engine-under-test's accepted claim by
-    // the observed outcome. Called exactly once per test.
-    void commitClaims(const std::vector<SupportResult>& results, bool exercised);
+    // what the run actually achieved. Called exactly once per test.
+    void commitClaims(const std::vector<SupportResult>& results,
+                      const VerificationOutcome& outcome);
+
+    // The only place a gtest disposition is issued. Called exactly once per test,
+    // last, because GTEST_SKIP() and FAIL() both return.
+    void reportOutcome(const VerificationOutcome& outcome);
+
+    VerificationDepth bundleRequiredDepth() const
+    {
+        return _bundle != nullptr ? requiredDepth(_bundle->metadata.enforcementLevel)
+                                  : VerificationDepth::VERIFIED;
+    }
 
     // Ranked-engine query result, populated by observeSupportForBundle() and reused
     // by the executor and the enforcement rungs so one test makes one heuristic
@@ -209,8 +210,6 @@ private:
     };
 
     bool _requiresDevice;
-    mutable bool _verified = false;
-    bool _engineRan = false;
     std::filesystem::path _bundlePath;
     SupportClaimLocator _claimLocator;
     std::shared_ptr<IntegrationTestBundle> _bundle;
@@ -230,32 +229,63 @@ private:
         std::string message;
     };
 
-    void runComparison();
-    void runGoldenMode();
-    void runExplicitRefMode(ReferenceExecutorType type);
-    void runAutoMode();
+    enum class EngineStatus
+    {
+        RAN, ///< the engine executed the graph; `outputs` holds what it wrote
+        DECLINED, ///< EngineNotApplicableError — the engine refused the graph
+        ERRORED, ///< the executor raised a fatal assertion, already on the record
+    };
+    struct EngineRunResult
+    {
+        EngineStatus status = EngineStatus::DECLINED;
+        std::string message;
+        OutputTensors outputs;
+    };
 
-    bool ensureInputsAvailable();
-    bool fillBundleInputs();
+    VerificationOutcome runComparison();
+    VerificationOutcome runGoldenMode();
+    VerificationOutcome runExplicitRefMode(ReferenceExecutorType type);
+    VerificationOutcome runAutoMode();
+
+    // Builds the bundle's graph on the shared handle. Returns the frontend's message
+    // on failure, empty on success — callers choose how loud to be.
+    std::string buildGraph(hipdnn_frontend::graph::Graph& graph) const;
+
+    // One heuristic query per test. The ranked list is a property of (graph, handle),
+    // so a second call fans out to every plugin again for the same answer.
+    const RankedQuery& rankedEngineIds(hipdnn_frontend::graph::Graph& graph);
+
+    // nullopt when the inputs are ready; otherwise the outcome to return.
+    std::optional<VerificationOutcome> prepareInputs();
+    std::optional<VerificationOutcome> fillBundleInputs();
 
     OutputTensors allocateSentinelOutputs() const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
                                                         bool useDevice) const;
-    std::optional<OutputTensors> runEngineCapturingOutputs(std::string& error);
-    std::optional<OutputTensors> runEngineOrSkip();
+    EngineRunResult runEngine();
+    VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
     RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
     static void markOutputsModifiedFor(OutputTensors& outputs, bool device);
 
-    void compareAgainstGolden(OutputTensors& engineOutputs);
-    void compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
+    VerificationOutcome compareAgainstGolden(OutputTensors& engineOutputs);
+    VerificationOutcome compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
+
+    // VERIFIED either way: the oracle ran and the outputs were examined. A mismatch
+    // carries no message because compareOutputTensor() already printed the diff.
+    static VerificationOutcome comparisonOutcome(bool allMatched)
+    {
+        return allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
+                          : VerificationOutcome::failed(
+                                VerificationDepth::VERIFIED, FailureOrigin::COMPARISON, {});
+    }
 
     template <typename ExpectedLookup>
-    void compareEach(OutputTensors& engineOutputs, ExpectedLookup expectedFor);
+    bool compareEach(OutputTensors& engineOutputs, ExpectedLookup expectedFor);
 
-    void compareOutputTensor(int64_t uid,
+    bool compareOutputTensor(int64_t uid,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
                              hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                              hipdnn_data_sdk::utilities::ITensor& expected,
