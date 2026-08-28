@@ -405,3 +405,44 @@ BenchmarkProblems:
           - Exact: [33, 256, 1, 256]    # odd M   -- rejected, see above
           - Exact: [256, 65, 1, 256]    # odd N   -- rejected
           - Exact: [33, 65, 1, 256]     # both odd -- rejected
+  -
+    - # The free-dim tail of the buffer window.  The last workgroup along the
+      # contiguous dim owns fewer than a macro tile whenever the size leaves a
+      # remainder, and the window is sized from the tile, so its end runs past
+      # the tensor.  Every other block here either divides evenly or is small
+      # enough that the overhang shares a page with the tail and nothing
+      # faults; 2048 over a tile of 96 leaves 32 rows and an operand that ends
+      # exactly on a 2MB boundary, which puts the overhang on an unmapped page.
+      #
+      # Keep the sizes: the shapes are what make this reachable, not the tiles.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128  wg1x4
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2048, 2048, 1, 2048]   # M tail vs tile 96, operand ends on a page
+          - Exact: [1920, 2048, 1, 2048]   # same scale, no tail -- the control
+          - Exact: [2048, 2000, 1, 2048]   # N tail on the other operand
