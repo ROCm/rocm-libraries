@@ -51,7 +51,6 @@ doxygen_project = {
     "path": "doxygen/xml",
 }
 
-external_projects = []
 external_projects_current_project = "rocprim"
 
 cpp_id_attributes = [
