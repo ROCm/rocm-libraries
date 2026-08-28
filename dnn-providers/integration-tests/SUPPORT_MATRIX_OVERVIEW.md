@@ -27,7 +27,9 @@ For the full per-variant and per-dtype detail matrix, run: `python3 dnn-provider
 | **RMSNorm** | — | — | 🟡 168/172 | — | — |
 | **RMSNormBackward** | — | — | ✅ 960/960 | — | — |
 | **Reduction** | — | — | — | — | — |
+| **ResampleFwd** | — | — | — | — | — |
 | **Sdpa** | — | — | — | — | — |
+| **SdpaBackward** | — | — | — | — | — |
 
 ## gfx90a / linux — MI200 series (MI210/MI250/MI250X)
 
@@ -47,7 +49,9 @@ For the full per-variant and per-dtype detail matrix, run: `python3 dnn-provider
 | **RMSNorm** | — | — | 🟡 168/172 | — | — |
 | **RMSNormBackward** | — | — | ✅ 960/960 | — | — |
 | **Reduction** | — | — | — | — | — |
+| **ResampleFwd** | — | — | — | — | — |
 | **Sdpa** | — | — | — | — | — |
+| **SdpaBackward** | — | — | — | — | — |
 
 ## gfx942 / linux — MI300 series (MI300A/MI300X/MI325X)
 
@@ -67,4 +71,6 @@ For the full per-variant and per-dtype detail matrix, run: `python3 dnn-provider
 | **RMSNorm** | — | — | 🟡 168/172 | — | — |
 | **RMSNormBackward** | — | — | ✅ 960/960 | — | — |
 | **Reduction** | — | — | — | — | — |
+| **ResampleFwd** | — | — | — | — | — |
 | **Sdpa** | 🟡 12/50 | — | — | — | — |
+| **SdpaBackward** | — | — | — | — | — |

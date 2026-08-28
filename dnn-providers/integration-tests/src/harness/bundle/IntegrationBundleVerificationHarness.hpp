@@ -202,6 +202,34 @@ private:
 
     static std::string
         labelFor(int64_t uid, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs);
+
+    std::string reportHeader(int64_t uid,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                             hipdnn_data_sdk::utilities::ITensor& expected,
+                             float atol,
+                             float rtol) const;
+
+    static void
+        appendTensorDiff(std::ostream& os,
+                         int64_t uid,
+                         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                         hipdnn_data_sdk::utilities::ITensor& expected,
+                         hipdnn_data_sdk::utilities::ITensor& actual,
+                         float atol,
+                         float rtol);
+
+    template <typename T>
+    static void appendFpDiff(std::ostream& os,
+                             int64_t uid,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                             hipdnn_data_sdk::utilities::ITensor& expected,
+                             hipdnn_data_sdk::utilities::ITensor& actual,
+                             float atol,
+                             float rtol);
+
+    static std::string dataTypeName(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 };
 
 } // namespace hipdnn_integration_tests::bundle
