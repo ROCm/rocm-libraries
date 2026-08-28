@@ -1,14 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Tests the verification mode dispatch logic in the harness:
-//
-//   AUTO mode:    golden → GPU ref → CPU ref → SKIP
-//   GOLDEN mode:  golden or SKIP
-//   GPU/CPU mode: explicit ref or SKIP/FAIL
-//
-// Each test overrides getVerificationMode() and the executor stubs to exercise
-// one branch without touching the TestConfig singleton.
+// Verification mode dispatch: AUTO/GOLDEN/GPU/CPU paths.
 
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
@@ -76,15 +69,36 @@ protected:
         return nullptr;
     }
 
-    // These tests exercise verification-mode dispatch, not the VRAM/arch
-    // hardware guards. Override to a no-op so they don't reach into the
-    // (uninitialized-in-this-binary) TestConfig singleton.
+    bool isEnforcingSupportClaims() const override
+    {
+        return false;
+    }
+
     void applyMetadataGuards() const override {}
+
+    // Record the routing decision instead of running it. The real implementation
+    // calls getSharedHandle(), which this deviceless harness must not reach.
+    // skipUnverifiable() is how the real enforceAtLevel() exits when it cannot
+    // verify; using it here keeps TestBody()'s "verified nothing" guard satisfied,
+    // which a bare GTEST_SKIP() would not once the reporter intercepts the skip.
+    // Assertions read enforcedLevel(), so they prove routing specifically.
+    void enforceAtLevel(EnforcementLevel level) override
+    {
+        _enforcedLevel = level;
+        skipUnverifiable("enforceAtLevel stubbed (deviceless)");
+    }
+
+public:
+    std::optional<EnforcementLevel> enforcedLevel() const
+    {
+        return _enforcedLevel;
+    }
 
 private:
     VerificationMode _mode;
     EngineStub _engineStub;
     RefStub _refStub;
+    std::optional<EnforcementLevel> _enforcedLevel;
 };
 
 class TestVerificationModePathsFixture : public ::testing::Test
@@ -405,6 +419,68 @@ TEST_F(TestVerificationModePathsFixture, CpuModeCapabilityMissSkips)
                  &results);
 
     EXPECT_TRUE(anySkipped(results));
+    EXPECT_FALSE(anyFailed(results));
+}
+
+// ── Enforcement-level gate ──────────────────────────────────────────────────
+// runComparison() routes on enforcement level alone. The --enforce-support-claims
+// flag controls what happens *inside* enforceAtLevel(), not whether it runs, so a
+// non-FULL bundle must reach it even with the flag off (isEnforcingSupportClaims()
+// is false in this harness). These cover the routing branch only; enforceAtLevel()
+// itself is stubbed because the real one needs a device.
+
+TEST_F(TestVerificationModePathsFixture, NonFullBundleRoutesToEnforcementPath)
+{
+    auto bundle = loadBundle("enforce_gate", /*includeGoldenOutput=*/true);
+    bundle->metadata.enforcementLevel = EnforcementLevel::APPLICABILITY;
+
+    bool engineCalled = false;
+    ModeTestableHarness harness(
+        VerificationMode::AUTO,
+        [&](std::unordered_map<int64_t, void*>&) { engineCalled = true; },
+        matchingRef());
+    harness.setBundle(std::move(bundle), "vmode-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    {
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, &results);
+        harness.SetUp();
+        harness.TestBody();
+    }
+
+    EXPECT_EQ(harness.enforcedLevel(), EnforcementLevel::APPLICABILITY)
+        << "non-FULL bundle must route to enforceAtLevel()";
+    EXPECT_FALSE(engineCalled) << "comparison path must not run for a non-FULL bundle";
+    EXPECT_FALSE(anyFailed(results));
+}
+
+TEST_F(TestVerificationModePathsFixture, FullBundleRoutesToComparisonPath)
+{
+    auto bundle = loadBundle("enforce_gate_full", /*includeGoldenOutput=*/true);
+    bundle->metadata.enforcementLevel = EnforcementLevel::FULL;
+
+    bool engineCalled = false;
+    ModeTestableHarness harness(
+        VerificationMode::AUTO,
+        [&](std::unordered_map<int64_t, void*>& variantPack) {
+            engineCalled = true;
+            matchingEngine()(variantPack);
+        },
+        matchingRef());
+    harness.setBundle(std::move(bundle), "vmode-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    {
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, &results);
+        harness.SetUp();
+        harness.TestBody();
+    }
+
+    EXPECT_FALSE(harness.enforcedLevel().has_value())
+        << "FULL bundle must not route to enforceAtLevel()";
+    EXPECT_TRUE(engineCalled) << "FULL bundle must run the comparison path";
     EXPECT_FALSE(anyFailed(results));
 }
 
