@@ -7,6 +7,7 @@
 #include <roc/host_numerics/comparison.hpp>
 #include <roc/host_numerics/epilogue.hpp>
 #include <roc/host_numerics/gemm.hpp>
+#include <roc/host_numerics/gemm_validation.hpp>
 #include <roc/host_numerics/generation.hpp>
 #include <roc/host_numerics/layer_norm.hpp>
 #include <roc/host_numerics/mx.hpp>
