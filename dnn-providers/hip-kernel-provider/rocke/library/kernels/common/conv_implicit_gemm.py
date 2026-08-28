@@ -745,7 +745,9 @@ def make_d_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
 # ---------------------------------------------------------------------
 
 
-def build_implicit_gemm_conv(spec: ImplicitGemmConvSpec, *, arch: str = "gfx950") -> KernelDef:
+def build_implicit_gemm_conv(
+    spec: ImplicitGemmConvSpec, *, arch: str = "gfx950"
+) -> KernelDef:
     """Build the IR for one implicit-GEMM conv instance (clean public entry point).
 
     For internal use by deep_fused_conv_pool which needs override callbacks,
