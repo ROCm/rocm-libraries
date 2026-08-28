@@ -1105,8 +1105,12 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     }
     const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
     // mode2 WAR gate: hold back a ds_load too close after its WMMA reader (while WMMAs remain).
-    // A window with <=1 co-issue slot cannot absorb a deferred ds_load, so gating the one
-    // that feeds the next WMMA exposes it instead of reordering. Wider windows have room.
+    // EMPIRICAL, unexplained: exempting the first ds_load of a window when
+    // popcount(coIssueWindow) <= 1 -- in practice the FP4/FP4 WMMA -- is worth ~2pp of
+    // mxf4 D (removing it measured D-C +2.85% -> +0.46%, D-A -2.69%). Co-issue is NOT
+    // the mechanism: ds_loads never occupy a coexec slot, those are VALU-pipe only
+    // (InsertCoexecHazardPass). Kept because it measures; do not ship the slot-capacity
+    // story with it.
     const int coIssueSlots =
         activeWmmaNode_ ? popcount16(activeWmmaNode_->inst->coIssueWindow) : 0;
     const bool feederNoSlot = coIssueSlots <= 1 && dsInsertedSinceLastWmma_ == 0;
