@@ -83,6 +83,7 @@ namespace TensileLite
 
         void ReferenceValidator::preProblem(ContractionProblem* const problem)
         {
+            m_outputSelections.clear();
             if(m_enabled)
             {
                 m_problem = problem;
@@ -90,6 +91,8 @@ namespace TensileLite
                 // Report problem context for timing correlation
                 if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem))
                 {
+                    m_outputSelections.push_back(referenceOutputSelection(
+                        gemm->d(), static_cast<size_t>(m_elementsToValidate)));
                     size_t M          = gemm->freeSizeA(0);
                     size_t N          = gemm->freeSizeB(0);
                     size_t K          = gemm->boundSize(0);
@@ -101,9 +104,12 @@ namespace TensileLite
                 else if(auto grouped = dynamic_cast<ContractionProblemGroupedGemm*>(problem))
                 {
                     size_t totalGemms = grouped->gemms.size();
+                    m_outputSelections.reserve(totalGemms);
                     for(size_t i = 0; i < totalGemms; i++)
                     {
                         auto&  g          = grouped->gemms[i];
+                        m_outputSelections.push_back(referenceOutputSelection(
+                            g.d(), static_cast<size_t>(m_elementsToValidate)));
                         size_t M          = g.freeSizeA(0);
                         size_t N          = g.freeSizeB(0);
                         size_t K          = g.boundSize(0);
@@ -121,7 +127,7 @@ namespace TensileLite
 
                 {
                     ScopedTimer timer("cpu_reference_gemm");
-                    SolveCPU(problem, m_referenceInputs.get(), m_elementsToValidate);
+                    SolveCPU(problem, m_referenceInputs.get(), m_outputSelections);
                 }
             }
         }
@@ -149,7 +155,7 @@ namespace TensileLite
                 if(!m_dataInit->referenceNeedsPerSolutionRecompute(*gemm, solution))
                     return;
                 ScopedTimer timer("cpu_reference_gemm_per_solution");
-                SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
+                SolveCPU(m_problem, m_referenceInputs.get(), m_outputSelections);
             }
         }
 
@@ -197,14 +203,18 @@ namespace TensileLite
                     rv          = true;
                     for(size_t j = 0; j < problems->gemms.size(); j++)
                     {
-                        rv &= validate(problems->gemms[j], reference.grouped[j], result.grouped[j]);
+                        rv &= validate(problems->gemms[j],
+                                       reference.grouped[j],
+                                       result.grouped[j],
+                                       m_outputSelections.at(j));
                     }
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
                     auto reference = dynamic_cast<ContractionInputs const&>(*m_referenceInputs);
                     auto result    = dynamic_cast<ContractionInputs const&>(*inputs);
-                    rv             = validate(*problem, reference, result);
+                    rv             = validate(
+                        *problem, reference, result, m_outputSelections.front());
                 }
                 else
                 {
@@ -231,7 +241,8 @@ namespace TensileLite
                                               void const*             resPtr,
                                               size_t                  maxElements,
                                               bool                    isgpu,
-                                              size_t                  validationStride,
+                                              const roc::host_numerics::OutputSelection&
+                                                  outputSelection,
                                               double                  threshold)
         {
             using namespace roc::host_numerics;
@@ -356,9 +367,7 @@ namespace TensileLite
 
             ComparisonOptions options
                 = validationComparisonOptions(tensor.dataType(), threshold);
-            options.selection.indexOrder
-                = IndexOrder::FirstDimensionFastest;
-            options.selection.stride = validationStride;
+            options.selection = outputSelection;
             options.computePointwiseStatistics = false;
             options.computeFrobenius = false;
             options.reportMatchingElements = m_printValids;
@@ -435,7 +444,7 @@ namespace TensileLite
                     options.maxReportedMismatches);
             }
             if(boundsCheck == BoundsCheckMode::NaN
-               && validationStride == 1)
+               && outputSelection.selectsAll())
             {
                 sentinel.append(checkUnusedTensorStorage(resultTensor,
                                                          tensor.totalAllocatedElements(),
@@ -510,7 +519,9 @@ namespace TensileLite
 
         bool ReferenceValidator::validate(ContractionProblemGemm const& problem,
                                           ContractionInputs const&      reference,
-                                          ContractionInputs const&      result)
+                                          ContractionInputs const&      result,
+                                          const roc::host_numerics::OutputSelection&
+                                              outputSelection)
         {
             if(problem.tensors().empty())
                 return false;
@@ -540,14 +551,17 @@ namespace TensileLite
                 if(!tensor.isOutput())
                     continue;
 
-                size_t validationStride = 1;
-                if(m_elementsToValidate > 0 && m_elementsToValidate < tensor.totalLogicalElements())
-                    validationStride
-                        = NextPrime(tensor.totalAllocatedElements() / m_elementsToValidate);
+                const auto tensorRole = static_cast<ContractionProblemGemm::TENSOR>(i);
+                const roc::host_numerics::OutputSelection comparisonSelection
+                    = tensorRole == ContractionProblemGemm::TENSOR::D
+                              || tensorRole == ContractionProblemGemm::TENSOR::E
+                          ? outputSelection
+                          : referenceOutputSelection(
+                                tensor, static_cast<size_t>(m_elementsToValidate));
 
                 void const* refPtr = nullptr;
                 void const* resPtr = nullptr;
-                switch(static_cast<ContractionProblemGemm::TENSOR>(i))
+                switch(tensorRole)
                 {
                 case ContractionProblemGemm::TENSOR::A:
                 {
@@ -662,8 +676,13 @@ namespace TensileLite
                     throw std::runtime_error(ss.str());
                 }
 
-                rv &= checkResults(
-                    tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
+                rv &= checkResults(tensor,
+                                   refPtr,
+                                   resPtr,
+                                   result.maxElements[i],
+                                   result.gpu,
+                                   comparisonSelection,
+                                   threshold);
             }
             return rv;
         }

@@ -362,13 +362,11 @@ int runGemm(size_t             m,
 
     const bool partialValidation = elementsToValidate > 0
                                    && static_cast<size_t>(elementsToValidate) < d.size();
+    const auto outputSelection = TensileLite::Client::referenceOutputSelection(
+        contraction.d(), static_cast<size_t>(elementsToValidate));
     std::vector<size_t> selectedValidationIndices;
     if(partialValidation)
-    {
-        const auto selection = roc::host_numerics::OutputSelection::primeStride(
-            d.size(), d.size(), static_cast<size_t>(elementsToValidate));
-        selectedValidationIndices = selection.indices(d.size());
-    }
+        selectedValidationIndices = outputSelection.indices(d.size());
 
     // Initialize inputs with random values. We use ±1 (binary) for A and B by
     // default because it is exactly representable in every supported storage
@@ -595,8 +593,8 @@ int runGemm(size_t             m,
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    const auto runInfo
-        = TensileLite::Client::executeReferenceGemm(contraction, inputs, elementsToValidate, backend);
+    const auto runInfo = TensileLite::Client::executeReferenceGemm(
+        contraction, inputs, outputSelection, backend);
 
     auto                                      end      = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
@@ -662,13 +660,7 @@ int runGemm(size_t             m,
             .maxReportedMismatches = 10,
         };
         if(partialValidation)
-        {
-            comparisonOptions.selection.stride =
-                selectedValidationIndices.size() > 1
-                    ? selectedValidationIndices[1] - selectedValidationIndices[0]
-                    : 1;
-            comparisonOptions.selection.maxElements = selectedValidationIndices.size();
-        }
+            comparisonOptions.selection = outputSelection;
         for(const GemmBackend validationBackend : validationBackends)
         {
             std::vector<AccumulateT> dRef(d.size());
@@ -677,7 +669,7 @@ int runGemm(size_t             m,
             try
             {
                 TensileLite::Client::executeReferenceGemm(
-                    contraction, referenceInputs, elementsToValidate, validationBackend);
+                    contraction, referenceInputs, outputSelection, validationBackend);
             }
             catch(const std::invalid_argument& error)
             {

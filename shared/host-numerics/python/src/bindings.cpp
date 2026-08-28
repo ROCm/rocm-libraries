@@ -388,13 +388,22 @@ NB_MODULE(_roc_host_numerics, module) {
         .value("Explicit", OutputSelectionKind::Explicit);
 
     nb::class_<OutputSelection>(module, "OutputSelection")
-        .def_static("all", &OutputSelection::all)
-        .def_static("strided", &OutputSelection::strided, "first"_a, "stride"_a)
-        .def_static("explicit_indices", &OutputSelection::explicitIndices)
+        .def_static("all", &OutputSelection::all,
+                    "index_order"_a = IndexOrder::LastDimensionFastest)
+        .def_static("strided", &OutputSelection::strided, "first"_a, "stride"_a,
+                    "max_elements"_a = std::numeric_limits<size_t>::max(),
+                    "index_order"_a = IndexOrder::LastDimensionFastest)
+        .def_static("explicit_indices", &OutputSelection::explicitIndices, "indices"_a,
+                    "index_order"_a = IndexOrder::LastDimensionFastest)
         .def_static("prime_stride", &OutputSelection::primeStride, "logical_elements"_a,
-                    "allocated_elements"_a, "requested_elements"_a)
+                    "allocated_elements"_a, "requested_elements"_a,
+                    "index_order"_a = IndexOrder::LastDimensionFastest)
         .def_prop_ro("kind", &OutputSelection::kind)
         .def_prop_ro("selects_all", &OutputSelection::selectsAll)
+        .def_prop_ro("first", &OutputSelection::first)
+        .def_prop_ro("stride", &OutputSelection::stride)
+        .def_prop_ro("max_elements", &OutputSelection::maxElements)
+        .def_prop_ro("index_order", &OutputSelection::indexOrder)
         .def("indices", &OutputSelection::indices, "logical_elements"_a);
 
     nb::class_<ScalarTypeInfo>(module, "ScalarTypeInfo")

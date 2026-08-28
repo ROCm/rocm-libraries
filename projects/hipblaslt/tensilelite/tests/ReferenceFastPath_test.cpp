@@ -6,6 +6,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <roc/host_numerics/adapters/tensilelite/GemmInvocationAdapter.hpp>
+#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
 #include <roc/host_numerics/adapters/tensilelite/Reference.hpp>
 #include <roc/host_numerics/validation.hpp>
 
@@ -469,12 +470,13 @@ TEST(ReferenceOutputSelection, ComputesPrimeStrideSubset)
     std::vector<float> d(M * N, -99.0f);
 
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
-    executeReferenceGemm(problem, inputs, /*elementsToValidate=*/3);
+    const auto selection = referenceOutputSelection(problem.d(), /*elementsToValidate=*/3);
+    executeReferenceGemm(problem, inputs, selection);
 
     for(size_t index = 0; index < d.size(); ++index)
     {
-        const bool selected = index == 0 || index == 5 || index == 10;
-        EXPECT_EQ(d[index], selected ? 2.0f : -99.0f) << "index=" << index;
+        const bool expectedToBeWritten = index == 0 || index == 5 || index == 10;
+        EXPECT_EQ(d[index], expectedToBeWritten ? 2.0f : -99.0f) << "index=" << index;
     }
 }
 

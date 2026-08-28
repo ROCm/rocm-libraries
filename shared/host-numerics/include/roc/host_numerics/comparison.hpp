@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <roc/host_numerics/index_order.hpp>
+#include <roc/host_numerics/operation_types.hpp>
 #include <roc/host_numerics/tensor.hpp>
 #include <span>
 #include <vector>
@@ -29,16 +29,6 @@ enum class ComplexPointwiseMode {
     /// Compare the complex-difference magnitude against a tolerance scaled by the expected
     /// complex-value magnitude.
     Magnitude,
-};
-
-/// Selects logical tensor elements before any comparison criterion, evidence, or reporting is
-/// evaluated. `first` and `stride` are linear logical indices in `indexOrder`; `maxElements`
-/// limits the number of selected indices. `stride` must be nonzero.
-struct ComparisonSelection {
-    size_t first = 0;
-    size_t stride = 1;
-    size_t maxElements = std::numeric_limits<size_t>::max();
-    IndexOrder indexOrder = IndexOrder::LastDimensionFastest;
 };
 
 /// Configures three independent comparison criteria plus optional evidence and reporting.
@@ -115,7 +105,7 @@ struct ComparisonOptions {
     // `reportedComparisons`. `maxReportedMismatches` caps each reported vector independently.
     bool reportMatchingElements = false;
     size_t maxReportedMismatches = 10;
-    ComparisonSelection selection;
+    OutputSelection selection;
 };
 
 struct ComparisonValue {
@@ -125,7 +115,7 @@ struct ComparisonValue {
 };
 
 /// One reported logical tensor element. `index` is the selected element's linear logical index in
-/// `ComparisonOptions::selection.indexOrder`; `coordinates` are tensor coordinates; offsets are
+/// `ComparisonOptions::selection.indexOrder()`; `coordinates` are tensor coordinates; offsets are
 /// element offsets from the start of each tensor's storage, not byte offsets. Reported values are
 /// normalized to double and can round wide integers, while integer `absoluteDifference` is
 /// computed exactly before conversion to double. For a complex value, `absoluteDifference` is the
