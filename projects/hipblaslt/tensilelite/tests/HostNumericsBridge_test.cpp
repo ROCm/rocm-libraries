@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
 
 #include <Tensile/DataTypes.hpp>
 

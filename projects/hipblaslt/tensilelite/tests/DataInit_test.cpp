@@ -17,9 +17,9 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <limits>
-#include <roc/host_numerics/adapters/tensilelite/DataInitializationHelpers.hpp>
-#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
-#include <roc/host_numerics/adapters/tensilelite/TensileDataGeneration.hpp>
+#include <TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/TensileDataGeneration.hpp>
 #include <roc/host_numerics/validation.hpp>
 #include <sstream>
 #include <stdexcept>
@@ -44,7 +44,7 @@ using TensileLite::Client::initializeHostBufferWithHostNumerics;
 
 // Shorthand for the production helper namespace under test (MX builds only).
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-namespace dt = TensileLite::Client::detail;
+namespace dt = TensileLite::Client::HostNumerics::detail;
 #endif
 namespace
 {

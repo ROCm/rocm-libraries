@@ -26,9 +26,9 @@
 
 #include "DataInitialization.hpp"
 
-#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-#include <roc/host_numerics/adapters/tensilelite/DataInitializationHelpers.hpp>
+#include <TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp>
 #endif
 #include "Utility.hpp"
 // #include "DataInitializationTyped.hpp"
@@ -698,7 +698,8 @@ namespace TensileLite
                 hipDeviceProp_t prop;
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
-                m_mxScaleLayout = detail::mxScaleStorageLayoutForArchName(prop.gcnArchName);
+                m_mxScaleLayout
+                    = HostNumerics::detail::mxScaleStorageLayoutForArchName(prop.gcnArchName);
             }
 
             m_rotatingBuffer
@@ -1654,7 +1655,7 @@ namespace TensileLite
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
-        using namespace detail;
+        using namespace HostNumerics::detail;
         using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
 
         static bool isConstantScaleInitMode(InitMode mode)
@@ -1823,7 +1824,7 @@ namespace TensileLite
                                                      scaleDesc.totalAllocatedBytes(),
                                                      b * scaleBatchStrideBytes,
                                                      scaleBatchStrideBytes);
-                    auto mxProblem = detail::makeMxGenerationProblem(
+                    auto mxProblem = HostNumerics::detail::makeMxGenerationProblem(
                         dataDesc.dataType(),
                         scaleEltType,
                         roc::host_numerics::Shape{rows, cols},

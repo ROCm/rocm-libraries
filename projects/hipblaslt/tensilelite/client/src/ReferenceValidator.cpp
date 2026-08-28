@@ -25,11 +25,11 @@
  *******************************************************************************/
 
 #include "ReferenceValidator.hpp"
-#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
 
-#include <roc/host_numerics/adapters/tensilelite/Reference.hpp>
+#include <TensileLite/Client/HostNumerics/Reference.hpp>
 
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/hip/HipUtils.hpp>
