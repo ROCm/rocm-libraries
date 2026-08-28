@@ -14,8 +14,13 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit b45a060 for multi-arch package toggles.
-# NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
+# TheRock ref: the resolve_therock_ref job picks one concrete ROCm/TheRock SHA
+# for the whole run. The setup job checks out the pinned TheRock SHA and
+# re-exports it as needs.setup.outputs.ref. The `uses:
+# ROCm/TheRock/...@b45a060` lines below are the workflow-definition refs
+# (Actions requires a literal there), and the matching `ref:` inputs are the
+# build-source refs consumed by those reusable workflows.
+
 on:
   pull_request:
     types:
@@ -153,6 +158,9 @@ jobs:
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
+      # Concrete SHA resolved once by resolve_therock_ref; setup re-exports the
+      # checked-out commit as needs.setup.outputs.ref for downstream jobs.
+      # TODO: After multi-arch CI is fully migrated to TheRock, remove the explicit ref here
       ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
       # Pass external repo info for stage-impact analysis
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
