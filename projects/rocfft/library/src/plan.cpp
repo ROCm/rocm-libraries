@@ -542,6 +542,72 @@ catch(...)
     return rocfft_handle_exception();
 }
 
+rocfft_status rocfft_plan_description_set_load_callback(rocfft_plan_description description,
+                                                        const char*             symbol_name,
+                                                        const void*             bitcode_data,
+                                                        size_t                  bitcode_len_bytes,
+                                                        size_t                  shared_mem_bytes)
+try
+{
+    log_trace(__func__,
+              "description",
+              description,
+              "symbol_name",
+              symbol_name,
+              "bitcode_data",
+              bitcode_data,
+              "bitcode_len_bytes",
+              bitcode_len_bytes,
+              "shared_mem_bytes",
+              shared_mem_bytes);
+    if(!description)
+        return rocfft_status_invalid_arg_value;
+
+    // shared memory for callbacks is not currently supported
+    if(shared_mem_bytes)
+        return rocfft_status_invalid_arg_value;
+
+    description->loadOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes);
+    return rocfft_status_success;
+}
+catch(...)
+{
+    return rocfft_handle_exception();
+}
+
+rocfft_status rocfft_plan_description_set_store_callback(rocfft_plan_description description,
+                                                         const char*             symbol_name,
+                                                         const void*             bitcode_data,
+                                                         size_t                  bitcode_len_bytes,
+                                                         size_t                  shared_mem_bytes)
+try
+{
+    log_trace(__func__,
+              "description",
+              description,
+              "symbol_name",
+              symbol_name,
+              "bitcode_data",
+              bitcode_data,
+              "bitcode_len_bytes",
+              bitcode_len_bytes,
+              "shared_mem_bytes",
+              shared_mem_bytes);
+    if(!description)
+        return rocfft_status_invalid_arg_value;
+
+    // shared memory for callbacks is not currently supported
+    if(shared_mem_bytes)
+        return rocfft_status_invalid_arg_value;
+
+    description->storeOps.spirv_cb.set(symbol_name, bitcode_data, bitcode_len_bytes);
+    return rocfft_status_success;
+}
+catch(...)
+{
+    return rocfft_handle_exception();
+}
+
 std::vector<size_t> rocfft_plan_t::get_user_facing_lengths() const
 {
     if(transformType == rocfft_transform_type_complex_forward
@@ -1543,6 +1609,13 @@ rocfft_status
         //    //
         //}
     }
+
+    // JIT callbacks cannot currently be combined with field
+    // decompositions, as we can't guarantee that a callback-running
+    // kernel will be first/last to load/store the data in the FFT.
+    if((!inFields.empty() || !outFields.empty()) && (loadOps.has_spirv() || storeOps.has_spirv()))
+        return rocfft_status_invalid_arg_value;
+
     return rocfft_status_success;
 }
 
