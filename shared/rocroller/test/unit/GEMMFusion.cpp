@@ -355,13 +355,16 @@ namespace GEMMDriverTest
             }
 
             // Host result
-            HostNumerics::HostReferenceProblem referenceProblem(
+            auto referenceProblem = HostNumerics::makeHostReferenceProblem(
                 HostNumerics::hostTensor(descA, hostA),
                 HostNumerics::hostTensor(descB, hostB),
-                HostNumerics::hostTensor(descC, hostC));
-            referenceProblem.alpha = alpha;
-            referenceProblem.beta  = beta;
-            auto h_result          = HostNumerics::convertHostReference<T>(
+                HostNumerics::hostTensor(descC, hostC),
+                std::nullopt,
+                std::nullopt,
+                0,
+                alpha,
+                beta);
+            auto h_result = HostNumerics::convertHostReference<T>(
                 HostNumerics::computeHostReference(referenceProblem));
             // Host leaky relu
             for(size_t i = 0; i < M; i++)
@@ -419,8 +422,8 @@ namespace GEMMDriverTest
                     = gemmAcceptableError<T, T, T>(K, m_context->targetArchitecture().target());
                 auto res = compare(d_result, h_result, tol);
 
-                Log::info("RNorm is {}", res.relativeNormL2);
-                if(debuggable && !res.ok)
+                Log::info("RNorm is {}", res.statistics.relativeFrobeniusError);
+                if(debuggable && !res.ok())
                 {
                     for(size_t i = 0; i < M; i++)
                     {
@@ -438,7 +441,7 @@ namespace GEMMDriverTest
                         }
                     }
                 }
-                ASSERT_TRUE(res.ok) << res.message();
+                ASSERT_TRUE(res.ok()) << res.message();
             }
         }
     };

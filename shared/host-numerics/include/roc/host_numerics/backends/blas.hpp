@@ -21,4 +21,8 @@ GemmSupportInfo queryGemmSupportWithBlasBackend(const GemmRequest& request,
 // Blocked/Pointwise policy.
 GemmRunInfo referenceGemmWithBlasBackend(const GemmRequest& request,
                                          GemmBackend backend = GemmBackend::Automatic);
+
+GemmResult referenceGemmWithBlasBackend(const GemmProblem& problem,
+                                        const GemmOutputOptions& output = {},
+                                        GemmBackend backend = GemmBackend::Automatic);
 }  // namespace roc::host_numerics

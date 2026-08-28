@@ -418,41 +418,46 @@ namespace MatrixMultiplyTest
 
                 float alpha = 1.0f;
 
-                HostNumerics::HostReferenceProblem referenceProblem(
-                    HostNumerics::hostTensor(descA,
-                                             A,
-                                             scaleA
-                                                 ? HostNumerics::DataTypeInterpretation::BlockScaled
-                                                 : HostNumerics::DataTypeInterpretation::Unscaled),
-                    HostNumerics::hostTensor(descB,
-                                             B,
-                                             scaleB
-                                                 ? HostNumerics::DataTypeInterpretation::BlockScaled
-                                                 : HostNumerics::DataTypeInterpretation::Unscaled),
-                    HostNumerics::hostTensor(descD, c_C));
+                std::optional<roc::host_numerics::Tensor> referenceScaleA;
+                std::optional<roc::host_numerics::Tensor> referenceScaleB;
                 if(scaleA)
                 {
                     ASSERT_TRUE(scaleB);
-                    referenceProblem.scaleA = HostNumerics::hostScaleTensor(
+                    referenceScaleA = HostNumerics::hostScaleTensor(
                         scaleTypeA, hostScaleA, descA, 1, scaleBlockSize);
-                    referenceProblem.scaleB = HostNumerics::hostScaleTensor(
+                    referenceScaleB = HostNumerics::hostScaleTensor(
                         scaleTypeB, hostScaleB, descB, 0, scaleBlockSize);
-                    referenceProblem.scaleBlockSize = scaleBlockSize;
                 }
                 else
                 {
                     ASSERT_FALSE(scaleB);
                 }
-                referenceProblem.alpha = alpha;
-                auto c_D               = HostNumerics::convertHostReference<TD>(
+                auto referenceProblem = HostNumerics::makeHostReferenceProblem(
+                    HostNumerics::hostTensor(
+                        descA,
+                        A,
+                        scaleA ? HostNumerics::DataTypeInterpretation::BlockScaled
+                               : HostNumerics::DataTypeInterpretation::Unscaled),
+                    HostNumerics::hostTensor(
+                        descB,
+                        B,
+                        scaleB ? HostNumerics::DataTypeInterpretation::BlockScaled
+                               : HostNumerics::DataTypeInterpretation::Unscaled),
+                    HostNumerics::hostTensor(descD, c_C),
+                    std::move(referenceScaleA),
+                    std::move(referenceScaleB),
+                    scaleA ? scaleBlockSize : 0,
+                    alpha,
+                    0.0f);
+                auto c_D = HostNumerics::convertHostReference<TD>(
                     HostNumerics::computeHostReference(referenceProblem));
 
                 auto tol
                     = gemmAcceptableError<TA, TB, TD>(K, m_context->targetArchitecture().target());
                 auto res = compare(D, c_D, tol);
 
-                Log::info("RNorm is {}", res.relativeNormL2);
-                ASSERT_TRUE(res.ok) << res.message();
+                Log::info("RNorm is {}", res.statistics.relativeFrobeniusError);
+                ASSERT_TRUE(res.ok()) << res.message();
             }
         }
 
@@ -677,10 +682,15 @@ namespace MatrixMultiplyTest
 
                 std::vector<TD> c_C(M * N, TD{});
 
-                HostNumerics::HostReferenceProblem referenceProblem(
+                auto referenceProblem = HostNumerics::makeHostReferenceProblem(
                     HostNumerics::hostTensor(descA, A),
                     HostNumerics::hostTensor(descB, B),
-                    HostNumerics::hostTensor(descD, c_C));
+                    HostNumerics::hostTensor(descD, c_C),
+                    std::nullopt,
+                    std::nullopt,
+                    0,
+                    1.0f,
+                    0.0f);
                 auto c_D = HostNumerics::convertHostReference<TD>(
                     HostNumerics::computeHostReference(referenceProblem));
 
@@ -688,8 +698,8 @@ namespace MatrixMultiplyTest
                     = gemmAcceptableError<TA, TB, TD>(K, m_context->targetArchitecture().target());
                 auto res = compare(D, c_D, tol);
 
-                Log::info("RNorm is {}", res.relativeNormL2);
-                ASSERT_TRUE(res.ok) << res.message();
+                Log::info("RNorm is {}", res.statistics.relativeFrobeniusError);
+                ASSERT_TRUE(res.ok()) << res.message();
             }
         }
 
@@ -827,20 +837,24 @@ namespace MatrixMultiplyTest
                 ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                HostNumerics::HostReferenceProblem referenceProblem(
+                auto referenceProblem = HostNumerics::makeHostReferenceProblem(
                     HostNumerics::hostTensor(descA, A),
                     HostNumerics::hostTensor(descB, B),
-                    HostNumerics::hostTensor(descC, C));
-                referenceProblem.beta = 1.0f;
-                auto c_D              = HostNumerics::convertHostReference<T>(
+                    HostNumerics::hostTensor(descC, C),
+                    std::nullopt,
+                    std::nullopt,
+                    0,
+                    1.0f,
+                    1.0f);
+                auto c_D = HostNumerics::convertHostReference<T>(
                     HostNumerics::computeHostReference(referenceProblem));
 
                 auto tol
                     = gemmAcceptableError<T, T, T>(K, m_context->targetArchitecture().target());
                 auto res = compare(D, c_D, tol);
 
-                Log::info("RNorm is {}", res.relativeNormL2);
-                ASSERT_TRUE(res.ok) << res.message();
+                Log::info("RNorm is {}", res.statistics.relativeFrobeniusError);
+                ASSERT_TRUE(res.ok()) << res.message();
             }
         }
     };
