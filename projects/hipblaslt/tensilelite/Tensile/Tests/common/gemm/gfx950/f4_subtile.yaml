@@ -359,16 +359,12 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 256]
           - Exact: [512, 512, 1, 512]
   -
-    - # Edge and tail coverage.  Every other block sizes M, N and K to whole
-      # macro tiles and whole DepthU, so neither the M/N edge nor the tail loop
-      # is reached; the buffer limits and the tail masking are untested there.
-      #
-      # The odd sizes below are here to be *rejected*, not to run.  Two fp4
-      # elements share a byte, and on this layout M and N are the contiguous
-      # dims, so an odd extent leaves the leading stride on a half byte.  The
-      # geometry sets AssertFree0/1ElementMultiple for that, and the client
-      # reports DID_NOT_SATISFY_ASSERTS.  Drop the assert and these come back
-      # as FAILED rather than quietly vanishing, so they hold the guard in place.
+    - # Edge and tail coverage: every other block uses whole macro tiles and
+      # whole DepthU, so the M/N edge and the tail loop go untested there.
+      # The odd sizes are here to be *rejected* -- an odd extent on a contiguous
+      # dim leaves the leading stride on a half byte, and the geometry sets
+      # AssertFree0/1ElementMultiple.  Drop that assert and they come back
+      # FAILED rather than vanishing, so they hold the guard in place.
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -406,15 +402,11 @@ BenchmarkProblems:
           - Exact: [256, 65, 1, 256]    # odd N   -- rejected
           - Exact: [33, 65, 1, 256]     # both odd -- rejected
   -
-    - # The free-dim tail of the buffer window.  The last workgroup along the
-      # contiguous dim owns fewer than a macro tile whenever the size leaves a
-      # remainder, and the window is sized from the tile, so its end runs past
-      # the tensor.  Every other block here either divides evenly or is small
-      # enough that the overhang shares a page with the tail and nothing
-      # faults; 2048 over a tile of 96 leaves 32 rows and an operand that ends
-      # exactly on a 2MB boundary, which puts the overhang on an unmapped page.
-      #
-      # Keep the sizes: the shapes are what make this reachable, not the tiles.
+    - # The free-dim tail of the buffer window.  The last workgroup owns fewer
+      # than a macro tile when the size leaves a remainder, so the window runs
+      # past the tensor.  Faulting needs the operand to end on a page too:
+      # 2048 over a tile of 96 leaves 32 rows and an A of exactly 2MB.
+      # Keep the sizes -- the shapes make this reachable, not the tiles.
       OperationType: GEMM
       DataType: F4
       DestDataType: S
