@@ -5069,6 +5069,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # and may not be allocated at all.
           continue
         if kernel["ProblemType"]["TLU%s" % tc]:
+          # The ceil-divide below is a shift, so the block size has to be a
+          # power of two.  Every MX format defines it as 32.
+          assert mxBlock & (mxBlock - 1) == 0, \
+                 "MXBlock%s must be a power of two, got %u" % (tc[-1], mxBlock)
           module.addComment("%s group span = roundUp(ceil(K/%u), 8) * 32" % (tc, mxBlock))
           module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("SizesSum"), src1=(mxBlock - 1),
                              comment="K + %u - 1"%mxBlock))
