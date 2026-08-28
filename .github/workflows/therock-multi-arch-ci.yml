@@ -150,6 +150,10 @@ jobs:
       prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg') || '' }}
       # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
       baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
+      build_python_packages: ${{ inputs.build_python_packages || false }}
+      build_pytorch: ${{ inputs.build_pytorch || false }}
+      build_jax: ${{ inputs.build_jax || false }}
+      build_native_linux: ${{ inputs.build_native_linux || false }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
