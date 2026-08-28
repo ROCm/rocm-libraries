@@ -48,6 +48,23 @@ SDKS = {
     "flatbuffers_sdk": "hipdnn_flatbuffers_sdk",
 }
 
+# Schemas that additionally need Python bindings, mapped to the directory the
+# generated package tree is written into (relative to the hipdnn root).
+#
+# Only these two: uhd_gen writes a UHD and a GbdtModel, and nothing else in the tree
+# builds a FlatBuffer from Python. Generating all 38 would ship modules no one
+# imports. Kept here rather than inferred so adding a schema to the list is a
+# deliberate act.
+#
+# The C++ flag set is not reused. --gen-compare and --scoped-enums are C++-only and
+# flatc rejects them for --python; --gen-object-api is required because the writers
+# are built on the object API.
+PYTHON_BINDING_SCHEMAS = {
+    "uhd.fbs": os.path.join("tools", "uhd_gen", "_generated"),
+    "gbdt_model.fbs": os.path.join("tools", "uhd_gen", "_generated"),
+}
+PYTHON_FLATC_FLAGS = ["--python", "--gen-object-api"]
+
 
 def detect_sdk(schema_path):
     """Detect which SDK a schema file belongs to based on its path."""
@@ -113,29 +130,40 @@ def main():
             "data_objects",
         )
 
-        try:
-            subprocess.run(
-                [
-                    flatc_path,
-                    "-I",
-                    schemas_dir,
-                    "--cpp",
-                    *FLATC_EXTRA_FLAGS,
-                    "-o",
-                    output_dir,
-                    f,
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
+        _run_flatc(flatc_path, schemas_dir, ["--cpp", *FLATC_EXTRA_FLAGS], output_dir, f)
+
+        python_out = PYTHON_BINDING_SCHEMAS.get(os.path.basename(f))
+        if python_out is not None:
+            _run_flatc(
+                flatc_path,
+                schemas_dir,
+                PYTHON_FLATC_FLAGS,
+                os.path.join(script_dir, "..", python_out),
+                f,
             )
-        except subprocess.CalledProcessError as e:
-            print(f"ERROR: Failed to compile {f}", file=sys.stderr)
-            print("STDOUT:", file=sys.stderr)
-            print(e.stdout, file=sys.stderr)
-            print("STDERR:", file=sys.stderr)
-            print(e.stderr, file=sys.stderr)
-            sys.exit(1)
+
+
+def _run_flatc(flatc_path, schemas_dir, flags, output_dir, schema):
+    """Invoke flatc once, surfacing its output on failure.
+
+    flatc reports schema errors on stderr and exits non-zero; capturing and
+    re-printing is what turns a bare CalledProcessError into a diagnosable message.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    try:
+        subprocess.run(
+            [flatc_path, "-I", schemas_dir, *flags, "-o", output_dir, schema],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: Failed to compile {schema} with {' '.join(flags)}", file=sys.stderr)
+        print("STDOUT:", file=sys.stderr)
+        print(e.stdout, file=sys.stderr)
+        print("STDERR:", file=sys.stderr)
+        print(e.stderr, file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

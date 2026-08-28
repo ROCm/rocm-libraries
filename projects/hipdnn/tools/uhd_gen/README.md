@@ -106,6 +106,44 @@ output_dir/
 
 **NOTE:** The runtime loads `uhd.fb`, not `uhd.json`. The JSON is for inspection/debugging only.
 
+## Generated FlatBuffers bindings
+
+`uhd.fb` and `model.bin` are written through flatc-generated Python bindings that
+live in `_generated/`, committed alongside the tool the same way the C++
+`*_generated.h` headers are committed alongside the SDK.
+
+```
+_generated/hipdnn_flatbuffers_sdk/data_objects/
+├── UHD.py, UhdAdapter.py, UhdDerivedEntry.py, UhdScoreMetadata.py   # uhd.fbs
+└── GbdtModel.py, GbdtTree.py                                        # gbdt_model.fbs
+```
+
+`uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import
+hipdnn_flatbuffers_sdk.data_objects.UHD` resolves to the bindings that match the
+schemas shipping beside this tool rather than to any other copy installed on the
+system.
+
+Regenerate after editing either schema — a build with `HIPDNN_GENERATE_SDK_HEADERS=ON`
+does it automatically, and so does the `flatc-hipdnn` pre-commit hook:
+
+```bash
+python projects/hipdnn/scripts/run_flatc.py \
+    projects/hipdnn/flatbuffers_sdk/schemas/uhd.fbs \
+    projects/hipdnn/flatbuffers_sdk/schemas/gbdt_model.fbs
+```
+
+That command emits both the C++ headers and these bindings from one invocation, so
+the two cannot drift. Requires flatc 25.9.23 on PATH (see
+`projects/hipdnn/CONTRIBUTING.md`).
+
+**Do not hand-write FlatBuffers vtables here.** Both writers previously did, and the
+UHD one declared `StartObject(11)` against a 13-field table: `derived` and
+`native_symbol` were never written, and every field from `features_signature` on
+landed one slot low, so every `uhd.fb` the tool produced failed `UhdLoader`'s
+verifier. Nothing caught it, because the only structural assertion in the test suite
+was the four-byte file identifier — which sits before the root table and survives any
+vtable error.
+
 ### uhd.json
 
 ```json

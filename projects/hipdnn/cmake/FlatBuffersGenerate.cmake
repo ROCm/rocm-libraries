@@ -148,3 +148,64 @@ function(hipdnn_generate_flatbuffer_headers)
 
     add_dependencies(${ARG_TARGET} ${_gen_target_name})
 endfunction()
+
+# Generate FlatBuffer Python bindings from .fbs schema files.
+#
+# Separate from hipdnn_generate_flatbuffer_headers() rather than a LANGUAGE argument
+# on it, because the two have different shapes: the C++ side emits one predictable
+# `<schema>_generated.h` per schema, while flatc's Python output is a package tree
+# named for the schema's namespace with one module per declared type, so the output
+# set cannot be derived from the schema filename. This function therefore drives a
+# stamp file rather than declaring the generated modules as OUTPUTs.
+#
+# The shared flatc_flags.txt is deliberately NOT applied: --gen-compare and
+# --scoped-enums are C++-only and flatc rejects them here. --gen-object-api is passed
+# explicitly because the Python writers are built on the object API.
+function(hipdnn_generate_flatbuffer_python)
+    set(_options "")
+    set(_one_value_args TARGET SCHEMAS_DIR OUTPUT_DIR NAME)
+    set(_multi_value_args SCHEMAS)
+    cmake_parse_arguments(ARG "${_options}" "${_one_value_args}" "${_multi_value_args}" ${ARGN})
+
+    foreach(_required SCHEMAS SCHEMAS_DIR OUTPUT_DIR NAME)
+        if(NOT ARG_${_required})
+            message(FATAL_ERROR "hipdnn_generate_flatbuffer_python: missing required argument ${_required}")
+        endif()
+    endforeach()
+
+    _hipdnn_resolve_flatc_command(_flatc_command _flatc_dependency)
+
+    set(_schema_paths "")
+    foreach(_schema IN LISTS ARG_SCHEMAS)
+        if(IS_ABSOLUTE "${_schema}")
+            list(APPEND _schema_paths "${_schema}")
+        else()
+            list(APPEND _schema_paths "${CMAKE_CURRENT_SOURCE_DIR}/${_schema}")
+        endif()
+    endforeach()
+
+    set(_stamp "${CMAKE_CURRENT_BINARY_DIR}/${ARG_NAME}_python_bindings.stamp")
+    set(_depends ${_schema_paths})
+    if(_flatc_dependency)
+        list(PREPEND _depends ${_flatc_dependency})
+    endif()
+
+    add_custom_command(
+        OUTPUT "${_stamp}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${ARG_OUTPUT_DIR}"
+        COMMAND "${_flatc_command}" --python --gen-object-api
+                -o "${ARG_OUTPUT_DIR}"
+                -I "${ARG_SCHEMAS_DIR}"
+                ${_schema_paths}
+        COMMAND ${CMAKE_COMMAND} -E touch "${_stamp}"
+        DEPENDS ${_depends}
+        COMMENT "Generating ${ARG_NAME} FlatBuffers Python bindings"
+        VERBATIM
+    )
+
+    add_custom_target(generate_${ARG_NAME}_python_bindings DEPENDS "${_stamp}")
+
+    if(ARG_TARGET)
+        add_dependencies(${ARG_TARGET} generate_${ARG_NAME}_python_bindings)
+    endif()
+endfunction()
