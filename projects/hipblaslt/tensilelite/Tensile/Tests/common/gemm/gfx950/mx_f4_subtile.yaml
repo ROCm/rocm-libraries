@@ -144,6 +144,10 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256
+          # Non-power-of-two on M, the contiguous dim here, so A takes a strip
+          # narrower than its tile.  The M wave group has to be 1 for that.
+          - [16, 16, 128, 1,  1, 12, 4,  1, 4]  # MT192x256 wg1x4
+          - [16, 16, 128, 1,  1, 14, 4,  1, 4]  # MT224x256 wg1x4
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [256]
@@ -157,6 +161,8 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [256, 256, 1, 256]
           - Exact: [512, 512, 1, 512]
+          - Exact: [192, 256, 1, 256]
+          - Exact: [224, 256, 1, 256]
   -
     - # TT: A K-contig (TLU=0, row-major), B free-contig (TLU=1, stacked) -- the
       # mirror of NN, so the spans land on the opposite scales.
@@ -179,6 +185,10 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256
+          # Mirror of the NN pair: the non-power-of-two goes on N, which is the
+          # contiguous dim here, so the N wave group is the one pinned to 1.
+          - [16, 16, 128, 1,  1, 4, 12, 4,  1]  # MT256x192 wg4x1
+          - [16, 16, 128, 1,  1, 4, 14, 4,  1]  # MT256x224 wg4x1
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [256]
@@ -192,3 +202,5 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [256, 256, 1, 256]
           - Exact: [512, 512, 1, 512]
+          - Exact: [256, 192, 1, 256]
+          - Exact: [256, 224, 1, 256]
