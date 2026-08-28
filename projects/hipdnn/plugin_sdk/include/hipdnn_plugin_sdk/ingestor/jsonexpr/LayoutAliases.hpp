@@ -1,0 +1,249 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+// LayoutAliases.hpp - the `stride_order` layout-name pre-pass.
+//
+// A pure json -> json rewrite run before compilation, so the node tree and
+// evaluation only ever see integer arrays. This is the one place in the
+// language that knows anything about tensors.
+
+#include <hipdnn_plugin_sdk/ingestor/jsonexpr/Error.hpp>
+
+#include <nlohmann/json.hpp>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace hipdnn_plugin_sdk::ingestor::jsonexpr::detail
+{
+// ---- layout aliases -------------------------------------------------------
+// A `stride_order` is an IntArray: for each logical dimension d, that
+// dimension's stride rank, 0 being the fastest-varying. The common layouts get
+// names, and a name expands to its array here, at compile time, so the array
+// stays the single canonical form and evaluation never sees an alias.
+struct LayoutAlias
+{
+    const char* name;
+    const std::int64_t* order;
+    std::size_t rank;
+};
+
+inline const LayoutAlias* lookupLayoutAlias(const std::string& name)
+{
+    static const std::int64_t s_nchw[] = {3, 2, 1, 0};
+    static const std::int64_t s_nhwc[] = {3, 0, 2, 1};
+    static const std::int64_t s_ncdhw[] = {4, 3, 2, 1, 0};
+    static const std::int64_t s_ndhwc[] = {4, 0, 3, 2, 1};
+    static const std::int64_t s_bhsd[] = {3, 2, 1, 0};
+    static const std::array<LayoutAlias, 5> s_table = {{{"nchw", s_nchw, 4},
+                                                        {"nhwc", s_nhwc, 4},
+                                                        {"ncdhw", s_ncdhw, 5},
+                                                        {"ndhwc", s_ndhwc, 5},
+                                                        {"bhsd", s_bhsd, 4}}};
+    for(const auto& e : s_table)
+    {
+        if(name == e.name)
+        {
+            return &e;
+        }
+    }
+    return nullptr;
+}
+
+inline std::string knownLayoutAliases()
+{
+    return "nchw, nhwc, ncdhw, ndhwc, bhsd";
+}
+
+/// The variable path in a sigil-prefixed string, or nullptr if `j` is not one.
+inline const std::string* variablePath(const nlohmann::json& j, char sigil)
+{
+    if(!j.is_string())
+    {
+        return nullptr;
+    }
+    const auto& s = j.get_ref<const nlohmann::json::string_t&>();
+    // "$$x" is an escaped literal, and a bare "$" is rejected in compileNode.
+    if(s.size() < 2 || s[0] != sigil || s[1] == sigil)
+    {
+        return nullptr;
+    }
+    return &s;
+}
+
+/// True for a reference whose last path segment is `stride_order`.
+inline bool isStrideOrderRef(const nlohmann::json& j, char sigil)
+{
+    const std::string* s = variablePath(j, sigil);
+    if(s == nullptr)
+    {
+        return false;
+    }
+    static const std::string k_suffix = ".stride_order";
+    return s->size() > k_suffix.size() + 1
+           && s->compare(s->size() - k_suffix.size(), k_suffix.size(), k_suffix) == 0;
+}
+
+/// The variable root of a reference: "$q.stride_order" -> "q".
+inline std::string variableRoot(const std::string& sigilPath)
+{
+    const std::string path = sigilPath.substr(1);
+    return path.substr(0, path.find_first_of(".["));
+}
+
+/// Collect `{"==": ["$x.rank", N]}` rank pins that hold unconditionally: the
+/// root, and anything reachable from it through `and` only. A pin inside an
+/// `or` / `if` / `!` arm is conditional and cannot contradict an alias, so it
+/// is deliberately not collected.
+inline void
+    collectRankPins(const nlohmann::json& j, char sigil, std::map<std::string, std::int64_t>& pins)
+{
+    if(!j.is_object() || j.size() != 1)
+    {
+        return;
+    }
+    const auto it = j.begin();
+    const std::string& key = it.key();
+    const nlohmann::json& val = it.value();
+    if(key == "and" && val.is_array())
+    {
+        for(const auto& e : val)
+        {
+            collectRankPins(e, sigil, pins);
+        }
+        return;
+    }
+    if(key != "==" || !val.is_array() || val.size() != 2)
+    {
+        return;
+    }
+    for(std::size_t i = 0; i < 2; ++i)
+    {
+        const std::string* s = variablePath(val.at(i), sigil);
+        const nlohmann::json& other = val.at(1 - i);
+        if(s == nullptr || !other.is_number_integer())
+        {
+            continue;
+        }
+        static const std::string k_suffix = ".rank";
+        if(s->size() > k_suffix.size() + 1
+           && s->compare(s->size() - k_suffix.size(), k_suffix.size(), k_suffix) == 0)
+        {
+            // First pin wins; a second, contradictory one makes the criteria
+            // unsatisfiable on its own terms, which is not the alias's problem.
+            pins.emplace(variableRoot(*s), other.get<std::int64_t>());
+        }
+    }
+}
+
+/// Resolve one alias string against a `stride_order` reference, or throw.
+inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
+                                         const std::string& refPath,
+                                         const std::map<std::string, std::int64_t>& rankPins)
+{
+    // A stride_order is an IntArray, so a string in this position can only be
+    // an alias; an unknown one is a typo that would otherwise compare unequal
+    // forever and decline silently at match time.
+    const std::string& name = aliasNode.get_ref<const nlohmann::json::string_t&>();
+    const LayoutAlias* alias = lookupLayoutAlias(name);
+    if(alias == nullptr)
+    {
+        throw JsonExpressionCompileError("unknown layout alias '" + name + "' compared against "
+                                         + refPath + "; expected an integer array or one of: "
+                                         + knownLayoutAliases());
+    }
+    // Every alias is fixed-rank, so an alias compared against a tensor the
+    // criteria pin to a different rank can never hold. Refuse it here rather
+    // than let it decline silently on every graph.
+    const auto pin = rankPins.find(variableRoot(refPath));
+    if(pin != rankPins.end() && pin->second != static_cast<std::int64_t>(alias->rank))
+    {
+        throw JsonExpressionCompileError(
+            "layout alias '" + name + "' is rank " + std::to_string(alias->rank)
+            + ", but the expression pins " + refPath + " to rank " + std::to_string(pin->second));
+    }
+    return nlohmann::json(std::vector<std::int64_t>(alias->order, alias->order + alias->rank));
+}
+
+/// Rewrite every layout alias into its canonical array. An alias is recognized
+/// only where a `stride_order` reference gives it that meaning -- opposite one
+/// in an `==` / `!=`, or as an element of the array an `in` searches -- so
+/// "nhwc" stays an ordinary string literal everywhere else.
+inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
+                                          char sigil,
+                                          const std::map<std::string, std::int64_t>& rankPins)
+{
+    if(j.is_array())
+    {
+        nlohmann::json out = nlohmann::json::array();
+        for(const auto& e : j)
+        {
+            out.push_back(expandLayoutAliases(e, sigil, rankPins));
+        }
+        return out;
+    }
+    if(!j.is_object())
+    {
+        return j;
+    }
+
+    nlohmann::json out = nlohmann::json::object();
+    for(auto it = j.begin(); it != j.end(); ++it)
+    {
+        const std::string& key = it.key();
+        const nlohmann::json& val = it.value();
+        const bool binary = val.is_array() && val.size() == 2;
+
+        // {"==" / "!=": [$x.stride_order, <alias>]}, either operand order.
+        if(binary && (key == "==" || key == "!="))
+        {
+            nlohmann::json args = nlohmann::json::array();
+            for(std::size_t i = 0; i < 2; ++i)
+            {
+                const nlohmann::json& side = val.at(i);
+                const nlohmann::json& ref = val.at(1 - i);
+                if(isStrideOrderRef(ref, sigil) && side.is_string())
+                {
+                    args.push_back(resolveLayoutAlias(side, ref.get<std::string>(), rankPins));
+                }
+                else
+                {
+                    args.push_back(expandLayoutAliases(side, sigil, rankPins));
+                }
+            }
+            out[key] = std::move(args);
+            continue;
+        }
+
+        // {"in": [$x.stride_order, [<alias-or-array>, ...]]} -- the documented
+        // way to accept a set of layouts. Only the haystack's own elements are
+        // aliases; a nested expression there is left alone.
+        if(binary && key == "in" && isStrideOrderRef(val.at(0), sigil) && val.at(1).is_array())
+        {
+            const std::string refPath = val.at(0).get<std::string>();
+            nlohmann::json hay = nlohmann::json::array();
+            for(const auto& e : val.at(1))
+            {
+                hay.push_back(e.is_string() ? resolveLayoutAlias(e, refPath, rankPins)
+                                            : expandLayoutAliases(e, sigil, rankPins));
+            }
+            out[key] = nlohmann::json::array({val.at(0), std::move(hay)});
+            continue;
+        }
+
+        out[key] = expandLayoutAliases(val, sigil, rankPins);
+    }
+    return out;
+}
+} // namespace hipdnn_plugin_sdk::ingestor::jsonexpr::detail
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

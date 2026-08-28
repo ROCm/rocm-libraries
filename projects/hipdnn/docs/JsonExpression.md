@@ -1,6 +1,6 @@
 # JSON Expression Language
 
-A **single-header expression compiler**
+A **header-only expression compiler**
 ([`JsonExpression.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/ingestor/JsonExpression.hpp))
 for boolean and arithmetic expressions written as JSON. A rule written as an
 `nlohmann::json` value is compiled once into a reusable `Expression<Data>`,
@@ -14,8 +14,24 @@ nor a subset of it, so treat this document, not jsonlogic.com, as the contract.
 
 All names live in namespace `hipdnn_plugin_sdk::ingestor::jsonexpr`; the examples
 below assume `namespace jexpr = hipdnn_plugin_sdk::ingestor::jsonexpr;`. The
-header is part of the Plugin SDK's kernel-ingestor subtree, so it compiles and
-installs only when `HIPDNN_ENABLE_KERNEL_INGESTOR` is set.
+headers are part of the Plugin SDK's kernel-ingestor subtree, so they compile and
+install only when `HIPDNN_ENABLE_KERNEL_INGESTOR` is set.
+
+`JsonExpression.hpp` is the entry point and the only header to include; it pulls
+in the implementation, which is split by layer under
+[`ingestor/jsonexpr/`](../plugin_sdk/include/hipdnn_plugin_sdk/ingestor/jsonexpr):
+
+| Header | Contents |
+| --- | --- |
+| `Error.hpp` | `JsonExpressionCompileError` |
+| `Value.hpp` | the runtime value type |
+| `DataSource.hpp` | the type-erased data-source contract |
+| `Node.hpp` | compiled tree nodes |
+| `Operators.hpp` | one function per operator |
+| `OperatorTable.hpp` | the operator table, and `OpNode` |
+| `LayoutAliases.hpp` | the `stride_order` layout-name pre-pass |
+| `Compiler.hpp` | json → node tree |
+| `VarIterator.hpp` | iteration over referenced variables |
 
 ```cpp
 #include <hipdnn_plugin_sdk/ingestor/JsonExpression.hpp>
