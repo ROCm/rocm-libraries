@@ -91,6 +91,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128]
           - Exact: [256, 256, 1, 256]
+          - Exact: [640, 640, 1, 256]
 
   ########################################
   # PartialRMS — f32 gamma, f32 residual type, residual add, DP-only
@@ -149,3 +150,4 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128]
           - Exact: [256, 256, 1, 256]
+          - Exact: [640, 640, 1, 256]

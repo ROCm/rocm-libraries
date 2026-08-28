@@ -97,6 +97,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 256, 1, 256]
+          - Exact: [640, 640, 1, 256]
 
   ########################################
   # DeepseekScaleB only — scaleA is unit (0x7f in E8M0), StreamKForceDPOnly=1
@@ -163,6 +164,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 256, 1, 256]
+          - Exact: [640, 640, 1, 256]
 
   ########################################
   # DeepseekScaleAB — both scales active, StreamKForceDPOnly=1 (DP path only)
@@ -229,6 +231,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 256, 1, 256]
+          - Exact: [640, 640, 1, 256]
 
   ########################################
   # DeepseekScaleAB — K-split path (StreamKForceDPOnly=0), PGR=0 required
@@ -293,3 +296,4 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 256, 1, 256]
+          - Exact: [640, 640, 1, 256]

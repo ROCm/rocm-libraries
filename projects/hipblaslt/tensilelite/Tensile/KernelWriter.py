@@ -334,6 +334,8 @@ class StateValues:
   batchOffsetCKernArgOffset: int         = 0
   batchOffsetAKernArgOffset: int         = 0
   batchOffsetBKernArgOffset: int         = 0
+  scaleABufKernArgOffset: int            = 0
+  scaleBBufKernArgOffset: int            = 0
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
@@ -9603,7 +9605,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if (self.states.streamK.emitsParallelReductionSgprAliases or kernel["StreamK"] == 4) \
         and not kernel["ProblemType"]["UseBeta"]:
       self.defineSgpr("SkPartialIdx", 1)
-      self.states.numSgprStreamK += 1
+      # SkPartialIdx is a scratch SGPR computed at runtime, not a kernel argument.
 
     if not kernel["UseSubtileImpl"]:
       if kernel["LocalWriteUseSgprA"]:
@@ -10222,15 +10224,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # RMSNormGamma: 64-bit ptr (2 SGPRs), PartialBuf: 64-bit ptr (2 SGPRs).
       # NTilesN is a kernarg u32 but is NOT put in the named SGPR block; instead the
       # epilogue computes it from SizesFree[1] and the compile-time MT1 constant.
-      # Guarantee even alignment for the 64-bit pointers. The store SGPR block is
-      # loaded starting at absolute kernarg dword offset numSgprToLoad, so the
-      # alignment of RMSNormGamma is decided by the ABSOLUTE running offset
-      # (numSgprToLoad + entries already in this block), not the internal block
-      # parity. Insert a 1-SGPR pad when that absolute offset is odd.
-      if (self.states.numSgprToLoad + sum(self.states.numStoreSgprNameSizes)) % 2:
-        self.states.numStoreSgprNames.append("PartialRMSPad")
-        self.states.numStoreSgprNameSizes.append(1)
-        storeSgprLoad += 1
+      # 8-byte alignment for RMSNormGamma is handled purely by offset arithmetic:
+      # the host uses appendAligned<>() and the loader advances via (offset+7)&~7.
       self.states.numStoreSgprNames.append("RMSNormGamma")
       self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
       self.states.numStoreSgprNames.append("PartialBuf")
@@ -10243,69 +10238,35 @@ class KernelWriter(metaclass=abc.ABCMeta):
         storeSgprLoad += self.states.rpga
       if kernel["PartialRMSStoreBf16D"]:
         # AddressResidualOut: 64-bit ptr (2 SGPRs) for the bf16 pre-quant output.
-        # Ensure 64-bit alignment before the pointer pair using the ABSOLUTE
-        # running kernarg offset (see PartialRMSPad above), not internal parity.
-        if (self.states.numSgprToLoad + sum(self.states.numStoreSgprNameSizes)) % 2:
-          self.states.numStoreSgprNames.append("PartialRMSBf16Pad")
-          self.states.numStoreSgprNameSizes.append(1)
-          storeSgprLoad += 1
+        # Alignment is handled by offset arithmetic in the loader, no pad SGPR.
         self.states.numStoreSgprNames.append("AddressResidualOut")
         self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
         storeSgprLoad += self.states.rpga
     if kernel["DQuantType"] == "Tile":
       # QuantScale: 64-bit pointer (2 SGPRs) for per-tile amax/448 output buffer.
-      if sum(self.states.numStoreSgprNameSizes) % 2:
-        self.states.numStoreSgprNames.append("TileQuantPad")
-        self.states.numStoreSgprNameSizes.append(1)
-        storeSgprLoad += 1
+      # Alignment is handled by offset arithmetic in the loader, no pad SGPR.
       self.states.numStoreSgprNames.append("QuantScale")
       self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
       storeSgprLoad += self.states.rpga
     if kernel["DQuantType"] == "MXFP8":
       # MXScale: 64-bit pointer (2 SGPRs) for the e8m0 side buffer.
-      # Align on the ABSOLUTE running kernarg offset (see PartialRMSPad above),
-      # not internal block parity, so the pointer lands on an 8-byte boundary.
-      if (self.states.numSgprToLoad + sum(self.states.numStoreSgprNameSizes)) % 2:
-        self.states.numStoreSgprNames.append("MXFP8QuantPad")
-        self.states.numStoreSgprNameSizes.append(1)
-        storeSgprLoad += 1
+      # Alignment is handled by offset arithmetic in the loader, no pad SGPR.
       self.states.numStoreSgprNames.append("MXScale")
       self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
       storeSgprLoad += self.states.rpga
     if kernel.get("UseDeepseekScaleA", False):
       # ScaleABuf: 64-bit pointer (2 SGPRs) for per-row fp32 A-dequantization scales.
-      if sum(self.states.numStoreSgprNameSizes) % 2:
-        self.states.numStoreSgprNames.append("DeepseekScaleAPad")
-        self.states.numStoreSgprNameSizes.append(1)
-        storeSgprLoad += 1
+      # Alignment is handled by offset arithmetic in the loader, no pad SGPR.
       self.states.numStoreSgprNames.append("ScaleABuf")
       self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
       storeSgprLoad += self.states.rpga
     if kernel.get("UseDeepseekScaleB", False):
       # ScaleBBuf: 64-bit pointer (2 SGPRs) for per-128col-block fp32 B-dequantization scales.
-      if sum(self.states.numStoreSgprNameSizes) % 2:
-        self.states.numStoreSgprNames.append("DeepseekScaleBPad")
-        self.states.numStoreSgprNameSizes.append(1)
-        storeSgprLoad += 1
+      # Alignment is handled by offset arithmetic in the loader, no pad SGPR.
       self.states.numStoreSgprNames.append("ScaleBBuf")
       self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
       storeSgprLoad += self.states.rpga
     self.states.numStoreSgprToLoad = storeSgprLoad
-
-
-    if self.states.useGateResidual:
-      self.states.numSgprAddressGate = self.states.rpga # 64-bit
-      self.states.numStoreSgprNames.append("AddressGate")
-      self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressGate)
-      self.states.GateType   = 1
-      self.states.GateStride = self.states.gate.numSgprStrides
-      self.states.numStoreSgprNames.append("GateType")
-      self.states.numStoreSgprNameSizes.append(self.states.GateType)
-      self.states.numStoreSgprNames.append("GateStride")
-      self.states.numStoreSgprNameSizes.append(self.states.GateStride)
-      storeSgprLoad += self.states.numSgprAddressGate + self.states.GateType + self.states.GateStride
-  
-    self.states.numStoreSgprToLoad = storeSgprLoad      
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
     if self.db["InitSgpr"] : print ("\n***WARNING: InitSgpr enabled, may impact performance\n")
     if self.db["InitVgpr"] : print ("\n***WARNING: InitVgpr enabled, may impact performance\n")

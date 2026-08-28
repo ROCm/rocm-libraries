@@ -13,7 +13,12 @@ This is Phase 1 (K1) of a two-kernel RMSNorm pipeline operating on row-major out
     rstd = rsqrt(Σx²/N_hidden + eps), and divides D in-place.
 
 partialBuf layout contract (2D, row-major):
-  - Logical shape [M_padded, n_d], n_d = ceil(SizesFree0 / MT0).
+  - Logical shape [M_padded, n_d] for Σx² (n_d = ceil(SizesFree0 / MT0)).
+    When PartialRMSQuant is set, a second region of the same shape is
+    stacked below it, so the real buffer is [2*M_padded, n_d]: rows
+    [0, M_padded) hold Σx² and rows [M_padded, 2*M_padded) hold
+    amax(|D|)/fp8_max, written by _amaxEpilogueFree0 with rowOffset =
+    M_padded.
   - partialBuf[token, t] = Σ_{i in WG t's free0 columns} h1[token, i]².
   - Byte offset for (token, t) = (token * n_d + t) * 4.
   - Token index = WorkGroup1*MT1 + intra-tile token offset.
@@ -105,16 +110,23 @@ from rocisa.enum import HighBitSel
 from Tensile.Common.DataType import DataType
 
 
-# OCP FP8 e4m3 maximum representable magnitude.
-_FP8_E4M3_MAX = 448.0
+# Maximum inline-literal integer for VOP encodings; larger immediates must be
+# materialized in a VGPR before a v_add.
+_INLINE_CONST_MAX = 64
+
+# Maximum representable magnitudes of the FP8 quantization output types, used
+# to scale amax so K2 can requantize. e5m2/bf8 has a far larger range than e4m3.
+_FP8_E4M3_MAX = 448.0        # OCP FP8 e4m3.
+_FP8_E4M3_FNUZ_MAX = 240.0   # FNUZ FP8 e4m3.
+_BF8_E5M2_MAX = 57344.0      # FP8 e5m2 (bf8).
 
 
 # Returns (magic, postShift) for unsigned floor-division by constant d via SMulHIU32.
 # floor(x/d) = mulhi(x, magic) >> postShift; for ceil-div pre-add (d-1). Valid for d >= 2.
 def _ceilDivMagic(d: int):
-    p = (d - 1).bit_length()          # smallest p such that 2^p >= d
-    magic = -(-( 1 << (32 + p - 1)) // d)  # ceil(2^(32+p-1) / d), using integer ceiling
-    return magic & 0xFFFFFFFF, p - 1  # postShift = p-1 (mulhi already shifts by 32)
+    p = (d - 1).bit_length()          # smallest p such that 2^p >= d.
+    magic = -(-( 1 << (32 + p - 1)) // d)  # ceil(2^(32+p-1) / d), using integer ceiling.
+    return magic & 0xFFFFFFFF, p - 1  # postShift = p-1 (mulhi already shifts by 32).
 
 
 class SubtilePartialRMSEmitter:
@@ -134,6 +146,9 @@ class SubtilePartialRMSEmitter:
         self.mfma_m = kernel["MatrixInstM"]
         self.mfma_n = kernel["MatrixInstN"]
         self.waveSize = kernel["WavefrontSize"]
+        # This epilogue uses 64-bit EXEC ops (SAndSaveExecB64 / SMovB64(EXEC()))
+        # and a 2-dword lane mask, so it only supports wave64.
+        assert self.waveSize == 64, "partialRMS epilogue requires wavefrontSize == 64"
         self.rows_per_lane = (self.mfma_m * self.mfma_n) // self.waveSize
 
         wg = kernel["MIWaveGroup"]
@@ -144,7 +159,6 @@ class SubtilePartialRMSEmitter:
         self.mma_n = (kernel["MacroTile1"] // self.mfma_n) // self.wg_n
         self.macro_tile0 = kernel["MacroTile0"]
         self.macro_tile1 = kernel["MacroTile1"]
-        self.numRows = self.mma_m * self.rows_per_lane
         self.numPartials = self.mma_n
 
         # laneSGPRCount: 1 for wave32, 2 for wave64.
@@ -154,6 +168,8 @@ class SubtilePartialRMSEmitter:
         self.storeBf16D = bool(kernel.get("PartialRMSStoreBf16D", False))
 
         dt = kernel["ProblemType"]["DataType"]
+        # Quant output type selects the fp8 max used to scale amax (see _quantOutMax).
+        self.destType = kernel["ProblemType"]["DestDataType"]
         # elemBytes/log2ElemBytes are the GEMM input element size, used only as a
         # reversible scale for the token-index encoding in colByte (encoded in
         # _setup, decoded in _writePartialsFree0/_beginResidual); gamma and residual
@@ -166,7 +182,9 @@ class SubtilePartialRMSEmitter:
         self.residualType = DataType(kernel.get("PartialRMSResidualType") or "b")
         self.gammaBytes,    self.gammaLog2Bytes    = self._sideBytes(self.gammaType)
         self.residualBytes, self.residualLog2Bytes = self._sideBytes(self.residualType)
-        # Wide residual load: pack 4 contiguous fp8/bf8 into one b32 load + packed convert.
+        # Pack 4 contiguous fp8/bf8 into one b32 load + packed convert. residualBytes
+        # == 1 is a proxy for fp8/bf8 (the only 1-byte types here); a future 1-byte
+        # type (e.g. int8) would need an explicit float-type check.
         self.useWideResidual = (self.residualAdd and self.residualBytes == 1
                                 and (self.rows_per_lane % 4 == 0))
 
@@ -185,6 +203,20 @@ class SubtilePartialRMSEmitter:
         if dtype.isAnyFloat8() or dtype.isAnyBFloat8():
             return BufferLoadD16U8
         return BufferLoadD16B16  # bf16 / f16.
+
+    def _quantOutMax(self) -> float:
+        """Return the max magnitude of the quant output type used to scale amax.
+
+        The two-kernel RMSNorm pipeline quantizes to OCP FP8 e4m3 (448.0) by
+        default; a fnuz e4m3 or bf8/e5m2 dest selects its own range. Mirrors the
+        DestDataType-driven selection in GlobalWriteBatch.py so the amax scale
+        matches whatever K2 requantizes to.
+        """
+        if self.destType.isFloat8_fnuz():
+            return _FP8_E4M3_FNUZ_MAX
+        if self.destType.isAnyBFloat8():
+            return _BF8_E5M2_MAX
+        return _FP8_E4M3_MAX
 
     def _issueSideLoad(self, module, dstVgpr: int, addrVgpr: int, srd: int,
                        comment: str, dtype) -> None:
@@ -226,8 +258,12 @@ class SubtilePartialRMSEmitter:
             module.add(VAccvgprReadB32(vgpr(dstBase + i), accvgpr(reg),
                                        comment=f"{comment} [{i}]"))
             usedAcc = True
+        # gfx950 requires one wait state between v_accvgpr_read_b32 and a dependent
+        # VALU consumer. A burst of >= 2 reads already places another read between
+        # read[0] and its first consumer, filling that single gap; only a lone read
+        # (mma_n == 1) needs an explicit s_nop. mma_n == 2 is therefore safe.
         if usedAcc and len(coords) < 2:
-            module.add(SNop(waitState=1, comment="s_nop after v_accvgpr_read before VALU (gfx950)."))
+            module.add(SNop(waitState=1, comment="fill the mandatory v_accvgpr_read->VALU wait state (gfx950)."))
 
     def _writeAccFrom(self, module, src: int, vgprTiles, m: int, n: int, k: int, comment: str) -> None:
         """Write VGPR src back into accumulator element (m, n, k), selecting the right register file."""
@@ -244,34 +280,31 @@ class SubtilePartialRMSEmitter:
         module.add(SMovB32(dst=sgpr(srd + 3), src="Srd127_96", comment=f"{name} SRD flags"))
 
     def _addImmU32(self, module, dst: int, src: int, imm: int, scratch: int, comment: str) -> None:
+        # imm == 0 is a no-op add; emit a copy only when the value must move registers.
+        if imm == 0:
+            if dst != src:
+                module.add(VMovB32(dst=vgpr(dst), src=vgpr(src), comment=comment))
+            return
         # Materialize the immediate in a VGPR when it exceeds the inline-literal range.
-        if imm > 64:
+        if imm > _INLINE_CONST_MAX:
             module.add(VMovB32(dst=vgpr(scratch), src=imm, comment=f"imm={imm}"))
             module.add(VAddU32(vgpr(dst), vgpr(src), vgpr(scratch), comment=comment))
             return
         module.add(VAddU32(vgpr(dst), vgpr(src), imm, comment=comment))
 
     def _computeWaveM(self, module, dst: int) -> None:
-        waveId = self.writer.vgprPool.checkOut(1, tag="pRMS_waveId")
-        tmpVgpr = self.writer.vgprPool.checkOutAligned(2, 2, tag="pRMS_waveMDiv")
-        tmpRes = ContinuousRegister(tmpVgpr, 2)
-        module.add(vectorStaticDivide(waveId, "Serial", self.waveSize, tmpRes,
-                                      comment="waveId = Serial / WavefrontSize"))
-        module.add(VAndB32(dst=vgpr(dst), src0=vgpr(waveId), src1=self.wg_m - 1,
+        # waveId is cached once in _setup (self.waveIdV); only callers with wg_m > 1
+        # reach here, so self.waveIdV is always valid.
+        module.add(VAndB32(dst=vgpr(dst), src0=vgpr(self.waveIdV), src1=self.wg_m - 1,
                            comment=f"waveM = waveId % {self.wg_m}"))
-        self.writer.vgprPool.checkIn(tmpVgpr)
-        self.writer.vgprPool.checkIn(waveId)
 
     def _computeRowGroupOff(self, module, dst: int) -> None:
+        # Reuse the cached self.laneId instead of recomputing Serial & (waveSize-1).
         log2MfmaN = int(math.log2(self.mfma_n))
-        laneIdV = self.writer.vgprPool.checkOut(1, tag="pRMS_rgoLaneId")
-        module.add(VAndB32(dst=vgpr(laneIdV), src0=vgpr("Serial"), src1=self.waveSize - 1,
-                           comment="laneId = Serial & (waveSize-1)"))
-        module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(log2MfmaN), src=vgpr(laneIdV),
+        module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(log2MfmaN), src=vgpr(self.laneId),
                                    comment=f"rowGroup = laneId >> {log2MfmaN}"))
         module.add(VMulLOU32(dst=vgpr(dst), src0=self.rows_per_lane, src1=vgpr(dst),
                              comment=f"rowGroupOff = rowGroup * {self.rows_per_lane}"))
-        self.writer.vgprPool.checkIn(laneIdV)
 
     def _computeFree0RowBase(self, module, dst: int) -> None:
         # rowBase = WorkGroup0 * MT0 (+ waveM * mma_m*mfma_m when wg_m > 1).
@@ -358,6 +391,9 @@ class SubtilePartialRMSEmitter:
         # Allocate all VGPRs for temporaries.
         self.partials = self.writer.vgprPool.checkOut(self.numPartials, tag="pRMS_partials")
         self.laneId = self.writer.vgprPool.checkOut(1, tag="pRMS_laneId")
+        # waveId = Serial / WavefrontSize is computed once in _setup and reused by
+        # _computeWaveM / _buildWriteMask / _crossWaveComputeAddrs (wg_m > 1 only).
+        self.waveIdV = self.writer.vgprPool.checkOut(1, tag="pRMS_waveId") if self.wg_m > 1 else None
         # colByte is computed and consumed outside the EXEC-narrowed window in _writePartials.
         self.colByte = self.writer.vgprPool.checkOut(1, tag="pRMS_colByte")
         self.globalAddr = self.writer.vgprPool.checkOut(1, tag="pRMS_globalAddr")
@@ -402,6 +438,8 @@ class SubtilePartialRMSEmitter:
         self.writer.vgprPool.checkIn(self.globalAddr)
         self.writer.vgprPool.checkIn(self.colByte)
         self.writer.vgprPool.checkIn(self.laneId)
+        if self.wg_m > 1:
+            self.writer.vgprPool.checkIn(self.waveIdV)
         self.writer.vgprPool.checkIn(self.partials)
         if self.residualAdd:
             self.writer.vgprPool.checkIn(self.resAddr)
@@ -418,6 +456,12 @@ class SubtilePartialRMSEmitter:
         self._buildBufferSrd(module, partialSrd, "PartialBuf", "partialBuf")
         module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=self.waveSize - 1,
                            comment="laneId = Serial & (waveSize-1)"))
+        if self.wg_m > 1:
+            waveIdTmp = self.writer.vgprPool.checkOutAligned(2, 2, tag="pRMS_setupWaveIdDiv")
+            waveIdRes = ContinuousRegister(waveIdTmp, 2)
+            module.add(vectorStaticDivide(self.waveIdV, "Serial", self.waveSize, waveIdRes,
+                                          comment="waveId = Serial / WavefrontSize (cached once)"))
+            self.writer.vgprPool.checkIn(waveIdTmp)
         module.add(VAndB32(dst=vgpr(colByte), src0=vgpr(laneId), src1=self.mfma_n - 1,
                            comment=f"colInMma = laneId % {self.mfma_n}"))
         module.add(VLShiftLeftB32(dst=vgpr(colByte), shiftHex=hex(self.log2ElemBytes), src=vgpr(colByte),
@@ -477,6 +521,8 @@ class SubtilePartialRMSEmitter:
     def _residualRowByteBase(self, module, dst: int, tokenBase: int, n: int, scratch: int) -> None:
         nOff = n * self.mfma_n
         self._addImmU32(module, dst, tokenBase, nOff, scratch, f"token_n = tokenBase + {nOff} (n={n})")
+        # token_n * SizesFree0 uses 32-bit VMulLOU32; valid while the element index
+        # token_n * N_hidden stays below 2^32 (all currently supported tensor sizes).
         module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr("SizesFree+0"), src1=vgpr(dst),
                              comment="token_n * SizesFree0"))
         module.add(VLShiftLeftB32(dst=vgpr(dst), shiftHex=hex(self.residualLog2Bytes), src=vgpr(dst),
@@ -485,6 +531,8 @@ class SubtilePartialRMSEmitter:
     def _residualOutRowByteBase(self, module, dst: int, tokenBase: int, n: int, scratch: int) -> None:
         nOff = n * self.mfma_n
         self._addImmU32(module, dst, tokenBase, nOff, scratch, f"token_n = tokenBase + {nOff} (n={n}).")
+        # token_n * SizesFree0 uses 32-bit VMulLOU32; valid while token_n * N_hidden
+        # stays below 2^32 (all currently supported tensor sizes).
         module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr("SizesFree+0"), src1=vgpr(dst),
                              comment="token_n * SizesFree0."))
         module.add(VLShiftLeftB32(dst=vgpr(dst), shiftHex=hex(1), src=vgpr(dst),
@@ -584,6 +632,8 @@ class SubtilePartialRMSEmitter:
         # Row-group butterfly per array, then one fused cross-wave pass so the amax
         # and Σx² reductions share barriers instead of paying them per array.
         module = Module("PartialRMS reduceFree0")
+        # TODO(perf): fuse the Σx² and amax row-group butterflies to share the
+        # partner-address computation and dscnt wait. Deferred for simplicity.
         module.add(self._rowGroupReduceFree0(self.partials))
         if self.quant:
             module.add(self._rowGroupReduceFree0(self.amaxPartials, op=VMaxF32, verb="max"))
@@ -605,18 +655,13 @@ class SubtilePartialRMSEmitter:
         if numRounds == 0:
             return module
 
-        laneIdV = self.writer.vgprPool.checkOut(1, tag="pRMS_rgrLaneId")
         addrV = self.writer.vgprPool.checkOut(1, tag="pRMS_rgrAddr")
         tmpV = self.writer.vgprPool.checkOut(self.numPartials, tag="pRMS_rgrTmp")
 
-        module.add(
-            VAndB32(dst=vgpr(laneIdV), src0=vgpr("Serial"), src1=self.waveSize - 1,
-                    comment="laneId = Serial & (waveSize-1)")
-        )
         for i in range(numRounds):
             xorVal = self.mfma_n << i
             module.add(
-                VXorB32(dst=vgpr(addrV), src0=vgpr(laneIdV), src1=xorVal,
+                VXorB32(dst=vgpr(addrV), src0=vgpr(self.laneId), src1=xorVal,
                         comment=f"partnerLane = laneId ^ {xorVal}")
             )
             module.add(
@@ -637,32 +682,29 @@ class SubtilePartialRMSEmitter:
 
         self.writer.vgprPool.checkIn(tmpV)
         self.writer.vgprPool.checkIn(addrV)
-        self.writer.vgprPool.checkIn(laneIdV)
         return module
 
     def _crossWaveComputeAddrs(self, module, writeAddr: int, readAddr: int,
                                numArrays: int = 1) -> None:
+        # Only reached when wg_m > 1, so self.waveIdV is valid. Reuse the cached
+        # waveId and laneId instead of recomputing them here.
         laneSlotBytes = numArrays * self.numPartials * 4
         strideW = self.waveSize * laneSlotBytes
-        waveId = self.writer.vgprPool.checkOut(1, tag="pRMS_xwF0WaveId")
         waveM = self.writer.vgprPool.checkOut(1, tag="pRMS_xwF0WaveM")
         readBaseWave = self.writer.vgprPool.checkOut(1, tag="pRMS_xwF0ReadBase")
         laneLoc = self.writer.vgprPool.checkOut(1, tag="pRMS_xwF0Lane")
-        tmpVgpr = self.writer.vgprPool.checkOutAligned(2, 2, tag="pRMS_xwF0Tmp")
-        tmpRes = ContinuousRegister(tmpVgpr, 2)
-        module.add(VAndB32(dst=vgpr(laneLoc), src0=vgpr("Serial"), src1=self.waveSize - 1,
-                           comment="laneId for LDS addressing"))
-        module.add(vectorStaticDivide(waveId, "Serial", self.waveSize, tmpRes,
-                                      comment="waveId = Serial / WavefrontSize"))
-        module.add(VAndB32(dst=vgpr(waveM), src0=vgpr(waveId), src1=self.wg_m - 1,
+        # laneLoc is mutated in place below, so copy the cached laneId into it.
+        module.add(VMovB32(dst=vgpr(laneLoc), src=vgpr(self.laneId),
+                           comment="laneId for LDS addressing (cached)"))
+        module.add(VAndB32(dst=vgpr(waveM), src0=vgpr(self.waveIdV), src1=self.wg_m - 1,
                            comment=f"waveM = waveId % {self.wg_m}"))
         # readBaseWave = waveId XOR waveM = waveN * wg_m.
-        module.add(VXorB32(dst=vgpr(readBaseWave), src0=vgpr(waveId), src1=vgpr(waveM),
+        module.add(VXorB32(dst=vgpr(readBaseWave), src0=vgpr(self.waveIdV), src1=vgpr(waveM),
                            comment="readBaseWave = waveN * wg_m"))
         with self.writer.allocTmpSgpr(1, tag="pRMS_xwF0AddrSetup") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
             module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(strideW), comment=f"strideW={strideW}"))
-            module.add(VMulLOU32(dst=vgpr(writeAddr), src0=sgpr(tmpSgpr), src1=vgpr(waveId),
+            module.add(VMulLOU32(dst=vgpr(writeAddr), src0=sgpr(tmpSgpr), src1=vgpr(self.waveIdV),
                                  comment="writeAddr = waveId * strideW"))
             module.add(VMulLOU32(dst=vgpr(readAddr), src0=sgpr(tmpSgpr), src1=vgpr(readBaseWave),
                                  comment="readAddr = readBaseWave * strideW"))
@@ -674,11 +716,9 @@ class SubtilePartialRMSEmitter:
                                comment="writeAddr += lane*laneSlotBytes"))
             module.add(VAddU32(vgpr(readAddr), vgpr(readAddr), vgpr(laneLoc),
                                comment="readAddr += lane*laneSlotBytes"))
-        self.writer.vgprPool.checkIn(tmpVgpr)
         self.writer.vgprPool.checkIn(laneLoc)
         self.writer.vgprPool.checkIn(readBaseWave)
         self.writer.vgprPool.checkIn(waveM)
-        self.writer.vgprPool.checkIn(waveId)
 
     def _crossWaveReduceFree0(self, arrays) -> Module:
         # Step 3 (free0): reduce every array in `arrays` across wg_m sibling waves
@@ -719,6 +759,8 @@ class SubtilePartialRMSEmitter:
                                       comment=f"LDS store arr[{a}] partial[{i}]."))
 
     def _crossWaveLoadReduce(self, module, readAddr: int, readTmp: int, arrays, strideW: int) -> None:
+        # TODO(perf): prefetch wave[j+1]'s LDS loads while accumulating wave[j] to
+        # overlap load and compute. Deferred: needs a second readTmp buffer.
         numArrays = len(arrays)
         for j in range(self.wg_m):
             for a in range(numArrays):
@@ -810,9 +852,10 @@ class SubtilePartialRMSEmitter:
         module.addComment1("PartialRMSQuant: partial amax(|D|)/fp8_max into partialBuf second half")
         # amax is already row-group- and cross-wave-reduced in emit(); only scale+write here.
         self._computeMPadded(module, mPaddedV)
-        bits = struct.unpack('<I', struct.pack('<f', 1.0 / _FP8_E4M3_MAX))[0]
+        fp8Max = self._quantOutMax()
+        bits = struct.unpack('<I', struct.pack('<f', 1.0 / fp8Max))[0]
         module.add(VMovB32(dst=vgpr(scaleV), src=hex(bits),
-                           comment=f"1/fp8_max ({_FP8_E4M3_MAX})"))
+                           comment=f"1/fp8_max ({fp8Max})"))
         for n in range(self.mma_n):
             module.add(VMulF32(dst=vgpr(amaxPartials + n), src0=vgpr(amaxPartials + n),
                                src1=vgpr(scaleV), comment=f"amax[n={n}] /= fp8_max"))
@@ -837,27 +880,40 @@ class SubtilePartialRMSEmitter:
                                    comment="tokenBase = colByte >> log2ElemBytes."))
         module.add(SAndSaveExecB64(dst=sgpr(savedExec, lsc), src=sgpr(laneMaskSgpr, lsc),
                                    comment="save exec; set exec = writing-lane mask"))
-        nOffVgpr = self.writer.vgprPool.checkOut(1, tag="pRMS_wF0NOff")
+        # Strength-reduce token*n_d across the n loop: token advances by mfma_n each
+        # step, so token*n_d advances by the loop-invariant stride mfma_n*n_d. This
+        # replaces the per-n multiply with a single add.
+        accumV = self.writer.vgprPool.checkOut(1, tag="pRMS_wF0Accum")
+        if rowOffset is not None:
+            module.add(VAddU32(vgpr(accumV), vgpr(tokenBase), vgpr(rowOffset),
+                               comment="token0 = tokenBase + M_padded (amax second half)"))
+        else:
+            module.add(VMovB32(dst=vgpr(accumV), src=vgpr(tokenBase), comment="token0 = tokenBase"))
+        # token*n_d uses 32-bit VMulLOU32; assumes token*n_d < 2^32.
+        module.add(VMulLOU32(dst=vgpr(accumV), src0=vgpr(ntilesV), src1=vgpr(accumV),
+                             comment="accum = token0 * n_d"))
+        strideV = None
+        if self.mma_n > 1:
+            strideV = self.writer.vgprPool.checkOut(1, tag="pRMS_wF0Stride")
+            module.add(VMulLOU32(dst=vgpr(strideV), src0=self.mfma_n, src1=vgpr(ntilesV),
+                                 comment=f"stride = mfma_n({self.mfma_n}) * n_d"))
         for n in range(self.mma_n):
-            nOff = n * self.mfma_n
-            self._addImmU32(module, globalAddr, tokenBase, nOff, nOffVgpr,
-                            f"token = tokenBase + {nOff} (n={n})")
-            if rowOffset is not None:
-                module.add(VAddU32(vgpr(globalAddr), vgpr(globalAddr), vgpr(rowOffset),
-                                   comment="token += M_padded (amax second half)"))
-            module.add(VMulLOU32(dst=vgpr(globalAddr), src0=vgpr(ntilesV), src1=vgpr(globalAddr),
-                                 comment="token * n_d"))
-            module.add(VAddU32(vgpr(globalAddr), vgpr(globalAddr), sgpr("WorkGroup0"),
-                               comment="+ WorkGroup0 (free0 tile index)"))
+            module.add(VAddU32(vgpr(globalAddr), vgpr(accumV), sgpr("WorkGroup0"),
+                               comment=f"token*n_d + WorkGroup0 (n={n})"))
             module.add(VLShiftLeftB32(dst=vgpr(globalAddr), shiftHex=hex(2), src=vgpr(globalAddr),
                                       comment="byteOff = (token*n_d + WG0) * 4"))
             module.add(BufferStoreB32(src=vgpr(partials + n), vaddr=vgpr(globalAddr),
                                       saddr=sgpr(partialSrd, 4), soffset=0,
                                       mubuf=MUBUFModifiers(offen=True),
                                       comment=f"partialBuf[token, WG0] = {label} (n={n})"))
+            if n < self.mma_n - 1:
+                module.add(VAddU32(vgpr(accumV), vgpr(accumV), vgpr(strideV),
+                                   comment=f"accum += stride (advance to n={n + 1})"))
         module.add(SWaitCnt(vscnt=0, comment="wait partialBuf stores"))
         module.add(SMovB64(dst=EXEC(), src=sgpr(savedExec, lsc), comment="restore exec mask"))
-        self.writer.vgprPool.checkIn(nOffVgpr)
+        if strideV is not None:
+            self.writer.vgprPool.checkIn(strideV)
+        self.writer.vgprPool.checkIn(accumV)
         self.writer.vgprPool.checkIn(tokenBase)
         self.writer.vgprPool.checkIn(ntilesV)
         return module
@@ -927,7 +983,9 @@ class SubtilePartialRMSEmitter:
     def _issueResidualLoadsWide(self, module, m: int, resBurst: int, wgRowBase: int,
                                 rowGroupOff: int, scratch: int) -> None:
         rpl = self.rows_per_lane
-        # nhidden base for k=0 (4-aligned); kept in _resNBaseV for the OOB masks in convert.
+        # nhidden base for k=0, kept in _resNBaseV for the convert OOB masks. It is
+        # 4-aligned (MT0, mfma_m, rows_per_lane are all multiples of 4 for the 16x16
+        # geometry), so the buffer_load_b32 below reads 4 contiguous fp8 in one dword.
         self._free0RowPos(module, self._resNBaseV, wgRowBase, rowGroupOff, m, 0, scratch)
         for n in range(self.mma_n):
             self._residualRowByteBase(module, self._resRowByteBase, self._resTokenBase, n, scratch)

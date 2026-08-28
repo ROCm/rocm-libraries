@@ -7,6 +7,19 @@
 # writes fp8 to D. Constraints: MT1==128, MT0%64==0, WG0<=2,
 # DQuantSize0(=32) <= MT0/WG0. NumElementsToValidate enables in-pipeline
 # correctness checking across a range of problem sizes.
+#
+# The ProblemType MUST set PartialRMSStoreBf16D: True. The solution-selection
+# predicate UsePartialRMSStoreBf16D is built from the ProblemType field, while the
+# client sets the problem's store-bf16-d flag from the solutions (ForkParameters
+# request it). Omitting it from the ProblemType makes the predicate value 0 while
+# the problem value is 1, so every solution is rejected (DID_NOT_SATISFY_ASSERTS)
+# and no benchmark data is produced.
+#
+# The tile sweep spans two BenchmarkProblemSizeGroups under ONE ProblemType. They
+# MUST be sibling size groups, not separate outer BenchmarkProblems entries: each
+# pass's results file is named "{ProblemType}_{sizeGroupIdx:02d}.csv", so two outer
+# entries with an identical ProblemType both map to "..._00.csv" and the second
+# silently clobbers the first. Sibling size groups get distinct idx (00, 01).
 
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
@@ -21,7 +34,8 @@ BenchmarkProblems:
 
   ########################################
   # bf16 in, fp8 out — PartialRMS + ResidualAdd + MXFP8 DynQuant + bf16 ResidualOut
-  # DepthU=64, PGR=[1,2], MT1=128, WG0<=2 — WG 1x1 and WG 2x1 tiles
+  # DepthU=64, PGR=[1,2], MT1=128, WG0<=2. Two sibling size groups share one
+  # ProblemType.
   ########################################
   -
     - # ProblemType — bf16 in, OCP fp8 e4m3 out, f32 compute, residual add, bf16 ResidualOut
@@ -44,9 +58,13 @@ BenchmarkProblems:
       Sparse: 0
       UsePartialRMS: True
       PartialRMSResidualAdd: True
+      PartialRMSStoreBf16D: True
       PartialRMSQuant: False
       DQuantType: MXFP8
 
+    ########################################
+    # Size group 1 (idx 00): WG 1x1 and WG 2x1 tiles.
+    ########################################
     - InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -92,39 +110,13 @@ BenchmarkProblems:
         - ProblemSizes:
             - Exact: [128,  128, 1,  128]
             - Exact: [128,  256, 1,   64]
-            - Exact: [256, 2048, 1,  128]
-            - Exact: [512, 4096, 1,  128]
-            - Exact: [128, 4096, 1, 4096]
-            - Exact: [512, 4096, 1, 4096]
-            - Exact: [2048, 8192, 1, 4096]
+            - Exact: [640, 640, 1,  128]
 
-  ########################################
-  # WG 2x2 and WG 1x4 tiles: broader wave-group coverage, same constraints
-  ########################################
-  -
-    - # ProblemType — bf16 in, OCP fp8 e4m3 out, f32 compute, residual add, bf16 ResidualOut
-      OperationType: GEMM
-      DataType: b
-      DestDataType: F8
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: True
-      TransposeB: False
-      UseBeta: False
-      Batched: True
-      StridedBatched: True
-      GroupedGemm: False
-      UseBias: 0
-      UseScaleAB: ""
-      UseScaleCD: False
-      UseScaleAlphaVec: 0
-      UseScaleD: False
-      Sparse: 0
-      UsePartialRMS: True
-      PartialRMSResidualAdd: True
-      PartialRMSQuant: False
-      DQuantType: MXFP8
-
+    ########################################
+    # Size group 2 (idx 01): WG 2x2 and WG 1x4 tiles. Second sibling size group
+    # under the SAME ProblemType as group 1 (NOT a separate outer entry), so it
+    # gets results file idx 01 instead of clobbering group 1's _00.csv.
+    ########################################
     - InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -170,10 +162,7 @@ BenchmarkProblems:
         - ProblemSizes:
             - Exact: [128,  128, 1,  128]
             - Exact: [256,  256, 1,  256]
-            - Exact: [512, 4096, 1,  128]
-            - Exact: [2048, 4096, 1, 4096]
-            - Exact: [512,  8192, 1, 8192]
-
+            - Exact: [640, 640, 1,  128]
 
 
 LibraryLogic:

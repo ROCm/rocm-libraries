@@ -2083,6 +2083,12 @@ class SignatureCodeMeta(Item):
         self.argList.append(sa)
         self.offset += sa.size
 
+    def alignKernArg(self, alignment: int) -> int:
+        aligned = ((self.offset + alignment - 1) // alignment) * alignment
+        pad = aligned - self.offset
+        self.offset = aligned
+        return pad
+
     def toString(self) -> str:
         out = ".amdgpu_metadata\n"
         out += "---\n"
@@ -2194,6 +2200,9 @@ class SignatureBase(Item):
         addrSpaceQual: Optional[str] = None,
     ) -> None:
         self.codeMeta.addArg(name, kind, type, addrSpaceQual)
+
+    def alignKernArg(self, alignment: int) -> int:
+        return self.codeMeta.alignKernArg(alignment)
 
     def addDescriptionTopic(self, text: str) -> None:
         self.descriptionTopic = TextBlock(_sig_block3line(text))

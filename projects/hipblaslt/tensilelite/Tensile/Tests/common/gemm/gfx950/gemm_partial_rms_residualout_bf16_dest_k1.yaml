@@ -1,10 +1,17 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# PartialRMS + ResidualAdd + MXFP8 DynQuant 32x1 + bf16 ResidualOut store (K1).
-# PartialRMSStoreBf16D=True splits the store into two passes: RMS pass writes bf16
-# to ResidualOut, quant pass writes fp8 to D. All other constraints follow the
-# combined PartialRMS+MXFP8 mode (MT1==128, MT0%64==0, WG0<=2).
+# PartialRMS + ResidualAdd + bf16 ResidualOut store (K1), plain bf16 D output.
+# DestDataType=b (bf16 D), NOT fp8: this is the non-MXFP8 counterpart of
+# gemm_partial_rms_residualout_bf16_k1.yaml (which stores fp8 to D via the MXFP8
+# quant pass). Here PartialRMSStoreBf16D=True writes the pre-norm bf16(H+residual)
+# to ResidualOut, and the normal PartialRMS store writes normalized bf16 to D.
+# No DQuantType / MXFP8Quant machinery. Constraints: MT0%64==0, MT1%64==0, WG0<=2.
+#
+# Both D and ResidualOut are CPU-validated (NumElementsToValidate: 128): the client
+# reference (Reference.cpp) writes bf16(H+residual) to residualOut in the
+# DQuantType=None PartialRMSStoreBf16D path, matching the device epilogue
+# (pre-gamma, pre-alpha).
 
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
@@ -14,23 +21,37 @@ GlobalParameters:
   NumElementsToValidate: 128
   ExitOnFails: 0
   PrintSolutionRejectionReason: True
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  DataInitTypeBias: 1
+  BoundsCheck: 0
+  CpuThreads: 1
+  RotatingBufferSize: 0
 
 BenchmarkProblems:
 
   ########################################
-  # bf16 in, fp8 out — PartialRMS + ResidualAdd + MXFP8 DynQuant + bf16 ResidualOut
-  # DepthU=64, PGR=[1,2], MT1=128, WG0<=2
+  # bf16 in, bf16 out — PartialRMS + ResidualAdd + bf16 ResidualOut store
+  # DepthU=64, PGR=[0,1,2], MT1=128, WG0<=2
   ########################################
   -
-    - # ProblemType — bf16 in, OCP fp8 e4m3 out, f32 compute, residual add, bf16 ResidualOut
+    - # ProblemType — bf16 TN GEMM, PartialRMS + residual add + bf16 ResidualOut, bf16 D
       OperationType: GEMM
       DataType: b
-      DestDataType: F8
+      DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: True
       TransposeB: False
-      UseBeta: False
+      UseBeta: True
       Batched: True
       StridedBatched: True
       GroupedGemm: False
@@ -38,38 +59,30 @@ BenchmarkProblems:
       UseScaleAB: ""
       UseScaleCD: False
       UseScaleAlphaVec: 0
-      UseScaleD: False
       Sparse: 0
       UsePartialRMS: True
       PartialRMSResidualAdd: True
       PartialRMSStoreBf16D: True
       PartialRMSQuant: False
-      DQuantType: MXFP8
 
     - InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-            # WG 1x1 (WG0=1, MT1=128)
-            - [16, 16, 32, 1, 1,  4,  8, 1, 1]  # MT0=64   MT1=128
-            - [16, 16, 32, 1, 1,  8,  8, 1, 1]  # MT0=128  MT1=128
-            # WG 2x1 (WG0=2, MT1=128)
-            - [16, 16, 32, 1, 1,  2,  8, 2, 1]  # MT0=64   MT1=128
-            - [16, 16, 32, 1, 1,  4,  8, 2, 1]  # MT0=128  MT1=128
+            - [16, 16, 32, 1, 1,  4,  8, 1, 1]  # MT 64x128,  WG 1x1
+            - [16, 16, 32, 1, 1,  4,  4, 2, 2]  # MT 128x128, WG 2x2
+            - [16, 16, 32, 1, 1,  6,  4, 2, 2]  # MT 192x128, WG 2x2
         - PartialRMS: [True]
         - PartialRMSResidualAdd: [True]
-        - PartialRMSQuant: [False]
         - PartialRMSStoreBf16D: [True]
-        - DQuantType: [MXFP8]
-        - DQuantSize0: [32]
-        - DQuantSize1: [1]
+        - PartialRMSQuant: [False]
         - StreamK: [3]
         - StreamKForceDPOnly: [1]
         - StreamKAtomic: [0]
         - GlobalSplitU: [1]
         - ScheduleIterAlg: [3]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchAcrossPersistent: [0]
         - DirectToLds: [1]
         - UseSubtileImpl: [True]
@@ -86,13 +99,12 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
             - Exact: [128,  128, 1,  128]
-            - Exact: [128,  256, 1,   64]
-            - Exact: [640, 640, 1,  256]
-
+            - Exact: [320,  320, 1,  128]
+            - Exact: [640, 640, 1,  512]
 
 
 LibraryLogic:
-  ScheduleName: "partialrms_residualout_bf16_k1"
+  ScheduleName: "partialrms_residualout_bf16_dest_k1"
   DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
   ArchitectureName: "gfx950"
   LibraryType: "Prediction"

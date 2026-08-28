@@ -1262,22 +1262,20 @@ namespace TensileLite
         if(sizeMapping.partialRMS)
         {
             // RMSNormGamma is the first 64-bit pointer of the PartialRMS block and
-            // must land on an 8-byte kernarg boundary. When the preceding args do
-            // not end on an 8-byte boundary a bare append() leaves it 4-byte
-            // shifted, which corrupts every PartialRMS pointer loaded by the
-            // device s_load_dwordx8. The device inserts a matching 4-byte pad
-            // (PartialRMSPad); align here so the layouts agree.
+            // must land on an 8-byte kernarg boundary. The device reserves an implicit
+            // 4-byte alignment gap (no named kernarg) before the pointer; align here
+            // so the host and device layouts agree.
             args.template appendAligned<void const*>("RMSNormGamma", inputs.rmsGamma);
             args.template append<void*>      ("PartialBuf",   inputs.partialBuf);
             if(sizeMapping.partialRMSResidualAdd)
                 args.template append<void const*>("ResidualBuf", inputs.residual);
             if(sizeMapping.partialRMSStoreBf16D)
-                args.template append<void*>("AddressResidualOut", inputs.residualOut);
+                args.template appendAligned<void*>("AddressResidualOut", inputs.residualOut);
         }
         if(sizeMapping.dquantType == DQuantType::Tile)
-            args.template append<void*>("QuantScale", inputs.quantScale);
+            args.template appendAligned<void*>("QuantScale", inputs.quantScale);
         if(sizeMapping.dquantType == DQuantType::MXFP8)
-            args.template append<void*>("MXScale", inputs.mxScale);
+            args.template appendAligned<void*>("MXScale", inputs.mxScale);
     }
 
     inline uint32_t getNumWorkGroups(const KernelInvocation& rv)
@@ -2077,9 +2075,9 @@ namespace TensileLite
         // Deepseek scale pointers follow batchOffsets in the kernel signature, matching
         // the order emitted by Signature.py (see SubtileDeepseekScaleEmit.py).
         if(sizeMapping.deepseekScaleA)
-            rv.args.append<void const*>("ScaleABuf", inputs.scaleADeepseek);
+            rv.args.appendAligned<void const*>("ScaleABuf", inputs.scaleADeepseek);
         if(sizeMapping.deepseekScaleB)
-            rv.args.append<void const*>("ScaleBBuf", inputs.scaleBDeepseek);
+            rv.args.appendAligned<void const*>("ScaleBBuf", inputs.scaleBDeepseek);
 
         if(problemType.stochasticRounding)
         {

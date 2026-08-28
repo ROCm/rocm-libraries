@@ -528,6 +528,9 @@ namespace TensileLite
                                     rv.back().setPartialRMSMT1(mt1);
                                     rv.back().setRMSGamma(m_partialRMSGammaType, nHidden);
                                     rv.back().setPartialRMSQuant(m_partialRMSQuant);
+                                    // Mirror the store-bf16-d flag onto the problem so the
+                                    // UsePartialRMSStoreBf16D solution predicate matches.
+                                    rv.back().setPartialRMSStoreBf16D(m_partialRMSStoreBf16D);
                                     // Double the row count so both halves fit: first half = Σx²,
                                     // second half = amax(|D|)/448.
                                     size_t pbRows = m_partialRMSQuant ? 2 * mPadded : mPadded;

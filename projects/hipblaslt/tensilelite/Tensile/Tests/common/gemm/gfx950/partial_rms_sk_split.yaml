@@ -91,6 +91,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128]
           - Exact: [256, 256, 1, 256]
+          - Exact: [640, 640, 1, 256]
 
   ########################################
   # PartialRMS + residual add — K-split path (StreamKForceDPOnly=0)
@@ -148,6 +149,7 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128]
           - Exact: [256, 256, 1, 256]
+          - Exact: [640, 640, 1, 256]
 
   ########################################
   # PartialRMS + f32 gamma/residual types — K-split (StreamKForceDPOnly=0)
@@ -205,3 +207,4 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128]
+          - Exact: [640, 640, 1, 256]

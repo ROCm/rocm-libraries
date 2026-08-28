@@ -2251,6 +2251,12 @@ namespace
                 tensileProblem.setMxScale(freeTiles, kBlockTiles);
                 tensileProblem.setPartialRMSStoreBf16D(fusedInfo.requantMxResidualOut != nullptr);
             }
+            // Pure bf16 PartialRMS dual-store (no dynamic quant): the caller's bf16 residual-out
+            // buffer receives H+residual while D receives the normalized bf16 output. Selects the
+            // DQuantType=None PartialRMSStoreBf16D solution. Default DQuantType (None) is kept.
+            else if((fusedInfo.hasRMSNorm || fusedInfo.hasPartialRMSStats)
+                    && fusedInfo.residualOutput != nullptr)
+                tensileProblem.setPartialRMSStoreBf16D(true);
         }
 
         // set AmaxD
@@ -2566,6 +2572,12 @@ namespace
                     tensileProblem.setMxScale(freeTiles, kBlockTiles);
                     tensileProblem.setPartialRMSStoreBf16D(fusedInfo.requantMxResidualOut != nullptr);
                 }
+                // Pure bf16 PartialRMS dual-store (no dynamic quant): the caller's bf16 residual-out
+                // buffer receives H+residual while D receives the normalized bf16 output. Selects the
+                // DQuantType=None PartialRMSStoreBf16D solution. Default DQuantType (None) is kept.
+                else if((fusedInfo.hasRMSNorm || fusedInfo.hasPartialRMSStats)
+                        && fusedInfo.residualOutput != nullptr)
+                    tensileProblem.setPartialRMSStoreBf16D(true);
             }
         }
 
@@ -2712,6 +2724,11 @@ namespace
                 // Dual-store bf16 pre-quant output (PartialRMSStoreBf16D). Null unless requested.
                 inputs.residualOut = const_cast<void*>(fusedInputs.requantMxResidualOut);
             }
+            // Pure bf16 PartialRMS dual-store: wire the caller's bf16 residual-out buffer. The K1
+            // kernel writes bf16(H+residual) here, gated by sizeMapping.partialRMSStoreBf16D.
+            else if((fusedInputs.hasRMSNorm || fusedInputs.hasPartialRMSStats)
+                    && fusedInputs.residualOutput != nullptr)
+                inputs.residualOut = const_cast<void*>(fusedInputs.residualOutput);
         }
 
         // set bias vector

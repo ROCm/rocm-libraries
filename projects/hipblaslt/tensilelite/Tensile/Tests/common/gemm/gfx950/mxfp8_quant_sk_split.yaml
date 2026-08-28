@@ -91,3 +91,4 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [64, 128, 1, 128]
           - Exact: [128, 256, 1, 128]
+          - Exact: [640, 640, 1, 128]

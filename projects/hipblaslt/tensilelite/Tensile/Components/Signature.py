@@ -344,46 +344,45 @@ class SignatureDefault(Signature):
             # NTilesN is not a kernarg: the device computes it from SizesFree[1] and the
             # compile-time MT1 constant to avoid consuming a permanent named-SGPR slot.
             gammaValueType = _partialRMSSideValueType(kernel.get("PartialRMSGammaType"))
-            # RMSNormGamma is the first 64-bit pointer of the block; it must land on
-            # an 8-byte kernarg boundary. KernelWriter._initKernel decides the pad
-            # from the ABSOLUTE running kernarg offset; mirror it exactly by checking
-            # whether it inserted the pad entry.
-            if "PartialRMSPad" in writer.states.numStoreSgprNames:
-                signature.addArg("PartialRMSPad", SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.rmsNormSize += 4
+            # Advance the kernarg offset to the next 8-byte boundary so the
+            # following 64-bit pointer is aligned. The host mirrors this with
+            # appendAligned<>() and the device loader with (offset+7)&~7; no
+            # named pad kernarg is emitted.
+            userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
             signature.addArg("RMSNormGamma", SVK.SIG_GLOBALBUFFER, gammaValueType, "generic")
             signature.addArg("PartialBuf",   SVK.SIG_GLOBALBUFFER, "f32",          "generic")
-            userArgumentsInfo.rmsNormSize = 8 + 8  # gamma ptr + partialBuf ptr
+            userArgumentsInfo.rmsNormSize += 8 + 8  # gamma ptr + partialBuf ptr
             if kernel["PartialRMSResidualAdd"]:
                 resValueType = _partialRMSSideValueType(kernel.get("PartialRMSResidualType"))
                 signature.addArg("ResidualBuf", SVK.SIG_GLOBALBUFFER, resValueType, "generic")
                 userArgumentsInfo.rmsNormSize += 8  # residual ptr
             if kernel["PartialRMSStoreBf16D"]:
-                # AddressResidualOut: 64-bit ptr for the bf16 pre-quant output; mirrors
-                # KernelWriter.py numStoreSgprNames pad logic exactly.
-                if "PartialRMSBf16Pad" in writer.states.numStoreSgprNames:
-                    signature.addArg("PartialRMSBf16Pad", SVK.SIG_VALUE, "u32")
-                    userArgumentsInfo.rmsNormSize += 4
+                # AddressResidualOut: 64-bit ptr for the bf16 pre-quant output.
+                # Advance the kernarg offset to the next 8-byte boundary so the
+                # following 64-bit pointer is aligned. The host mirrors this with
+                # appendAligned<>() and the device loader with (offset+7)&~7; no
+                # named pad kernarg is emitted.
+                userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
                 signature.addArg("AddressResidualOut", SVK.SIG_GLOBALBUFFER, "bf16", "generic")
                 userArgumentsInfo.rmsNormSize += 8  # residualOut ptr
 
         if kernel["DQuantType"] == "Tile":
             # TileQuant epilogue appends QuantScale: fp32 global buffer pointer (8 bytes).
-            # KernelWriter._initKernel is the source of truth for the 64-bit alignment pad;
-            # mirror it exactly by checking whether it inserted the pad entry.
-            if "TileQuantPad" in writer.states.numStoreSgprNames:
-                signature.addArg("TileQuantPad", SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.rmsNormSize += 4
+            # Advance the kernarg offset to the next 8-byte boundary so the
+            # following 64-bit pointer is aligned. The host mirrors this with
+            # appendAligned<>() and the device loader with (offset+7)&~7; no
+            # named pad kernarg is emitted.
+            userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
             signature.addArg("QuantScale", SVK.SIG_GLOBALBUFFER, "f32", "generic")
             userArgumentsInfo.rmsNormSize += 8  # 8B quantScale ptr
 
         if kernel["DQuantType"] == "MXFP8":
             # MXFP8Quant epilogue appends MXScale: u8 global buffer pointer (8 bytes).
-            # KernelWriter._initKernel is the source of truth for the 64-bit alignment pad;
-            # mirror it exactly by checking whether it inserted the pad entry.
-            if "MXFP8QuantPad" in writer.states.numStoreSgprNames:
-                signature.addArg("MXFP8QuantPad", SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.rmsNormSize += 4
+            # Advance the kernarg offset to the next 8-byte boundary so the
+            # following 64-bit pointer is aligned. The host mirrors this with
+            # appendAligned<>() and the device loader with (offset+7)&~7; no
+            # named pad kernarg is emitted.
+            userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
             signature.addArg("MXScale", SVK.SIG_GLOBALBUFFER, "u8", "generic")
             userArgumentsInfo.rmsNormSize += 8  # 8B MXScale ptr
 
@@ -418,21 +417,23 @@ class SignatureDefault(Signature):
 
         if kernel.get("UseDeepseekScaleA", False):
             # DeepseekScaleA epilogue appends ScaleABuf: fp32 global buffer pointer (8 bytes).
-            # KernelWriter._initKernel is the source of truth for the 64-bit alignment pad;
-            # mirror it exactly by checking whether it inserted the pad entry.
-            if "DeepseekScaleAPad" in writer.states.numStoreSgprNames:
-                signature.addArg("DeepseekScaleAPad", SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.rmsNormSize += 4
+            # Advance the kernarg offset to the next 8-byte boundary so the
+            # following 64-bit pointer is aligned. The host mirrors this with
+            # appendAligned<>() and the device loader with (offset+7)&~7; no
+            # named pad kernarg is emitted.
+            userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
+            writer.states.scaleABufKernArgOffset = signature.offset - userArgumentsInfo.commonArgsSize
             signature.addArg("ScaleABuf", SVK.SIG_GLOBALBUFFER, "f32", "generic")
             userArgumentsInfo.rmsNormSize += 8  # 8B scaleA ptr.
 
         if kernel.get("UseDeepseekScaleB", False):
             # DeepseekScaleB epilogue appends ScaleBBuf: fp32 global buffer pointer (8 bytes).
-            # KernelWriter._initKernel is the source of truth for the 64-bit alignment pad;
-            # mirror it exactly by checking whether it inserted the pad entry.
-            if "DeepseekScaleBPad" in writer.states.numStoreSgprNames:
-                signature.addArg("DeepseekScaleBPad", SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.rmsNormSize += 4
+            # Advance the kernarg offset to the next 8-byte boundary so the
+            # following 64-bit pointer is aligned. The host mirrors this with
+            # appendAligned<>() and the device loader with (offset+7)&~7; no
+            # named pad kernarg is emitted.
+            userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
+            writer.states.scaleBBufKernArgOffset = signature.offset - userArgumentsInfo.commonArgsSize
             signature.addArg("ScaleBBuf", SVK.SIG_GLOBALBUFFER, "f32", "generic")
             userArgumentsInfo.rmsNormSize += 8  # 8B scaleB ptr.
 

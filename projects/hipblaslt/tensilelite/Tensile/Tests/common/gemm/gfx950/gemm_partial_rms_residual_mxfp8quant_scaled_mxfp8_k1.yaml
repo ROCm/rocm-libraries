@@ -109,10 +109,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
             - Exact: [128,  128, 1, 256]
-            - Exact: [256,  2048, 1, 128]
-            - Exact: [512,  4096, 1, 256]
             - Exact: [384,   128, 1, 256]
-            - Exact: [512,   128, 1, 256]
+            - Exact: [640, 640, 1, 256]
 
   ########################################
   # Large-tile MT1=192 group: MIWT8x6 WG2x2
@@ -176,7 +174,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [8192, 8192, 1, 8192]
+            - Exact: [640, 640, 1, 256]
 
   ########################################
   # Large-tile MT1=256 group: MIWT6x8, MIWT8x8, MIWT4x16, MIWT10x8, MIWT16x4
@@ -246,7 +244,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [8192, 8192, 1, 8192]
+            - Exact: [640, 640, 1, 256]
 
   ########################################
   # Large-tile MT1=320 group: MIWT8x10 WG2x2
@@ -310,7 +308,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [8192, 8192, 1, 8192]
+            - Exact: [640, 640, 1, 256]
 
 
 

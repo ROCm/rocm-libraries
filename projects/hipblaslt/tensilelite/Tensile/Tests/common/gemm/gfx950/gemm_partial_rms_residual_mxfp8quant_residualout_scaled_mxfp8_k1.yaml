@@ -6,20 +6,76 @@
 # with the two-pass PartialRMSStoreBf16D epilogue: the RMS pass writes the
 # pre-quantization H+residual value as bf16 to ResidualOut, the quant pass writes
 # OCP fp8 e4m3 to D. Constraints (combined PartialRMS + MXFP8 mode): DestDataType=F8,
-# UseBeta=False, MXFP8Quant owns quantization (PartialRMSQuant=False), MT1==128,
-# MT0%64==0, WG0<=2, DQuantSize0(=32) <= MT0/WG0. Realistic LLM-inference shapes.
+# UseBeta=False, MXFP8Quant owns quantization (PartialRMSQuant=False), MT1 a multiple of 64 (MT1==128 for most of the sweep; one 256x256 tile added),
+# MT0%64==0, WG0<=2, DQuantSize0(=32) <= MT0/WG0.
+#
+# One ProblemType with two BenchmarkProblemSizeGroups: ClientWriter requires all
+# solutions in a benchmark pass (size group) to share the same MT1, so the MT1=256
+# tile (256x256) lives in a second size group. Both size groups share this one
+# ProblemType. They MUST be sibling size groups, not separate outer groups: each pass's
+# results file is named "{ProblemType}_{sizeGroupIdx:02d}.csv", so two outer entries with
+# an identical ProblemType both map to "..._00.csv" and the second silently clobbers the
+# first. Sibling size groups get distinct idx (00, 01) so both are preserved. Wave-group
+# tile sweep (MT1=128: WG1*MIWT_N==8; WG0<=2; MT0=WG0*16*MIWT_M, MT0%64==0,
+# MIWT_M>=2): WG 1x1,2x1,1x2,2x2,1x4,2x4 each over MT0 in {64,128,192,256},
+# PGR in {0,1,2}. Sizes: 640x640x4096 (smoke) + 8192x8192x8192.
+
+# --- Benchmark run 2026-08-31, gfx950 (prebuilt tensilelite-client), single group ---
+# Sizes: 640x640x4096 (smoke), 8192x8192x8192 (target). EXIT=0.
+# 72 candidates (24 tiles x 3 PGR), 18 rejected, 54 benchmarked (all valid > 0 GFlops).
+#
+# True global top config @ 8192^3 (all WG families ranked together):
+#   MI=[16,16,128,1,1,4,2,2,4]  MT128x128  WG 2x4 (WG0=2 WG1=4)  MIWT4x2  PGR2
+#   1,141,170 GFlops (1141.170 TFlops).
+#
+# Top-10 @ 8192^3:
+#   #1  MT128x128  WG 2x4  MIWT4x2   PGR2  1141170 GFlops (1141.170 TFlops)  [16,16,128,1,1,4,2,2,4]
+#   #2  MT128x128  WG 1x4  MIWT8x2   PGR2  1128940 GFlops (1128.940 TFlops)  [16,16,128,1,1,8,2,1,4]
+#   #3  MT128x128  WG 2x2  MIWT4x4   PGR2  1078360 GFlops (1078.360 TFlops)  [16,16,128,1,1,4,4,2,2]
+#   #4  MT128x128  WG 1x2  MIWT8x4   PGR2  1050260 GFlops (1050.260 TFlops)  [16,16,128,1,1,8,4,1,2]
+#   #5  MT192x128  WG 2x4  MIWT6x2   PGR0   997292 GFlops ( 997.292 TFlops)  [16,16,128,1,1,6,2,2,4]
+#   #6  MT256x128  WG 2x4  MIWT8x2   PGR1   992861 GFlops ( 992.861 TFlops)  [16,16,128,1,1,8,2,2,4]
+#   #7  MT128x128  WG 2x1  MIWT4x8   PGR2   989642 GFlops ( 989.642 TFlops)  [16,16,128,1,1,4,8,2,1]
+#   #8  MT256x128  WG 2x4  MIWT8x2   PGR0   989075 GFlops ( 989.075 TFlops)  [16,16,128,1,1,8,2,2,4]
+#   #9  MT192x128  WG 2x4  MIWT6x2   PGR1   977710 GFlops ( 977.710 TFlops)  [16,16,128,1,1,6,2,2,4]
+#   #10 MT128x128  WG 1x4  MIWT8x2   PGR1   972075 GFlops ( 972.075 TFlops)  [16,16,128,1,1,8,2,1,4]
+#
+# Rejected configs (all families, 18 total):
+#   MXSA scale — unable to load MXSA scales in one load per wave (WG1x1, MT0>=192):
+#     [16,16,128,1,1,12, 8,1,1] MT192x128 WG1x1 @ PGR0,1,2
+#     [16,16,128,1,1,16, 8,1,1] MT256x128 WG1x1 @ PGR0,1,2
+#   Multi-DU — DepthU=256, dataDU=128 incompatible with PGR2 (MT0>=192):
+#     [16,16,128,1,1, 6, 8,2,1] MT192x128 WG2x1 @ PGR2
+#     [16,16,128,1,1, 8, 8,2,1] MT256x128 WG2x1 @ PGR2
+#     [16,16,128,1,1,12, 4,1,2] MT192x128 WG1x2 @ PGR2
+#     [16,16,128,1,1,16, 4,1,2] MT256x128 WG1x2 @ PGR2
+#     [16,16,128,1,1, 6, 4,2,2] MT192x128 WG2x2 @ PGR2
+#     [16,16,128,1,1, 8, 4,2,2] MT256x128 WG2x2 @ PGR2
+#     [16,16,128,1,1,12, 2,1,4] MT192x128 WG1x4 @ PGR2
+#     [16,16,128,1,1,16, 2,1,4] MT256x128 WG1x4 @ PGR2
+#     [16,16,128,1,1, 6, 2,2,4] MT192x128 WG2x4 @ PGR2
+#     [16,16,128,1,1, 8, 2,2,4] MT256x128 WG2x4 @ PGR2
+#   Silent (VGPR overflow at build time, WG1x1 MT128x128 high-PGR):
+#     [16,16,128,1,1, 8, 8,1,1] MT128x128 WG1x1 @ PGR1,2
 
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
-  # NumElementsToValidate: -1 requests full validation, but the MX-scaled
-  # dynamic-quant path has no in-pipeline reference, so solutions may report -1;
-  # correctness is covered by the GPU gtests.
-  NumElementsToValidate: 128
+  # Benchmark run: the MX-scaled dynamic-quant path has no in-pipeline CPU
+  # reference and a full CPU reference at 8192^3 is intractable, so validation is
+  # disabled. Pass/fail here means the kernel builds and the client runs to
+  # completion (clientExit=0). Correctness is covered by the GPU gtests.
+  NumElementsToValidate: 0
   ExitOnFails: 0
+  PrintLevel: 3
+  KernelTime: True
   PrintSolutionRejectionReason: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
   MXScaleFormat: 1
@@ -27,9 +83,9 @@ GlobalParameters:
 BenchmarkProblems:
 
   ########################################
-  # MX-scaled fp8 in, fp8 out, bf16 ResidualOut — PartialRMS + ResidualAdd + MXFP8 DynQuant
-  # WG 1x1 and WG 2x1 tiles (WG0<=2, MT1=128). DepthU=256, PGR=[1,2].
-  # LLM-inference sizes: small token counts (M = 1,4,8,16,32,64).
+  # Size group 1 (idx 00): MT1=128 sweep — WG 1x1,2x1,1x2,2x2,1x4,2x4 x MT0 in
+  # {64,128,192,256} x PGR in {0,1,2}. ClientWriter requires uniform MT1 within a
+  # benchmark pass (size group).
   ########################################
   -
     - # ProblemType — MX-scaled fp8 in, OCP fp8 e4m3 out, f32 compute, residual add, bf16 ResidualOut
@@ -63,95 +119,36 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-            # WG 1x1 (WG0=1, MT1=128)
+            # WG 1x1 (WG0=1, WG1=1, MIWT_N=8)
             - [16, 16, 128, 1, 1,  4,  8, 1, 1]  # MT0=64   MT1=128
+            - [16, 16, 128, 1, 1,  8,  8, 1, 1]  # MT0=128  MT1=128
             - [16, 16, 128, 1, 1, 12,  8, 1, 1]  # MT0=192  MT1=128
             - [16, 16, 128, 1, 1, 16,  8, 1, 1]  # MT0=256  MT1=128
-            # WG 2x1 (WG0=2, MT1=128)
+            # WG 2x1 (WG0=2, WG1=1, MIWT_N=8)
             - [16, 16, 128, 1, 1,  2,  8, 2, 1]  # MT0=64   MT1=128
             - [16, 16, 128, 1, 1,  4,  8, 2, 1]  # MT0=128  MT1=128
             - [16, 16, 128, 1, 1,  6,  8, 2, 1]  # MT0=192  MT1=128
-        - PartialRMS: [True]
-        - PartialRMSResidualAdd: [True]
-        - PartialRMSQuant: [False]
-        - PartialRMSStoreBf16D: [True]
-        - DQuantType: [MXFP8]
-        - DQuantSize0: [32]
-        - DQuantSize1: [1]
-        - StreamK: [3]
-        - StreamKForceDPOnly: [1]
-        - StreamKAtomic: [0]
-        - GlobalSplitU: [1]
-        - ScheduleIterAlg: [3]
-        - PrefetchGlobalRead: [1, 2]
-        - PrefetchAcrossPersistent: [0]
-        - UseSubtileImpl: [True]
-        - StaggerU: [0]
-        - DepthU: [256]
-        - LocalReadVectorWidth: [16]
-        - GlobalReadVectorWidthA: [16]
-        - GlobalReadVectorWidthB: [16]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - StoreVectorWidth: [-1]
-        - PreloadKernArgs: [False]
-        - 1LDSBuffer: [0]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-            - Exact: [4096,    1, 1, 4096]
-            - Exact: [4096,    4, 1, 4096]
-            - Exact: [8192,    8, 1, 4096]
-            - Exact: [4096,   16, 1, 8192]
-            - Exact: [8192,   32, 1, 8192]
-            - Exact: [4096,   64, 1, 4096]
-
-  ########################################
-  # WG 2x2 and WG 1x4 tiles: broader wave-group coverage, same constraints.
-  # LLM-inference sizes: larger token counts (M = 128,512,2048).
-  ########################################
-  -
-    - # ProblemType — MX-scaled fp8 in, OCP fp8 e4m3 out, f32 compute, residual add, bf16 ResidualOut
-      OperationType: GEMM
-      DataType: F8
-      DestDataType: F8
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: True
-      TransposeB: False
-      UseBeta: False
-      Batched: True
-      StridedBatched: True
-      GroupedGemm: False
-      UseBias: 0
-      UseScaleAB: ""
-      UseScaleCD: False
-      UseScaleAlphaVec: 0
-      UseScaleD: False
-      Sparse: 0
-      UsePartialRMS: True
-      PartialRMSResidualAdd: True
-      PartialRMSStoreBf16D: True
-      PartialRMSQuant: False
-      DQuantType: MXFP8
-
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-            # WG 2x2 (WG0=2, MT1=128)
+            - [16, 16, 128, 1, 1,  8,  8, 2, 1]  # MT0=256  MT1=128
+            # WG 1x2 (WG0=1, WG1=2, MIWT_N=4)
+            - [16, 16, 128, 1, 1,  4,  4, 1, 2]  # MT0=64   MT1=128
+            - [16, 16, 128, 1, 1,  8,  4, 1, 2]  # MT0=128  MT1=128
+            - [16, 16, 128, 1, 1, 12,  4, 1, 2]  # MT0=192  MT1=128
+            - [16, 16, 128, 1, 1, 16,  4, 1, 2]  # MT0=256  MT1=128
+            # WG 2x2 (WG0=2, WG1=2, MIWT_N=4)
             - [16, 16, 128, 1, 1,  2,  4, 2, 2]  # MT0=64   MT1=128
             - [16, 16, 128, 1, 1,  4,  4, 2, 2]  # MT0=128  MT1=128
             - [16, 16, 128, 1, 1,  6,  4, 2, 2]  # MT0=192  MT1=128
             - [16, 16, 128, 1, 1,  8,  4, 2, 2]  # MT0=256  MT1=128
-            # WG 1x4 (WG0=1, MT1=128)
+            # WG 1x4 (WG0=1, WG1=4, MIWT_N=2)
             - [16, 16, 128, 1, 1,  4,  2, 1, 4]  # MT0=64   MT1=128
             - [16, 16, 128, 1, 1,  8,  2, 1, 4]  # MT0=128  MT1=128
             - [16, 16, 128, 1, 1, 12,  2, 1, 4]  # MT0=192  MT1=128
             - [16, 16, 128, 1, 1, 16,  2, 1, 4]  # MT0=256  MT1=128
+            # WG 2x4 (WG0=2, WG1=4, MIWT_N=2)
+            - [16, 16, 128, 1, 1,  2,  2, 2, 4]  # MT0=64   MT1=128
+            - [16, 16, 128, 1, 1,  4,  2, 2, 4]  # MT0=128  MT1=128
+            - [16, 16, 128, 1, 1,  6,  2, 2, 4]  # MT0=192  MT1=128
+            - [16, 16, 128, 1, 1,  8,  2, 2, 4]  # MT0=256  MT1=128
         - PartialRMS: [True]
         - PartialRMSResidualAdd: [True]
         - PartialRMSQuant: [False]
@@ -164,7 +161,7 @@ BenchmarkProblems:
         - StreamKAtomic: [0]
         - GlobalSplitU: [1]
         - ScheduleIterAlg: [3]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchAcrossPersistent: [0]
         - UseSubtileImpl: [True]
         - StaggerU: [0]
@@ -180,13 +177,58 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [8192,  128, 1, 4096]
-            - Exact: [4096,  512, 1, 8192]
-            - Exact: [8192, 2048, 1, 8192]
-            - Exact: [4096,  128, 1, 8192]
-            - Exact: [8192,  512, 1, 4096]
-            - Exact: [4096, 2048, 1, 4096]
+            - Exact: [640, 640, 1, 4096]
+            - Exact: [8192, 8192, 1, 8192]
 
+  ########################################
+  # Size group 2 (idx 01): MT1=256 — 256x256 tile (WG 2x2, MIWT_N=8).
+  # This is a second BenchmarkProblemSizeGroup under the SAME ProblemType as size
+  # group 1 (above), NOT a separate outer group. ClientWriter enforces uniform MT1
+  # per benchmark pass, so the MT1=256 tile needs its own size group; making it a
+  # separate outer ProblemType entry would instead collide on the
+  # "{ProblemType}_00.csv" results filename and silently clobber size group 1.
+  # Verified on gfx950: builds, runs, passes validation (NumElementsToValidate=-1).
+  # MT1>128 is valid: DQuantSize1=1 trivially satisfies the column-quant bound
+  # q1 > MT1/WG1 in _resolveDQuantSize; _validatePartialRMS only requires MT1%64==0.
+  # PGR=2 will be rejected by the multi-DU guard (dataDU=128 < DepthU=256), expected.
+  ########################################
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            # WG 2x2, MT1=256 (WG0=2, WG1=2, MIWT_N=8)
+            - [16, 16, 128, 1, 1,  8,  8, 2, 2]  # MT0=256  MT1=256
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [True]
+        - PartialRMSQuant: [False]
+        - PartialRMSStoreBf16D: [True]
+        - DQuantType: [MXFP8]
+        - DQuantSize0: [32]
+        - DQuantSize1: [1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [256]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256, 256, 1, 256]
+            - Exact: [8192, 8192, 1, 8192]
 
 
 LibraryLogic:

@@ -648,7 +648,7 @@ def _initDeepseekScaleSrdSide(module, writer, kernel, isN, off, tileInfo, wgSgpr
   calls _dsSetSrd to load the pointer and write the SRD quad.
   """
   bufName = "scaleBBuf" if isN else "scaleABuf"
-  assert off is not None, "%s not found in numStoreSgprNames" % bufName
+  assert off, "%s kernarg offset not recorded" % bufName
   waveSize = kernel["WavefrontSize"]
   waveBytes = waveSize * tileInfo.loadWidthGR
   side = "B" if isN else "A"
@@ -688,9 +688,8 @@ def initDeepseekScaleSrd(writer, kernel):
   start mid-K-dimension. After the base SRD is set, advance it by
   StreamKLocalStart * wave_bytes so the first DTL load reads the correct K-block.
   """
-  from .SubtileDeepseekScaleEmit import _scaleBufKernArgOffsets
-
-  offA, offB = _scaleBufKernArgOffsets(writer, kernel)
+  offA = writer.states.scaleABufKernArgOffset
+  offB = writer.states.scaleBBufKernArgOffset
   wg_m = kernel["MIWaveGroup"][0]
   wg_n = kernel["MIWaveGroup"][1]
   use_a = kernel.get("UseDeepseekScaleA", False)

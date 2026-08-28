@@ -8388,6 +8388,33 @@ class KernelWriterAssembly(KernelWriter):
           self.argLoader.setOffset(offset + ((self.states.rpga * self.states.bpr) * 2))
       return (item, startVgprName, numStoreSgprToLoad)
 
+    # 64-bit epilogue pointers that the host aligns to an 8-byte kernarg boundary
+    # via appendAligned<>().  The loader must advance to the same boundary before
+    # reading each of them; no pad SGPR is used.
+    forceAlignedEpilogue = frozenset([
+        "RMSNormGamma", "AddressResidualOut", "QuantScale",
+        "MXScale", "ScaleABuf", "ScaleBBuf",
+    ])
+
+    def loadStoreSgprsAligned(startSgpr, numRemaining):
+      """Load the remaining store-block SGPRs, advancing the kernarg byte
+      offset to the next 8-byte boundary before each force-aligned epilogue
+      pointer so the load matches the host-side appendAligned<>() gaps."""
+      consumed = self.states.numStoreSgprToLoad - numRemaining
+      sgprIdx = startSgpr
+      accumulated = 0
+      loadMod = Module("store sgprs aligned")
+      for name, size in zip(self.states.numStoreSgprNames, self.states.numStoreSgprNameSizes):
+        if accumulated < consumed:
+          accumulated += size
+          continue
+        if name in forceAlignedEpilogue:
+          cur = self.argLoader.getOffset()
+          self.argLoader.setOffset((cur + 7) & ~7)
+        loadMod.addModuleAsFlatItems(self.argLoader.loadAllKernArg(sgprIdx, "KernArgAddress", size))
+        sgprIdx += size
+      return loadMod
+
     if self.states.numStoreSgprToLoad:
       sgpxIdxVec = self.defineMultiSgprIndex(self.states.numStoreSgprNames, self.states.numStoreSgprNameSizes, align=4)
       for name in self.states.numStoreSgprNames:
@@ -8410,7 +8437,7 @@ class KernelWriterAssembly(KernelWriter):
         (item, startVgprName, numStoreSgprToLoad) = fixPreloadOffset(argOffset, sgpxIdxVec, numStoreSgprToLoad)
         if item:
           module.add(item)
-        loadModule = module.addModuleAsFlatItems(self.argLoader.loadAllKernArg(startVgprName, "KernArgAddress", numStoreSgprToLoad))
+        loadModule = module.addModuleAsFlatItems(loadStoreSgprsAligned(startVgprName, numStoreSgprToLoad))
         self.states.numStoreSgprInst = countSMemLoad(loadModule)
         self.argLoader.setOffset(argOffset) # Restore offset
         module.add(SBranch(extReadEpilogueLabelEnd.getLabelName()))
@@ -8503,7 +8530,7 @@ class KernelWriterAssembly(KernelWriter):
         (item, startVgprName, numStoreSgprToLoad) = fixPreloadOffset(argOffset, sgpxIdxVec, numStoreSgprToLoad)
         if item:
           module.add(item)
-        loadModule = module.addModuleAsFlatItems(self.argLoader.loadAllKernArg(startVgprName, "KernArgAddress", numStoreSgprToLoad))
+        loadModule = module.addModuleAsFlatItems(loadStoreSgprsAligned(startVgprName, numStoreSgprToLoad))
         self.states.numStoreSgprInst = countSMemLoad(loadModule)
         self.argLoader.setOffset(argOffset) # Restore offset
       if noSkipLoad and kernel["GlobalSplitU"] != 0:

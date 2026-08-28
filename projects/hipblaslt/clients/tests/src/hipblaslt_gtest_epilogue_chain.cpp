@@ -1138,6 +1138,144 @@ TEST(FusedEpilogueE2E, fullRmsNormResidualAddMatchesReference)
     runFullRmsNormE2E(/*residualAdd=*/true);
 }
 
+// ---- End-to-end numeric test: full RMSNorm with bf16 residual-output buffer (no quant) ----
+//
+// Exercises the DQuantType=None / PartialRMSStoreBf16D=true solution path. The kernel writes
+// bf16(H+residual) to the residual-out buffer and the RMS-normalised result to D. Shape
+// [640,640,1,512] matches the exact entry in the deployed gfx950 LibraryLogic YAML.
+static void runFullRmsNormResidualOutE2E()
+{
+    const int64_t M   = 640, N = 640, K = 512;
+    const float   eps = 1e-5f;
+
+    // op(A)=T => A stored K x M col-major; op(B)=N => B stored K x N col-major.
+    std::vector<uint16_t> hA(static_cast<size_t>(K) * M);
+    std::vector<uint16_t> hB(static_cast<size_t>(K) * N);
+    std::vector<uint16_t> hGamma(N);
+    std::vector<uint16_t> hResidual(static_cast<size_t>(M) * N);
+    std::vector<uint16_t> hD(static_cast<size_t>(M) * N, 0);
+    std::vector<uint16_t> hResidualOut(static_cast<size_t>(M) * N, 0);
+
+    std::mt19937                          rng(42);
+    std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
+    std::uniform_real_distribution<float> gdist(0.5f, 1.5f);
+    fillRandomBf16(hA, rng, dist);
+    fillRandomBf16(hB, rng, dist);
+    fillRandomBf16(hGamma, rng, gdist);
+    fillRandomBf16(hResidual, rng, dist);
+
+    void* dA           = nullptr;
+    void* dB           = nullptr;
+    void* dC           = nullptr;
+    void* dD           = nullptr;
+    void* dGamma       = nullptr;
+    void* dResidual    = nullptr;
+    void* dResidualOut = nullptr;
+    void* dWs          = nullptr;
+    const size_t wsSize = size_t(256) * 1024 * 1024;
+    ASSERT_EQ(hipMalloc(&dA, hA.size() * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dB, hB.size() * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dD, hD.size() * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dGamma, hGamma.size() * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dResidual, hResidual.size() * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dResidualOut, hResidualOut.size() * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
+    dC = dD; // beta = 0, C unused numerically but must be a valid pointer.
+
+    ASSERT_EQ(hipMemcpy(dA, hA.data(), hA.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dB, hB.data(), hB.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(dGamma, hGamma.data(), hGamma.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+        hipSuccess);
+    ASSERT_EQ(hipMemcpy(dResidual,
+                        hResidual.data(),
+                        hResidual.size() * sizeof(uint16_t),
+                        hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemset(dD, 0, hD.size() * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMemset(dResidualOut, 0, hResidualOut.size() * sizeof(uint16_t)), hipSuccess);
+
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
+    ASSERT_EQ(hipblasLtFusedEpilogueCreate(&fused), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(
+        hipblasLtFusedEpilogueSetAttribute(
+            fused, HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_POINTER, &dResidual, sizeof(dResidual)),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                  fused, HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA, &dGamma, sizeof(dGamma)),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(
+        hipblasLtFusedEpilogueSetAttribute(
+            fused, HIPBLASLT_FUSED_EPILOGUE_RMSNORM_EPS, &eps, sizeof(eps)),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(fused,
+                                                 HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_OUTPUT_POINTER,
+                                                 &dResidualOut,
+                                                 sizeof(dResidualOut)),
+              HIPBLAS_STATUS_SUCCESS);
+
+    int algoCount = 0;
+    ASSERT_EQ(
+        runBf16TnFusedMatmul(handle, M, N, K, dA, K, dB, dC, dD, fused, dWs, wsSize, algoCount),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_GT(algoCount, 0) << "no bf16 residual-out PartialRMS solution selected";
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    ASSERT_EQ(hipMemcpy(hD.data(), dD, hD.size() * sizeof(uint16_t), hipMemcpyDeviceToHost),
+              hipSuccess);
+    // Validate the normalised D output.
+    expectBf16Near(hD,
+                   referenceRmsNormRows(hA, hB, hGamma, &hResidual, M, N, K, eps));
+
+    ASSERT_EQ(hipMemcpy(hResidualOut.data(),
+                        dResidualOut,
+                        hResidualOut.size() * sizeof(uint16_t),
+                        hipMemcpyDeviceToHost),
+              hipSuccess);
+
+    // Reference: residualOut[row, col] = bf16(H[row,col] + residual[row,col]), where H is the
+    // GEMM result. Layout mirrors referenceRmsNormRows exactly (hA[kk + row*K], hB[kk + col*K]).
+    std::vector<float> refResidualOut(static_cast<size_t>(M) * N);
+    for(int64_t row = 0; row < M; ++row)
+        for(int64_t col = 0; col < N; ++col)
+        {
+            float acc = 0.0f;
+            for(int64_t kk = 0; kk < K; ++kk)
+                acc += bf16_to_f32(hA[kk + row * K]) * bf16_to_f32(hB[kk + col * K]);
+            acc += bf16_to_f32(hResidual[row * N + col]);
+            // The kernel stores the pre-normalisation sum as bf16, so round-trip through bf16.
+            refResidualOut[row * N + col] = bf16_to_f32(f32_to_bf16(acc));
+        }
+    expectBf16Near(hResidualOut, refResidualOut, 1e-2f, 0.10f);
+
+    hipblasLtFusedEpilogueDestroy(fused);
+    hipblasLtDestroy(handle);
+    static_cast<void>(hipFree(dA));
+    static_cast<void>(hipFree(dB));
+    static_cast<void>(hipFree(dD));
+    static_cast<void>(hipFree(dGamma));
+    static_cast<void>(hipFree(dResidual));
+    static_cast<void>(hipFree(dResidualOut));
+    static_cast<void>(hipFree(dWs));
+}
+
+TEST(FusedEpilogueE2E, fullRmsNormBf16ResidualOutMatchesReference)
+{
+    if(!deviceIsGfx950())
+        GTEST_SKIP() << "fused RMSNorm (PartialRMS) is wired for gfx950 only";
+
+    runFullRmsNormResidualOutE2E();
+}
+
 TEST(FusedEpilogueE2E, fullRmsNormResidualAddRequantMatchesReference)
 {
     if(!deviceIsGfx950())
@@ -2220,9 +2358,11 @@ namespace
     // Data read back from the producer GEMM1 kernel.
     struct ProducerResults
     {
-        std::vector<uint8_t> hD1;
-        std::vector<uint8_t> hMxScale;
-        std::vector<float>   hRstd;
+        std::vector<uint8_t>  hD1;
+        std::vector<uint8_t>  hMxScale;
+        std::vector<float>    hRstd;
+        std::vector<uint16_t> hResidualOut; // bf16; non-empty when dResidualOut was non-null.
+        int                   algoCount = 0;
     };
 
     // Consumer input tensors after quantizing the producer output and W1.
@@ -2309,13 +2449,15 @@ static MxfpTypedInputData generateTypedInputData(hipDataType gemm1InType, const 
 
 // Build the PARTIAL_RMSNORM_STATS + REQUANT(MX) producer fused epilogue descriptor.
 // Pass a non-null dResidual to prepend a RESIDUAL_ADD stage.
+// Pass a non-null dResidualOut to also write the pre-quant bf16 H into a separate buffer.
 static void buildProducerDescriptor(void*                                     dGamma,
                                     float                                     eps,
                                     hipblasLtFusedEpilogueRMSNormDescriptor_t stats,
                                     void*                                     dMxScale,
                                     int32_t                                   blockSize,
                                     hipblasLtFusedEpilogueDescriptor_t*       prodOut,
-                                    void*                                     dResidual = nullptr)
+                                    void*                                     dResidual    = nullptr,
+                                    void*                                     dResidualOut = nullptr)
 {
     ASSERT_EQ(hipblasLtFusedEpilogueCreate(prodOut), HIPBLAS_STATUS_SUCCESS);
     if(dResidual != nullptr)
@@ -2360,9 +2502,18 @@ static void buildProducerDescriptor(void*                                     dG
         hipblasLtFusedEpilogueSetAttribute(
             *prodOut, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_OUTPUT_TYPE, &outType, sizeof(outType)),
         HIPBLAS_STATUS_SUCCESS);
+    if(dResidualOut != nullptr)
+        ASSERT_EQ(
+            hipblasLtFusedEpilogueSetAttribute(*prodOut,
+                                               HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_RESIDUAL_OUT_POINTER,
+                                               &dResidualOut,
+                                               sizeof(dResidualOut)),
+            HIPBLAS_STATUS_SUCCESS);
 }
 
 // Launch the GEMM1 producer kernel and read back D1, MX scale, and rstd handoff.
+// Pass non-null dMxScaleA/dMxScaleB to use the MX-scaled input path (runTnFusedMatmul).
+// Pass non-null dResidualOut to also read back the bf16 pre-quant residual output.
 static void launchProducerAndReadback(hipblasLtHandle_t                         handle,
                                       const TypedTestDims&                      d,
                                       hipDataType                               gemm1InType,
@@ -2374,25 +2525,53 @@ static void launchProducerAndReadback(hipblasLtHandle_t                         
                                       hipblasLtFusedEpilogueRMSNormDescriptor_t stats,
                                       void*                                     dWs,
                                       size_t                                    wsSize,
-                                      ProducerResults&                          out)
+                                      ProducerResults&                          out,
+                                      void*                                     dMxScaleA    = nullptr,
+                                      void*                                     dMxScaleB    = nullptr,
+                                      void*                                     dResidualOut = nullptr)
 {
     int algoCount = 0;
-    ASSERT_EQ(runTypedTnFusedMatmulFp8D(handle,
-                                        d.mTok,
-                                        d.nHid,
-                                        d.k0,
-                                        dA,
-                                        d.k0,
-                                        dB,
-                                        dD1,
-                                        dD1,
-                                        gemm1InType,
-                                        prod,
-                                        dWs,
-                                        wsSize,
-                                        algoCount),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_GT(algoCount, 0) << "no typed PartialRMS+MXfp8 (K1) producer solution selected";
+    if(dMxScaleA != nullptr && dMxScaleB != nullptr)
+    {
+        ASSERT_EQ(runTnFusedMatmul(handle,
+                                   {gemm1InType, gemm1InType, HIP_R_8F_E4M3},
+                                   d.mTok,
+                                   d.nHid,
+                                   d.k0,
+                                   dA,
+                                   d.k0,
+                                   dMxScaleA,
+                                   dB,
+                                   dMxScaleB,
+                                   dD1,
+                                   dD1,
+                                   prod,
+                                   dWs,
+                                   wsSize,
+                                   algoCount),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(algoCount, 0) << "no MX-scaled PartialRMS+MXfp8 (K1) producer solution selected";
+    }
+    else
+    {
+        ASSERT_EQ(runTypedTnFusedMatmulFp8D(handle,
+                                            d.mTok,
+                                            d.nHid,
+                                            d.k0,
+                                            dA,
+                                            d.k0,
+                                            dB,
+                                            dD1,
+                                            dD1,
+                                            gemm1InType,
+                                            prod,
+                                            dWs,
+                                            wsSize,
+                                            algoCount),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(algoCount, 0) << "no typed PartialRMS+MXfp8 (K1) producer solution selected";
+    }
+    out.algoCount = algoCount;
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     out.hD1.resize(static_cast<size_t>(d.mTok) * d.nHid);
@@ -2408,6 +2587,15 @@ static void launchProducerAndReadback(hipblasLtHandle_t                         
     ASSERT_EQ(
         hipMemcpy(out.hRstd.data(), rstdDevPtr, d.rstdRows * sizeof(float), hipMemcpyDeviceToHost),
         hipSuccess);
+
+    if(dResidualOut != nullptr)
+    {
+        const size_t residualOutSz = static_cast<size_t>(d.mTok) * d.nHid * sizeof(uint16_t);
+        out.hResidualOut.resize(static_cast<size_t>(d.mTok) * d.nHid);
+        ASSERT_EQ(
+            hipMemcpy(out.hResidualOut.data(), dResidualOut, residualOutSz, hipMemcpyDeviceToHost),
+            hipSuccess);
+    }
 }
 
 // Validate producer output: rstd handoff, MX scale bytes, and fp8 D bytes.
@@ -2473,6 +2661,10 @@ static void validateProducer(const TypedTestDims&         d,
         else
             EXPECT_EQ(dMismatches, 0u) << "D e4m3 output has " << dMismatches << " mismatches";
     }
+
+    // Validate bf16 residual output if the producer was asked to write it.
+    if(!pr.hResidualOut.empty())
+        expectBf16Near(pr.hResidualOut, h1Out, 1e-2f, 0.10f);
 }
 
 // Build consumer A+B MX buffers for GEMM2.
@@ -3398,5 +3590,153 @@ TEST(FusedEpilogueE2E, partialRmsBf16InputMxfp8QuantMatchesReference)
     static_cast<void>(hipFree(dGamma));
     static_cast<void>(hipFree(dResidual));
     static_cast<void>(hipFree(dMxScale));
+    static_cast<void>(hipFree(dWs));
+}
+
+// ---- End-to-end: chained MXfp8 producer/consumer with MX input scales + bf16 residualOut ----
+//
+// GEMM1 is F8F8S with MXAE8B32/MXBE8B32 input scales (uniform-127, i.e. scale=1).
+// The epilogue chain is RESIDUAL_ADD -> PARTIAL_RMSNORM_STATS -> REQUANT(MX) with a bf16
+// residualOut dual-store.  GEMM2 (consumer) applies the per-row rstd, producing bf16 D2.
+// This exercises the partialrms_residual_mxfp8quant_residualout_scaled_mxfp8_k1 kernel.
+TEST(FusedEpilogueE2E, chainedMxfp8ScaledResidualOutProducerConsumerMatchesReference)
+{
+    if(!deviceIsGfx950())
+        GTEST_SKIP() << "chained MXfp8 scaled residual-out flow is wired for gfx950 only";
+
+    const TypedTestDims d      = makeTypedTestDims(HIP_R_8F_E4M3);
+    const size_t        wsSize = size_t(256) * 1024 * 1024;
+
+    // Input MX scale geometry: one UE8M0 byte per (row-block, k-block), k-block cols
+    // padded to a multiple of 8 as required by the GFX950 swizzle.
+    const int64_t inputScaleColsK = ((d.k0 / d.blockSize + 7) / 8) * 8;
+    const size_t  aScaleSz
+        = static_cast<size_t>(((d.mTok + 31) / 32) * 32) * inputScaleColsK;
+    const size_t bScaleSz
+        = static_cast<size_t>(((d.nHid + 31) / 32) * 32) * inputScaleColsK;
+    const size_t residualOutSz = static_cast<size_t>(d.mTok) * d.nHid * sizeof(uint16_t);
+
+    std::vector<uint8_t>  hA(d.szABytes), hB(d.szBBytes);
+    std::vector<uint16_t> hGamma(static_cast<size_t>(d.nHid));
+    std::vector<uint16_t> hW1(static_cast<size_t>(d.nHid) * d.nOut);
+    std::vector<uint16_t> hResidual(static_cast<size_t>(d.mTok) * d.nHid);
+
+    std::mt19937                          rng(31416);
+    std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
+    std::uniform_real_distribution<float> gdist(0.5f, 1.5f);
+    fillRandomF8(hA, rng, dist);
+    fillRandomF8(hB, rng, dist);
+    fillRandomBf16(hGamma, rng, gdist);
+    fillRandomBf16(hW1, rng, dist);
+    fillRandomBf16(hResidual, rng, dist);
+
+    std::vector<float> aF32(d.szABytes), bF32(d.szBBytes);
+    for(size_t i = 0; i < d.szABytes; ++i)
+        aF32[i] = unpackF8(hA[i]);
+    for(size_t i = 0; i < d.szBBytes; ++i)
+        bF32[i] = unpackF8(hB[i]);
+
+    void *dA = nullptr, *dB = nullptr, *dGamma = nullptr;
+    void *dD1 = nullptr, *dMxScale = nullptr, *dWs = nullptr;
+    void *dW1 = nullptr, *dD2 = nullptr, *dResidual = nullptr;
+    void *dMxScaleA = nullptr, *dMxScaleB = nullptr, *dResidualOut = nullptr;
+    ASSERT_EQ(hipMalloc(&dA, d.szABytes), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dB, d.szBBytes), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dGamma, static_cast<size_t>(d.nHid) * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dD1, static_cast<size_t>(d.mTok) * d.nHid), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dMxScale, d.scaleBufSz), hipSuccess);
+    ASSERT_EQ(
+        hipMalloc(&dW1, static_cast<size_t>(d.nHid) * d.nOut * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(
+        hipMalloc(&dD2, static_cast<size_t>(d.mTok) * d.nOut * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
+    ASSERT_EQ(
+        hipMalloc(&dResidual, static_cast<size_t>(d.mTok) * d.nHid * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dMxScaleA, aScaleSz), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dMxScaleB, bScaleSz), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dResidualOut, residualOutSz), hipSuccess);
+
+    ASSERT_EQ(hipMemcpy(dA, hA.data(), d.szABytes, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dB, hB.data(), d.szBBytes, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dGamma,
+                        hGamma.data(),
+                        static_cast<size_t>(d.nHid) * sizeof(uint16_t),
+                        hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dW1,
+                        hW1.data(),
+                        static_cast<size_t>(d.nHid) * d.nOut * sizeof(uint16_t),
+                        hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dResidual,
+                        hResidual.data(),
+                        static_cast<size_t>(d.mTok) * d.nHid * sizeof(uint16_t),
+                        hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemset(dD1, 0, static_cast<size_t>(d.mTok) * d.nHid), hipSuccess);
+    ASSERT_EQ(hipMemset(dMxScale, 0, d.scaleBufSz), hipSuccess);
+    ASSERT_EQ(hipMemset(dD2, 0, static_cast<size_t>(d.mTok) * d.nOut * sizeof(uint16_t)),
+              hipSuccess);
+    ASSERT_EQ(hipMemset(dResidualOut, 0, residualOutSz), hipSuccess);
+
+    // UE8M0 byte 127 encodes 2^(127-127)=1.0; uniform-127 scales exercise the MXSA/B
+    // code path without altering the numeric reference.
+    const std::vector<uint8_t> hScaleA(aScaleSz, 127u);
+    const std::vector<uint8_t> hScaleB(bScaleSz, 127u);
+    ASSERT_EQ(hipMemcpy(dMxScaleA, hScaleA.data(), aScaleSz, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dMxScaleB, hScaleB.data(), bScaleSz, hipMemcpyHostToDevice), hipSuccess);
+
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    // Library-owned rstd handoff shared by both GEMM calls.
+    hipblasLtFusedEpilogueRMSNormDescriptor_t stats = nullptr;
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats), HIPBLAS_STATUS_SUCCESS);
+
+    // Producer: RESIDUAL_ADD -> PARTIAL_RMSNORM_STATS -> REQUANT(MX) with bf16 residualOut.
+    hipblasLtFusedEpilogueDescriptor_t prod = nullptr;
+    ASSERT_NO_FATAL_FAILURE(buildProducerDescriptor(
+        dGamma, d.eps, stats, dMxScale, d.blockSize, &prod, dResidual, dResidualOut));
+
+    ProducerResults pr;
+    ASSERT_NO_FATAL_FAILURE(launchProducerAndReadback(handle,
+                                                      d,
+                                                      HIP_R_8F_E4M3,
+                                                      dA,
+                                                      dB,
+                                                      dD1,
+                                                      dMxScale,
+                                                      prod,
+                                                      stats,
+                                                      dWs,
+                                                      wsSize,
+                                                      pr,
+                                                      dMxScaleA,
+                                                      dMxScaleB,
+                                                      dResidualOut));
+    ASSERT_GT(pr.algoCount, 0)
+        << "no partialrms_residual_mxfp8quant_residualout_scaled_mxfp8_k1 solution selected";
+
+    std::vector<float> h1;
+    ASSERT_NO_FATAL_FAILURE(
+        validateProducer(d, aF32, bF32, hGamma, pr, HIP_R_8F_E4M3, h1, &hResidual));
+
+    const ConsumerQuantData cq = buildConsumerQuantData(d, hW1, pr.hD1, pr.hMxScale);
+    ASSERT_NO_FATAL_FAILURE(runConsumerAndValidate(handle, d, h1, cq, stats, dD2, dWs, wsSize));
+
+    hipblasLtFusedEpilogueDestroy(prod);
+    hipblasLtFusedEpilogueRMSNormDescriptorDestroy(stats);
+    hipblasLtDestroy(handle);
+    static_cast<void>(hipFree(dA));
+    static_cast<void>(hipFree(dB));
+    static_cast<void>(hipFree(dGamma));
+    static_cast<void>(hipFree(dD1));
+    static_cast<void>(hipFree(dMxScale));
+    static_cast<void>(hipFree(dW1));
+    static_cast<void>(hipFree(dD2));
+    static_cast<void>(hipFree(dResidual));
+    static_cast<void>(hipFree(dMxScaleA));
+    static_cast<void>(hipFree(dMxScaleB));
+    static_cast<void>(hipFree(dResidualOut));
     static_cast<void>(hipFree(dWs));
 }

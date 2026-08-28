@@ -1573,6 +1573,16 @@ namespace rocisa
             offset += sa.size;
         }
 
+        // Advance the kernarg byte offset to the next multiple of alignment
+        // without emitting a named argument. Returns the pad bytes inserted.
+        int alignKernArg(int alignment)
+        {
+            int aligned = ((offset + alignment - 1) / alignment) * alignment;
+            int pad     = aligned - offset;
+            offset      = aligned;
+            return pad;
+        }
+
         std::string prettyPrint(const std::string& indent = "") const override
         {
             std::string ostream;
@@ -1629,6 +1639,11 @@ namespace rocisa
                     const std::optional<std::string>& addrSpaceQual = std::nullopt)
         {
             codeMeta.addArg(name, kind, type, addrSpaceQual);
+        }
+
+        int alignKernArg(int alignment)
+        {
+            return codeMeta.alignKernArg(alignment);
         }
 
         void addDescriptionTopic(const std::string& text)

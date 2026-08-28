@@ -31,10 +31,12 @@
 #include "TimingInstrumentation.hpp"
 #include "TypedId.hpp"
 
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <omp.h>
 #include <type_traits>
 
@@ -1845,6 +1847,503 @@ namespace TensileLite
 
         }
 
+        // Maximum representable magnitude of the OCP fp8 E4M3 format; the shared
+        // quantization denominator for every dynamic-quant epilogue pass.
+        constexpr float kFp8E4M3Max = 448.0f;
+
+        // DeepseekScale broadcasts each per-K-block scale across a full wavefront, so
+        // the scale buffer stores this many identical lanes per (row-group, K-block).
+        constexpr int deepseekScaleLaneWidth = 64;
+
+        // Narrow a tensor linear index to the 32-bit width GetValue expects, asserting
+        // the value fits so oversized problems fail loudly instead of silently wrapping.
+        inline int toInt32Index(size_t index)
+        {
+            assert(index <= static_cast<size_t>(std::numeric_limits<int>::max())
+                   && "tensor index exceeds int range");
+            return static_cast<int>(index);
+        }
+
+        // Compute one f32 GEMM dot product for an output element, optionally applying
+        // per-block MX scales. The caller presets all non-K coordinates in aCoord and
+        // bCoord; this writes only the K dimension (aDimK/bDimK).
+        inline float computeReferenceDot(TensorDescriptor const&  a,
+                                         TensorDescriptor const&  b,
+                                         TensorDescriptor const&  mxsa,
+                                         TensorDescriptor const&  mxsb,
+                                         ContractionInputs const& inputs,
+                                         void const*              mxsaBase,
+                                         void const*              mxsbBase,
+                                         std::vector<int64_t>&    aCoord,
+                                         std::vector<int64_t>&    bCoord,
+                                         int                      aDimK,
+                                         int                      bDimK,
+                                         size_t                   boundSizeK,
+                                         bool                     hasMX,
+                                         int                      mxBlockA,
+                                         int                      mxBlockB,
+                                         rocisa::DataType         mxTypeA,
+                                         rocisa::DataType         mxTypeB)
+        {
+            float dot = 0.0f;
+            if(!hasMX)
+            {
+                for(size_t k = 0; k < boundSizeK; ++k)
+                {
+                    aCoord[aDimK] = static_cast<int64_t>(k);
+                    bCoord[bDimK] = static_cast<int64_t>(k);
+                    dot += GetValue<float>(a.dataType(), inputs.a, toInt32Index(a.index(aCoord)), false)
+                           * GetValue<float>(b.dataType(), inputs.b, toInt32Index(b.index(bCoord)), false);
+                }
+                return dot;
+            }
+
+            size_t blkA = static_cast<size_t>(mxBlockA);
+            size_t blkB = static_cast<size_t>(mxBlockB);
+            for(size_t k = 0; k < boundSizeK; k += blkA)
+            {
+                float blockDot = 0.0f;
+                for(size_t j = 0; j < blkA && (k + j) < boundSizeK; ++j)
+                {
+                    aCoord[aDimK] = static_cast<int64_t>(k + j);
+                    bCoord[bDimK] = static_cast<int64_t>(k + j);
+                    blockDot
+                        += GetValue<float>(a.dataType(), inputs.a, toInt32Index(a.index(aCoord)), false)
+                           * GetValue<float>(b.dataType(), inputs.b, toInt32Index(b.index(bCoord)), false);
+                }
+                // Reuse the coord vectors to index the MX scale tensors.
+                aCoord[aDimK] = static_cast<int64_t>(k / blkA);
+                bCoord[bDimK] = static_cast<int64_t>(k / blkB);
+                float mxSA    = mxScaleElementAsFloat(mxTypeA, mxsaBase, mxsa.index(aCoord));
+                float mxSB    = mxScaleElementAsFloat(mxTypeB, mxsbBase, mxsb.index(bCoord));
+                dot += blockDot * mxSA * mxSB;
+            }
+            return dot;
+        }
+
+        // Derive the OCP e8m0 scale byte and its reciprocal power-of-two multiplier
+        // from a tile amax, using the ceil exponent so amax/scale never exceeds fp8 max.
+        inline void e8m0ScaleFromAmax(float amax, uint8_t& scaleByte, float& quantMult)
+        {
+            scaleByte = 0;
+            quantMult = 0.0f;
+            if(amax <= 0.0f)
+                return;
+
+            float    scaleF = amax / kFp8E4M3Max;
+            uint32_t bits;
+            std::memcpy(&bits, &scaleF, sizeof(bits));
+            int expByte = static_cast<int>((bits >> 23) & 0xFF);
+            int ceilAdj = (bits & 0x7FFFFF) != 0 ? 1 : 0;
+            int sb      = expByte + ceilAdj;
+            sb          = sb < 0 ? 0 : (sb > 254 ? 254 : sb);
+            scaleByte   = static_cast<uint8_t>(sb);
+            int qExp    = 254 - sb;
+            qExp        = qExp < 1 ? 1 : (qExp > 254 ? 254 : qExp);
+            uint32_t qbits = static_cast<uint32_t>(qExp) << 23;
+            std::memcpy(&quantMult, &qbits, sizeof(quantMult));
+        }
+
+        // Swizzled byte offset into the MX scale grid: tj indexes the free/token
+        // dimension (rows), ti indexes the K-block dimension (cols).
+        inline size_t mxScaleSwizzleOffset(size_t tj, size_t ti, size_t colBlocks)
+        {
+            size_t d0 = tj >> 5;
+            size_t d1 = (tj >> 4) & 1;
+            size_t d2 = tj & 0xF;
+            size_t d3 = ti >> 3;
+            size_t d4 = (ti >> 2) & 1;
+            size_t d5 = ti & 0x3;
+            return d0 * (colBlocks * 256) + d3 * 256 + d5 * 64 + d2 * 4 + d4 * 2 + d1;
+        }
+
+        // Compute the PartialRMS partial-reduction buffer for PartialRMSAxis=0:
+        // partialBuf[token, tFree0] = sum over free0 tile t of (A*B)[m, token]^2. When
+        // quant is enabled a second half holds per-tile amax/fp8Max entries.
+        inline void computePartialRMSBuf(ContractionProblemGemm const& problem,
+                                         ContractionInputs const&      inputs,
+                                         size_t                        elementsToValidate)
+        {
+            if(!problem.usePartialRMS() || inputs.partialBuf == nullptr)
+                return;
+
+            TensorDescriptor const&                     a    = problem.a();
+            TensorDescriptor const&                     b    = problem.b();
+            TensorDescriptor const&                     d    = problem.d();
+            TensorDescriptor const&                     mxsa = problem.mxsa();
+            TensorDescriptor const&                     mxsb = problem.mxsb();
+            ContractionProblemGemm::FreeIndices const&  freeIndicesA = problem.freeIndicesA();
+            ContractionProblemGemm::FreeIndices const&  freeIndicesB = problem.freeIndicesB();
+            ContractionProblemGemm::BoundIndices const& boundIndices = problem.boundIndices();
+            void const*                                 mxsaBase     = inputs.mxsa;
+            void const*                                 mxsbBase     = inputs.mxsb;
+            size_t                                      boundSizeK   = problem.boundSize(0);
+            bool hasMX = problem.mxBlockA() > 0 && problem.mxBlockB() > 0;
+
+            int mt0 = problem.partialRMSMT0() > 0 ? problem.partialRMSMT0() : 16;
+
+            TensorDescriptor const& pbTensor
+                = problem.tensors()[ContractionProblemGemm::TENSOR::PARTIALBUF];
+            size_t pbValidStride = 1;
+            if(elementsToValidate > 0 && elementsToValidate < pbTensor.totalLogicalElements())
+                pbValidStride = NextPrime(pbTensor.totalAllocatedElements() / elementsToValidate);
+
+            float* pb = static_cast<float*>(inputs.partialBuf);
+            std::fill(pb, pb + pbTensor.totalAllocatedElements(), 0.0f);
+
+            // mPadded is the first-half row count; the second half starts at mPadded.
+            size_t mPadded
+                = problem.partialRMSQuant() ? pbTensor.sizes()[0] / 2 : pbTensor.sizes()[0];
+
+            omp_set_num_threads(MAX_OMP_THREADS);
+#pragma omp parallel for schedule(dynamic)
+            for(size_t pbNum = 0; pbNum < pbTensor.totalLogicalElements(); pbNum += pbValidStride)
+            {
+                std::vector<int64_t> pbCoord(pbTensor.dimensions());
+                CoordNumbered(pbNum,
+                              pbCoord.begin(),
+                              pbCoord.end(),
+                              pbTensor.sizes().begin(),
+                              pbTensor.sizes().end());
+                size_t pbIdx = pbTensor.index(pbCoord);
+                size_t token = static_cast<size_t>(pbCoord[0]);
+
+                bool   isAmaxRow = problem.partialRMSQuant() && token >= mPadded;
+                size_t realToken = isAmaxRow ? token - mPadded : token;
+
+                // Padded rows carry no data; leave them zero.
+                if(realToken >= static_cast<size_t>(d.sizes()[1]))
+                    continue;
+
+                size_t tFree0 = static_cast<size_t>(pbCoord[1]);
+                size_t mLo    = tFree0 * static_cast<size_t>(mt0);
+                size_t mHi    = std::min(mLo + static_cast<size_t>(mt0), static_cast<size_t>(d.sizes()[0]));
+
+                float tileSum  = 0.0f;
+                float tileAmax = 0.0f;
+                for(size_t m = mLo; m < mHi; ++m)
+                {
+                    std::vector<int64_t> aCoordL(a.dimensions(), 0);
+                    std::vector<int64_t> bCoordL(b.dimensions(), 0);
+                    for(ContractionProblemGemm::FreeIndex const& fi : freeIndicesA)
+                        aCoordL[fi.i] = static_cast<int64_t>(m);
+                    for(ContractionProblemGemm::FreeIndex const& fi : freeIndicesB)
+                        bCoordL[fi.i] = static_cast<int64_t>(realToken);
+
+                    float dot = computeReferenceDot(a,
+                                                    b,
+                                                    mxsa,
+                                                    mxsb,
+                                                    inputs,
+                                                    mxsaBase,
+                                                    mxsbBase,
+                                                    aCoordL,
+                                                    bCoordL,
+                                                    static_cast<int>(boundIndices[0].a),
+                                                    static_cast<int>(boundIndices[0].b),
+                                                    boundSizeK,
+                                                    hasMX,
+                                                    problem.mxBlockA(),
+                                                    problem.mxBlockB(),
+                                                    problem.mxTypeA(),
+                                                    problem.mxTypeB());
+
+                    if(problem.partialRMSResidualAdd() && inputs.residual != nullptr)
+                    {
+                        // residual is row-major [M_tokens, N_hidden]: realToken*N + m.
+                        size_t residualIdx = realToken * static_cast<size_t>(d.sizes()[0]) + m;
+                        dot += static_cast<float>(GetValue<float>(
+                            problem.tensor(ContractionProblemGemm::TENSOR::RESIDUAL).dataType(),
+                            inputs.residual,
+                            toInt32Index(residualIdx),
+                            false));
+                    }
+
+                    if(!isAmaxRow)
+                    {
+                        tileSum += dot * dot;
+                        continue;
+                    }
+
+                    if(inputs.rmsGamma == nullptr)
+                        continue;
+
+                    // amax uses the post-gamma pre-D-store value.
+                    float gammaM = static_cast<float>(GetValue<float>(
+                        problem.tensor(ContractionProblemGemm::TENSOR::RMSGAMMA).dataType(),
+                        inputs.rmsGamma,
+                        toInt32Index(m),
+                        false));
+                    float absDVal = std::abs(gammaM * dot);
+                    if(absDVal > tileAmax)
+                        tileAmax = absDVal;
+                }
+
+                pb[pbIdx] = isAmaxRow ? tileAmax / kFp8E4M3Max : tileSum;
+            }
+        }
+
+        // Compute the TileQuant reference: per-tile amax-based fp8 quantization. Alpha
+        // is applied before amax; beta must be 0 (Tier 1).
+        template <typename Inputs, typename Accumulator>
+        void computeTileQuant(ContractionProblemGemm const& problem, ContractionInputs const& inputs)
+        {
+            if(problem.dquantType() != DQuantType::Tile || inputs.quantScale == nullptr
+               || inputs.d == nullptr)
+                return;
+
+            TensorDescriptor const&                     a = problem.a();
+            TensorDescriptor const&                     b = problem.b();
+            TensorDescriptor const&                     d = problem.d();
+            ContractionProblemGemm::FreeIndices const&  freeIndicesA = problem.freeIndicesA();
+            ContractionProblemGemm::FreeIndices const&  freeIndicesB = problem.freeIndicesB();
+            ContractionProblemGemm::BoundIndices const& boundIndices = problem.boundIndices();
+            typename Inputs::DType* dPtr       = static_cast<typename Inputs::DType*>(inputs.d);
+            size_t                  boundSizeK = problem.boundSize(0);
+
+            float alphaF = static_cast<float>(constVariantCast<Accumulator>(inputs.alpha));
+
+            int q0 = problem.dquantSize0() > 0 ? problem.dquantSize0() : static_cast<int>(d.sizes()[0]);
+            int q1 = problem.dquantSize1() > 0 ? problem.dquantSize1() : static_cast<int>(d.sizes()[1]);
+
+            float* qsPtr = static_cast<float*>(inputs.quantScale);
+
+            size_t sizeM  = static_cast<size_t>(d.sizes()[0]);
+            size_t sizeN  = static_cast<size_t>(d.sizes()[1]);
+            size_t mTiles = (sizeM + static_cast<size_t>(q0) - 1) / static_cast<size_t>(q0);
+            size_t nTiles = (sizeN + static_cast<size_t>(q1) - 1) / static_cast<size_t>(q1);
+
+            size_t dDimM = freeIndicesA[0].d;
+            size_t dDimN = freeIndicesB[0].d;
+            int    aDimM = static_cast<int>(freeIndicesA[0].i);
+            int    bDimN = static_cast<int>(freeIndicesB[0].i);
+            int    aDimK = static_cast<int>(boundIndices[0].a);
+            int    bDimK = static_cast<int>(boundIndices[0].b);
+
+            // The full matrix is recomputed here (not sparse-sampled like the main
+            // loop) because per-tile amax needs every element of each quant tile.
+            omp_set_num_threads(MAX_OMP_THREADS);
+#pragma omp parallel for schedule(dynamic) collapse(2)
+            for(size_t ti = 0; ti < mTiles; ++ti)
+            {
+                for(size_t tj = 0; tj < nTiles; ++tj)
+                {
+                    size_t mLo = ti * static_cast<size_t>(q0);
+                    size_t mHi = std::min(mLo + static_cast<size_t>(q0), sizeM);
+                    size_t nLo = tj * static_cast<size_t>(q1);
+                    size_t nHi = std::min(nLo + static_cast<size_t>(q1), sizeN);
+
+                    size_t             tileCols = nHi - nLo;
+                    std::vector<float> effTile((mHi - mLo) * tileCols, 0.0f);
+
+                    float amax = 0.0f;
+                    for(size_t m = mLo; m < mHi; ++m)
+                    {
+                        for(size_t n = nLo; n < nHi; ++n)
+                        {
+                            std::vector<int64_t> ac(a.dimensions(), 0);
+                            std::vector<int64_t> bc(b.dimensions(), 0);
+                            ac[aDimM]  = static_cast<int64_t>(m);
+                            bc[bDimN]  = static_cast<int64_t>(n);
+                            float dot  = computeReferenceDot(a,
+                                                             b,
+                                                             problem.mxsa(),
+                                                             problem.mxsb(),
+                                                             inputs,
+                                                             inputs.mxsa,
+                                                             inputs.mxsb,
+                                                             ac,
+                                                             bc,
+                                                             aDimK,
+                                                             bDimK,
+                                                             boundSizeK,
+                                                             false,
+                                                             0,
+                                                             0,
+                                                             problem.mxTypeA(),
+                                                             problem.mxTypeB());
+                            float eff  = alphaF * dot;
+                            effTile[(m - mLo) * tileCols + (n - nLo)] = eff;
+                            float absVal = std::abs(eff);
+                            if(absVal > amax)
+                                amax = absVal;
+                        }
+                    }
+
+                    qsPtr[ti * nTiles + tj] = amax / kFp8E4M3Max;
+
+                    float quantMult = amax > 0.0f ? kFp8E4M3Max / amax : 0.0f;
+                    for(size_t m = mLo; m < mHi; ++m)
+                    {
+                        for(size_t n = nLo; n < nHi; ++n)
+                        {
+                            std::vector<int64_t> dc(d.dimensions(), 0);
+                            dc[dDimM]  = static_cast<int64_t>(m);
+                            dc[dDimN]  = static_cast<int64_t>(n);
+                            float eff  = effTile[(m - mLo) * tileCols + (n - nLo)];
+                            dPtr[d.index(dc)] = SaturateCast<typename Inputs::DType>(eff * quantMult);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Compute the MXFP8Quant reference: per-block e8m0 MX quantization of fp8 D.
+        // Alpha is applied before amax; beta must be 0. When PartialRMS is also active,
+        // gamma is folded into eff before amax to match the GPU epilogue order.
+        template <typename Inputs, typename Accumulator>
+        void computeMXFP8Quant(ContractionProblemGemm const& problem, ContractionInputs const& inputs)
+        {
+            if(problem.dquantType() != DQuantType::MXFP8 || inputs.mxScale == nullptr
+               || inputs.d == nullptr)
+                return;
+
+            TensorDescriptor const&                     a    = problem.a();
+            TensorDescriptor const&                     b    = problem.b();
+            TensorDescriptor const&                     d    = problem.d();
+            TensorDescriptor const&                     mxsa = problem.mxsa();
+            TensorDescriptor const&                     mxsb = problem.mxsb();
+            ContractionProblemGemm::FreeIndices const&  freeIndicesA = problem.freeIndicesA();
+            ContractionProblemGemm::FreeIndices const&  freeIndicesB = problem.freeIndicesB();
+            ContractionProblemGemm::BoundIndices const& boundIndices = problem.boundIndices();
+            typename Inputs::DType* dPtr       = static_cast<typename Inputs::DType*>(inputs.d);
+            void const*             mxsaBase   = inputs.mxsa;
+            void const*             mxsbBase   = inputs.mxsb;
+            size_t                  boundSizeK = problem.boundSize(0);
+            bool hasMX = problem.mxBlockA() > 0 && problem.mxBlockB() > 0;
+
+            float alphaF = static_cast<float>(constVariantCast<Accumulator>(inputs.alpha));
+
+            int q0 = problem.dquantSize0() > 0 ? problem.dquantSize0() : static_cast<int>(d.sizes()[0]);
+            int q1 = problem.dquantSize1() > 0 ? problem.dquantSize1() : static_cast<int>(d.sizes()[1]);
+
+            uint8_t* mxPtr = static_cast<uint8_t*>(inputs.mxScale);
+
+            size_t sizeM  = static_cast<size_t>(d.sizes()[0]);
+            size_t sizeN  = static_cast<size_t>(d.sizes()[1]);
+            // mTiles = kblock tiles (N_hidden/32); nTiles = free tiles (M_tokens).
+            size_t mTiles = (sizeM + static_cast<size_t>(q0) - 1) / static_cast<size_t>(q0);
+            size_t nTiles = (sizeN + static_cast<size_t>(q1) - 1) / static_cast<size_t>(q1);
+
+            // Scale grid: rows = free dim (M_tokens, nTiles), cols = kblock dim (mTiles).
+            size_t paddedRows = ((nTiles + 31) / 32) * 32;
+            size_t paddedCols = ((mTiles + 7) / 8) * 8;
+            size_t colBlocks  = paddedCols / 8;
+            std::memset(mxPtr, 0, paddedRows * paddedCols * sizeof(uint8_t));
+
+            size_t dDimM = freeIndicesA[0].d;
+            size_t dDimN = freeIndicesB[0].d;
+            int    aDimM = static_cast<int>(freeIndicesA[0].i);
+            int    bDimN = static_cast<int>(freeIndicesB[0].i);
+            int    aDimK = static_cast<int>(boundIndices[0].a);
+            int    bDimK = static_cast<int>(boundIndices[0].b);
+
+            // The full matrix is recomputed here (not sparse-sampled like the main
+            // loop) because per-block amax needs every element of each MX block.
+            omp_set_num_threads(MAX_OMP_THREADS);
+#pragma omp parallel for schedule(dynamic) collapse(2)
+            // Outer: tj over M_tokens (free); inner: ti over N_hidden/32 (kblock).
+            for(size_t tj = 0; tj < nTiles; ++tj)
+            {
+                for(size_t ti = 0; ti < mTiles; ++ti)
+                {
+                    size_t mLo = ti * static_cast<size_t>(q0);
+                    size_t mHi = std::min(mLo + static_cast<size_t>(q0), sizeM);
+                    size_t nLo = tj * static_cast<size_t>(q1);
+                    size_t nHi = std::min(nLo + static_cast<size_t>(q1), sizeN);
+
+                    size_t             tileCols  = nHi - nLo;
+                    size_t             tileElems = (mHi - mLo) * tileCols;
+                    std::vector<float> effTile(tileElems, 0.0f);
+                    // hValTile caches dot+residual so the second loop writes bf16(H+residual)
+                    // to ResidualOut without needing gammaM (live only in the first loop).
+                    std::vector<float> hValTile(tileElems, 0.0f);
+
+                    float amax = 0.0f;
+                    for(size_t m = mLo; m < mHi; ++m)
+                    {
+                        // Gamma is indexed by free0 (m); hoist out of the n loop. When
+                        // PartialRMS is active it is applied in place before MX amax on
+                        // the GPU, so fold it into eff here.
+                        float gammaM = 1.0f;
+                        if(problem.usePartialRMS() && inputs.rmsGamma != nullptr)
+                            gammaM = static_cast<float>(GetValue<float>(
+                                problem.tensor(ContractionProblemGemm::TENSOR::RMSGAMMA).dataType(),
+                                inputs.rmsGamma,
+                                toInt32Index(m),
+                                false));
+                        for(size_t n = nLo; n < nHi; ++n)
+                        {
+                            std::vector<int64_t> ac(a.dimensions(), 0);
+                            std::vector<int64_t> bc(b.dimensions(), 0);
+                            ac[aDimM] = static_cast<int64_t>(m);
+                            bc[bDimN] = static_cast<int64_t>(n);
+                            float dot = computeReferenceDot(a,
+                                                            b,
+                                                            mxsa,
+                                                            mxsb,
+                                                            inputs,
+                                                            mxsaBase,
+                                                            mxsbBase,
+                                                            ac,
+                                                            bc,
+                                                            aDimK,
+                                                            bDimK,
+                                                            boundSizeK,
+                                                            hasMX,
+                                                            problem.mxBlockA(),
+                                                            problem.mxBlockB(),
+                                                            problem.mxTypeA(),
+                                                            problem.mxTypeB());
+                            // hVal = dot + residual; ResidualOut stores H+residual (pre-gamma).
+                            float hVal = dot;
+                            if(problem.partialRMSResidualAdd() && inputs.residual != nullptr)
+                            {
+                                // residual is row-major [M_tokens, N_hidden]: n(token)*N + m.
+                                size_t residualIdx = n * static_cast<size_t>(d.sizes()[0]) + m;
+                                hVal += static_cast<float>(GetValue<float>(
+                                    problem.tensor(ContractionProblemGemm::TENSOR::RESIDUAL).dataType(),
+                                    inputs.residual,
+                                    toInt32Index(residualIdx),
+                                    false));
+                            }
+                            size_t tileIdx    = (m - mLo) * tileCols + (n - nLo);
+                            float  eff        = alphaF * gammaM * hVal;
+                            effTile[tileIdx]  = eff;
+                            hValTile[tileIdx] = hVal;
+                            float absVal      = std::abs(eff);
+                            if(absVal > amax)
+                                amax = absVal;
+                        }
+                    }
+
+                    uint8_t scaleByte = 0;
+                    float   quantMult = 0.0f;
+                    e8m0ScaleFromAmax(amax, scaleByte, quantMult);
+                    mxPtr[mxScaleSwizzleOffset(tj, ti, colBlocks)] = scaleByte;
+
+                    for(size_t m = mLo; m < mHi; ++m)
+                    {
+                        for(size_t n = nLo; n < nHi; ++n)
+                        {
+                            std::vector<int64_t> dc(d.dimensions(), 0);
+                            dc[dDimM]      = static_cast<int64_t>(m);
+                            dc[dDimN]      = static_cast<int64_t>(n);
+                            size_t tileIdx = (m - mLo) * tileCols + (n - nLo);
+                            // ResidualOut stores H+residual (pre-gamma, pre-quant).
+                            if(inputs.residualOut != nullptr)
+                            {
+                                BFloat16* roPtr    = static_cast<BFloat16*>(inputs.residualOut);
+                                roPtr[d.index(dc)] = static_cast<BFloat16>(hValTile[tileIdx]);
+                            }
+                            dPtr[d.index(dc)]
+                                = SaturateCast<typename Inputs::DType>(effTile[tileIdx] * quantMult);
+                        }
+                    }
+                }
+            }
+        }
+
         template <typename Inputs, typename Accumulator, typename MathOpAccum>
         void ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
             ContractionProblemGemm const& problem,
@@ -2044,7 +2543,11 @@ namespace TensileLite
                         // DeepseekScale uses Aq1 as the K-block granularity so
                         // the per-K-block scale can be folded inside the loop.
                         if(problem.useDeepseekScaleA() || problem.useDeepseekScaleB())
-                            innerMXLoop = static_cast<size_t>(problem.deepseekScaleAq1());
+                        {
+                            int aq1 = problem.deepseekScaleAq1();
+                            assert(aq1 > 0 && "deepseekScaleAq1 must be positive");
+                            innerMXLoop = static_cast<size_t>(aq1);
+                        }
                         for(size_t i = 0; i < boundSize[0]; i += innerMXLoop)
                         {
                             Accumulator val(0);
@@ -2098,30 +2601,40 @@ namespace TensileLite
                             }
 
                             // DeepseekScale: per-K-block fp32 scale folded into reduction.
-                            // Buffer layout: [nRowGroups, nKBlocks, 64] fp32 with broadcast
-                            // init (all 64 lanes same value). Use lane 0 for the reference.
+                            // Buffer layout: [nRowGroups, nKBlocks, laneWidth] fp32 with
+                            // broadcast init (all lanes equal). Use lane 0 for the reference.
                             if(problem.useDeepseekScaleA() || problem.useDeepseekScaleB())
                             {
-                                int    aq1      = problem.deepseekScaleAq1();
+                                int aq1 = problem.deepseekScaleAq1();
+                                assert(aq1 > 0 && "deepseekScaleAq1 must be positive");
                                 size_t nKBlocks = (boundSize[0] + static_cast<size_t>(aq1) - 1)
                                                   / static_cast<size_t>(aq1);
                                 size_t kb = i / static_cast<size_t>(aq1);
                                 if(problem.useDeepseekScaleA()
                                    && inputs.scaleADeepseek != nullptr)
                                 {
-                                    size_t mWaveGroup = dCoord[0] / 64;
+                                    size_t mWaveGroup
+                                        = dCoord[0] / static_cast<size_t>(deepseekScaleLaneWidth);
                                     mxScale *= static_cast<const float*>(
-                                        inputs.scaleADeepseek)[mWaveGroup * nKBlocks * 64
-                                                               + kb * 64];
+                                        inputs.scaleADeepseek)[(mWaveGroup * nKBlocks + kb)
+                                                               * static_cast<size_t>(
+                                                                   deepseekScaleLaneWidth)];
                                 }
                                 if(problem.useDeepseekScaleB()
                                    && inputs.scaleBDeepseek != nullptr)
                                 {
+                                    // The reduction loop steps by Aq1, so B-scale K-blocks
+                                    // must share that granularity; assert rather than
+                                    // mis-index scaleBDeepseek when Bq1 differs.
+                                    assert(problem.deepseekScaleBq1() == aq1
+                                           && "deepseekScale A/B K-granularity must match");
                                     size_t nBlock = dCoord[1]
                                                     / static_cast<size_t>(
                                                         problem.deepseekScaleBq1());
                                     mxScale *= static_cast<const float*>(
-                                        inputs.scaleBDeepseek)[nBlock * nKBlocks * 64 + kb * 64];
+                                        inputs.scaleBDeepseek)[(nBlock * nKBlocks + kb)
+                                                               * static_cast<size_t>(
+                                                                   deepseekScaleLaneWidth)];
                                 }
                             }
 
@@ -2296,12 +2809,13 @@ namespace TensileLite
 
                 if constexpr(notCmplxAmaxD)
                 {
-                    // When MXFP8Quant is also active, D ownership belongs to the MX
-                    // second-pass block below; skip the gamma*D store here to avoid
-                    // a dead write (gamma is folded into the MX eff computation instead).
+                    // Any dynamic-quant pass (Tile or MXFP8) owns D via its second
+                    // pass below, so only perform the gamma*D store here when no
+                    // dquant pass is active; otherwise it would be a dead or wrong
+                    // write (TileQuant does not re-apply gamma).
                     if(problem.usePartialRMS() && inputs.partialBuf != nullptr
                        && inputs.rmsGamma != nullptr
-                       && problem.dquantType() != DQuantType::MXFP8)
+                       && problem.dquantType() == DQuantType::None)
                     {
                         // PartialRMSAxis=0: free0=N_hidden (mCoord), free1=M_tokens (nCoord).
                         // gamma is indexed by free0 position (mCoord).
@@ -2321,12 +2835,17 @@ namespace TensileLite
                             size_t residualIdx = nCoord * static_cast<size_t>(d.sizes()[0]) + mCoord;
                             hF += static_cast<float>(
                                 GetValue<float>(problem.tensor(ContractionProblemGemm::TENSOR::RESIDUAL).dataType(),
-                                                inputs.residual, (int)residualIdx, aConjugate));
+                                                inputs.residual, toInt32Index(residualIdx), aConjugate));
                         }
+                        // PartialRMSStoreBf16D: residualOut stores bf16(H+residual), pre-gamma and
+                        // pre-alpha, mirroring the MXFP8 reference for the DQuantType=None case.
+                        if(problem.partialRMSStoreBf16D() && inputs.residualOut != nullptr)
+                            static_cast<BFloat16*>(inputs.residualOut)[dIndex]
+                                = static_cast<BFloat16>(hF);
                         // D = alpha * gamma[mCoord] * hF + beta * C.
                         float gammaVal = static_cast<float>(
                             GetValue<float>(problem.tensor(ContractionProblemGemm::TENSOR::RMSGAMMA).dataType(),
-                                            inputs.rmsGamma, (int)mCoord, aConjugate));
+                                            inputs.rmsGamma, toInt32Index(mCoord), aConjugate));
                         float dVal = static_cast<float>(alpha) * hF * gammaVal;
                         if(beta != zero)
                             dVal += static_cast<float>(beta)
@@ -2346,458 +2865,11 @@ namespace TensileLite
                 }
             }
 
-            // Compute partialBuf for PartialRMSAxis=0: per-token (free1) Σx² over each
-            // free0 tile. partialBuf[token, tFree0] = Σ_{m in tile t} (A*B)[m, token]².
-            // pbCoord[0]=token (free1 index), pbCoord[1]=tFree0 (free0 tile index, MT0-wide).
-            // When PartialRMSQuant is enabled, sizes()[0] = 2*mPadded: the first half holds
-            // tileSum entries and the second half holds amax/fp8_max entries. Both halves are
-            // computed directly here so sparse stride sampling covers them independently.
             if constexpr(notCmplxAmaxD)
             {
-                if(problem.usePartialRMS() && inputs.partialBuf != nullptr)
-                {
-                    int mt0 = problem.partialRMSMT0() > 0 ? problem.partialRMSMT0() : 16;
-
-                    auto const& pbTensor
-                        = problem.tensors()[ContractionProblemGemm::TENSOR::PARTIALBUF];
-                    size_t pbValidStride = 1;
-                    if(elementsToValidate > 0
-                       && elementsToValidate < pbTensor.totalLogicalElements())
-                        pbValidStride = NextPrime(
-                            pbTensor.totalAllocatedElements() / elementsToValidate);
-
-                    float* pb = static_cast<float*>(inputs.partialBuf);
-
-                    std::fill(pb, pb + pbTensor.totalAllocatedElements(), 0.0f);
-
-                    // mPadded is the first-half row count; second half starts at mPadded.
-                    size_t mPadded = problem.partialRMSQuant()
-                                         ? pbTensor.sizes()[0] / 2
-                                         : pbTensor.sizes()[0];
-
-                    omp_set_num_threads(MAX_OMP_THREADS);
-#pragma omp parallel for schedule(dynamic)
-                    for(size_t pbNum = 0; pbNum < pbTensor.totalLogicalElements();
-                        pbNum += pbValidStride)
-                    {
-                        std::vector<int64_t> pbCoord(pbTensor.dimensions());
-                        CoordNumbered(pbNum,
-                                      pbCoord.begin(),
-                                      pbCoord.end(),
-                                      pbTensor.sizes().begin(),
-                                      pbTensor.sizes().end());
-                        size_t pbIdx = pbTensor.index(pbCoord);
-                        size_t token = static_cast<size_t>(pbCoord[0]);
-
-                        // Determine whether this row is a second-half amax entry.
-                        bool isAmaxRow  = problem.partialRMSQuant() && token >= mPadded;
-                        size_t realToken = isAmaxRow ? token - mPadded : token;
-
-                        // Padded rows (first-half beyond M_tokens, or second-half amax
-                        // for a padded token) carry no data; leave them zero.
-                        if(realToken >= static_cast<size_t>(d.sizes()[1]))
-                            continue;
-
-                        size_t tFree0 = static_cast<size_t>(pbCoord[1]); // free0 tile (MT0-wide)
-                        size_t mLo    = tFree0 * mt0;
-                        size_t mHi    = std::min(mLo + mt0, static_cast<size_t>(d.sizes()[0]));
-
-                        constexpr float kFp8E4M3Max = 448.0f;
-                        float tileSum  = 0.0f;
-                        float tileAmax = 0.0f;
-                        for(size_t m = mLo; m < mHi; ++m)
-                        {
-                            // (A*B)[m, realToken] = Σ_k A[k, m] * B[k, realToken].
-                            // free0 corresponds to freeIndicesA, free1 to freeIndicesB.
-                            std::vector<int64_t> aCoordL(a.dimensions(), 0);
-                            std::vector<int64_t> bCoordL(b.dimensions(), 0);
-                            for(auto const& fi : freeIndicesA)
-                                aCoordL[fi.i] = static_cast<int64_t>(m);
-                            for(auto const& fi : freeIndicesB)
-                                bCoordL[fi.i] = static_cast<int64_t>(realToken);
-
-                            float dot = 0.0f;
-                            bool hasMXPb = (problem.mxBlockA() > 0 && problem.mxBlockB() > 0);
-                            if(hasMXPb)
-                            {
-                                size_t mxBlockA = static_cast<size_t>(problem.mxBlockA());
-                                size_t mxBlockB = static_cast<size_t>(problem.mxBlockB());
-                                for(size_t k = 0; k < boundSize[0]; k += mxBlockA)
-                                {
-                                    float blockDot = 0.0f;
-                                    for(size_t j = 0; j < mxBlockA && (k + j) < boundSize[0]; ++j)
-                                    {
-                                        aCoordL[boundIndices[0].a] = static_cast<int64_t>(k + j);
-                                        bCoordL[boundIndices[0].b] = static_cast<int64_t>(k + j);
-                                        blockDot
-                                            += GetValue<float>(a.dataType(), inputs.a,
-                                                               static_cast<int>(a.index(aCoordL)),
-                                                               false)
-                                               * GetValue<float>(b.dataType(), inputs.b,
-                                                                 static_cast<int>(b.index(bCoordL)),
-                                                                 false);
-                                    }
-                                    // Reuse coord vectors to index MX scale tensors.
-                                    aCoordL[boundIndices[0].a] = static_cast<int64_t>(k / mxBlockA);
-                                    bCoordL[boundIndices[0].b] = static_cast<int64_t>(k / mxBlockB);
-                                    float mxSA = mxScaleElementAsFloat(
-                                        problem.mxTypeA(), mxsaBase, mxsa.index(aCoordL));
-                                    float mxSB = mxScaleElementAsFloat(
-                                        problem.mxTypeB(), mxsbBase, mxsb.index(bCoordL));
-                                    dot += blockDot * mxSA * mxSB;
-                                }
-                            }
-                            else
-                            {
-                                for(size_t k = 0; k < boundSize[0]; ++k)
-                                {
-                                    aCoordL[boundIndices[0].a] = static_cast<int64_t>(k);
-                                    bCoordL[boundIndices[0].b] = static_cast<int64_t>(k);
-                                    size_t aI = a.index(aCoordL);
-                                    size_t bI = b.index(bCoordL);
-                                    dot += GetValue<float>(a.dataType(), inputs.a,
-                                                           static_cast<int>(aI), false)
-                                           * GetValue<float>(b.dataType(), inputs.b,
-                                                             static_cast<int>(bI), false);
-                                }
-                            }
-
-                            if(problem.partialRMSResidualAdd() && inputs.residual != nullptr)
-                            {
-                                // residual is row-major [M_tokens, N_hidden]:
-                                // offset = realToken * N_hidden + m_free0.
-                                size_t residualIdx
-                                    = realToken * static_cast<size_t>(d.sizes()[0]) + m;
-                                dot += static_cast<float>(
-                                    GetValue<float>(problem.tensor(ContractionProblemGemm::TENSOR::RESIDUAL).dataType(),
-                                                    inputs.residual,
-                                                    static_cast<int>(residualIdx), false));
-                            }
-
-                            if(!isAmaxRow)
-                                tileSum += dot * dot;
-
-                            if(isAmaxRow && inputs.rmsGamma != nullptr)
-                            {
-                                // amax uses the post-gamma pre-D-store value.
-                                float gammaM = static_cast<float>(
-                                    GetValue<float>(problem.tensor(ContractionProblemGemm::TENSOR::RMSGAMMA).dataType(),
-                                                    inputs.rmsGamma,
-                                                    static_cast<int>(m), false));
-                                float absDVal = gammaM * dot;
-                                absDVal       = absDVal < 0.0f ? -absDVal : absDVal;
-                                if(absDVal > tileAmax)
-                                    tileAmax = absDVal;
-                            }
-                        }
-
-                        // Write directly into the correct half; no cross-half side effects.
-                        if(isAmaxRow)
-                            pb[pbIdx] = tileAmax / kFp8E4M3Max;
-                        else
-                            pb[pbIdx] = tileSum;
-                    }
-                }
-            }
-
-            // Compute TileQuant reference: per-tile amax-based fp8 quantization.
-            // Arbitrary alpha is applied before amax; beta=0 is required (Tier 1).
-            if constexpr(notCmplxAmaxD)
-            {
-                if(problem.dquantType() == DQuantType::Tile && inputs.quantScale != nullptr
-                   && inputs.d != nullptr)
-                {
-                    float alphaF = static_cast<float>(constVariantCast<Accumulator>(inputs.alpha));
-
-                    int q0 = problem.dquantSize0() > 0 ? problem.dquantSize0() : static_cast<int>(d.sizes()[0]);
-                    int q1 = problem.dquantSize1() > 0 ? problem.dquantSize1() : static_cast<int>(d.sizes()[1]);
-
-                    float* qsPtr = static_cast<float*>(inputs.quantScale);
-
-                    size_t M = static_cast<size_t>(d.sizes()[0]);
-                    size_t N = static_cast<size_t>(d.sizes()[1]);
-                    size_t mTiles = (M + static_cast<size_t>(q0) - 1) / static_cast<size_t>(q0);
-                    size_t nTiles = (N + static_cast<size_t>(q1) - 1) / static_cast<size_t>(q1);
-
-                    // D index for the M dimension (free0) and N dimension (free1).
-                    size_t dDimM = freeIndicesA[0].d;
-                    size_t dDimN = freeIndicesB[0].d;
-                    // A/B tensor dimension indices for the free and bound dimensions.
-                    size_t aDimM = freeIndicesA[0].i;
-                    size_t bDimN = freeIndicesB[0].i;
-                    size_t aDimK = boundIndices[0].a;
-                    size_t bDimK = boundIndices[0].b;
-
-                    constexpr float kFp8Max = 448.0f;
-
-                    omp_set_num_threads(MAX_OMP_THREADS);
-#pragma omp parallel for schedule(dynamic) collapse(2)
-                    for(size_t ti = 0; ti < mTiles; ++ti)
-                    {
-                        for(size_t tj = 0; tj < nTiles; ++tj)
-                        {
-                            size_t mLo = ti * static_cast<size_t>(q0);
-                            size_t mHi = std::min(mLo + static_cast<size_t>(q0), M);
-                            size_t nLo = tj * static_cast<size_t>(q1);
-                            size_t nHi = std::min(nLo + static_cast<size_t>(q1), N);
-
-                            size_t tileRows = mHi - mLo;
-                            size_t tileCols = nHi - nLo;
-                            // Cache alpha*dot per element so the second pass reuses the same
-                            // f32 accumulation used for amax (GPU accumulates only once).
-                            std::vector<float> effTile(tileRows * tileCols, 0.0f);
-
-                            // First pass: compute f32 GEMM dot products and find amax.
-                            float amax = 0.0f;
-                            for(size_t m = mLo; m < mHi; ++m)
-                            {
-                                for(size_t n = nLo; n < nHi; ++n)
-                                {
-                                    std::vector<int64_t> ac(a.dimensions(), 0);
-                                    std::vector<int64_t> bc(b.dimensions(), 0);
-                                    ac[aDimM] = static_cast<int64_t>(m);
-                                    bc[bDimN] = static_cast<int64_t>(n);
-                                    float dot = 0.0f;
-                                    for(size_t k = 0; k < boundSize[0]; ++k)
-                                    {
-                                        ac[aDimK] = static_cast<int64_t>(k);
-                                        bc[bDimK] = static_cast<int64_t>(k);
-                                        dot += GetValue<float>(a.dataType(), inputs.a,
-                                                               static_cast<int>(a.index(ac)), false)
-                                               * GetValue<float>(b.dataType(), inputs.b,
-                                                                 static_cast<int>(b.index(bc)), false);
-                                    }
-                                    float eff    = alphaF * dot;
-                                    effTile[(m - mLo) * tileCols + (n - nLo)] = eff;
-                                    float absVal = eff < 0.0f ? -eff : eff;
-                                    if(absVal > amax)
-                                        amax = absVal;
-                                }
-                            }
-
-                            // Write quantScale = amax / fp8Max.
-                            qsPtr[ti * nTiles + tj] = amax / kFp8Max;
-
-                            // Second pass: reuse cached eff values; no second dot-product.
-                            float quantMult = (amax > 0.0f) ? (kFp8Max / amax) : 0.0f;
-                            for(size_t m = mLo; m < mHi; ++m)
-                            {
-                                for(size_t n = nLo; n < nHi; ++n)
-                                {
-                                    std::vector<int64_t> dc(d.dimensions(), 0);
-                                    dc[dDimM] = static_cast<int64_t>(m);
-                                    dc[dDimN] = static_cast<int64_t>(n);
-                                    float eff = effTile[(m - mLo) * tileCols + (n - nLo)];
-                                    dPtr[d.index(dc)]
-                                        = SaturateCast<typename Inputs::DType>(eff * quantMult);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Compute MXFP8Quant reference: per-block e8m0 MX quantization of fp8 D.
-            // Alpha is applied before amax; beta=0 is required.
-            if constexpr(notCmplxAmaxD)
-            {
-                if(problem.dquantType() == DQuantType::MXFP8 && inputs.mxScale != nullptr
-                   && inputs.d != nullptr)
-                {
-                    float alphaF = static_cast<float>(constVariantCast<Accumulator>(inputs.alpha));
-
-                    int q0 = problem.dquantSize0() > 0 ? problem.dquantSize0() : static_cast<int>(d.sizes()[0]);
-                    int q1 = problem.dquantSize1() > 0 ? problem.dquantSize1() : static_cast<int>(d.sizes()[1]);
-
-                    uint8_t* mxPtr = static_cast<uint8_t*>(inputs.mxScale);
-
-                    size_t M = static_cast<size_t>(d.sizes()[0]);
-                    size_t N = static_cast<size_t>(d.sizes()[1]);
-                    // mTiles = kblock tiles (N_hidden/32), nTiles = free tiles (M_tokens).
-                    size_t mTiles = (M + static_cast<size_t>(q0) - 1) / static_cast<size_t>(q0);
-                    size_t nTiles = (N + static_cast<size_t>(q1) - 1) / static_cast<size_t>(q1);
-
-                    // Scale grid: rows = free dim (M_tokens, nTiles), cols = kblock dim (mTiles).
-                    size_t paddedRows = ((nTiles + 31) / 32) * 32;
-                    size_t paddedCols = ((mTiles +  7) /  8) *  8;
-                    size_t colBlocks  = paddedCols / 8;
-                    std::memset(mxPtr, 0, paddedRows * paddedCols * sizeof(uint8_t));
-
-                    size_t dDimM = freeIndicesA[0].d;
-                    size_t dDimN = freeIndicesB[0].d;
-                    size_t aDimM = freeIndicesA[0].i;
-                    size_t bDimN = freeIndicesB[0].i;
-                    size_t aDimK = boundIndices[0].a;
-                    size_t bDimK = boundIndices[0].b;
-
-                    constexpr float kFp8Max = 448.0f;
-                    bool hasMX = (problem.mxBlockA() > 0 && problem.mxBlockB() > 0);
-
-                    omp_set_num_threads(MAX_OMP_THREADS);
-#pragma omp parallel for schedule(dynamic) collapse(2)
-                    // Outer: tj over M_tokens (free), inner: ti over N_hidden/32 (kblock).
-                    for(size_t tj = 0; tj < nTiles; ++tj)
-                    {
-                        for(size_t ti = 0; ti < mTiles; ++ti)
-                        {
-                            size_t mLo = ti * static_cast<size_t>(q0);
-                            size_t mHi = std::min(mLo + static_cast<size_t>(q0), M);
-                            size_t nLo = tj * static_cast<size_t>(q1);
-                            size_t nHi = std::min(nLo + static_cast<size_t>(q1), N);
-
-                            size_t tileRows = mHi - mLo;
-                            size_t tileCols = nHi - nLo;
-                            std::vector<float> effTile(tileRows * tileCols, 0.0f);
-                            // hValTile caches dot+residual per element so the second loop
-                            // can write bf16(H+residual) to ResidualOut without re-dividing
-                            // by gammaM (which is only live in the first loop's scope).
-                            std::vector<float> hValTile(tileRows * tileCols, 0.0f);
-
-                            float amax = 0.0f;
-                            for(size_t m = mLo; m < mHi; ++m)
-                            {
-                                // Gamma is indexed by free0 (m = N_hidden position); hoist
-                                // the lookup out of the inner n loop to avoid redundant loads.
-                                // When PartialRMS is also active, gamma is applied in-place
-                                // before MX amax on the GPU, so fold it into eff here.
-                                float gammaM = 1.0f;
-                                if(problem.usePartialRMS() && inputs.rmsGamma != nullptr)
-                                    gammaM = static_cast<float>(
-                                        GetValue<float>(
-                                            problem.tensor(ContractionProblemGemm::TENSOR::RMSGAMMA)
-                                                .dataType(),
-                                            inputs.rmsGamma,
-                                            static_cast<int>(m), false));
-                                for(size_t n = nLo; n < nHi; ++n)
-                                {
-                                    std::vector<int64_t> ac(a.dimensions(), 0);
-                                    std::vector<int64_t> bc(b.dimensions(), 0);
-                                    ac[aDimM] = static_cast<int64_t>(m);
-                                    bc[bDimN] = static_cast<int64_t>(n);
-                                    float dot = 0.0f;
-                                    if(hasMX)
-                                    {
-                                        size_t mxBlockA = static_cast<size_t>(problem.mxBlockA());
-                                        size_t mxBlockB = static_cast<size_t>(problem.mxBlockB());
-                                        for(size_t k = 0; k < boundSize[0]; k += mxBlockA)
-                                        {
-                                            float blockDot = 0.0f;
-                                            for(size_t j = 0;
-                                                j < mxBlockA && (k + j) < boundSize[0];
-                                                ++j)
-                                            {
-                                                ac[aDimK] = static_cast<int64_t>(k + j);
-                                                bc[bDimK] = static_cast<int64_t>(k + j);
-                                                blockDot += GetValue<float>(
-                                                                a.dataType(), inputs.a,
-                                                                static_cast<int>(a.index(ac)),
-                                                                false)
-                                                            * GetValue<float>(
-                                                                b.dataType(), inputs.b,
-                                                                static_cast<int>(b.index(bc)),
-                                                                false);
-                                            }
-                                            // Reuse ac/bc to index the MX scale tensors.
-                                            ac[aDimK] = static_cast<int64_t>(k / mxBlockA);
-                                            bc[bDimK] = static_cast<int64_t>(k / mxBlockB);
-                                            float mxSA = mxScaleElementAsFloat(
-                                                problem.mxTypeA(), mxsaBase, mxsa.index(ac));
-                                            float mxSB = mxScaleElementAsFloat(
-                                                problem.mxTypeB(), mxsbBase, mxsb.index(bc));
-                                            dot += blockDot * mxSA * mxSB;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        for(size_t k = 0; k < boundSize[0]; ++k)
-                                        {
-                                            ac[aDimK] = static_cast<int64_t>(k);
-                                            bc[bDimK] = static_cast<int64_t>(k);
-                                            dot += GetValue<float>(
-                                                       a.dataType(), inputs.a,
-                                                       static_cast<int>(a.index(ac)), false)
-                                                   * GetValue<float>(
-                                                       b.dataType(), inputs.b,
-                                                       static_cast<int>(b.index(bc)), false);
-                                        }
-                                    }
-                                    // hVal = dot + residual; ResidualOut stores H+residual (pre-gamma).
-                                    float hVal = dot;
-                                    if(problem.partialRMSResidualAdd() && inputs.residual != nullptr)
-                                    {
-                                        // residual is row-major [M_tokens, N_hidden]:
-                                        // offset = n(token) * N_hidden + m(nhidden).
-                                        size_t residualIdx
-                                            = n * static_cast<size_t>(d.sizes()[0]) + m;
-                                        hVal += static_cast<float>(
-                                            GetValue<float>(
-                                                problem.tensor(ContractionProblemGemm::TENSOR::RESIDUAL)
-                                                    .dataType(),
-                                                inputs.residual,
-                                                static_cast<int>(residualIdx), false));
-                                    }
-                                    size_t tileIdx = (m - mLo) * tileCols + (n - nLo);
-                                    float eff = alphaF * gammaM * hVal;
-                                    effTile[tileIdx]  = eff;
-                                    hValTile[tileIdx] = hVal;
-                                    float absVal = eff < 0.0f ? -eff : eff;
-                                    if(absVal > amax)
-                                        amax = absVal;
-                                }
-                            }
-
-                            // Compute the e8m0 scale byte using the ceil-exponent formula.
-                            // Ceil guarantees amax/S <= 448, preventing fp8 NaN.
-                            uint8_t scaleByte = 0;
-                            float   quantMult  = 0.0f;
-                            if(amax > 0.0f)
-                            {
-                                float    scaleF = amax / kFp8Max;
-                                uint32_t bits;
-                                std::memcpy(&bits, &scaleF, sizeof(bits));
-                                int expByte = static_cast<int>((bits >> 23) & 0xFF);
-                                int ceilAdj = (bits & 0x7FFFFF) != 0 ? 1 : 0;
-                                int sb      = expByte + ceilAdj;
-                                sb          = sb < 0 ? 0 : (sb > 254 ? 254 : sb);
-                                scaleByte   = static_cast<uint8_t>(sb);
-                                int qExp    = 254 - sb;
-                                qExp        = qExp < 1 ? 1 : (qExp > 254 ? 254 : qExp);
-                                uint32_t qbits = static_cast<uint32_t>(qExp) << 23;
-                                std::memcpy(&quantMult, &qbits, sizeof(quantMult));
-                            }
-                            // Swizzle: d0..d2 from tj (free/M_tokens row), d3..d5 from ti (kblock col).
-                            size_t d0 = tj >> 5;
-                            size_t d1 = (tj >> 4) & 1;
-                            size_t d2 = tj & 0xF;
-                            size_t d3 = ti >> 3;
-                            size_t d4 = (ti >> 2) & 1;
-                            size_t d5 = ti & 0x3;
-                            size_t swzOff = d0 * (colBlocks * 256) + d3 * 256
-                                            + d5 * 64 + d2 * 4 + d4 * 2 + d1;
-                            mxPtr[swzOff] = scaleByte;
-
-                            for(size_t m = mLo; m < mHi; ++m)
-                            {
-                                for(size_t n = nLo; n < nHi; ++n)
-                                {
-                                    std::vector<int64_t> dc(d.dimensions(), 0);
-                                    dc[dDimM] = static_cast<int64_t>(m);
-                                    dc[dDimN] = static_cast<int64_t>(n);
-                                    size_t tileIdx = (m - mLo) * tileCols + (n - nLo);
-                                    float eff = effTile[tileIdx];
-                                    // ResidualOut stores H+residual (pre-gamma, pre-quant).
-                                    if(inputs.residualOut != nullptr)
-                                    {
-                                        auto* roPtr = static_cast<BFloat16*>(inputs.residualOut);
-                                        roPtr[d.index(dc)] = static_cast<BFloat16>(hValTile[tileIdx]);
-                                    }
-                                    dPtr[d.index(dc)]
-                                        = SaturateCast<typename Inputs::DType>(eff * quantMult);
-                                }
-                            }
-                        }
-                    }
-                }
+                computePartialRMSBuf(problem, inputs, elementsToValidate);
+                computeTileQuant<Inputs, Accumulator>(problem, inputs);
+                computeMXFP8Quant<Inputs, Accumulator>(problem, inputs);
             }
 
             if(problem.outputAmaxD())
