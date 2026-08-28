@@ -1250,7 +1250,7 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
         {
             // gfx950: hipBLASLt is used for all types except complex.
             // TODO remove after complex support is enabled
-            if(rocblas_internal_get_arch(prob.handle) == 950 && rocblas_is_complex_type<Ti>())
+            if(rocblas_internal_get_arch(prob.handle) == 950 && rocblas_is_complex<Ti>())
                 return false; // complex won't default to hipBLASLt
         }
     }
