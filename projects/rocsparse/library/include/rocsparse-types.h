@@ -393,7 +393,6 @@ typedef enum rocsparse_fill_mode_
     rocsparse_fill_mode_upper = 1 /**< Upper triangular part is stored. */
 } rocsparse_fill_mode;
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
 /*! \ingroup types_module
  *  \brief Select whether a solve stage performs a triangular or diagonal-only solve.
  *
@@ -428,7 +427,6 @@ typedef enum rocsparse_diagonal_modifier_
     rocsparse_diagonal_modifier_none     = 0, /**< Use \f$d\f$ (default). */
     rocsparse_diagonal_modifier_absolute = 1 /**< Use \f$|d|\f$. */
 } rocsparse_diagonal_modifier;
-#endif
 
 /*! \ingroup types_module
  *  \brief Specify whether the matrix is stored sorted or not.

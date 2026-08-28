@@ -492,33 +492,30 @@ namespace rocsparse_clients
                                        p_error);
         }
 
-        void set_solve_mode(int32_t solve_mode)
+        void set_solve_mode(rocsparse_solve_mode solve_mode)
         {
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-            rocsparse_error            p_error[1] = {nullptr};
-            const rocsparse_solve_mode dm         = static_cast<rocsparse_solve_mode>(solve_mode);
+            rocsparse_error p_error[1] = {nullptr};
             rocsparse_sptrsv_set_input(this->m_handle,
                                        this->m_descr,
                                        rocsparse_sptrsv_input_solve_mode,
-                                       &dm,
-                                       sizeof(dm),
+                                       &solve_mode,
+                                       sizeof(solve_mode),
                                        p_error);
 #else
             (void)solve_mode;
 #endif
         }
 
-        void set_diagonal_modifier(int32_t diagonal_modifier)
+        void set_diagonal_modifier(rocsparse_diagonal_modifier diagonal_modifier)
         {
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-            rocsparse_error                   p_error[1] = {nullptr};
-            const rocsparse_diagonal_modifier dm
-                = static_cast<rocsparse_diagonal_modifier>(diagonal_modifier);
+            rocsparse_error p_error[1] = {nullptr};
             rocsparse_sptrsv_set_input(this->m_handle,
                                        this->m_descr,
                                        rocsparse_sptrsv_input_diagonal_modifier,
-                                       &dm,
-                                       sizeof(dm),
+                                       &diagonal_modifier,
+                                       sizeof(diagonal_modifier),
                                        p_error);
 #else
             (void)diagonal_modifier;
@@ -574,8 +571,8 @@ namespace rocsparse_clients
                      rocsparse_clients::dnvec_descr<T>&       y,
                      const rocsparse_diag_type                diag,
                      const rocsparse_fill_mode                uplo,
-                     int32_t                                  solve_mode,
-                     int32_t                                  diagonal_modifier,
+                     rocsparse_solve_mode                     solve_mode,
+                     rocsparse_diagonal_modifier              diagonal_modifier,
                      int64_t*                                 symbolic,
                      int64_t*                                 exact)
     {
@@ -617,7 +614,7 @@ namespace rocsparse_clients
                 const T* p    = host.val.data() + i * A.get_stride();
                 const T* p_hx = x.host().data() + i * x.get_stride();
                 T*       p_hy = y.host().data() + i * y.get_stride();
-                if(solve_mode != 0)
+                if(solve_mode != rocsparse_solve_mode_triangular)
                 {
                     J sp = -1, np = -1;
                     host_diagonal_solve_csr<I, J, T>(operation,
@@ -677,7 +674,7 @@ namespace rocsparse_clients
                 const T* p_hx = x.host().data() + i * x.get_stride();
                 T*       p_hy = y.host().data() + i * y.get_stride();
 
-                if(solve_mode != 0)
+                if(solve_mode != rocsparse_solve_mode_triangular)
                 {
                     J sp = -1, np = -1;
                     host_diagonal_solve_csc<I, J, T>(operation,
@@ -764,7 +761,7 @@ void testing_sptrsv(const Arguments& arg)
 #endif
 
 #ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
-    if(arg.solve_mode != 0)
+    if(arg.solve_mode != rocsparse_solve_mode_triangular)
     {
         return;
     }
