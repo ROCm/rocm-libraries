@@ -11550,6 +11550,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
+
+  def cmpNamedArgTypeEq(self, module, value, comment=""):
+    """Compare the named ArgType domain (low 8 bits) to value."""
+    with self.allocTmpSgpr(1, tag="cmpNamedArgTypeEq") as tmp:
+      module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("ArgType"), src1=hex(0xFF),
+                         comment="mask ArgType domain (bit 8 = TDM wave-parity)"))
+      module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=value, comment=comment))
   
   @abc.abstractmethod
   def gl2PrefetchInit(self, kernel, tPA, tPB):
