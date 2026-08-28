@@ -26,8 +26,9 @@ contains a separate CPU-only module for constructing physical AMD GPU layouts.
 - `roc::host-numerics`
   - Compiled validation operations layered on the tensor core.
   - Exports `axpby.hpp`, `comparison.hpp`, `epilogue.hpp`, `generation.hpp`,
-    `gemm.hpp`, `layer_norm.hpp`, `mx.hpp`, `reduction.hpp`, `softmax.hpp`,
-    `structured_sparsity.hpp`, and the convenience umbrella `validation.hpp`.
+    `gemm.hpp`, `gemm_validation.hpp`, `layer_norm.hpp`, `mx.hpp`,
+    `reduction.hpp`, `softmax.hpp`, `structured_sparsity.hpp`, and the
+    convenience umbrella `validation.hpp`.
   - Exposes runtime-typed generation, tensor AXPBY, reference GEMM, reference
     epilogues, LayerNorm, reductions, softmax, structured sparsity, comparison,
     block-scaled tensor generation, and the built-in Pointwise and Blocked GEMM
@@ -521,6 +522,14 @@ requested thread configurations rather than introspecting provider internals.
 The Pointwise strategy covers and writes exactly the selected outputs.
 Accelerated strategies report selected writes separately from all output
 coordinates covered by their execution granularity.
+
+`validateGemm(problem, observed, options)` uses the comparison selection as the
+single source of truth for both reference computation and comparison. Complete
+output validation materializes an expected tensor with the observed layout.
+Partial validation streams the selected reference values into compact storage;
+memory scales with the number of selected outputs rather than the complete D
+shape. GPU readback, tolerance selection, and diagnostic rendering remain
+consumer-owned.
 
 The built-in Blocked strategy reuses decoded A/B tiles across output elements
 without BLAS or product dependencies. It supports block-scaled MX operands

@@ -541,6 +541,47 @@ void testOutputSelection() {
     require(rejectedOutOfRange, "Out-of-range explicit selection materialization did not fail.");
 }
 
+void testStreamingGemmValidation() {
+    using namespace roc::host_numerics;
+
+    const std::array<float, 4> a{1, 2, 3, 4};
+    const std::array<float, 4> b{5, 6, 7, 8};
+    const std::array<float, 4> c{};
+    GemmProblem problem(GemmOperand(Tensor::copyNativeValues<float>(Shape{2, 2}, a)),
+                        GemmOperand(Tensor::copyNativeValues<float>(Shape{2, 2}, b)),
+                        Tensor::copyNativeValues<float>(Shape{2, 2}, c), ScalarType::Float32,
+                        ScalarType::Float32);
+
+    Tensor observed =
+        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{19, 999, 43, 50});
+    GemmValidationOptions options;
+    options.comparison.computeFrobenius = false;
+    options.comparison.selection =
+        OutputSelection::explicitIndices({1}, IndexOrder::FirstDimensionFastest);
+
+    GemmValidationResult pointwise = validateGemm(problem, observed, options);
+    require(pointwise.comparison.passed() && pointwise.comparison.compared == 1 &&
+                pointwise.reference.backendUsed == GemmBackend::Pointwise &&
+                pointwise.reference.outputElementsWritten == 1,
+            "Streaming GEMM validation did not isolate the selected output.");
+
+    options.backend = GemmBackend::Blocked;
+    GemmValidationResult blocked = validateGemm(problem, observed, options);
+    require(blocked.comparison.passed() && blocked.reference.backendUsed == GemmBackend::Blocked &&
+                blocked.reference.outputElementsWritten == 1 &&
+                blocked.reference.outputElementsCovered == 4,
+            "Streaming blocked GEMM validation reported the wrong work.");
+
+    observed.storeFrom({1, 0}, 44.0f);
+    GemmValidationResult mismatch = validateGemm(problem, observed, options);
+    require(
+        !mismatch.comparison.passed() && mismatch.comparison.mismatches == 1 &&
+            mismatch.comparison.reportedMismatches[0].index == 1 &&
+            mismatch.comparison.reportedMismatches[0].coordinates == std::vector<size_t>({1, 0}) &&
+            mismatch.comparison.reportedMismatches[0].observedOffset == 2,
+        "Streaming GEMM validation did not preserve the original logical location.");
+}
+
 void testReferenceEpilogue() {
     using namespace roc::host_numerics;
 
@@ -2220,6 +2261,7 @@ int main() {
     testExactIntegerGemm();
     testRuntimeComplexAndExplicitAxisGemm();
     testOutputSelection();
+    testStreamingGemmValidation();
     testReferenceEpilogue();
     testReferenceReduction();
     testStructuredSparsity();
