@@ -214,17 +214,27 @@ takes minutes, and it is paid once per shape in the first process that runs with
 and setup as well as the timed measurements. It defaults to five minutes, so that a first matmul
 cannot block a live application indefinitely, and 0 removes the ceiling entirely.
 
-A search the ceiling cuts short is discarded rather than recorded: candidates are not measured in
-order of expected performance, so the best of an arbitrary prefix is not the best kernel, and caching
-it would freeze that arbitrary choice in place. The shape falls back to normal selection and is not
-retried in that process, so the ceiling is spent once rather than on every call. Use the ceiling to
-bound how long tuning may run, not as a way to tune faster; to tune faster, reduce the candidate list
-or the iteration counts.
+A search the ceiling cuts short still records its best candidate, marked incomplete. Candidates are
+not measured in order of expected performance, so the best of a truncated prefix is usually not the
+shape's best kernel. It is never worse than not tuning at all, though: default selection's own choice
+is put at the front of the candidate list and is therefore always measured first, so the best of any
+prefix is at least as fast as what the shape would have run untuned. Recording it means a shape too
+large to finish gets some of the benefit immediately rather than none.
 
-A shape large enough to need more than the ceiling therefore never caches under the default. Tuning
-reports that this is what happened and names the variable to raise, so the fix is to raise or clear
-``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` and tune that shape again. As a rough guide, a
+An incomplete entry is replayed like any other. What the marking buys is that tune mode revisits the
+shape when a run comes along that can finish the search, and replaces the row, so a partial answer
+never becomes permanent. To finish such a shape, raise or clear
+``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` and run it in tune mode again; as a rough guide a
 2048x1024x2048 FP16 shape takes about 146 seconds on MI300X, and the cost grows with the problem.
+
+Each row records the ceiling it was written under, and a shape is only benchmarked again when the
+current ceiling beats it, with 0 beating every finite one. Re-running the same workload at the same
+ceiling therefore costs nothing: the search would measure the same candidates and stop in the same
+place, so it is not repeated and no second row is appended. Within a single process a shape is
+benchmarked at most once in any case.
+
+Use the ceiling to bound how long tuning may run, not as a way to tune faster; to tune faster, reduce
+the candidate list or the iteration counts.
 
 The ceiling is checked between candidates, since a batch of launches already submitted cannot be
 recalled. One candidate may therefore overrun it by as much as its own measurement takes. A search

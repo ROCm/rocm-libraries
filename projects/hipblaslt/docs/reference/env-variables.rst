@@ -167,7 +167,7 @@ Setting ``off``, or leaving the mode unset, produces no tuning output at any lev
     * - | ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE``
         | Sets a soft wall-clock limit checked between candidates.
       - | Milliseconds (default: 300000, five minutes; 0 is unlimited)
-        | A truncated search is discarded, not cached
+        | A truncated search records its best candidate as incomplete
         | A single candidate can overrun the limit
 
     * - | ``HIPBLASLT_TUNING_SCRATCH_MAX_BYTES``

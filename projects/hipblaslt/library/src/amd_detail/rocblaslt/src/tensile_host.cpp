@@ -3568,17 +3568,17 @@ namespace
          * The three shapes measured in the pull request tune in 53 to 146
          * seconds, so the default does not truncate them.
          *
-         * A search the ceiling cuts short is discarded rather than cached.
-         * Candidates are not enumerated in order of expected performance, so
-         * the best of an arbitrary prefix is not the best kernel: an earlier 10
-         * second default measured 140 of 782 candidates and then persisted that
-         * prefix's winner as if it were the answer. The shape is latched
-         * fruitless instead, so the ceiling is spent once per process rather
-         * than on every call for that shape.
+         * A search the ceiling cuts short keeps its winner, marked incomplete.
+         * Candidates are not enumerated in order of expected performance, so the
+         * best of an arbitrary prefix is usually not the shape's best kernel,
+         * but default selection's own pick is measured first and so is always in
+         * that prefix, which makes the recorded winner no slower than not tuning
+         * at all. The row carries the ceiling it ran under, and only a run whose
+         * ceiling beats it benchmarks the shape again, so a workload rerun at
+         * the same setting pays nothing and appends nothing.
          *
-         * The cost of that choice is that a shape too large to finish inside
-         * the ceiling never caches under the default. It says so and names this
-         * variable when it gives up, and zero restores the unlimited search.
+         * Zero restores the unlimited search, which is how a shape too large to
+         * finish inside the ceiling gets a final answer.
          */
         static double perShapeBudgetUs()
         {
@@ -4784,23 +4784,18 @@ namespace
             log_info(__func__, msg.str());
         }
 
-        // A search the budget cut short is thrown away rather than cached.
-        //
-        // The candidate list is not ordered by expected performance, so the
-        // prefix that happened to fit in the budget is an arbitrary subset and
-        // its best member is not the shape's best kernel. Persisting it would
-        // freeze that arbitrary pick into the cache permanently, and because the
-        // entry also marks the shape as tuned, no later run would revisit it.
-        // Discarding costs a re-tune next process start and leaves the shape on
-        // default selection until a run is allowed to finish.
-        if(truncated)
-        {
-            TensileLite::TuningCounters::instance().skipped++;
-            return TuningAttempt::SkippedBudget;
-        }
-
+        // Nothing measured leaves nothing to record, whichever way the loop
+        // ended. A budget that expires before the first candidate is timed is
+        // the common way to reach this with truncated set.
         if(bestIndex < 0)
+        {
+            if(truncated)
+            {
+                TensileLite::TuningCounters::instance().skipped++;
+                return TuningAttempt::SkippedBudget;
+            }
             return TuningAttempt::FallbackNoWinner;
+        }
 
         // The first candidate is what default selection would have returned, so
         // recording it costs nothing and cannot be reconstructed later.
@@ -4821,6 +4816,27 @@ namespace
         // which is deliberate: it records that the shape was measured, so tune
         // mode does not re-benchmark it on every process start.
         winnerIndexOut = bestIndex;
+
+        // A search the budget stopped is recorded as incomplete rather than
+        // discarded. The prefix it managed to measure is an arbitrary subset of
+        // the candidate list, so its best member is very likely not the shape's
+        // best kernel -- but default selection's own pick is forced to the front
+        // of that list and is therefore always measured first, so the best of
+        // any prefix is no slower than what this shape runs untuned. Keeping it
+        // hands the caller that much now; the flag is what stops it from
+        // becoming permanent, since tune mode revisits an incomplete entry in a
+        // later process whose budget can finish the search.
+        // Recorded on every row, so a later run reading an incomplete one can
+        // tell whether it is able to get any further than this run did. Rounded
+        // down from the microsecond budget the loop actually used; zero means
+        // unlimited, which a truncated search cannot have been.
+        winnerOut.budgetMs = static_cast<int64_t>(budgetUs / 1000.0);
+
+        if(truncated)
+        {
+            winnerOut.complete = false;
+            return TuningAttempt::TunedPartial;
+        }
         return TuningAttempt::Tuned;
     }
 #endif // HIPBLASLT_ENABLE_TUNING_CACHE
@@ -4929,15 +4945,26 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 return;
 
             std::ostringstream msg;
-            if(result == TensileLite::TuningAttempt::Tuned)
+            if(result == TensileLite::TuningAttempt::Tuned
+               || result == TensileLite::TuningAttempt::TunedPartial)
             {
-                msg << "tuning-done winner=" << winnerIndex << " elapsed=" << std::fixed
-                    << std::setprecision(1) << elapsedSeconds
+                const bool partial = result == TensileLite::TuningAttempt::TunedPartial;
+
+                msg << (partial ? "tuning-partial winner=" : "tuning-done winner=") << winnerIndex
+                    << " elapsed=" << std::fixed << std::setprecision(1) << elapsedSeconds
                     << "s persisted=" << (persisted ? "yes" : "no");
                 if(!persisted)
                     msg << " (could not write "
                         << TensileLite::TuningModeSingleton::getInstance().cachePath()
                         << "; the winner is used now but lost at exit)";
+
+                // Said plainly because the entry is usable but not final: it
+                // beats default selection, it will be replayed, and a run with a
+                // higher ceiling will replace it.
+                if(partial)
+                    msg << "; the time budget stopped the search, so this is the best of the "
+                           "candidates measured, not of all of them. Raise or unset "
+                           "HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE to finish it";
             }
             else
             {
@@ -4993,20 +5020,41 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 //
                 // The lookup runs first either way, so a shape the tuner has
                 // given up on is still counted as the fallback it is. Only then
-                // is the search itself declined, because a budget-truncated or
-                // winnerless search records nothing and repeating it would spend
-                // the same minutes on every matmul of that shape.
-                if(!tuning_cache_has_valid_entry(
-                       handle, key, prob, gemmData, prob.workspaceSize, callerSuppliedAlgo)
-                   && !TensileLite::tuningWasFruitless(key))
+                // is the search itself declined, because a winnerless search
+                // records nothing and repeating it would spend the same minutes
+                // on every matmul of that shape.
+                //
+                // An entry the budget cut short is usable but not final, so it
+                // does not necessarily close the gate. needsFinishing decides,
+                // and it says yes only when this run's ceiling beats the one
+                // that produced the row: a run that cannot get further would
+                // measure the same prefix, stop in the same place, and append an
+                // identical row, which is the whole ceiling spent for nothing.
+                //
+                // Rounded to milliseconds the same way the benchmarker records
+                // it, so the two are compared on equal terms.
+                const int64_t currentBudgetMs
+                    = static_cast<int64_t>(TuningPolicy::perShapeBudgetUs() / 1000.0);
+
+                const bool haveUsableEntry = tuning_cache_has_valid_entry(
+                    handle, key, prob, gemmData, prob.workspaceSize, callerSuppliedAlgo);
+
+                if((!haveUsableEntry || cache.needsFinishing(key, currentBudgetMs))
+                   && !TensileLite::tuningAlreadyAttempted(key))
                 {
                     // try_lock, not lock: a second thread meeting an untuned
                     // shape runs normally rather than stalling behind a
                     // benchmark, and the shared scratch keeps one writer.
                     std::unique_lock<std::mutex> guard(tuningLock(), std::try_to_lock);
-                    if(guard.owns_lock()
-                       && !tuning_cache_has_valid_entry(
-                           handle, key, prob, gemmData, prob.workspaceSize, false))
+
+                    // The latch is re-read under the lock as well as before it.
+                    // A thread that passed the gate while another was still
+                    // benchmarking this shape would otherwise inherit the lock
+                    // and repeat the search that just finished.
+                    if(guard.owns_lock() && !TensileLite::tuningAlreadyAttempted(key)
+                       && (!tuning_cache_has_valid_entry(
+                               handle, key, prob, gemmData, prob.workspaceSize, false)
+                           || cache.needsFinishing(key, currentBudgetMs)))
                     {
                         TensileLite::TunedEntry winner;
                         benchmarked = true;
@@ -5038,7 +5086,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
                         bool persisted = false;
 
-                        if(result == TensileLite::TuningAttempt::Tuned)
+                        if(result == TensileLite::TuningAttempt::Tuned
+                           || result == TensileLite::TuningAttempt::TunedPartial)
                         {
                             // solutionName is already set from the benchmarked
                             // solution object; re-deriving it from the index
@@ -5082,14 +5131,22 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                             }
                         }
 
-                        // A search that reached the measurement loop and still
-                        // has no winner to record is not attempted again in this
-                        // process. Both of these spend the full search before
-                        // discarding it, so retrying on the next matmul would
-                        // stall the caller exactly as long for exactly nothing.
+                        // Latched for the outcomes that spent the search and
+                        // left the shape wanting another one. A winnerless or
+                        // budget-stopped attempt would stall the next matmul
+                        // exactly as long for exactly nothing, and a partial
+                        // winner would re-measure the same prefix under the same
+                        // ceiling and arrive at the same answer.
+                        //
+                        // A complete tune needs no latch: its entry closes the
+                        // gate on its own. The early declines are deliberately
+                        // left unlatched, because they cost microseconds and
+                        // retrying lets a shape recover if the condition that
+                        // caused them was transient.
                         if(result == TensileLite::TuningAttempt::SkippedBudget
-                           || result == TensileLite::TuningAttempt::FallbackNoWinner)
-                            TensileLite::recordFruitlessTuning(key);
+                           || result == TensileLite::TuningAttempt::FallbackNoWinner
+                           || result == TensileLite::TuningAttempt::TunedPartial)
+                            TensileLite::recordTuningAttempt(key);
 
                         reportAttempt(key, result, elapsedSeconds, tunedIndex, persisted);
                     }

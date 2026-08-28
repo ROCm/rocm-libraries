@@ -443,6 +443,31 @@ namespace TensileLite
         TuningSchemaVersion schemaVersion = TuningSchemaVersion::Legacy;
         TuningEntrySource   source        = TuningEntrySource::LegacyOverrideFile;
 
+        // False when the per-shape budget stopped the search, so this winner is
+        // the best of a prefix rather than of the whole candidate list.
+        //
+        // Such an entry is still worth keeping. Default selection's own pick is
+        // forced to the front of the candidate list and is therefore always
+        // measured first, so the best of any prefix is no slower than what the
+        // shape runs untuned. What the flag buys is that the partial answer does
+        // not become permanent: a later process whose budget can finish the
+        // search treats the shape as still needing tuning and replaces the row.
+        //
+        // Absent from a row means complete, which is what every row written
+        // before this column existed was.
+        bool complete = true;
+
+        // The per-shape ceiling in force when this row was written, in
+        // milliseconds, with zero meaning unlimited and a negative value meaning
+        // the row predates the column.
+        //
+        // Read only for an incomplete row, to answer whether this run could get
+        // any further than the one that produced it. Without it a shape that
+        // keeps truncating is re-benchmarked by every process that opens the
+        // cache, each spending the whole ceiling to stop in exactly the same
+        // place and append another identical row.
+        int64_t budgetMs = -1;
+
         // Build that produced this row. Carried per row rather than only in the
         // file header because appending after an upgrade makes mixed-build files
         // the normal case.
@@ -461,6 +486,24 @@ namespace TensileLite
         int32_t baselineIndex  = -1;
         double  baselineTimeUs = 0.0;
     };
+
+    /**
+     * Whether a ceiling of nowMs can get further than one of thenMs did.
+     *
+     * Zero is unlimited on either side, so an unlimited run beats any finite one
+     * and nothing beats a previous unlimited run. A negative thenMs is a row
+     * written before the ceiling was recorded: the answer is unknowable, so it
+     * is worth one more attempt, and the row that attempt writes carries the
+     * value from then on.
+     */
+    inline bool tuningBudgetIsMoreGenerous(int64_t nowMs, int64_t thenMs)
+    {
+        if(thenMs < 0)
+            return true;
+        if(thenMs == 0)
+            return false;
+        return nowMs == 0 || nowMs > thenMs;
+    }
 
     std::optional<std::pair<ProblemOverride, TunedEntry>>
         problemFromEntries(const std::map<std::string, std::string>& row);
@@ -513,6 +556,8 @@ namespace TensileLite
     enum class TuningAttempt : uint32_t
     {
         Tuned = 0,
+        /** Budget stopped the search, but a winner was measured and recorded. */
+        TunedPartial,
         SkippedInPlaceBeta,
         SkippedExtentUnknown,
         SkippedScratchCap,
@@ -560,25 +605,28 @@ namespace TensileLite
     void recordTuningLookup(const ProblemOverride& key, bool matched);
 
     /**
-     * Note that a full search for this problem ran and produced nothing, and
-     * ask whether one already has.
+     * Note that this process has already benchmarked this problem, and ask
+     * whether it has.
      *
-     * A search the budget cuts short is discarded rather than cached, and so is
-     * one where no candidate could be measured. The shape therefore stays
-     * uncached, and without this latch the next matmul starts the same doomed
-     * search again: a 4096-cubed shape under a 30 s ceiling re-ran it on every
-     * call, spending the whole ceiling each time and never recording a row.
+     * Set for the outcomes that spent the search and left the shape wanting
+     * another one. Without it the next matmul starts the same search again: a
+     * 4096-cubed shape under a 30 s ceiling re-ran it on every call, spending
+     * the whole ceiling each time and never recording a row. A truncated search
+     * that did record a partial winner needs the latch just as much, because the
+     * retry would measure the same prefix under the same ceiling and reach the
+     * same answer.
      *
-     * Only the two outcomes that reach the measurement loop are latched. The
-     * early declines cost microseconds, so retrying them is free and lets a
-     * shape recover if the condition was transient.
+     * A search that finished needs no latch, since its entry closes the gate on
+     * its own. Neither do the declines made before the measurement loop: they
+     * cost microseconds, so retrying them is free and lets a shape recover if
+     * the condition was transient.
      *
      * Per process, not per file. Raising or clearing
      * HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE in a later run is what lets the shape
      * finish, so the latch must not outlive the process that set it.
      */
-    void recordFruitlessTuning(const ProblemOverride& key);
-    bool tuningWasFruitless(const ProblemOverride& key);
+    void recordTuningAttempt(const ProblemOverride& key);
+    bool tuningAlreadyAttempted(const ProblemOverride& key);
 
     /**
      * Note that this problem was successfully tuned in this process.
@@ -801,6 +849,38 @@ namespace TensileLite
 
             m_legacy.emplace(narrow, entry);
             return true;
+        }
+
+        /**
+         * Whether this key is worth benchmarking again to finish its search.
+         *
+         * Three things must hold. The key has entries at all, so this is not
+         * simply an untuned shape. None of them finished, which is deliberately
+         * "none is complete" rather than "any is partial": the file is
+         * append-only, so the run that finishes a search appends its winner
+         * beside the partial row instead of rewriting it, and a key holding both
+         * has been tuned properly at least once. And this run's ceiling beats
+         * every ceiling those rows were written under, since a run that cannot
+         * get further would measure the same prefix, stop in the same place, and
+         * append another identical row.
+         *
+         * Only the widened map is consulted: a legacy row has no completeness to
+         * record and is never partial.
+         */
+        bool needsFinishing(const ProblemOverride& key, int64_t currentBudgetMs)
+        {
+            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
+            auto                                      range = m_override.equal_range(key);
+            bool                                      any   = false;
+            for(auto it = range.first; it != range.second; ++it)
+            {
+                any = true;
+                if(it->second.complete)
+                    return false;
+                if(!tuningBudgetIsMoreGenerous(currentBudgetMs, it->second.budgetMs))
+                    return false;
+            }
+            return any;
         }
 
         /**

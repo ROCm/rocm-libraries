@@ -500,6 +500,71 @@ namespace
         return true;
     }
 
+    /**
+     * Delete one named column, header cell and value cell, from every row.
+     *
+     * Produces what a file written by a build that predates the column looks
+     * like, which is the shape of every cache a user upgrades with.
+     */
+    bool dropColumn(const std::string& path, const std::string& column)
+    {
+        auto lines = readLines(path);
+        if(lines.empty())
+            return false;
+
+        auto split = [](const std::string& s) {
+            std::vector<std::string> out;
+            std::stringstream        ss(s);
+            std::string              cell;
+            while(std::getline(ss, cell, ','))
+            {
+                const auto b = cell.find_first_not_of(" \t");
+                const auto e = cell.find_last_not_of(" \t");
+                out.push_back(b == std::string::npos ? "" : cell.substr(b, e - b + 1));
+            }
+            return out;
+        };
+
+        auto join = [](const std::vector<std::string>& cells) {
+            std::ostringstream out;
+            for(size_t c = 0; c < cells.size(); c++)
+                out << (c ? "," : "") << cells[c];
+            return out.str();
+        };
+
+        bool changed = false;
+        for(size_t i = 0; i + 1 < lines.size(); i++)
+        {
+            if(lines[i].find("transA") == std::string::npos)
+                continue;
+
+            auto names  = split(lines[i]);
+            auto values = split(lines[i + 1]);
+            for(size_t c = 0; c < names.size(); c++)
+            {
+                if(names[c] != column)
+                    continue;
+                names.erase(names.begin() + c);
+                if(c < values.size())
+                    values.erase(values.begin() + c);
+                changed = true;
+                break;
+            }
+
+            lines[i]     = "    " + join(names);
+            lines[i + 1] = join(values);
+            i++;
+        }
+
+        if(!changed)
+            return false;
+
+        std::ofstream out(path, std::ios::trunc);
+        for(const auto& l : lines)
+            out << l << "\n";
+        return true;
+    }
+
     bool fileHasColumn(const std::string& path, const std::string& column)
     {
         for(const auto& line : readLines(path))
@@ -1271,25 +1336,148 @@ namespace
         EXPECT_EQ(counters().tuned, 0u) << "the winner was somehow written to " << unwritable;
     }
 
-    // A search the budget cuts short records nothing, so the shape stays
-    // uncached and the next matmul would start the same doomed search again.
-    // Unlatched, that is the whole ceiling spent on every call for the life of
-    // the process rather than once.
+    // An entry the budget cut short is usable but not final: it is replayed like
+    // any other, and a run that can finish the search replaces it rather than
+    // living with the best of an arbitrary prefix.
+    TEST_F(TuningCache, PartialEntryReplaysAndIsRetuned)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_TRUE(fileHasColumn(m_path, "complete")) << "completeness was not recorded";
+
+        // Demote the row to what a search stopped by a one-second ceiling would
+        // have written. Doing it this way rather than by inducing a real
+        // truncation keeps the test off the clock: a budget that stops the
+        // search partway through is a race.
+        ASSERT_TRUE(rewriteColumn(m_path, "complete", "0"));
+        ASSERT_TRUE(rewriteColumn(m_path, "budget_ms", "1000"));
+        const size_t before = valueRowCount(m_path);
+
+        enterMode("cache", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_GE(counters().hits, 1u) << "a partial entry was not replayed";
+
+        // The fixture runs with no ceiling, which beats the recorded one.
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_GT(valueRowCount(m_path), before) << "a partial entry was never re-tuned";
+    }
+
+    // Re-tuning is worth a stall only when this run can get further than the one
+    // that gave up. Under the same ceiling it would measure the same prefix,
+    // stop in the same place, and append an identical row, so a shape that keeps
+    // truncating must not cost the ceiling on every process that opens the file.
+    TEST_F(TuningCache, PartialEntryIsNotRetunedUnderTheSameCeiling)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_TRUE(rewriteColumn(m_path, "complete", "0"));
+        ASSERT_TRUE(rewriteColumn(m_path, "budget_ms", "1000"));
+
+        const size_t before = valueRowCount(m_path);
+        ASSERT_GT(before, 0u) << "tune mode recorded nothing";
+
+        enterMode("tune", m_path);
+        setenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "1000", 1);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+        EXPECT_EQ(valueRowCount(m_path), before)
+            << "a partial entry was re-tuned under the ceiling that already stopped it";
+    }
+
+    // The file is append-only, so a shape tuned partially and later properly
+    // ends up holding both rows. The superseded partial row must not keep the
+    // shape looking untuned, or the finished search is repeated on every process
+    // start for the life of the file.
+    TEST_F(TuningCache, PartialRowBesideCompleteRowDoesNotRetune)
+    {
+        // Two searches over different candidate pools, so the second is likely
+        // to land on a different kernel and leave two distinct entries under one
+        // key. If they do coincide the later row simply refreshes the earlier
+        // one, which this must also survive.
+        enterMode("tune", m_path);
+        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_TRUE(rewriteColumn(m_path, "complete", "0"));
+        ASSERT_TRUE(rewriteColumn(m_path, "budget_ms", "1000"));
+
+        enterMode("tune", m_path);
+        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "16", 1);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+        const size_t before = valueRowCount(m_path);
+        ASSERT_GT(before, 1u) << "the finishing run did not append beside the partial row";
+
+        enterMode("tune", m_path);
+        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "16", 1);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_EQ(valueRowCount(m_path), before)
+            << "a superseded partial row kept the shape looking untuned";
+    }
+
+    // The other half of that gate. A finished entry must close it, or every
+    // tune-mode process would pay the whole search again on a warm cache.
+    TEST_F(TuningCache, CompleteEntryIsNotRetuned)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+        const size_t before = valueRowCount(m_path);
+        ASSERT_GT(before, 0u) << "tune mode recorded nothing";
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_EQ(valueRowCount(m_path), before) << "a complete entry was re-tuned";
+    }
+
+    // Rows written before the completeness column existed must read as complete.
+    // Reading them as partial would re-tune every shape in an existing cache on
+    // the first run after an upgrade, which is the stall this whole feature is
+    // trying to avoid.
+    TEST_F(TuningCache, RowWithoutCompleteColumnIsTreatedAsComplete)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+        ASSERT_TRUE(dropColumn(m_path, "complete"));
+        ASSERT_FALSE(fileHasColumn(m_path, "complete"));
+        const size_t before = valueRowCount(m_path);
+        ASSERT_GT(before, 0u) << "tune mode recorded nothing";
+
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_EQ(valueRowCount(m_path), before)
+            << "a row predating the column was re-tuned as if it were partial";
+    }
+
+    // A search the budget cuts short is attempted once per process. The retry
+    // would run under the same ceiling and stop in the same place, so leaving it
+    // unlatched spends the whole ceiling on every call for the life of the
+    // process rather than once.
     TEST_F(TuningCache, BudgetExhaustedShapeIsNotRetried)
     {
         enterMode("tune", m_path);
 
-        // Small enough that the search is already over budget by the time the
-        // first candidate would be measured, so the test costs one enumeration.
+        // A ceiling this small stops the search either before the first
+        // candidate is measured or just after, and which one is a matter of how
+        // long setup happened to take. Both are correct, and they end
+        // differently: nothing measured is a skip that records no row, whereas
+        // one candidate measured is a partial winner that records exactly one.
+        // What must hold either way is that it happened once.
         setenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "1", 1);
         hipblaslt_tuning_reset_for_test();
 
         for(int i = 0; i < 3; i++)
             ASSERT_TRUE(runGemm(1024, 512, 1024));
 
-        EXPECT_EQ(counters().skipped, 1u)
+        const auto c = counters();
+        EXPECT_EQ(c.skipped + c.tuned, 1u)
             << "the shape re-tuned after its budget ran out, so every call pays the ceiling";
-        EXPECT_EQ(valueRowCount(m_path), 0u) << "a truncated search must not be cached";
+        EXPECT_LE(valueRowCount(m_path), 1u) << "a truncated search appended more than one row";
     }
 
     // One stale row is met three times in a tune-mode call: the heuristic

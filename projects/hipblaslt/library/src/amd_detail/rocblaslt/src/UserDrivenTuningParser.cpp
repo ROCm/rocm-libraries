@@ -151,6 +151,8 @@ namespace TensileLite
         {
         case TuningAttempt::Tuned:
             return "tuned";
+        case TuningAttempt::TunedPartial:
+            return "tuned from a search the time budget stopped early";
         case TuningAttempt::SkippedInPlaceBeta:
             return "in-place C==D with nonzero beta cannot be measured without mutating its input";
         case TuningAttempt::SkippedExtentUnknown:
@@ -210,11 +212,11 @@ namespace TensileLite
             std::unordered_set<ProblemOverride>       tunedKeys;
             std::unordered_map<ProblemOverride, bool> lookups;
 
-            // Not a diagnostic: shapes whose search already ran and produced
-            // nothing, so the tuner declines to repeat it. Kept here because
-            // this is where the per-key process-lifetime state and its mutex
-            // already live.
-            std::unordered_set<ProblemOverride> fruitlessKeys;
+            // Not a diagnostic: shapes this process has already benchmarked,
+            // so the tuner declines to repeat the search whatever it produced.
+            // Kept here because this is where the per-key process-lifetime
+            // state and its mutex already live.
+            std::unordered_set<ProblemOverride> attemptedKeys;
 
             // Solution indexes already counted as rejected, per key. A key can
             // hold several entries and each is its own rejected entry, so the
@@ -386,18 +388,18 @@ namespace TensileLite
             inserted.first->second = true;
     }
 
-    void recordFruitlessTuning(const ProblemOverride& key)
+    void recordTuningAttempt(const ProblemOverride& key)
     {
         DiagnosticsState&           state = DiagnosticsState::instance();
         std::lock_guard<std::mutex> lock(state.mutex);
-        state.fruitlessKeys.insert(key);
+        state.attemptedKeys.insert(key);
     }
 
-    bool tuningWasFruitless(const ProblemOverride& key)
+    bool tuningAlreadyAttempted(const ProblemOverride& key)
     {
         DiagnosticsState&           state = DiagnosticsState::instance();
         std::lock_guard<std::mutex> lock(state.mutex);
-        return state.fruitlessKeys.count(key) != 0;
+        return state.attemptedKeys.count(key) != 0;
     }
 
     void recordTuningWinner(const ProblemOverride& key)
@@ -436,7 +438,9 @@ namespace TensileLite
         // per-key slot. A failed attempt records no winner, so the same key is
         // attempted again on the next matmul and can succeed, and that later
         // tuning-done is the line explaining the minutes the caller just spent.
-        if(result == TuningAttempt::Tuned)
+        // A partial tune counts as a success here: it recorded a winner, and the
+        // run that finishes the search is a different process with its own slot.
+        if(result == TuningAttempt::Tuned || result == TuningAttempt::TunedPartial)
             return state.doneKeys.insert(key).second;
 
         // Announcing a start is a promise that something will say how it ended,
@@ -483,7 +487,7 @@ namespace TensileLite
         state.invalidKeys.clear();
         state.tunedKeys.clear();
         state.invalidEntries.clear();
-        state.fruitlessKeys.clear();
+        state.attemptedKeys.clear();
         state.lookups.clear();
     }
 
@@ -907,6 +911,18 @@ namespace TensileLite
                 = static_cast<size_t>(std::max<int64_t>(0, num(row, "required_workspace")));
         entry.winnerTimeUs = real(row, "us");
 
+        // Absent means complete: rows predating the column were only ever
+        // written by a search that ran to the end of the candidate list. A
+        // malformed value falls the same way, since treating an unreadable cell
+        // as partial would re-tune the shape on every process start.
+        entry.complete = num(row, "complete", 1) != 0;
+
+        // Negative when absent, meaning the ceiling that produced the row is
+        // unknown rather than unlimited. Defaulting to 0 would read as "the
+        // last run was already unlimited" and retire the shape from ever
+        // being finished.
+        entry.budgetMs = num(row, "budget_ms", -1);
+
         return std::make_pair(po, entry);
     }
 
@@ -1067,6 +1083,13 @@ namespace TensileLite
         column("kernel_name", entry.kernelName.value_or(std::string{}));
         column("required_workspace", entry.requiredWorkspaceBytes);
         column("us", entry.winnerTimeUs);
+
+        // Additive rather than part of the required set, so a file written
+        // before this column existed still parses. Every row emits its own
+        // header line, so a reader that does not know the column simply never
+        // looks for it.
+        column("complete", entry.complete ? 1 : 0);
+        column("budget_ms", entry.budgetMs);
 
         // One write for the header and the row together, rather than a flush
         // apiece. The process mutex above orders writers inside this process,
