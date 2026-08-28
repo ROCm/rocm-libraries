@@ -3,17 +3,28 @@
 # SPDX-License-Identifier: MIT
 """UHD Generation Tool CLI.
 
-Train a LightGBM model from benchmark data and export to FlatBuffer format
-for use with hipDNN's TreeDataAdapter.
+Two subcommands, one per stage of RFC 0019.13's pipeline that exists today:
 
-Usage:
-    python -m uhd_gen \\
-        --input benchmark_results.csv \\
-        --features M N K tile_m tile_n cu_count \\
+    export-benchmarks   ingestor benchmark log -> §8.3 training CSV
+    train               training CSV -> UHD descriptor + model artifact
+
+Collect and train:
+
+    HIPDNN_LOG_LEVEL=info HIPDNN_LOG_FILE=sweep.log <run the graphs you care about>
+
+    python -m uhd_gen export-benchmarks sweep.log -o bench.csv
+
+    python -m uhd_gen train \\
+        --input bench.csv \\
+        --features q.seqlen_q kernel.block_size device.cu_count \\
         --target tflops \\
-        --group-by M N K \\
+        --group-by q.seqlen_q \\
         --output-dir ./uhd_output \\
-        --name "GEMM UHD"
+        --descriptor-name pointwise \\
+        --name "Pointwise UHD"
+
+Features must be namespace-qualified (`q.`, `kernel.`, `device.`); an unqualified
+name produces a descriptor that loads but never scores.
 """
 from __future__ import annotations
 
@@ -26,6 +37,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from .benchmark_log import main as benchmark_log_main
 from .features import build_features_signature, compute_features_hash
 from .lgbm_to_flatbuffer import convert
 from .train_uhd import train_model
@@ -62,12 +74,42 @@ def _looks_like_cost_metric(target: str) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Main entry point."""
+    """Dispatch to a subcommand."""
     parser = argparse.ArgumentParser(
-        description="Generate UHD heuristic from benchmark data",
+        prog="uhd_gen",
+        description="Generate a UHD heuristic from benchmark data",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Thin delegation: the exporter owns its own arguments, and duplicating them
+    # here would be a second place for them to drift.
+    subparsers.add_parser(
+        "export-benchmarks",
+        add_help=False,
+        help="convert an ingestor benchmark log into the §8.3 training CSV",
+    )
+
+    train = subparsers.add_parser(
+        "train",
+        help="train a UHD from a benchmark CSV",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_train_arguments(train)
+
+    # export-benchmarks parses its own argv tail, so it is split off before the
+    # main parser sees flags it does not declare.
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "export-benchmarks":
+        return benchmark_log_main(argv[1:])
+
+    args = parser.parse_args(argv)
+    return _run_train(args)
+
+
+def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--input",
         required=True,
@@ -155,9 +197,20 @@ def main(argv: list[str] | None = None) -> int:
         dest="model_version",
         help="Semantic version for the model (e.g., 1.0.0). Embedded in model metadata.",
     )
+    parser.add_argument(
+        "--descriptor-name",
+        dest="descriptor_name",
+        default="heuristic",
+        help=(
+            "Stem for the emitted descriptor pair, producing <stem>.uhd.json and "
+            "<stem>.uhd.fb (default: heuristic). DescriptorLoader discovers a "
+            "heuristic by the <name>.uhd.json suffix, so a bare 'uhd.json' is "
+            "invisible to it."
+        ),
+    )
 
-    args = parser.parse_args(argv)
 
+def _run_train(args: argparse.Namespace) -> int:
     input_path = Path(args.input)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -167,7 +220,20 @@ def main(argv: list[str] | None = None) -> int:
         df = pd.read_json(input_path)
     else:
         df = pd.read_csv(input_path)
-    logger.info("Loaded %d rows", len(df))
+    logger.info("Loaded %d row(s)", len(df))
+
+    # RFC 0019.13 §10.2 step 1. A §8.3 CSV records the pairs that failed to run so
+    # coverage can be audited; they carry no timings, so training on them would fit
+    # the model to empty cells. Absent column means the CSV predates the envelope.
+    if "is_valid" in df.columns:
+        before = len(df)
+        df = df[df["is_valid"].astype(str).str.lower() == "true"]
+        skipped = before - len(df)
+        if skipped:
+            logger.info("Dropped %d row(s) with is_valid=False", skipped)
+        if df.empty:
+            logger.error("Every row in %s is is_valid=False; nothing to train on", input_path)
+            return 1
 
     missing = set(args.features) - set(df.columns)
     if missing:
@@ -220,34 +286,14 @@ def main(argv: list[str] | None = None) -> int:
         lgbm_path.unlink()
         logger.info("Removed intermediate %s", lgbm_path)
 
-    # Generate UHD identifier
     uhd_id = str(uuid.uuid4())
+    stem = args.descriptor_name
+    uhd_fb_name = f"{stem}.uhd.fb"
+    uhd_fb_path = output_dir / uhd_fb_name
 
-    # Write JSON descriptor for human readability
-    uhd_json = {
-        "schema": "hipdnn.uhd/v1",
-        "id": uhd_id,
-        "name": args.name,
-        "adapter": "tree_data",
-        "features_signature": features_signature,
-        "features_hash": features_hash,
-        "objective": args.objective,
-        # transform is log1p because train_uhd.train_model always fits on
-        # log1p(target); the runtime inverts it to recover the declared units.
-        "score": {
-            "units": args.score_units or args.target,
-            "calibrated": args.calibrated,
-            "transform": "log1p",
-        },
-        "model": {"artifact": "model.bin"},
-    }
-    uhd_json_path = output_dir / "uhd.json"
-    with open(uhd_json_path, "w") as f:
-        json.dump(uhd_json, f, indent=2)
-    logger.info("Generated UHD JSON descriptor: %s", uhd_json_path)
-
-    # Write FlatBuffer UHD (RFC 0019 §9.2 descriptor format)
-    uhd_fb_path = output_dir / "uhd.fb"
+    # The UHD itself: features, objective, score units, and the artifact it names.
+    # `model_artifact_path` is relative to this file, which is where UhdLoader
+    # resolves it from, so the pair relocates together.
     convert_uhd(
         uhd_id=uhd_id,
         name=args.name,
@@ -257,17 +303,44 @@ def main(argv: list[str] | None = None) -> int:
         objective=args.objective,
         score_units=args.score_units or args.target,
         score_calibrated=args.calibrated,
+        # log1p because train_uhd.train_model always fits on log1p(target); the
+        # runtime inverts it to recover the declared units.
         score_transform="log1p",
         output_path=uhd_fb_path,
-        model_artifact_path="model.bin",
+        model_artifact_path=fb_path.name,
     )
-    logger.info("Generated UHD FlatBuffer: %s", uhd_fb_path)
+    logger.info("Generated UHD: %s", uhd_fb_path)
+
+    # The descriptor the ingestor actually discovers. DescriptorLoader globs
+    # `<name>.uhd.json` and reads `payload` as a path relative to that file; the
+    # previous `uhd.json` matched no glob and named no artifact, so nothing loaded
+    # it. Its human-readable content is not reproduced here -- a third spelling of
+    # the same fields is the drift RFC 0019.13 §6.3 exists to prevent. Read the
+    # emitted .uhd.fb, or the manifest below.
+    descriptor = {
+        "version": "1.0",
+        "id": uhd_id,
+        "name": args.name,
+        "kind": "model",
+        "payload": uhd_fb_name,
+    }
+    descriptor_path = output_dir / f"{stem}.uhd.json"
+    with open(descriptor_path, "w", encoding="utf-8") as handle:
+        json.dump(descriptor, handle, indent=2)
+        handle.write("\n")
+    logger.info("Generated descriptor: %s", descriptor_path)
 
     manifest = {
+        "uhd_id": uhd_id,
         "features": args.features,
-        "target": args.target,
-        "group_by": args.group_by or [],
+        "features_signature": features_signature,
         "features_hash": features_hash,
+        "target": args.target,
+        "objective": args.objective,
+        "score_units": args.score_units or args.target,
+        "score_calibrated": args.calibrated,
+        "score_transform": "log1p",
+        "group_by": args.group_by or [],
         "num_trees": model.num_trees(),
         "num_samples": len(df),
         "input_file": str(input_path),
@@ -275,15 +348,19 @@ def main(argv: list[str] | None = None) -> int:
         "model_version": args.model_version,
     }
     manifest_path = output_dir / "train_manifest.json"
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2)
     logger.info("Wrote training manifest: %s", manifest_path)
 
-    print(f"\nUHD Generation Complete")
-    print(f"  UHD FlatBuffer: {uhd_fb_path}")
-    print(f"  UHD JSON:       {uhd_json_path}")
-    print(f"  Model artifact: {fb_path} ({model.num_trees()} trees)")
-    print(f"  Features hash:  {features_hash}")
+    print("\nUHD generation complete")
+    print(f"  descriptor:     {descriptor_path}")
+    print(f"  UHD:            {uhd_fb_path}")
+    print(f"  model artifact: {fb_path} ({model.num_trees()} trees)")
+    print(f"  features hash:  {features_hash}")
+    print(
+        "\nThe engine's UED must name this heuristic by id:\n"
+        f'  "heuristic": "{uhd_id}"'
+    )
 
     return 0
 
