@@ -3977,19 +3977,23 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // cover the stream as well as the problem index: offsetting by index
             // alone keeps one grouped call internally safe but still shares the
             // region with every other stream.
+            //
+            // A group wider than one stream's block has no private region left
+            // for the problems past it, and every problem in a group runs in one
+            // kernel launch, so handing two of them the same region would let
+            // one clear a flag the other is spinning on. Such a group keeps the
+            // shared GSU regions it is given at problem-creation time, which are
+            // still distinct per problem and so safe within the launch; the
+            // cross-stream exposure there is no worse than on any other path
+            // that uses them.
             if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
-               && !solution->problemType.outputAmaxD)
+               && !solution->problemType.outputAmaxD
+               && data->inputs.grouped.size() <= _rocblaslt_handle::c_syncSkSlotsPerStream)
             {
                 for(size_t i = 0; i < data->inputs.grouped.size(); i++)
                 {
-                    // SynchronizerSizeCheck refuses every solution that uses
-                    // these flags once the group is wider than the block, so
-                    // problems past it never read the pointer. Give them the
-                    // stream's first region rather than failing a call that runs
-                    // fine without it.
-                    const size_t slot   = i < _rocblaslt_handle::c_syncSkSlotsPerStream ? i : 0;
-                    void*        region = nullptr;
-                    if(rocblaslt_status s = handle->streamKFlagsForStream(stream, slot, &region);
+                    void* region = nullptr;
+                    if(rocblaslt_status s = handle->streamKFlagsForStream(stream, i, &region);
                        s != rocblaslt_status_success)
                     {
                         log_error(__func__,
