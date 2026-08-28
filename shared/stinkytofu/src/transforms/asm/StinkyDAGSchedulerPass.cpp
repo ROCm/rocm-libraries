@@ -588,6 +588,10 @@ static void scheduleRegionWithMovableSideEffects(
     // contradictory requests across barrier groups are possible).
     std::vector<HardSchedulingConstraint> requestedConstraints;
     readyQueue.onInitRegion(regionStart, regionEnd, blockBegin, requestedConstraints);
+    // Provenance only (not consulted by scheduling): which merged dagGraph edges are
+    // policy-injected rather than real register dependencies, so debug output can still
+    // tell them apart now that both live in the same graph.
+    std::set<std::pair<unsigned, unsigned>> mergedHardConstraintEdges;
     for (const auto& [predecessor, successor] : requestedConstraints) {
         auto predecessorIt = instToId.find(predecessor);
         auto successorIt = instToId.find(successor);
@@ -603,11 +607,12 @@ static void scheduleRegionWithMovableSideEffects(
         }
         dagGraph[predecessorId].insert(successorId);
         ++dagNodes[successorId].inDegree;
+        mergedHardConstraintEdges.emplace(predecessorId, successorId);
         PASS_DEBUG(std::cerr << "[DAG hard constraint] add link " << predecessorId << " -> "
                              << successorId << "\n");
     }
 
-    PASS_DEBUG(dag::dumpDAGGraph(regionDag, std::cerr));
+    PASS_DEBUG(dag::dumpDAGGraph(regionDag, std::cerr, mergedHardConstraintEdges));
 
     // Kahn's algorithm with stable pick (by original order)
 

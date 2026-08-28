@@ -24,8 +24,10 @@
 
 #include <cassert>
 #include <iosfwd>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "ReadyQueue.hpp"
@@ -82,8 +84,12 @@ RegionDAG buildRegisterDependencyDAG(const std::vector<StinkyInstruction*>& inst
 /// Same as above for an IRList region iterator pair.
 RegionDAG buildRegisterDependencyDAG(IRList::iterator regionStart, IRList::iterator regionEnd);
 
-/// Print each DAG node and its successor IDs.
-void dumpDAGGraph(const RegionDAG& dag, std::ostream& os);
+/// Print each DAG node and its successor IDs. \p hardConstraintEdges, if given, marks which
+/// edges are scheduler-policy links (not real register dependencies) merged into \p dag by
+/// the caller, so debug output can still tell the two apart even though they now share one
+/// graph.
+void dumpDAGGraph(const RegionDAG& dag, std::ostream& os,
+                  const std::set<std::pair<unsigned, unsigned>>& hardConstraintEdges = {});
 
 }  // namespace dag
 }  // namespace stinkytofu
