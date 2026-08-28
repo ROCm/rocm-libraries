@@ -5048,7 +5048,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Should check for is swizzled instead of usesubtileimpl
     # TODO: Move this calculation to host-side?
-    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockA"] and kernel["UseSubtileImpl"]:
+    if (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) and kernel["UseSubtileImpl"]:
       # The scale GR steps one group per 32 rows of the free dim, so Strides<tc>
       # has to hold that group's byte span: paddedKBlocks * 32, where
       # paddedKBlocks is ceil(K/mxBlock) rounded up to a multiple of 8 (the
@@ -5064,7 +5064,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # that case rather than from a stride that does not describe it.
       for tc in ("MXSA", "MXSB"):
         mxBlock = kernel["ProblemType"]["MXBlock%s" % tc[-1]]
-        if kernel["ProblemType"]["TLU%s" % tc] and mxBlock:
+        if not mxBlock:
+          # No scales on this operand, so Strides<tc> is not a scale stride --
+          # and may not be allocated at all.
+          continue
+        if kernel["ProblemType"]["TLU%s" % tc]:
           module.addComment("%s group span = roundUp(ceil(K/%u), 8) * 32" % (tc, mxBlock))
           module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("SizesSum"), src1=(mxBlock - 1),
                              comment="K + %u - 1"%mxBlock))
