@@ -52,6 +52,10 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
         "benchmark timing coverage file under common/benchmark_runs",
     ),
     SyncsPerBenchmarkOptOut(
+        "common/benchmark_runs/f4_nt_gfx950.yaml",
+        "benchmark timing coverage file under common/benchmark_runs",
+    ),
+    SyncsPerBenchmarkOptOut(
         "common/benchmark_runs/fp16_tn_gfx11.yaml",
         "benchmark timing coverage file under common/benchmark_runs",
     ),
@@ -78,10 +82,6 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
     SyncsPerBenchmarkOptOut(
         "common/gemm/fp8nfp16mix_hfp8ns.yaml",
         "LibraryLogic requires benchmark data to build the library table",
-    ),
-    SyncsPerBenchmarkOptOut(
-        "common/gemm/gfx950/f4_nt_maf.yaml",
-        "MAF roofline benchmark; the reported FLOPs come from the timing loop",
     ),
     SyncsPerBenchmarkOptOut(
         "common/gemm/icache_flush.yaml",

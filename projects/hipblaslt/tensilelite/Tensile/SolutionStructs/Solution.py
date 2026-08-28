@@ -5598,7 +5598,8 @@ class Solution(collections.abc.Mapping):
     # (see Components/Subtile), so the classic partial-load guarantees do not
     # apply; treat loads as non-partial to skip the classic graShift path.
     # This covers every subtile kernel, TN bf16 and fp8 included -- what stands
-    # behind it is the edge coverage in f4_subtile.yaml and subtile_mxfp4.yaml.
+    # behind it is the edge coverage in subtile_mxfp4_tlu1.yaml and
+    # subtile_mxfp4.yaml.
     if state["ProblemType"]["TLUA"] and not state["UseSubtileImpl"]:
       state["GuaranteeNoPartialA"] = state["AssertFree0ElementMultiple"]%state["GlobalReadVectorWidthA"]==0
     else:
