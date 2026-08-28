@@ -16,9 +16,17 @@
 // benchmarked together.
 //
 // KNOBS
-//   F2_WAVES  waves per CTA (1,2,4)          -> blockDim = 64*WAVES
-//   F2_QG     query groups per wave (1,2,4)  -> queries/CTA = WAVES*QG*16
+//   F2_WAVES  waves per CTA (4 or 8)         -> blockDim = 64*WAVES
+//   F2_QG     query groups per wave (1,2,3)  -> queries/CTA = WAVES*QG*16
 //   F2_KG     key groups per tile  (2,4)     -> BK = KG*16 (32 or 64)
+//
+// The five variants the dispatcher ships, and their launch geometry:
+//   w4q1k4  WAVES=4 QG=1 KG=4  ->  256 threads,  64 queries/CTA
+//   w8q1k4  WAVES=8 QG=1 KG=4  ->  512 threads, 128 queries/CTA
+//   w8q2k4  WAVES=8 QG=2 KG=4  ->  512 threads, 256 queries/CTA
+//   w8q3k2  WAVES=8 QG=3 KG=2  ->  512 threads, 384 queries/CTA
+//   w8q3k4  WAVES=8 QG=3 KG=4  ->  512 threads, 384 queries/CTA
+// The defaults below are the tuning-sweep defaults, not a shipped variant.
 //   F2_PIPE   0/1 software-pipelined prefetch of the next KV tile
 //   F2_PAD    pad on the D axis of sK   (LDS bank skew)
 //   F2_PADK   pad on the key axis of sVT (LDS bank skew; 0 is a known trap)

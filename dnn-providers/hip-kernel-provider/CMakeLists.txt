@@ -98,8 +98,9 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     # builder checks HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK against the
     # geometry the table claims and hard-errors on mismatch.
     #
-    # Off by default because the .co files are checked in prebuilt -- turn it
-    # on only to regenerate them:
+    # Off by default. Only the legacy hip_flash2_fwd_gfx942.co is tracked in
+    # git; the per-variant objects are not, so build this target before
+    # installing if you want per-shape dispatch to be active:
     #   cmake -DENABLE_HIP_FLASH2_ENGINE=ON -DHIP_FLASH2_BUILD_VARIANTS=ON ...
     #   cmake --build . --target hip_flash2_variants
     #
@@ -113,6 +114,16 @@ if(ENABLE_HIP_FLASH2_ENGINE)
         find_program(HIP_FLASH2_HIPCC hipcc HINTS ${ROCM_PATH}/bin /opt/rocm/bin)
         if(NOT HIP_FLASH2_HIPCC)
             message(FATAL_ERROR "HIP_FLASH2_BUILD_VARIANTS=ON but hipcc was not found")
+        endif()
+
+        # Respect GPU_TARGETS rather than hardcoding gfx942: hardcoding both the
+        # flag and the output filename silently produces mislabelled objects if
+        # anyone points the build at another arch. Single-arch only -- the
+        # variant filename encodes one arch, so a multi-arch GPU_TARGETS list
+        # takes the first entry.
+        set(_f2_arch "gfx942")
+        if(GPU_TARGETS)
+            list(GET GPU_TARGETS 0 _f2_arch)
         endif()
 
         set(_f2_src ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/HipFlash2FwdPlanVariant.hip)
@@ -138,11 +149,11 @@ if(ENABLE_HIP_FLASH2_ENGINE)
             list(GET _vf 1 _waves)
             list(GET _vf 2 _qg)
             list(GET _vf 3 _kg)
-            set(_co ${_f2_out}/hip_flash2_fwd_gfx942_${_tag}.co)
+            set(_co ${_f2_out}/hip_flash2_fwd_${_f2_arch}_${_tag}.co)
             add_custom_command(
                 OUTPUT ${_co}
                 COMMAND ${HIP_FLASH2_HIPCC} --genco -O3 -std=c++17
-                        --offload-arch=gfx942
+                        --offload-arch=${_f2_arch}
                         -DF2_WAVES=${_waves} -DF2_QG=${_qg} -DF2_KG=${_kg}
                         ${_f2_src} -o ${_co}
                 DEPENDS ${_f2_src}
@@ -150,6 +161,14 @@ if(ENABLE_HIP_FLASH2_ENGINE)
                 VERBATIM)
             list(APPEND _f2_targets ${_co})
         endforeach()
+
+        # The partial-tile correctness probe is a standalone HIP program, built
+        # only under this same opt-in flag. Leaving it in no target at all was
+        # the same class of problem as the dispatch test, which was fixed by
+        # registering it with hip_kernel_provider_tests.
+        add_executable(hip_flash2_partial_tile_probe EXCLUDE_FROM_ALL
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/tools/partial_tile_probe.cpp)
+        target_link_libraries(hip_flash2_partial_tile_probe PRIVATE hip::host)
 
         add_custom_target(hip_flash2_variants
             DEPENDS ${_f2_targets}
@@ -159,12 +178,28 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     # Install any variant objects that are present. The engine falls back to
     # the legacy single-kernel object when a variant is absent, so a partial
     # or empty set is safe.
-    file(GLOB _f2_variant_cos
-         ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942_*.co)
-    if(_f2_variant_cos)
-        install(FILES ${_f2_variant_cos}
-            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels)
-    endif()
+    #
+    # The glob MUST be evaluated at install time, not configure time. The
+    # documented workflow is configure -> build hip_flash2_variants -> install,
+    # so at configure time the variant objects do not exist yet. A plain
+    # file(GLOB) + install(FILES) silently installs nothing in that order and
+    # leaves the dispatcher inert with no diagnostic (found by S. Reeder, who
+    # measured it: variants staged after configure -> legacy object only;
+    # staged before configure -> all six).
+    install(CODE "
+        file(GLOB _f2_co
+             \"${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_*_*.co\")
+        if(_f2_co)
+            file(INSTALL
+                 DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels\"
+                 TYPE FILE FILES \${_f2_co})
+        else()
+            message(STATUS
+                \"HipFlash2: no variant .co objects found; installing the legacy \"
+                \"single-kernel object only. Build the hip_flash2_variants target \"
+                \"before installing to enable per-shape dispatch.\")
+        endif()
+    ")
 else()
     message(STATUS "HIP Flash2 SDPA engine disabled")
 endif()

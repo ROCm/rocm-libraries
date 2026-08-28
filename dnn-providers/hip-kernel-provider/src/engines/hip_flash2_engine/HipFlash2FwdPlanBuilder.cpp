@@ -270,10 +270,19 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
     // Verify the object was actually built with the geometry the variant table
     // claims. The file probe above only proves a file exists at that path --
     // it says nothing about how the object was compiled. A mismatch is not
-    // benign: a 64-thread object launched with 512 threads fails every launch
-    // with hipError 719, and the reverse computes silently wrong results.
-    // (S. Reeder demonstrated the first case by copying the legacy 64-thread
-    // .co over the five variant names: the suite went 6/6 to 0/6, all 719.)
+    // benign in EITHER direction: an object built for fewer threads than the
+    // table claims fails every launch with hipError 719, and one built for
+    // more threads launches fine and computes silently wrong results.
+    //
+    // The comparison is therefore exact, not an upper bound. An earlier
+    // revision used `<`, which caught only the loud direction; S. Reeder
+    // demonstrated the gap by copying the 512-thread w8q2k4 object over the
+    // w4q1k4 filename (table: 256 threads) and running the integration suite:
+    // `<` threw 0 times and produced 4 wrong results, `!=` threw 4 times and
+    // produced 0. Exact comparison cannot false-positive here because every
+    // variant carries __launch_bounds__(F2_BLOCK, 1), so
+    // max_flat_workgroup_size equals the compiled block size exactly on all
+    // five (measured 256/512/512/512/512 against a table of the same).
     if(!params.variantTag.empty())
     {
         int maxThreads = 0;
@@ -287,11 +296,11 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
             HIPDNN_PLUGIN_LOG_ERROR(msg);
             throw std::runtime_error(msg);
         }
-        if(maxThreads < static_cast<int>(params.blockDim))
+        if(maxThreads != static_cast<int>(params.blockDim))
         {
             const std::string msg
                 = "HipFlash2FwdPlanBuilder::buildPlan -- variant '" + params.variantTag
-                  + "' geometry mismatch: " + coPath + " was built for at most "
+                  + "' geometry mismatch: " + coPath + " was built for "
                   + std::to_string(maxThreads) + " threads/block but the variant table claims "
                   + std::to_string(params.blockDim)
                   + ". The installed kernel object does not match the variant it is named for.";

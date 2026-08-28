@@ -68,8 +68,9 @@ struct Flash2FwdParams
     // Selected for grid-starved shapes. Execution is not yet plumbed through
     // execute(); the fields record the decision so the follow-up does not have
     // to re-derive it.
-    int splitK = 1; // 1 = disabled (single pass)
-    size_t workspaceBytes = 0; // 0 when splitK == 1
+    int splitK = 1; ///< always 1 today: selection computes a split factor but
+        ///< execute() is not wired for it, so buildPlan forces 1.
+    size_t workspaceBytes = 0; ///< 0 today; sized only when split-K executes.
 
     // Architecture string determined at buildPlan() time
     std::string archString;

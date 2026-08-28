@@ -55,6 +55,17 @@ constexpr Flash2Variant K_FLASH2_W8Q3K4{"w8q3k4", 512, 384}; // BK=64, D=64 larg
 /// with a 64-query tile. Used when no per-variant object is installed.
 constexpr Flash2Variant K_FLASH2_LEGACY{"", 64, 64};
 
+/// Whether split-K is actually executed. buildPlan() currently forces
+/// splitK = 1 because execute() has no merge-pass launch or workspace pointer,
+/// so selection must NOT credit a split that will not happen: doing so shifts
+/// the variant choice for shapes whose CTA count only clears the tiny-grid
+/// threshold once multiplied by the split factor. Measured over a 560-shape
+/// sweep, 90 D=128 shapes with ctas256 in [32, 96] change variant purely from
+/// that credit, and the only such shape we have measured runs 0.478x.
+///
+/// Flip this to true in the same change that wires split-K through execute().
+constexpr bool K_FLASH2_SPLITK_EXECUTES = false;
+
 /// Result of variant selection, including any split-K decision.
 struct Flash2Selection
 {
@@ -111,11 +122,15 @@ inline Flash2Selection selectFlash2Config(
     // Measured, the 8-wave variant still wins on merely-starved grids (185 vs
     // 110 TFLOPS) because the kernel is bandwidth-bound and smaller CTAs
     // multiply K/V re-reads. Only a genuinely tiny grid prefers 4 waves.
-    // Test against the EFFECTIVE grid: split-K multiplies CTA count by splitK,
-    // so a shape that is starved single-pass may be perfectly full once split.
-    // B=1 H=8 S=2048 has 64 CTAs (starved) but 256 after splitK=4 -- and 256
-    // CTAs want the 8-wave variant, which is what we measured (191 TFLOPS).
-    if(ctas256 * sel.splitK < scaled(100))
+    // Test against the grid that will ACTUALLY run. Split-K multiplies CTA
+    // count by splitK, so a shape that is starved single-pass may be full once
+    // split -- B=1 H=8 S=2048 has 64 CTAs but 256 at splitK=4, and 256 CTAs
+    // want the 8-wave variant (measured 191 TFLOPS). That reasoning only holds
+    // when the split is executed; while it is not, crediting it picks the
+    // 8-wave variant for a grid that stays starved. See
+    // K_FLASH2_SPLITK_EXECUTES.
+    const long long effectiveCtas = K_FLASH2_SPLITK_EXECUTES ? ctas256 * sel.splitK : ctas256;
+    if(effectiveCtas < scaled(100))
     {
         sel.variant = K_FLASH2_W4Q1K4;
         return sel;
