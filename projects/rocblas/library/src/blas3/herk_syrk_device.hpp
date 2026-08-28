@@ -1332,13 +1332,12 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
                                          rocblas_int    batch_offset)
 {
     // blockIdx.z is the local index within the chunk (0..chunk_size-1).
-    // W_C is indexed by the local index so the workspace only needs chunk_size
-    // triangle slots.  d_C is indexed by the absolute batch index.
+    // gridDim.z == chunk_size, so blockIdx.z is always in range; no bounds
+    // check needed here.  W_C is indexed by the local index so the workspace
+    // holds exactly chunk_size triangle slots.  d_C is indexed by the absolute
+    // batch index (batch_offset + blockIdx.z).
     uint32_t local_batch = blockIdx.z;
-    if(local_batch >= (uint32_t)chunk_size)
-        return;
-
-    uint32_t abs_batch = (uint32_t)batch_offset + local_batch;
+    uint32_t abs_batch   = (uint32_t)batch_offset + local_batch;
 
     auto* C = load_ptr_batch(d_C, abs_batch, 0, stride_C);
 

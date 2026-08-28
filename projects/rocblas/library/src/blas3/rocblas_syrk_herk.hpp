@@ -65,12 +65,13 @@ inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
         if(n > 0 && batch_count > 0)
         {
             // The host-side launcher processes at most c_YZ_grid_launch_limit batches
-            // per chunk, reusing the same workspace slice for each chunk.  Only
+            // per chunk, reusing the same workspace buffer for each chunk.  Only
             // min(batch_count, c_YZ_grid_launch_limit) triangle slots are live
-            // simultaneously, so the peak allocation is proportional to the chunk
-            // size rather than the full batch count.
-            rocblas_int chunk = std::min(batch_count, (rocblas_int)c_YZ_grid_launch_limit);
-            size              = ((int64_t(n) * (n - 1)) / 2) * sizeof(T) * chunk;
+            // simultaneously, so peak allocation is proportional to the chunk size
+            // rather than the full batch count.  All arithmetic uses size_t to avoid
+            // signed overflow for large n.
+            size_t chunk = size_t(std::min(batch_count, (rocblas_int)c_YZ_grid_launch_limit));
+            size         = (size_t(n) * size_t(n - 1) / 2) * sizeof(T) * chunk;
         }
 
     return size;
