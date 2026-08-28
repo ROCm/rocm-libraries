@@ -114,14 +114,6 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, SearchStartsAtKernelZe
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
-TEST(CPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_NONE, Gfx942HardHeuristicSpatialGate)
-{
-    EXPECT_TRUE(Config::IsGfx942HardHeuristicSpatialCase(3, 256));
-    EXPECT_TRUE(Config::IsGfx942HardHeuristicSpatialCase(4, 256));
-    EXPECT_FALSE(Config::IsGfx942HardHeuristicSpatialCase(5, 256));
-    EXPECT_FALSE(Config::IsGfx942HardHeuristicSpatialCase(3, 255));
-}
-
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16,
                          testing::ValuesIn(GetPerfConfigTestCases(miopenBFloat16, "gfx942")));

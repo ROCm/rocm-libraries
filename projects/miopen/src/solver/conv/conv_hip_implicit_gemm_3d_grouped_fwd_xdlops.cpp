@@ -234,8 +234,8 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         if(ctx.GetStream().GetDeviceName() == "gfx942")
         {
             if(index == 0 && problem.GetGroupCount() == 1 &&
-               problem.GetAlphaBetaCase() == DEFAULT &&
-               IsGfx942HardHeuristicSpatialCase(problem.GetInDepth(), problem.GetInWidth()))
+               problem.GetAlphaBetaCase() == DEFAULT && problem.GetInDepth() <= 4 &&
+               problem.GetInWidth() >= 256)
             {
                 int K = problem.GetOutChannels();
 
