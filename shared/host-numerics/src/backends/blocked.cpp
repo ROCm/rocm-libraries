@@ -23,6 +23,7 @@ struct SelectedOutputLocation {
     size_t blockRow;
     size_t blockColumn;
     size_t localIndex;
+    size_t selectedIndex;
 };
 
 struct PlannedOutputBlock {
@@ -34,7 +35,7 @@ struct PlannedOutputBlock {
 
 struct SelectedOutputBlockPlan {
     std::vector<PlannedOutputBlock> blocks;
-    std::vector<size_t> localIndices;
+    std::vector<SelectedOutputLocation> locations;
 };
 
 SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selection,
@@ -44,7 +45,8 @@ SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selectio
     const std::vector<size_t> selectedIndices = selection.indices(logicalElements);
     std::vector<SelectedOutputLocation> locations;
     locations.reserve(selectedIndices.size());
-    for (const size_t logicalIndex : selectedIndices) {
+    for (size_t selectedIndex = 0; selectedIndex < selectedIndices.size(); ++selectedIndex) {
+        const size_t logicalIndex = selectedIndices[selectedIndex];
         const auto coordinates = outputShape.coordinates(logicalIndex, selection.indexOrder());
         const size_t row = coordinates[0];
         const size_t column = coordinates[1];
@@ -53,6 +55,7 @@ SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selectio
             .blockColumn = column / outputBlockColumns,
             .localIndex =
                 (row % outputBlockRows) * outputBlockColumns + column % outputBlockColumns,
+            .selectedIndex = selectedIndex,
         });
     }
 
@@ -74,7 +77,7 @@ SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selectio
         locations.end());
 
     SelectedOutputBlockPlan plan;
-    plan.localIndices.reserve(locations.size());
+    plan.locations.reserve(locations.size());
     for (const SelectedOutputLocation& location : locations) {
         const size_t rowBase = location.blockRow * outputBlockRows;
         const size_t columnBase = location.blockColumn * outputBlockColumns;
@@ -83,11 +86,11 @@ SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selectio
             plan.blocks.push_back({
                 .rowBase = rowBase,
                 .columnBase = columnBase,
-                .firstSelectedOutput = plan.localIndices.size(),
+                .firstSelectedOutput = plan.locations.size(),
                 .selectedOutputCount = 0,
             });
         }
-        plan.localIndices.push_back(location.localIndex);
+        plan.locations.push_back(location);
         ++plan.blocks.back().selectedOutputCount;
     }
     return plan;
@@ -114,7 +117,7 @@ void validateBlocked(const GemmRequest& problem) {
 }
 
 template <typename Accumulator>
-GemmRunInfo runBlocked(const GemmRequest& problem) {
+GemmRunInfo runBlocked(const GemmRequest& problem, Tensor* selectedOutput = nullptr) {
     using namespace detail;
 
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
@@ -124,6 +127,9 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
     const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
                                                         problem.epilogue.outputConversion);
+    std::optional<RuntimeMatrixOutputWriter<Accumulator>> selectedOutputWriter;
+    if (selectedOutput != nullptr)
+        selectedOutputWriter.emplace(*selectedOutput, problem.epilogue.outputConversion);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
     std::vector<RuntimeVectorReader<Accumulator>> preScalesA;
@@ -144,7 +150,7 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
     const size_t n = problem.b.values.shape()[1];
 
     const auto executeBlock = [&](size_t rowBase, size_t columnBase, bool storeAllOutputs,
-                                  std::span<const size_t> selectedOutputIndices) {
+                                  std::span<const SelectedOutputLocation> selectedOutputs) {
         const size_t rows = std::min(outputBlockRows, m - rowBase);
         const size_t columns = std::min(outputBlockColumns, n - columnBase);
         std::vector<Accumulator> accumulator(rows * columns, Accumulator(0));
@@ -243,12 +249,15 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
                 }
             }
         } else {
-            for (const size_t localIndex : selectedOutputIndices) {
-                const size_t row = localIndex / outputBlockColumns;
-                const size_t column = localIndex % outputBlockColumns;
-                output.store(rowBase + row, columnBase + column,
-                             finalizer.finalize(rowBase + row, columnBase + column,
-                                                accumulator[row * columns + column]));
+            for (const SelectedOutputLocation& selected : selectedOutputs) {
+                const size_t row = selected.localIndex / outputBlockColumns;
+                const size_t column = selected.localIndex % outputBlockColumns;
+                const Accumulator value = finalizer.finalize(rowBase + row, columnBase + column,
+                                                             accumulator[row * columns + column]);
+                if (selectedOutputWriter)
+                    selectedOutputWriter->store(0, selected.selectedIndex, value);
+                else
+                    output.store(rowBase + row, columnBase + column, value);
             }
         }
         return rows * columns;
@@ -274,7 +283,7 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
     } else {
         const SelectedOutputBlockPlan plan =
             planSelectedOutputBlocks(problem.outputSelection, problem.d.shape());
-        const std::span<const size_t> localIndices(plan.localIndices);
+        const std::span<const SelectedOutputLocation> selectedOutputs(plan.locations);
         for (const PlannedOutputBlock& block : plan.blocks)
             outputElementsCovered += std::min(outputBlockRows, m - block.rowBase) *
                                      std::min(outputBlockColumns, n - block.columnBase);
@@ -284,7 +293,7 @@ GemmRunInfo runBlocked(const GemmRequest& problem) {
                 const PlannedOutputBlock& block = plan.blocks[index];
                 (void)executeBlock(
                     block.rowBase, block.columnBase, false,
-                    localIndices.subspan(block.firstSelectedOutput, block.selectedOutputCount));
+                    selectedOutputs.subspan(block.firstSelectedOutput, block.selectedOutputCount));
             });
     }
 
@@ -354,6 +363,27 @@ GemmRunInfo detail::runBlockedGemm(const GemmRequest& problem) {
             return runBlocked<double>(problem);
         default:
             throw std::invalid_argument("Blocked backend accumulator type is unsupported.");
+    }
+}
+
+GemmRunInfo detail::runBlockedGemmToSelectedOutput(const GemmRequest& problem,
+                                                   Tensor& selectedOutput) {
+    validateBlocked(problem);
+    if (problem.outputSelection.selectsAll())
+        throw std::invalid_argument("Streaming blocked GEMM requires a partial selection.");
+    const size_t selectedCount =
+        problem.outputSelection.selectedCount(problem.d.shape().elementCount());
+    if (selectedOutput.type() != problem.outputType ||
+        selectedOutput.shape() != Shape{1, selectedCount})
+        throw std::invalid_argument("Streaming blocked GEMM output shape or type mismatch.");
+
+    switch (problem.accumulatorType) {
+        case ScalarType::Float32:
+            return runBlocked<float>(problem, &selectedOutput);
+        case ScalarType::Float64:
+            return runBlocked<double>(problem, &selectedOutput);
+        default:
+            throw std::invalid_argument("Blocked backend supports F32 and F64 accumulation.");
     }
 }
 }  // namespace roc::host_numerics
