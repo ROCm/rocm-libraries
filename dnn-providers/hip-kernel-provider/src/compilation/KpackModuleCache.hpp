@@ -9,6 +9,7 @@
 #include "KpackModule.hpp"
 #include "ModuleCache.hpp"
 #include "device/ScopedDevice.hpp"
+#include "utilities/Digest.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -24,7 +25,7 @@ namespace hip_kernel_provider::compilation
 
 /// A staged failure escaping the cache's load(). The message already describes what went
 /// wrong -- but not *who asked*, because the cache is keyed on (archive, tocKey, arch,
-/// ordinal) and never sees the descriptor or the symbol. KpackKernelLoader catches this and
+/// ordinal, sha256) and never sees the descriptor or the symbol. KpackKernelLoader catches this and
 /// prefixes both, so every message names the descriptor and the symbol without either
 /// entering the key.
 ///
@@ -50,8 +51,8 @@ private:
 
 using CachedKpackModule = std::shared_ptr<const KpackModule>;
 
-/// One hipModule_t per (archive path, toc_key, device arch, device ordinal), loaded lazily
-/// and shared.
+/// One hipModule_t per (archive path, toc_key, device arch, device ordinal, declared
+/// sha256), loaded lazily and shared.
 ///
 /// The key deliberately excludes the kernel symbol. `toc_key` is content-addressed on
 /// (source, build) only, so two kernels that differ solely by entry point name the same
@@ -72,7 +73,8 @@ class KpackModuleCache : public ModuleCache<KpackModuleCache,
                                             const std::string& /*archivePath*/,
                                             const std::string& /*tocKey*/,
                                             const std::string& /*deviceArch*/,
-                                            int /*deviceOrdinal*/>
+                                            int /*deviceOrdinal*/,
+                                            const std::string& /*expectedSha256*/>
 {
 public:
     KpackModuleCache() = default;
@@ -85,14 +87,21 @@ public:
     /// "gfx90a" and "gfx90a:xnack-" must reach one entry rather than load the same blob
     /// twice. load() keeps the decorated string -- it feeds archMatches and names the
     /// device arch in its diagnostics.
+    ///
+    /// `expectedSha256` is in the key so that no cache hit can bypass the digest check: a
+    /// hit answers from the key alone, so a digest outside it would hand a second
+    /// descriptor declaring a different one the first's module, unverified. It does not
+    /// fragment the cache -- two descriptors naming one entry agree on its digest unless
+    /// one is wrong, and a wrong one throws in load() before anything is cached.
     static std::string makeKey(const std::string& archivePath,
                                const std::string& tocKey,
                                const std::string& deviceArch,
-                               int deviceOrdinal)
+                               int deviceOrdinal,
+                               const std::string& expectedSha256)
     {
         return archivePath + "::" + tocKey
                + "::" + std::string(hipdnn_plugin_sdk::stripArchFeatures(deviceArch))
-               + "::" + std::to_string(deviceOrdinal);
+               + "::" + std::to_string(deviceOrdinal) + "::" + expectedSha256;
     }
 
     /// @throws KpackModuleLoadFailure on any stage that fails. Never returns a null
@@ -101,7 +110,8 @@ public:
     static CachedKpackModule load(const std::string& archivePath,
                                   const std::string& tocKey,
                                   const std::string& deviceArch,
-                                  int deviceOrdinal)
+                                  int deviceOrdinal,
+                                  const std::string& expectedSha256)
     {
         KpackArchive archive;
         KpackError error;
@@ -169,6 +179,21 @@ public:
                                          "cannot decompress toc_key '" + tocKey + "' at arch '"
                                              + *matched + "' from kpack archive '" + archivePath
                                              + "' (" + error.codeName + ")");
+        }
+
+        // Before hipModuleLoadData, so bytes that fail never reach the driver. The reader
+        // cannot catch this itself: a TOC entry pointing at the wrong offset decompresses
+        // cleanly and returns another entry's code object rather than an error.
+        const std::string actualSha256 = utilities::sha256Hex(codeObject.data(), codeObject.size());
+        if(actualSha256 != expectedSha256)
+        {
+            throw KpackModuleLoadFailure(KpackLoadStage::DIGEST_MISMATCH,
+                                         "the code object for toc_key '" + tocKey + "' at arch '"
+                                             + *matched + "' in kpack archive '" + archivePath
+                                             + "' hashes to " + actualSha256
+                                             + ", but the descriptor declares " + expectedSha256
+                                             + "; the archive and the descriptor disagree about "
+                                               "what this entry contains");
         }
 
         // Bound before the load, not after: the device current at hipModuleLoadData is

@@ -220,11 +220,10 @@ struct KernelSource
     std::string symbol;
     /// KPACK: digest of the raw decompressed code object, as the packager recorded it.
     ///
-    /// Identification only. Nothing verifies it, on this path or any other, and it is
-    /// not a security control: a descriptor and the archive it names travel together, so
-    /// whoever can rewrite one can rewrite the other. Treat a match as evidence the two
-    /// came from the same pack run, nothing more. The loader's defence against a wrong
-    /// or corrupt payload is KpackArchive's container check, not this field.
+    /// Checked before the code object reaches the driver: a TOC entry pointing at the
+    /// wrong offset decompresses cleanly and yields another entry's blob, which only this
+    /// field can catch. An integrity check, not a security control -- a descriptor travels
+    /// with the archive it names, so whoever can rewrite one can rewrite the other.
     std::string sha256;
 };
 
