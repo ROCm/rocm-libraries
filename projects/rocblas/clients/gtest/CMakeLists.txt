@@ -104,6 +104,7 @@ set(rocblas_no_tensile_test_source
     blas3/syrk_gtest.cpp
     blas3/syrkx_gtest.cpp
     blas3/syr2k_gtest.cpp
+    blas3/syrk_herk_chunked_workspace_gtest.cpp
     blas3/herk_gtest.cpp
     blas3/herkx_gtest.cpp
     blas3/her2k_gtest.cpp

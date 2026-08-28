@@ -63,7 +63,15 @@ inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
     //Allocating workspace memory when only using gemm
     if(rocblas_use_only_gemm<T>(handle, n, k))
         if(n > 0 && batch_count > 0)
-            size = ((int64_t(n) * (n - 1)) / 2) * sizeof(T) * batch_count;
+        {
+            // The host-side launcher processes at most c_YZ_grid_launch_limit batches
+            // per chunk, reusing the same workspace slice for each chunk.  Only
+            // min(batch_count, c_YZ_grid_launch_limit) triangle slots are live
+            // simultaneously, so the peak allocation is proportional to the chunk
+            // size rather than the full batch count.
+            rocblas_int chunk = std::min(batch_count, (rocblas_int)c_YZ_grid_launch_limit);
+            size              = ((int64_t(n) * (n - 1)) / 2) * sizeof(T) * chunk;
+        }
 
     return size;
 }
@@ -313,4 +321,5 @@ rocblas_status rocblas_copy_triangular_syrk_herk(rocblas_handle handle,
                                                  rocblas_int    ldc,
                                                  rocblas_stride stride_C,
                                                  T*             W_C,
-                                                 rocblas_int    batch_count);
+                                                 rocblas_int    chunk_size,
+                                                 rocblas_int    batch_offset);

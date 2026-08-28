@@ -102,43 +102,88 @@ rocblas_status rocblas_internal_syrk_herk_template(rocblas_handle    handle,
                   ? (HERM ? rocblas_operation_conjugate_transpose : rocblas_operation_transpose)
                   : rocblas_operation_none;
 
-        // Launch kernel to copy the data from triangular matrix to the workspace memory
-        if(rocblas_fill_upper == uplo)
-            RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<true, true, HERM>(
-                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count)));
-        else
-            RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<true, false, HERM>(
-                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count)));
+        // Process batches in chunks of at most c_YZ_grid_launch_limit.  The
+        // workspace is sized for one chunk, so each iteration reuses the same
+        // allocation.  Within a chunk the kernel uses blockIdx.z (0..chunk_size-1)
+        // to index W_C and (batch_offset + blockIdx.z) to load/store d_C.
+        rocblas_int offset = 0;
+        while(offset < batch_count)
+        {
+            rocblas_int chunk = std::min(batch_count - offset, (rocblas_int)c_YZ_grid_launch_limit);
 
-        RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemm_64<BATCHED>(handle,
-                                                                   trans_orig,
-                                                                   trans_opp,
-                                                                   n,
-                                                                   n,
-                                                                   k,
-                                                                   alpha,
-                                                                   A,
-                                                                   offset_A,
-                                                                   lda,
-                                                                   stride_A,
-                                                                   A,
-                                                                   offset_A,
-                                                                   lda,
-                                                                   stride_A,
-                                                                   beta,
-                                                                   C,
-                                                                   offset_C,
-                                                                   ldc,
-                                                                   stride_C,
-                                                                   batch_count)));
+            // Save: copy triangular region of C into workspace
+            if(rocblas_fill_upper == uplo)
+                RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<true, true, HERM>(
+                    handle, n, C, ldc, stride_C, (T*)w_mem, chunk, offset)));
+            else
+                RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<true, false, HERM>(
+                    handle, n, C, ldc, stride_C, (T*)w_mem, chunk, offset)));
 
-        // Launch kernel to copy the data from workspace memory back to triangular matrix
-        if(rocblas_fill_upper == uplo)
-            RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<false, true, HERM>(
-                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count)));
-        else
-            RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<false, false, HERM>(
-                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count)));
+            // GEMM on the chunk.
+            // For strided-batched: advance the element offset by offset * stride.
+            // For batched (pointer arrays): advance the pointer array base by offset
+            // so that batch 0 of the chunk maps to the correct device pointer.
+            if constexpr(BATCHED)
+            {
+                RETURN_IF_ROCBLAS_ERROR(
+                    (rocblas_internal_gemm_64<BATCHED>(handle,
+                                                       trans_orig,
+                                                       trans_opp,
+                                                       n,
+                                                       n,
+                                                       k,
+                                                       alpha,
+                                                       A + offset,
+                                                       offset_A,
+                                                       lda,
+                                                       stride_A,
+                                                       A + offset,
+                                                       offset_A,
+                                                       lda,
+                                                       stride_A,
+                                                       beta,
+                                                       C + offset,
+                                                       offset_C,
+                                                       ldc,
+                                                       stride_C,
+                                                       chunk)));
+            }
+            else
+            {
+                RETURN_IF_ROCBLAS_ERROR(
+                    (rocblas_internal_gemm_64<BATCHED>(handle,
+                                                       trans_orig,
+                                                       trans_opp,
+                                                       n,
+                                                       n,
+                                                       k,
+                                                       alpha,
+                                                       A,
+                                                       offset_A + (rocblas_stride)offset * stride_A,
+                                                       lda,
+                                                       stride_A,
+                                                       A,
+                                                       offset_A + (rocblas_stride)offset * stride_A,
+                                                       lda,
+                                                       stride_A,
+                                                       beta,
+                                                       C,
+                                                       offset_C + (rocblas_stride)offset * stride_C,
+                                                       ldc,
+                                                       stride_C,
+                                                       chunk)));
+            }
+
+            // Restore: write workspace back into the triangular region of C
+            if(rocblas_fill_upper == uplo)
+                RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<false, true, HERM>(
+                    handle, n, C, ldc, stride_C, (T*)w_mem, chunk, offset)));
+            else
+                RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<false, false, HERM>(
+                    handle, n, C, ldc, stride_C, (T*)w_mem, chunk, offset)));
+
+            offset += chunk;
+        }
 
         return rocblas_status_success;
     }
