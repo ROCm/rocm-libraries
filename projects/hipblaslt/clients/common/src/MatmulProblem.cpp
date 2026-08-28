@@ -69,8 +69,8 @@ namespace hipblaslt::client
                                      int32_t              batchCount,
                                      hipblasLtBatchMode_t batchMode)
         {
-            using roc::host_validation::Layout;
-            using roc::host_validation::Shape;
+            using roc::host_numerics::Layout;
+            using roc::host_numerics::Shape;
 
             const int64_t matrixElements
                 = checkedProduct(leadingDimension, columns, "matrix storage size");
@@ -83,7 +83,7 @@ namespace hipblaslt::client
                       : matrixElements;
             return {
                 type,
-                hipblaslt::host_validation::scalarType(type),
+                hipblaslt::host_numerics::scalarType(type),
                 Layout(Shape{normalizeExtent(rows, "matrix rows"),
                              normalizeExtent(columns, "matrix columns"),
                              static_cast<size_t>(batchCount)},

@@ -35,7 +35,7 @@ subtree_to_project_map = {
     "projects/rocwmma": "rocwmma",
     "projects/hipthreads": "hipthreads",
     "projects/rpp": "rpp",
-    "shared/host-validation": "blas",
+    "shared/host-numerics": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "rocroller",
     "shared/stinkytofu": "blas",
@@ -206,7 +206,7 @@ dependency_graph = {
 # its additional_options merge into the parent job (e.g. hipSPARSELt depends on hipBLASLt).
 SUBTREE_EXTRA_MATRIX_PROJECTS = {
     "projects/hipblaslt": "sparselt",
-    "shared/host-validation": "rocroller",
+    "shared/host-numerics": "rocroller",
 }
 
 ROCJITSU_RACE_CHECK_SUBTREES = {

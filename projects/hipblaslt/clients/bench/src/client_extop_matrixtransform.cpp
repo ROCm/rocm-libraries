@@ -30,8 +30,8 @@
 #include <iostream>
 #include <memory>
 #include <numeric>
-#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_validation/MatrixTransformReference.hpp>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/MatrixTransformReference.hpp>
 #include <vector>
 
 struct MatrixTransformIO
@@ -82,7 +82,7 @@ private:
     void init(DType* buf, size_t len, hipblaslt_initialization initMethod)
     {
         std::vector<DType> ref(len);
-        hipblaslt::host_validation::initialize(
+        hipblaslt::host_numerics::initialize(
             ref.data(), ref.size(), initMethod);
 
         auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
@@ -290,8 +290,8 @@ void validation(hipDataType datatype,
                 bool        transA,
                 bool        transB)
 {
-    const auto   scalarType   = hipblaslt::host_validation::scalarType(datatype);
-    const size_t elementBytes = roc::host_validation::scalarTypeInfo(scalarType).storageBits / 8;
+    const auto   scalarType   = hipblaslt::host_numerics::scalarType(datatype);
+    const size_t elementBytes = roc::host_numerics::scalarTypeInfo(scalarType).storageBits / 8;
     const size_t storageBytes = size_t(m) * n * batchSize * elementBytes;
     std::vector<std::byte> hA(storageBytes);
     std::vector<std::byte> hB(storageBytes);
@@ -300,7 +300,7 @@ void validation(hipDataType datatype,
     hipErr                        = hipMemcpyDtoH(hB.data(), b, storageBytes);
     hipErr                        = hipMemcpyDtoH(hC.data(), c, storageBytes);
 
-    hipblaslt::host_validation::MatrixTransformReferenceArguments arguments;
+    hipblaslt::host_numerics::MatrixTransformReferenceArguments arguments;
     arguments.observed               = hC.data();
     arguments.observedStorageBytes   = storageBytes;
     arguments.a                      = hA.data();
@@ -324,10 +324,10 @@ void validation(hipDataType datatype,
     arguments.beta                   = beta;
 
     const auto result
-        = hipblaslt::host_validation::referenceMatrixTransform(arguments);
+        = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
     if(!result.comparison.passed())
     {
-        hipblaslt::host_validation::reportMatrixTransformMismatches(std::cerr,
+        hipblaslt::host_numerics::reportMatrixTransformMismatches(std::cerr,
                                                                     result.comparison);
         std::cerr << '\n';
     }

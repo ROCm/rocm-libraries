@@ -415,8 +415,8 @@ namespace GEMMDriverTest
                            "execution";
                 }
 
-                auto tol = gemmAcceptableError<T, T, T>(
-                    M, N, K, m_context->targetArchitecture().target());
+                auto tol
+                    = gemmAcceptableError<T, T, T>(K, m_context->targetArchitecture().target());
                 auto res = compare(d_result, h_result, tol);
 
                 Log::info("RNorm is {}", res.relativeNormL2);

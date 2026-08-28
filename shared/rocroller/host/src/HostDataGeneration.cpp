@@ -11,8 +11,8 @@
 #include <string_view>
 #include <utility>
 
-#include <roc/host_validation/generation.hpp>
-#include <roc/host_validation/mx.hpp>
+#include <roc/host_numerics/generation.hpp>
+#include <roc/host_numerics/mx.hpp>
 #include <rocRoller/DataTypes/DataTypes_BF8.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP8.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -21,16 +21,16 @@ namespace rocRoller::HostNumerics
 {
     namespace
     {
-        using roc::host_validation::GenerationRecipe;
-        using roc::host_validation::GenerationRecipeSettings;
-        using roc::host_validation::IndexOrder;
-        using roc::host_validation::Layout;
-        using roc::host_validation::MxDataRecipe;
-        using roc::host_validation::MxGenerationProblem;
-        using roc::host_validation::MxScaleGenerationMode;
-        using roc::host_validation::ScalarType;
-        using roc::host_validation::Shape;
-        using roc::host_validation::Tensor;
+        using roc::host_numerics::GenerationRecipe;
+        using roc::host_numerics::GenerationRecipeSettings;
+        using roc::host_numerics::IndexOrder;
+        using roc::host_numerics::Layout;
+        using roc::host_numerics::MxDataGeneration;
+        using roc::host_numerics::MxGenerationProblem;
+        using roc::host_numerics::MxScaleGenerationMode;
+        using roc::host_numerics::ScalarType;
+        using roc::host_numerics::Shape;
+        using roc::host_numerics::Tensor;
 
         ptrdiff_t checkedPtrdiff(size_t value, char const* description)
         {
@@ -211,31 +211,64 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument("Unknown rocRoller data initialization mode.");
         }
 
-        MxDataRecipe mxGenerationRecipe(DataInitialization const& initialization,
-                                        float                     minimum,
-                                        float                     maximum)
+        MxDataGeneration mxDataGeneration(DataInitialization const& initialization,
+                                          Shape const&              shape,
+                                          float                     minimum,
+                                          float                     maximum,
+                                          uint32_t                  seed)
         {
+            auto recipe = [&](GenerationRecipe::Component component,
+                              uint64_t                    randomDomain
+                              = roc::host_numerics::mx_generation_random_domain_version_1::data) {
+                return GenerationRecipe::realOnly(
+                    std::move(component),
+                    {
+                        .seed         = seed,
+                        .indexOrder   = IndexOrder::FirstDimensionFastest,
+                        .randomDomain = randomDomain,
+                    });
+            };
+
             switch(initialization.mode)
             {
             case DataInitializationMode::Bounded:
-                return MxDataRecipe::bounded({.lower = minimum, .upper = maximum});
+                return MxDataGeneration::preserveRange(
+                    recipe(GenerationRecipe::uniformReal({.lower = minimum, .upper = maximum})),
+                    {.lower = minimum, .upper = maximum});
             case DataInitializationMode::BoundedAlternatingSign:
-                return MxDataRecipe::boundedAlternatingSign(
-                    {.maximumMagnitude = std::max(std::abs(minimum), std::abs(maximum))});
+            {
+                std::vector<size_t> alternatingDimensions{0};
+                if((shape[0] & 1U) != 0)
+                    alternatingDimensions.push_back(1);
+                const double maximumMagnitude = std::max(std::abs(minimum), std::abs(maximum));
+                return MxDataGeneration::preserveRange(
+                    recipe(GenerationRecipe::uniformReal({.lower = 0.0, .upper = maximumMagnitude})
+                               .withAlternatingSign({.dimensions = std::move(alternatingDimensions),
+                                                     .negativeWhenOdd = true})),
+                    {.lower = -maximumMagnitude, .upper = maximumMagnitude});
+            }
             case DataInitializationMode::Unbounded:
-                return MxDataRecipe::unbounded();
+                return MxDataGeneration::preserveGeneratedEncoding(recipe(
+                    GenerationRecipe::uniformFiniteEncodedValue(),
+                    roc::host_numerics::mx_generation_random_domain_version_1::unboundedData));
             case DataInitializationMode::Identity:
-                return MxDataRecipe::identity();
+                return MxDataGeneration::quantize(recipe(GenerationRecipe::identity()));
             case DataInitializationMode::Ones:
-                return MxDataRecipe::constant(1.0);
+                return MxDataGeneration::quantize(
+                    recipe(GenerationRecipe::constant({.value = 1.0})));
             case DataInitializationMode::Zeros:
-                return MxDataRecipe::constant(0.0);
+                return MxDataGeneration::quantize(recipe(GenerationRecipe::zero()));
             case DataInitializationMode::TrigonometricFromFloat:
-                return MxDataRecipe::trigonometric();
+                return MxDataGeneration::quantize(
+                    recipe(GenerationRecipe::uniformReal(
+                               {.lower = 0.0, .upper = 6.28318530717958647692528676655900576})
+                               .withCosineTransform()));
             case DataInitializationMode::NormalFromFloat:
-                return MxDataRecipe::normal(
-                    {.mean              = initialization.normalMean,
-                     .standardDeviation = initialization.normalStandardDeviation});
+                return MxDataGeneration::quantize(
+                    recipe(GenerationRecipe::normal(
+                               {.mean              = initialization.normalMean,
+                                .standardDeviation = initialization.normalStandardDeviation}),
+                           roc::host_numerics::mx_generation_random_domain_version_1::normal));
             }
             throw std::invalid_argument("Unknown rocRoller MX data initialization mode.");
         }
@@ -251,10 +284,11 @@ namespace rocRoller::HostNumerics
                 return MxScaleGenerationMode::Minimum;
             case DataInitializationMode::Bounded:
             case DataInitializationMode::BoundedAlternatingSign:
-            case DataInitializationMode::Unbounded:
             case DataInitializationMode::TrigonometricFromFloat:
             case DataInitializationMode::NormalFromFloat:
                 return MxScaleGenerationMode::Derived;
+            case DataInitializationMode::Unbounded:
+                return MxScaleGenerationMode::RandomFinite;
             }
             throw std::invalid_argument("Unknown rocRoller MX scale initialization mode.");
         }
@@ -268,28 +302,10 @@ namespace rocRoller::HostNumerics
         {
             auto const layout = hostTensorLayout(descriptor);
             Tensor     source(ScalarType::Float32, layout);
-            roc::host_validation::generate(
+            roc::host_numerics::generate(
                 source, generationRecipe(descriptor, initialization, type, minimum, maximum, seed));
 
-            auto const sourceStorage = source.rawEncodedBackingStorage();
-            if(sourceStorage.size() % sizeof(float) != 0)
-                throw std::logic_error("Float32 generation storage is not float-aligned.");
-
-            std::vector<std::byte> storage(sourceStorage.size() / sizeof(float));
-            for(size_t index = 0; index < storage.size(); ++index)
-            {
-                float value;
-                std::memcpy(&value, sourceStorage.data() + index * sizeof(float), sizeof(float));
-
-                uint8_t encoded;
-                if(type == ScalarType::Float8E4M3 || type == ScalarType::Float8E4M3Fnuz)
-                    encoded = FP8(value).data;
-                else
-                    encoded = BF8(value).data;
-                storage[index] = static_cast<std::byte>(encoded);
-            }
-
-            return Tensor::takeOwnershipOfEncodedBackingStorage(type, layout, std::move(storage));
+            return source.copyConvertedTo(type);
         }
 
         GeneratedTensor generateUnscaled(TensorDescriptor const&   descriptor,
@@ -311,7 +327,7 @@ namespace rocRoller::HostNumerics
             }
 
             Tensor data(type, hostTensorLayout(descriptor));
-            roc::host_validation::generate(
+            roc::host_numerics::generate(
                 data, generationRecipe(descriptor, initialization, type, minimum, maximum, seed));
             std::optional<Tensor> reference;
             if(includeReference)
@@ -349,47 +365,34 @@ namespace rocRoller::HostNumerics
                 throw std::invalid_argument(
                     "rocRoller MX generation requires a stride-one matrix dimension.");
 
-            MxGenerationProblem problem;
+            Shape mxShape{descriptor.size(contiguousDimension), descriptor.size(freeDimension)};
+            MxDataGeneration dataGeneration
+                = mxDataGeneration(initialization, mxShape, minimum, maximum, seed);
+            MxGenerationProblem problem(std::move(mxShape), std::move(dataGeneration));
             problem.dataType
                 = hostScalarType(descriptor.dataType(), DataTypeInterpretation::BlockScaled);
             problem.scaleType = hostScalarType(scaleType);
-            problem.shape
-                = Shape{descriptor.size(contiguousDimension), descriptor.size(freeDimension)};
             problem.leadingDimension
                 = checkedPtrdiff(descriptor.stride(freeDimension),
                                  "rocRoller MX leading dimension exceeds ptrdiff_t.");
             problem.blockAxis = blockedDimension == contiguousDimension ? 0 : 1;
             problem.blockSize = scaleBlockSize;
-            problem.data      = mxGenerationRecipe(initialization, minimum, maximum);
             problem.scale     = mxScaleGenerationMode(initialization.mode);
-            problem.seed      = seed;
 
-            auto   result      = roc::host_validation::generateMx(problem);
-            auto   dataStorage = std::vector<std::byte>(result.data.rawEncodedBackingStorage().begin(),
-                                                      result.data.rawEncodedBackingStorage().end());
-            Tensor data        = Tensor::takeOwnershipOfEncodedBackingStorage(
-                result.data.type(), hostTensorLayout(descriptor), std::move(dataStorage));
+            auto   result = roc::host_numerics::generateMx(problem);
+            Tensor data   = result.data.shareStorageWithLayout(hostTensorLayout(descriptor));
 
-            auto const scaleLayout  = hostScaleLayout(descriptor, blockedDimension, scaleBlockSize);
-            auto       scaleStorage = std::vector<std::byte>(result.scales.rawEncodedBackingStorage().begin(),
-                                                       result.scales.rawEncodedBackingStorage().end());
-            Tensor     scales
-                = Tensor::takeOwnershipOfEncodedBackingStorage(result.scales.type(), scaleLayout, std::move(scaleStorage));
+            auto const scaleLayout = hostScaleLayout(descriptor, blockedDimension, scaleBlockSize);
+            Tensor     scales      = result.scales.shareStorageWithLayout(scaleLayout);
             std::optional<Tensor> reference;
             if(includeReference)
-            {
-                auto referenceStorage = std::vector<std::byte>(result.reference.rawEncodedBackingStorage().begin(),
-                                                               result.reference.rawEncodedBackingStorage().end());
-                reference             = Tensor::takeOwnershipOfEncodedBackingStorage(result.reference.type(),
-                                                hostTensorLayout(descriptor),
-                                                std::move(referenceStorage));
-            }
+                reference = result.reference.shareStorageWithLayout(hostTensorLayout(descriptor));
             return {std::move(data), std::move(scales), std::move(reference)};
         }
     }
 
-    roc::host_validation::ScalarType hostScalarType(DataType               type,
-                                                    DataTypeInterpretation interpretation)
+    roc::host_numerics::ScalarType hostScalarType(DataType               type,
+                                                  DataTypeInterpretation interpretation)
     {
         return makeHostScalarType(type, interpretation);
     }
@@ -428,14 +431,14 @@ namespace rocRoller::HostNumerics
         return "DataInitMode(" + description + ")";
     }
 
-    roc::host_validation::Layout hostTensorLayout(TensorDescriptor const& descriptor)
+    roc::host_numerics::Layout hostTensorLayout(TensorDescriptor const& descriptor)
     {
         return makeTensorLayout(descriptor);
     }
 
-    roc::host_validation::Layout hostScaleLayout(TensorDescriptor const& descriptor,
-                                                 size_t                  blockedDimension,
-                                                 size_t                  blockSize)
+    roc::host_numerics::Layout hostScaleLayout(TensorDescriptor const& descriptor,
+                                               size_t                  blockedDimension,
+                                               size_t                  blockSize)
     {
         if(descriptor.dimensions() != 2)
             throw std::invalid_argument("rocRoller block scales require a rank-two tensor.");
@@ -513,7 +516,7 @@ namespace rocRoller::HostNumerics
             initializationA,
             scaleTypeA == DataType::None ? std::nullopt
                                          : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                             scaleTypeA, 1, scaleBlockSize}},
+                                               scaleTypeA, 1, scaleBlockSize}},
             minimum,
             maximum,
             seed + 1);
@@ -522,7 +525,7 @@ namespace rocRoller::HostNumerics
             initializationB,
             scaleTypeB == DataType::None ? std::nullopt
                                          : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                             scaleTypeB, 0, scaleBlockSize}},
+                                               scaleTypeB, 0, scaleBlockSize}},
             minimum,
             maximum,
             seed + 2);

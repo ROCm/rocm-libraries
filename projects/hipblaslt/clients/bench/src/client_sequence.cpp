@@ -25,7 +25,7 @@
  *******************************************************************************/
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
-#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
 #include <iostream>
 #include <numeric>
 #include <string>
@@ -206,15 +206,15 @@ void initData(hipDataType type, void* data, int m, int n, int lda, int stride, i
     switch(type)
     {
     case hipDataType::HIP_R_8F_E4M3_FNUZ:
-        hipblaslt::host_validation::initializeCosineMatrix(
+        hipblaslt::host_numerics::initializeCosineMatrix(
             static_cast<hipblaslt_f8_fnuz*>(data), m, n, lda, stride, batch_count);
         break;
     case hipDataType::HIP_R_8F_E4M3:
-        hipblaslt::host_validation::initializeCosineMatrix(
+        hipblaslt::host_numerics::initializeCosineMatrix(
             static_cast<hipblaslt_f8*>(data), m, n, lda, stride, batch_count);
         break;
     case hipDataType::HIP_R_16F:
-        hipblaslt::host_validation::initializeCosineMatrix(
+        hipblaslt::host_numerics::initializeCosineMatrix(
             static_cast<hipblasLtHalf*>(data), m, n, lda, stride, batch_count);
         break;
     default:

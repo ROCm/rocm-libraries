@@ -19,11 +19,10 @@ target_include_directories(rocroller-host-numerics
 target_link_libraries(rocroller-host-numerics
     PUBLIC
         roc::rocroller-interface
-        roc::host-validation-core
+        roc::host-numerics-core
     PRIVATE
-        roc::host-validation
-        roc::host-validation-blas
-        roc::host-validation-mx
+        roc::host-numerics
+        roc::host-numerics-blas
 )
 
 if(ROCROLLER_ENABLE_ASAN)

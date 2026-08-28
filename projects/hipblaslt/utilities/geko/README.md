@@ -239,7 +239,7 @@ sudo apt install libtinfo-dev libzstd-dev libmsgpack-dev libgtest-dev libgmock-d
 git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
 cd rocm-libraries
 git sparse-checkout init --cone
-git sparse-checkout set projects/hipblaslt shared/host-validation shared/origami shared/stinkytofu cmake
+git sparse-checkout set projects/hipblaslt shared/host-numerics shared/origami shared/stinkytofu cmake
 git checkout develop
 ```
 

@@ -269,133 +269,127 @@ if(NOT ROCM_LIBS_SUPERBUILD)
     endif()
 endif()
 
-set(_hipblaslt_mxdatagen_enabled FALSE)
+set(_hipblaslt_mx_enabled FALSE)
 if(HIPBLASLT_ENABLE_MXDATAGENERATOR
         AND (HIPBLASLT_ENABLE_CLIENT
              OR TENSILELITE_ENABLE_CLIENT
              OR TENSILELITE_BUILD_TESTING))
-    set(_hipblaslt_mxdatagen_enabled TRUE)
+    set(_hipblaslt_mx_enabled TRUE)
 endif()
 
-set(_hipblaslt_host_validation_enabled FALSE)
+set(_hipblaslt_host_numerics_enabled FALSE)
 if(HIPBLASLT_ENABLE_CLIENT
         OR TENSILELITE_ENABLE_CLIENT
         OR TENSILELITE_BUILD_TESTING)
-    set(_hipblaslt_host_validation_enabled TRUE)
+    set(_hipblaslt_host_numerics_enabled TRUE)
 endif()
 
-if(_hipblaslt_host_validation_enabled
-        AND NOT TARGET roc::host-validation)
-    set(_hipblaslt_host_validation_source
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-validation"
+if(_hipblaslt_host_numerics_enabled
+        AND NOT TARGET roc::host-numerics)
+    set(_hipblaslt_host_numerics_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-numerics"
     )
-    if(NOT EXISTS "${_hipblaslt_host_validation_source}/CMakeLists.txt")
-        set(_hipblaslt_host_validation_components Operations)
+    if(NOT EXISTS "${_hipblaslt_host_numerics_source}/CMakeLists.txt")
+        set(_hipblaslt_host_numerics_components Operations)
         if(HIPBLASLT_ENABLE_CLIENT)
-            list(APPEND _hipblaslt_host_validation_components BLAS)
+            list(APPEND _hipblaslt_host_numerics_components BLAS)
         endif()
-        if(TENSILELITE_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING)
-            list(APPEND _hipblaslt_host_validation_components Blocked)
-        endif()
-        if(_hipblaslt_mxdatagen_enabled)
+        if(_hipblaslt_mx_enabled)
             list(
                 APPEND
-                _hipblaslt_host_validation_components
-                MX
+                _hipblaslt_host_numerics_components
                 AMDGPULayout
             )
         endif()
         find_package(
-            ROCHostValidation
+            ROCHostNumerics
             CONFIG
             QUIET
-            COMPONENTS ${_hipblaslt_host_validation_components}
+            COMPONENTS ${_hipblaslt_host_numerics_components}
         )
     endif()
-    if(NOT TARGET roc::host-validation
+    if(NOT TARGET roc::host-numerics
             AND NOT EXISTS
-                "${_hipblaslt_host_validation_source}/CMakeLists.txt")
+                "${_hipblaslt_host_numerics_source}/CMakeLists.txt")
         hipblaslt_materialize_monorepo_paths(
             _hipblaslt_materialized_root
-            shared/host-validation
+            shared/host-numerics
         )
         if(_hipblaslt_materialized_root)
-            set(_hipblaslt_host_validation_source
-                "${_hipblaslt_materialized_root}/shared/host-validation"
+            set(_hipblaslt_host_numerics_source
+                "${_hipblaslt_materialized_root}/shared/host-numerics"
             )
         endif()
     endif()
-    if(NOT TARGET roc::host-validation
-            AND EXISTS "${_hipblaslt_host_validation_source}/CMakeLists.txt")
+    if(NOT TARGET roc::host-numerics
+            AND EXISTS "${_hipblaslt_host_numerics_source}/CMakeLists.txt")
         block(SCOPE_FOR VARIABLES)
-            set(HOST_VALIDATION_BUILD_TESTING OFF)
-            set(HOST_VALIDATION_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
+            set(HOST_NUMERICS_BUILD_TESTING OFF)
+            set(HOST_NUMERICS_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
             add_subdirectory(
-                "${_hipblaslt_host_validation_source}"
-                "${CMAKE_CURRENT_BINARY_DIR}/host-validation"
+                "${_hipblaslt_host_numerics_source}"
+                "${CMAKE_CURRENT_BINARY_DIR}/host-numerics"
                 EXCLUDE_FROM_ALL
             )
         endblock()
     endif()
-    if(NOT TARGET roc::host-validation)
+    if(NOT TARGET roc::host-numerics)
         message(FATAL_ERROR
-            "hipBLASLt requires the standalone ROCHostValidation component. "
-            "Include shared/host-validation in a monorepo sparse checkout, "
+            "hipBLASLt requires the standalone ROCHostNumerics component. "
+            "Include shared/host-numerics in a monorepo sparse checkout, "
             "configure from a Git checkout that can materialize that path, or "
-            "install the ROCHostValidation package and add it to CMAKE_PREFIX_PATH."
+            "install the ROCHostNumerics package and add it to CMAKE_PREFIX_PATH."
         )
     endif()
 endif()
-if(_hipblaslt_host_validation_enabled
-        AND _hipblaslt_mxdatagen_enabled
-        AND NOT TARGET roc::host-validation-amd-gpu-layout)
+if(_hipblaslt_host_numerics_enabled
+        AND HIPBLASLT_ENABLE_CLIENT
+        AND TARGET roc::host-numerics
+        AND NOT TARGET roc::host-numerics-blas
+        AND COMMAND roc_host_numerics_enable_blas_backend)
+    roc_host_numerics_enable_blas_backend()
+endif()
+if(_hipblaslt_host_numerics_enabled
+        AND _hipblaslt_mx_enabled
+        AND NOT TARGET roc::host-numerics-amd-gpu-layout)
     message(FATAL_ERROR
         "hipBLASLt MX clients require the "
-        "roc::host-validation-amd-gpu-layout target."
+        "roc::host-numerics-amd-gpu-layout target."
     )
 endif()
-if(_hipblaslt_host_validation_enabled
-        AND _hipblaslt_mxdatagen_enabled
-        AND NOT TARGET roc::host-validation-mx)
-    message(FATAL_ERROR
-        "hipBLASLt MX clients require the roc::host-validation-mx target."
-    )
-endif()
-if(_hipblaslt_host_validation_enabled
+if(_hipblaslt_host_numerics_enabled
         AND HIPBLASLT_ENABLE_CLIENT
-        AND NOT TARGET roc::host-validation-blas)
+        AND NOT TARGET roc::host-numerics-blas)
     message(FATAL_ERROR
-        "hipBLASLt clients require the roc::host-validation-blas target."
+        "hipBLASLt clients require the roc::host-numerics-blas target."
     )
 endif()
 
-if(_hipblaslt_host_validation_enabled)
-    foreach(_host_validation_target
-            host-validation
-            host-validation-blocked
-            host-validation-blas
-            host-validation-mx)
-        if(NOT TARGET ${_host_validation_target})
+if(_hipblaslt_host_numerics_enabled)
+    foreach(_host_numerics_target
+            host-numerics
+            host-numerics-blas)
+        if(NOT TARGET ${_host_numerics_target})
             continue()
         endif()
 
         if(HIPBLASLT_ENABLE_ASAN OR HIPBLASLT_ENABLE_TSAN)
-            hipblaslt_target_configure_sanitizers(${_host_validation_target} PRIVATE)
+            hipblaslt_target_configure_sanitizers(${_host_numerics_target} PRIVATE)
         elseif(TENSILELITE_ENABLE_HOST_ASAN)
-            target_compile_options(${_host_validation_target}
+            target_compile_options(${_host_numerics_target}
                 PRIVATE
                     -fsanitize=address
                     -fno-omit-frame-pointer
             )
         elseif(TENSILELITE_ENABLE_HOST_TSAN)
-            target_compile_options(${_host_validation_target}
+            target_compile_options(${_host_numerics_target}
                 PRIVATE
                     -fsanitize=thread
             )
         endif()
 
         if(HIPBLASLT_ENABLE_COVERAGE OR TENSILELITE_ENABLE_COVERAGE)
-            target_compile_options(${_host_validation_target}
+            target_compile_options(${_host_numerics_target}
                 PRIVATE
                     -g
                     -O0
@@ -404,7 +398,7 @@ if(_hipblaslt_host_validation_enabled)
             )
         endif()
     endforeach()
-    unset(_host_validation_target)
+    unset(_host_numerics_target)
 endif()
 
 add_library(hipblaslt-headers INTERFACE)
@@ -455,15 +449,6 @@ elseif(WIN32)
         "libhipblaslt.dll will be built WITHOUT VERSIONINFO metadata. Install the "
         "Windows SDK or make llvm-rc available (e.g. on PATH or in the ROCm "
         "llvm/bin directory) to embed version info.")
-endif()
-
-# `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
-# only built when at least one consumer needs it. tensilelite/client and
-# tensilelite/tests reach for it on the same condition, so we drive the
-# subdir from here to keep the dependency wiring close to the gate that
-# decides whether to build it at all.
-if(_hipblaslt_mxdatagen_enabled)
-    add_subdirectory(clients/common)
 endif()
 
 add_subdirectory(tensilelite)

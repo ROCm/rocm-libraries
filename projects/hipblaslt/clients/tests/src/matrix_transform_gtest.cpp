@@ -32,11 +32,11 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_validation/MatrixTransformReference.hpp>
-#include <hipblaslt/host_validation/Types.hpp>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/MatrixTransformReference.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <numeric>
-#include <roc/host_validation/generation.hpp>
+#include <roc/host_numerics/generation.hpp>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -147,18 +147,20 @@ namespace
         {
             std::vector<DType> ref(len);
             const uint64_t     recipeSeed
-                = hipblaslt::host_validation::initialization::seedForSequence(
-                    hipblaslt::host_validation::defaultInitializationSeed,
+                = hipblaslt::host_numerics::initialization::seedForSequence(
+                    hipblaslt::host_numerics::defaultInitializationSeed,
                     static_cast<std::uint64_t>(sequence));
-            const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
-                roc::host_validation::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
+            const auto recipe = roc::host_numerics::GenerationRecipe::realOnly(
+                roc::host_numerics::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
                 {.seed = recipeSeed});
-            auto generated = hipblaslt::host_validation::tensorFromMutableStorage(
+            auto generated = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
                 ref.data(),
                 ref.size(),
-                roc::host_validation::Layout::contiguousLastDimensionFastest(roc::host_validation::Shape{ref.size()}));
-            roc::host_validation::generate(generated, recipe);
-            hipblaslt::host_validation::copyTensorStorageTo(ref.data(), ref.size(), generated);
+                roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                    roc::host_numerics::Shape{ref.size()}));
+            roc::host_numerics::generate(generated, recipe);
+            hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
+                ref.data(), ref.size(), generated);
 
             auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
             ASSERT_EQ(err, hipSuccess);
@@ -225,9 +227,9 @@ namespace
                     bool        transA,
                     bool        transB)
     {
-        const auto   scalarType = hipblaslt::host_validation::scalarType(datatype);
+        const auto   scalarType = hipblaslt::host_numerics::scalarType(datatype);
         const size_t elementBytes
-            = roc::host_validation::scalarTypeInfo(scalarType).storageBits / 8;
+            = roc::host_numerics::scalarTypeInfo(scalarType).storageBits / 8;
         const size_t           storageBytes = size_t(m) * n * batchSize * elementBytes;
         std::vector<std::byte> hA(storageBytes);
         std::vector<std::byte> hB(storageBytes);
@@ -248,7 +250,7 @@ namespace
 
         ASSERT_EQ(err, hipSuccess);
 
-        hipblaslt::host_validation::MatrixTransformReferenceArguments arguments;
+        hipblaslt::host_numerics::MatrixTransformReferenceArguments arguments;
         arguments.observed                     = hC.data();
         arguments.observedStorageBytes         = storageBytes;
         arguments.a                            = a ? hA.data() : nullptr;
@@ -272,9 +274,9 @@ namespace
         arguments.beta                         = beta;
         arguments.comparison.absoluteTolerance = 1e-5;
 
-        const auto         result = hipblaslt::host_validation::referenceMatrixTransform(arguments);
+        const auto         result = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
         std::ostringstream diagnostics;
-        hipblaslt::host_validation::reportMatrixTransformMismatches(diagnostics, result.comparison);
+        hipblaslt::host_numerics::reportMatrixTransformMismatches(diagnostics, result.comparison);
         ASSERT_TRUE(result.comparison.passed()) << diagnostics.str();
     }
 }

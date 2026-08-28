@@ -34,7 +34,7 @@
 #include "ClientProblemFactory.hpp"
 #include "Rotating.hpp"
 
-#include <mxDataGen.hpp>
+#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -123,26 +123,26 @@ namespace TensileLite
 
         std::uint64_t stableDataInitializationStream(std::string_view semanticName);
 
-        bool   tryHostValidationInitialize(rocisa::DataType      dataType,
-                                           InitMode              mode,
-                                           void*                 array,
-                                           size_t                elements,
-                                           DataInitializationKey key);
-        bool   tryHostValidationInitialize(rocisa::DataType      dataType,
-                                           InitMode              mode,
-                                           void*                 array,
-                                           size_t                elements,
-                                           DataInitializationKey key,
-                                           double                freeValue);
-        bool   tryHostValidationInitialize(rocisa::DataType        dataType,
-                                           InitMode                mode,
-                                           void*                   array,
-                                           TensorDescriptor const& descriptor,
-                                           DataInitializationKey   key);
-        double hostValidationDoubleValue(InitMode              mode,
+        void initializeHostBufferWithHostNumerics(rocisa::DataType      dataType,
+                                                  InitMode              mode,
+                                                  void*                 array,
+                                                  size_t                elements,
+                                                  DataInitializationKey key);
+        void initializeHostBufferWithHostNumerics(rocisa::DataType      dataType,
+                                                  InitMode              mode,
+                                                  void*                 array,
+                                                  size_t                elements,
+                                                  DataInitializationKey key,
+                                                  double                freeValue);
+        void initializeHostBufferWithHostNumerics(rocisa::DataType        dataType,
+                                                  InitMode                mode,
+                                                  void*                   array,
+                                                  TensorDescriptor const& descriptor,
+                                                  DataInitializationKey   key);
+        double hostNumericsDoubleValue(InitMode              mode,
                                          DataInitializationKey key,
                                          double                freeValue = 0.0);
-        double hostValidationUniformDouble(double lower, double upper, DataInitializationKey key);
+        double hostNumericsUniformDouble(double lower, double upper, DataInitializationKey key);
 
         static bool IsProblemDependent(InitMode const& mode)
         {
@@ -481,11 +481,8 @@ namespace TensileLite
                            S                     descriptor,
                            DataInitializationKey key)
             {
-                if(tryHostValidationInitialize(dataType, initMode, array, descriptor, key))
-                    return;
-                throw std::invalid_argument(
-                    "TensileLite CPU initialization mode/type is not represented "
-                    "by host-validation.");
+                initializeHostBufferWithHostNumerics(
+                    dataType, initMode, array, descriptor, key);
             }
 
             size_t workspaceSize() const
@@ -684,7 +681,8 @@ namespace TensileLite
                 ContractionSolution const*    solution) const
             {
                 return isMXProblem(problem) && m_mxScaleFormat > 0
-                       && m_mxScaleLayout == MXScaleLayout::GFX950
+                       && m_mxScaleLayout
+                              == roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
                        && solution != nullptr
                        && solution->problemType.mxScaleFormat == 1;
             }
@@ -789,7 +787,8 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
-            MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
+            roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout m_mxScaleLayout
+                = roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Natural;
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
             // hand back gpuInput.valid as-is rather than re-swizzling).

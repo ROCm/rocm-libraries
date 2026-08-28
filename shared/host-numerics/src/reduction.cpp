@@ -1,0 +1,76 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <complex>
+#include <numeric>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+#include "detail/reference_reduction.hpp"
+
+namespace roc::host_numerics {
+ReductionRunInfo referenceReduce(const ReductionRequest& request) {
+    const detail::ReductionPlan plan = detail::validateReductionRequest(request);
+    switch (request.accumulatorType) {
+        case ScalarType::Float16:
+        case ScalarType::BFloat16:
+        case ScalarType::Float32:
+            return detail::referenceReductionTyped<float>(request, plan);
+        case ScalarType::Float64:
+            return detail::referenceReductionTyped<double>(request, plan);
+        case ScalarType::Int32:
+            return detail::referenceReductionTyped<int32_t>(request, plan);
+        case ScalarType::ComplexFloat32:
+            return detail::referenceReductionTyped<std::complex<float>>(request, plan);
+        case ScalarType::ComplexFloat64:
+            return detail::referenceReductionTyped<std::complex<double>>(request, plan);
+        default:
+            throw std::invalid_argument("Unsupported reference reduction accumulator type.");
+    }
+}
+
+ReductionResult referenceReduce(const ReductionProblem& problem) {
+    const detail::ReductionPlan plan = detail::validateReductionProblem(problem);
+    Tensor output(problem.outputType, plan.outputShape);
+    ReductionRequest request(problem, output);
+    const ReductionRunInfo runInfo = referenceReduce(request);
+    return {.output = std::move(output), .runInfo = runInfo};
+}
+
+ReductionRunInfo referenceSum(const ReductionRequest& request) {
+    if (request.operation != ReductionOperation::Sum)
+        throw std::invalid_argument("referenceSum requires a sum reduction problem.");
+    return referenceReduce(request);
+}
+
+ReductionResult referenceSum(const ReductionProblem& problem) {
+    if (problem.operation != ReductionOperation::Sum)
+        throw std::invalid_argument("referenceSum requires a sum reduction problem.");
+    return referenceReduce(problem);
+}
+
+ReductionRunInfo referenceMaximumAbsolute(const ReductionRequest& request) {
+    if (request.operation != ReductionOperation::MaximumAbsolute)
+        throw std::invalid_argument(
+            "referenceMaximumAbsolute requires a maximum-absolute reduction problem.");
+    return referenceReduce(request);
+}
+
+ReductionRunInfo referenceMaximumAbsolute(Tensor input, Tensor output, ScalarType accumulatorType) {
+    std::vector<size_t> axes(input.shape().rank());
+    std::iota(axes.begin(), axes.end(), 0);
+    return referenceMaximumAbsolute(ReductionRequest(std::move(input), std::move(output),
+                                                     accumulatorType, std::move(axes),
+                                                     ReductionOperation::MaximumAbsolute));
+}
+
+ReductionResult referenceMaximumAbsolute(Tensor input, ScalarType outputType,
+                                         ScalarType accumulatorType) {
+    std::vector<size_t> axes(input.shape().rank());
+    std::iota(axes.begin(), axes.end(), 0);
+    return referenceReduce(ReductionProblem(std::move(input), outputType, accumulatorType,
+                                            std::move(axes), ReductionOperation::MaximumAbsolute));
+}
+
+}  // namespace roc::host_numerics

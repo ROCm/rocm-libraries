@@ -168,7 +168,7 @@ namespace TensileLite
                 std::string valueName = "init-" + constants[i].name;
                 if(args.count(valueName))
                 {
-                    m_constantValues[i] = hostValidationDoubleValue(
+                    m_constantValues[i] = hostNumericsDoubleValue(
                         args[valueName].as<InitMode>(),
                         DataInitializationKey{initializationSeed,
                                               stableDataInitializationStream(valueName)});

@@ -223,7 +223,7 @@ namespace rocRollerTest
             cpu_D.emplace_back(TypeD(tmp_D[i]));
 
         auto tol = gemmAcceptableError<TypeAB, TypeAB, TypeD>(
-            M, N, K, m_context->targetArchitecture().target());
+            K, m_context->targetArchitecture().target());
         auto res = compare(gpu_D, cpu_D, tol);
 
         Log::info("MatrixMultiplyABC and Conversion RNorm is {}", res.relativeNormL2);
@@ -343,7 +343,7 @@ namespace rocRollerTest
             cpu_D.emplace_back(TypeD(tmp_D[i]));
 
         auto tol = gemmAcceptableError<TypeAB, TypeAB, TypeD>(
-            M, N, K, m_context->targetArchitecture().target());
+            K, m_context->targetArchitecture().target());
         auto res = compare(gpu_D, cpu_D, tol);
 
         Log::info("D = Convert(A * B) RNorm is {}", res.relativeNormL2);
@@ -482,7 +482,7 @@ namespace rocRollerTest
         // Convert A to destination type
         auto tagCvtA = seed.has_value()
                            ? execute.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
-                               tagLoadA, tagLoadSeed, destDataType))
+                                 tagLoadA, tagLoadSeed, destDataType))
                            : execute.addXOp(rocRoller::Operations::E_Cvt(tagLoadA, destDataType));
         command->addOperation(std::move(execute));
 

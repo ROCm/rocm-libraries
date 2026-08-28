@@ -19,7 +19,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
-#include <roc/host_validation/generation.hpp>
+#include <roc/host_numerics/generation.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -174,21 +174,21 @@ int main(int argc, char** argv)
 
     std::vector<float> A_clean(M * K);
     std::vector<float> B(K * N);
-    const auto         ones = roc::host_validation::GenerationRecipe::realOnly(
-        roc::host_validation::GenerationRecipe::constant({.value = 1.0}));
-    roc::host_validation::Tensor cleanTensor
-        = roc::host_validation::generate(roc::host_validation::ScalarType::Float32,
-                                         roc::host_validation::Shape{A_clean.size()},
+    const auto         ones = roc::host_numerics::GenerationRecipe::realOnly(
+        roc::host_numerics::GenerationRecipe::constant({.value = 1.0}));
+    roc::host_numerics::Tensor cleanTensor
+        = roc::host_numerics::generate(roc::host_numerics::ScalarType::Float32,
+                                         roc::host_numerics::Shape{A_clean.size()},
                                          ones);
     std::memcpy(A_clean.data(), cleanTensor.rawEncodedBackingStorage().data(), cleanTensor.rawEncodedBackingStorage().size());
-    roc::host_validation::Tensor bTensor = roc::host_validation::generate(
-        roc::host_validation::ScalarType::Float32, roc::host_validation::Shape{B.size()}, ones);
+    roc::host_numerics::Tensor bTensor = roc::host_numerics::generate(
+        roc::host_numerics::ScalarType::Float32, roc::host_numerics::Shape{B.size()}, ones);
     std::memcpy(B.data(), bTensor.rawEncodedBackingStorage().data(), bTensor.rawEncodedBackingStorage().size());
     std::vector<float> A_dirty = A_clean;
-    const auto         nan     = roc::host_validation::GenerationRecipe::realOnly(
-        roc::host_validation::GenerationRecipe::typeNaN());
-    roc::host_validation::Tensor dirtyTensor = cleanTensor.deepCopy();
-    roc::host_validation::generateAt(dirtyTensor, 0, nan);
+    const auto         nan     = roc::host_numerics::GenerationRecipe::realOnly(
+        roc::host_numerics::GenerationRecipe::typeNaN());
+    roc::host_numerics::Tensor dirtyTensor = cleanTensor.deepCopy();
+    roc::host_numerics::generateAt(dirtyTensor, 0, nan);
     std::memcpy(A_dirty.data(), dirtyTensor.rawEncodedBackingStorage().data(), dirtyTensor.rawEncodedBackingStorage().size());
 
     for(int i = 1; i <= total; ++i)

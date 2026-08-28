@@ -26,10 +26,9 @@
 
 #include "DataInitialization.hpp"
 
-#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
+#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-#include <mxDataGen.hpp>
-#include <roc/host_validation/adapters/tensilelite/DataInitializationHelpers.hpp>
+#include <roc/host_numerics/adapters/tensilelite/DataInitializationHelpers.hpp>
 #endif
 #include "Utility.hpp"
 // #include "DataInitializationTyped.hpp"
@@ -117,7 +116,7 @@ namespace TensileLite
         using BitWidth        = uint8_t;
         using Size            = uint64_t;
         using SwizzleCacheKey = std::tuple<BitWidth, Size, Size>;
-        using SwizzleCacheVal = roc::host_validation::Tensor;
+        using SwizzleCacheVal = roc::host_numerics::Tensor;
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
 
@@ -131,10 +130,10 @@ namespace TensileLite
             MXScale
         };
 
-        roc::host_validation::ScalarType swizzleScalarType(rocisa::DataType  dataType,
+        roc::host_numerics::ScalarType swizzleScalarType(rocisa::DataType  dataType,
                                                            SwizzleTensorKind kind)
         {
-            using roc::host_validation::ScalarType;
+            using roc::host_numerics::ScalarType;
 
             switch(dataType)
             {
@@ -148,24 +147,24 @@ namespace TensileLite
                 // A mixed product tag selects an operand interpretation, not one scalar encoding.
                 return ScalarType::UInt8;
             default:
-                return kind == SwizzleTensorKind::MXScale ? toHostValidationMxScaleType(dataType)
-                                                          : toHostValidationScalarType(dataType);
+                return kind == SwizzleTensorKind::MXScale ? toHostNumericsMxScaleType(dataType)
+                                                          : toHostNumericsScalarType(dataType);
             }
         }
 
         BitWidth toBitWidth(rocisa::DataType dataType)
         {
-            return static_cast<BitWidth>(roc::host_validation::scalarTypeInfo(
+            return static_cast<BitWidth>(roc::host_numerics::scalarTypeInfo(
                                              swizzleScalarType(dataType, SwizzleTensorKind::Data))
                                              .storageBits);
         }
 
-        roc::host_validation::Tensor makeSwizzleTensor(rocisa::DataType            dataType,
+        roc::host_numerics::Tensor makeSwizzleTensor(rocisa::DataType            dataType,
                                                        SwizzleTensorKind           kind,
-                                                       roc::host_validation::Shape shape,
+                                                       roc::host_numerics::Shape shape,
                                                        const void*                 source)
         {
-            using namespace roc::host_validation;
+            using namespace roc::host_numerics;
 
             const ScalarType type   = swizzleScalarType(dataType, kind);
             Layout           layout = Layout::contiguousLastDimensionFastest(shape);
@@ -180,11 +179,11 @@ namespace TensileLite
 
         void* copySwizzleTensor(const TensorDescriptor&             descriptor,
                                 void*                               destination,
-                                const roc::host_validation::Tensor& source,
+                                const roc::host_numerics::Tensor& source,
                                 hipMemcpyKind                       kind)
         {
             const size_t bytes
-                = roc::host_validation::storageBytesForLayout(source.type(), source.layout());
+                = roc::host_numerics::storageBytesForLayout(source.type(), source.layout());
             const auto storage = source.rawEncodedBackingStorage();
             if(storage.size() != bytes)
                 throw std::runtime_error("Swizzled tensor has an unexpected storage byte count.");
@@ -699,7 +698,7 @@ namespace TensileLite
                 hipDeviceProp_t prop;
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
-                m_mxScaleLayout = mxScaleLayoutForArchName(prop.gcnArchName);
+                m_mxScaleLayout = detail::mxScaleStorageLayoutForArchName(prop.gcnArchName);
             }
 
             m_rotatingBuffer
@@ -1080,7 +1079,7 @@ namespace TensileLite
                     double value = 0.0;
                     if(activationAdditionalArgs.empty())
                     {
-                        value = hostValidationUniformDouble(
+                        value = hostNumericsUniformDouble(
                             -2.0,
                             2.0,
                             DataInitializationKey{m_initializationSeed,
@@ -1656,95 +1655,7 @@ namespace TensileLite
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
         using namespace detail;
-
-        static std::string_view initModeToMXMethod(InitMode mode)
-        {
-            switch(mode)
-            {
-            case InitMode::Zero:
-                return "Zeros";
-            case InitMode::One:
-                return "Ones";
-            case InitMode::Two:
-                return "Twos";
-            case InitMode::NegOne:
-                return "NegOnes";
-            case InitMode::Max:
-                return "MaxVals";
-            case InitMode::DenormMin:
-                return "DenormMins";
-            case InitMode::DenormMax:
-                return "DenormMaxs";
-            // BadInput/BadOutput alias to NaN/Inf in tensilelite.
-            case InitMode::NaN:
-            case InitMode::BadInput:
-                return "NaNs";
-            case InitMode::Inf:
-            case InitMode::BadOutput:
-                return "Infs";
-            case InitMode::Identity:
-                return "Identity";
-            case InitMode::SerialIdx:
-            case InitMode::SerialDim0:
-            case InitMode::SerialDim1:
-                return "Sequential";
-            // The MX generation adapter has a single trig family, so all sin/cos/abs/ind
-            // variants collapse to the same string.
-            case InitMode::TrigSin:
-            case InitMode::TrigCos:
-            case InitMode::TrigAbsSin:
-            case InitMode::TrigAbsCos:
-            case InitMode::TrigIndSin:
-            case InitMode::TrigIndCos:
-            case InitMode::TrigIndAbsSin:
-            case InitMode::TrigIndAbsCos:
-                return "TrigonometricFromFloat";
-            // Random maps to rand_int (per-dtype integer range) so low-precision
-            // MX validation stays exact, matching the legacy integer init.
-            case InitMode::Random:
-                return "rand_int";
-            // RandomNarrow/RandomNegPosLimited map to Bounded[-1,1] (the window
-            // generateMXInput is already pinned to).
-            case InitMode::RandomNarrow:
-            case InitMode::RandomNegPosLimited:
-                return "Bounded";
-            // UniformLowPrecision routes to bounded MX generation with the
-            // hard-coded [-6, 6] window (full FP4 E2M1 range) inside
-            // generateMXInput. No UE8M0/scaleType guard is applied here;
-            // generateMXInput's "uniform_low_precision" arm intentionally has
-            // none because the [-6, 6] data range fits well inside UE8M0's
-            // exponent range.
-            case InitMode::UniformLowPrecision:
-                return "uniform_low_precision";
-            // Free / Count have no MX generation analogue; throw rather than
-            // silently fall through to an unrelated distribution.
-            case InitMode::Free:
-            case InitMode::Count:
-                break;
-            }
-            throw std::runtime_error(
-                "initModeToMXMethod: InitMode '" + ToString(mode)
-                + "' has no MX generation mapping; either pick a supported "
-                  "InitMode (Zero, One, Two, NegOne, Max, DenormMin, DenormMax, "
-                  "NaN, Inf, BadInput, BadOutput, Identity, SerialIdx/Dim0/Dim1, "
-                  "Trig{Sin,Cos,AbsSin,AbsCos}[Ind], Random, RandomNarrow, "
-                  "RandomNegPosLimited, UniformLowPrecision) "
-                  "or add a mapping in initModeToMXMethod.");
-        }
-
-        static bool isRandomLikeInitMode(InitMode mode)
-        {
-            switch(mode)
-            {
-            case InitMode::Random:
-            case InitMode::RandomNarrow:
-            case InitMode::RandomNegPosLimited:
-            case InitMode::UniformLowPrecision:
-                return true;
-            default:
-                return false;
-            }
-        }
+        using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
 
         static bool isConstantScaleInitMode(InitMode mode)
         {
@@ -1754,9 +1665,7 @@ namespace TensileLite
             case InitMode::One:
             case InitMode::Two:
             case InitMode::Max:
-            case InitMode::NaN:
             case InitMode::Inf:
-            case InitMode::BadInput:
             case InitMode::BadOutput:
                 return true;
             default:
@@ -1768,7 +1677,7 @@ namespace TensileLite
         {
             if(dataInit == scaleInit)
                 return true;
-            return isRandomLikeInitMode(dataInit) && isConstantScaleInitMode(scaleInit);
+            return isConstantScaleInitMode(scaleInit);
         }
 
         void DataInitialization::initializeMXData(ContractionProblemGemm const& problem)
@@ -1800,10 +1709,10 @@ namespace TensileLite
             m_mxPreswizzledA = false;
             m_mxPreswizzledB = false;
 
-            MXScaleLayout layoutA = MXScaleLayout::None;
-            MXScaleLayout layoutB = MXScaleLayout::None;
+            MxScaleStorageLayout layoutA = MxScaleStorageLayout::Natural;
+            MxScaleStorageLayout layoutB = MxScaleStorageLayout::Natural;
 
-            if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::GFX950
+            if(m_mxScaleFormat > 0 && m_mxScaleLayout == MxScaleStorageLayout::Gfx950
                && m_currentSolution != nullptr)
             {
                 auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;
@@ -1821,7 +1730,7 @@ namespace TensileLite
                         size_t      scaleRowsA = mxsaSizes[0];
                         size_t      scaleColsA = mxsaSizes[1];
                         if(scaleRowsA % tileK == 0 && scaleColsA % swizzleTileMN == 0)
-                            layoutA = MXScaleLayout::GFX950;
+                            layoutA = MxScaleStorageLayout::Gfx950;
                     }
 
                     if(problem.mxBlockB() > 0 && MiK % problem.mxBlockB() == 0)
@@ -1832,16 +1741,16 @@ namespace TensileLite
                         size_t      scaleRowsB = mxsbSizes[0];
                         size_t      scaleColsB = mxsbSizes[1];
                         if(scaleRowsB % tileK == 0 && scaleColsB % swizzleTileMN == 0)
-                            layoutB = MXScaleLayout::GFX950;
+                            layoutB = MxScaleStorageLayout::Gfx950;
                     }
                 }
             }
-            else if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::GFX1250)
+            else if(m_mxScaleFormat > 0 && m_mxScaleLayout == MxScaleStorageLayout::Gfx1250)
             {
                 if(problem.mxBlockA() > 0)
-                    layoutA = MXScaleLayout::GFX1250;
+                    layoutA = MxScaleStorageLayout::Gfx1250;
                 if(problem.mxBlockB() > 0)
-                    layoutB = MXScaleLayout::GFX1250;
+                    layoutB = MxScaleStorageLayout::Gfx1250;
             }
 
             // We pass cpuInput.valid (host) pointers because the CPU reference
@@ -1853,7 +1762,7 @@ namespace TensileLite
                                      size_t                  mxBlock,
                                      rocisa::DataType        scaleEltType,
                                      bool                    isMatrixA,
-                                     MXScaleLayout           swizzleLayout,
+                                     MxScaleStorageLayout    swizzleLayout,
                                      bool*                   preswizzledFlag) {
                 auto         rows       = dataDesc.sizes()[0];
                 auto         cols       = dataDesc.sizes()[1];
@@ -1885,32 +1794,25 @@ namespace TensileLite
 
                 auto dataInitMode  = m_vdata[dataTensorEnum].init;
                 auto scaleInitMode = m_vdata[scaleTensorEnum].init;
+                auto effectiveScaleInitMode = canDecoupleMXScaleInit(dataInitMode, scaleInitMode)
+                                                  ? scaleInitMode
+                                                  : dataInitMode;
 
                 std::memset(
                     pristineScale.cpuInput.valid.get(), 0x00, scaleDesc.totalAllocatedBytes());
 
-                hipDataType const hipDataT  = hipMxDataTypeForDataGenerator(dataDesc.dataType());
-                hipDataType const hipScaleT = hipMxScaleTypeForDataGenerator(scaleEltType);
-
-                // cpuInput.valid always holds the canonical (non-swizzled) scale.
-                // generateMXInput emits scales packed for the unpadded data K, but
-                // setMXScaleA/B pad ceil(K/mxBlock) up to a multiple of 8. For K-fast
-                // layouts (bound dim at index 0) the compact and padded K-block counts
-                // can differ, so we must restride the canonical buffer in place so the
-                // kernel and CPU reference read every (free, k_block) at the right byte
-                // (develop #7683). K-slow layouts keep K as the slow axis and the
-                // pre-memset zero tail already covers the padding.
                 auto const boundIdx
                     = isMatrixA ? problem.boundIndices()[0].a : problem.boundIndices()[0].b;
                 auto const freeIdx
                     = isMatrixA ? problem.freeIndicesA()[0].i : problem.freeIndicesB()[0].i;
-                int const    scaleBlockRowSize = boundIdx == 0 ? static_cast<int>(mxBlock) : 1;
-                int const    scaleBlockColSize = boundIdx == 1 ? static_cast<int>(mxBlock) : 1;
-                size_t const compactKBlocks = (dataDesc.sizes()[boundIdx] + mxBlock - 1) / mxBlock;
-                size_t const paddedKBlocks  = scaleDesc.sizes()[boundIdx];
-                size_t const compactFree    = dataDesc.sizes()[freeIdx];
-                size_t const scaleElemSize  = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
-                bool const   kFast          = (boundIdx == 0);
+                bool const kFast = boundIdx == 0;
+                auto const paddedScaleShape
+                    = roc::host_numerics::Shape{kFast ? scaleDesc.sizes()[freeIdx]
+                                                        : scaleDesc.sizes()[boundIdx],
+                                                  kFast ? scaleDesc.sizes()[boundIdx]
+                                                        : scaleDesc.sizes()[freeIdx]};
+                std::vector<std::byte> gpuScaleStorage;
+                size_t                 gpuScaleBytesPerBatch = 0;
                 for(size_t b = 0; b < batchCount; b++)
                 {
                     auto dataOutput  = mxBatchOutput(pristineData.cpuInput.valid.get(),
@@ -1921,82 +1823,67 @@ namespace TensileLite
                                                      scaleDesc.totalAllocatedBytes(),
                                                      b * scaleBatchStrideBytes,
                                                      scaleBatchStrideBytes);
-                    generateMXInput(hipDataT,
-                                    hipScaleT,
-                                    dataOutput,
-                                    scaleOutput,
-                                    rows,
-                                    cols,
-                                    stride,
-                                    scaleBlockRowSize,
-                                    scaleBlockColSize,
-                                    MXScaleLayout::None,
-                                    initModeToMXMethod(dataInitMode),
-                                    -1.0f,
-                                    1.0f,
-                                    initModeToMXMethod(scaleInitMode),
-                                    m_initializationSeed);
-                    if(kFast)
-                        ::restrideMXScaleBufferKFast(
-                            scaleOutput, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
+                    auto mxProblem = detail::makeMxGenerationProblem(
+                        dataDesc.dataType(),
+                        scaleEltType,
+                        roc::host_numerics::Shape{rows, cols},
+                        stride,
+                        kFast ? 0 : 1,
+                        mxBlock,
+                        dataInitMode,
+                        effectiveScaleInitMode,
+                        m_initializationSeed);
+                    auto generated = roc::host_numerics::generateMx(mxProblem);
+                    const auto dataStorage = generated.data.rawEncodedBackingStorage();
+                    if(dataOutput.size() < dataStorage.size())
+                        throw std::invalid_argument("TensileLite MX data output is too small.");
+                    if(!dataStorage.empty())
+                        std::memcpy(dataOutput.data(), dataStorage.data(), dataStorage.size());
+                    auto canonicalScales
+                        = generated.scales.copyWithZeroPadding(paddedScaleShape);
+                    canonicalScales.copyLogicalElementsToEncodedStorage(
+                        std::as_writable_bytes(scaleOutput));
+
+                    if(swizzleLayout != MxScaleStorageLayout::Natural
+                       && pristineScale.gpuInput.valid)
+                    {
+                        auto physicalScale
+                            = roc::host_numerics::amd_gpu_layout::
+                                copyMxScaleStorageToPhysicalLayout(
+                                    canonicalScales.rawEncodedBackingStorage().data(),
+                                    canonicalScales.rawEncodedBackingStorage().size(),
+                                    {canonicalScales.shape()[0], canonicalScales.shape()[1]},
+                                    mxBlock,
+                                    swizzleLayout);
+                        if(b == 0)
+                        {
+                            gpuScaleBytesPerBatch = physicalScale.size();
+                            if(gpuScaleBytesPerBatch != 0
+                               && batchCount > std::numeric_limits<size_t>::max()
+                                                   / gpuScaleBytesPerBatch)
+                                throw std::overflow_error(
+                                    "TensileLite MX scale batch storage overflow.");
+                            gpuScaleStorage.resize(gpuScaleBytesPerBatch * batchCount);
+                        }
+                        else if(physicalScale.size() != gpuScaleBytesPerBatch)
+                        {
+                            throw std::logic_error(
+                                "TensileLite MX scale layout size changed between batches.");
+                        }
+                        std::memcpy(gpuScaleStorage.data() + b * gpuScaleBytesPerBatch,
+                                    physicalScale.data(),
+                                    physicalScale.size());
+                    }
                 }
 
-                // When the kernel needs a swizzled scale, regenerate it with the
-                // requested layout straight into gpuInput.valid; the cpuInput.valid
-                // copy stays canonical for the CPU reference.
-                if(swizzleLayout != MXScaleLayout::None && pristineScale.gpuInput.valid)
+                if(!gpuScaleStorage.empty())
                 {
-                    size_t const slowDim                    = kFast ? compactFree : compactKBlocks;
-                    size_t const fastDim                    = kFast ? compactKBlocks : compactFree;
-                    size_t       swizzledScaleElemsPerBatch = slowDim * fastDim;
-                    if(swizzleLayout == MXScaleLayout::GFX1250 && mxBlock > 0)
-                    {
-                        size_t const dimk = 128u / static_cast<size_t>(mxBlock);
-                        size_t const paddedFast
-                            = (dimk == 0) ? fastDim : ((fastDim + dimk - 1) / dimk) * dimk;
-                        swizzledScaleElemsPerBatch = slowDim * paddedFast;
-                    }
-                    else if(swizzleLayout == MXScaleLayout::GFX950)
-                    {
-                        size_t const paddedSlow    = ((slowDim + 31) / 32) * 32;
-                        size_t const paddedFast    = ((fastDim + 7) / 8) * 8;
-                        swizzledScaleElemsPerBatch = paddedSlow * paddedFast;
-                    }
-
-                    size_t const canonicalScaleBytesPerBatch
-                        = batchCount > 1 ? scaleBatchStrideBytes : scaleDesc.totalAllocatedBytes();
-                    size_t const swizzledScaleBytesPerBatch = std::max(
-                        canonicalScaleBytesPerBatch, swizzledScaleElemsPerBatch * scaleElemSize);
-                    size_t const         gpuScaleBytes = swizzledScaleBytesPerBatch * batchCount;
-                    std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, 0);
-                    for(size_t b = 0; b < batchCount; b++)
-                    {
-                        auto dataOutput  = mxBatchOutput(pristineData.cpuInput.valid.get(),
-                                                         dataDesc.totalAllocatedBytes(),
-                                                         b * dataBatchStrideBytes,
-                                                         dataBatchStrideBytes);
-                        auto scaleOutput = std::span<uint8_t>(gpuScaleBuf.data()
-                                                                  + b * swizzledScaleBytesPerBatch,
-                                                              swizzledScaleBytesPerBatch);
-                        generateMXInput(hipDataT,
-                                        hipScaleT,
-                                        dataOutput,
-                                        scaleOutput,
-                                        rows,
-                                        cols,
-                                        stride,
-                                        scaleBlockRowSize,
-                                        scaleBlockColSize,
-                                        swizzleLayout,
-                                        initModeToMXMethod(dataInitMode),
-                                        -1.0f,
-                                        1.0f,
-                                        initModeToMXMethod(scaleInitMode),
-                                        m_initializationSeed);
-                    }
+                    if(gpuScaleStorage.size() > scaleDesc.totalAllocatedBytes())
+                        throw std::invalid_argument(
+                            "TensileLite MX physical scale storage exceeds its allocation.");
                     HIP_CHECK_EXC(hipMemcpy(pristineScale.gpuInput.valid.get(),
-                                            gpuScaleBuf.data(),
-                                            gpuScaleBytes,
+                                            gpuScaleStorage.data(),
+                                            gpuScaleStorage.size(),
                                             hipMemcpyHostToDevice));
                     *preswizzledFlag = true;
                 }
@@ -2020,10 +1907,9 @@ namespace TensileLite
                           << ToString(scaleInit) << " cannot be decoupled from --init-"
                           << m_vdata[dataTensorEnum].name << "=" << ToString(dataInit)
                           << " for MX generation; scale init is ignored. "
-                          << "Supported decoupling: random-like data init (Random, "
-                             "RandomNarrow, RandomNegPosLimited, UniformLowPrecision) with "
-                             "constant scale init (Zero, One, Two, Max, NaN, Inf, BadInput, "
-                             "BadOutput). This warning is shown once per process."
+                          << "A distinct scale initializer must select a constant scale "
+                             "(Zero, One, Two, Max, Inf, or BadOutput). "
+                             "This warning is shown once per process."
                           << std::endl;
             };
 
@@ -2097,17 +1983,14 @@ namespace TensileLite
                     prop.dataType             = problem.constants()[i].dataType;
                     auto assignGeneratedValue = [&]<typename T>() {
                         T value{};
-                        if(!tryHostValidationInitialize(
-                               prop.dataType,
-                               prop.init,
-                               &value,
-                               TypeInfo<T>::Packing,
-                               DataInitializationKey{m_initializationSeed,
-                                                     stableDataInitializationStream(prop.name)},
-                               prop.freeValue))
-                            throw std::invalid_argument(
-                                "TensileLite constant mode/type is not represented "
-                                "by host-validation.");
+                        initializeHostBufferWithHostNumerics(
+                            prop.dataType,
+                            prop.init,
+                            &value,
+                            TypeInfo<T>::Packing,
+                            DataInitializationKey{m_initializationSeed,
+                                                  stableDataInitializationStream(prop.name)},
+                            prop.freeValue);
                         prop.value = value;
                     };
                     switch(prop.dataType)
@@ -2527,8 +2410,8 @@ namespace TensileLite
 
                 if(needSwizzle)
                 {
-                    using roc::host_validation::Shape;
-                    using roc::host_validation::Tensor;
+                    using roc::host_numerics::Shape;
+                    using roc::host_numerics::Tensor;
 
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
@@ -2612,8 +2495,8 @@ namespace TensileLite
                         // branches above. Batch dim (if present) goes at the
                         // front; pad/reshape/permute operate natively on N-D
                         // so all batches are processed at once.
-                        using roc::host_validation::Shape;
-                        using roc::host_validation::Tensor;
+                        using roc::host_numerics::Shape;
+                        using roc::host_numerics::Tensor;
 
                         size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
 

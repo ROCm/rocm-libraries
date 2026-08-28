@@ -1,0 +1,244 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+from __future__ import annotations
+
+import numpy as np
+
+from ._roc_host_numerics import *  # noqa: F403
+
+
+# Default NumPy containers for decoded numerical values. These are not storage
+# dtypes: packed and custom encodings remain in tensor.storage and decode into
+# the wider type listed here.
+_DEFAULT_DECODED_DTYPES = {
+    ScalarType.Boolean: np.bool_,  # noqa: F405
+    ScalarType.UInt8: np.uint8,  # noqa: F405
+    ScalarType.Int8: np.int8,  # noqa: F405
+    ScalarType.UInt16: np.uint16,  # noqa: F405
+    ScalarType.Int16: np.int16,  # noqa: F405
+    ScalarType.UInt32: np.uint32,  # noqa: F405
+    ScalarType.Int32: np.int32,  # noqa: F405
+    ScalarType.UInt64: np.uint64,  # noqa: F405
+    ScalarType.Int64: np.int64,  # noqa: F405
+    ScalarType.Float16: np.float16,  # noqa: F405
+    ScalarType.BFloat16: np.float32,  # noqa: F405
+    ScalarType.Float32: np.float32,  # noqa: F405
+    ScalarType.Float64: np.float64,  # noqa: F405
+    ScalarType.ComplexFloat32: np.complex64,  # noqa: F405
+    ScalarType.ComplexFloat64: np.complex128,  # noqa: F405
+    ScalarType.Float8E4M3: np.float32,  # noqa: F405
+    ScalarType.Float8E5M2: np.float32,  # noqa: F405
+    ScalarType.Float8E4M3Fnuz: np.float32,  # noqa: F405
+    ScalarType.Float8E5M2Fnuz: np.float32,  # noqa: F405
+    ScalarType.Float6E2M3: np.float32,  # noqa: F405
+    ScalarType.Float6E3M2: np.float32,  # noqa: F405
+    ScalarType.Float4E2M1: np.float32,  # noqa: F405
+    ScalarType.Int4: np.int8,  # noqa: F405
+    ScalarType.E8M0: np.float32,  # noqa: F405
+    ScalarType.E8M0Zero: np.float32,  # noqa: F405
+    ScalarType.E5M3: np.float32,  # noqa: F405
+    ScalarType.E4M3: np.float32,  # noqa: F405
+}
+
+_SCALAR_TYPES_FROM_NUMPY = {
+    np.dtype(np.bool_): ScalarType.Boolean,  # noqa: F405
+    np.dtype(np.uint8): ScalarType.UInt8,  # noqa: F405
+    np.dtype(np.int8): ScalarType.Int8,  # noqa: F405
+    np.dtype(np.uint16): ScalarType.UInt16,  # noqa: F405
+    np.dtype(np.int16): ScalarType.Int16,  # noqa: F405
+    np.dtype(np.uint32): ScalarType.UInt32,  # noqa: F405
+    np.dtype(np.int32): ScalarType.Int32,  # noqa: F405
+    np.dtype(np.uint64): ScalarType.UInt64,  # noqa: F405
+    np.dtype(np.int64): ScalarType.Int64,  # noqa: F405
+    np.dtype(np.float16): ScalarType.Float16,  # noqa: F405
+    np.dtype(np.float32): ScalarType.Float32,  # noqa: F405
+    np.dtype(np.float64): ScalarType.Float64,  # noqa: F405
+    np.dtype(np.complex64): ScalarType.ComplexFloat32,  # noqa: F405
+    np.dtype(np.complex128): ScalarType.ComplexFloat64,  # noqa: F405
+}
+
+
+def default_decoded_dtype(scalar_type) -> np.dtype:
+    """Return the default NumPy dtype for decoded values of scalar_type.
+
+    This describes the owning array returned by to_numpy, not tensor.storage's
+    encoded or packed representation.
+    """
+
+    try:
+        return np.dtype(_DEFAULT_DECODED_DTYPES[scalar_type])
+    except KeyError as error:
+        raise ValueError(
+            f"No default decoded NumPy dtype for scalar type {scalar_type!r}"
+        ) from error
+
+
+def from_numpy(array: np.ndarray, scalar_type=None):
+    """Create an owning host-numerics tensor by quantizing NumPy values."""
+
+    values = np.asarray(array)
+    if scalar_type is None:
+        try:
+            scalar_type = _SCALAR_TYPES_FROM_NUMPY[values.dtype]
+        except KeyError as error:
+            raise TypeError(
+                f"NumPy dtype {values.dtype} has no automatic ScalarType mapping"
+            ) from error
+
+    flat = values.reshape(-1)
+    shape = list(values.shape)
+    if np.issubdtype(values.dtype, np.complexfloating):
+        return Tensor.from_complex_values(  # noqa: F405
+            scalar_type, shape, [complex(value) for value in flat]
+        )
+    if np.issubdtype(values.dtype, np.signedinteger):
+        return Tensor.from_signed_values(  # noqa: F405
+            scalar_type, shape, [int(value) for value in flat]
+        )
+    if np.issubdtype(values.dtype, np.unsignedinteger) or values.dtype == np.bool_:
+        return Tensor.from_unsigned_values(  # noqa: F405
+            scalar_type, shape, [int(value) for value in flat]
+        )
+    return Tensor.from_values(  # noqa: F405
+        scalar_type, shape, [float(value) for value in flat]
+    )
+
+
+def to_numpy(tensor, dtype=None) -> np.ndarray:
+    """Decode tensor values into an owning NumPy array.
+
+    dtype selects the decoded output container. It does not reinterpret the
+    encoded bytes exposed by tensor.storage.
+    """
+
+    if dtype is None:
+        dtype = default_decoded_dtype(tensor.type)
+    return np.asarray(tensor.values, dtype=dtype).reshape(tensor.shape)
+
+
+def reference_gemm_flat_result(
+    a,
+    b,
+    c,
+    output_type,
+    accumulator_type,
+    alpha=1.0,
+    beta=0.0,
+    scale_c=1.0,
+    compute_type_a=None,
+    compute_type_b=None,
+    math_mode=MathMode.Default,  # noqa: F405
+    activation=Activation.None_,  # noqa: F405
+    activation_parameter0=0.0,
+    activation_parameter1=0.0,
+    output_selection=None,
+    backend=GemmBackend.Pointwise,  # noqa: F405
+    block_scale_a=None,
+    block_scale_b=None,
+    block_size_a=0,
+    block_size_b=0,
+    pre_quantization_scales_a=None,
+    pre_quantization_axes_a=None,
+    pre_quantization_scales_b=None,
+    pre_quantization_axes_b=None,
+    output_scale=1.0,
+    output_conversion=OutputConversion.Default,  # noqa: F405
+    accumulation_rounding=AccumulationRounding.TypeDefault,  # noqa: F405
+):
+    """Build native GEMM descriptors from tensor arguments and return the result."""
+
+    operand_a = GemmOperand(a)  # noqa: F405
+    operand_b = GemmOperand(b)  # noqa: F405
+    if compute_type_a is not None:
+        operand_a.compute_type = compute_type_a
+    if compute_type_b is not None:
+        operand_b.compute_type = compute_type_b
+
+    def add_pre_quantization_scales(operand, scales, axes, default_axis, name):
+        scales = [] if scales is None else list(scales)
+        axes = [] if axes is None else list(axes)
+        if axes and len(axes) != len(scales):
+            raise ValueError(f"Python reference_gemm {name} scale/axis counts differ.")
+        operand.pre_quantization_scales = [
+            VectorBinding(  # noqa: F405
+                scale,
+                default_axis if not axes else axes[index],
+            )
+            for index, scale in enumerate(scales)
+        ]
+
+    add_pre_quantization_scales(
+        operand_a,
+        pre_quantization_scales_a,
+        pre_quantization_axes_a,
+        MatrixAxis.Row,  # noqa: F405
+        "A pre-quantization",
+    )
+    add_pre_quantization_scales(
+        operand_b,
+        pre_quantization_scales_b,
+        pre_quantization_axes_b,
+        MatrixAxis.Column,  # noqa: F405
+        "B pre-quantization",
+    )
+
+    if block_scale_a is not None:
+        if block_size_a == 0:
+            raise ValueError(
+                "Python reference_gemm A block scale requires a nonzero size."
+            )
+        operand_a.block_scale = BlockScaleBinding(  # noqa: F405
+            block_scale_a, block_size_a
+        )
+    elif block_size_a != 0:
+        raise ValueError("Python reference_gemm A block size requires a scale tensor.")
+
+    if block_scale_b is not None:
+        if block_size_b == 0:
+            raise ValueError(
+                "Python reference_gemm B block scale requires a nonzero size."
+            )
+        operand_b.block_scale = BlockScaleBinding(  # noqa: F405
+            block_scale_b, block_size_b
+        )
+    elif block_size_b != 0:
+        raise ValueError("Python reference_gemm B block size requires a scale tensor.")
+
+    problem = GemmProblem(  # noqa: F405
+        operand_a,
+        operand_b,
+        c,
+        output_type,
+        accumulator_type,
+    )
+    problem.accumulation_rounding = accumulation_rounding
+    problem.math_mode = math_mode
+    problem.epilogue.alpha = alpha
+    problem.epilogue.beta = beta
+    problem.epilogue.scale_c = scale_c
+    problem.epilogue.output_scale = output_scale
+    problem.epilogue.output_conversion = output_conversion
+    problem.epilogue.activation = activation
+    problem.epilogue.activation_parameter0 = activation_parameter0
+    problem.epilogue.activation_parameter1 = activation_parameter1
+
+    output = GemmOutputOptions()  # noqa: F405
+    output.selection = (
+        OutputSelection.all()  # noqa: F405
+        if output_selection is None
+        else output_selection
+    )
+    return reference_gemm_result(problem, output, backend)  # noqa: F405
+
+
+def reference_gemm(*args, **kwargs):
+    """Run a native GEMM request/problem and return only its output tensor."""
+
+    return reference_gemm_result(*args, **kwargs).output
+
+
+def reference_gemm_flat(*args, **kwargs):
+    """Run the tensor-argument GEMM convenience API and return its output tensor."""
+
+    return reference_gemm_flat_result(*args, **kwargs).output
