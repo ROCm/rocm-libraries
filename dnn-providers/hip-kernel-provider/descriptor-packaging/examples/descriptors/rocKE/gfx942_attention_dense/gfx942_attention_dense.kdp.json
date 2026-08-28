@@ -1,16 +1,16 @@
 {
   "version": "1.0",
-  "id": "dccc46c8-a16b-4294-837e-1ca9173ee2d2",
+  "id": "15402b1e-6b43-412d-85af-78a8036d2132",
   "name": "hipkernel:gfx942_attention_dense",
   "matchers": [
-    "e1181ef3-faa8-48da-941b-02523d8fc51f"
+    "69b58b6f-73de-4951-a081-cd0bbc5cbd98"
   ],
-  "engine": "2b5ddf8b-0547-4526-8eff-d18da30cef75",
-  "dispatch": "eb12ab9c-1ed5-42fc-a176-246d4b45b13b",
+  "engine": "051294a8-d7fe-46c0-980d-584c26c85b1a",
+  "dispatch": "71a8b66b-a2a6-461c-9b4b-74406afbd70c",
   "kernelDescriptors": [
     {
       "version": "1.0",
-      "id": "ad344dc6-2157-4ae7-9101-e261c250e669",
+      "id": "5122ddc5-24e2-41d0-bf0a-73c2b2f3cfac",
       "name": "attention_dense.dit_bf16_d128_b1_hq9_kv9_sq1024_skv62208_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -45,7 +45,7 @@
     },
     {
       "version": "1.0",
-      "id": "6ed142f7-064a-441f-8479-3225064f9731",
+      "id": "46c7b690-0ec9-485a-8354-feef7f58e1d9",
       "name": "attention_dense.dit_bf16_d128_b1_hq9_kv9_sq2048_skv62208_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -80,7 +80,7 @@
     },
     {
       "version": "1.0",
-      "id": "d4a9d9b0-0b9c-497c-be7c-6d5c3147b657",
+      "id": "d5f33d8e-3094-46c1-9a84-68ed3d715e71",
       "name": "attention_dense.dit_bf16_d128_b1_hq9_kv9_sq4096_skv62208_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -115,7 +115,7 @@
     },
     {
       "version": "1.0",
-      "id": "9c5b33d2-7778-4d40-91ff-a70b948feac0",
+      "id": "c0b5531b-880c-49d7-b689-e01aa2e7817c",
       "name": "attention_dense.dit_bf16_d128_b1_hq9_kv9_sq8192_skv62208_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -150,7 +150,7 @@
     },
     {
       "version": "1.0",
-      "id": "9246e65c-8674-47aa-ae9c-f8044e9d96f0",
+      "id": "ce7d0a9d-c9a0-4891-80c5-ece711ae0c63",
       "name": "attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -185,7 +185,7 @@
     },
     {
       "version": "1.0",
-      "id": "0aa47007-1736-4e64-b554-7368429981a3",
+      "id": "d1c131f9-56eb-47c7-88ae-579cdd4c3cad",
       "name": "attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -220,7 +220,7 @@
     },
     {
       "version": "1.0",
-      "id": "9ead1762-3833-49b7-806a-057906630c9b",
+      "id": "c8630006-2e79-4541-b732-b7b7e6d8286e",
       "name": "attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq4096_skv4096_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -255,7 +255,7 @@
     },
     {
       "version": "1.0",
-      "id": "e6c8c046-b70c-4beb-a14e-b5079d1b4ccb",
+      "id": "e327897e-6587-4ef0-aee8-3a3ddf2b805f",
       "name": "attention_dense.fp16cov_fp16_d64_b1_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -290,7 +290,7 @@
     },
     {
       "version": "1.0",
-      "id": "265c11a6-b897-4bfc-a7a3-938d2d43b0c5",
+      "id": "b5754243-6c4b-4087-a7a3-2757129601ba",
       "name": "attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -325,7 +325,7 @@
     },
     {
       "version": "1.0",
-      "id": "1af53d6b-5b99-4cd4-9a16-e954e97970a4",
+      "id": "3e7432b0-569d-4795-a4af-73133d96cfeb",
       "name": "attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -360,7 +360,7 @@
     },
     {
       "version": "1.0",
-      "id": "45a6be7c-4d22-4397-afc6-d554429650c3",
+      "id": "d9aea2cd-7ca7-49f7-bdb5-6bbb430ac6d6",
       "name": "attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq4096_skv4096_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -395,7 +395,7 @@
     },
     {
       "version": "1.0",
-      "id": "e6886ff2-1c05-41e7-9398-be7d3587e03f",
+      "id": "c0e9c570-55b1-4bc5-8baf-ecab1aefa11a",
       "name": "attention_dense.fp16cov_fp16_d128_b1_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -430,7 +430,7 @@
     },
     {
       "version": "1.0",
-      "id": "236011db-3726-4a4d-8b3c-1e70f2b128bb",
+      "id": "e9bd29bc-e66c-41db-b66b-42881ba7e86f",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq2048_skv2048_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -465,7 +465,7 @@
     },
     {
       "version": "1.0",
-      "id": "2452ae7c-aa54-4420-8a94-a55f00a9cfdc",
+      "id": "51b0b4c5-6cd2-409b-8b92-00e92452f9ff",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -500,7 +500,7 @@
     },
     {
       "version": "1.0",
-      "id": "0a68ddaa-39f8-483a-8a94-c0951a9e3ec5",
+      "id": "4fd7437b-a6bc-4d63-ba05-2fb2223735af",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq4096_skv4096_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -535,7 +535,7 @@
     },
     {
       "version": "1.0",
-      "id": "e93e0d88-cb64-435f-83da-10ba881a0774",
+      "id": "69f770ef-b9fa-4e9a-b92f-a82a3ffc44fd",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -570,7 +570,7 @@
     },
     {
       "version": "1.0",
-      "id": "3f171062-da08-44a6-bc5e-2a17d3ca7e49",
+      "id": "f5b91be5-996a-4c8b-bab0-559dd605049d",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq8192_skv8192_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -605,7 +605,7 @@
     },
     {
       "version": "1.0",
-      "id": "96434e4d-b529-4b74-8aca-ddfc0bfc86dc",
+      "id": "aa46fa22-ce1e-47ec-bd64-f8597abdc08f",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -640,7 +640,7 @@
     },
     {
       "version": "1.0",
-      "id": "1a727746-cdd4-423e-99b5-c6322fdc0aa4",
+      "id": "3824147e-aac8-4577-a586-6be2914b7583",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq16384_skv16384_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -675,7 +675,7 @@
     },
     {
       "version": "1.0",
-      "id": "f363e581-b0b2-49fc-9dd1-d8b24cf48176",
+      "id": "7cd67620-8123-4cee-a84b-1ad37f79f395",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq16384_skv16384_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -710,7 +710,7 @@
     },
     {
       "version": "1.0",
-      "id": "9fd04042-82f6-409b-8ba6-a0bb737aa3a2",
+      "id": "96e142be-4003-45bd-9be7-fe93936cbcd8",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq32768_skv32768_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -745,7 +745,7 @@
     },
     {
       "version": "1.0",
-      "id": "14895abf-b6c3-4738-8345-4785ac4aac1c",
+      "id": "3e60916c-16e1-49c2-af93-01550f888e79",
       "name": "attention_dense.gptoss_bf16_d64_b2_hq128_kv128_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -780,7 +780,7 @@
     },
     {
       "version": "1.0",
-      "id": "a12bca7f-a3af-4d96-85f0-789f28a01302",
+      "id": "da31900a-47a6-4249-bb9f-958c40e1c604",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -815,7 +815,7 @@
     },
     {
       "version": "1.0",
-      "id": "f809a114-d310-4557-9832-9b30323d8a2c",
+      "id": "fb718bc0-b861-4224-a6fd-bec33012ecce",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -850,7 +850,7 @@
     },
     {
       "version": "1.0",
-      "id": "d0993fdf-badb-4917-9699-88415ccd1d1c",
+      "id": "b36df869-0411-4058-b051-c25ce62bedf2",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -885,7 +885,7 @@
     },
     {
       "version": "1.0",
-      "id": "31d61c09-b979-4626-875b-3b983feb8db8",
+      "id": "8ea3d851-6828-4548-9b91-91efbac00803",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -920,7 +920,7 @@
     },
     {
       "version": "1.0",
-      "id": "15cb26f3-6646-415e-85ba-621386bf41a7",
+      "id": "e4262206-819f-43d8-bd9e-2021a81281e5",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -955,7 +955,7 @@
     },
     {
       "version": "1.0",
-      "id": "f7d50056-c949-4b5d-91bb-60127b3d53f9",
+      "id": "ccc54345-4912-4db1-b4cd-26ebfce9c420",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -990,7 +990,7 @@
     },
     {
       "version": "1.0",
-      "id": "ed346d1a-cc63-42c9-98b7-927a2bf0caf6",
+      "id": "4db716f3-5c11-4e28-b23d-94e107df7e3f",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1025,7 +1025,7 @@
     },
     {
       "version": "1.0",
-      "id": "deef9e41-1972-42cc-af8a-2f22706c91bf",
+      "id": "a47d6f07-c3ef-4dc6-80c4-859698269e40",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1060,7 +1060,7 @@
     },
     {
       "version": "1.0",
-      "id": "34ccbecd-9761-473e-a659-385942787ab9",
+      "id": "6ca2d138-de5e-4a3e-b06f-c7269ec3494f",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1095,7 +1095,7 @@
     },
     {
       "version": "1.0",
-      "id": "3d70b290-0328-40f8-a27e-799a0d2caf08",
+      "id": "899b459a-70c3-41df-8567-733c3019ba14",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1130,7 +1130,7 @@
     },
     {
       "version": "1.0",
-      "id": "2623a187-2d80-46a1-a3fe-a44cfe5d1f20",
+      "id": "3325c8e7-08f9-4f60-b678-6394b4625176",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1165,7 +1165,7 @@
     },
     {
       "version": "1.0",
-      "id": "07b7e445-26cd-4c44-ac9f-c5dccb7adbc6",
+      "id": "8a187287-1ee3-431e-a44f-f54f50bbe675",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1200,7 +1200,7 @@
     },
     {
       "version": "1.0",
-      "id": "506c48a2-87b0-4992-96d5-d6e0a651ae99",
+      "id": "58fe5315-7dac-4085-9cd9-6173f2bebaf8",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1235,7 +1235,7 @@
     },
     {
       "version": "1.0",
-      "id": "4c8fe4f9-0f24-4310-9be8-5ba6149aae8c",
+      "id": "ed7ae746-ca4f-4bd3-b9fc-d2e82d0eda3c",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1270,7 +1270,7 @@
     },
     {
       "version": "1.0",
-      "id": "99f41726-4371-4b3e-a59c-3b885c5539eb",
+      "id": "f642d353-b1fa-476f-9588-4310c0f383f1",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1305,7 +1305,7 @@
     },
     {
       "version": "1.0",
-      "id": "cef963a5-2cb7-4be3-8458-15c0e499fa6a",
+      "id": "6f91e46f-4d19-452a-b42f-613f3195475c",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq16384_skv16384_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1340,7 +1340,7 @@
     },
     {
       "version": "1.0",
-      "id": "d8cfea53-8ad6-4b6d-b285-8bd1547eab3a",
+      "id": "d53f7509-f51b-4113-9bf4-cf43bf75490c",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_full_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1375,7 +1375,7 @@
     },
     {
       "version": "1.0",
-      "id": "d1ff6820-aeff-4295-b253-5457826407f1",
+      "id": "b8d943bd-6d16-4b3d-9ef5-c3b48ae5d8c1",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1410,7 +1410,7 @@
     },
     {
       "version": "1.0",
-      "id": "9356804d-977e-40bf-9f06-ae58792f693e",
+      "id": "e7f0458f-55cb-41be-bdfe-eeb3f51a32a2",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1445,7 +1445,7 @@
     },
     {
       "version": "1.0",
-      "id": "61cd91be-33ec-4868-aa3d-fc9315a0c10e",
+      "id": "def0ca82-3226-4c8a-bdf6-e96eaf849dc6",
       "name": "attention_dense.llama31_bf16_d128_b2_hq64_kv8_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1480,7 +1480,7 @@
     },
     {
       "version": "1.0",
-      "id": "95fee2d1-3e99-4cc5-8427-425843f43485",
+      "id": "a891bbe3-c20c-4176-b071-96a98da5eaba",
       "name": "attention_dense.ltx2_bf16_d128_b1_hq32_kv32_sq6144_skv6144_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1515,7 +1515,7 @@
     },
     {
       "version": "1.0",
-      "id": "b2637d7e-615b-4138-8bf9-5b86cf4e983e",
+      "id": "57723a34-4544-4bc8-9d59-a012c1f81e1c",
       "name": "attention_dense.ltx2_bf16_d128_b1_hq32_kv32_sq37632_skv37632_full_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1550,7 +1550,7 @@
     },
     {
       "version": "1.0",
-      "id": "58b5e931-cf8c-49aa-ae67-2cade2e64112",
+      "id": "38dcb7d2-2a96-4e6d-ba23-f12fc6618c98",
       "name": "attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1585,7 +1585,7 @@
     },
     {
       "version": "1.0",
-      "id": "ddef4dae-2a59-4ac4-8e39-64c380726883",
+      "id": "3da8dfaf-dede-485b-89f5-f87626358694",
       "name": "attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1620,7 +1620,7 @@
     },
     {
       "version": "1.0",
-      "id": "f75b514c-5575-4815-a23a-50b0c781a248",
+      "id": "c3473fba-2e63-45dd-b89d-c97868f0d6a0",
       "name": "attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1655,7 +1655,7 @@
     },
     {
       "version": "1.0",
-      "id": "32c91e1d-adeb-4cbf-92b2-9c258060c394",
+      "id": "f8f19b76-fea8-4603-bb3f-cd074a6f019c",
       "name": "attention_dense.qwen235b_bf16_d128_b1_hq64_kv4_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1690,7 +1690,7 @@
     },
     {
       "version": "1.0",
-      "id": "6b8ca4af-4fe4-4e89-9d84-b412e40df89c",
+      "id": "95ab5c1d-34d7-4c8e-86f4-3d67a5979ea6",
       "name": "attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1725,7 +1725,7 @@
     },
     {
       "version": "1.0",
-      "id": "9d657467-dc0f-4d0c-8a9c-ed556f04444f",
+      "id": "a7746c16-2374-4817-a64f-1b3d87a22b1b",
       "name": "attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1760,7 +1760,7 @@
     },
     {
       "version": "1.0",
-      "id": "b58ebf67-e2f7-47da-b731-90d955d04b98",
+      "id": "05e47e17-e825-4293-b38c-1f663facd814",
       "name": "attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1795,7 +1795,7 @@
     },
     {
       "version": "1.0",
-      "id": "e36e4788-91a8-4842-88a8-82939404336b",
+      "id": "13ed45c3-5d6a-4eb7-a6f4-32e025c33aeb",
       "name": "attention_dense.qwen30b_bf16_d128_b1_hq32_kv4_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1830,7 +1830,7 @@
     },
     {
       "version": "1.0",
-      "id": "1e6b2802-03ab-42f7-b554-76ff281a5867",
+      "id": "8233fbf5-9ccd-4a6e-a687-4f75e5b07556",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq2048_skv2048_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1865,7 +1865,7 @@
     },
     {
       "version": "1.0",
-      "id": "fca53d19-f072-4040-8380-42f032a07452",
+      "id": "476679bf-4ed8-4c0f-92ae-318e571b8345",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1900,7 +1900,7 @@
     },
     {
       "version": "1.0",
-      "id": "416f526d-7712-4ff7-875d-c461021e0cfd",
+      "id": "6a7b416b-8c6b-493d-84a1-e41d1b000f90",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq4096_skv4096_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1935,7 +1935,7 @@
     },
     {
       "version": "1.0",
-      "id": "d9b8a595-990a-4f65-8fd3-4b4666210b0a",
+      "id": "5701d944-10f9-41b2-8780-17bdc76622ce",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -1970,7 +1970,7 @@
     },
     {
       "version": "1.0",
-      "id": "535ac591-f486-4db5-8452-4bfc4613fba5",
+      "id": "36c8ed46-9e95-46b0-8483-9e33c25f2300",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq8192_skv8192_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2005,7 +2005,7 @@
     },
     {
       "version": "1.0",
-      "id": "6eda7ad8-fc4e-4f03-93ff-4360d3204783",
+      "id": "48785166-62f5-40b0-8cc7-b0fc9784966b",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2040,7 +2040,7 @@
     },
     {
       "version": "1.0",
-      "id": "9850d172-5497-4e00-a273-968177fe2bc1",
+      "id": "6e313beb-557e-4cfd-81f1-2392ed6d0cf3",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq32768_skv32768_causal_bn32.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2075,7 +2075,7 @@
     },
     {
       "version": "1.0",
-      "id": "8428c42b-bbb9-45e1-8fe8-372046622707",
+      "id": "bcc51b16-873d-403e-83ff-4b267a09fb18",
       "name": "attention_dense.qwen32b_bf16_d128_b1_hq64_kv8_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2110,7 +2110,7 @@
     },
     {
       "version": "1.0",
-      "id": "066a4bfc-2f88-4d84-9398-2263118883d0",
+      "id": "dac451df-e55b-43ef-b0a2-57d928283fd0",
       "name": "attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2145,7 +2145,7 @@
     },
     {
       "version": "1.0",
-      "id": "992bf837-6e66-4f88-b18e-75f506df8a94",
+      "id": "9826171f-bcce-4321-b815-6b615efac302",
       "name": "attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2180,7 +2180,7 @@
     },
     {
       "version": "1.0",
-      "id": "16247836-867a-4282-8aca-dc187dc8582a",
+      "id": "e03da309-5723-40e5-a6fd-db0eb2994187",
       "name": "attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2215,7 +2215,7 @@
     },
     {
       "version": "1.0",
-      "id": "1e95d061-a97f-4fbe-a9f3-52638a67527a",
+      "id": "3bb987ee-2bb1-48b9-8f4d-7a0d4319d7f1",
       "name": "attention_dense.qwen8b_bf16_d128_b1_hq32_kv8_sq32768_skv32768_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2250,7 +2250,7 @@
     },
     {
       "version": "1.0",
-      "id": "3b6b8502-68d7-47f7-afa8-97b1ece75afd",
+      "id": "604d62bc-7906-43ae-bc6a-69d35e57b933",
       "name": "attention_dense.train8b_bf16_d128_b3_hq32_kv8_sq8192_skv8192_causal_bn64.gfx942",
       "kernel_source": {
         "kind": "rocke",
@@ -2277,6 +2277,2806 @@
         "seqlen_q": 8192,
         "seqlen_kv": 8192,
         "batch": 3,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0b3a433f-aae7-417a-b70d-50c1181b0217",
+      "name": "attention_dense.tile32_bf16_d64_b2_hq4_kv4_sq256_skv288_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 288,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 288,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a51a755a-4bb7-4871-b2ee-2ef2fb864577",
+      "name": "attention_dense.tile32_bf16_d64_b2_hq4_kv4_sq256_skv288_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 288,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 288,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "658f8298-e965-4fc2-ba5d-37de4fe2b4d4",
+      "name": "attention_dense.tile32_bf16_d128_b2_hq4_kv4_sq256_skv288_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 288,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 288,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2f2f3819-2a50-4f05-9dee-f5948d1f9f46",
+      "name": "attention_dense.tile32_bf16_d128_b2_hq4_kv4_sq256_skv288_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 288,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 288,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "61f2ed2d-8f43-4794-b866-4d5a4882556c",
+      "name": "attention_dense.tile32_fp16_d64_b2_hq4_kv4_sq256_skv288_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 288,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 288,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "73d22856-7e9a-4797-8b7a-fa59209ee5fd",
+      "name": "attention_dense.tile32_fp16_d64_b2_hq4_kv4_sq256_skv288_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 288,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 288,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "952c9687-73c0-4627-a3be-7786c40b5a00",
+      "name": "attention_dense.tile32_fp16_d128_b2_hq4_kv4_sq256_skv288_causal_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 288,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 288,
+        "batch": 2,
+        "causal": 1,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7dbfc7e2-2595-4b85-9292-6fdae61091bb",
+      "name": "attention_dense.tile32_fp16_d128_b2_hq4_kv4_sq256_skv288_full_bn32.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 2,
+          "seqlen_q": 256,
+          "seqlen_kv": 288,
+          "num_query_heads": 4,
+          "num_kv_heads": 4,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 32,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 4,
+        "num_kv_heads": 4,
+        "seqlen_q": 256,
+        "seqlen_kv": 288,
+        "batch": 2,
+        "causal": 0,
+        "block_n": 32,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5911b42c-5e16-4317-8554-59add663d170",
+      "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq256_skv512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d260b927-2e3b-4aeb-9d27-c5d55dc61b00",
+      "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "12bbe8f8-6b5a-42fc-90d7-02a95c55d253",
+      "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq256_skv512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "baf3aa01-dac3-44ce-973d-348ec9be20fc",
+      "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d0b99bd0-5179-4692-a6c0-d4a8fb69a5d1",
+      "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq512_skv256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0b95386c-acaa-45a0-9454-626fe63f0847",
+      "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a89a90c5-25db-40ef-8699-b696ba6981bb",
+      "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq512_skv256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "26a8f9ef-801c-45ec-abd1-3a1cf361a059",
+      "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "474f469b-432c-407b-ba4a-a8a4f18e1b14",
+      "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2df40592-aaca-4f37-ab1f-6d6ea346c484",
+      "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ed39a9b7-36c9-4544-9635-c4b00ed676f3",
+      "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4eccfe78-db82-42f2-ac7b-6c98a024c00e",
+      "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "efe6679a-d6c2-46f1-8589-9be9939f2cfb",
+      "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "21ac0564-f5f7-4e46-99fd-e1f33b3c2e7e",
+      "name": "attention_dense.aiter_bf16_d64_b4_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a9e45a88-fa73-4108-8e40-754340979f37",
+      "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "10253cde-6a83-4d4f-bb9a-56c2ee4e621d",
+      "name": "attention_dense.aiter_bf16_d64_b5_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3f9fc811-9b32-4a0a-9914-d4927388c604",
+      "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq256_skv512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "70955679-85ba-412f-9fa1-a63fee282072",
+      "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "854f95bb-f9e5-4b4c-b3c5-2ca937cc76ea",
+      "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq256_skv512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "07bd4a7e-c985-452a-bbb4-48456df3c84d",
+      "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ad4b62e2-665b-41bf-b298-ffef4ace78d8",
+      "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq512_skv256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3dcd2efe-3370-483d-9d5f-a38afa68e419",
+      "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ba8ee802-49c8-469f-92a9-41019310ad76",
+      "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq512_skv256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cf1c1633-2125-447d-bd3b-64a4a5a5ab0a",
+      "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a3367577-bbaa-4ab2-816a-110756dbf629",
+      "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1c1938b3-6e93-456f-8a09-68639d04e9ed",
+      "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f3d5775f-878d-4f06-b039-000897d2c27d",
+      "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e0d2c3ee-2972-408c-b8eb-222651d6ee04",
+      "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a652b550-5e75-444e-82b8-4a90b270b8ef",
+      "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "49fab4cc-c0cc-4adc-8d95-763fdda99cb8",
+      "name": "attention_dense.aiter_bf16_d128_b4_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7c6189be-c1f5-4d48-b404-7b3bf009f044",
+      "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1fce9482-4119-4339-9142-dc45304f3172",
+      "name": "attention_dense.aiter_bf16_d128_b5_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7c35ceda-b157-4376-8367-efefee074e96",
+      "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq256_skv512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1e4fd479-ed52-4d4d-8d27-cff36e76521d",
+      "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f739ffa9-2c15-416b-9f27-8f61be356945",
+      "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq256_skv512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3afb0998-a488-4405-b86c-f53bc8ebb47a",
+      "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f046ed23-0768-4c9a-abc4-7012e91736e8",
+      "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq512_skv256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d61ba0af-bfbc-4079-9808-285526c8f42b",
+      "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e91c10c1-3f83-454a-a8c8-1bead5c4ef2f",
+      "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq512_skv256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "581d4d0a-1073-451b-bdc6-d1ceb462b8f5",
+      "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b8fca497-7251-41b4-9090-4731b677e34b",
+      "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4e4e9f41-5483-43b8-87c3-a975a8fe9d85",
+      "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a834f24e-e8a5-4970-ac45-1ffc96eb7383",
+      "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7f28fb0a-8fef-4762-81fe-e44a22d2daa0",
+      "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7821cec1-46fd-4274-80cd-7e12072cdaa1",
+      "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "28ad71d5-b844-4191-99ae-f01fb57e1a1e",
+      "name": "attention_dense.aiter_fp16_d64_b4_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4ec9f3e7-de6e-41f5-81f1-4761f8ccd51f",
+      "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c6473698-2705-49a8-b0dc-f17ba4102e0d",
+      "name": "attention_dense.aiter_fp16_d64_b5_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "64e578d5-4ebe-4632-8cab-891522b38449",
+      "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq256_skv512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "055e85a0-ada2-4b56-bca8-1ab663b12a62",
+      "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "18e63ed4-2ae7-40ae-a135-9fb8b83225ee",
+      "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq256_skv512_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "efd09fb7-0fa8-4b1f-b2c8-13146935c786",
+      "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq256_skv512_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 256,
+          "seqlen_kv": 512,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 256,
+        "seqlen_kv": 512,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "90e726f1-7864-4cd3-9fa9-553431af2df3",
+      "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq512_skv256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e5aa73b4-5824-4b30-a4b9-d6502230c6e7",
+      "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "01b000db-9c69-4288-acb2-1f11f11afce3",
+      "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq512_skv256_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a8a3601d-bcc5-4a63-9038-82b2b4df7f33",
+      "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq512_skv256_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 512,
+          "seqlen_kv": 256,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 512,
+        "seqlen_kv": 256,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cbfb40e4-905c-4ec8-b696-06ec2be30f4a",
+      "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "69d7881c-3ced-414c-bc1e-d79d98c7655d",
+      "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d95cf44e-c124-45e7-b532-818bcc9df81e",
+      "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq1024_skv1024_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "88d708aa-555c-46c6-b87f-822cbb5b0405",
+      "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq1024_skv1024_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 1024,
+          "seqlen_kv": 1024,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 1024,
+        "seqlen_kv": 1024,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6eb5fc5d-cb83-4677-b9b3-30939cf2c1d4",
+      "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 4,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2d5017ec-3b8e-4a57-bceb-e2426ad154b0",
+      "name": "attention_dense.aiter_fp16_d128_b4_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f25a9dd9-efbb-4b8e-bbb9-16a5c810bb1e",
+      "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq2048_skv2048_full_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": false,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 5,
+        "causal": 0,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a80142c6-7551-44aa-baf2-5bc956c6098d",
+      "name": "attention_dense.aiter_fp16_d128_b5_hq6_kv6_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 5,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 6,
+          "num_kv_heads": 6,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 6,
+        "num_kv_heads": 6,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 5,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e59f855c-b867-4bfb-8fac-31642a447e1d",
+      "name": "attention_dense.rockebench_fp16_d128_b1_hq32_kv32_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 1,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 32,
+          "num_kv_heads": 32,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 32,
+        "num_kv_heads": 32,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 1,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "447c19ea-1859-4aca-88a2-8f2bbdc2bb42",
+      "name": "attention_dense.rockebench_bf16_d128_b8_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 8,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 32,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 8,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9346d849-6e8a-4ab0-885a-0634890ada1a",
+      "name": "attention_dense.rockebench_fp16_d64_b4_hq64_kv8_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 64,
+          "num_kv_heads": 8,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4cb80ee8-3b79-4e60-b8ab-5e9246e69df3",
+      "name": "attention_dense.rockebench_fp16_d128_b4_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 32,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5dcb46f7-03a9-432d-ab89-73b03b9c676f",
+      "name": "attention_dense.rockebench_fp16_d128_b8_hq32_kv8_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 8,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 32,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 8,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9c44cf39-0c67-426d-8866-3438b3365c2b",
+      "name": "attention_dense.rockebench_fp16_d128_b1_hq32_kv8_sq8192_skv8192_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 1,
+          "seqlen_q": 8192,
+          "seqlen_kv": 8192,
+          "num_query_heads": 32,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "seqlen_q": 8192,
+        "seqlen_kv": 8192,
+        "batch": 1,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cbeab3a0-c839-49de-a456-ea374775fa15",
+      "name": "attention_dense.rockebench_fp16_d128_b4_hq32_kv8_sq4096_skv4096_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 4,
+          "seqlen_q": 4096,
+          "seqlen_kv": 4096,
+          "num_query_heads": 32,
+          "num_kv_heads": 8,
+          "head_size": 128,
+          "causal": true,
+          "dtype": "fp16",
+          "block_n": 64,
+          "waves_per_eu": 2
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "seqlen_q": 4096,
+        "seqlen_kv": 4096,
+        "batch": 4,
+        "causal": 1,
+        "block_n": 64,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "799a00e2-7006-46b1-8b8e-9e8f71bf2626",
+      "name": "attention_dense.rockebench_bf16_d64_b1_hq64_kv8_sq2048_skv2048_causal_bn64.gfx942",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx942/attention_dense.py",
+        "builder": "build_attention_dense",
+        "spec": {
+          "batch": 1,
+          "seqlen_q": 2048,
+          "seqlen_kv": 2048,
+          "num_query_heads": 64,
+          "num_kv_heads": 8,
+          "head_size": 64,
+          "causal": true,
+          "dtype": "bf16",
+          "block_n": 64,
+          "waves_per_eu": 4
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 64,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "seqlen_q": 2048,
+        "seqlen_kv": 2048,
+        "batch": 1,
         "causal": 1,
         "block_n": 64,
         "block_m": 256
