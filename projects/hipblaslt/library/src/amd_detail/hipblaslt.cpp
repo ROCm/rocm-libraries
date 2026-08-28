@@ -167,7 +167,11 @@ try
     constexpr size_t gsuBytes = _rocblaslt_handle::c_syncGsuTotalElements * sizeof(int);
     constexpr size_t skBytes  = _rocblaslt_handle::c_syncSkTotalElements * sizeof(int);
     CHECK_HIP_ERROR(hipMalloc(&d_Synchronizer, gsuBytes));
-    CHECK_HIP_ERROR(hipMemset(d_Synchronizer, 0, gsuBytes));
+    if(hipError_t e = hipMemset(d_Synchronizer, 0, gsuBytes); e != hipSuccess)
+    {
+        static_cast<void>(hipFree(d_Synchronizer));
+        CHECK_HIP_ERROR(e);
+    }
     if(hipError_t e = hipMalloc(&d_StreamKFlags, skBytes); e != hipSuccess)
     {
         static_cast<void>(hipFree(d_Synchronizer));
@@ -180,13 +184,21 @@ try
         CHECK_HIP_ERROR(e);
     }
 
+    // A failure here leaves *handle unwritten, so it must not be reported as a
+    // success: the caller would go on to use whatever the pointer happened to
+    // hold. Treated like the allocation failures above - free both regions,
+    // then report.
     err = hipGetDevice(&deviceId);
-    if(err == hipSuccess)
+    if(err != hipSuccess)
     {
-        retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
-        (*(rocblaslt_handle*)handle)->Synchronizer = d_Synchronizer;
-        (*(rocblaslt_handle*)handle)->StreamKFlags = d_StreamKFlags;
+        static_cast<void>(hipFree(d_StreamKFlags));
+        static_cast<void>(hipFree(d_Synchronizer));
+        CHECK_HIP_ERROR(err);
     }
+
+    retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
+    (*(rocblaslt_handle*)handle)->Synchronizer = d_Synchronizer;
+    (*(rocblaslt_handle*)handle)->StreamKFlags = d_StreamKFlags;
     rocblaslt::Debug::Instance().markerStop();
     return retval;
 }
