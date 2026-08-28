@@ -1319,11 +1319,6 @@ def _build_wgrad_one(args_tuple):
         split_k,
     ) = combo
 
-    # split_k==0 in combo means "runtime atomic kernel"; cshuffle not supported.
-    _is_atomic = split_k == 0 or split_k > 1
-    if _is_atomic and epilogue == "cshuffle":
-        return None
-
     from rocke.core.arch import ArchTarget
     from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
     from rocke.instances.common.conv_implicit_gemm_wgrad import (
@@ -1995,7 +1990,7 @@ def _run_wgrad_sweep(
     #          actual degrees from _SPLIT_K_AUTO are swept at launch time via the ks arg.
     #  -1   → one combo per tile config, degree resolved by CK formula at build time.
     #  else → single fixed degree baked into the kernel.
-    split_k_values = (1, 0) if args.split_k == 0 else (args.split_k,)
+    split_k_values = (0,) if args.split_k == 0 else (args.split_k,)
 
     combos = list(
         itertools.product(

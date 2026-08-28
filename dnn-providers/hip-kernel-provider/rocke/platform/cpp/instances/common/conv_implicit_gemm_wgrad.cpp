@@ -320,6 +320,21 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                              s->problem.C);
                 return false;
             }
+            /* For bf16/fp16 split-K the default epilogue emits zero-fill packed
+             * atomics at the scattered MFMA layout; cshuffle produces contiguous
+             * pairs and is required.  Matches Python is_valid_wgrad_spec check. */
+            bool is_default_epi = (s->epilogue == NULL || strcmp(s->epilogue, "default") == 0);
+            if(is_default_epi)
+            {
+                if(reason && reason_cap)
+                    snprintf(reason,
+                             reason_cap,
+                             "split_k atomic with dtype_d=%s requires epilogue='cshuffle' "
+                             "(default emits zero-fill packed atomics with scattered MFMA "
+                             "layout; cshuffle produces contiguous pairs)",
+                             dt);
+                return false;
+            }
         }
     }
 
@@ -964,6 +979,64 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Wgrad split-K cshuffle epilogue
+// Mirrors Python _emit_wgrad_split_k_cshuffle_epilogue:
+//   CShuffleEpilogue.from_grid(atom, grid, max_store_vec=vec_c)
+//       .atomic_store(b, accs, dw_ptr=dW, wg_N=wg_N_v, bounds=(wg_M_v, wg_N_v))
+// vec_c uses split_k=1 semantics (same as the non-atomic cshuffle path) because
+// the cshuffle atomic path is not contraindicated by wide store_vec.
+// groups > 1 is not supported for C++ wgrad (rejected by the validator).
+// ---------------------------------------------------------------------------
+static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
+                                                 const rocke_conv_build_ctx_t* ctx,
+                                                 const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
+                                                 rocke_value_t* dw_ptr,
+                                                 int wg_M,
+                                                 int wg_N)
+{
+    const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
+    bool is_fp32_vec = (strcmp(dtype_d, "fp32") == 0);
+    int C = spec->problem.C;
+    int vec_c;
+
+    /* default_vector_sizes(..., split_k=1): widest vec that divides C.
+     * fp32: cap at 4; fp16/bf16: cap at 8. */
+    if(is_fp32_vec)
+    {
+        if(C % 4 == 0)
+            vec_c = 4;
+        else if(C % 2 == 0)
+            vec_c = 2;
+        else
+            vec_c = 1;
+    }
+    else
+    {
+        if(C % 8 == 0)
+            vec_c = 8;
+        else if(C % 4 == 0)
+            vec_c = 4;
+        else if(C % 2 == 0)
+            vec_c = 2;
+        else
+            vec_c = 1;
+    }
+
+    rocke_cshuffle_epilogue_t cepi
+        = rocke_cshuffle_epilogue_from_grid(ctx->atom, &ctx->grid, vec_c);
+    cepi.out_dtype = dtype_d;
+
+    rocke_cshuffle_epilogue_atomic_store(b,
+                                         &cepi,
+                                         ctx->final_accs,
+                                         ctx->num_final_accs,
+                                         dw_ptr,
+                                         rocke_b_const_i32(b, wg_N),
+                                         rocke_b_const_i32(b, wg_M),
+                                         rocke_b_const_i32(b, wg_N));
 }
 
 // ---------------------------------------------------------------------------
@@ -1814,7 +1887,10 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         for(int i = 0; i < ctx.num_final_accs; ++i)
             ctx.final_accs[i] = post_accs[i];
 
-        wgrad_emit_split_k_epilogue_f32(b, &ctx, spec, dW, wg_M, wg_N);
+        if(spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0)
+            wgrad_emit_split_k_cshuffle_epilogue(b, &ctx, spec, dW, wg_M, wg_N);
+        else
+            wgrad_emit_split_k_epilogue_f32(b, &ctx, spec, dW, wg_M, wg_N);
     }
     else
     {

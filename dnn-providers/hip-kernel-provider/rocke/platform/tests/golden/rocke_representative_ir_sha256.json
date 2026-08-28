@@ -506,108 +506,12 @@
           "sha256": "eb4e1e855a5e20322724fe96a9682a119e2e22be919e5f31fd27bdfeb1af840b",
           "status": "ok"
         },
-        "conv_wgrad/gfx1151/n1h8c16k32r3": {
-          "arch": "gfx1151",
-          "bytes": 50026,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1151_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "ddea585b03f23dca19fa2db10ddb820c264cafcb9364c8317268489707d5b841",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx1201/n1h8c16k32r3": {
-          "arch": "gfx1201",
-          "bytes": 43628,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1201_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "abcc3065391d7df85ad05c1abb6d0a7f3a9bf72ed9d221a7184d2b396f4bc04f",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx1250/n1h8c64k64r3_g4": {
-          "arch": "gfx1250",
-          "bytes": 62562,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1250_g4_N1H8W8C64_K64Y3X3G4_t32x32x32_w2x1_a16x16x32_mem_default",
-          "sha256": "767412ae17e3931fea38b13712b1423da61fccbba0bdbcdbeea9857317852752",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx90a/n1h8c16k32r3": {
-          "arch": "gfx90a",
-          "bytes": 28560,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_90a_a_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "7687e9b2ebe9c3000d4ba2b3b2faacdd9c6ef3f48686ecf7c648b04cf0d76d76",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx942/n1h8c16k32r3": {
-          "arch": "gfx942",
-          "bytes": 28560,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_942_a_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "1a5e8bc4edd4c0f3f8c209b2fc7a6ffba5787e309e821e0ce85e0f0fe7cecb4c",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx942/n1h8c64k64r3_g4": {
-          "arch": "gfx942",
-          "bytes": 29761,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_942_g4_N1H8W8C64_K64Y3X3G4_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "14c710f1103776168455e140def09b99535a206c3620daa1457c97eaf6624f89",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx942/n1h8c64k64r3_g4_spk4": {
-          "arch": "gfx942",
-          "bytes": 24380,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_942_g4_spk4_N1H8W8C64_K64Y3X3G4_t64x32x16_w2x2_a16x16x16_mem_default_spk4",
-          "sha256": "23f94e6d95bf6c8d71b2bc08ceac6d901c780c7064aff121e40e4f2ec4908397",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c16k32r3": {
-          "arch": "gfx950",
-          "bytes": 44707,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_mem_default",
-          "sha256": "c15f14a924a2ba69a3b551ad5550f4ed920990be409c5a1812c8b0249449e73e",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c16k32r3_spk4": {
-          "arch": "gfx950",
-          "bytes": 23252,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_spk4_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default_spk4",
-          "sha256": "271cdec2d9db44de5adececd05a3cde64688daf698d563fa66ff80e6c27e9584",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c64k64r3_g4": {
-          "arch": "gfx950",
-          "bytes": 46597,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_g4_N1H8W8C64_K64Y3X3G4_t64x64x32_w2x2_a32x32x16_mem_default",
-          "sha256": "a340c71242f1394497d80a565114d49dfab0b9044abd01bb77285cbc1c931133",
-          "status": "ok"
-        },
         "conv_wgrad/gfx950/n1h8c64k64r3_g4_cshuffle": {
           "arch": "gfx950",
           "bytes": 28223,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_g4_cshuffle_N1H8W8C64_K64Y3X3G4_t64x64x32_w2x2_a32x32x16_mem_cshuffle",
           "sha256": "09c3e68d240ec17aee15c9064200102d7791f755c7479ffec60f5c25330c5aa4",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4": {
-          "arch": "gfx950",
-          "bytes": 36343,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_g4_spk4_N1H8W8C64_K64Y3X3G4_t64x64x32_w2x2_a32x32x16_mem_default_spk4",
-          "sha256": "71e63d13b1e92bdef27b1ab2936729715e3574a8d82566e28d98ff3763bec26a",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n2h16c32k32r1": {
-          "arch": "gfx950",
-          "bytes": 16980,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "4912eee06481e49b03a3f5bae1e0d33a393d132782a641b5da8b196634ec5319",
           "status": "ok"
         },
         "deep/common_gfx950_wt16/h16w16_k32": {
@@ -859,30 +763,79 @@
           "status": "ok"
         }
       },
-      "expected_failures": {},
+      "expected_failures": {
+        "conv_wgrad/gfx1151/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx1201/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx1250/n1h8c64k64r3_g4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx90a/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx942/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_spk4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c16k32r3_spk4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n2h16c32k32r1": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        }
+      },
       "summary": {
         "arches": {
           "gfx11-generic": 1,
-          "gfx1151": 10,
-          "gfx1201": 7,
-          "gfx1250": 4,
-          "gfx90a": 5,
-          "gfx942": 18,
-          "gfx950": 62
+          "gfx1151": 9,
+          "gfx1201": 6,
+          "gfx1250": 3,
+          "gfx90a": 4,
+          "gfx942": 15,
+          "gfx950": 57
         },
-        "expected_failures": 0,
+        "expected_failures": 12,
         "families": {
           "attention": 14,
           "attention_d256": 2,
           "attention_dense": 27,
           "conv": 9,
           "conv_dgrad": 11,
-          "conv_wgrad": 13,
+          "conv_wgrad": 1,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 107
+        "ok_cases": 95
       }
     },
     "llvm22": {
@@ -1391,108 +1344,12 @@
           "sha256": "54cc0b02e6239027716936ac563b606fe8897161b0b033012e4813cdda29b141",
           "status": "ok"
         },
-        "conv_wgrad/gfx1151/n1h8c16k32r3": {
-          "arch": "gfx1151",
-          "bytes": 50165,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1151_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "21e62e04f74f42b8f74f04935244c025150b6c8c38255d950f8ed9fac94fe51f",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx1201/n1h8c16k32r3": {
-          "arch": "gfx1201",
-          "bytes": 43767,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1201_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "a92a5e0b9b6874fb3e24e369f249240df99b78a1c839f2abcdec3001e8b879bb",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx1250/n1h8c64k64r3_g4": {
-          "arch": "gfx1250",
-          "bytes": 62701,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1250_g4_N1H8W8C64_K64Y3X3G4_t32x32x32_w2x1_a16x16x32_mem_default",
-          "sha256": "4c4b6b2850499292a5cc6e205da9ee783b5b0473464bbb23e4a2e9820a9ce4b0",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx90a/n1h8c16k32r3": {
-          "arch": "gfx90a",
-          "bytes": 28699,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_90a_a_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "7e5456c0add7b499ef7b29485e43f22eac26c79cbee0b45ec6433254bda41903",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx942/n1h8c16k32r3": {
-          "arch": "gfx942",
-          "bytes": 28699,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_942_a_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "b1a7939c7058c09d1a541b60893d960044925c1eb0d3a40de4cc0e472b1a864d",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx942/n1h8c64k64r3_g4": {
-          "arch": "gfx942",
-          "bytes": 29900,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_942_g4_N1H8W8C64_K64Y3X3G4_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "7712477169e9ed2999c7d8fcfc62ba38fe4c58178341e9f5b88ed0482b197851",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx942/n1h8c64k64r3_g4_spk4": {
-          "arch": "gfx942",
-          "bytes": 24513,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_942_g4_spk4_N1H8W8C64_K64Y3X3G4_t64x32x16_w2x2_a16x16x16_mem_default_spk4",
-          "sha256": "d922fcec076cbd3afb004bca84e394e7602df34c9efbccfc15c833fc67edbfd2",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c16k32r3": {
-          "arch": "gfx950",
-          "bytes": 44846,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_mem_default",
-          "sha256": "b5b8ce8dfae244daf0c821e844928b549217be34a1a6bbba6c9d857e13bd6a2d",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c16k32r3_spk4": {
-          "arch": "gfx950",
-          "bytes": 23385,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_spk4_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default_spk4",
-          "sha256": "ac81c2eed39b4f051e87583bff0bb49ca51b193ef4369dba2444b80b07e6ace7",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c64k64r3_g4": {
-          "arch": "gfx950",
-          "bytes": 46736,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_g4_N1H8W8C64_K64Y3X3G4_t64x64x32_w2x2_a32x32x16_mem_default",
-          "sha256": "e3d63c7fae8faabd5650d94ece58acc8a2b0b2a7cbfbd9d4bcd82ee320f61785",
-          "status": "ok"
-        },
         "conv_wgrad/gfx950/n1h8c64k64r3_g4_cshuffle": {
           "arch": "gfx950",
           "bytes": 28356,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_g4_cshuffle_N1H8W8C64_K64Y3X3G4_t64x64x32_w2x2_a32x32x16_mem_cshuffle",
           "sha256": "82da50ae9435f41af0c2ff27c8254b417496c3620a443b3145b169f3ea7aa5b7",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4": {
-          "arch": "gfx950",
-          "bytes": 36476,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_g4_spk4_N1H8W8C64_K64Y3X3G4_t64x64x32_w2x2_a32x32x16_mem_default_spk4",
-          "sha256": "53dec398eb33f767de36aca18d13197f083457def2c90544d670b93e6ef96d9f",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n2h16c32k32r1": {
-          "arch": "gfx950",
-          "bytes": 17115,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "bb5279520cfdff6aa0d878e73dd517b917828155ab38c5e654abca6b97f185de",
           "status": "ok"
         },
         "deep/common_gfx950_wt16/h16w16_k32": {
@@ -1744,30 +1601,79 @@
           "status": "ok"
         }
       },
-      "expected_failures": {},
+      "expected_failures": {
+        "conv_wgrad/gfx1151/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx1201/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx1250/n1h8c64k64r3_g4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx90a/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx942/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_spk4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c16k32r3_spk4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n2h16c32k32r1": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        }
+      },
       "summary": {
         "arches": {
           "gfx11-generic": 1,
-          "gfx1151": 10,
-          "gfx1201": 7,
-          "gfx1250": 4,
-          "gfx90a": 5,
-          "gfx942": 18,
-          "gfx950": 62
+          "gfx1151": 9,
+          "gfx1201": 6,
+          "gfx1250": 3,
+          "gfx90a": 4,
+          "gfx942": 15,
+          "gfx950": 57
         },
-        "expected_failures": 0,
+        "expected_failures": 12,
         "families": {
           "attention": 14,
           "attention_d256": 2,
           "attention_dense": 27,
           "conv": 9,
           "conv_dgrad": 11,
-          "conv_wgrad": 13,
+          "conv_wgrad": 1,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 107
+        "ok_cases": 95
       }
     },
     "llvm23": {
@@ -2276,108 +2182,12 @@
           "sha256": "3874355917c725b958de0a94e3cee499b33decc2f8e1635c484f219334233307",
           "status": "ok"
         },
-        "conv_wgrad/gfx1151/n1h8c16k32r3": {
-          "arch": "gfx1151",
-          "bytes": 50169,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1151_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "7eec218b49093645ba3854b8d921313fa198d9552a3eecb4b477996ad8432a79",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx1201/n1h8c16k32r3": {
-          "arch": "gfx1201",
-          "bytes": 43771,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1201_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
-          "sha256": "908885dcfd621493a5dc50f86832577692b1a73fced09dcef82144e1574d6ec8",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx1250/n1h8c64k64r3_g4": {
-          "arch": "gfx1250",
-          "bytes": 62705,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_1250_g4_N1H8W8C64_K64Y3X3G4_t32x32x32_w2x1_a16x16x32_mem_default",
-          "sha256": "6dfb536b20e364d62d0dec3dd9fa0570470a6afce10931ef0c3822e496d097b5",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx90a/n1h8c16k32r3": {
-          "arch": "gfx90a",
-          "bytes": 28703,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_90a_a_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "4d964cff46d77b4a3b49ea94e21132b505739301d4cd9ef3d430eebeff451436",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx942/n1h8c16k32r3": {
-          "arch": "gfx942",
-          "bytes": 28703,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_942_a_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "47a0c8e4f881b1294d298566bde12a7bc18b783c34f85805d50386515c05b0cc",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx942/n1h8c64k64r3_g4": {
-          "arch": "gfx942",
-          "bytes": 29904,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_942_g4_N1H8W8C64_K64Y3X3G4_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "c93f70a9ac78a2eccb901f51e23628c283ac40ac6f589437e4952ba03d55f984",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx942/n1h8c64k64r3_g4_spk4": {
-          "arch": "gfx942",
-          "bytes": 24517,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_942_g4_spk4_N1H8W8C64_K64Y3X3G4_t64x32x16_w2x2_a16x16x16_mem_default_spk4",
-          "sha256": "57fa64cef8a5578a2df6ed0474ea81afc3a4710bbfd9f4e8ba6ca1df6692aeef",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c16k32r3": {
-          "arch": "gfx950",
-          "bytes": 44850,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_mem_default",
-          "sha256": "2a283755dd50e966d022282cf9fe27e920d07b429ec3882617c32ce1cef45062",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c16k32r3_spk4": {
-          "arch": "gfx950",
-          "bytes": 23389,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_spk4_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default_spk4",
-          "sha256": "954417c06092c9bc832dcbb2fc9127655d0c41d7e64e1a9c0d7d14828027c58d",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c64k64r3_g4": {
-          "arch": "gfx950",
-          "bytes": 46740,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_g4_N1H8W8C64_K64Y3X3G4_t64x64x32_w2x2_a32x32x16_mem_default",
-          "sha256": "ee02fb57b02db57425cfe712fa24f4a9f698c99e71beadaaf93bfb81130bd0f3",
-          "status": "ok"
-        },
         "conv_wgrad/gfx950/n1h8c64k64r3_g4_cshuffle": {
           "arch": "gfx950",
           "bytes": 28360,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_g4_cshuffle_N1H8W8C64_K64Y3X3G4_t64x64x32_w2x2_a32x32x16_mem_cshuffle",
           "sha256": "45c8eb4b4a658ad923fd44b4f1c5a71fba823cd1509fd68ec13f6187ae100df8",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4": {
-          "arch": "gfx950",
-          "bytes": 36480,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_g4_spk4_N1H8W8C64_K64Y3X3G4_t64x64x32_w2x2_a32x32x16_mem_default_spk4",
-          "sha256": "24a0bad5902d1511bddce97b1d5445019203c982f2ad455e966d29232c4f8c53",
-          "status": "ok"
-        },
-        "conv_wgrad/gfx950/n2h16c32k32r1": {
-          "arch": "gfx950",
-          "bytes": 17119,
-          "family": "conv_wgrad",
-          "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_default",
-          "sha256": "c70e36a69b080498830a50fa2aa3ec887aa633d5313cfd36e700f10920571e32",
           "status": "ok"
         },
         "deep/common_gfx950_wt16/h16w16_k32": {
@@ -2629,30 +2439,79 @@
           "status": "ok"
         }
       },
-      "expected_failures": {},
+      "expected_failures": {
+        "conv_wgrad/gfx1151/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx1201/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx1250/n1h8c64k64r3_g4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx90a/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx942/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_spk4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c16k32r3": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c16k32r3_spk4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        },
+        "conv_wgrad/gfx950/n2h16c32k32r1": {
+          "message": "split_k atomic with dtype_d='fp16' requires epilogue='cshuffle' (default emits zero-fill packed atomics with scattered MFMA layout; cshuffle produces contiguous pairs)",
+          "type": "ValueError"
+        }
+      },
       "summary": {
         "arches": {
           "gfx11-generic": 1,
-          "gfx1151": 10,
-          "gfx1201": 7,
-          "gfx1250": 4,
-          "gfx90a": 5,
-          "gfx942": 18,
-          "gfx950": 62
+          "gfx1151": 9,
+          "gfx1201": 6,
+          "gfx1250": 3,
+          "gfx90a": 4,
+          "gfx942": 15,
+          "gfx950": 57
         },
-        "expected_failures": 0,
+        "expected_failures": 12,
         "families": {
           "attention": 14,
           "attention_d256": 2,
           "attention_dense": 27,
           "conv": 9,
           "conv_dgrad": 11,
-          "conv_wgrad": 13,
+          "conv_wgrad": 1,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 107
+        "ok_cases": 95
       }
     }
   },

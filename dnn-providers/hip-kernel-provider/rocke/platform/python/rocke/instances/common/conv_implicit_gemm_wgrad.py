@@ -441,6 +441,12 @@ class WgradConvSpec:
                     f"position; the packed dW inner dim is cpg=C/groups); "
                     f"got cpg={self.problem.cpg} (C={self.problem.C}, groups={self.problem.groups})"
                 )
+        if self.data.dtype_d in ("bf16", "fp16") and self.epilogue == "default":
+            raise ValueError(
+                f"split_k atomic with dtype_d={self.data.dtype_d!r} requires "
+                f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
+                f"scattered MFMA layout; cshuffle produces contiguous pairs)"
+            )
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -561,6 +567,12 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"(packed <2 x dtype> atomic pairs must stay within one filter "
             f"position; the packed dW inner dim is cpg=C/groups); "
             f"got cpg={spec.problem.cpg}"
+        )
+    if spec.data.dtype_d in ("bf16", "fp16") and spec.epilogue == "default":
+        return False, (
+            f"split_k atomic with dtype_d={spec.data.dtype_d!r} requires "
+            f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
+            f"scattered MFMA layout; cshuffle produces contiguous pairs)"
         )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
@@ -1276,6 +1288,18 @@ def build_implicit_gemm_conv_wgrad(
             dW,
             group=group_v,
         )
+    elif _is_split_k and spec.epilogue == "cshuffle":
+        # MFMA split-K + cshuffle: scatter to LDS then paired pk_atomic from smem.
+        # Avoids the zero-fill workaround of the direct split-K path for bf16/fp16.
+        _emit_wgrad_split_k_cshuffle_epilogue(
+            b,
+            spec,
+            atom,
+            final_accs,
+            grid,
+            dW,
+            group=group_v,
+        )
     elif _is_split_k:
         # MFMA split-K: supports fp32, bf16, fp16 via packed atomics.
         _emit_wgrad_split_k_epilogue(
@@ -1582,6 +1606,75 @@ def _emit_wgrad_split_k_epilogue_wmma(
                         b.global_atomic_add(dw_ptr, c_off, b.vec_extract(acc, i))
                 else:
                     _emit_single_packed_atomic(c_m, c_n, b.vec_extract(acc, i))
+
+
+def _emit_wgrad_split_k_cshuffle_epilogue(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    atom: MfmaAtom,
+    accs: Sequence[Value],
+    grid,
+    dW: Value,
+    group: Optional[Value] = None,
+) -> None:
+    """Split-K epilogue via cshuffle + packed atomic-adds into dW.
+
+    After the GEMM loop each CTA holds a partial dW tile.  This epilogue:
+      1. Scatters the MFMA accumulator to an LDS staging buffer in row-major
+         order (identical to the non-atomic cshuffle epilogue).
+      2. Issues a barrier.
+      3. Reads back ``sv``-wide chunks per thread and issues atomic-adds:
+           fp32 — scalar ``global_atomic_add`` per element.
+           bf16 — ``global_atomic_add_pk_bf16`` (<2 x bfloat>) per pair.
+           fp16 — ``global_atomic_add_pk_f16`` (<2 x half>) per pair.
+
+    For bf16/fp16: adjacent elements in the sv-wide chunk share the same row
+    and consecutive N-positions after the shuffle, so they form a genuine
+    <2 x dtype> pair — no zero-fill required (contrast with the direct
+    split-K epilogue's ``_emit_single_packed_atomic``).
+
+    ``group`` (grouped wgrad only): fold ``group*kpg`` into the atomic address
+    so each group writes to its own output-channel slab in dW.
+    """
+    p = spec.problem
+    dtype_d = spec.data.dtype_d
+
+    _cshuffle_kwargs: dict = {"out_dtype": dtype_d}
+    if spec.vector_size_c is not None:
+        _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
+    else:
+        _vc_C = p.cpg if group is not None else p.C
+        _vc_K = p.kpg if group is not None else p.K
+        # Pass split_k=1 so default_vector_sizes does not force vec_c=1; the
+        # cshuffle atomic path reads from smem in sv-wide chunks and issues paired
+        # pk_atomics, so a wide store_vec is beneficial (not contraindicated).
+        _, __, vec_c = WgradConvSpec.default_vector_sizes(
+            _vc_C, _vc_K, dtype_d, split_k=1
+        )
+        _cshuffle_kwargs["max_store_vec"] = vec_c
+
+    wg_M_v = b.const_i32(_wg_M(p))
+    wg_N_v = b.const_i32(_wg_N(p))
+
+    # Grouped: shift block_m_off by group*kpg so the atomic addresses land in
+    # the group's absolute output-channel slab.  N axis is unaffected.
+    if group is not None:
+        c_kpg = b.const_i32(p.kpg)
+        eff_grid = dc_replace(
+            grid, block_m_off=b.add(grid.block_m_off, b.mul(group, c_kpg))
+        )
+    else:
+        eff_grid = grid
+
+    CShuffleEpilogue.from_grid(
+        atom=atom, grid=eff_grid, **_cshuffle_kwargs
+    ).atomic_store(
+        b,
+        accs=accs,
+        dw_ptr=dW,
+        wg_N=wg_N_v,
+        bounds=(wg_M_v, wg_N_v),
+    )
 
 
 def _emit_wgrad_direct_epilogue(
