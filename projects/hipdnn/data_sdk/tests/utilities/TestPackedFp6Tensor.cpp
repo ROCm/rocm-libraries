@@ -15,6 +15,8 @@
 using namespace hipdnn_data_sdk::utilities;
 using hipdnn_data_sdk::types::fp6_e2m3;
 using hipdnn_data_sdk::types::fp6_e3m2;
+using hipdnn_data_sdk::types::fp6x2_e2m3;
+using hipdnn_data_sdk::types::fp6x4_e2m3;
 
 namespace
 {
@@ -196,6 +198,22 @@ TEST(TestPackedFp6Tensor, CodeReaderMatchesCanonicalBitPattern)
     {
         EXPECT_EQ(unpackElementAt(host, i), static_cast<uint8_t>(i + 1)) << "at index " << i;
     }
+}
+
+// Cross-checks the writer against the SDK's own canonical fp6x4_e2m3 packing.
+TEST(TestPackedFp6Tensor, PackingMatchesFp6x4StorageType)
+{
+    PackedFp6Tensor<fp6_e2m3> packed({4}, {1});
+    Tensor<fp6_e2m3> unpacked({4}, {1});
+    packed.fillTensorWithRandomValues(-1.0f, 1.0f, 99u);
+    unpacked.fillTensorWithRandomValues(-1.0f, 1.0f, 99u);
+
+    const auto* unpackedHost = static_cast<const fp6_e2m3*>(unpacked.rawHostData());
+    const fp6x4_e2m3 expected(fp6x2_e2m3(unpackedHost[0], unpackedHost[1]),
+                              fp6x2_e2m3(unpackedHost[2], unpackedHost[3]));
+
+    const auto* packedHost = static_cast<const uint8_t*>(packed.rawHostData());
+    EXPECT_TRUE(std::equal(expected.data.begin(), expected.data.end(), packedHost));
 }
 
 TEST(TestPackedFp6Tensor, FillWithValueWritesThreeBytePeriod)
