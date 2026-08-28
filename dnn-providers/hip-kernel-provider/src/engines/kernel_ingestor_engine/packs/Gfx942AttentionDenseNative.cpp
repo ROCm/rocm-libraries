@@ -95,6 +95,15 @@ constexpr std::string_view BATCH_FIELD = "batch";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view BLOCK_N_FIELD = "block_n";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
+// The persistent grid-stride variant launches a DIFFERENT grid shape, so the launch
+// path must know which variant it holds. dispatch/attention/gfx942.py::_dense_spec
+// turns it on when `nqb * Hq * B >= num_persistent`; the kernel bakes that choice into
+// the binary, and attention_dense_grid() then returns (num_persistent, 1, 1) instead of
+// the default 3-D grid. Without these two fields the engine cannot tell the two apart
+// and launches every variant on the default grid -- which is exactly "the grid and the
+// body's query tiling disagree ... writes some rows twice and others never".
+constexpr std::string_view PERSISTENT_FIELD = "persistent";
+constexpr std::string_view NUM_PERSISTENT_FIELD = "num_persistent";
 
 constexpr std::string_view Q_TOKEN = "attention_dense.q.uid";
 constexpr std::string_view K_TOKEN = "attention_dense.k.uid";
@@ -815,17 +824,28 @@ public:
         auto code
             = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
 
-        // Geometry, restated from the builder's own helpers. `attention_dense_grid`
-        // (attention_dense.py:1791) is (ceil(Sq / block_m), Hq, B) on the default grid,
-        // exact because supports_attention_dense enforces Sq % block_m == 0; and
-        // `attention_dense_block` (:1810) is (block_m // 32 * 64, 1, 1) wave64 lanes.
-        // Every term is read from the KMD rather than hardcoded, so a variant with a
-        // different tile launches the geometry it was actually compiled for. Nothing
-        // checks this correspondence but this comment.
+        // Geometry, restated from the builder's own helpers, INCLUDING the persistent
+        // branch. `attention_dense_grid` (attention_dense.py:1803) is:
+        //
+        //     if spec.persistent: return (spec.num_persistent, 1, 1)
+        //     return (ceil(Sq / block_m), num_query_heads, batch)
+        //
+        // and `attention_dense_block` (:1822) is (block_m // 32 * 64, 1, 1) wave64 lanes.
+        // The default arm is exact because supports_attention_dense enforces
+        // Sq % block_m == 0.
+        //
+        // Both arms matter: the persistent grid-stride variant is a different binary that
+        // expects a 1-D grid of num_persistent CTAs, and launching it on the default 3-D
+        // grid silently leaves output elements unwritten -- the builder's own words are
+        // "a mismatch writes some rows twice and others never". Every term is read from
+        // the KMD rather than hardcoded, so a variant launches the geometry it was
+        // actually compiled for.
         const auto blockM = kernel.getIntMetadata(std::string(BLOCK_M_FIELD));
         const auto seqLenQ = kernel.getIntMetadata(std::string(SEQLEN_Q_FIELD));
         const auto numQueryHeads = kernel.getIntMetadata(std::string(NUM_QUERY_HEADS_FIELD));
         const auto batch = kernel.getIntMetadata(std::string(BATCH_FIELD));
+        const auto persistent = kernel.getIntMetadata(std::string(PERSISTENT_FIELD));
+        const auto numPersistent = kernel.getIntMetadata(std::string(NUM_PERSISTENT_FIELD));
         if(blockM <= 0)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -833,12 +853,30 @@ public:
                 "gfx942 attention_dense: kernel '" + toString(kernel.kernelId)
                     + "' declares a non-positive block_m");
         }
-        const int64_t queryBlocks = (seqLenQ + blockM - 1) / blockM;
+        // A persistent variant with no usable CTA count would launch an empty or
+        // negative grid. Fail at prepare with a named reason rather than at the far end
+        // of a silent miscompute: this is the correspondence the old comment said
+        // nothing checked, and it is what let the missing branch ship.
+        if(persistent != 0 && numPersistent <= 0)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx942 attention_dense: kernel '" + toString(kernel.kernelId)
+                    + "' is persistent but declares a non-positive num_persistent");
+        }
 
         code.kernel->setBlockSize(static_cast<unsigned>(blockM / 32 * 64), 1, 1);
-        code.kernel->setGridSize(static_cast<unsigned>(queryBlocks),
-                                 static_cast<unsigned>(numQueryHeads),
-                                 static_cast<unsigned>(batch));
+        if(persistent != 0)
+        {
+            code.kernel->setGridSize(static_cast<unsigned>(numPersistent), 1, 1);
+        }
+        else
+        {
+            const int64_t queryBlocks = (seqLenQ + blockM - 1) / blockM;
+            code.kernel->setGridSize(static_cast<unsigned>(queryBlocks),
+                                     static_cast<unsigned>(numQueryHeads),
+                                     static_cast<unsigned>(batch));
+        }
 
         return std::make_unique<PreparedGfx942AttentionDense>(
             std::move(code.program), std::move(code.kernel), binding);
