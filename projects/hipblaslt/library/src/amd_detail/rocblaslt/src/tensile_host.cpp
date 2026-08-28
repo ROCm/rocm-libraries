@@ -3973,19 +3973,25 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
             }
 
-            // Grouped GEMM does select Stream-K solutions, so isolation has to
-            // cover the stream as well as the problem index: offsetting by index
-            // alone keeps one grouped call internally safe but still shares the
-            // region with every other stream.
+            // Selection never pairs a grouped problem with a Stream-K solution:
+            // a solution matches only when its ProblemType.groupedGemm agrees
+            // with the problem (the GroupedGemm predicate on the heuristic path,
+            // isGemmTypeSame() on the getAllSolutions one), and no shipped logic
+            // file with GroupedGemm set carries StreamK. getSolutionByIndex()
+            // above evaluates no predicate at all, so a caller-supplied index is
+            // the one way a Stream-K solution reaches here, and it is what the
+            // binding below is for.
             //
-            // A group wider than one stream's block has no private region left
-            // for the problems past it, and every problem in a group runs in one
-            // kernel launch, so handing two of them the same region would let
-            // one clear a flag the other is spinning on. Such a group keeps the
-            // shared GSU regions it is given at problem-creation time, which are
-            // still distinct per problem and so safe within the launch; the
-            // cross-stream exposure there is no worse than on any other path
-            // that uses them.
+            // Isolation then has to cover the stream as well as the problem
+            // index: offsetting by index alone keeps one grouped call internally
+            // safe but still shares the region with every other stream. Past one
+            // stream's block no private region is left, and every problem in a
+            // group runs in one kernel launch, so handing two of them the same
+            // region would let one clear a flag the other is spinning on. A
+            // wider group is therefore left with the GSU regions bound at
+            // problem creation, which are shared across streams and null past
+            // c_syncGsuSlots: no guarantee for flag use, but no solution that
+            // reads them is reachable for such a group either.
             if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
                && !solution->problemType.outputAmaxD
                && data->inputs.grouped.size() <= _rocblaslt_handle::c_syncSkSlotsPerStream)

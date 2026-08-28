@@ -156,14 +156,30 @@ struct _rocblaslt_handle
     static constexpr size_t c_syncGsuSlots         = 16;
     static constexpr size_t c_syncGsuTotalElements = c_syncGsuSlots * c_syncGsuSlotElements;
 
+    // Hands back the GSU flag region for `problemIndex`, or null past the last
+    // slot. A group holds any number of problems, so the index has to be bounded
+    // here or the later ones would be given a pointer past the end of the
+    // allocation. Null rather than a shared slot, because nothing selectable for
+    // a group that wide reads it - SynchronizerSizeCheck bounds the MBSK
+    // reduction by the slots, and no shipped logic pairs a grouped problem with
+    // Stream-K or AmaxD - while a shared slot would be read as a private one.
+    void* gsuFlagsForProblem(size_t problemIndex) const
+    {
+        if(Synchronizer == nullptr || problemIndex >= c_syncGsuSlots)
+            return nullptr;
+        return static_cast<char*>(Synchronizer) + problemIndex * c_syncGsuSlotBytes;
+    }
+
     // Stream-K indexes its flags by workgroup id (StreamK.py emits "flag offset
     // based on CTA index"), so a slot holds one int per Stream-K workgroup and
     // no more; skGrid is 224 on gfx950, which has 256 CUs. At that size every
     // stream can afford its own region, which is what closes the deadlock.
     static constexpr size_t c_syncSkSlotElements = 2048;
     static constexpr size_t c_syncSkSlotBytes    = c_syncSkSlotElements * sizeof(int);
-    // Problem slots inside one stream's block: grouped GEMM does select Stream-K
-    // solutions, so each problem in a group needs its own region.
+    // Problem slots inside one stream's block. Selection does not pair a grouped
+    // problem with a Stream-K solution, but a caller-supplied solution index
+    // bypasses every predicate, so each problem in a group still needs its own
+    // region (see the grouped branch of makeArgument()).
     static constexpr size_t c_syncSkSlotsPerStream = 16;
     // Distinct streams one handle can serve. A block is claimed on a stream's
     // first Stream-K matmul and held until the handle is destroyed, so this
