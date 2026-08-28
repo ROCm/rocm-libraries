@@ -467,6 +467,11 @@ namespace TensileLite
         size_t requiredHostSizeGroupedGemmSingle(Problem const&  problem,
                                                  Hardware const& hardware) const;
 
+        /**
+         * Bytes of the synchronizer region this solution writes for `problem`:
+         * the MBSK reduction area, or the Stream-K flags plus whatever
+         * work-queue prefix precedes them. 0 when it reads none.
+         */
         size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
         void                 calculateGrid(dim3&                               workGroupSize,

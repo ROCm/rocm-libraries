@@ -5,7 +5,8 @@
  *
  *******************************************************************************/
 
-// Unit tests for the bound getSKGrid puts on a Stream-K grid.
+// Unit tests for the bound getSKGrid puts on a Stream-K grid, and for the
+// synchronizer requirement the same solution reports.
 //
 // A Stream-K flag region is one block of StreamKFlagElements ints, private to
 // one (stream, problem) pair. The dynamic-queue kernels (StreamK 4, and the
@@ -119,5 +120,37 @@ namespace
 
         EXPECT_EQ(solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree),
                   StreamKFlagElements);
+    }
+
+    // Both bounds are set so that a clamped grid asks for exactly one block,
+    // which is what makes the clamp the right one: a byte more would be an
+    // overrun, a byte less would be grid left unused.
+    TEST(StreamKFlagBound, ClampedGridRequestsExactlyOneBlock)
+    {
+        auto device  = makeGfx950Device();
+        auto problem = makeProblem();
+
+        ContractionSolution dynamicQueue;
+        initStreamKSolution(dynamicQueue, 4);
+        EXPECT_EQ(dynamicQueue.requiredSynchronizerSize(problem, device),
+                  StreamKFlagElements * sizeof(int));
+
+        ContractionSolution staticGrid;
+        initStreamKSolution(staticGrid, 3);
+        EXPECT_EQ(staticGrid.requiredSynchronizerSize(problem, device),
+                  StreamKFlagElements * sizeof(int));
+    }
+
+    // Atomic kernels never take the Flags pointer, so they report nothing.
+    TEST(StreamKFlagBound, AtomicSolutionNeedsNoSynchronizer)
+    {
+        ContractionSolution solution;
+        initStreamKSolution(solution, 4);
+        solution.sizeMapping.streamKAtomic = 1;
+
+        auto device  = makeGfx950Device();
+        auto problem = makeProblem();
+
+        EXPECT_EQ(solution.requiredSynchronizerSize(problem, device), 0u);
     }
 } // namespace

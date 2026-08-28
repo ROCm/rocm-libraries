@@ -4155,6 +4155,42 @@ namespace TensileLite
             return tiles * sizeMapping.synchronizerSizePerWG * sizeof(int);
         }
 
+        // Stream-K reads the same region as inter-workgroup flags: one int per
+        // workgroup, laid out after the per-XCD work-queue counters on the
+        // dynamic-queue paths. Only the launches that reach the flag protocol
+        // need any of it -- atomic and ForceDPOnly kernels never take the
+        // pointer, a parallel reduction is handed nullptr, and a grid that
+        // divides the tiles leaves no partial tile to fix up -- which is the
+        // same set getSKGrid bounds against the region.
+        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
+           && sizeMapping.streamKForceDPOnly == 0)
+        {
+            size_t tiles = problem.getNumTiles(sizeMapping, 1);
+            if(tiles == 0) // Grouped GEMM reports 0 tiles
+                return 0;
+
+            const bool effectiveDynamic
+                = (sizeMapping.streamK == 5) ? streamK5EffectiveDynamic(problem, hardware) : false;
+            // The reduction solve() will pick, which decides both the grid and
+            // whether the flags are read at all.
+            origami::reduction_t reduction;
+            if(sizeMapping.streamK == 4)
+                reduction = origami::reduction_t::tree;
+            else if(sizeMapping.streamK == 5)
+                reduction = effectiveDynamic ? origami::reduction_t::tree
+                                             : getSKReduction(problem, hardware);
+            else
+                reduction = getSKReduction(problem, hardware);
+
+            size_t skGrid = getSKGrid(problem, hardware, tiles, reduction);
+            if(reduction == origami::reduction_t::parallel || skGrid == 0 || tiles % skGrid == 0)
+                return 0;
+
+            size_t size = skGrid * sizeof(int);
+            if(sizeMapping.streamK == 4 || (sizeMapping.streamK == 5 && effectiveDynamic))
+                size += streamKFlagPrefixBytes(hardware);
+            return size;
+        }
         return 0;
     }
 
