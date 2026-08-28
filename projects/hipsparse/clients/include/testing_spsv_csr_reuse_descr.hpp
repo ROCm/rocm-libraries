@@ -325,7 +325,7 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
 template <typename I, typename J, typename T>
 void testing_spsv_csr_reuse_descr(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
     J                    m        = argus.M;
     J                    n        = argus.N;
     T                    h_alpha  = argus.get_alpha<T>();
