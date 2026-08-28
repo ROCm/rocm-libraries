@@ -362,6 +362,13 @@ BenchmarkProblems:
     - # Edge and tail coverage.  Every other block sizes M, N and K to whole
       # macro tiles and whole DepthU, so neither the M/N edge nor the tail loop
       # is reached; the buffer limits and the tail masking are untested there.
+      #
+      # The odd sizes below are here to be *rejected*, not to run.  Two fp4
+      # elements share a byte, and on this layout M and N are the contiguous
+      # dims, so an odd extent leaves the leading stride on a half byte.  The
+      # geometry sets AssertFree0/1ElementMultiple for that, and the client
+      # reports DID_NOT_SATISFY_ASSERTS.  Drop the assert and these come back
+      # as FAILED rather than quietly vanishing, so they hold the guard in place.
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -395,3 +402,6 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 320]   # K tail (320 = DepthU + 64)
           - Exact: [256, 256, 1, 384]   # K tail (384 = DepthU + 128)
           - Exact: [200, 200, 1, 320]   # M and N edge with a K tail
+          - Exact: [33, 256, 1, 256]    # odd M   -- rejected, see above
+          - Exact: [256, 65, 1, 256]    # odd N   -- rejected
+          - Exact: [33, 65, 1, 256]     # both odd -- rejected
