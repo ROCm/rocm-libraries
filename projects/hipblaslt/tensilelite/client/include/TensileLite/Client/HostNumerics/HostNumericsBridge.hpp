@@ -5,7 +5,9 @@
 
 // TensileLite client-private adapter.
 
-#include <roc/host_numerics/validation.hpp>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/operation_types.hpp>
+#include <roc/host_numerics/tensor.hpp>
 
 #include <Tensile/Activation.hpp>
 #include <Tensile/DataTypes.hpp>

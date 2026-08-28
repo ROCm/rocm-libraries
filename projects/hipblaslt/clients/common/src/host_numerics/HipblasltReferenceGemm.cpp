@@ -7,7 +7,6 @@
 #include <hipblaslt/host_numerics/HipblasltReferenceGemm.hpp>
 #include <hipblaslt/host_numerics/Types.hpp>
 #include <roc/host_numerics/backends/blas.hpp>
-#include <roc/host_numerics/validation.hpp>
 
 #include <utility>
 
