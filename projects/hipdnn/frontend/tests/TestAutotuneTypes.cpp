@@ -3,12 +3,13 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
-#include <hipdnn_frontend/autotune/BenchmarkStatistics.hpp>
 #include <hipdnn_frontend/autotune/CartesianProduct.hpp>
 #include <hipdnn_frontend/autotune/KnobConstants.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -282,90 +283,12 @@ TEST(TestAutotuneTypes, CartesianProductAboveWarningThresholdStillProducesAllCom
 }
 
 // ============================================================================
-// BenchmarkStatistics Tests
+// Timing statistics
 // ============================================================================
-
-TEST(TestAutotuneTypes, MeanSingleValue)
-{
-    const std::vector<float> values = {5.0f};
-    EXPECT_FLOAT_EQ(autotune::detail::computeMean(values), 5.0f);
-}
-
-TEST(TestAutotuneTypes, MeanMultipleValues)
-{
-    const std::vector<float> values = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
-    EXPECT_FLOAT_EQ(autotune::detail::computeMean(values), 3.0f);
-}
-
-TEST(TestAutotuneTypes, MeanDoubleValues)
-{
-    const std::vector<double> values = {2.0, 4.0, 6.0};
-    EXPECT_DOUBLE_EQ(autotune::detail::computeMean(values), 4.0);
-}
-
-TEST(TestAutotuneTypes, MeanThrowsOnEmpty)
-{
-    const std::vector<float> values;
-    EXPECT_THROW(autotune::detail::computeMean(values), std::invalid_argument);
-}
-
-TEST(TestAutotuneTypes, StddevUniformValues)
-{
-    // All identical values should have zero standard deviation
-    const std::vector<float> values = {3.0f, 3.0f, 3.0f, 3.0f};
-    EXPECT_FLOAT_EQ(autotune::detail::computeStddev(values), 0.0f);
-}
-
-TEST(TestAutotuneTypes, StddevKnownValues)
-{
-    // Population stddev of {2, 4, 4, 4, 5, 5, 7, 9}
-    // Mean = 40/8 = 5.0
-    // Variance = ((2-5)^2 + (4-5)^2 + (4-5)^2 + (4-5)^2 + (5-5)^2 + (5-5)^2 + (7-5)^2 +
-    // (9-5)^2) / 8
-    //          = (9+1+1+1+0+0+4+16)/8 = 32/8 = 4.0
-    // Stddev = sqrt(4) = 2.0
-    const std::vector<double> values = {2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0};
-    EXPECT_DOUBLE_EQ(autotune::detail::computeStddev(values), 2.0);
-}
-
-TEST(TestAutotuneTypes, StddevThrowsOnEmpty)
-{
-    const std::vector<float> values;
-    EXPECT_THROW(autotune::detail::computeStddev(values), std::invalid_argument);
-}
-
-TEST(TestAutotuneTypes, CoVKnownValues)
-{
-    // Mean = 5.0, Stddev = 2.0, CoV = 2.0/5.0 = 0.4
-    const std::vector<double> values = {2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0};
-    EXPECT_DOUBLE_EQ(autotune::detail::computeCoefficientOfVariation(values), 0.4);
-}
-
-TEST(TestAutotuneTypes, CoVUniformValuesIsZero)
-{
-    const std::vector<float> values = {7.0f, 7.0f, 7.0f};
-    EXPECT_FLOAT_EQ(autotune::detail::computeCoefficientOfVariation(values), 0.0f);
-}
-
-TEST(TestAutotuneTypes, CoVAllZerosIsZero)
-{
-    // When mean is 0, CoV returns 0 to avoid division by zero
-    const std::vector<float> values = {0.0f, 0.0f, 0.0f};
-    EXPECT_FLOAT_EQ(autotune::detail::computeCoefficientOfVariation(values), 0.0f);
-}
-
-TEST(TestAutotuneTypes, CoVThrowsOnEmpty)
-{
-    const std::vector<double> values;
-    EXPECT_THROW(autotune::detail::computeCoefficientOfVariation(values), std::invalid_argument);
-}
-
-TEST(TestAutotuneTypes, StddevSingleValue)
-{
-    // Single value: stddev = 0
-    const std::vector<float> values = {42.0f};
-    EXPECT_FLOAT_EQ(autotune::detail::computeStddev(values), 0.0f);
-}
+//
+// The statistics themselves live in data_sdk and are covered by
+// TestTimingStatistics.cpp; both the autotune sweep and the plugin SDK's catalog
+// benchmark share that one implementation. Nothing to duplicate here.
 
 // ============================================================================
 // AutotuneConfig Default Values Tests

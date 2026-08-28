@@ -43,6 +43,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [0, 2]
+        - PrefetchGL2: [0, 1, 2]
         - ScheduleIterAlg: [3]
         - UseSubtileImpl: [true]
         - StreamK: [0]
@@ -63,9 +64,10 @@ BenchmarkProblems:
       JoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # MT 64x64, ClusterDim 2x2: every size yields an even WG grid
-          # (ceil(M/64) and ceil(N/64) both divisible by 2), as required by the
-          # host ClusterDimCheck launch predicate.
+          # MT 64x64, ClusterDim 2x2: these sizes yield an even WG grid
+          # (ceil(M/64) and ceil(N/64) both divisible by 2). Non-multiple grids
+          # are also supported (padded up + padded WGs early-exit); these cases
+          # cover the divisible path.
           - Exact: [128, 128, 1, 128]  # WG 2x2, aligned
           - Exact: [96,  96,  1, 128]  # WG 2x2, mult-of-32 edge
           - Exact: [256, 256, 1, 256]  # WG 4x4, larger K
@@ -93,6 +95,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [0, 2]
+        - PrefetchGL2: [0, 1, 2]
         - ScheduleIterAlg: [3]
         - UseSubtileImpl: [true]
         - StreamK: [0]
@@ -138,6 +141,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [0, 2]
+        - PrefetchGL2: [0, 1, 2]
         - ScheduleIterAlg: [3]
         - UseSubtileImpl: [true]
         - StreamK: [0]
@@ -162,3 +166,63 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 384]  # WG 2x2, larger K
           - Exact: [384, 512, 1, 256]  # WG 2x2, asymmetric
           - Exact: [257, 512, 1, 128]  # WG 2x2, non-aligned edge
+  -
+    - # ProblemType -- large DepthU
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  2, 2]  # MT 64x64   WG 2x2
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128 WG 2x2
+        - DepthU: [256, 512, 1024]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchGL2: [0, 1]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [true]
+        - StreamK: [0]
+        - TDMInst: [3]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+        - ClusterDim: [[2, 2]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # MT 64x64, ClusterDim 2x2: ceil(M/64), ceil(N/64) both even
+          - Exact: [128, 128, 1, 1024]  # WG 2x2, aligned
+          - Exact: [128, 128, 1, 512]   # WG 2x2, smaller K
+          - Exact: [128, 128, 1, 256]   # WG 2x2, smallest large DU
+          # MT 128x128, ClusterDim 2x2: ceil(M/128), ceil(N/128) both even
+          - Exact: [256, 256, 1, 1024]  # WG 2x2, aligned
+          - Exact: [256, 256, 1, 512]   # WG 2x2, smaller K
+          - Exact: [256, 256, 1, 256]   # WG 2x2, smallest large DU
+          # Odd M/N (grid still cluster-compatible)
+          - Exact: [96, 96, 1, 1024]    # WG 2x2, mult-of-32 edge
+          - Exact: [129, 127, 1, 512]   # WG 2x2, non-aligned edge
+          # Edge WG: waves with 0 valid rows (MT 64x64 WG 2x2, perWaveRows=16)
+          - Exact: [1,  1,  1, 1024]    # wave0: 1 row, waves 1-3: 0
+          - Exact: [16, 17, 1, 1024]    # wave0: 16, wave1: 0-1, waves 2-3: 0
+          - Exact: [48, 48, 1, 1024]    # wave0-2: 16, wave3: 0
+          - Exact: [49, 63, 1, 1024]    # wave0-2: 16, wave3: 1 row
+          # Tail loop: K is multiple of WMMA-K(32) but not DepthU
+          - Exact: [128, 128, 1, 960]   # WG 2x2, tail loop
+          - Exact: [256, 256, 1, 192]   # WG 2x2, tail loop

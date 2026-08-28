@@ -1,68 +1,107 @@
 # hipTensor Test Categories Configuration (CTest)
 #
-# Labels here are applied to the *installed-tree* CTestTestfile.cmake
-# fragments (full / smoke / regression) by calls to
-# apply_ctest_category_labels(yaml, install_test_file) in
-# projects/hiptensor/test/CMakeLists.txt, after every test subdirectory
-# has appended its add_test() lines. The shared parser scans those lines
-# for test names and emits explicit set_tests_properties(... LABELS ...)
-# entries, the only label form ctest's script interpreter exposes through
+# Labels here are applied to the *installed-tree* CTestTestfile.cmake fragment
+# (bin/hiptensor/CTestTestfile.cmake) by apply_ctest_category_labels(yaml,
+# install_test_file) in projects/hiptensor/test/CMakeLists.txt, after every
+# test subdirectory has appended its add_test() lines. The shared parser scans
+# those lines for test names and emits explicit set_tests_properties(... LABELS
+# ...) entries, the only label form ctest's script interpreter exposes through
 # `--print-labels` / `-L` at install time.
 #
-# Tiers (parse_ctest_categories.py applies these automatically):
+# Tier nesting (parse_ctest_categories.py applies these automatically):
 #   quick         -> quick, standard, comprehensive, full
 #   standard      -> standard, comprehensive, full
 #   comprehensive -> comprehensive, full
 #   full          -> full
 #
-# `test_patterns` are regexes matched against the test names registered
-# in each install fragment. The full fragment registers bare names
-# (e.g. `logger_test`); the smoke / regression fragments register
-# suffixed names (e.g. `logger_test smoke`), so patterns allow an
-# optional trailing ` smoke`.
+# `test_patterns` are regexes matched against the test names registered in the
+# main install fragment. Each rank/device test is registered once per category
+# as "<binary> <category>", e.g.:
+#   - tier entries   e.g. `bilinear_contraction_test_m1n1k1 quick`
+#                         `bilinear_contraction_test_m1n1k1 standard`
+#                         `bilinear_contraction_test_m1n1k1 comprehensive`
+#                         `bilinear_contraction_test_m1n1k1 full`
+#   - FFM entries    e.g. `bilinear_contraction_test_m1n1k1 ffm-quick`
+#                         `bilinear_contraction_test_m1n1k1 ffm-full`
+#   - bench entries  e.g. `bilinear_contraction_test_m1n1k1 bench`
+# Host-only tests are registered once as `<binary> quick` and nest up via the
+# tier inheritance above.
 #
-# `quick` mirrors rtest.xml's <emulation sets="smoke"> membership: every
-# registered test except plan_cache_test, plan_lifetime_test, and
-# interface_test (which smoke does not run). standard/comprehensive/full
-# are the full suite.
+# Category -> config dir (the -y config each entry runs with):
+#   quick         -> validation/quick
+#   standard      -> validation/standard   (also the compiled-in default)
+#   comprehensive -> validation/comprehensive
+#   full          -> validation/full
+#   ffm-quick     -> emulation/quick
+#   ffm-full      -> emulation/full
+#   bench         -> bench
+# FFM and bench entries are excluded from the tiers (opt-in via -L ffm-*/bench).
 
 test_categories:
+  # quick -> validation/quick. Matches "<binary> quick" (the trailing-space
+  # anchor means "<binary> ffm-quick" is NOT matched). Auto-nests into
+  # standard/comprehensive/full.
   quick:
-    description: "hipTensor quick tests - mirrors rtest.xml smoke set"
+    description: "hipTensor quick tests"
     test_patterns:
-      - "^contraction_mode_test( smoke)?$"
-      - "^elementwise_cpu_test( smoke)?$"
-      - "^elementwise_op_test( smoke)?$"
-      - "^hiptensor_options_test( smoke)?$"
-      - "^logger_test( smoke)?$"
-      - "^reduction_cpu_impl_test( smoke)?$"
-      - "^util_test( smoke)?$"
-      - "^yaml_test( smoke)?$"
-      - "^(complex_)?(bilinear|scale)_contraction_test_m[1-6]n[1-6]k[1-6]( smoke)?$"
-      - "^(bilinear|scale)_contraction_with_unary_ops_test( smoke)?$"
-      - "^trinary_(bilinear|scale)_contraction_test( smoke)?$"
-      - "^rank[1-6]_reduction_test( smoke)?$"
-      - "^rank[2-6]_elementwise_(permute|binary_op|trinary_op)_test( smoke)?$"
+      - "^.* quick$"
     labels:
       - "quick"
 
+  # standard -> validation/standard. Auto-nests into comprehensive/full.
   standard:
-    description: "hipTensor standard tests - full suite"
+    description: "hipTensor standard tests"
     test_patterns:
-      - ".*"
+      - "^.* standard$"
     labels:
       - "standard"
 
+  # comprehensive -> validation/comprehensive. Auto-nests into full.
   comprehensive:
-    description: "hipTensor comprehensive tests - full suite"
+    description: "hipTensor comprehensive tests"
     test_patterns:
-      - ".*"
+      - "^.* comprehensive$"
     labels:
       - "comprehensive"
 
+  # full -> validation/full.
   full:
     description: "hipTensor full test suite"
     test_patterns:
-      - ".*"
+      - "^.* full$"
     labels:
       - "full"
+
+  # ffm-quick -> emulation/quick (device tests only, FFM simulator budget).
+  ffm-quick:
+    description: "hipTensor FFM quick set"
+    test_patterns:
+      - "^.* ffm-quick$"
+    labels:
+      - "ffm-quick"
+
+  # ffm-full -> emulation/full (device tests only, FFM simulator budget).
+  ffm-full:
+    description: "hipTensor FFM full set"
+    test_patterns:
+      - "^.* ffm-full$"
+    labels:
+      - "ffm-full"
+
+  # bench -> performance runs (device tests only). Opt-in via -L bench.
+  bench:
+    description: "hipTensor bench tests - performance runs"
+    test_patterns:
+      - "^.* bench$"
+    labels:
+      - "bench"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 900            # 15 min
+    standard: 1800        # 30 min
+    comprehensive: 2700   # 45 min
+    full: 7200            # 2 hours
+    ffm-quick: 7200       # 2 hours
+    ffm-full: 7200        # 2 hours

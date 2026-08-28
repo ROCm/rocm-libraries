@@ -19,9 +19,13 @@
  * then this is the single C-side source. */
 static const char ROCKE_TRIPLE[] = "amdgcn-amd-amdhsa";
 /* The AMDGPU datalayout is FLAVOR-KEYED (Python _DATALAYOUT_LLVM20 /
- * _DATALAYOUT_LLVM22): only the buffer-fat-pointer address space (p8) drifts
- * between LLVM 20 (ROCm 7.0/7.1, ...-p8:128:128-...) and LLVM 22 (ROCm >= 7.2,
- * ...-p8:128:128:128:48-...). The triple is unchanged across flavors. */
+ * _DATALAYOUT_LLVM22 / _DATALAYOUT_LLVM23): two fields drift across flavors --
+ * the buffer-resource address space p8 (the 128-bit buffer descriptor, not the
+ * p7 fat pointer) gained an index-width field in LLVM 22 (...-p8:128:128-... ->
+ * ...-p8:128:128:128:48-...), and the ELF symbol-mangling spec m:e (absent in
+ * LLVM 20 / 22) is present in LLVM 23 (ROCm 7.13+): e-p:64:64-... ->
+ * e-m:e-p:64:64-.... The triple is unchanged across flavors. Must stay
+ * byte-identical with the Python constants. */
 static const char ROCKE_DATALAYOUT_LLVM20[]
     = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
       "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
@@ -29,6 +33,16 @@ static const char ROCKE_DATALAYOUT_LLVM20[]
       "-n32:64-S32-A5-G1-ni:7:8:9";
 static const char ROCKE_DATALAYOUT_LLVM22[]
     = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
+      "-n32:64-S32-A5-G1-ni:7:8:9";
+/* LLVM 23 (ROCm 7.13+) adds the ELF symbol-mangling spec m:e that LLVM 22
+ * omits; the p8-indexed layout is otherwise identical (Python
+ * _DATALAYOUT_LLVM23). Kept as its own constant rather than folded into the
+ * `else` arm below so the next divergence is a one-line edit, not a silent
+ * wrong-datalayout bug. */
+static const char ROCKE_DATALAYOUT_LLVM23[]
+    = "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
       "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
       "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
       "-n32:64-S32-A5-G1-ni:7:8:9";
@@ -64,6 +78,12 @@ static const registry_row_t REGISTRY[] = {
      ROCKE_BUFFER_RSRC_WORD3_RDNA,
      ROCKE_WAITCNT_GFX11,
      32},
+    /* gfx1250: a CDNA part on the GFX12 programming model (wave32, WMMA-only).
+     * The RDNA SRD word3 and gfx11 waitcnt layout are inherited placeholders,
+     * as in Python's Gfx1250Backend; the gfx1250 57-bit SRD is deferred, and
+     * the waitcnt layout is moot because gfx1250 emits split counters rather
+     * than the monolithic s_waitcnt. */
+    {"gfx1250", ROCKE_ISA_GFX1250, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
 };
 static const int REGISTRY_N = (int)(sizeof(REGISTRY) / sizeof(REGISTRY[0]));
 
@@ -102,7 +122,7 @@ rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err)
              * sorted-list suffix is reproducible from rocke_backend_is_known if
              * a caller wants it, so we keep this allocation-free. */
             *err = "no ISA backend registered for the given gfx target; known: "
-                   "gfx11-generic, gfx1151, gfx1201, gfx908, gfx90a, gfx942, gfx950";
+                   "gfx11-generic, gfx1151, gfx1201, gfx1250, gfx908, gfx90a, gfx942, gfx950";
         }
         return be;
     }
@@ -133,14 +153,20 @@ const char* rocke_isa_triple(const rocke_isa_backend_t* be)
     return ROCKE_TRIPLE;
 }
 
-/* Python backend.datalayout(llvm_flavor) -> _datalayout_for_flavor: LLVM20
- * returns the legacy p8 layout; anything else (incl. unexpected values)
- * degrades to the modern LLVM22 form. */
+/* Python backend.datalayout(llvm_flavor) -> _datalayout_for_flavor, branch for
+ * branch: LLVM20 gets the legacy p8 layout, LLVM23 its own m:e constant, and
+ * anything else -- including an unexpected value -- the modern LLVM22 form.
+ * Mirrors rocke_ll_datalayout_for_flavor in lower_llvm/data.cpp;
+ * the two are held together by test_isa_and_lower_llvm_datalayouts_agree. */
 const char* rocke_isa_datalayout_for_flavor(const rocke_isa_backend_t* be,
                                             rocke_llvm_flavor_t flavor)
 {
     (void)be; /* shared across all wired targets; only the flavor drives p8 */
-    return (flavor == ROCKE_LLVM_FLAVOR_LLVM20) ? ROCKE_DATALAYOUT_LLVM20 : ROCKE_DATALAYOUT_LLVM22;
+    if(flavor == ROCKE_LLVM_FLAVOR_LLVM20)
+        return ROCKE_DATALAYOUT_LLVM20;
+    if(flavor == ROCKE_LLVM_FLAVOR_LLVM23)
+        return ROCKE_DATALAYOUT_LLVM23;
+    return ROCKE_DATALAYOUT_LLVM22;
 }
 
 const char* rocke_isa_datalayout(const rocke_isa_backend_t* be)
@@ -238,13 +264,15 @@ static const rocke_wmma_spec_t RDNA_WMMA[] = {
      "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16",
      "half",
      "half",
-     16},
+     16,
+     ROCKE_WMMA_SHAPE_AB_C},
     {"tile.wmma_f32_16x16x16_bf16",
      "wmma.f32.16x16x16.bf16",
      "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16",
      "bfloat",
      "i16",
-     16},
+     16,
+     ROCKE_WMMA_SHAPE_AB_C},
 };
 static const int RDNA_WMMA_N = (int)(sizeof(RDNA_WMMA) / sizeof(RDNA_WMMA[0]));
 
@@ -270,15 +298,67 @@ static const rocke_wmma_spec_t RDNA_GFX12_WMMA[] = {
      "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v8f16",
      "half",
      "half",
-     8},
+     8,
+     ROCKE_WMMA_SHAPE_AB_C},
     {"tile.wmma_gfx12_f32_16x16x16_bf16",
      "wmma.gfx12.f32.16x16x16.bf16",
      "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16",
      "bfloat",
      "i16",
-     8},
+     8,
+     ROCKE_WMMA_SHAPE_AB_C},
 };
 static const int RDNA_GFX12_WMMA_N = (int)(sizeof(RDNA_GFX12_WMMA) / sizeof(RDNA_GFX12_WMMA[0]));
+
+/* _GFX1250_WMMA + _GFX1250_WMMA_FP8: the gfx1250 atoms. K=32 f16/bf16 keeps
+ * frag_width 16 but takes the 8-operand signature, and unlike gfx11/gfx12 the
+ * bf16 form takes <16 x bfloat> directly (ssa_elt == call_elt, no bitcast).
+ * K=64 fp8/bf8 arrives as <8 x i32> (32 packed bytes per lane). */
+static const rocke_wmma_spec_t GFX1250_WMMA[] = {
+    {"tile.wmma_gfx1250_f32_16x16x32_f16",
+     "wmma.gfx1250.f32.16x16x32.f16",
+     "llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16",
+     "half",
+     "half",
+     16,
+     ROCKE_WMMA_SHAPE_GFX1250},
+    {"tile.wmma_gfx1250_f32_16x16x32_bf16",
+     "wmma.gfx1250.f32.16x16x32.bf16",
+     "llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16",
+     "bfloat",
+     "bfloat",
+     16,
+     ROCKE_WMMA_SHAPE_GFX1250},
+    {"tile.wmma_gfx1250_f32_16x16x64_fp8_fp8",
+     "wmma.gfx1250.f32.16x16x64.fp8.fp8",
+     "llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32",
+     "i32",
+     "i32",
+     8,
+     ROCKE_WMMA_SHAPE_GFX1250_FP8},
+    {"tile.wmma_gfx1250_f32_16x16x64_fp8_bf8",
+     "wmma.gfx1250.f32.16x16x64.fp8.bf8",
+     "llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32",
+     "i32",
+     "i32",
+     8,
+     ROCKE_WMMA_SHAPE_GFX1250_FP8},
+    {"tile.wmma_gfx1250_f32_16x16x64_bf8_fp8",
+     "wmma.gfx1250.f32.16x16x64.bf8.fp8",
+     "llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32",
+     "i32",
+     "i32",
+     8,
+     ROCKE_WMMA_SHAPE_GFX1250_FP8},
+    {"tile.wmma_gfx1250_f32_16x16x64_bf8_bf8",
+     "wmma.gfx1250.f32.16x16x64.bf8.bf8",
+     "llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32",
+     "i32",
+     "i32",
+     8,
+     ROCKE_WMMA_SHAPE_GFX1250_FP8},
+};
+static const int GFX1250_WMMA_N = (int)(sizeof(GFX1250_WMMA) / sizeof(GFX1250_WMMA[0]));
 
 const rocke_wmma_spec_t* rocke_isa_wmma_lookup(const char* op_name)
 {
@@ -331,11 +411,32 @@ const rocke_wmma_spec_t* rocke_isa_wmma_gfx12_lookup(const char* op_name)
     return NULL;
 }
 
+const rocke_wmma_spec_t* rocke_isa_wmma_gfx1250_lookup(const char* op_name)
+{
+    int i;
+    if(op_name == NULL)
+    {
+        return NULL;
+    }
+    for(i = 0; i < GFX1250_WMMA_N; ++i)
+    {
+        if(strcmp(GFX1250_WMMA[i].op_name, op_name) == 0)
+        {
+            return &GFX1250_WMMA[i];
+        }
+    }
+    return NULL;
+}
+
 const rocke_wmma_spec_t* rocke_isa_resolve_wmma(const rocke_isa_backend_t* be, const char* op_name)
 {
     if(be == NULL || !be->valid)
     {
         return NULL;
+    }
+    if(be->kind == ROCKE_ISA_GFX1250)
+    {
+        return rocke_isa_wmma_gfx1250_lookup(op_name);
     }
     if(be->kind == ROCKE_ISA_GFX12_RDNA)
     {
@@ -410,6 +511,50 @@ int rocke_isa_emit_wmma_call(rocke_strbuf_t* out,
         b_arg = b_cast_name;
     }
 
+    if(spec->shape == ROCKE_WMMA_SHAPE_GFX1250)
+    {
+        /* gfx1250 8-operand form: (i1 negA, A, i1 negB, B, i16 fmt, C,
+         * i1 reuseA, i1 reuseB), immediates pinned to the plain unscaled MMA. */
+        return rocke_strbuf_appendf(out,
+                                    "  %s = call <8 x float> @%s("
+                                    "i1 false, <%d x %s> %s, "
+                                    "i1 false, <%d x %s> %s, "
+                                    "i16 0, <8 x float> %s, "
+                                    "i1 false, i1 false)\n",
+                                    result_name,
+                                    spec->intrinsic,
+                                    w,
+                                    spec->call_elt,
+                                    a_arg,
+                                    w,
+                                    spec->call_elt,
+                                    b_arg,
+                                    c_name)
+                       != 0
+                   ? -1
+                   : 0;
+    }
+    if(spec->shape == ROCKE_WMMA_SHAPE_GFX1250_FP8)
+    {
+        /* gfx1250 K=64 6-operand form: (A, B, i16 fmt, C, i1, i1). */
+        return rocke_strbuf_appendf(out,
+                                    "  %s = call <8 x float> @%s("
+                                    "<%d x %s> %s, <%d x %s> %s, "
+                                    "i16 0, <8 x float> %s, "
+                                    "i1 false, i1 false)\n",
+                                    result_name,
+                                    spec->intrinsic,
+                                    w,
+                                    spec->call_elt,
+                                    a_arg,
+                                    w,
+                                    spec->call_elt,
+                                    b_arg,
+                                    c_name)
+                       != 0
+                   ? -1
+                   : 0;
+    }
     if(rocke_strbuf_appendf(out,
                             "  %s = call <8 x float> @%s("
                             "<%d x %s> %s, <%d x %s> %s, <8 x float> %s)\n",

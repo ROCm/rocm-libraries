@@ -39,6 +39,7 @@
 #include <hipdnn_frontend.hpp>
 
 #include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
+#include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -74,7 +75,10 @@ public:
                   auto tensor = std::make_unique<hipdnn_data_sdk::utilities::Tensor<float>>(
                       tensorAttr->get_dim(), tensorAttr->get_stride());
                   tensor->fillWithValue(fillValue);
-                  _variantPack[tensorAttr->get_uid()] = tensor->memory().deviceData();
+                  _variantPack[tensorAttr->get_uid()]
+                      = selectVariantPackPointer(*tensor,
+                                                 /*useDevice=*/true,
+                                                 tensorAttr->get_is_runtime_pass_by_value());
                   _tensors.push_back(std::move(tensor));
               };
 
@@ -90,7 +94,8 @@ public:
         });
     }
 
-    /// Maps tensor UID -> device pointer for graph->execute()/autotune().
+    /// Maps tensor UID to its execute-time pointer. Ordinary tensors use device
+    /// pointers; runtime pass-by-value tensors use host pointers.
     const std::unordered_map<int64_t, void*>& variantPack() const
     {
         return _variantPack;

@@ -326,6 +326,23 @@ void host_csrsv(rocsparse_operation  trans,
                 J*                   struct_pivot,
                 J*                   numeric_pivot);
 
+template <typename I, typename J, typename T>
+void host_cscsv(rocsparse_operation  trans,
+                J                    M,
+                I                    nnz,
+                T                    alpha,
+                const I*             csc_col_ptr,
+                const J*             csc_row_ind,
+                const T*             csc_val,
+                const T*             x,
+                int64_t              x_inc,
+                T*                   y,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                J*                   struct_pivot,
+                J*                   numeric_pivot);
+
 template <typename I, typename T>
 void host_coosv(rocsparse_operation  trans,
                 I                    M,
@@ -636,6 +653,25 @@ void host_csrsm(J                    M,
                 const I*             csr_row_ptr,
                 const J*             csr_col_ind,
                 const T*             csr_val,
+                T*                   B,
+                int64_t              ldb,
+                rocsparse_order      order_B,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                J*                   struct_pivot,
+                J*                   numeric_pivot);
+
+template <typename I, typename J, typename T>
+void host_cscsm(J                    M,
+                J                    nrhs,
+                I                    nnz,
+                rocsparse_operation  transA,
+                rocsparse_operation  transB,
+                T                    alpha,
+                const I*             csc_col_ptr,
+                const J*             csc_row_ind,
+                const T*             csc_val,
                 T*                   B,
                 int64_t              ldb,
                 rocsparse_order      order_B,
@@ -974,8 +1010,8 @@ rocsparse_status host_nnz(rocsparse_direction dirA,
                           rocsparse_int*      nnz_total_dev_host_ptr);
 
 template <typename T>
-void host_prune_dense2csr(rocsparse_int               m,
-                          rocsparse_int               n,
+void host_prune_dense2csr(int64_t                     m,
+                          int64_t                     n,
                           const std::vector<T>&       A,
                           int64_t                     lda,
                           rocsparse_index_base        base,
@@ -986,8 +1022,8 @@ void host_prune_dense2csr(rocsparse_int               m,
                           std::vector<rocsparse_int>& csr_col_ind);
 
 template <typename T>
-void host_prune_dense2csr_by_percentage(rocsparse_int               m,
-                                        rocsparse_int               n,
+void host_prune_dense2csr_by_percentage(int64_t                     m,
+                                        int64_t                     n,
                                         const std::vector<T>&       A,
                                         int64_t                     lda,
                                         rocsparse_index_base        base,
@@ -1031,6 +1067,18 @@ void host_dense_to_coo(I                     m,
                        std::vector<T>&       coo_val,
                        std::vector<I>&       coo_row_ind,
                        std::vector<I>&       coo_col_ind);
+
+template <typename I, typename T>
+void host_dense_to_bell(I                     m,
+                        I                     n,
+                        rocsparse_index_base  base,
+                        const std::vector<T>& A,
+                        int64_t               ld,
+                        rocsparse_order       order,
+                        I                     ell_block_size,
+                        I&                    ell_cols,
+                        std::vector<T>&       bell_val,
+                        std::vector<I>&       bell_col_ind);
 
 template <typename I, typename T>
 void host_coo_to_dense(I                     m,

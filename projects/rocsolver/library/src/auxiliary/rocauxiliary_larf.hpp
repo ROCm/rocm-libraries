@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -89,13 +89,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(NB_X) larf_left_kernel(const I m,
         res += conj(A[i]) * xs[i];
 
     // reduction
-    res += shift_left(res, 1);
-    res += shift_left(res, 2);
-    res += shift_left(res, 4);
-    res += shift_left(res, 8);
-    res += shift_left(res, 16);
-    if(warpSize > 32)
-        res += shift_left(res, 32);
+    reduce_wave_sum(res);
     if(tx % warpSize == 0)
         sdata[tx / warpSize] = res;
     __syncthreads();
@@ -165,13 +159,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(NB_X) larf_right_kernel(const I m,
         res += A[j * size_t(lda)] * xs[j];
 
     // reduction
-    res += shift_left(res, 1);
-    res += shift_left(res, 2);
-    res += shift_left(res, 4);
-    res += shift_left(res, 8);
-    res += shift_left(res, 16);
-    if(warpSize > 32)
-        res += shift_left(res, 32);
+    reduce_wave_sum(res);
     if(tx % warpSize == 0)
         sdata[tx / warpSize] = res;
     __syncthreads();

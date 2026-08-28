@@ -9,10 +9,10 @@ rocALUTION client examples
 ****************************
 
 rocALUTION clients host a variety of different examples as well as a unit test package.
-For detailed instructions on how to build rocALUTION with clients, see :ref:`linux-installation` or :ref:`windows-installation`.
+To build rocALUTION with clients, see :ref:`install-rocalution`.
 
 Examples
-========
+=========
 The examples collection offers different possible set-ups of solvers and preconditioners.
 The following tables provide a quick overview of various examples:
 
@@ -59,7 +59,7 @@ Example (MPI)     Description
 ================= ====
 
 Unit Tests
-==========
+===========
 There are multiple unit tests available to test for bad arguments, invalid parameters, and solver and preconditioner functionality.
 These unit tests are based on google test.
 The tests cover a variety of solver, preconditioning, and matrix format combinations and can be performed on all available backends.

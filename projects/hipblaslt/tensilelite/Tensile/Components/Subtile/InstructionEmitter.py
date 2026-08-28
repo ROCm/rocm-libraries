@@ -138,6 +138,8 @@ class InstructionEmitter:
             'skip':         lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
             'inline':       lambda em, ui: self.emit_inline(em.source),
+            'gl2_prefetch':     lambda em, ui: self.emit_gl2_prefetch(),
+            'gl2_prefetch_inc': lambda em, ui: self.emit_gl2_prefetch_inc(),
         }
 
         # Sentinel for the long-lived per-lane diff vgpr. Set by
@@ -332,6 +334,44 @@ class InstructionEmitter:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
+
+    def emit_gl2_prefetch(self):
+        """Emit GL2 prefetch loads (global_prefetch_b8) for all tensors."""
+        writer = self.writer
+        kernel = self.kernel
+        tPA = self.tensorParametersMap['A']
+        tPB = self.tensorParametersMap['B']
+        mod = writer.gl2PrefetchIssueLoad(kernel, tPA, tPB)
+        return list(mod.flatitems())
+
+    def emit_gl2_prefetch_inc(self):
+        """Emit GL2 prefetch address increment with end-of-K guard.
+
+        Mirrors the SIA path: when LoopCounterL <= PGR + PrefetchGL2,
+        zero the increment SGPRs so prefetch stops advancing past K.
+        Then advance all GL2 prefetch addresses by the (possibly zeroed) increment.
+        """
+        writer = self.writer
+        kernel = self.kernel
+        tPA = self.tensorParametersMap['A']
+        tPB = self.tensorParametersMap['B']
+        from rocisa.code import Module
+        from rocisa.instruction import SCmpLeU32, SCMovB32
+        from rocisa.container import sgpr
+        mod = Module("GL2 Prefetch Increment")
+        loopCounter = writer.loopCounter(kernel, writer.states.unrollIdx)
+        pgl = kernel["PrefetchGL2"]
+        pgr = kernel["PrefetchGlobalRead"]
+        mod.add(SCmpLeU32(src0=loopCounter, src1=pgr + pgl,
+                          comment=f"counterL <= PGR({pgr})+PGL({pgl})?"))
+        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncA"), src=0))
+        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncB"), src=0))
+        if kernel["ProblemType"].get("MXBlockA", 0):
+            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSA"), src=0))
+        if kernel["ProblemType"].get("MXBlockB", 0):
+            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSB"), src=0))
+        mod.add(writer.gl2PrefetchIncrementAddr(kernel, tPA, tPB))
+        return list(mod.flatitems())
 
     def emit_skip(self, source):
         """Emit skip guard: compare LoopCounterL and branch."""

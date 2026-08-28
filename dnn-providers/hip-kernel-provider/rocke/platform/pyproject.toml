@@ -42,3 +42,6 @@ package-dir = { "" = "python" }
 [tool.setuptools.packages.find]
 where = ["python"]
 include = ["rocke*"]
+
+[tool.setuptools.package-data]
+rocke = ["**/*.json"]

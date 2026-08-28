@@ -264,6 +264,7 @@ static int is_unary_same_type(rocke_opcode_t o)
     case ROCKE_OP_ARITH_FABS:
     case ROCKE_OP_ARITH_NOT:
     case ROCKE_OP_MATH_EXP2:
+    case ROCKE_OP_MATH_EXP2_FAST:
     case ROCKE_OP_MATH_LOG2:
     case ROCKE_OP_MATH_RCP:
     case ROCKE_OP_MATH_RCP_FAST:

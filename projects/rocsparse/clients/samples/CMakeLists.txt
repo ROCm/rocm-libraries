@@ -119,6 +119,9 @@ add_rocsparse_example(example_spgemm.cpp)
 add_rocsparse_example(example_spgeam.cpp)
 add_rocsparse_example(example_spgeam_2.cpp)
 add_rocsparse_example(example_spgeam_3.cpp)
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  add_rocsparse_example(example_spmat_scale.cpp)
+endif()
 
 # Managed
 add_rocsparse_example(example_csrmv_managed.cpp)

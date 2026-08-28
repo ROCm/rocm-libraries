@@ -9,11 +9,13 @@
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
+
 #include <hip/hip_runtime.h>
-#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace asm_sdpa_engine
@@ -97,19 +99,54 @@ static bool isMi308Device(hipStream_t stream)
     auto status = hipStreamGetDevice(stream, &deviceId);
     if(status != hipSuccess)
     {
-        throw std::runtime_error("hipStreamGetDevice failed with error code: "
-                                 + std::to_string(status));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "hipStreamGetDevice failed with error code: "
+                                                           + std::to_string(status));
     }
     int chipId;
     status = hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, deviceId);
     if(status != hipSuccess)
     {
-        throw std::runtime_error("hipDeviceGetAttribute failed with error code: "
-                                 + std::to_string(status));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "hipDeviceGetAttribute failed with error code: " + std::to_string(status));
     }
 
     HIPDNN_PLUGIN_LOG_INFO("pciDeviceID  = " << std::hex << std::to_string(chipId));
     return chipId == 0x74a2 || chipId == 0x74a8 || chipId == 0x74b6 || chipId == 0x74bc;
+}
+
+// Validate that every forward-pass byte stride fits in uint32_t.  The ASM
+// kernarg struct stores strides as uint32 so values that overflow silently
+// truncate, producing wrong results.  Checked early in isApplicable so the
+// engine declines rather than dispatching with bad strides.
+static bool
+    wouldFwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o)
+{
+    constexpr int64_t K_BF16_BYTES = 2;
+
+    auto checkTensor
+        = [](const char* prefix, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t) {
+              const auto* s = t.strides();
+              bool ok = true;
+              ok &= plan_utils::byteStrideFitsU32(
+                  (std::string("batch_stride_") + prefix).c_str(), s->Get(0), K_BF16_BYTES);
+              ok &= plan_utils::byteStrideFitsU32(
+                  (std::string("nhead_stride_") + prefix).c_str(), s->Get(1), K_BF16_BYTES);
+              ok &= plan_utils::byteStrideFitsU32(
+                  (std::string("stride_") + prefix).c_str(), s->Get(2), K_BF16_BYTES);
+              return ok;
+          };
+
+    bool ok = true;
+    ok &= checkTensor("q", q);
+    ok &= checkTensor("k", k);
+    ok &= checkTensor("v", v);
+    ok &= checkTensor("o", o);
+    return ok;
 }
 
 static std::string getKernelCoPath(std::string coName, const std::string& archId, bool isMi308)
@@ -136,6 +173,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
 
+    // Execute-time override shapes can diverge from the compile-time dims this
+    // builder matched exactly; the family serves fixed prebuilt shapes, so decline
+    // rather than risk a mismatch (RFC 0008 §4.6).
+    HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
+                               "Graph has override shapes enabled");
+
     auto& nodeWrappers = opGraph.nodeWrappers();
 
     std::string deviceString;
@@ -158,6 +201,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    != NodeAttributes::SdpaAttributes,
                                "Node attribute type is not SdpaAttributes");
 
+    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->computeDataType() != DataType::FLOAT,
+                               "Compute data type must be FLOAT");
+
     const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
                                    && attrs.dropout_probability().value() != 0.f,
@@ -173,7 +219,23 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
                                "page_table_v tensor not supported");
 
+    // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
+    // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
+    if(attrs.scale_tensor_uid().has_value())
+    {
+        const auto& tensorMap = opGraph.getTensorMap();
+        const auto scaleIt = tensorMap.find(attrs.scale_tensor_uid().value());
+        HIP_KERNEL_RETURN_FALSE_IF(scaleIt == tensorMap.end(),
+                                   "scale_tensor_uid not found in tensor map");
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
+            "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
+
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats(), "Stats output not supported");
+
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET,
+                               "mma_core_mode must be unset");
 
     const auto& tensorMap = opGraph.getTensorMap();
 
@@ -248,6 +310,10 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(key.empty(),
                                "Could not find matching kernel for parameter combination");
 
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !wouldFwdByteStridesFitUint32(*qTensor, *kTensor, *vTensor, *oTensor),
+        "Forward byte strides overflow uint32_t kernarg fields");
+
     return true;
 }
 
@@ -267,7 +333,7 @@ void SdpaFwdPlanBuilder::initializeExecutionSettings(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     Settings& /* executionSettings */) const
 {
-    HIPDNN_PLUGIN_LOG_ERROR("SdpaFwdPlanBuilder::initializeExecutionContext not implemented");
+    // Forward exposes no knobs — nothing to parse.
 }
 
 void SdpaFwdPlanBuilder::buildPlan(
@@ -278,18 +344,16 @@ void SdpaFwdPlanBuilder::buildPlan(
 {
 
     // Get device properties
-    std::string deviceString;
-    bool isMi308;
-    try
+    auto deviceStringOpt = plan_utils::tryGetDeviceString(
+        handle.getStream(), "SdpaFwdPlanBuilder::buildPlan: failed to query device properties: ");
+    if(!deviceStringOpt)
     {
-        deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-        isMi308 = isMi308Device(handle.getStream());
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: failed to query device string");
     }
-    catch(const std::exception& e)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to query device properties with error: " << e.what());
-        return;
-    }
+    const std::string& deviceString = *deviceStringOpt;
+    const bool isMi308 = isMi308Device(handle.getStream());
 
     // Extract SDPA attributes and tensor metadata
     auto& sdpaNode = opGraph.getNodeWrapper(0);
@@ -349,12 +413,21 @@ void SdpaFwdPlanBuilder::buildPlan(
     auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
     auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
 
-    // Get attention scale (default: 1/sqrt(D_qk) if not provided)
-    float attnScale = 1.0f / std::sqrt(static_cast<float>(headDimQk));
-    auto scaleValue = sdpaAttrs.attn_scale_value();
-    if(scaleValue.has_value())
+    hipdnn_plugin_sdk::ScalarOperand attnScale{};
+    if(sdpaAttrs.scale_tensor_uid().has_value())
     {
-        attnScale = scaleValue.value();
+        attnScale = hipdnn_plugin_sdk::makeScalarOperand(
+            tensorMap, sdpaAttrs.scale_tensor_uid().value(), "attn_scale");
+    }
+    else
+    {
+        float scaleVal = sdpaAttrs.attn_scale_value().value_or(
+            1.0f / std::sqrt(static_cast<float>(headDimQk)));
+        attnScale = hipdnn_plugin_sdk::ScalarOperand{
+            0,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            false,
+            hipdnn_plugin_sdk::ScalarValue{scaleVal}};
     }
 
     // Extract optional LSE output metadata
@@ -414,7 +487,15 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     if(kernelKey.empty())
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to find matching kernel with error");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: failed to find matching kernel for arch=" + deviceString
+                + " dtype="
+                + getDataTypeIdentifier(qTensor->data_type(),
+                                        kTensor->data_type(),
+                                        vTensor->data_type(),
+                                        oTensor->data_type())
+                + " hdim_q=" + std::to_string(headDimQk) + " hdim_v=" + std::to_string(headDimV));
     }
     config = cfg_fmha_fwd.at(kernelKey);
 
@@ -428,7 +509,9 @@ void SdpaFwdPlanBuilder::buildPlan(
     auto kernel = moduleCache().getOrLoad(coPath, config.knl_name.c_str());
     if(!kernel)
     {
-        return;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel module from " + coPath);
     }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(kernel), params));

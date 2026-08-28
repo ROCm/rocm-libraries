@@ -696,6 +696,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     Register(registry, ++id, Primitive::Normalization, layernorm::LayernormBackward().SolverDbId());
 
     RegisterWithSolver(registry, ++id, conv::ConvDepthwiseFwd2D{}, miopenConvolutionAlgoDirect);
+    RegisterWithSolver(registry, ++id, conv::ConvDepthwiseBwdData2D{}, miopenConvolutionAlgoDirect);
 
     // Transposed Winograd solvers for NHWC layout support
     RegisterWithSolver(
@@ -707,9 +708,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     // Transposed non-tunable Winograd solvers
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvWinoFuryRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
-    ++id; // RegisterWithSolver(
-          //     registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{},
-          //     miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(
+        registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry,
                        ++id,
                        conv::TransposedConvMPBidirectWinograd<2, 3>{},
@@ -815,6 +815,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
              Primitive::Fusion,
              fusion::ConvHipDirectFwdFused{}.SolverDbId(),
              miopenConvolutionAlgoDirect);
+    RegisterWithSolver(registry, ++id, conv::ConvHipConv{}, miopenConvolutionAlgoDirect);
     //  IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     //  space between this comment and the newly registered solver(s)!
 }

@@ -237,6 +237,10 @@ class KernelWriterAssembly(KernelWriter):
   def isGfx12(self):
     return isGfx12(self.version)
 
+  def isOcpFloat8(self):
+    # gfx950 and gfx12xx use OCP f8 (E4M3 max 448); gfx942 uses FNUZ (max 240).
+    return self.version == (9,5,0) or isGfx12(self.version)
+
   @property
   def syncStr(self):
     return "_s_barrier" if hasattr(self, "version") and self.isGfx12() else "s_barrier"
@@ -12376,8 +12380,11 @@ class KernelWriterAssembly(KernelWriter):
         kStr += inst("v_mov_b32", vgpr(vgprFp32NanInfFlag), "0x207", "flag for Nan and +/- inf" )
         # set max/min values for clipping
         if kernel["ProblemType"]["DestDataType"].isFloat8():
-          kStr += inst("v_mov_b32", vgpr(vgprF8Max), "0x43700000", "save 240.0f as max for clipping" )
-          kStr += inst("v_mov_b32", vgpr(vgprF8Min), "0xC3700000", "save -240.0f as min for clipping" )
+          f8MaxHex = "0x43E00000" if self.isOcpFloat8() else "0x43700000"
+          f8MinHex = "0xC3E00000" if self.isOcpFloat8() else "0xC3700000"
+          f8MaxVal = "448.0f" if self.isOcpFloat8() else "240.0f"
+          kStr += inst("v_mov_b32", vgpr(vgprF8Max), f8MaxHex, "save %s as max for clipping" % f8MaxVal )
+          kStr += inst("v_mov_b32", vgpr(vgprF8Min), f8MinHex, "save -%s as min for clipping" % f8MaxVal )
         else: #BFloat8
           kStr += inst("v_mov_b32", vgpr(vgprF8Max), "0x47600000", "save 57344.0f as max for clipping" )
           kStr += inst("v_mov_b32", vgpr(vgprF8Min), "0xC7600000", "save -57344`.0f as min for clipping" )
@@ -13291,8 +13298,11 @@ class KernelWriterAssembly(KernelWriter):
         kStr += inst("v_mov_b32", vgpr(vgprFp32NanInfFlag), "0x207", "flag for Nan and +/- inf" )
         # set max/min values for clipping
         if kernel["ProblemType"]["DestDataType"].isFloat8():
-          kStr += inst("v_mov_b32", vgpr(vgprF8Max), "0x43700000", "save 240.0f as max for clipping" )
-          kStr += inst("v_mov_b32", vgpr(vgprF8Min), "0xC3700000", "save -240.0f as min for clipping" )
+          f8MaxHex = "0x43E00000" if self.isOcpFloat8() else "0x43700000"
+          f8MinHex = "0xC3E00000" if self.isOcpFloat8() else "0xC3700000"
+          f8MaxVal = "448.0f" if self.isOcpFloat8() else "240.0f"
+          kStr += inst("v_mov_b32", vgpr(vgprF8Max), f8MaxHex, "save %s as max for clipping" % f8MaxVal )
+          kStr += inst("v_mov_b32", vgpr(vgprF8Min), f8MinHex, "save -%s as min for clipping" % f8MaxVal )
         else: #BFloat8
           kStr += inst("v_mov_b32", vgpr(vgprF8Max), "0x47600000", "save 57344.0f as max for clipping" )
           kStr += inst("v_mov_b32", vgpr(vgprF8Min), "0xC7600000", "save -57344`.0f as min for clipping" )
@@ -14871,8 +14881,11 @@ class KernelWriterAssembly(KernelWriter):
           kStr += inst("v_mov_b32", vgpr(vgprFp32NanInfFlag), "0x207", "flag for Nan and +/- inf" )
           # set max/min values for clipping
           if kernel["ProblemType"]["DestDataType"].isFloat8():
-            kStr += inst("v_mov_b32", vgpr(vgprF8Max), "0x43700000", "save 240.0f as max for clipping" )
-            kStr += inst("v_mov_b32", vgpr(vgprF8Min), "0xC3700000", "save -240.0f as min for clipping" )
+            f8MaxHex = "0x43E00000" if self.isOcpFloat8() else "0x43700000"
+            f8MinHex = "0xC3E00000" if self.isOcpFloat8() else "0xC3700000"
+            f8MaxVal = "448.0f" if self.isOcpFloat8() else "240.0f"
+            kStr += inst("v_mov_b32", vgpr(vgprF8Max), f8MaxHex, "save %s as max for clipping" % f8MaxVal )
+            kStr += inst("v_mov_b32", vgpr(vgprF8Min), f8MinHex, "save -%s as min for clipping" % f8MaxVal )
           else: #BFloat8
             kStr += inst("v_mov_b32", vgpr(vgprF8Max), "0x47600000", "save 57344.0f as max for clipping" )
             kStr += inst("v_mov_b32", vgpr(vgprF8Min), "0xC7600000", "save -57344`.0f as min for clipping" )

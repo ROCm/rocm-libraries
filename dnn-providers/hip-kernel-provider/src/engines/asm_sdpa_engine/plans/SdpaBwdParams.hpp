@@ -5,6 +5,8 @@
 
 #include <cstdint>
 
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
+
 namespace asm_sdpa_engine
 {
 
@@ -97,8 +99,10 @@ struct SdpaBwdParams
     unsigned int statsStrideHead;
     unsigned int statsStrideBatch;
 
-    // Attention scale
-    float attnScale;
+    // Attention scale — resolved at execute via resolveScalarOperand().
+    // Supports compile-time constant, runtime-with-default, and pure runtime
+    // user-supplied (RFC 0016 pass-by-value) states.
+    hipdnn_plugin_sdk::ScalarOperand attnScale;
 
     // Per-stage tile sizes; populated by SdpaBwdPlanBuilder from the resolved
     // CSV configs ('ts' column) and consumed by SdpaBwdPlan grid math.

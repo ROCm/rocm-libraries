@@ -70,8 +70,9 @@ else()
 endif()
 
 if( CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  # GCC or hip-clang needs specific flag to turn on f16c intrinsics
-  target_compile_options( hipsparselt-test PRIVATE -mf16c )
+  if(HIPSPARSELT_CXX_HAS_MF16C)
+    target_compile_options( hipsparselt-test PRIVATE -mf16c )
+  endif()
 endif( )
 
 target_compile_definitions( hipsparselt-test PRIVATE ROCM_USE_FLOAT16 HIPSPARSELT_INTERNAL_API )

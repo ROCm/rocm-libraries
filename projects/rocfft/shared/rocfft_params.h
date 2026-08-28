@@ -29,10 +29,6 @@
 #include "rocfft/rocfft.h"
 #include "rocfft_enums_vs_fft_enums.h"
 
-#ifdef ROCFFT_MPI_ENABLE
-#include <mpi.h>
-#endif
-
 #ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
@@ -276,6 +272,39 @@ public:
                    != rocfft_status_success)
                     throw std::runtime_error("rocfft_plan_description_set_comm failed");
             }
+
+            if(run_callbacks == fft_callback_type_jit)
+            {
+                check_jit_callback_state();
+                if(load_jit_cb_state)
+                {
+                    fft_status = rocfft.plan_description_set_load_callback(
+                        desc,
+                        load_jit_cb_state->symbol,
+                        load_jit_cb_state->func.data(),
+                        load_jit_cb_state->func.size(),
+                        load_jit_cb_state->shared_mem_bytes);
+                    if(fft_status != rocfft_status_success)
+                    {
+                        throw std::runtime_error(
+                            "rocfft_plan_description_set_load_callback failed");
+                    }
+                }
+                if(store_jit_cb_state)
+                {
+                    fft_status = rocfft.plan_description_set_store_callback(
+                        desc,
+                        store_jit_cb_state->symbol,
+                        store_jit_cb_state->func.data(),
+                        store_jit_cb_state->func.size(),
+                        store_jit_cb_state->shared_mem_bytes);
+                    if(fft_status != rocfft_status_success)
+                    {
+                        throw std::runtime_error(
+                            "rocfft_plan_description_set_store_callback failed");
+                    }
+                }
+            }
         }
 
         if(plan == nullptr)
@@ -316,6 +345,36 @@ public:
                 throw std::runtime_error("rocfft_plan_get_work_buffer_size failed");
             }
         }
+
+        // Set JIT callback data if necessary
+        if(run_callbacks == fft_callback_type_jit)
+        {
+            if(load_jit_cb_state)
+            {
+                fft_status = rocfft.execution_info_set_load_callback_data(
+                    info,
+                    load_jit_cb_state->get_raw_data_ptrs().data(),
+                    load_jit_cb_state->get_raw_data_ptrs().size());
+                if(fft_status != rocfft_status_success)
+                {
+                    throw std::runtime_error("rocfft_execution_info_set_load_callback_data failed");
+                }
+            }
+
+            if(store_jit_cb_state)
+            {
+                fft_status = rocfft.execution_info_set_store_callback_data(
+                    info,
+                    store_jit_cb_state->get_raw_data_ptrs().data(),
+                    store_jit_cb_state->get_raw_data_ptrs().size());
+                if(fft_status != rocfft_status_success)
+                {
+                    throw std::runtime_error(
+                        "rocfft_execution_info_set_store_callback_data failed");
+                }
+            }
+        }
+
         return fft_status_from_rocfftparams(fft_status);
     }
 
@@ -360,31 +419,6 @@ public:
         }
 
         return ret;
-    }
-
-    // Return the number of expected callback entries for supplied
-    // fields.
-    size_t expected_callback_count(const std::vector<fft_field>& fields) const
-    {
-        // If fields are not specified, we consider the input or
-        // output to have a single brick (and thus expect a single
-        // callback entry)
-        if(fields.empty())
-            return 1;
-
-        const int mpi_rank = get_process_rank();
-
-        // count the number of bricks on this rank
-        size_t expected_callbacks = 0;
-        for(const auto& f : fields)
-        {
-            for(const auto& b : f.bricks)
-            {
-                if(b.rank == mpi_rank)
-                    ++expected_callbacks;
-            }
-        }
-        return expected_callbacks;
     }
 
     fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,
@@ -713,28 +747,6 @@ private:
         }
         return splitDims;
     }
-
-    int get_process_rank() const
-    {
-        int process_rank = -1; // invalid initialization
-        if(mp_lib == fft_mp_lib_mpi)
-        {
-#ifdef ROCFFT_MPI_ENABLE
-            if(!mp_comm)
-                throw std::runtime_error("Multi-process communicator is not defined");
-            auto ret = MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &process_rank);
-            if(ret != MPI_SUCCESS || process_rank < 0)
-                throw std::runtime_error("Rank of current process couldn't be set");
-#else
-            throw std::runtime_error("MPI is not enabled");
-#endif
-        }
-        else
-        {
-            process_rank = 0;
-        }
-        return process_rank;
-    }
 };
 
 #define ROCFFT_API_WRAP(func)                            \
@@ -754,6 +766,8 @@ struct rocfft_funcs
     ROCFFT_API_WRAP(execution_info_destroy);
     ROCFFT_API_WRAP(execution_info_set_load_callback);
     ROCFFT_API_WRAP(execution_info_set_store_callback);
+    ROCFFT_API_WRAP(execution_info_set_load_callback_data);
+    ROCFFT_API_WRAP(execution_info_set_store_callback_data);
     ROCFFT_API_WRAP(execution_info_set_work_buffer);
     ROCFFT_API_WRAP(field_add_brick);
     ROCFFT_API_WRAP(field_create);
@@ -766,6 +780,8 @@ struct rocfft_funcs
     ROCFFT_API_WRAP(plan_description_set_comm);
     ROCFFT_API_WRAP(plan_description_set_data_layout);
     ROCFFT_API_WRAP(plan_description_set_scale_factor);
+    ROCFFT_API_WRAP(plan_description_set_load_callback);
+    ROCFFT_API_WRAP(plan_description_set_store_callback);
     ROCFFT_API_WRAP(plan_destroy);
     ROCFFT_API_WRAP(plan_get_work_buffer_size);
     ROCFFT_API_WRAP(setup);
@@ -837,6 +853,8 @@ struct dyna_rocfft_funcs
     ROCFFT_DYNA_API_WRAP(execution_info_destroy);
     ROCFFT_DYNA_API_WRAP(execution_info_set_load_callback);
     ROCFFT_DYNA_API_WRAP(execution_info_set_store_callback);
+    ROCFFT_DYNA_API_WRAP(execution_info_set_load_callback_data);
+    ROCFFT_DYNA_API_WRAP(execution_info_set_store_callback_data);
     ROCFFT_DYNA_API_WRAP(execution_info_set_work_buffer);
     ROCFFT_DYNA_API_WRAP(field_add_brick);
     ROCFFT_DYNA_API_WRAP(field_create);
@@ -849,6 +867,8 @@ struct dyna_rocfft_funcs
     ROCFFT_DYNA_API_WRAP(plan_description_set_comm);
     ROCFFT_DYNA_API_WRAP(plan_description_set_data_layout);
     ROCFFT_DYNA_API_WRAP(plan_description_set_scale_factor);
+    ROCFFT_DYNA_API_WRAP(plan_description_set_load_callback);
+    ROCFFT_DYNA_API_WRAP(plan_description_set_store_callback);
     ROCFFT_DYNA_API_WRAP(plan_destroy);
     ROCFFT_DYNA_API_WRAP(plan_get_work_buffer_size);
     ROCFFT_DYNA_API_WRAP(setup);
@@ -868,6 +888,8 @@ struct dyna_rocfft_funcs
         ROCFFT_DYNA_API_LOAD(execution_info_destroy);
         ROCFFT_DYNA_API_LOAD(execution_info_set_load_callback);
         ROCFFT_DYNA_API_LOAD(execution_info_set_store_callback);
+        ROCFFT_DYNA_API_LOAD(execution_info_set_load_callback_data);
+        ROCFFT_DYNA_API_LOAD(execution_info_set_store_callback_data);
         ROCFFT_DYNA_API_LOAD(execution_info_set_work_buffer);
         ROCFFT_DYNA_API_LOAD(field_add_brick);
         ROCFFT_DYNA_API_LOAD(field_create);
@@ -880,6 +902,8 @@ struct dyna_rocfft_funcs
         ROCFFT_DYNA_API_LOAD(plan_description_set_comm);
         ROCFFT_DYNA_API_LOAD(plan_description_set_data_layout);
         ROCFFT_DYNA_API_LOAD(plan_description_set_scale_factor);
+        ROCFFT_DYNA_API_LOAD(plan_description_set_store_callback);
+        ROCFFT_DYNA_API_LOAD(plan_description_set_load_callback);
         ROCFFT_DYNA_API_LOAD(plan_destroy);
         ROCFFT_DYNA_API_LOAD(plan_get_work_buffer_size);
         ROCFFT_DYNA_API_LOAD(setup);
@@ -906,6 +930,10 @@ struct dyna_rocfft_funcs
         std::swap(this->execution_info_destroy, other.execution_info_destroy);
         std::swap(this->execution_info_set_load_callback, other.execution_info_set_load_callback);
         std::swap(this->execution_info_set_store_callback, other.execution_info_set_store_callback);
+        std::swap(this->execution_info_set_load_callback_data,
+                  other.execution_info_set_load_callback_data);
+        std::swap(this->execution_info_set_store_callback_data,
+                  other.execution_info_set_store_callback_data);
         std::swap(this->execution_info_set_work_buffer, other.execution_info_set_work_buffer);
         std::swap(this->field_add_brick, other.field_add_brick);
         std::swap(this->field_create, other.field_create);
@@ -918,6 +946,10 @@ struct dyna_rocfft_funcs
         std::swap(this->plan_description_set_comm, other.plan_description_set_comm);
         std::swap(this->plan_description_set_data_layout, other.plan_description_set_data_layout);
         std::swap(this->plan_description_set_scale_factor, other.plan_description_set_scale_factor);
+        std::swap(this->plan_description_set_load_callback,
+                  other.plan_description_set_load_callback);
+        std::swap(this->plan_description_set_store_callback,
+                  other.plan_description_set_store_callback);
         std::swap(this->plan_destroy, other.plan_destroy);
         std::swap(this->plan_get_work_buffer_size, other.plan_get_work_buffer_size);
         std::swap(this->setup, other.setup);

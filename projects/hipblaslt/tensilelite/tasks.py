@@ -12,6 +12,18 @@ import sys
 
 _TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 
+# Ensure the Tensile package (shipped next to this file) is importable when
+# invoke runs from the tensilelite root, regardless of cwd/sys.path state.
+if str(_TASKS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TASKS_DIR))
+
+from Tensile.RocisaStatus import _rocisa_install_status
+
+# gfx1250 v0/v1 ASIC-revision detection lives in the packaged Tensile tree
+# (invoke-free) so CI test artifacts can exercise it directly; these @task
+# wrappers only expose it on the invoke command line.
+from Tensile.GpuRevisionTarget import detect_gpu_arch, detect_gpu_revision_target
+
 
 def _cmake_bool(value):
     return "ON" if value else "OFF"
@@ -39,48 +51,39 @@ def _detect_rocm():
     return "/opt/rocm"
 
 
-def detect_gpu_arch():
-    try:
-        result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
-        if result.returncode == 0:
-            target = next((line.strip() for line in result.stdout.splitlines() if line.startswith("gfx") and line.strip() != "gfx000"), None)
-            if target:
-                return target
-    except FileNotFoundError:
-        print("Error: 'rocm_agent_enumerator' command not found. Please install ROCm.", file=sys.stderr)
-
-    except subprocess.TimeoutExpired:
-        print("Error: GPU detection timed out. Hardware might be unresponsive.", file=sys.stderr)
-
-    except Exception as e:
-        print(f"An unexpected error occurred during GPU detection: {e}", file=sys.stderr)
-
-    print(f"Failed to detect a valid GPU architecture (gfx target not found).", file=sys.stderr)
-    return None
-
 @task
 def get_gpu_arch(c):
     print(detect_gpu_arch())
+
+
+@task
+def get_gpu_revision_target(c):
+    """Print the Tensile --gpu-targets value, split by gfx1250 v0/v1 revision."""
+    print(detect_gpu_revision_target())
 
 @task(
     help={
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
         "stinkytofu_prefix": "Install prefix for the stinkytofu build (default: build_tmp/stinkytofu-install).",
+        "static": "Build stinkytofu static (BUILD_SHARED_LIBS=OFF) instead of the default shared build.",
     }
 )
-def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
+def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, static=False):
     """Install rocisa as an editable pip package.
 
-    Run once after cloning, or after changes to rocisa's pyproject.toml or
-    CMakeLists.txt. C++ source changes are picked up automatically: `invoke
-    build-client` re-runs this editable install (an incremental no-op when
-    nothing changed), with the staleness check in rocisa/__init__.py as a
-    backstop if you skip that.
+    Not required before `invoke build-client` — the client build enables
+    HIPBLASLT_BUNDLE_PYTHON_DEPS automatically when rocisa is absent. Run
+    this task to make rocisa importable system-wide (outside the build
+    directory), or after changes to rocisa's pyproject.toml or CMakeLists.txt.
 
     Builds and installs stinkytofu locally first so rocisa uses
     find_package(stinkytofu) — mirroring how TheRock wires the two together.
+
+    Pass --static to build stinkytofu static instead of shared — useful for
+    exercising the static-plugin path covered by
+    rocisa/test/test_pass_plugin.py::TestHelloWorldPassIntegrationStatic.
     """
-    _pip_install_rocisa(c, rocisa_dir, stinkytofu_prefix)
+    _pip_install_rocisa(c, rocisa_dir, stinkytofu_prefix, shared=not static)
 
 
 def _load_stinkytofu_tasks():
@@ -98,13 +101,18 @@ def _load_stinkytofu_tasks():
     return mod
 
 
-def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) -> None:
+def _build_and_install_stinkytofu(
+    c, install_prefix: pathlib.Path, rocm: str, shared: bool = True
+) -> None:
     """Build stinkytofu and install it to install_prefix so rocisa can find_package it.
 
     Build flags come from stinkytofu_tasks.cmake_build_args() — the single source
     of truth — so a new required cmake option only needs to be added there.
     Compiler selection mirrors shared/stinkytofu/tasks.py `invoke build`.
     cmake is incremental, so repeat calls are a fast no-op when nothing changed.
+
+    shared=False builds stinkytofu static (BUILD_SHARED_LIBS=OFF) instead of
+    the default shared library.
     """
     stinkytofu_src = _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu"
     build_dir = install_prefix.parent / "stinkytofu-build"
@@ -127,7 +135,9 @@ def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) ->
         # into the installed libstinkytofu RPATH for this dev/standalone build.
         "-DSTINKYTOFU_INSTALL_RPATH_USE_LINK_PATH=ON",
         # tests/python OFF for the rocisa integration build; examples ON (default).
-        *st.cmake_build_args(install_prefix=install_prefix, tests=False, python=False),
+        *st.cmake_build_args(
+            install_prefix=install_prefix, tests=False, python=False, shared=shared
+        ),
     ]
     if shutil.which("ninja"):
         cmake_cmd.append("-G Ninja")
@@ -141,7 +151,7 @@ def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) ->
     c.run(shlex.join(["cmake", "--install", str(build_dir)]))
 
 
-def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
+def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, shared=True):
     """Editable-install rocisa via scikit-build-core.
 
     Factored out of the `rocisa` task so `build_client` can reuse it to keep
@@ -152,6 +162,9 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     via find_package(stinkytofu) — the same path TheRock uses. This exercises
     the installed package layout (stinkytofuConfig.cmake, exported targets) so
     breakage is caught early in the dev/CI workflow.
+
+    shared=False builds and links a static stinkytofu instead of the default
+    shared library.
     """
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else _TASKS_DIR / "rocisa"
     rocm = _detect_rocm()
@@ -161,11 +174,15 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
         if stinkytofu_prefix
         else _TASKS_DIR / "build_tmp" / "stinkytofu-install"
     )
-    _build_and_install_stinkytofu(c, prefix, rocm)
+    _build_and_install_stinkytofu(c, prefix, rocm, shared=shared)
 
     cmake_args = (
         f"-DROCM_PATH={rocm}"
         f" -DROCISA_INCLUDE_BUILD_INFO=ON"
+        # Compiles the HelloWorldPass example plugin directly into _rocisa so
+        # TestHelloWorldPassIntegrationStatic can exercise the compiled-in
+        # plugin path regardless of whether stinkytofu above is shared or static.
+        f" -DROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON"
     )
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
@@ -181,54 +198,19 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
 
 
-def _rocisa_is_editable():
-    """Return True only if rocisa is currently installed as an editable package.
-
-    Reads PEP 610 direct_url.json metadata; it does NOT import rocisa, so the
-    import-time staleness check is never triggered here. `invoke rocisa`
-    (pip install -e) sets dir_info.editable=true; a plain `pip install rocisa/`
-    (e.g. tox) or a wheel does not, so we never rebuild over a deliberate
-    non-editable install, and we return False when rocisa is absent.
-    """
-    import json
-    from importlib import metadata
-
-    try:
-        raw = metadata.distribution("rocisa").read_text("direct_url.json")
-    except metadata.PackageNotFoundError:
-        return False
-    if not raw:
-        return False
-    try:
-        return bool(json.loads(raw).get("dir_info", {}).get("editable"))
-    except (ValueError, AttributeError):
-        return False
-
-
 def _maybe_rebuild_rocisa(c, rocisa_dir=None):
     """Refresh the editable rocisa so `import rocisa` picks up C++ edits.
 
-    `invoke build-client` builds a *separate* `_rocisa.so` under the client
-    build dir; it never touches the editable install that `import rocisa`
-    (and `Tensile/bin/Tensile`) actually load. So after editing rocisa C++ and
-    running only build-client, those bindings are stale — silently for installs
-    without `_build_info.py`, or an ImportError otherwise. Re-running the
-    editable install here fixes that.
+    Only acts when rocisa is installed editable (pip install -e). When
+    absent, rocisa is built by CMake via HIPBLASLT_BUNDLE_PYTHON_DEPS.
+    When non-editable (e.g. tox), does nothing.
 
-    This also re-runs the stinkytofu cmake configure+build+install step. cmake is
-    incremental, so when stinkytofu sources are unchanged this is a fast no-op and
-    does not affect the staleness-check semantics — the stale rocisa detection via
-    _build_info.py / direct_url.json is unaffected.
-
-    No-op unless rocisa is installed editable. Degrades to a warning — never a
-    hard failure — when the build backend (scikit-build-core / nanobind) is
-    unavailable, since the editable install uses --no-build-isolation and needs
-    those importable. This keeps build-client working in CI/tox and on fresh
-    checkouts that lack the rocisa build toolchain.
+    Degrades to a warning — never a hard failure — when the build backend
+    (scikit-build-core / nanobind) is unavailable.
     """
     import importlib.util
 
-    if not _rocisa_is_editable():
+    if _rocisa_install_status() != "editable":
         return
 
     missing = [m for m in ("scikit_build_core", "nanobind") if importlib.util.find_spec(m) is None]
@@ -262,10 +244,12 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101).",
         "rocm_path": "Path to a ROCm install whose amdclang/amdclang++ should be used.",
         "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
-        "bundle_python_deps": "Enable HIPBLASLT_BUNDLE_PYTHON_DEPS.",
+        "bundle_python_deps": "Force HIPBLASLT_BUNDLE_PYTHON_DEPS on or off; auto-enabled when rocisa is not pip-installed.",
         "enable_rocprof": "Build tensilelite-client with rocprof.",
         "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
         "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
+        "enable_asan": "Enable AddressSanitizer.",
+        "enable_tsan": "Enable ThreadSanitizer.",
     }
 )
 def build_client(
@@ -282,21 +266,25 @@ def build_client(
     enable_rocprof=False,
     cxx_flags_release=None,
     rebuild_rocisa=True,
+    enable_asan=False,
+    enable_tsan=False,
 ):
     """Build the tensilelite-client C++ executable.
 
     To run Tensile after building, use: Tensile/bin/Tensile <args>
-    rocisa must first be installed via: invoke rocisa. After that, this task
-    keeps the editable rocisa in sync — if it is installed editable, the
-    bindings are rebuilt here so rocisa C++ edits are not silently stale
-    (disable with --no-rebuild-rocisa).
+    When rocisa is not pip-installed, HIPBLASLT_BUNDLE_PYTHON_DEPS is
+    enabled automatically so CMake builds it in the client build
+    directory. When rocisa is installed editable, the bindings are
+    refreshed to pick up C++ edits (disable with --no-rebuild-rocisa).
     """
+
+    if enable_asan and enable_tsan:
+        raise Exit("Error: ASAN and TSAN cannot be enabled simultaneously", code=1)
 
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
         if not gpu_targets:
-            print("Error: No GPU detected and no gpu_targets provided. Skipping build.")
-            return
+            raise Exit("Error: No GPU detected and no gpu_targets provided", code=1)
         print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
 
     if rocm_path:
@@ -307,14 +295,17 @@ def build_client(
             try:
                 subprocess.run([compiler, "--version"], capture_output=True, timeout=5, check=True)
             except FileNotFoundError:
-                print(f"Error: compiler not found at {compiler}", file=sys.stderr)
-                return
+                raise Exit(f"Error: compiler not found at {compiler}", code=1)
             except subprocess.SubprocessError as e:
-                print(f"Error: compiler check failed for {compiler}: {e}", file=sys.stderr)
-                return
+                raise Exit(f"Error: compiler check failed for {compiler}: {e}", code=1)
 
     if rebuild_rocisa:
         _maybe_rebuild_rocisa(c)
+
+    if not bundle_python_deps and _rocisa_install_status() == "absent":
+        print("rocisa is not pip-installed; enabling HIPBLASLT_BUNDLE_PYTHON_DEPS=ON "
+              "so CMake builds it in the client build directory.")
+        bundle_python_deps = True
 
     if clean and os.path.exists(build_dir):
         c.run(f"rm -rf {shlex.quote(build_dir)}")
@@ -343,6 +334,10 @@ def build_client(
             cmake_cmd.append("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
         if export_compile_commands:
             cmake_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+        if enable_asan:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_ASAN=ON")
+        if enable_tsan:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_TSAN=ON")
         cmake_cmd.append(f"-DHIPBLASLT_BUNDLE_PYTHON_DEPS={_cmake_bool(bundle_python_deps)}")
 
         c.run(shlex.join(cmake_cmd))

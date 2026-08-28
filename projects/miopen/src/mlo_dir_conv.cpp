@@ -60,7 +60,9 @@ static auto GetDirectSolvers()
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw,
                                            miopen::solver::conv::ConvDepthwiseFwd2D,
-                                           miopen::solver::conv::ConvDepthwiseFwd3D>{};
+                                           miopen::solver::conv::ConvDepthwiseBwdData2D,
+                                           miopen::solver::conv::ConvDepthwiseFwd3D,
+                                           miopen::solver::conv::ConvHipConv>{};
 }
 
 static auto GetImplicitGemmSolvers()
@@ -204,7 +206,8 @@ static auto GetBwdWrW2DSolvers()
                                            miopen::solver::conv::ConvHipBwdWrW53,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
-                                           miopen::solver::conv::ConvDirectNaiveConvWrw>{};
+                                           miopen::solver::conv::ConvDirectNaiveConvWrw,
+                                           miopen::solver::conv::ConvHipConv>{};
 }
 
 static auto GetFFTSolvers() { return miopen::solver::SolverContainer<miopen::solver::conv::fft>{}; }

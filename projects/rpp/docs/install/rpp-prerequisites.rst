@@ -23,7 +23,7 @@ The following compilers and libraries are required to build and install RPP:
 * half, the half-precision floating-point library, version 1.12.0 or later
 * libstdc++-12-dev for Ubuntu 22.04 only
 * Clang version 5.0.1 or later for CPU-only backends
-* AMD Clang++ Version 18.0.0 or later for HIP and OpenCL backends
+* AMD Clang++ Version 18.0.0 or later for the HIP backend
 
 With the following compiler support:
 
@@ -31,8 +31,8 @@ With the following compiler support:
 * OpenMP
 * Threads
 
-On OpenCL and HIP backends, RPP requires ROCm installed with the `AMDGPU installer <https://rocm.docs.amd.com/projects/install-on-linux/en/docs-6.4.1/install/install-methods/amdgpu-installer-index.html>`_ and the ``rocm`` usecase running on `accelerators based on the CDNA architecture <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_.
+The HIP backend requires a working ROCm installation running on `ROCm-supported AMD GPUs and accelerators <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_. A ``gfx908`` or later GPU is required.
 
-On CPU-only backends, also referred to as HOST backends, RPP requires CPUs that support PCIe™ atomics.
+The CPU-only backend, also referred to as the HOST backend, has no GPU requirement.
 
-The `test suite prerequisites <https://github.com/ROCm/rpp/blob/develop/utilities/test_suite/README.md>`_ are required to build the RPP test suite.
+The `test suite prerequisites <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rpp/utilities/test_suite/README.md>`_ are required to build the RPP test suite.

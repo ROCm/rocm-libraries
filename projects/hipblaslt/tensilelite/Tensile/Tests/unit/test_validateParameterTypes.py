@@ -22,6 +22,8 @@
 
 import pytest
 
+from Tensile.Common.TypeValidationErrors import ConfigTypeError
+from Tensile.Common.ValidParameters import validParameters
 from Tensile.SolutionStructs.Solution import (
     validateParameterTypes,
     mergeMismatchRecords,
@@ -30,7 +32,7 @@ from Tensile.SolutionStructs.Solution import (
     _skipTypeCheck,
     _typeMismatchCollector,
     resetTypeMismatchCollector,
-    printTypeMismatchSummary,
+    raiseIfTypeMismatches,
 )
 from Tensile.SolutionStructs.Problem import (
     ProblemType,
@@ -38,7 +40,6 @@ from Tensile.SolutionStructs.Problem import (
     _expectedProblemTypeParamTypes,
     _defaultProblemType,
 )
-from Tensile.Common.ValidParameters import validParameters
 
 
 class TestGetExpectedTypes:
@@ -316,93 +317,59 @@ class TestResetTypeMismatchCollector:
         assert _typeMismatchCollector[key]["values"] == {"True"}
 
 
-class TestPrintTypeMismatchSummary:
-    """Tests for printTypeMismatchSummary()."""
+class TestRaiseIfTypeMismatches:
+    """Tests for the fatal aggregate type-mismatch checker."""
 
     def setup_method(self):
         resetTypeMismatchCollector()
 
-    def test_returns_zero_when_clean(self):
-        """No mismatches -> returns 0 and prints nothing."""
-        result = printTypeMismatchSummary()
-        assert result == 0
+    def _raise_message(self) -> str:
+        with pytest.raises(ConfigTypeError) as exc:
+            raiseIfTypeMismatches()
+        return str(exc.value)
 
-    def test_returns_total_count(self):
-        """Should return the total number of individual mismatches."""
+    def test_raises_config_type_error_when_populated(self) -> None:
+        mergeMismatchRecords(validateParameterTypes({"BufferLoad": 0}, srcFile="b.yaml"))
+        msg = self._raise_message()
+        assert "ERROR: YAML parameter type mismatches detected" in msg
+
+    def test_error_contains_param_names(self) -> None:
         mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="a.yaml"))
-        mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": True}, srcFile="b.yaml"))
-        mergeMismatchRecords(validateParameterTypes({"BufferLoad": 0}, srcFile="c.yaml"))
-        result = printTypeMismatchSummary()
-        assert result == 3
+        mergeMismatchRecords(validateParameterTypes({"BufferLoad": 0}, srcFile="b.yaml"))
+        msg = self._raise_message()
+        assert "BufferLoad" in msg
+        assert "UseCustomMainLoopSchedule" in msg
 
-    def test_outputs_warning_to_stdout(self, capsys):
-        """Summary should be printed to stdout so it appears in build logs."""
-        mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="test.yaml"))
-        printTypeMismatchSummary()
-        captured = capsys.readouterr()
-        assert captured.err == ""
-        assert "WARNING" in captured.out
-
-    def test_output_contains_param_name(self, capsys):
-        mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}))
-        printTypeMismatchSummary()
-        captured = capsys.readouterr()
-        assert "UseCustomMainLoopSchedule" in captured.out
-
-    def test_output_contains_actual_type(self, capsys):
-        mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}))
-        printTypeMismatchSummary()
-        captured = capsys.readouterr()
-        assert "bool" in captured.out
-
-    def test_output_contains_expected_type(self, capsys):
-        mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}))
-        printTypeMismatchSummary()
-        captured = capsys.readouterr()
-        assert "int" in captured.out
-
-    def test_output_contains_solution_count(self, capsys):
+    def test_error_contains_actual_and_expected_types(self) -> None:
         mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="a.yaml"))
-        mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": True}, srcFile="b.yaml"))
-        printTypeMismatchSummary()
-        captured = capsys.readouterr()
-        assert "2 solutions" in captured.out
+        mergeMismatchRecords(validateParameterTypes({"BufferLoad": 0}, srcFile="b.yaml"))
+        msg = self._raise_message()
+        assert "BufferLoad: found int" in msg
+        assert "UseCustomMainLoopSchedule: found bool" in msg
+        assert "expected bool" in msg
+        assert "expected int" in msg
 
-    def test_output_contains_file_count(self, capsys):
+    def test_error_contains_solution_count(self) -> None:
+        mergeMismatchRecords(validateParameterTypes({"BufferLoad": 0}, srcFile="b.yaml"))
+        msg = self._raise_message()
+        assert "in 1 solutions" in msg
+
+    def test_error_contains_file_count(self) -> None:
         mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="a.yaml"))
-        mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": True}, srcFile="b.yaml"))
-        printTypeMismatchSummary()
-        captured = capsys.readouterr()
-        assert "2 files" in captured.out
+        mergeMismatchRecords(validateParameterTypes({"BufferLoad": 0}, srcFile="b.yaml"))
+        msg = self._raise_message()
+        assert "2 total across 2 files" in msg
 
-    def test_output_contains_fix_message(self, capsys):
-        mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}))
-        printTypeMismatchSummary()
-        captured = capsys.readouterr()
-        assert "Fix these to prevent future build failures" in captured.out
+    def test_error_contains_fix_message(self) -> None:
+        mergeMismatchRecords(validateParameterTypes({"BufferLoad": 0}, srcFile="b.yaml"))
+        msg = self._raise_message()
+        assert "Fix these type mismatches before building." in msg
 
-    def test_no_output_when_clean_no_files(self, capsys):
-        """When there are no mismatches and no files, nothing should be printed."""
-        printTypeMismatchSummary()
+    def test_noop_when_clean(self, capsys: pytest.CaptureFixture) -> None:
+        raiseIfTypeMismatches()
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == ""
-
-    def test_clean_message_when_no_mismatches(self, capsys):
-        """When files were checked but no mismatches found, print confirmation."""
-        printTypeMismatchSummary(numFiles=42)
-        captured = capsys.readouterr()
-        assert "42" in captured.out
-        assert "no type mismatches found" in captured.out
-
-    def test_multiple_param_types_in_output(self, capsys):
-        """Multiple different mismatched params should all appear in output."""
-        mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}))
-        mergeMismatchRecords(validateParameterTypes({"BufferLoad": 0}))
-        printTypeMismatchSummary()
-        captured = capsys.readouterr()
-        assert "UseCustomMainLoopSchedule" in captured.out
-        assert "BufferLoad" in captured.out
 
 
 class TestValidateProblemTypeParameterTypes:
@@ -542,7 +509,6 @@ class TestValidateProblemTypeRaiseMode:
 
     def test_usebeta_int_raises(self):
         """UseBeta: 1 (int where bool expected) raises ConfigTypeError."""
-        from Tensile.Common.TypeValidationErrors import ConfigTypeError
         with pytest.raises(ConfigTypeError) as exc:
             validateProblemTypeParameterTypes({"UseBeta": 1})
         assert "UseBeta" in str(exc.value)
@@ -554,7 +520,6 @@ class TestValidateProblemTypeRaiseMode:
 
     def test_raises_on_first_bad_key(self):
         """Raises on the first mistyped key encountered."""
-        from Tensile.Common.TypeValidationErrors import ConfigTypeError
         with pytest.raises(ConfigTypeError) as exc:
             validateProblemTypeParameterTypes({"TransposeA": 0, "UseBeta": 1})
         assert "TransposeA" in str(exc.value)
@@ -568,7 +533,6 @@ class TestValidateProblemTypeRaiseMode:
         validateProblemTypeParameterTypes({"DataType": "single"})
 
     def test_keypath_prefix_in_message(self):
-        from Tensile.Common.TypeValidationErrors import ConfigTypeError
         with pytest.raises(ConfigTypeError) as exc:
             validateProblemTypeParameterTypes(
                 {"UseBeta": 1}, keyPathPrefix="BenchmarkProblems[0][0].ProblemType",
@@ -577,7 +541,6 @@ class TestValidateProblemTypeRaiseMode:
 
     def test_problem_type_constructor_strict_by_default(self):
         """ProblemType construction still raises for input-YAML callers."""
-        from Tensile.Common.TypeValidationErrors import ConfigTypeError
         cfg = dict(_defaultProblemType)
         cfg["DataType"] = "s"
         cfg["TransposeA"] = 0
@@ -636,7 +599,6 @@ class TestWorkerPassthroughBackstop:
         stand up a full Solution-construction stack. The point is the
         typed-except in _generate_single_solution.
         """
-        from Tensile.Common.TypeValidationErrors import ConfigTypeError
         from Tensile import BenchmarkProblems
 
         perm, ptype, cfg, isaInfoMap = self._make_minimal_fixtures()

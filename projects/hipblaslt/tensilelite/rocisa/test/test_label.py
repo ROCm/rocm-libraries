@@ -23,6 +23,7 @@
 import rocisa
 from copy import deepcopy
 import pickle
+import pytest
 
 name = "Test"
 
@@ -42,3 +43,40 @@ def test_label_copy():
     print("Copied lm using deepcopy:", lm2.getName(name))
     lm3 = pickle.loads(pickle.dumps(lm))
     print("Copied lm using pickle:", lm3.getName(name))
+
+
+def test_unique_name_is_deterministic_counter():
+    # Happy path: unique names are a monotonic counter, shared across the
+    # prefixed and unprefixed variants, so codegen is reproducible.
+    lm = rocisa.label.LabelManager()
+    assert [lm.getUniqueNamePrefix("X") for _ in range(3)] == ["X_0", "X_1", "X_2"]
+    assert lm.getUniqueName() == "label_3"
+    assert lm.getUniqueNamePrefix("Y") == "Y_4"
+
+def test_unique_name_skips_manually_added_collision():
+    # Edge case: the guard loop must skip a name that was added manually.
+    lm = rocisa.label.LabelManager()
+    lm.addName("X_0")
+    assert lm.getUniqueNamePrefix("X") == "X_1"
+
+def test_counter_survives_pickle_and_deepcopy():
+    # The counter is part of the serialized state, so a copied manager keeps
+    # producing unique (non-colliding) names instead of restarting at 0.
+    lm = rocisa.label.LabelManager()
+    lm.getUniqueNamePrefix("X")
+    lm.getUniqueNamePrefix("X")  # counter -> 2
+    assert pickle.loads(pickle.dumps(lm)).getUniqueNamePrefix("X") == "X_2"
+    assert deepcopy(lm).getUniqueNamePrefix("X") == "X_2"
+
+def test_getNameIndex_raises_when_not_added():
+    # Failure path: getNameIndex requires the name to be added first.
+    lm = rocisa.label.LabelManager()
+    with pytest.raises(Exception):
+        lm.getNameIndex("nope", 0)
+
+def test_getNameIndex_raises_when_index_out_of_range():
+    # Failure path: index beyond the recorded increments is rejected.
+    lm = rocisa.label.LabelManager()
+    lm.addName("Test")
+    with pytest.raises(Exception):
+        lm.getNameIndex("Test", 5)

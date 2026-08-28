@@ -12,6 +12,9 @@
 /dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
 /dnn-providers/hipblaslt-provider/                  @ROCm/dnn-providers-core
 /dnn-providers/hip-kernel-provider/                 @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
+/dnn-providers/hip-kernel-provider/rocke/platform/  @ROCm/rocke-platform @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
+/dnn-providers/hip-kernel-provider/rocke/style/     @ROCm/rocke-platform @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
+/dnn-providers/hip-kernel-provider/rocke/library/   @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
 /dnn-providers/fusilli-provider/                    @ROCm/fusilli-provider-reviewers
 /dnn-providers/integration-tests/                   @ROCm/dnn-providers-core
 /projects/composablekernel/                         @ROCm/ck-reviewers
@@ -41,6 +44,7 @@
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
+/projects/hipthreads/                               @ROCm/hipthreads-reviewers
 
 # Next CMake-specific ownership
 /projects/hipblas-common/**/*.cmake                 @ROCm/rocm-math-lib-build-infra
@@ -95,6 +99,10 @@
 /projects/hipblaslt/**/.readthedocs.yaml            @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
 /projects/hipblaslt/docs/                           @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
 /projects/hipblaslt/library/include/                @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+
+# Internal engineering decision logs, not user-facing docs: skip the docs-reviewers group.
+/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/DECISIONS.md   @ROCm/hipblaslt-reviewers
+/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/adr/           @ROCm/hipblaslt-reviewers
 
 /projects/hipcub/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/hipcub/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
@@ -190,3 +198,8 @@
 /projects/rpp/**/*.rst                              @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
 /projects/rpp/**/.readthedocs.yaml                  @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
 /projects/rpp/**/docs/                              @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
+
+/projects/hipthreads/**/*.md                        @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
+/projects/hipthreads/**/*.rst                       @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
+/projects/hipthreads/**/.readthedocs.yaml           @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
+/projects/hipthreads/docs/                          @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers

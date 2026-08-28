@@ -116,6 +116,23 @@ and :doc:`Performance database <../conceptual/perfdb>`.
       - | 1: Disable FindDb
         | 0 or unset: Enable FindDb
 
+    * - | ``MIOPEN_DEBUG_DISABLE_SYSTEM_DB``
+        | Ignores the system (installed) find database and performance database, so that solver
+        | selection and performance configurations fall through to the built-in heuristics,
+        | including the AI models, instead of being served from the shipped databases. The user
+        | databases are still read and written, and the AI heuristic models and the kernel cache
+        | are unaffected.
+      - | 1: Disable the system databases
+        | 0 or unset: Enable the system databases (default)
+
+    * - | ``MIOPEN_DEBUG_DISABLE_USER_DB``
+        | Skips all file I/O against the user find database and performance database. Both
+        | lookups and writes are suppressed, so tuning results are not persisted and repeated
+        | runs stay reproducible. The system databases and the kernel cache are unaffected.
+        | Set together with ``MIOPEN_DEBUG_DISABLE_SYSTEM_DB`` to run purely on heuristics.
+      - | 1: Disable the user databases
+        | 0 or unset: Enable the user databases (default)
+
 Algorithm control
 =================
 
@@ -361,6 +378,11 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
 
     * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2``
         | Controls Winograd Fury RxS F(3,2) solution.
+      - | 0: Disable
+        | 1: Enable
+
+    * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3``
+        | Controls Winograd Rage RxS F(2,3) solution.
       - | 0: Disable
         | 1: Enable
 

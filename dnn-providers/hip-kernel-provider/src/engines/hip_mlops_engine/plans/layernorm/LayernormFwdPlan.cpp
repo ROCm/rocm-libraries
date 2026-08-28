@@ -38,7 +38,8 @@ LayernormFwdParams::LayernormFwdParams(
     , _invVariance(attributes.inv_variance_tensor_uid().has_value()
                        ? tensorMap.at(attributes.inv_variance_tensor_uid().value())
                        : nullptr)
-    , _epsilon((tensorMap.at(attributes.epsilon_tensor_uid())))
+    , _epsilon(hipdnn_plugin_sdk::makeScalarOperand(
+          tensorMap, attributes.epsilon_tensor_uid(), "Epsilon"))
 {
 }
 
@@ -73,9 +74,11 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _invVariance;
 }
 
-const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormFwdParams::epsilon() const
+double LayernormFwdParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                        uint32_t numDeviceBuffers) const
 {
-    return _epsilon;
+    return hipdnn_plugin_sdk::toDouble(
+        hipdnn_plugin_sdk::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
 }
 
 LayernormFwdPlan::LayernormFwdPlan(LayernormFwdParams&& params)
@@ -98,18 +101,26 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(
         std::vector<int64_t>(xStrides->begin(), xStrides->end()));
 
+    // Ensure that the input tensor is either 4D or 5D
+    if(xDims->size() != 4 && xDims->size() != 5)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported tensor dimension: "
+                                                           + std::to_string(xDims->size()));
+    }
+
     const size_t normalizedDim
         = layernorm::guessNormalizedDim(_params.x(), _params.scale(), _params.mean());
-    long outerSize = 1;
-    long innerSize = 1;
-    long stride = 1;
+    int64_t outerSize = 1;
+    int64_t innerSize = 1;
+    int64_t stride = 1;
     const auto layoutNHWC = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
     const auto layoutNDHWC = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
 
     if(normalizedDim > 1
        && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
     {
-        stride = static_cast<long>(xDims->Get(1));
+        stride = static_cast<int64_t>(xDims->Get(1));
     }
 
     for(unsigned int i = 0; i < xDims->size(); ++i)
@@ -118,21 +129,21 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
         {
             if(stride == 1 || i != 1) // Don't add C to outerSize if there is a stride
             {
-                outerSize *= static_cast<long>(xDims->Get(i));
+                outerSize *= static_cast<int64_t>(xDims->Get(i));
             }
         }
         else
         {
-            innerSize *= static_cast<long>(xDims->Get(i));
+            innerSize *= static_cast<int64_t>(xDims->Get(i));
         }
     }
 
-    const long xlocalsize = 1024;
-    const long xgridsize = outerSize * stride;
-    const long ylocalsize = 1;
-    const long ygridsize = 1;
-    const long zlocalsize = 1;
-    const long zgridsize = 1;
+    const int64_t xlocalsize = 1024;
+    const int64_t xgridsize = outerSize * stride;
+    const int64_t ylocalsize = 1;
+    const int64_t ygridsize = 1;
+    const int64_t zlocalsize = 1;
+    const int64_t zgridsize = 1;
 
     // Determine input/output data type configuration
     const auto inputDataType = _params.x()->data_type();
@@ -180,22 +191,25 @@ void LayernormFwdPlan::execute(const Handle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer = findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = findDeviceBuffer(_params.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer = findDeviceBuffer(_params.bias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto yBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.bias()->uid(), deviceBuffers, numDeviceBuffers);
     auto meanBuffer = _params.mean() != nullptr
-                          ? findDeviceBuffer(_params.mean()->uid(), deviceBuffers, numDeviceBuffers)
+                          ? hipdnn_plugin_sdk::findDeviceBuffer(
+                                _params.mean()->uid(), deviceBuffers, numDeviceBuffers)
                           : hipdnnPluginDeviceBuffer_t{-1, nullptr};
-    auto invVarianceBuffer
-        = _params.invVariance() != nullptr
-              ? findDeviceBuffer(_params.invVariance()->uid(), deviceBuffers, numDeviceBuffers)
-              : hipdnnPluginDeviceBuffer_t{-1, nullptr};
+    auto invVarianceBuffer = _params.invVariance() != nullptr
+                                 ? hipdnn_plugin_sdk::findDeviceBuffer(_params.invVariance()->uid(),
+                                                                       deviceBuffers,
+                                                                       numDeviceBuffers)
+                                 : hipdnnPluginDeviceBuffer_t{-1, nullptr};
 
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
-    _params.epsilon()->UnPackTo(&epsilonTensor);
-    double epsilon
-        = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
+    double epsilon = _params.epsilonValue(deviceBuffers, numDeviceBuffers);
 
     // Launch kernel
     _runnableKernel->launch(handle.getStream(),

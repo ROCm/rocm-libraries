@@ -3,9 +3,13 @@
 
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
-    ../src/harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.cpp
-    TestArchMatch.cpp
+    ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    ../src/harness/bundle/SupportClaimReport.cpp
+    ../src/harness/bundle/SupportClaims.cpp
+    ../src/harness/bundle/SupportVerdict.cpp
+    ../src/harness/input-init/FillInputs.cpp
     TestBundleMetadata.cpp
+    TestSupportClaims.cpp
     TestGraphDescription.cpp
     TestNodeTypeToString.cpp
     TestPlatformUtils.cpp
@@ -16,20 +20,28 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuReferenceGraphExecutor.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
+    TestGpuSdpaFwdSignatureKey.cpp
+    TestGpuSdpaFwdPlan.cpp
+    TestGpuRMSNormSignatureKey.cpp
+    TestGpuRMSNormPlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
     TestVerificationPaths.cpp
-    TestGoldenVerificationHarness.cpp
-    TestSynthesisTracker.cpp
-    TestSynthesizeInputs.cpp
+    TestBundleVerificationHarness.cpp
+    TestInputFillRecipes.cpp
+    TestFillInputs.cpp
+    TestToleranceResolver.cpp
     TestVerificationModePaths.cpp
     TestErrorPaths.cpp
+    TestLoadedEngineTable.cpp
+    TestSupportClaimReport.cpp
+    TestSupportVerdict.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 target_include_directories(hipdnn_integration_tests_unit_tests SYSTEM PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/third_party/tomlplusplus)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/third-party/tomlplusplus)
 
 target_link_libraries(hipdnn_integration_tests_unit_tests
     PRIVATE
@@ -50,15 +62,20 @@ clang_tidy_check(hipdnn_integration_tests_unit_tests)
 add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(hipdnn_gpu_ref_tests
-    gpu_ref/main.cpp
-    gpu_ref/TestGpuFpReferenceConvolution.cpp
-    gpu_ref/TestGpuFpReferenceDgrad.cpp
-    gpu_ref/TestGpuFpReferenceWgrad.cpp
-    gpu_ref/TestGpuFpReferenceValidation.cpp
-    gpu_ref/TestGpuRefHipError.cpp
-    gpu_ref/TestGpuRefKernelCompiler.cpp
-    gpu_ref/TestShallowDeviceOnlyMigratableMemory.cpp
-    gpu_ref/TestShallowGpuTensor.cpp
+    gpu-ref/main.cpp
+    gpu-ref/TestGpuFpReferencePointwise.cpp
+    gpu-ref/TestGpuFpReferenceConvolution.cpp
+    gpu-ref/TestGpuFpReferenceSdpa.cpp
+    gpu-ref/TestGpuFpReferenceDgrad.cpp
+    gpu-ref/TestGpuFpReferenceWgrad.cpp
+    gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
+    gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp
+    gpu-ref/TestGpuFpReferenceValidation.cpp
+    gpu-ref/TestGpuRefHipError.cpp
+    gpu-ref/TestGpuRefKernelCompiler.cpp
+    gpu-ref/TestShallowDeviceOnlyMigratableMemory.cpp
+    gpu-ref/TestShallowGpuTensor.cpp
+    gpu-ref/TestGpuFpReferenceCommon.cpp
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests
@@ -69,6 +86,7 @@ target_link_libraries(hipdnn_gpu_ref_tests
         GTest::gtest
         Threads::Threads
         hip::host
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
 )
 
 target_compile_options(hipdnn_gpu_ref_tests
@@ -76,4 +94,8 @@ target_compile_options(hipdnn_gpu_ref_tests
 
 clang_tidy_check(hipdnn_gpu_ref_tests)
 
-add_tiered_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_integration_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+if(USE_ROCRAND)
+    target_compile_definitions(hipdnn_gpu_ref_tests PRIVATE USE_ROCRAND)
+endif()

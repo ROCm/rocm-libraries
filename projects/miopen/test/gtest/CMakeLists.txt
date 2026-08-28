@@ -37,6 +37,7 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
         miopendriver_conv_immed.cpp
         miopendriver_regression_half_gfx9.cpp
         unit_conv_solver_ConvCkGroupedConvFwd.cpp
+        unit_conv_solver_ConvDepthwiseBwdData2D_test.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp
@@ -98,12 +99,24 @@ function(add_gtest TEST_NAME TEST_CPP)
   if(WIN32)
     target_compile_definitions(${TEST_NAME} PRIVATE NOMINMAX)
   endif()
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    # Tests that assert on logged/traced API names need to know which library
+    # layout they are running against: when MIOpen is built as a public wrapper
+    # over a private implementation, the public entry points are renamed with an
+    # _impl suffix and MIOPEN_LOG_FUNCTION runs inside the renamed definition,
+    # so the logged name carries that suffix.
+    target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
+  endif()
 
   add_dependencies(miopen-tests ${TEST_NAME})
   add_dependencies(miopen-check ${TEST_NAME})
 
   target_compile_options(${TEST_NAME} PRIVATE -Wno-global-constructors -Wno-undef)
   target_include_directories(${TEST_NAME} PRIVATE ../ ../../src/kernels)
+
+  if(MIOPEN_USE_HIPCONV)
+    target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_USE_HIPCONV=1)
+  endif()
 
   target_link_libraries(${TEST_NAME} miopen_gtest_common)
   if(MIOPEN_ENABLE_AI_KERNEL_TUNING)
@@ -125,6 +138,29 @@ function(add_gtest TEST_NAME TEST_CPP)
   target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main GTest::gmock MIOpen_with_plugins hip::host )
   if(NOT MIOPEN_EMBED_DB STREQUAL "")
       target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:miopen_data>)
+  endif()
+
+  # CK setup for any test target that compiles CK-including sources. This must
+  # be applied to every test executable so the test objects use the same CK
+  # macro set as MIOpen and the CK plugins.
+  if(MIOPEN_USE_COMPOSABLEKERNEL)
+    if(MIOPEN_BUILD_CK)
+      # The include directories also don't propagate correctly when using the
+      # non-aliased targets. Manually including them fixes this for inline builds.
+      target_include_directories(${TEST_NAME} SYSTEM PRIVATE
+          ${MIOPEN_CK_INCLUDE_DIR}
+          ${MIOPEN_CK_BUILD_INCLUDE_DIR}
+          ${MIOPEN_CK_LIBRARY_INCLUDE_DIR}
+      )
+    else()
+      # While building on TheRock we are missing CK include headers; pull them in
+      # via the utility component (needed by CK utility gtests).
+      if(NOT TARGET composable_kernel::utility)
+        find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS utility)
+      endif()
+      target_link_libraries(${TEST_NAME} composable_kernel::utility)
+    endif()
+    miopen_apply_ck_compile_definitions(${TEST_NAME})
   endif()
 
   if(MIOPEN_TEST_DISCRETE)
@@ -300,22 +336,8 @@ else()
   endforeach()
 
   add_gtest(miopen_gtest "${TESTS_CPP}")
-
-  if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
-        # The include directories also dont propagate correctly when using the non aliased targets.
-        # Manually including them fixes this problem for inline builds.
-        target_include_directories(miopen_gtest SYSTEM PRIVATE
-            ${MIOPEN_CK_INCLUDE_DIR}
-            ${MIOPEN_CK_BUILD_INCLUDE_DIR}
-            ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
-    else()
-        # While building on TheRock we are missing CK include headers for miopen_gtest target
-        # But we need them, for example, for unit_implicitgemm_ck_util.cpp gtest, which is part of miopen_gtest target
-        find_package(composable_kernel 1.0.0 COMPONENTS utility)
-        target_link_libraries(miopen_gtest composable_kernel::utility)
-    endif()
-  endif()
+  # CK include dirs / utility linkage / compile definitions for miopen_gtest
+  # are applied inside add_gtest() (shared with discrete test executables).
 
   add_custom_command(
     OUTPUT test_list

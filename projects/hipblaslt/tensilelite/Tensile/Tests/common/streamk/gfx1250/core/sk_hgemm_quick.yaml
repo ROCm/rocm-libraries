@@ -3,6 +3,7 @@ TestParameters:
 
 GlobalParameters:
   SyncsPerBenchmark: 0
+  Architecture: gfx1250
   NumElementsToValidate: -1
   BoundsCheck: 0
   CpuThreads: 32
@@ -48,7 +49,7 @@ BenchmarkProblems:
         - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [3, 4]
         - SourceSwap: [True, False]
         - StoreRemapVectorWidth: [0, -1]
         - StreamK: [3]
@@ -85,7 +86,7 @@ BenchmarkProblems:
         - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [3, 4]
         - SourceSwap: [True, False]
         - StoreRemapVectorWidth: [0, -1]
         - StreamK: [3]

@@ -22,7 +22,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
                              const int64_t normalizedDimCount,
                              const hipdnn_data_sdk::utilities::TensorLayout& layout,
                              bool useTrainingPhase = false,
-                             bool onePadded = false)
+                             bool onePadded = false,
+                             bool runtimeEpsilon = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("LayernormFpropTest");
@@ -80,12 +81,18 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(biasAttr));
 
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    epsilonTensor->set_uid(uid++)
-        .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
-        .set_dim({1})
-        .set_stride({1})
-        .set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
+    epsilonTensor->set_uid(uid++).set_name("EpsilonTensor").set_dim({1}).set_stride({1});
+    if(runtimeEpsilon)
+    {
+        // Pure runtime pass-by-value: FLOAT scalar, no baked value; resolved
+        // from the variant pack at execute.
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT).set_as_runtime_parameter();
+    }
+    else
+    {
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_value(static_cast<float>(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON));
+    }
 
     hipdnn_frontend::graph::LayernormAttributes lnAttrs;
     lnAttrs.set_name("layernorm_fprop");
@@ -161,7 +168,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 }
 
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildLayernormBpropGraph(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+    buildLayernormBpropGraph(hipdnn_flatbuffers_sdk::data_objects::DataType dyDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType dxDataType,
                              hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
                              hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVarianceDataType,
                              hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
@@ -169,7 +177,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
                              const int64_t normalizedDimCount,
                              const hipdnn_data_sdk::utilities::TensorLayout& layout,
                              bool meanInvVar = false,
-                             bool onePadded = false)
+                             bool onePadded = false,
+                             bool runtimeEpsilon = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("LayernormBpropTest");
@@ -211,13 +220,13 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     int64_t uid = 1;
     auto dyAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "dy", hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType), dims, strides);
+        "dy", hipdnn_test_sdk::utilities::sdkToFrontendDataType(dyDataType), dims, strides);
     dyAttr.set_uid(uid++);
     auto dyTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(dyAttr));
 
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "x", hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType), dims, strides);
+        "x", hipdnn_test_sdk::utilities::sdkToFrontendDataType(dxDataType), dims, strides);
     xAttr.set_uid(uid++);
     auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
@@ -231,12 +240,18 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    epsilonTensor->set_uid(uid++)
-        .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
-        .set_dim({1})
-        .set_stride({1})
-        .set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
+    epsilonTensor->set_uid(uid++).set_name("EpsilonTensor").set_dim({1}).set_stride({1});
+    if(runtimeEpsilon)
+    {
+        // Pure runtime pass-by-value: FLOAT scalar, no baked value; resolved
+        // from the variant pack at execute.
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT).set_as_runtime_parameter();
+    }
+    else
+    {
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_value(static_cast<float>(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON));
+    }
 
     hipdnn_frontend::graph::LayernormBackwardAttributes lnAttrs;
     lnAttrs.set_name("layernorm_bprop");
@@ -276,7 +291,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         dxTensorAttr->set_uid(uid++);
     }
     dxTensorAttr->set_name("DX");
-    dxTensorAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
+    dxTensorAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(dxDataType));
     dxTensorAttr->set_dim(dims);
     dxTensorAttr->set_stride(strides);
     dxTensorAttr->set_is_virtual(false);
@@ -288,7 +303,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     }
     dscaleTensorAttr->set_name("DSCALE");
     dscaleTensorAttr->set_data_type(
-        hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(scaleBiasDataType));
     dscaleTensorAttr->set_dim(normalizedDims);
     dscaleTensorAttr->set_stride(normalizedStrides);
     dscaleTensorAttr->set_is_virtual(false);
@@ -300,7 +315,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     }
     dbiasTensorAttr->set_name("DBIAS");
     dbiasTensorAttr->set_data_type(
-        hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(scaleBiasDataType));
     dbiasTensorAttr->set_dim(normalizedDims);
     dbiasTensorAttr->set_stride(normalizedStrides);
     dbiasTensorAttr->set_is_virtual(false);

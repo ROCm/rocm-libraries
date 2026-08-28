@@ -39,16 +39,18 @@ enum class ReferenceExecutorType
 // BUNDLE tests only and is independent of ReferenceExecutorType (which governs
 // the parameterized tests' choice of which ref executor to exercise).
 //
-//   AUTO   — per-test fallback: golden -> GPU ref -> CPU ref -> SKIP+report
-//   GOLDEN — golden data only; SKIP if a bundle has no golden outputs
-//   GPU    — ignore golden; compare engine against the GPU reference executor
-//   CPU    — ignore golden; compare engine against the CPU reference executor
+//   AUTO         — per-test fallback: golden -> GPU ref -> CPU ref -> SKIP+report
+//   GOLDEN       — golden data only; SKIP if a bundle has no golden outputs
+//   GPU          — ignore golden; compare engine against the GPU reference executor
+//   CPU          — ignore golden; compare engine against the CPU reference executor
+//   GOLDEN_CHECK — no engine; compare golden data against CPU ref (data validation)
 enum class VerificationMode
 {
     AUTO,
     GOLDEN,
     GPU,
     CPU,
+    GOLDEN_CHECK,
 };
 
 // Parse a verification-mode string (case-insensitive) into the enum. Throws
@@ -75,8 +77,12 @@ inline VerificationMode parseVerificationMode(std::string value)
     {
         return VerificationMode::CPU;
     }
+    if(value == "golden-check")
+    {
+        return VerificationMode::GOLDEN_CHECK;
+    }
     throw std::runtime_error("Invalid verification mode '" + value
-                             + "'; expected 'auto', 'golden', 'gpu', or 'cpu'");
+                             + "'; expected 'auto', 'golden', 'gpu', 'cpu', or 'golden-check'");
 }
 
 // Resolve verification mode: CLI value wins, then env var, then nullopt (caller
@@ -121,9 +127,11 @@ struct TestConfigOptions
     bool skipGraphValidation = false;
     std::optional<std::filesystem::path> configPath;
     std::optional<ReferenceExecutorType> referenceExecutorType;
-    bool allowBundles = false;
+    bool allowBundles = true;
     std::optional<std::filesystem::path> goldenDataDir;
     std::optional<VerificationMode> verificationMode;
+    std::optional<std::filesystem::path> captureDir;
+    bool enforceSupportClaims = false;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -190,19 +198,22 @@ public:
             instance._testSettings.emplace(*opts.configPath);
         }
 
-        // Golden bundle configuration
+        // Golden bundle configuration — default is ON; env var can override.
         instance._allowBundles = opts.allowBundles;
-        if(!instance._allowBundles)
+        auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
+        if(envVal == "0" || envVal == "false")
         {
-            auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
-            if(envVal == "1" || envVal == "true")
-            {
-                instance._allowBundles = true;
-            }
+            instance._allowBundles = false;
+        }
+        else if(envVal == "1" || envVal == "true")
+        {
+            instance._allowBundles = true;
         }
 
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
+        instance._captureDir = std::move(opts.captureDir);
+        instance._enforceSupportClaims = opts.enforceSupportClaims;
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -375,6 +386,29 @@ public:
         return _verificationMode.value_or(VerificationMode::AUTO);
     }
 
+    bool enforceSupportClaims() const
+    {
+        throwIfNotInitialized();
+        return _enforceSupportClaims;
+    }
+
+    bool hasCaptureDir() const
+    {
+        throwIfNotInitialized();
+        return _captureDir.has_value();
+    }
+
+    const std::filesystem::path& getCaptureDir() const
+    {
+        throwIfNotInitialized();
+        if(!_captureDir.has_value())
+        {
+            throw std::runtime_error(
+                "getCaptureDir() called but --capture-bundles was not provided");
+        }
+        return _captureDir.value();
+    }
+
 private:
     TestConfig() = default;
 
@@ -392,12 +426,14 @@ private:
     std::optional<ReferenceExecutorType> _referenceExecutorType;
     std::optional<std::filesystem::path> _goldenDataDir;
     std::optional<VerificationMode> _verificationMode;
+    std::optional<std::filesystem::path> _captureDir;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;
     bool _failOnUnsupported = false;
     bool _skipGraphValidation = false;
     bool _allowBundles = false;
+    bool _enforceSupportClaims = false;
     bool _initialized = false;
 };
 

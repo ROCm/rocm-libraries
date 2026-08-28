@@ -38,6 +38,7 @@
 #include "rocke/instance_gfx942_attention_tiled_2d.h"
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
+#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_unified_attn_tiled_2d_lds_bytes */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
@@ -158,6 +159,8 @@ rocke_gfx942_attention_tiled_2d_supports_args_t
     memset(&a, 0, sizeof(a));
     a.num_warps = 1;
     a.block_m_per_warp = 16;
+    a.ring_depth = 3;
+    a.k_slice_hd = 32;
     /* head_size/block_size/dtype/num_queries_per_kv set by the caller;
      * every other field defaults to 0/false/NULL == the Python keyword
      * default (q_dtype=None, kv_storage_dtype=None, tile_size=None, ...). */
@@ -325,8 +328,10 @@ bool rocke_gfx942_attention_tiled_2d_supports(
         {
             if(args->use_k_sliced_ring)
             {
-                int _K_SLICE_HD = 32;
-                int _K_SLICE_SLOTS = 3;
+                /* The ring's own geometry, not the shipped constants: pinning
+                 * these sized a different kernel than the builder emits. */
+                int _K_SLICE_HD = args->k_slice_hd;
+                int _K_SLICE_SLOTS = args->ring_depth;
                 int _k_bytes = _K_SLICE_SLOTS * _t_eff * _K_SLICE_HD * _BPE;
                 int _v_kpack = 8;
                 int _v_pixels = 64;
@@ -373,13 +378,18 @@ bool rocke_gfx942_attention_tiled_2d_supports(
             }
         }
         {
-            int _out_stripe = (args->head_size <= 64) ? 32 : args->head_size;
-            int _lds
-                = 2 * _t_eff * args->head_size * _BPE /* K_lds (double) */
-                  + _t_eff * args->head_size * _BPE /* V_lds          */
-                  + _block_m * (_t_eff + 8) * _BPE /* P_lds          */
-                  + ((_block_m <= 2 * _t_eff) ? 0 : _block_m * args->head_size * _BPE) /* Q_lds */
-                  + _block_m * _out_stripe * _BPE; /* Acc_lds     */
+            /* Default-path footprint via the shared model (single source of
+             * truth, also used by the gfx950 register-PV resolver). Conservative
+             * here: Q_lds/P_lds staged (the register-PV path drops them). */
+            int _lds = rocke_unified_attn_tiled_2d_lds_bytes(_t_eff,
+                                                             args->head_size,
+                                                             _block_m,
+                                                             _BPE,
+                                                             /*k_slots=*/2,
+                                                             /*v_slots=*/1,
+                                                             /*include_q_lds=*/true,
+                                                             /*include_p_lds=*/true,
+                                                             /*v_pad=*/0);
             if(_lds > _LDS_CAPACITY_BYTES)
             {
                 snprintf(buf,
@@ -505,6 +515,7 @@ static rocke_status_t
      * as the Python kernel_name does. */
     char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
     char sw_buf[32], w_buf[32], wpe_buf[32], mw_buf[32], kvcp_buf[64];
+    char rd_buf[32], ks_buf[32];
     int nqh, nkv;
 
     if(s == NULL || out == NULL)
@@ -544,6 +555,17 @@ static rocke_status_t
         snprintf(kvcp_buf, sizeof(kvcp_buf), "kvcp%s", s->kv_cache_policy);
     else
         kvcp_buf[0] = '\0';
+    /* Ring geometry away from its default is a distinct schedule and a distinct
+     * K_lds extent, so it is a distinct kernel. Tagged only away from the default
+     * so every already-shipped ring kernel keeps its current name. */
+    if(s->use_k_sliced_ring && s->ring_depth != 3)
+        snprintf(rd_buf, sizeof(rd_buf), "rd%d", s->ring_depth);
+    else
+        rd_buf[0] = '\0';
+    if(s->use_k_sliced_ring && s->k_slice_hd != 32)
+        snprintf(ks_buf, sizeof(ks_buf), "ks%d", s->k_slice_hd);
+    else
+        ks_buf[0] = '\0';
 
     {
         const char* cfvnosplit
@@ -592,6 +614,8 @@ static rocke_status_t
             cfvnosplit,
             cfvplainv,
             s->use_k_sliced_ring ? "ksring" : "",
+            rd_buf,
+            ks_buf,
             s->use_k_sliced_ldsseq ? "ldsseq" : "",
             s->use_iglp_opt ? "iglp1" : "",
             s->use_k_single_buffer ? "k1buf" : "",
