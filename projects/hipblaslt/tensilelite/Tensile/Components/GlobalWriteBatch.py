@@ -3920,8 +3920,6 @@ class GlobalWriteBatchWriter:
     """Merge lane l's 8 f8 M-rows with partner lane l^16's (M+8..M+15, same N) into one
     buffer_store_b128 from the even lane-group. Packed f8 for this element is at abs vgpr sumIdx."""
     module = Module("F8PartnerMergeStore")
-    kw      = self.parentWriter
-    wsBits  = self.kernel["WavefrontSize"] - 1
     isGlc = isSlc = isNT = False
 
     # Replicate addStore's SRD row advance (optSingleColVgpr shared column pointer).
@@ -3929,19 +3927,20 @@ class GlobalWriteBatchWriter:
       module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01))
 
     srcLo, srcHi = vgpr(sumIdx + 0), vgpr(sumIdx + 1)
-    # Batch-setup scratch (low VGPR bank, avoids gfx1250 high-vgpr MSB banking across ds_bpermute).
-    vPack     = self.cvtVgprStruct.vgprF8MergePack
-    vPermAddr = self.cvtVgprStruct.vgprF8MergePermAddr
+    # Batch-setup scratch (low VGPR bank, avoids gfx1250 high-vgpr MSB banking).
+    vPack = self.cvtVgprStruct.vgprF8MergePack
 
-    module.add(VAndB32(dst=vgpr(vPermAddr), src0=wsBits, src1=vgpr("Serial"), comment="lane_id"))
-    module.add(VXorB32(dst=vgpr(vPermAddr), src0=16, src1=vgpr(vPermAddr), comment="partner = lane ^ 16"))
-    module.add(VLShiftLeftB32(dst=vgpr(vPermAddr), shiftHex=2, src=vgpr(vPermAddr), comment="* 4 = ds_bpermute byte addr"))
-
+    # Pure-VALU cross-lane merge (no LDS), mirroring subtile's in-place idiom
+    # (VPermlane16SwapB32(dst=v, src=v) exchanges register v between lanes l and l^16;
+    # wave32 pairs (0,16)..(15,31)). Copy own halves into vPack+2/+3, then swap in place so
+    # even lane l ends up holding partner l^16's own halves (= M+8..M+15). vPack+0/+1 keep
+    # this lane's own M+0..M+7. Ends with payload [ownLo, ownHi, partnerLo, partnerHi].
     module.add(VMovB32(dst=vgpr(vPack + 0), src=srcLo, comment="own M..M+3"))
     module.add(VMovB32(dst=vgpr(vPack + 1), src=srcHi, comment="own M+4..M+7"))
-    module.add(DSBPermuteB32(dst=vgpr(vPack + 2), src0=vgpr(vPermAddr), src1=srcLo, comment="partner M+8..M+11"))
-    module.add(DSBPermuteB32(dst=vgpr(vPack + 3), src0=vgpr(vPermAddr), src1=srcHi, comment="partner M+12..M+15"))
-    module.add(SWaitCnt(dscnt=0, comment="wait ds_bpermute"))
+    module.add(VMovB32(dst=vgpr(vPack + 2), src=srcLo, comment="copy own lo (-> partner M+8..M+11 after swap)"))
+    module.add(VMovB32(dst=vgpr(vPack + 3), src=srcHi, comment="copy own hi (-> partner M+12..M+15 after swap)"))
+    module.add(VPermlane16SwapB32(dst=vgpr(vPack + 2), src=vgpr(vPack + 2), comment="exchange l <-> l^16 in place"))
+    module.add(VPermlane16SwapB32(dst=vgpr(vPack + 3), src=vgpr(vPack + 3), comment="exchange l <-> l^16 in place"))
 
     module.add(self.getEdgeMovInstType()(EXEC(), "0x0000ffff", "even lane-group only (lanes 0-15)"))
     module.add(BufferStoreB128(
