@@ -1328,54 +1328,58 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
                                          rocblas_int    ldc,
                                          rocblas_stride stride_C,
                                          T*             W_C,
-                                         rocblas_int    batch_count)
+                                         rocblas_int    chunk_size,
+                                         rocblas_int    batch_offset)
 {
-    uint32_t batch = blockIdx.z;
+    // blockIdx.z is the local index within the chunk (0..chunk_size-1).
+    // gridDim.z == chunk_size, so blockIdx.z is always in range; no bounds
+    // check needed here.  W_C is indexed by the local index so the workspace
+    // holds exactly chunk_size triangle slots.  d_C is indexed by the absolute
+    // batch index (batch_offset + blockIdx.z).
+    uint32_t local_batch = blockIdx.z;
+    uint32_t abs_batch   = (uint32_t)batch_offset + local_batch;
 
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    auto* C = load_ptr_batch(d_C, abs_batch, 0, stride_C);
+
+    // Index W_C by the local batch — the workspace holds exactly chunk_size
+    // triangle slots starting at W_C[0].
+    T* W_C_batch = W_C + ((int64_t(n) * (n - 1)) / 2) * local_batch;
+
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // if is_upper is true copy the lower triangular matrix else copy the upper triangular matrix and exclude diagonal elements
+    if constexpr(is_upper)
     {
-
-        auto* C = load_ptr_batch(d_C, batch, 0, stride_C);
-
-        // offset W_C by batch
-        W_C += ((int64_t(n) * (n - 1)) / 2) * batch;
-
-        int row = blockIdx.y * blockDim.y + threadIdx.y;
-        int col = blockIdx.x * blockDim.x + threadIdx.x;
-
-        // if is_upper is true copy the lower triangular matrix else copy the upper triangular matrix and exclude diagonal elements
-        if constexpr(is_upper)
+        // Ensure row and col are within matrix bounds and exclude diagonal elements
+        if(row < n && col < n && row > col)
         {
-            // Ensure row and col are within matrix bounds and exclude diagonal elements
-            if(row < n && col < n && row > col)
-            {
-                // Calculate the index in the destination matrix W_C
-                int index = (row * (row - 1)) / 2 + col;
-                if constexpr(copy_from_C_to_W_C)
-                    W_C[index] = C[row + col * int64_t(ldc)];
-                else
-                    C[row + col * int64_t(ldc)] = W_C[index];
-            }
+            // Calculate the index in the destination matrix W_C_batch
+            int64_t index = (int64_t(row) * (row - 1)) / 2 + col;
+            if constexpr(copy_from_C_to_W_C)
+                W_C_batch[index] = C[row + col * int64_t(ldc)];
+            else
+                C[row + col * int64_t(ldc)] = W_C_batch[index];
         }
-        else
-        {
-            // Ensure row and col are within matrix bounds and exclude diagonal elements
-            if(row < n && col < n && row < col)
-            {
-                // Calculate the index in the destination matrix W_C
-                int index = (row * (2 * n - row - 1)) / 2 + (col - row - 1);
-                if constexpr(copy_from_C_to_W_C)
-                    W_C[index] = C[row + col * int64_t(ldc)];
-                else
-                    C[row + col * int64_t(ldc)] = W_C[index];
-            }
-        }
-
-        // When copying back to C, we need to zero-out diagonal imaginary
-        if constexpr(HERM && !copy_from_C_to_W_C)
-            if(row == col && row < n)
-                C[row + row * int64_t(ldc)] = std::real(C[row + row * int64_t(ldc)]);
     }
+    else
+    {
+        // Ensure row and col are within matrix bounds and exclude diagonal elements
+        if(row < n && col < n && row < col)
+        {
+            // Calculate the index in the destination matrix W_C_batch
+            int64_t index = (int64_t(row) * (2 * n - row - 1)) / 2 + (col - row - 1);
+            if constexpr(copy_from_C_to_W_C)
+                W_C_batch[index] = C[row + col * int64_t(ldc)];
+            else
+                C[row + col * int64_t(ldc)] = W_C_batch[index];
+        }
+    }
+
+    // When copying back to C, we need to zero-out diagonal imaginary
+    if constexpr(HERM && !copy_from_C_to_W_C)
+        if(row == col && row < n)
+            C[row + row * int64_t(ldc)] = std::real(C[row + row * int64_t(ldc)]);
 }
 
 template <bool copy_from_C_to_W_C, bool is_upper, bool HERM, typename T, typename TPtr>
@@ -1385,18 +1389,16 @@ rocblas_status rocblas_copy_triangular_syrk_herk(rocblas_handle handle,
                                                  rocblas_int    ldc,
                                                  rocblas_stride stride_C,
                                                  T*             W_C,
-                                                 rocblas_int    batch_count)
+                                                 rocblas_int    chunk_size,
+                                                 rocblas_int    batch_offset)
 {
     hipStream_t rocblas_stream = handle->get_stream();
 
     constexpr int DIM_X = 16;
     constexpr int DIM_Y = 16;
 
-    // Define block and grid sizes
-    int batches = handle->getBatchGridDim((int)batch_count);
-
-    dim3 blockDim(DIM_X, DIM_Y); // Block size (can be tuned)
-    dim3 gridDim((n - 1) / blockDim.x + 1, (n - 1) / blockDim.y + 1, batches);
+    dim3 blockDim(DIM_X, DIM_Y);
+    dim3 gridDim((n - 1) / blockDim.x + 1, (n - 1) / blockDim.y + 1, chunk_size);
 
     // Launch kernel
     ROCBLAS_LAUNCH_KERNEL((rocblas_copy_triangular_syrk_herk_kernel<copy_from_C_to_W_C,
@@ -1415,7 +1417,8 @@ rocblas_status rocblas_copy_triangular_syrk_herk(rocblas_handle handle,
                           ldc,
                           stride_C,
                           W_C,
-                          batch_count);
+                          chunk_size,
+                          batch_offset);
 
     return rocblas_status_success;
 }
