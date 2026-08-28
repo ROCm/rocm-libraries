@@ -34,6 +34,7 @@
 
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/ContractionSolution_fwd.hpp>
+#include <Tensile/FusedA2AKernArg.hpp>
 
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/TensorOps.hpp>
@@ -1242,6 +1243,26 @@ namespace TensileLite
             m_fusedGemmA2A = fusedGemmA2A;
         }
 
+        int64_t fusedA2AExtent() const
+        {
+            return m_fusedA2AExtent;
+        }
+
+        void setFusedA2AExtent(int64_t extent)
+        {
+            m_fusedA2AExtent = extent;
+        }
+
+        uint32_t fusedA2AWorld() const
+        {
+            return m_fusedA2AWorld;
+        }
+
+        void setFusedA2AWorld(uint32_t world)
+        {
+            m_fusedA2AWorld = world;
+        }
+
         size_t mxBlockA() const
         {
             return m_mxBlockA;
@@ -1511,6 +1532,8 @@ namespace TensileLite
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
         bool             m_fusedGemmA2A            = false;
+        int64_t          m_fusedA2AExtent          = 0;
+        uint32_t         m_fusedA2AWorld           = 0;
         int              m_useBias                 = 0;
         bool             m_useGateResidual         = false;
         rocisa::DataType m_gateType               = rocisa::DataType::None;
@@ -1677,6 +1700,11 @@ namespace TensileLite
         ConstantVariant              alpha = static_cast<float>(0);
         ConstantVariant              beta  = static_cast<float>(0);
         std::vector<ConstantVariant> activationArgs;
+
+        std::vector<FusedA2APeerFields> fusedA2APeers;
+        void*                           fusedA2ACounter = nullptr;
+        uint32_t                        fusedA2AMyRank  = 0;
+        uint32_t                        fusedA2ADrain   = 0;
 
         // Workspace
         void* ws           = nullptr;

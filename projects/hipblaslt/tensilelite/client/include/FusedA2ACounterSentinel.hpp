@@ -22,7 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "FusedA2AKernArg.hpp" // FUSED_A2A_MAX_RANKS, fusedA2AAlignLine
+#include <Tensile/FusedA2AKernArg.hpp> // FUSED_A2A_MAX_RANKS, fusedA2AAlignLine
 
 namespace TensileLite
 {

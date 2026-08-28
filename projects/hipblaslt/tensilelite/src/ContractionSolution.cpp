@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/FusedA2AKernArg.hpp>
 
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -2119,6 +2120,16 @@ namespace TensileLite
             rv.args.append<int64_t>("batchOffsetA", inputs.batchOffsetA);
             rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
         }
+
+        // The fused GEMM+A2A segment follows batchOffsets in the kernel signature.
+        if(problem.fusedGemmA2A())
+            appendFusedSegment(rv.args,
+                               inputs.fusedA2APeers,
+                               inputs.fusedA2ACounter,
+                               inputs.fusedA2AMyRank,
+                               problem.fusedA2AWorld(),
+                               inputs.fusedA2ADrain,
+                               static_cast<uint32_t>(problem.fusedA2AExtent()));
 
         if(problemType.stochasticRounding)
         {

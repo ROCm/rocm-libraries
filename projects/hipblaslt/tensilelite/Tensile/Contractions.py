@@ -606,6 +606,9 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
+        if state['ProblemType']['FusedGemmA2A']:
+            rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
+
         return rv
 
     @classmethod
