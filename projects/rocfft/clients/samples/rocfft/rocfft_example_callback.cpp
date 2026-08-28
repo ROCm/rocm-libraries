@@ -225,6 +225,10 @@ int main()
         throw std::runtime_error("rocfft_plan_destroy failed.");
     plan = nullptr;
 
+    // Destroy plan description
+    if(rocfft_plan_description_destroy(desc) != rocfft_status_success)
+        throw std::runtime_error("rocfft_plan_description_destroy failed.");
+
     // Copy result back to host
     std::vector<double2> y(N);
     hip_status = hipMemcpy(&y[0], x, Nbytes, hipMemcpyDeviceToHost);
