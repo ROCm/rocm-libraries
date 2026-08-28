@@ -1,24 +1,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# MX-scaled F4 GEMM on the layouts with at least one free-dim contiguous operand:
-# NT (both), NN (A only) and TT (B only).  subtile_mxfp4.yaml covers TN, where
-# neither is.
+# MX-scaled F4 on the layouts with a free-dim contiguous operand: NT (both),
+# NN (A) and TT (B).  subtile_mxfp4.yaml covers TN.  The scale byte span is
+# derived per operand, so NN and TT carry one of each.
 #
-# The scale tensors are host pre-swizzled (MXScaleFormat 1), so the kernel reads
-# them as a linear run of blocks covering 32 rows of the free dim.  The scale
-# global read is the same code for every layout; only the byte span between those
-# blocks differs, and it is derived per operand, so NN and TT take the free-dim
-# contiguous span on one scale and the K-contiguous one on the other.
-#
-# Sizes keep the free-dim contiguous operand's extent even -- M for NT and NN, N
-# for NT and TT.  That dim is the fastest one there, so an odd extent leaves the
-# leading stride on a half byte for a 4-bit type; the geometry sets
-# AssertFree0/1ElementMultiple, so the library never routes such a problem here.
-# The harness applies the predicate too, reporting DID_NOT_SATISFY_ASSERTS
-# instead of dispatching, which is what f4_subtile.yaml leans on to hold the
-# guard in place.  Either way it belongs to the data path rather than the
-# scales -- non-MX F4 carries the same constraint.
+# The contiguous operand's extent stays even -- an odd one leaves the leading
+# stride on a half byte for a 4-bit type.  Data-path constraint, not a scale
+# one; f4_subtile.yaml covers the rejection.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
