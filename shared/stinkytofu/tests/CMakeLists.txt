@@ -50,6 +50,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/ExecMaskGroupingTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/StinkyUnreachableBlockElimPassTest.cpp
+    unit/asm/FlattenCFGPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
     unit/asm/EstimateAsmCyclesTest.cpp
