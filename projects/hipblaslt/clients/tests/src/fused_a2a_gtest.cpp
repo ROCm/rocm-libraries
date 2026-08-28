@@ -7,10 +7,9 @@
 // family rule, each attribute's accepted range, the completeness check that runs
 // when the descriptor is attached to a matmul descriptor, communicator
 // registration, and the shape and layout requirements checked before a solution
-// is selected. No architecture carries a fused all-to-all kernel yet, so a
-// well-formed request ends in HIPBLAS_STATUS_NOT_SUPPORTED; the tests assert that
-// distinction, since an unusable request must be an error while missing
-// capability must never present as a rejected shape.
+// is selected. Every case here is a rejection; a well-formed request is answered
+// by solution selection, whose outcome depends on the loaded device library, and
+// is covered by the SDMA samples instead.
 //
 // The suite names carry the "pre_checkin" token on purpose: the ctest presets in
 // clients/tests/test_categories.yaml select by loose substring on a category
@@ -784,16 +783,6 @@ namespace
         hipblasLtMatrixLayout_t            Bdesc      = nullptr;
         hipblasLtMatrixLayout_t            Ddesc      = nullptr;
     };
-
-    // The distinction the whole error table turns on: a request that is merely
-    // unserved by this release reports missing capability, not a bad shape.
-    TEST_F(FusedA2ADispatch_pre_checkin, WellFormedRequestReportsMissingCapability)
-    {
-        registerOneRank();
-        completeAndAttach();
-        makeD();
-        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_NOT_SUPPORTED);
-    }
 
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingCommunicator)
     {

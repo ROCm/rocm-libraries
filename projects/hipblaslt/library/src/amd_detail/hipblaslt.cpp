@@ -294,10 +294,7 @@ namespace
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
 
-        // The request is well formed; no architecture carries a fused all-to-all
-        // kernel in this release.
-        log_error(__func__, "no fused all-to-all implementation for the selected device");
-        return HIPBLAS_STATUS_NOT_SUPPORTED;
+        return HIPBLAS_STATUS_SUCCESS;
     }
 
     // Runs the checks a matmul carrying a fused epilogue owes before it is
