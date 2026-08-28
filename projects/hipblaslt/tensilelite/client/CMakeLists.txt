@@ -25,10 +25,10 @@ endif()
 # thunk) + hsa-runtime64. It is OFF by default so the ordinary client build
 # carries no hsakmt/hsa-runtime64/libnuma dependency: environments that never
 # built these can still configure and build the client unchanged. Turn it on
-# with -DTENSILELITE_ENABLE_SDMA_A2A=ON.
-option(TENSILELITE_ENABLE_SDMA_A2A "Build GPU-initiated SDMA path for fused A2A" OFF)
+# with -DTENSILELITE_ENABLE_SDMA=ON.
+option(TENSILELITE_ENABLE_SDMA "Build the GPU-initiated SDMA transport path" OFF)
 
-if(TENSILELITE_ENABLE_SDMA_A2A AND NOT WIN32)
+if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
     # ROCm 7.x's hsakmt cmake config declares a link dependency on the imported
     # target numa::numa but never provides it, so find_package(hsakmt) fails at
     # generate time ("target numa::numa not found") unless we define it first.
@@ -63,7 +63,7 @@ if(TENSILELITE_ENABLE_SDMA_A2A AND NOT WIN32)
         else()
             message(FATAL_ERROR
                 "libnuma not found but required by hsakmt::hsakmt for "
-                "TENSILELITE_ENABLE_SDMA_A2A. Searched the ROCm-vendored path "
+                "TENSILELITE_ENABLE_SDMA. Searched the ROCm-vendored path "
                 "'${ROCM_PATH}/lib/rocm_sysdeps/lib' and the default system "
                 "library paths. Set ROCM_PATH if your ROCm is elsewhere, or "
                 "point NUMA_LIBRARY at the libnuma.so to use.")
@@ -103,13 +103,13 @@ endif()
 # header-only SdmaQueue.hpp -- today just FusedA2AClient.cpp, itself gated on
 # the macro below. The two executables compile one source each and never
 # include it, so they get neither the headers nor the libs.
-if(TENSILELITE_ENABLE_SDMA_A2A AND NOT WIN32)
+if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
     target_link_libraries(tensilelite-client-common
         PRIVATE hsakmt::hsakmt hsa-runtime64::hsa-runtime64)
     # FusedA2AClient.cpp gates its SdmaQueueSet setup on this macro; without it
     # the fused run fails fast instead of handing the kernel a null queue array.
     target_compile_definitions(tensilelite-client-common
-        PRIVATE TENSILELITE_ENABLE_SDMA_A2A)
+        PRIVATE TENSILELITE_ENABLE_SDMA)
 endif()
 
 # When mxDataGenerator is enabled, hipblaslt::mxdatagen propagates the

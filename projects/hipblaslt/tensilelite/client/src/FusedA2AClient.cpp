@@ -20,7 +20,7 @@
 
 // SdmaQueue.hpp is header-only and pulls in hsakmt, which is only on the
 // include path (and linked) under this option.
-#ifdef TENSILELITE_ENABLE_SDMA_A2A
+#ifdef TENSILELITE_ENABLE_SDMA
 #include "SdmaQueue.hpp"
 #endif
 
@@ -40,14 +40,13 @@ namespace TensileLite
     namespace Client
     {
         // Returns a process exit code; 0 == all iterations passed.
-        int runFusedA2A(po::variables_map const&                                       args,
-                        std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
-                        std::shared_ptr<Hardware>                                      hardware,
-                        ContractionProblem*                                            problemIn,
-                        int                                                            runIdx)
+        static int runFusedA2AForSolution(po::variables_map const&             args,
+                                          std::shared_ptr<Hardware>            hardware,
+                                          ContractionProblem*                  problemIn,
+                                          std::shared_ptr<ContractionSolution> solution,
+                                          int                                  runIdx)
         {
-#ifdef TENSILELITE_ENABLE_SDMA_A2A
-            const int      W          = args["fused-a2a-world"].as<int>();
+#ifdef TENSILELITE_ENABLE_SDMA
             const int      drainRecv  = args["fused-a2a-drain-recv"].as<int>() ? 1 : 0;
             const int      drainSend  = args["fused-a2a-drain-send"].as<int>() ? 1 : 0;
             const int      toValidate = args["num-elements-to-validate"].as<int>();
@@ -63,6 +62,12 @@ namespace TensileLite
                           << std::endl;
                 return -1;
             }
+
+            int deviceCount = 0;
+            HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
+
+            const int worldArg = args["fused-a2a-world"].as<int>();
+            const int W        = worldArg > 0 ? worldArg : deviceCount;
 
             // Bound W before it is used as a divisor further down.
             if(!fusedA2AWorldSizeValid(W))
@@ -87,8 +92,6 @@ namespace TensileLite
 
             std::cout << "[fused-a2a] single-process " << W << "-GPU setup + launch smoke\n";
 
-            int deviceCount = 0;
-            HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
             if(deviceCount < W)
             {
                 std::cerr << "[fused-a2a] need " << W << " devices, found " << deviceCount
@@ -103,21 +106,6 @@ namespace TensileLite
                 return 1;
             }
 
-            // Resolve the solution via the normal iterator (needs preProblem to
-            // set its internal m_problem before getSolution()).
-            auto solutionIterator = SolutionIterator::Default(library, hardware, args);
-            solutionIterator->preProblem(problem);
-            if(!solutionIterator->moreSolutionsInProblem())
-            {
-                std::cerr << "[fused-a2a] no solution for problem" << std::endl;
-                return 1;
-            }
-            std::shared_ptr<ContractionSolution> solution = solutionIterator->getSolution();
-            if(!solution)
-            {
-                std::cerr << "[fused-a2a] getSolution returned null" << std::endl;
-                return 1;
-            }
             std::cout << "[fused-a2a] solution: " << solution->name() << std::endl;
 
             if(!solution->problemType.fusedGemmA2A)
@@ -185,7 +173,7 @@ namespace TensileLite
             // The first `AM` FEATURE columns go all-to-all; [AM, M) stay local in
             // `out`.
             auto const& amArgs = args["fused-a2a-am"].as<std::vector<int>>();
-            if(amArgs.size() != 1 && (size_t)runIdx >= amArgs.size())
+            if(!amArgs.empty() && amArgs.size() != 1 && (size_t)runIdx >= amArgs.size())
             {
                 std::cerr << "[fused-a2a] ERROR: --fused-a2a-am has " << amArgs.size()
                           << " values, fewer than the problems selected by "
@@ -194,7 +182,8 @@ namespace TensileLite
                           << std::endl;
                 return -1;
             }
-            const uint32_t AM           = (uint32_t)amArgs[amArgs.size() == 1 ? 0 : runIdx];
+            const uint32_t AM
+                = amArgs.empty() ? M : (uint32_t)amArgs[amArgs.size() == 1 ? 0 : runIdx];
             const uint32_t nShard       = AM / (uint32_t)W;
             const uint32_t tilesPerRank = (uint32_t)(nShard / macroTileM);
             // tokenTiles sizes the counter array and the padded recv buffer.
@@ -530,8 +519,10 @@ namespace TensileLite
             // Repeat loop: race detection + p50/p90 latency. Each iteration re-zeroes
             // counter/flag/recv (else the DRAIN barrier releases trivially and a
             // stale-correct recv masks a broken scatter).
-            const int iters  = std::max(1, args["fused-a2a-iters"].as<int>());
-            int       warmup = args["fused-a2a-warmup"].as<int>();
+            const int iters  = std::max(1,
+                                       args["num-enqueues-per-sync"].as<int>()
+                                           * args["num-syncs-per-benchmark"].as<int>());
+            int       warmup = args["num-warmups"].as<int>();
             if(warmup < 0)
                 warmup = 0;
             if(warmup >= iters)
@@ -1068,13 +1059,46 @@ namespace TensileLite
             return raceFail ? 3 : 0;
 #else
             std::cerr << "[fused-a2a] ERROR: this client was built without "
-                         "TENSILELITE_ENABLE_SDMA_A2A, so no SDMA rings exist, but the "
+                         "TENSILELITE_ENABLE_SDMA, so no SDMA rings exist, but the "
                          "fused epilogue unconditionally submits SDMA packets and would "
                          "dereference a null queue handle. Reconfigure with "
-                         "-DTENSILELITE_ENABLE_SDMA_A2A=ON."
+                         "-DTENSILELITE_ENABLE_SDMA=ON."
                       << std::endl;
             return 1;
 #endif
+        }
+
+        int runFusedA2A(po::variables_map const&                                       args,
+                        std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
+                        std::shared_ptr<Hardware>                                      hardware,
+                        ContractionProblem*                                            problemIn,
+                        int                                                            runIdx)
+        {
+            auto solutionIterator = SolutionIterator::Default(library, hardware, args);
+            solutionIterator->preProblem(problemIn);
+
+            if(!solutionIterator->moreSolutionsInProblem())
+            {
+                std::cerr << "[fused-a2a] no solution for problem" << std::endl;
+                return 1;
+            }
+
+            while(solutionIterator->moreSolutionsInProblem())
+            {
+                std::shared_ptr<ContractionSolution> solution = solutionIterator->getSolution();
+                if(!solution)
+                {
+                    std::cerr << "[fused-a2a] getSolution returned null" << std::endl;
+                    return 1;
+                }
+
+                int rc = runFusedA2AForSolution(args, hardware, problemIn, solution, runIdx);
+                if(rc != 0)
+                    return rc;
+
+                solutionIterator->postSolution();
+            }
+            return 0;
         }
 
     } // namespace Client

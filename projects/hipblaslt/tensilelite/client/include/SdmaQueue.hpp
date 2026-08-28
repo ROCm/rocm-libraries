@@ -8,7 +8,7 @@
 // Header-only, and therefore hsakmt-DEPENDENT: including it requires the
 // hsakmt/hsa headers on the include path. Only TUs in tensilelite-client-common
 // have that (the dependency is PRIVATE to that target), and the sole includer
-// gates itself on TENSILELITE_ENABLE_SDMA_A2A.
+// gates itself on TENSILELITE_ENABLE_SDMA.
 
 #pragma once
 
