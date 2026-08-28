@@ -104,6 +104,18 @@ namespace TensileLite
                 hipAMDGPU->analyticalHardware->arch);
         }
 
+        // Bytes of the flag region the per-XCD work-queue counters occupy
+        // before the first ready flag. The counters and the flags share one
+        // buffer: the kernel addresses both off AddressFlags, and the flags
+        // start after the counters (StreamK.py _wsFlagsBaseOffset, which is
+        // this same product). Only the dynamic-queue paths have the prefix, so
+        // the caller decides whether to apply it. 0 when the architecture
+        // cannot be determined.
+        inline size_t streamKFlagPrefixBytes(Hardware const& hardware)
+        {
+            return streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
+        }
+
         // The dynamic-queue fetch / work stealing is only correct when the
         // device's runtime NUM_XCD is a power of two AND equals the baked
         // per-XCD queue count. Returns true (UNSUPPORTED) when the hardware is
@@ -4142,6 +4154,7 @@ namespace TensileLite
             size_t tiles = problem.getNumTiles(sizeMapping, 1) * batch;
             return tiles * sizeMapping.synchronizerSizePerWG * sizeof(int);
         }
+
         return 0;
     }
 
@@ -4862,16 +4875,39 @@ namespace TensileLite
                                         && reductionStrat != origami::reduction_t::parallel
                                         && skGrid > 0 && (tiles % skGrid) != 0;
 
-            if(usesFlagRegion && skGrid > static_cast<size_t>(StreamKFlagElements))
+            // SK4 and the SK4 sub-path of SK5 put the per-XCD work-queue
+            // counters at the base of that same region and start the flags
+            // after them, so those grids have fewer entries to index than the
+            // region holds; the rest index from offset 0 and keep all of them.
+            // Tightening the bound for every path instead would shrink grids
+            // that have the whole region to themselves.
+            size_t flagEntries = StreamKFlagElements;
+            if(usesFlagRegion
+               && (self.sizeMapping.streamK == 4
+                   || (self.sizeMapping.streamK == 5
+                       && (sk5EffectiveDynamic != nullptr
+                               ? *sk5EffectiveDynamic
+                               : self.streamK5EffectiveDynamic(problem, hardware)))))
+            {
+                const size_t prefixEntries = streamKFlagPrefixBytes(hardware) / sizeof(int);
+                // An unknown architecture reports no prefix, and a prefix that
+                // swallowed the region would leave no grid to launch; both keep
+                // the full-region bound, which is no weaker than before.
+                if(prefixEntries < flagEntries)
+                    flagEntries -= prefixEntries;
+            }
+
+            if(usesFlagRegion && skGrid > flagEntries)
             {
                 if(Debug::Instance().printPropertyEvaluation())
                 {
                     std::cerr << "TensileLite::DEBUG: kernel '" << self.kernelName
-                              << "' StreamK grid " << skGrid << " exceeds the "
-                              << StreamKFlagElements << "-entry flag region (tiles=" << tiles
-                              << "); clamping the grid to " << StreamKFlagElements << ".\n";
+                              << "' StreamK grid " << skGrid << " exceeds the " << flagEntries
+                              << " usable entries of the " << StreamKFlagElements
+                              << "-entry flag region (tiles=" << tiles
+                              << "); clamping the grid to " << flagEntries << ".\n";
                 }
-                skGrid = StreamKFlagElements;
+                skGrid = flagEntries;
             }
 
             return skGrid;
