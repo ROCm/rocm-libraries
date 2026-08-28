@@ -587,6 +587,23 @@ class Tensor {
         });
     }
 
+    // Copies the selected logical elements into a contiguous rank-one Tensor
+    // in selection order. Encoded bits are preserved exactly.
+    Tensor copySelectedElements(std::span<const size_t> linearIndices,
+                                IndexOrder indexOrder) const {
+        Tensor result(m_type, Shape{linearIndices.size()});
+        const uint16_t bits = scalarTypeInfo(m_type).storageBits;
+        size_t destinationIndex = 0;
+        forEachLinearIndex(linearIndices, indexOrder, [&](std::span<const size_t> indices) {
+            detail::copyBitRange(rawEncodedBackingStorage(),
+                                 detail::bitOffset(m_type, layout().elementOffset(indices)),
+                                 result.rawEncodedBackingStorage(),
+                                 detail::bitOffset(m_type, destinationIndex), bits);
+            ++destinationIndex;
+        });
+        return result;
+    }
+
     void copyLogicalElementsFrom(const Tensor& source) const {
         if (m_type != source.m_type)
             throw std::invalid_argument("Tensor copy requires matching scalar types.");
