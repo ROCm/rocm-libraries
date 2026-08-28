@@ -30,11 +30,13 @@
 
 /**
  * @file TestIngestorKernelCode.cpp
- * @brief The path-confinement guard in buildIngestorKernelCode, called rather than copied.
+ * @brief The two checks buildIngestorKernelCode makes before loading anything: path
+ *        confinement, and the packaged-versus-marshalled argument signature. Called rather
+ *        than copied.
  *
- * TestPackedDescriptorLoad.cpp reproduces the rule inline, so deleting the guard leaves
- * that suite green; these cases turn red. No device and no archive on disk are needed --
- * the guard throws before the first HIP call and before kpackLoader.load.
+ * TestPackedDescriptorLoad.cpp reproduces the confinement rule inline, so deleting the
+ * guard leaves that suite green; these cases turn red. No device and no archive on disk are
+ * needed -- both checks throw before the first HIP call and before kpackLoader.load.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -65,10 +67,24 @@ public:
     }
 };
 
+/// One unnamed device pointer, the shape clang records for a HIP kernel parameter.
+KernelArgument buffer(uint32_t offset)
+{
+    return KernelArgument{"global_buffer", 8, offset, ""};
+}
+
+/// What both sides of the signature comparison say unless a case overrides one of them:
+/// three device pointers, as the pointwise pack marshals.
+std::vector<KernelArgument> threeBuffers()
+{
+    return {buffer(0), buffer(8), buffer(16)};
+}
+
 /// Nothing it names has to exist on disk.
 KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
                                  const std::filesystem::path& treeRoot,
-                                 const std::string& library)
+                                 const std::string& library,
+                                 const std::vector<KernelArgument>& signature = threeBuffers())
 {
     KernelDefinition kernel;
     kernel.kernelId.fill(0x21);
@@ -79,6 +95,7 @@ KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
     kernel.source.library = library;
     kernel.source.tocKey = "PointwiseAdd/block64";
     kernel.source.symbol = "PointwiseAdd";
+    kernel.source.signature = signature;
     kernel.originDirectory = originDirectory;
     kernel.treeRoot = treeRoot;
     return kernel;
@@ -96,9 +113,11 @@ public:
     {
     }
 
-    IngestorKernelCode build(const KernelDefinition& kernel)
+    IngestorKernelCode build(const KernelDefinition& kernel,
+                             const std::vector<KernelArgument>& expected = threeBuffers())
     {
-        return buildIngestorKernelCode(_compiler, _loader, _fixture.context(), kernel, _options);
+        return buildIngestorKernelCode(
+            _compiler, _loader, _fixture.context(), kernel, _options, expected);
     }
 
 private:
@@ -352,6 +371,130 @@ TEST(TestIngestorKernelCode, RejectsALibraryReachedThroughAJunctionInsideTheTree
     }
 }
 #endif // _WIN32
+
+// ---------------------------------------------------------------------------
+// Signature comparison
+// ---------------------------------------------------------------------------
+
+/// A library that does not exist is enough for these: the comparison runs before the load,
+/// so a case that reaches the loader has already failed to be rejected.
+constexpr const char* ABSENT_LIBRARY = "absent.kpack";
+
+TEST(TestIngestorKernelCode, RejectsAPackagedKernelTakingMoreArgumentsThanThePackMarshals)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    GuardHarness harness;
+    auto signature = threeBuffers();
+    signature.push_back(KernelArgument{"by_value", 4, 24, ""});
+    const auto kernel = makeKpackKernel(scratch.path(), scratch.path(), ABSENT_LIBRARY, signature);
+
+    try
+    {
+        harness.build(kernel);
+        FAIL() << "expected a fourth packaged argument to be rejected";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        // Both lists, not just the verdict: the reader has to see which side gained the
+        // argument without opening the archive.
+        const std::string what = error.what();
+        EXPECT_NE(what.find("by_value:4@24"), std::string::npos) << what;
+        EXPECT_NE(what.find("this pack launches it with"), std::string::npos) << what;
+        EXPECT_NE(what.find("PointwiseAdd"), std::string::npos) << what;
+    }
+}
+
+TEST(TestIngestorKernelCode, RejectsAByValueArgumentWhoseWidthDiffers)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    GuardHarness harness;
+    const auto kernel = makeKpackKernel(scratch.path(),
+                                        scratch.path(),
+                                        ABSENT_LIBRARY,
+                                        {buffer(0), KernelArgument{"by_value", 8, 8, ""}});
+
+    try
+    {
+        harness.build(kernel, {buffer(0), KernelArgument{"by_value", 4, 8, ""}});
+        FAIL() << "expected a widened by-value argument to be rejected";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("by_value:8@8"), std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(TestIngestorKernelCode, RejectsAnEqualArityPermutationWhenBothSidesRecordNames)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    GuardHarness harness;
+    // Both sides must keep their names: stripping them to HIP shape would leave this case
+    // passing for having nothing to disagree about rather than for detecting the swap.
+    const std::vector<KernelArgument> marshalled = {{"global_buffer", 8, 0, "inputA"},
+                                                    {"global_buffer", 8, 8, "inputB"},
+                                                    {"global_buffer", 8, 16, "output"}};
+    const std::vector<KernelArgument> packaged = {{"global_buffer", 8, 0, "output"},
+                                                  {"global_buffer", 8, 8, "inputA"},
+                                                  {"global_buffer", 8, 16, "inputB"}};
+    const auto kernel = makeKpackKernel(scratch.path(), scratch.path(), ABSENT_LIBRARY, packaged);
+
+    try
+    {
+        harness.build(kernel, marshalled);
+        FAIL() << "expected a permuted argument list to be rejected";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        const std::string what = error.what();
+        EXPECT_NE(what.find("'output', global_buffer:8@8 'inputA'"), std::string::npos) << what;
+        EXPECT_NE(what.find("'inputA', global_buffer:8@8 'inputB'"), std::string::npos) << what;
+    }
+}
+
+TEST(TestIngestorKernelCode, AcceptsAMatchWhereOnlyOneSideRecordsNames)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    GuardHarness harness;
+    const auto kernel = makeKpackKernel(scratch.path(), scratch.path(), ABSENT_LIBRARY);
+
+    try
+    {
+        harness.build(kernel,
+                      {{"global_buffer", 8, 0, "inputA"},
+                       {"global_buffer", 8, 8, "inputB"},
+                       {"global_buffer", 8, 16, "output"}});
+        FAIL() << "expected the absent archive to be what fails, not the signature";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        // Reaching the loader IS the pass: the comparison let this through and the missing
+        // file is the next thing to go wrong.
+        EXPECT_NE(std::string(error.what()).find("does not exist"), std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(TestIngestorKernelCode, DoesNotCompareOffsets)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    GuardHarness harness;
+    const auto kernel = makeKpackKernel(scratch.path(), scratch.path(), ABSENT_LIBRARY);
+
+    try
+    {
+        harness.build(kernel, {buffer(0), buffer(0), buffer(0)});
+        FAIL() << "expected the absent archive to be what fails, not the signature";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("does not exist"), std::string::npos)
+            << error.what();
+    }
+}
 
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine
