@@ -4697,8 +4697,38 @@ class KernelWriterAssembly(KernelWriter):
           prePadElems = self.states.srdShiftLeft[tc]
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), \
                     unrollStride, kernel["DepthU"] - 1, comment="(DepthU-1) * unrollStride (last K row in window)"))
-          module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=(freeSpan + prePadElems), \
-                    comment="+ MT free span (%u) + prePad (%u)"%(freeSpan, prePadElems)))
+          # Bring the free span down to what is left of the tensor, the way the
+          # strided branch above clamps numLine with SMinU32.  The last
+          # workgroup along the free dim owns fewer than MT elements whenever
+          # the size leaves a remainder, and spanning the whole MT there puts
+          # the end of the window (MT - remainder) * bpe past the tensor.  The
+          # base has already advanced by DepthU * unrollStride per K window, so
+          # on the final window that overhang is off the end of the allocation
+          # and the loads are real accesses rather than clamped ones.  It stays
+          # hidden while the overhang shares a page with the tail of the tensor,
+          # so it needs both a remainder and an allocation ending on a page
+          # boundary -- macro tile 96 over M 2048 is one such pair.
+          #
+          # Round up to a whole load first.  DirectToLds drops the LDS write for
+          # a load that is not wholly in range, and one lane covers 16B, so a
+          # limit cut to the exact element count silently leaves stale LDS for
+          # the valid elements sharing that lane's chunk with the tail.
+          chunkElems = max(1, int(16 / float(tP["bpeGR"])))
+          for i in range(0, numDim):
+            idx = indices[i]
+            if idx == kernel["ProblemType"]["Index0"] or idx == kernel["ProblemType"]["Index1"]:
+              module.add(SSubU32(dst=sgpr(stmp+1), src0=self.sizeRef(idx), src1=sgpr(tileStart+0), \
+                        comment="numToEnd = size - WG*MT"))
+              module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=(chunkElems - 1), \
+                        comment="round up to a whole %uB load (%u elements)"%(16, chunkElems)))
+              module.add(SAndB32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=hex(~(chunkElems - 1) & 0xffffffff), \
+                        comment="mask off the partial load"))
+              module.add(SMinU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=freeSpan, \
+                        comment="free span = min(that, MT %u)"%freeSpan))
+              module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=prePadElems, \
+                        comment="+ prePad (%u)"%prePadElems))
+              module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(stmp+1), \
+                        comment="+ free span + prePad"))
           module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), \
                     comment="buffer_load limit for %s (unit-stride tile K-window)"%tc))
           # tileStart stays in elements (stride 1); no scaling needed.
