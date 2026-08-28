@@ -8,7 +8,8 @@
 
 #include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
 #include <TensileLite/Client/HostNumerics/TensileDataGeneration.hpp>
-#include <roc/host_numerics/validation.hpp>
+#include <roc/host_numerics/generation.hpp>
+#include <roc/host_numerics/structured_sparsity.hpp>
 
 #include <algorithm>
 #include <cstddef>

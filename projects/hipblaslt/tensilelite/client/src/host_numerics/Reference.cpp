@@ -6,7 +6,6 @@
 #include <TensileLite/Client/HostNumerics/GemmInvocationAdapter.hpp>
 #include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
 #include <TensileLite/Client/HostNumerics/Reference.hpp>
-#include <roc/host_numerics/validation.hpp>
 
 #include "TimingInstrumentation.hpp"
 
