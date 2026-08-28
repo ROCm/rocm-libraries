@@ -250,6 +250,58 @@ def _write_text_at(base, rel_dir, name, text):
     _dest_at(base, rel_dir, name).write_text(text, encoding="utf-8")
 
 
+@dataclass(frozen=True)
+class _VariantJob:
+    """One distinct variant the prewarm compiles, as a picklable record.
+
+    Every field is a str or a plain dict so the record crosses a process
+    boundary without a custom reducer. `vk` is computed in the parent by
+    `_variant_key_for`; the worker never recomputes it. `hipcc` travels by value
+    rather than through an environment variable or a module global, keeping the
+    worker a pure function of its argument.
+    """
+
+    vk: str
+    kind: str
+    ukd: dict
+    rel_dir: str
+    source_root: str
+    out_dir: str
+    hipcc: str
+
+
+def _selected_entries(doc, arch, ukd_by_id):
+    """Yield the entries of doc that ship for arch.
+
+    Yields `(entry_id, ukd_doc, sdesc)`: for a standalone-UKD id ref, the id
+    string, that UKD's doc, and its Descriptor; for an inline UKD, `None`, the
+    entry dict itself, and `None`. The Descriptor rather than its rel_dir,
+    because the walk needs its `path.name` for the error context and for the
+    shipped filename as well as its `rel_dir` for the variant key.
+    """
+    return iter(())
+
+
+def _prewarm_jobs(flat, source_root, arch):
+    """The distinct variant jobs the walk will compile."""
+    return []
+
+
+def _pack_jobs():
+    """Worker count for the prewarm."""
+    return 1
+
+
+def _variant_key_for(ukd, rel_dir):
+    """Content-hash variant key, or None for a kind the prewarm skips."""
+    return None
+
+
+def _first_failure(results):
+    """First failing result in submission order, or None."""
+    return None
+
+
 def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=print):
     """Compile every hip UKD in the KDPs targeting arch and stage a per-arch tree.
 
