@@ -86,6 +86,10 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
 
         if not _enable_gfx942_fp16_flash(problem):
             return False, "gfx942 fp16 flash not eligible for this shape"
+        # dense_pipe is the ring-sliced K path; sliding-window is not implemented
+        # for it (D128 SW prefill goes through the non-ring flash path).
+        if problem.sliding_window > 0:
+            return False, "gfx942 fp16 flash not eligible for this shape (sliding_window)"
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
@@ -328,3 +332,206 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
 def register(registry: CandidateRegistry) -> None:
     registry.register(_make_gfx942_attention_dense_candidate())
     registry.register(_make_gfx942_dense_pipe_candidate())
+
+
+# ---------------------------------------------------------------------------
+# Harness helpers: CLI -> AttentionRequest -> dispatch-resolved AttentionDenseSpec
+#
+# These live here (not in builders/) because they depend on dispatch-layer
+# symbols (AttentionRequest, dense_spec_for_request).  Builders must not
+# import upward from dispatch, so callers at or above the dispatch layer
+# import these from here.
+# ---------------------------------------------------------------------------
+
+import argparse  # noqa: E402 -- intentionally deferred from top-of-file
+
+_OVERRIDE_FIELDS = (
+    "block_n",
+    "waves_per_eu",
+    "interleave",
+    "lds_k_group_pad",
+    "sliding_window",
+)
+
+
+def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
+    """Add the dense tuning flags, every one defaulting to ``None``.
+
+    ``None`` means "whatever dispatch ships for this request".
+    """
+    ap.add_argument(
+        "--bn",
+        dest="block_n",
+        type=int,
+        default=None,
+        help="block_n (KV tile) override; default = whatever dispatch ships",
+    )
+    ap.add_argument(
+        "--wpe",
+        "--waves-per-eu",
+        dest="waves_per_eu",
+        type=int,
+        default=None,
+        help="waves_per_eu override; default = the per-config tuned value dispatch ships",
+    )
+    ap.add_argument(
+        "--persistent",
+        nargs="?",
+        const="on",
+        choices=["auto", "on", "off"],
+        default=None,
+        help=(
+            "persistent grid-stride kernel: 'auto' (dispatch decides, the default), "
+            "'on' (bare --persistent), or 'off'"
+        ),
+    )
+    ap.add_argument(
+        "--np",
+        "--num-persistent",
+        dest="num_persistent",
+        type=int,
+        default=None,
+        help="num_persistent CTAs; default = the gfx942 CU count dispatch ships",
+    )
+    ap.add_argument(
+        "--persist-decode",
+        dest="persist_decode",
+        choices=["auto", "qb_major", "hkv_major"],
+        default=None,
+        help="persistent work-item decode; default = dispatch's 'auto'",
+    )
+    ap.add_argument(
+        "--interleave",
+        dest="interleave",
+        action="store_const",
+        const=True,
+        default=None,
+        help="boustrophedon qb order (persistent only)",
+    )
+    ap.add_argument(
+        "--no-interleave",
+        dest="interleave",
+        action="store_const",
+        const=False,
+        help="force boustrophedon qb order off",
+    )
+    ap.add_argument(
+        "--kpad",
+        "--lds-k-group-pad",
+        dest="lds_k_group_pad",
+        type=int,
+        default=None,
+        help="K row-GROUP LDS pad in elements (D64 path); 0 reproduces the unpadded A/B",
+    )
+    ap.add_argument(
+        "--sw",
+        dest="sliding_window",
+        type=int,
+        default=None,
+        help="sliding_window (0=off; multiple of block_n). P1+: currently rejected",
+    )
+
+
+def dense_request(
+    args: argparse.Namespace,
+    *,
+    batch: int,
+    seqlen_q: int,
+    seqlen_kv: int,
+    num_query_heads: int,
+    num_kv_heads: int,
+    head_size: int,
+    causal: bool,
+    dtype: str,
+) -> AttentionRequest:
+    """The :class:`AttentionRequest` a production caller would submit."""
+    req_kwargs = {}
+    if getattr(args, "persistent", None) is not None:
+        req_kwargs["dense_persistent"] = args.persistent
+    if getattr(args, "num_persistent", None) is not None:
+        req_kwargs["dense_num_persistent"] = int(args.num_persistent)
+    if getattr(args, "persist_decode", None) is not None:
+        req_kwargs["dense_persist_decode"] = args.persist_decode
+    return AttentionRequest(
+        batch=int(batch),
+        nhead_q=int(num_query_heads),
+        nhead_k=int(num_kv_heads),
+        seqlen_q=int(seqlen_q),
+        seqlen_k=int(seqlen_kv),
+        hdim_q=int(head_size),
+        hdim_v=int(head_size),
+        arch="gfx942",
+        mask_type=1 if causal else 0,
+        dtype=str(dtype).lower(),
+        algorithm="attention_dense",
+        spec_id="gfx942_attention_dense",
+        **req_kwargs,
+    )
+
+
+def dense_spec_overrides(args: argparse.Namespace) -> dict:
+    """Spec-field overrides for the tuning flags the user EXPLICITLY passed."""
+    return {
+        name: getattr(args, name)
+        for name in _OVERRIDE_FIELDS
+        if getattr(args, name, None) is not None
+    }
+
+
+def assert_tracks_dispatch(
+    spec,
+    req: AttentionRequest,
+    overrides: "dict | None" = None,
+) -> None:
+    """Raise unless ``spec`` is what dispatch would ship for ``req``, modulo overrides."""
+    import dataclasses
+    from kernels.gfx942.attention_dense import AttentionDenseSpec
+
+    overrides = dict(overrides or {})
+    shipped = dense_spec_for_request(req)
+    drift = [
+        f"{f.name}: harness={getattr(spec, f.name)!r} dispatch={getattr(shipped, f.name)!r}"
+        for f in dataclasses.fields(AttentionDenseSpec)
+        if f.name not in overrides and getattr(spec, f.name) != getattr(shipped, f.name)
+    ]
+    if drift:
+        raise RuntimeError(
+            "harness spec does not match the spec dispatch would ship for this "
+            "request; fields not explicitly overridden must track dispatch "
+            f"(overrides={sorted(overrides)}): " + "; ".join(drift)
+        )
+
+
+def resolve_dense_spec(req: AttentionRequest, overrides: "dict | None" = None):
+    """The spec dispatch ships for ``req``, plus the caller's explicit overrides."""
+    import dataclasses
+    from kernels.gfx942.attention_dense import AttentionDenseSpec
+
+    overrides = dict(overrides or {})
+    known = {f.name for f in dataclasses.fields(AttentionDenseSpec)}
+    unknown = sorted(set(overrides) - known)
+    if unknown:
+        raise ValueError(
+            f"unknown AttentionDenseSpec override field(s): {unknown}; "
+            f"known fields: {sorted(known)}"
+        )
+
+    spec = dense_spec_for_request(req)
+    if overrides:
+        spec = dataclasses.replace(spec, **overrides)
+    assert_tracks_dispatch(spec, req, overrides)
+    return spec
+
+
+def describe_dense_spec(spec, overrides: "dict | None" = None) -> str:
+    """One-line identity of what is actually about to be built and measured."""
+    from kernels.gfx942.attention_dense import gfx942_kernel_name
+
+    tag = gfx942_kernel_name(spec)
+    if overrides:
+        tag += (
+            "  [OVERRIDES "
+            + " ".join(f"{k}={v!r}" for k, v in sorted(overrides.items()))
+            + "]"
+        )
+    return tag

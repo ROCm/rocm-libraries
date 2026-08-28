@@ -445,7 +445,9 @@ class TestGfx1250ScalarFp8Attention(unittest.TestCase):
             supports_native_unified_attention,
         )
 
-        ok, reason = supports_native_unified_attention(self._small_fp8_problem())
+        ok, reason = supports_native_unified_attention(
+            self._small_fp8_problem(), arch="gfx1250"
+        )
         self.assertTrue(ok, reason)
         self.assertIn("supported", reason)
 
@@ -455,10 +457,10 @@ class TestGfx1250ScalarFp8Attention(unittest.TestCase):
         )
 
         ok_alibi, reason_alibi = supports_native_unified_attention(
-            self._small_fp8_problem(use_alibi=True)
+            self._small_fp8_problem(use_alibi=True), arch="gfx1250"
         )
         ok_qq, reason_qq = supports_native_unified_attention(
-            self._small_fp8_problem(use_qq_bias=True)
+            self._small_fp8_problem(use_qq_bias=True), arch="gfx1250"
         )
         self.assertFalse(ok_alibi)
         self.assertIn("ALiBi", reason_alibi)

@@ -69,10 +69,9 @@ sys.path.insert(0, _RK + "/library")
 
 import torch  # noqa: E402
 
-# Single copy of the CLI -> AttentionRequest -> dispatch-resolved spec plumbing,
-# including the raise-on-drift guard. Duplicating it here is what let the two
-# harnesses drift apart from dispatch in the first place.
-from builders.gfx942.attention.prefill.attention_dense_prefill import (  # noqa: E402
+# CLI -> AttentionRequest -> dispatch-resolved spec plumbing lives at dispatch
+# layer (dispatch.attention.gfx942) so builders/ can stay free of upward imports.
+from dispatch.attention.gfx942 import (  # noqa: E402
     add_dense_tuning_args,
     dense_request,
     dense_spec_overrides,
