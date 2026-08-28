@@ -31,4 +31,11 @@ inline rocblaslt_status validate_fused_a2a(const _rocblaslt_handle*           ha
     return rocblaslt_status_success;
 }
 
+inline bool fused_a2a_lacks_sdma_queues(const RocblasltContractionProblem& problem)
+{
+    RocblasltFusedEpilogueInfo info;
+    return rocblaslt_resolve_fused_epilogue(problem.fused_epilogue, info) && info.hasA2APrefix
+           && info.a2aSdmaQueues == nullptr;
+}
+
 #endif
