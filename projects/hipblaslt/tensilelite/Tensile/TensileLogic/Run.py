@@ -52,6 +52,7 @@ from .KnownBugs import (
     normalize_logic_relative_path,
 )
 from .ValidChipId import _validateChipId
+from .ValidCorpusConsistency import check_corpus_invariants, report_corpus_invariant_violations
 from .ValidMatrixInstruction import _validateMatrixInstruction
 from .ValidWorkGroup import _validateWorkGroup
 from .ValidWorkGroupMappingXCC import _validateWorkGroupMappingXCC, reset_reported_failures
@@ -262,6 +263,14 @@ def main():
     reset_reported_failures()
     jobs, isaInfoMap, logicPath, files, check, args = _setup()
 
+    # Corpus-wide invariants (sibling DeviceNames, chip-ID-arch-lock,
+    # gfx1250v0-overlay consistency) are architecture-independent, so they run
+    # over the full logicPath -- not the already --architecture-filtered
+    # `files` -- and only when --check-all is given. Fail fast, before the
+    # (expensive) per-solution loop.
+    corpus_violations = check_corpus_invariants(logicPath) if check.All else []
+    report_corpus_invariant_violations(corpus_violations)
+
     try:
         known_bugs = load_known_bugs(args.KnownBugs)
     except (ValueError, RuntimeError) as e:
@@ -320,7 +329,9 @@ def main():
             f"Stale known-bugs  {stale_known_bugs} entries now pass validation "
             "(remove them from the known-bugs YAML)"
         )
+    if corpus_violations:
+        print(f"Corpus invariants  {len(corpus_violations)} violations")
 
     strict_stale = getattr(args, "StrictKnownBugs", False) and stale_known_bugs > 0
-    if rejects > 0 or chip_id_failures > 0 or strict_stale:
+    if rejects > 0 or chip_id_failures > 0 or strict_stale or corpus_violations:
         exit(1)
