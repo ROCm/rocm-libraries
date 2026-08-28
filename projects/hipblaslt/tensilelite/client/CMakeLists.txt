@@ -140,6 +140,15 @@ add_library(tensilelite-host-numerics-adapter STATIC
 )
 add_library(tensilelite::host-numerics-adapter ALIAS tensilelite-host-numerics-adapter)
 
+target_sources(tensilelite-host-numerics-adapter
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/HostNumerics/GemmInvocationAdapter.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/HostNumerics/HostNumericsBridge.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/HostNumerics/Reference.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/HostNumerics/TensileDataGeneration.hpp"
+)
+
 target_include_directories(tensilelite-host-numerics-adapter
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"

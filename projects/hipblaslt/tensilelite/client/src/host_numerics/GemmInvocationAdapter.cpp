@@ -1,8 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <roc/host_numerics/adapters/tensilelite/GemmInvocationAdapter.hpp>
-#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/GemmInvocationAdapter.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
 
 #include <Tensile/TensorDescriptor_fwd.hpp>
 #include <Tensile/Utils.hpp>
@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace TensileLite::Client::reference_adapter
+namespace TensileLite::Client::HostNumerics
 {
     namespace detail
     {
@@ -1231,4 +1231,4 @@ namespace TensileLite::Client::reference_adapter
             inputs,
             referenceOutputSelection(problem.d(), elementsToValidate));
     }
-} // namespace TensileLite::Client::reference_adapter
+} // namespace TensileLite::Client::HostNumerics

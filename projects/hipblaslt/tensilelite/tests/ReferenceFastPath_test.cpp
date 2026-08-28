@@ -5,9 +5,9 @@
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
-#include <roc/host_numerics/adapters/tensilelite/GemmInvocationAdapter.hpp>
-#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
-#include <roc/host_numerics/adapters/tensilelite/Reference.hpp>
+#include <TensileLite/Client/HostNumerics/GemmInvocationAdapter.hpp>
+#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/HostNumerics/Reference.hpp>
 #include <roc/host_numerics/validation.hpp>
 
 #include <array>
@@ -30,9 +30,9 @@ namespace
     constexpr roc::host_numerics::GemmBackend automaticExecution
         = roc::host_numerics::GemmBackend::Automatic;
 
-    static_assert(!std::is_default_constructible_v<reference_adapter::TranslatedGemmBatch>);
-    static_assert(std::is_nothrow_move_constructible_v<reference_adapter::TranslatedGemmBatch>);
-    static_assert(std::is_nothrow_move_assignable_v<reference_adapter::TranslatedGemmBatch>);
+    static_assert(!std::is_default_constructible_v<HostNumerics::TranslatedGemmBatch>);
+    static_assert(std::is_nothrow_move_constructible_v<HostNumerics::TranslatedGemmBatch>);
+    static_assert(std::is_nothrow_move_assignable_v<HostNumerics::TranslatedGemmBatch>);
 
     ContractionProblemGemm makePackedProblem(rocisa::DataType typeA,
                                              rocisa::DataType typeB,
@@ -306,10 +306,10 @@ TEST(ReferenceInvocationAdapter, RejectsUnknownScaleABMode)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
     const auto translation
-        = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
-    EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
-              reference_adapter::TranslationFailureCode::InvalidScaleConfiguration);
+        = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<HostNumerics::TranslationFailure>(translation).code,
+              HostNumerics::TranslationFailureCode::InvalidScaleConfiguration);
 }
 
 TEST(ReferenceBlockedBackend, DoesNotChangeHalfAccumulatorSemantics)
@@ -503,13 +503,13 @@ TEST(ReferenceFusedEpilogue, KeepsScaleCDInGemm)
     inputs.scaleC = &scaleC;
     inputs.scaleD = &scaleD;
 
-    auto invocation = reference_adapter::translateGemmInvocation(
+    auto invocation = HostNumerics::translateGemmInvocation(
         problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::GemmInvocationAdapter>(invocation));
-    auto adapter = std::move(std::get<reference_adapter::GemmInvocationAdapter>(invocation));
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocation));
+    auto adapter = std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocation));
     auto batch   = adapter.translateBatch(0);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslatedGemmBatch>(batch));
-    auto translated = std::move(std::get<reference_adapter::TranslatedGemmBatch>(batch));
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
+    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
 
     EXPECT_EQ(translated.gemm().epilogue.scaleC.as<float>(), scaleC);
     EXPECT_EQ(translated.gemm().epilogue.outputScale.as<float>(), scaleD);
@@ -1164,7 +1164,7 @@ TEST(ReferenceInvocationAdapter, SnapshotsProblemPolicyBeforeBatchTranslation)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.scaleAlphaVec = scaleAlpha.data();
 
-    std::optional<reference_adapter::GemmInvocationAdapter> adapter;
+    std::optional<HostNumerics::GemmInvocationAdapter> adapter;
     {
         auto problem = makePackedProblem(
             rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
@@ -1172,16 +1172,16 @@ TEST(ReferenceInvocationAdapter, SnapshotsProblemPolicyBeforeBatchTranslation)
         problem.setScaleAlphaVec(rocisa::DataType::Float, M, /*factorDim=*/0);
         problem.setF32XdlMathOp(rocisa::DataType::XFloat32);
 
-        auto invocation = reference_adapter::translateGemmInvocation(
+        auto invocation = HostNumerics::translateGemmInvocation(
             problem, inputs, /*elementsToValidate=*/-1);
-        ASSERT_TRUE(std::holds_alternative<reference_adapter::GemmInvocationAdapter>(invocation));
+        ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocation));
         adapter.emplace(
-            std::move(std::get<reference_adapter::GemmInvocationAdapter>(invocation)));
+            std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocation)));
     }
 
     auto batch = adapter->translateBatch(0);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslatedGemmBatch>(batch));
-    auto translated = std::move(std::get<reference_adapter::TranslatedGemmBatch>(batch));
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
+    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
     ASSERT_TRUE(translated.gemm().epilogue.scaleAlpha);
     EXPECT_EQ(translated.gemm().epilogue.scaleAlpha->axis,
               roc::host_numerics::MatrixAxis::Row);
@@ -1224,15 +1224,15 @@ TEST(ReferenceInvocationAdapter, MaterializesStridedBatchOnDemand)
     std::vector<float> d{-99, -99};
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    auto invocation = reference_adapter::translateGemmInvocation(
+    auto invocation = HostNumerics::translateGemmInvocation(
         problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::GemmInvocationAdapter>(invocation));
-    auto adapter = std::move(std::get<reference_adapter::GemmInvocationAdapter>(invocation));
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocation));
+    auto adapter = std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocation));
 
     a[1] = 7;
     auto batch = adapter.translateBatch(1);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslatedGemmBatch>(batch));
-    auto translated = std::move(std::get<reference_adapter::TranslatedGemmBatch>(batch));
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
+    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
     a[1]             = 9;
 
     roc::host_numerics::referenceGemm(translated.gemm());
@@ -1279,7 +1279,7 @@ TEST(ReferenceInvocationAdapter, MaterializesPointerArrayBatchOnDemand)
     const void*        batchC[] = {c0.data(), c1.data()};
     void*              batchD[] = {d0.data(), d1.data()};
 
-    std::optional<reference_adapter::GemmInvocationAdapter> adapter;
+    std::optional<HostNumerics::GemmInvocationAdapter> adapter;
     {
         ContractionInputs inputs(nullptr, nullptr, nullptr, nullptr, 1.0f, 0.0f);
         inputs.batchA = batchA;
@@ -1287,19 +1287,19 @@ TEST(ReferenceInvocationAdapter, MaterializesPointerArrayBatchOnDemand)
         inputs.batchC = batchC;
         inputs.batchD = batchD;
 
-        auto invocation = reference_adapter::translateGemmInvocation(
+        auto invocation = HostNumerics::translateGemmInvocation(
             problem, inputs, /*elementsToValidate=*/-1);
         ASSERT_TRUE(
-            std::holds_alternative<reference_adapter::GemmInvocationAdapter>(invocation));
+            std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocation));
         adapter.emplace(
-            std::move(std::get<reference_adapter::GemmInvocationAdapter>(invocation)));
+            std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocation)));
     }
 
     batchA[1] = a0.data();
     a1[0] = 7;
     auto batch = adapter->translateBatch(1);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslatedGemmBatch>(batch));
-    auto translated = std::move(std::get<reference_adapter::TranslatedGemmBatch>(batch));
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
+    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
     a1[0]            = 9;
 
     roc::host_numerics::referenceGemm(translated.gemm());
@@ -1463,10 +1463,10 @@ TEST(ReferenceBlockedBackend, RejectsInvalidPointerBatchBeforeWriting)
     inputs.batchD = batchD;
 
     const auto translation
-        = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
-    EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
-              reference_adapter::TranslationFailureCode::InvalidBatchPointer);
+        = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<HostNumerics::TranslationFailure>(translation).code,
+              HostNumerics::TranslationFailureCode::InvalidBatchPointer);
 
     try
     {
@@ -1521,11 +1521,11 @@ TEST(ReferenceInvocationAdapter, PreflightsEveryBatchLayoutBeforeWriting)
     std::vector<float> d{-99, -99};
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    const auto translation = reference_adapter::translateGemmInvocation(
+    const auto translation = HostNumerics::translateGemmInvocation(
         problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
-    EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
-              reference_adapter::TranslationFailureCode::InvalidDescriptor);
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<HostNumerics::TranslationFailure>(translation).code,
+              HostNumerics::TranslationFailureCode::InvalidDescriptor);
     EXPECT_EQ(d, (std::vector<float>{-99, -99}));
 }
 
@@ -1544,20 +1544,20 @@ TEST(ReferenceInvocationAdapter, OwnsStandaloneTemporariesAcrossAdapterLifetime)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.e = e.data();
 
-    std::optional<reference_adapter::TranslatedGemmBatch> translated;
+    std::optional<HostNumerics::TranslatedGemmBatch> translated;
     {
         auto invocationTranslation
-            = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
+            = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
         ASSERT_TRUE(
-            std::holds_alternative<reference_adapter::GemmInvocationAdapter>(invocationTranslation));
+            std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocationTranslation));
         auto adapter
-            = std::move(std::get<reference_adapter::GemmInvocationAdapter>(invocationTranslation));
+            = std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocationTranslation));
 
         auto batchTranslation = adapter.translateBatch(0);
         ASSERT_TRUE(
-            std::holds_alternative<reference_adapter::TranslatedGemmBatch>(batchTranslation));
+            std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batchTranslation));
         translated.emplace(
-            std::move(std::get<reference_adapter::TranslatedGemmBatch>(batchTranslation)));
+            std::move(std::get<HostNumerics::TranslatedGemmBatch>(batchTranslation)));
     }
 
     roc::host_numerics::referenceGemm(translated->gemm(),
@@ -1601,15 +1601,15 @@ TEST(ReferenceInvocationAdapter, CopyOutputsPreservesUnselectedValuesAndPadding)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
     auto invocationTranslation
-        = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/1);
+        = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/1);
     ASSERT_TRUE(
-        std::holds_alternative<reference_adapter::GemmInvocationAdapter>(invocationTranslation));
+        std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocationTranslation));
     auto adapter
-        = std::move(std::get<reference_adapter::GemmInvocationAdapter>(invocationTranslation));
+        = std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocationTranslation));
 
     auto batchTranslation = adapter.translateBatch(0);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslatedGemmBatch>(batchTranslation));
-    auto translated = std::move(std::get<reference_adapter::TranslatedGemmBatch>(batchTranslation));
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batchTranslation));
+    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batchTranslation));
 
     roc::host_numerics::referenceGemm(translated.gemm());
     d[1] = 111;
@@ -1638,10 +1638,10 @@ TEST(ReferenceInvocationAdapter, RejectsDescriptorStrideThatCannotFitPtrdiff)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
     const auto translation
-        = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/0);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
-    EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
-              reference_adapter::TranslationFailureCode::InvalidDescriptor);
+        = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/0);
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<HostNumerics::TranslationFailure>(translation).code,
+              HostNumerics::TranslationFailureCode::InvalidDescriptor);
 }
 
 TEST(ReferenceInvocationAdapter, RejectsMirroredOffsetMultiplicationOverflow)
@@ -1690,10 +1690,10 @@ TEST(ReferenceInvocationAdapter, RejectsMirroredOffsetMultiplicationOverflow)
     inputs.batchA = batchA;
 
     const auto translation
-        = reference_adapter::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/0);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
-    EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
-              reference_adapter::TranslationFailureCode::InvalidDescriptor);
+        = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/0);
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<HostNumerics::TranslationFailure>(translation).code,
+              HostNumerics::TranslationFailureCode::InvalidDescriptor);
 }
 
 TEST(ReferenceRuntimePointwise, HandlesFloat16Accumulation)
@@ -1737,13 +1737,13 @@ TEST(ReferenceRuntimePointwise, AppliesScalarScaleBeforeComputeQuantization)
     inputs.scaleA = &scaleA;
     inputs.scaleB = &scaleB;
 
-    auto invocation = reference_adapter::translateGemmInvocation(
+    auto invocation = HostNumerics::translateGemmInvocation(
         problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::GemmInvocationAdapter>(invocation));
-    auto adapter = std::move(std::get<reference_adapter::GemmInvocationAdapter>(invocation));
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocation));
+    auto adapter = std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocation));
     auto batch   = adapter.translateBatch(0);
-    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslatedGemmBatch>(batch));
-    auto translated = std::move(std::get<reference_adapter::TranslatedGemmBatch>(batch));
+    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
+    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
 
     EXPECT_EQ(translated.gemm().epilogue.alpha.as<float>(), 1.0f);
     ASSERT_TRUE(translated.gemm().epilogue.scaleB.has_value());
