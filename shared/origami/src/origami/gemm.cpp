@@ -284,8 +284,10 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   else
     out_wgmxcc = NUM_XCD;
 
-  // WGM shortcuts
-  if (out_wgmxcc == 0 || grid_m == 1 || grid_n == 1) return {0, 0, out_wgmxcc, 1};
+  // WGM shortcuts. wgmxcc==0 only implies "no WGM" when there are multiple XCDs
+  // (nothing to remap). On single-XCD RDNA (NUM_XCD==1) wgmxcc is always 0 yet WGM
+  // (L2 spatial-reuse remapping) is still meaningful, so fall through to compute it.
+  if ((out_wgmxcc == 0 && NUM_XCD > 1) || grid_m == 1 || grid_n == 1) return {0, 0, out_wgmxcc, 1};
 
   // If the grid is large, use the square root of the number of CUs as the WGM.
   // Solution is not very sensitive to the WGM value in this case.
@@ -303,14 +305,20 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   if (wgm_cap == 0) return {0, 0, out_wgmxcc, 1};
 
   // Bitmask of candidates: bit i set means i is a WGM candidate.
-  // Drawback: cannot handle values more than 64.
+  // Drawback: cannot handle values more than 63 -- a shift count >= 64 is
+  // undefined behaviour (on x86 the count masks to 0, which would set bit 0 and
+  // later make wgm_candidate == 0 -> divide-by-zero). Skip any candidate >= 64;
+  // such a large WGM is never useful in practice.
   uint64_t cmask = 0;
+  auto add_candidate = [&](size_t v) {
+    if (v >= 1 && v < 64 && v <= wgm_cap) cmask |= (1ULL << v);
+  };
   for (size_t v : {1, 4, 6})
-    if (v <= wgm_cap) cmask |= (1ULL << v);
+    add_candidate(v);
   for (size_t i = 1; i * i <= wgm_cap; ++i) {
     if (wgm_cap % i == 0) {
-      cmask |= (1ULL << i);
-      cmask |= (1ULL << (wgm_cap / i));
+      add_candidate(i);
+      add_candidate(wgm_cap / i);
     }
   }
 
@@ -1932,22 +1940,30 @@ double compute_total_latency(const problem_t& problem,
 
     size_t K_mod_128bytes    = K * a_bits % 1024;
     size_t MT_K_mod_128bytes = MT_K * a_bits % 1024;
-    if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
-      // avoid division by 0 if K == 0
-      if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
-        // Use nontemporal B
-        if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
-      } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
-        // Use Non Temporal A
-        if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
-      } else {
-        // Never use Non Temporal
-        if (config.cache_hints_a || config.cache_hints_b) {
-          return std::numeric_limits<double>::max();
+    // NonTemporal cache-hint requirement is CDNA-only: CDNA kernels can carry a
+    // nontemporal hint (cache_hints==4), RDNA kernels physically cannot (always 0).
+    // Applying it on RDNA wrongly rejects valid DepthU=64/128 skinny/deep-K configs.
+    const bool is_cdna = (hardware.arch == hardware_t::architecture_t::gfx90a ||
+                          hardware.arch == hardware_t::architecture_t::gfx942 ||
+                          hardware.arch == hardware_t::architecture_t::gfx950);
+    if (is_cdna) {
+      if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
+        // avoid division by 0 if K == 0
+        if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
+          // Use nontemporal B
+          if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
+        } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
+          // Use Non Temporal A
+          if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
+        } else {
+          // Never use Non Temporal
+          if (config.cache_hints_a || config.cache_hints_b) {
+            return std::numeric_limits<double>::max();
+          }
         }
+      } else if (config.cache_hints_a || config.cache_hints_b) {
+        return std::numeric_limits<double>::max();
       }
-    } else if (config.cache_hints_a || config.cache_hints_b) {
-      return std::numeric_limits<double>::max();
     }
   }
 
@@ -1974,6 +1990,28 @@ double compute_total_latency(const problem_t& problem,
   //     (they default to 0.0), so extending the gate cannot change any
   //     existing prediction.
   const auto heuristic = get_heuristic_params(problem, hardware, config);
+
+  // 4b) RDNA oversubscription penalty (gfx1201; inert until cutoff>0). The linear
+  // timestep model L_timestep*num_timesteps under-charges configs that leave CUs
+  // idle (few output tiles per CU), so Origami over-favours big tiles on the
+  // compute-bound tail. Penalize configs whose tiles/CU is below the fitted
+  // cutoff. Cutoff is calibrated offline; overridable via the env hook.
+  {
+    double oversub_cutoff = heuristic.rdna_oversub_cutoff;
+    const double env_cut = runtime_options::get().rdna_oversub_cutoff;
+    if(env_cut >= 0.0) oversub_cutoff = env_cut;
+    if(hardware.arch == hardware_t::architecture_t::gfx1201 && oversub_cutoff > 0.0)
+    {
+      const double oversub = static_cast<double>(context.num_output_tiles)
+                             / static_cast<double>(hardware.N_CU);
+      if(oversub < oversub_cutoff)
+      {
+        const double ratio = std::max(oversub, 0.5) / oversub_cutoff;
+        total_latency *= (1.0 + (-std::log2(ratio)));
+      }
+    }
+  }
+
   const bool is_hhs_tn = problem.a_dtype == data_type_t::Half &&
                          problem.b_dtype == data_type_t::Half &&
                          problem.a_transpose == transpose_t::T &&

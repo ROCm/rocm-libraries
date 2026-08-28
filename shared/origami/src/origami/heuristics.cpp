@@ -206,6 +206,9 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   depth_u_edge_weight       = other.depth_u_edge_weight;
   deep_k_pipeline_weight    = other.deep_k_pipeline_weight;
 
+  // RDNA oversubscription penalty
+  rdna_oversub_cutoff       = other.rdna_oversub_cutoff;
+
   // Kernel rejection
   reject = other.reject;
   // VGPR / single-wave occupancy penalty
@@ -860,6 +863,43 @@ void heuristics_database_t::initialize_defaults() {
     key.subtile     = true;
     key.max_k       = 511;
     add_entry(key, reject_params);
+  }
+
+  // ========================================================================
+  // HEURISTIC 4: gfx1201 HHS (FP16) TN tuned genome
+  // The gfx1201 S2 genome (models/gfx1201_hhs_tn_genome_v2_basic.json + the
+  // resource_edge weights) was fit offline but never baked into the runtime, so
+  // libhipblaslt selected with untuned compiled defaults while catalogs were
+  // *distilled* with the tuned model. Offline on the dense oracle the tuned
+  // model beats the default by +8.5 ALL / +15 large selection efficiency. These
+  // are the 12 fitted basic genes (the base latency model uses them directly)
+  // plus the resource_residency RE term (inert at runtime until CUOccupancy is
+  // serialized; kept for parity with distillation). HW genes were measured to
+  // be unnecessary — the runtime already resolves real device memory ratios.
+  // ========================================================================
+  {
+    heuristic_params_t g1201;
+    g1201.weight_compute                 = 0.4663523880483756;
+    g1201.weight_memory                  = 2.413787556602907;
+    g1201.weight_mem_l2                  = 3.091542149623161;
+    g1201.main_loop_efficiency           = 0.2;
+    g1201.weight_loop_overhead           = 1342.0918673471194;
+    g1201.weight_mem_dram                = 0.15087731514591923;
+    g1201.epilogue_scalar_store_penalty  = 7.7549449890231035;
+    g1201.occupancy_decay_base           = 0.8744185930103232;
+    g1201.postgsu_kernel_launch_overhead = 82061.33672906409;
+    g1201.weight_epilogue                = 16.0;
+    g1201.weight_prologue                = 9.632545056916285;
+    g1201.weight_tile_total              = 0.05;
+    g1201.resource_residency_weight      = 0.3004774018604959;
+    g1201.resource_residency_target      = 1.2648999207258986;
+
+    heuristic_key_t k;
+    k.arch        = hardware_t::architecture_t::gfx1201;
+    k.mi_dtype    = data_type_t::Half;
+    k.a_transpose = transpose_t::T;  // TN
+    k.b_transpose = transpose_t::N;
+    add_entry(k, g1201);
   }
 }
 

@@ -47,11 +47,20 @@ dim3_t runtime_options::read_gemm_pick_from_env() {
   return {0, 0, 0};
 }
 
+double runtime_options::read_rdna_oversub_cutoff_from_env() {
+  if (const char* env = std::getenv("ANALYTICAL_GEMM_RDNA_OVERSUB_CUTOFF")) {
+    double v = -1.0;
+    if (std::sscanf(env, "%lf", &v) == 1) { return v; }
+  }
+  return -1.0;
+}
+
 void runtime_options::update_from_env() {
   debug_enabled       = read_debug_from_env();
   heuristics_enabled  = read_heuristics_from_env();
   heuristics_variance = read_heuristics_variance_from_env();
   gemm_pick           = read_gemm_pick_from_env();
+  rdna_oversub_cutoff = read_rdna_oversub_cutoff_from_env();
 }
 
 int datatype_to_bits(data_type_t type) {

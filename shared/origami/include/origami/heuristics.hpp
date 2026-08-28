@@ -57,6 +57,10 @@ struct heuristic_defaults_t {
   // Empirical Constants
   static constexpr double MAIN_MEMORY_LOAD_LATENCY         = 200.0;
   static constexpr double OCCUPANCY_DECAY_BASE             = 0.95;
+  // RDNA oversubscription penalty cutoff (tiles/CU below which under-subscribed
+  // configs are penalized). 0.0 = inert (unfitted arches unaffected); fitted per
+  // arch via calibration, and overridable at runtime by the env hook.
+  static constexpr double RDNA_OVERSUB_CUTOFF             = 0.0;
   static constexpr double MALL_DEPTH_SQ                    = 2.0;
   static constexpr double MALL_COLD_FLOOR                  = 0.85;
   static constexpr double L2_DEPTH_SQ                      = 4.0;
@@ -180,6 +184,9 @@ struct ORIGAMI_EXPORT heuristic_params_t {
   double edge_tile_penalty_weight  = 0.0;
   double depth_u_edge_weight       = 0.0;
   double deep_k_pipeline_weight    = 0.0;
+
+  // === RDNA oversubscription penalty (default-inert) ===
+  double rdna_oversub_cutoff       = heuristic_defaults_t::RDNA_OVERSUB_CUTOFF;
 
   // === Kernel Rejection ===
   /// When true, the kernel is rejected: its predicted latency is forced to the

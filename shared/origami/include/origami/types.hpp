@@ -349,6 +349,11 @@ struct ORIGAMI_EXPORT runtime_options {
   /// Format: "MxNxK" e.g. "128x128x64". When set, non-matching configs get max latency.
   dim3_t gemm_pick{0, 0, 0};
 
+  /// Override the RDNA oversubscription-penalty cutoff (ANALYTICAL_GEMM_RDNA_OVERSUB_CUTOFF).
+  /// -1 = use the compiled heuristic default; >=0 overrides it (0 disables the penalty).
+  /// Lets the cutoff be swept during offline calibration without a rebuild.
+  double rdna_oversub_cutoff{-1.0};
+
   /**
    * @brief Constructor with explicit values (does not read from environment).
    */
@@ -388,6 +393,12 @@ struct ORIGAMI_EXPORT runtime_options {
    * @return dim3_t MT size from ANALYTICAL_GEMM_PICK, or {0,0,0} if not set
    */
   static dim3_t read_gemm_pick_from_env();
+
+  /**
+   * @brief Read the RDNA oversub cutoff override from the environment.
+   * @return value of ANALYTICAL_GEMM_RDNA_OVERSUB_CUTOFF, or -1.0 if unset.
+   */
+  static double read_rdna_oversub_cutoff_from_env();
 
   /**
    * @brief Update runtime options from environment variables.

@@ -929,4 +929,19 @@ class ORIGAMI_EXPORT hardware_t {
  */
 ORIGAMI_EXPORT std::size_t resolve_num_cus(std::int64_t requested_num_cus,
                                            std::size_t hardware_num_cus);
+
+/**
+ * @brief Size-dependent effective CU count for the gfx1201 StreamK grid.
+ *
+ * Starts from resolve_num_cus(problem.num_cus, hardware.N_CU) and, ONLY when
+ * ORIGAMI_RDNA_CU_SIZEDEP is set (default off => shipped behaviour) and the arch
+ * is gfx1201 and the caller placed no genuine CU cap, replaces N_CU with
+ * WGP*mult where WGP = 32 and mult depends on problem FLOPs: small GEMMs use a
+ * larger multiplier (fills the 32 WGP), large/compute GEMMs a smaller one
+ * (leaner grid, less reduction/fixup overhead). Both the grid selection and the
+ * Origami ranking route through this so selection and launch stay consistent.
+ * Tunable via ORIGAMI_RDNA_CU_SMALL_FLOP / _SMALL_MULT / _BIG_MULT.
+ */
+ORIGAMI_EXPORT std::size_t effective_num_cus(const problem_t& problem,
+                                             const hardware_t& hardware);
 }  // namespace origami
