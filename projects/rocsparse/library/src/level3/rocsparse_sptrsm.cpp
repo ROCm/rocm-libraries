@@ -1663,18 +1663,36 @@ namespace rocsparse
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
             if(sptrsm_descr->get_solve_mode() != rocsparse_solve_mode_triangular)
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::sptrsm_diagonal_solve(handle,
-                                                     operation,
-                                                     X_operation,
-                                                     sptrsm_descr->get_diagonal_modifier(),
-                                                     alpha,
-                                                     A,
-                                                     X,
-                                                     Y,
-                                                     sptrsm_descr->get_csrsm_info()));
-                sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
-                return rocsparse_status_success;
+                switch(A->format)
+                {
+                case rocsparse_format_csr:
+                case rocsparse_format_csc:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::sptrsm_diagonal_solve(handle,
+                                                         operation,
+                                                         X_operation,
+                                                         sptrsm_descr->get_diagonal_modifier(),
+                                                         alpha,
+                                                         A,
+                                                         X,
+                                                         Y,
+                                                         sptrsm_descr->get_csrsm_info()));
+                    sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
+                    return rocsparse_status_success;
+                }
+                case rocsparse_format_coo:
+                case rocsparse_format_coo_aos:
+                case rocsparse_format_bsr:
+                case rocsparse_format_ell:
+                case rocsparse_format_bell:
+                case rocsparse_format_sell:
+                {
+                    // LCOV_EXCL_START
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+                    // LCOV_EXCL_STOP
+                }
+                }
             }
 #endif
 
