@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -63,7 +63,16 @@ inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
     //Allocating workspace memory when only using gemm
     if(rocblas_use_only_gemm<T>(handle, n, k))
         if(n > 0 && batch_count > 0)
-            size = ((int64_t(n) * (n - 1)) / 2) * sizeof(T) * batch_count;
+        {
+            // The host-side launcher processes at most c_YZ_grid_launch_limit batches
+            // per chunk, reusing the same workspace buffer for each chunk.  Only
+            // min(batch_count, c_YZ_grid_launch_limit) triangle slots are live
+            // simultaneously, so peak allocation is proportional to the chunk size
+            // rather than the full batch count.  All arithmetic uses size_t to
+            // prevent signed overflow in the product tri(n) * sizeof(T) * chunk.
+            size_t chunk = size_t(std::min(batch_count, (rocblas_int)c_YZ_grid_launch_limit));
+            size         = (size_t(n) * size_t(n - 1) / 2) * sizeof(T) * chunk;
+        }
 
     return size;
 }
@@ -313,4 +322,5 @@ rocblas_status rocblas_copy_triangular_syrk_herk(rocblas_handle handle,
                                                  rocblas_int    ldc,
                                                  rocblas_stride stride_C,
                                                  T*             W_C,
-                                                 rocblas_int    batch_count);
+                                                 rocblas_int    chunk_size,
+                                                 rocblas_int    batch_offset);
