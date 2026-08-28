@@ -4093,6 +4093,11 @@ struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
         : PerformanceConfigHipImplicitGemm3DGroupFwdXdlops(0, "")
     {
     }
+    static constexpr bool
+    IsGfx942HardHeuristicSpatialCase(std::size_t in_depth, std::size_t in_width)
+    {
+        return in_depth <= 4 && in_width >= 256;
+    }
     void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
