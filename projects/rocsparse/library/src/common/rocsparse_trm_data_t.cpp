@@ -101,6 +101,35 @@ void rocsparse::trm_data_t::set(rocsparse_operation    operation,
     this->m_data[idx] = trm_info;
 }
 
+rocsparse::trm_info_t* rocsparse::trm_data_t::create(rocsparse_handle          handle,
+                                                     rocsparse_operation       trans,
+                                                     int64_t                   m,
+                                                     int64_t                   n,
+                                                     const rocsparse_mat_descr descr,
+                                                     rocsparse_indextype  ell_col_ind_indextype,
+                                                     const void*          ell_col_ind,
+                                                     int64_t              ell_width,
+                                                     rocsparse_index_base idx_base,
+                                                     size_t               buffer_size,
+                                                     void*                temp_buffer)
+{
+    rocsparse::trm_info_t* trm_info = new rocsparse::trm_info_t();
+
+    THROW_IF_ROCSPARSE_ERROR(rocsparse::gellsv_analysis(handle,
+                                                        m,
+                                                        n,
+                                                        descr,
+                                                        ell_col_ind_indextype,
+                                                        ell_col_ind,
+                                                        ell_width,
+                                                        idx_base,
+                                                        trm_info,
+                                                        this,
+                                                        buffer_size,
+                                                        temp_buffer));
+    return trm_info;
+}
+
 rocsparse_indextype rocsparse::trm_data_t::get_indextype_J() const
 {
     for(int i = 0; i < 4; ++i)

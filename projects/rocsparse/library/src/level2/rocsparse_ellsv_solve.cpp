@@ -37,9 +37,9 @@ namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_solve_kernel(I       m,
-                            I       n,
-                            int64_t ell_width,
+    void ellsv_solve_kernel(I m,
+                            I n,
+                            I ell_width,
                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                             const I* __restrict__ ell_col_ind,
                             const T* __restrict__ ell_val,
@@ -84,11 +84,11 @@ namespace rocsparse
                                                       rocsparse_dnvec_descr       y,
                                                       const void*                 row_map,
                                                       void*                       zero_pivot,
-                                                      size_t                      buffer_size,
-                                                      void*                       temp_buffer,
-                                                      bool                        is_host_mode)
+                                                      size_t buffer_size_in_bytes,
+                                                      void*  temp_buffer,
+                                                      bool   is_host_mode)
     {
-        constexpr uint32_t BLOCKSIZE = 1024;
+        static constexpr uint32_t BLOCKSIZE = 1024;
 
         hipStream_t stream = handle->stream;
 
@@ -97,7 +97,7 @@ namespace rocsparse
         const size_t done_bytes = ellsv_align256(sizeof(int32_t) * static_cast<size_t>(m));
 
         // Must stay in sync with rocsparse::ellsv_solve_buffer_size.
-        if(buffer_size < 256 + done_bytes)
+        if(buffer_size_in_bytes < 256 + done_bytes)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_size);
         }
@@ -122,7 +122,7 @@ namespace rocsparse
             stream,
             m,
             static_cast<I>(A->cols),
-            A->ell_width,
+            static_cast<I>(A->ell_width),
             ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_),
             reinterpret_cast<const I*>(A->const_col_data),
             reinterpret_cast<const T*>(A->const_val_data),
@@ -156,9 +156,16 @@ namespace rocsparse
             return launch_ellsv_solve_kernel<WF_SIZE, SLEEP, I, rocsparse_float_complex>;
         case rocsparse_datatype_f64_c:
             return launch_ellsv_solve_kernel<WF_SIZE, SLEEP, I, rocsparse_double_complex>;
-        default:
+        case rocsparse_datatype_f16_r:
+        case rocsparse_datatype_bf16_r:
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_u8_r:
+        case rocsparse_datatype_i32_r:
+        case rocsparse_datatype_u32_r:
             return nullptr;
         }
+
+        return nullptr;
     }
 
     template <uint32_t WF_SIZE, bool SLEEP, typename... P>
@@ -193,33 +200,35 @@ namespace rocsparse
     }
 
     static rocsparse_status ellsv_init_zero_pivot(rocsparse_handle            handle,
-                                                  rocsparse_ellsv_info        ei,
+                                                  rocsparse_ellsv_info        info,
                                                   rocsparse_const_spmat_descr A)
     {
         hipStream_t stream = handle->stream;
 
-        ei->create_singularity_numeric_exact(1, A->col_type, stream);
+        info->create_singularity_numeric_exact(1, A->col_type, stream);
 
         switch(A->descr->diag_type)
         {
         case rocsparse_diag_type_unit:
         {
             RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::assign_max_async(1, A->col_type, ei->get_position(), stream));
+                rocsparse::assign_max_async(1, A->col_type, info->get_position(), stream));
             if(A->col_type == rocsparse_indextype_i32)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                     1,
-                    (int32_t*)ei->get_singularity_numeric_exact()->get_position(),
-                    (const int32_t*)ei->get_position(),
+                    reinterpret_cast<int32_t*>(
+                        info->get_singularity_numeric_exact()->get_position()),
+                    reinterpret_cast<const int32_t*>(info->get_position()),
                     stream));
             }
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
                     1,
-                    (int64_t*)ei->get_singularity_numeric_exact()->get_position(),
-                    (const int64_t*)ei->get_position(),
+                    reinterpret_cast<int64_t*>(
+                        info->get_singularity_numeric_exact()->get_position()),
+                    reinterpret_cast<const int64_t*>(info->get_position()),
                     stream));
             }
             break;
@@ -230,16 +239,18 @@ namespace rocsparse
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
                     1,
-                    (int32_t*)ei->get_singularity_numeric_exact()->get_position(),
-                    (const int32_t*)ei->get_position(),
+                    reinterpret_cast<int32_t*>(
+                        info->get_singularity_numeric_exact()->get_position()),
+                    reinterpret_cast<const int32_t*>(info->get_position()),
                     stream));
             }
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
                     1,
-                    (int64_t*)ei->get_singularity_numeric_exact()->get_position(),
-                    (const int64_t*)ei->get_position(),
+                    reinterpret_cast<int64_t*>(
+                        info->get_singularity_numeric_exact()->get_position()),
+                    reinterpret_cast<const int64_t*>(info->get_position()),
                     stream));
             }
             break;
@@ -262,16 +273,15 @@ rocsparse_status rocsparse::ellsv_solve_buffer_size(rocsparse_handle            
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_ENUM(1, trans);
     ROCSPARSE_CHECKARG_POINTER(2, A);
-    ROCSPARSE_CHECKARG_POINTER(3, buffer_size_in_bytes);
+    ROCSPARSE_CHECKARG_POINTER(4, y);
+    ROCSPARSE_CHECKARG_POINTER(5, buffer_size_in_bytes);
 
     if(trans != rocsparse_operation_none)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 
-    const int64_t batch_count = (y) ? y->batch_count : A->batch_count;
-
-    if(A->rows == 0 || batch_count == 0)
+    if(A->rows == 0)
     {
         *buffer_size_in_bytes = 0;
         return rocsparse_status_success;
@@ -279,11 +289,11 @@ rocsparse_status rocsparse::ellsv_solve_buffer_size(rocsparse_handle            
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_check(A));
 
-    const int64_t m = A->rows;
+    const int64_t m           = A->rows;
+    const int64_t batch_count = y->batch_count;
 
     size_t size = 256;
-    size += rocsparse::ellsv_align256(sizeof(int32_t) * static_cast<size_t>(m)
-                                      * static_cast<size_t>(batch_count));
+    size += rocsparse::ellsv_align256(sizeof(int32_t) * m * batch_count);
 
     *buffer_size_in_bytes = size;
 
@@ -307,12 +317,14 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_ENUM(1, trans);
     ROCSPARSE_CHECKARG_ENUM(2, alpha_datatype);
+    ROCSPARSE_CHECKARG_POINTER(3, alpha);
     ROCSPARSE_CHECKARG_POINTER(5, A);
-    ROCSPARSE_CHECKARG_POINTER(8, ellsv_info);
-    ROCSPARSE_CHECKARG_ARRAY(3, A->batch_count, alpha);
     ROCSPARSE_CHECKARG_POINTER(6, x);
     ROCSPARSE_CHECKARG_POINTER(7, y);
+    ROCSPARSE_CHECKARG_POINTER(8, ellsv_info);
 
+    // Batched solves are rejected below, which leaves alpha a single scalar whose
+    // stride is never read.
     (void)alpha_stride;
 
     if(trans != rocsparse_operation_none)
@@ -320,13 +332,14 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 
-    if(A->rows == 0 || A->batch_count == 0)
+    if(A->rows == 0)
     {
         return rocsparse_status_success;
     }
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_check(A));
 
+    ROCSPARSE_CHECKARG(6, x, (x->batch_count > 1), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(
         7, y, (y->batch_count > 1 || A->batch_count > 1), rocsparse_status_not_implemented);
 

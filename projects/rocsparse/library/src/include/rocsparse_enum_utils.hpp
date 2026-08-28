@@ -24,8 +24,13 @@
 
 #pragma once
 
+#include "rocsparse-types.h"
+
 namespace rocsparse
 {
+    static constexpr rocsparse_fill_mode all_rocsparse_fill_mode[]
+        = {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper};
+
     //
     // Provide some utility methods for enums.
     //

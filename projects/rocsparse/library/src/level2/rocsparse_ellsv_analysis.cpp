@@ -29,6 +29,7 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_ellsv.hpp"
 #include "rocsparse_ellsv_info.hpp"
+#include "rocsparse_enum_utils.hpp"
 #include "rocsparse_mat_info.hpp"
 #include "rocsparse_primitives.hpp"
 #include "rocsparse_spmat_descr.hpp"
@@ -36,16 +37,14 @@
 #include "rocsparse_trm_info.hpp"
 #include "rocsparse_utility.hpp"
 
-#include <vector>
-
 namespace rocsparse
 {
-    static void ellsv_clear_trm_slots(rocsparse_ellsv_info ei)
+    // The info object caches one analysis per fill mode; only the non-transposed
+    // ones are ever populated. This discards them, so that the next analysis
+    // starts from scratch.
+    static void ellsv_clear_trm_infos(rocsparse_ellsv_info ei)
     {
-        const rocsparse_fill_mode fill_modes[]
-            = {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper};
-
-        for(const rocsparse_fill_mode fm : fill_modes)
+        for(const rocsparse_fill_mode fm : rocsparse::all_rocsparse_fill_mode)
         {
             rocsparse::trm_info_t* trm_info = ei->get(rocsparse_operation_none, fm);
             if(trm_info != nullptr)
@@ -56,6 +55,8 @@ namespace rocsparse
         }
     }
 
+    // Whether a cached analysis can be reused for the matrix A, that is, whether
+    // it was built from a matrix with the same sparsity pattern layout.
     static bool ellsv_trm_info_matches(const rocsparse::trm_info_t* trm_info,
                                        rocsparse_const_spmat_descr  A)
     {
@@ -70,6 +71,11 @@ namespace rocsparse
                && trm_info->get_descr() == A->descr;
     }
 
+    // An info object is attached to the matrix info rather than to the matrix, so
+    // it survives a matrix being destroyed and a new one created in its place.
+    // Analysing A is only allowed to keep what it already holds if every cached
+    // analysis was built from a matrix A still matches; otherwise the caller is
+    // reusing the info object for an unrelated matrix and the cache is stale.
     static bool ellsv_info_matrix_matches(rocsparse_ellsv_info ei, rocsparse_const_spmat_descr A)
     {
         if(ei == nullptr)
@@ -77,10 +83,7 @@ namespace rocsparse
             return true;
         }
 
-        const rocsparse_fill_mode fill_modes[]
-            = {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper};
-
-        for(const rocsparse_fill_mode fm : fill_modes)
+        for(const rocsparse_fill_mode fm : rocsparse::all_rocsparse_fill_mode)
         {
             const rocsparse::trm_info_t* trm_info = ei->get(rocsparse_operation_none, fm);
             if(trm_info != nullptr && !rocsparse::ellsv_trm_info_matches(trm_info, A))
@@ -96,7 +99,7 @@ namespace rocsparse
     static rocsparse_status ellsv_launch_analysis(rocsparse_handle     handle,
                                                   I                    m,
                                                   I                    n,
-                                                  int64_t              ell_width,
+                                                  I                    ell_width,
                                                   const I*             ell_col_ind,
                                                   rocsparse_index_base base,
                                                   rocsparse_fill_mode  fill_mode,
@@ -107,7 +110,7 @@ namespace rocsparse
                                                   size_t               buffer_size,
                                                   void*                temp_buffer)
     {
-        constexpr uint32_t BLOCKSIZE = 1024;
+        static constexpr uint32_t BLOCKSIZE = 1024;
 
         hipStream_t  stream   = handle->stream;
         const size_t sizeof_I = sizeof(I);
@@ -211,7 +214,7 @@ namespace rocsparse
                                                     uint32_t             wfsize,
                                                     I                    m,
                                                     I                    n,
-                                                    int64_t              ell_width,
+                                                    I                    ell_width,
                                                     const void*          ell_col_ind,
                                                     rocsparse_index_base base,
                                                     rocsparse_fill_mode  fill_mode,
@@ -314,21 +317,21 @@ namespace rocsparse
 
         // Levelling only reads the sparsity pattern, so the values and their type
         // play no part here.
-#define GELLSV_ANALYSIS_DISPATCH(ITYPE)                                   \
-    rocsparse::ellsv_analysis_dispatch<ITYPE>(handle,                     \
-                                              sleep,                      \
-                                              wfsize,                     \
-                                              static_cast<ITYPE>(m),      \
-                                              static_cast<ITYPE>(n),      \
-                                              ell_width,                  \
-                                              ell_col_ind,                \
-                                              idx_base,                   \
-                                              descr->fill_mode,           \
-                                              descr->diag_type,           \
-                                              ell_col_ind_indextype,      \
-                                              info->get_row_map(),        \
-                                              pivot_info->get_position(), \
-                                              buffer_size,                \
+#define GELLSV_ANALYSIS_DISPATCH(ITYPE)                                      \
+    rocsparse::ellsv_analysis_dispatch<ITYPE>(handle,                        \
+                                              sleep,                         \
+                                              wfsize,                        \
+                                              static_cast<ITYPE>(m),         \
+                                              static_cast<ITYPE>(n),         \
+                                              static_cast<ITYPE>(ell_width), \
+                                              ell_col_ind,                   \
+                                              idx_base,                      \
+                                              descr->fill_mode,              \
+                                              descr->diag_type,              \
+                                              ell_col_ind_indextype,         \
+                                              info->get_row_map(),           \
+                                              pivot_info->get_position(),    \
+                                              buffer_size,                   \
                                               temp_buffer)
 
         switch(ell_col_ind_indextype)
@@ -377,7 +380,7 @@ rocsparse_status rocsparse::ellsv_analysis_buffer_size(rocsparse_handle         
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 
-    if(A->rows == 0 || A->batch_count == 0)
+    if(A->rows == 0)
     {
         *buffer_size_in_bytes = 0;
         return rocsparse_status_success;
@@ -429,12 +432,12 @@ rocsparse_status rocsparse::ellsv_analysis(rocsparse_handle            handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 
-    if(A->rows == 0 || A->batch_count == 0)
+    if(A->rows == 0)
     {
         return rocsparse_status_success;
     }
 
-    ROCSPARSE_CHECKARG_ARRAY(5, (A->rows > 0 && A->batch_count > 0), temp_buffer);
+    ROCSPARSE_CHECKARG_ARRAY(5, A->rows, temp_buffer);
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_check(A));
 
@@ -454,7 +457,7 @@ rocsparse_status rocsparse::ellsv_analysis(rocsparse_handle            handle,
     rocsparse_ellsv_info ei = p_ellsv_info[0];
     if(ei != nullptr && !rocsparse::ellsv_info_matrix_matches(ei, A))
     {
-        rocsparse::ellsv_clear_trm_slots(ei);
+        rocsparse::ellsv_clear_trm_infos(ei);
     }
 
     if(ei == nullptr)

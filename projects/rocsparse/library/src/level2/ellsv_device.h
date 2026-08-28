@@ -26,15 +26,13 @@
 
 #include "rocsparse_common.hpp"
 
-extern "C" void __builtin_amdgcn_s_sleep(int);
-
 namespace rocsparse
 {
-    // ELL storage is column-major with leading dimension m: entry (row, slot p)
-    // lives at ell_col_ind[p * m + row] / ell_val[p * m + row]. Padding entries
-    // carry an out-of-range column index. The kernels below scan every slot and
-    // skip padded / non-contributing entries, so they do not depend on the
-    // entries being sorted within a row.
+    // Both ell_col_ind and ell_val hold the m x ell_width slot array with a
+    // leading dimension of m, so entry (row, slot p) lives at
+    // ELL_IND(row, p, m, ell_width). Padding entries carry an out-of-range column
+    // index. The kernels below scan every slot and skip padded / non-contributing
+    // entries, so they do not depend on the entries being sorted within a row.
 
     // Analysis kernel for a lower triangular ELL matrix. Each wavefront processes
     // a single row and computes its dependency depth (level) by spin-waiting on
@@ -42,9 +40,9 @@ namespace rocsparse
     // done_array and later sorted to obtain the row execution order.
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_analysis_lower_kernel(I       m,
-                                     I       n,
-                                     int64_t ell_width,
+    void ellsv_analysis_lower_kernel(I m,
+                                     I n,
+                                     I ell_width,
                                      const I* __restrict__ ell_col_ind,
                                      int* __restrict__ done_array,
                                      I* __restrict__ zero_pivot,
@@ -58,21 +56,22 @@ namespace rocsparse
         const uint32_t lid = hipThreadIdx_x & (WF_SIZE - 1);
         const uint32_t wid = hipThreadIdx_x / WF_SIZE;
 
-        const I row = static_cast<I>(hipBlockIdx_x) * static_cast<I>(BLOCKSIZE / WF_SIZE)
-                      + static_cast<I>(wid);
+        const int64_t wavefront = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WF_SIZE) + wid;
 
-        if(row >= m)
+        if(wavefront >= m)
         {
             return;
         }
+
+        const I row = static_cast<I>(wavefront);
 
         // Local dependency depth.
         int32_t local_max      = 0;
         int32_t local_has_diag = 0;
 
-        for(int64_t p = lid; p < ell_width; p += WF_SIZE)
+        for(I p = lid; p < ell_width; p += WF_SIZE)
         {
-            const int64_t idx = p * static_cast<int64_t>(m) + row;
+            const int64_t idx = ELL_IND(row, static_cast<int64_t>(p), m, ell_width);
             const I       col = rocsparse::nontemporal_load(ell_col_ind + idx) - idx_base;
 
             // Skip padded (out-of-range) entries.
@@ -117,9 +116,9 @@ namespace rocsparse
     // entries.
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_analysis_upper_kernel(I       m,
-                                     I       n,
-                                     int64_t ell_width,
+    void ellsv_analysis_upper_kernel(I m,
+                                     I n,
+                                     I ell_width,
                                      const I* __restrict__ ell_col_ind,
                                      int* __restrict__ done_array,
                                      I* __restrict__ zero_pivot,
@@ -133,21 +132,21 @@ namespace rocsparse
         const uint32_t lid = hipThreadIdx_x & (WF_SIZE - 1);
         const uint32_t wid = hipThreadIdx_x / WF_SIZE;
 
-        const I row = (m - 1)
-                      - (static_cast<I>(hipBlockIdx_x) * static_cast<I>(BLOCKSIZE / WF_SIZE)
-                         + static_cast<I>(wid));
+        const int64_t wavefront = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WF_SIZE) + wid;
 
-        if(row < 0)
+        if(wavefront >= m)
         {
             return;
         }
 
+        const I row = static_cast<I>(m - 1 - wavefront);
+
         int32_t local_max      = 0;
         int32_t local_has_diag = 0;
 
-        for(int64_t p = lid; p < ell_width; p += WF_SIZE)
+        for(I p = lid; p < ell_width; p += WF_SIZE)
         {
-            const int64_t idx = p * static_cast<int64_t>(m) + row;
+            const int64_t idx = ELL_IND(row, static_cast<int64_t>(p), m, ell_width);
             const I       col = rocsparse::nontemporal_load(ell_col_ind + idx) - idx_base;
 
             // Skip padded (out-of-range) entries.
@@ -192,10 +191,10 @@ namespace rocsparse
     // the rows it depends on, exactly like the CSR solve but reading directly from
     // the ELL storage.
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void ellsv_device(I       m,
-                                           I       n,
-                                           int64_t ell_width,
-                                           T       alpha,
+    ROCSPARSE_DEVICE_ILF void ellsv_device(I m,
+                                           I n,
+                                           I ell_width,
+                                           T alpha,
                                            const I* __restrict__ ell_col_ind,
                                            const T* __restrict__ ell_val,
                                            const T* __restrict__ x,
@@ -216,19 +215,18 @@ namespace rocsparse
         const uint32_t lid = hipThreadIdx_x & (WF_SIZE - 1);
         const uint32_t wid = rocsparse::read_first_lane(hipThreadIdx_x / WF_SIZE);
 
-        const I idx = static_cast<I>(hipBlockIdx_x) * static_cast<I>(BLOCKSIZE / WF_SIZE)
-                      + static_cast<I>(wid);
+        const int64_t wavefront = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WF_SIZE) + wid;
 
         // Shared memory to hold the (reciprocal) diagonal entry of each row.
         __shared__ T diagonal[BLOCKSIZE / WF_SIZE];
 
-        if(idx >= m)
+        if(wavefront >= m)
         {
             return;
         }
 
         // The row this wavefront operates on.
-        const I row = map[idx];
+        const I row = map[wavefront];
 
         // Default diagonal factor (used for unit diagonal or a missing diagonal).
         if(lid == 0)
@@ -242,9 +240,9 @@ namespace rocsparse
             local_sum = alpha * rocsparse::nontemporal_load(x + x_inc * row);
         }
 
-        for(int64_t p = lid; p < ell_width; p += WF_SIZE)
+        for(I p = lid; p < ell_width; p += WF_SIZE)
         {
-            const int64_t eidx = p * static_cast<int64_t>(m) + row;
+            const int64_t eidx = ELL_IND(row, static_cast<int64_t>(p), m, ell_width);
             const I       col  = rocsparse::nontemporal_load(ell_col_ind + eidx) - idx_base;
 
             // Skip padded (out-of-range) entries.
@@ -287,7 +285,9 @@ namespace rocsparse
                 }
             }
 
-            // Spin until the dependency row has been solved.
+            // Spin until the dependency row has been solved. Its done flag only
+            // ever goes from 0 to 1 here, so the returned value carries no
+            // information beyond the wait itself and is discarded.
             (void)rocsparse::spin_loop<SLEEP>(&done_array[col], __HIP_MEMORY_SCOPE_AGENT);
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 

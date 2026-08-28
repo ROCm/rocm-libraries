@@ -209,24 +209,7 @@ namespace rocsparse
                                       int64_t                   ell_width,
                                       rocsparse_index_base      idx_base,
                                       size_t                    buffer_size,
-                                      void*                     temp_buffer)
-        {
-            rocsparse::trm_info_t* trm_info = new rocsparse::trm_info_t();
-
-            THROW_IF_ROCSPARSE_ERROR(rocsparse::gellsv_analysis(handle,
-                                                                m,
-                                                                n,
-                                                                descr,
-                                                                ell_col_ind_indextype,
-                                                                ell_col_ind,
-                                                                ell_width,
-                                                                idx_base,
-                                                                trm_info,
-                                                                this,
-                                                                buffer_size,
-                                                                temp_buffer));
-            return trm_info;
-        }
+                                      void*                     temp_buffer);
 
         template <typename I>
         rocsparse::trm_info_t* create(rocsparse_handle          handle,
