@@ -576,6 +576,17 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int getHazardWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     bool warTooCloseToWmmaRead(DAGNode* node) const;
+    // EMPIRICAL, unexplained: exempt the first ds_load of a window when
+    // popcount(coIssueWindow) <= 1 -- in practice the FP4/FP4 WMMA. Co-issue is NOT the
+    // mechanism: ds_loads never occupy a coexec slot, those are VALU-pipe only
+    // (InsertCoexecHazardPass). Kept because it measures; do not ship the slot-capacity
+    // story with it. Consulted at EVERY warTooCloseToWmmaRead() site -- exempting at the
+    // ds pick while Phase F2 still forces a WMMA over the same load half-applies it.
+    bool feederExemptFromWarGate() const {
+        const int coIssueSlots =
+            activeWmmaNode_ ? popcount16(activeWmmaNode_->inst->coIssueWindow) : 0;
+        return coIssueSlots <= 1 && dsInsertedSinceLastWmma_ == 0;
+    }
     int nodeElapseKey(DAGNode* node) const;
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
                           bool allowHiddenStall = false) const;
@@ -1105,17 +1116,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     }
     const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
     // mode2 WAR gate: hold back a ds_load too close after its WMMA reader (while WMMAs remain).
-    // EMPIRICAL, unexplained: exempting the first ds_load of a window when
-    // popcount(coIssueWindow) <= 1 -- in practice the FP4/FP4 WMMA -- is worth ~2pp of
-    // mxf4 D (removing it measured D-C +2.85% -> +0.46%, D-A -2.69%). Co-issue is NOT
-    // the mechanism: ds_loads never occupy a coexec slot, those are VALU-pipe only
-    // (InsertCoexecHazardPass). Kept because it measures; do not ship the slot-capacity
-    // story with it.
-    const int coIssueSlots =
-        activeWmmaNode_ ? popcount16(activeWmmaNode_->inst->coIssueWindow) : 0;
-    const bool feederNoSlot = coIssueSlots <= 1 && dsInsertedSinceLastWmma_ == 0;
     const bool warTooClose =
-        !wmmaQueue.empty() && !feederNoSlot && warTooCloseToWmmaRead(pickedDS);
+        !wmmaQueue.empty() && !feederExemptFromWarGate() && warTooCloseToWmmaRead(pickedDS);
     const bool dsBaseOk =
         pickedDS && !dsCapReached && !warTooClose && !destOverlapsActiveWmmaSrc(pickedDS);
     int dsThrottleWait = 0;
@@ -1838,7 +1840,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     }
 
     // Phase F2 — mode2 WAR: if the only fill left is a too-close ds_load, issue a WMMA instead.
-    if (!wmmaQueue.empty() && warTooCloseToWmmaRead(pickedDS)) {
+    if (!wmmaQueue.empty() && !feederExemptFromWarGate() && warTooCloseToWmmaRead(pickedDS)) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
         (void)bestLatency;
         DAGNode* node = pickOneFromWMMA(bestWMMA);
