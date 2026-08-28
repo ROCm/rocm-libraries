@@ -7,6 +7,7 @@ ARG AITER_BRANCH="main"
 ARG CK_AITER_BRANCH="develop"
 # CK_FROM_ROCM_LIBRARIES - 1: CK from rocm-libraries sparse-checkout; 0: direct clone from ROCm/composable_kernel
 ARG CK_FROM_ROCM_LIBRARIES=1
+ADD projects/composablekernel/requirements-aiter.txt /requirements-aiter.txt
 RUN pip install --require-hashes -r requirements-aiter.txt && \
     sudo mkdir /home/jenkins && \
     sudo mkdir /home/jenkins/workspace && \
