@@ -5,5 +5,5 @@ add_executable(sample_hipblaslt_gemm_mix_precision_ext "${CMAKE_CURRENT_SOURCE_D
 target_link_libraries(sample_hipblaslt_gemm_mix_precision_ext
     PRIVATE
         sample-helper
-        roc::host-validation
+        roc::host-numerics
 )

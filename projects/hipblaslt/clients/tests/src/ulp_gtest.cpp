@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 
-#include <hipblaslt/host_validation/HostComparison.hpp>
+#include <hipblaslt/host_numerics/HostComparison.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -24,8 +24,8 @@ namespace
 {
     inline int ulp_mantissa_bits(hipDataType type)
     {
-        return roc::host_validation::ulpMantissaBits(
-            hipblaslt::host_validation::scalarType(type));
+        return roc::host_numerics::ulpMantissaBits(
+            hipblaslt::host_numerics::scalarType(type));
     }
 
     template <typename T>
@@ -36,7 +36,7 @@ namespace
 
     inline double ulp_distance(double exact, double approximation, int mantissaBits)
     {
-        return roc::host_validation::ulpDistance(exact, approximation, mantissaBits);
+        return roc::host_numerics::ulpDistance(exact, approximation, mantissaBits);
     }
 
     template <typename T>
@@ -55,11 +55,11 @@ namespace
         if(M == 0 || N == 0 || batchCount == 0)
             return;
 
-        using namespace roc::host_validation;
-        using namespace hipblaslt::host_validation;
+        using namespace roc::host_numerics;
+        using namespace hipblaslt::host_numerics;
 
         const Layout layout
-            = hipblaslt::host_validation::detail::comparisonLayout(M, N, lda, stride, batchCount);
+            = hipblaslt::host_numerics::detail::comparisonLayout(M, N, lda, stride, batchCount);
         const size_t storageElements = storageBytesForLayout(scalarType<T>(), layout) / sizeof(T);
         ComparisonOptions options;
         options.pointwise                  = false;
@@ -70,9 +70,10 @@ namespace
         options.maxReportedMismatches      = 0;
         options.selection.indexOrder       = IndexOrder::FirstDimensionFastest;
 
-        const ComparisonResult report = compare(tensorFromStorage(hGPU, storageElements, layout),
-                                                tensorFromStorage(hCPU, storageElements, layout),
-                                                options);
+        const ComparisonResult report
+            = compare(copyTensorFromEncodedStorage(hGPU, storageElements, layout),
+                      copyTensorFromEncodedStorage(hCPU, storageElements, layout),
+                      options);
         maxUlp = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;
         count += report.ulpCompared;
@@ -90,7 +91,7 @@ namespace
                                   size_t&     count,
                                   hipDataType type)
     {
-        using namespace hipblaslt::host_validation;
+        using namespace hipblaslt::host_numerics;
 
         HostComparisonRequest request;
         request.rows                    = M;

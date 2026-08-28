@@ -39,7 +39,7 @@ subtree_to_project_map = {
     "projects/rocwmma": "rocwmma",
     "projects/hipthreads": "hipthreads",
     "projects/rpp": "rpp",
-    "shared/host-validation": "blas",
+    "shared/host-numerics": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "rocroller",
     "shared/stinkytofu": "blas",
@@ -214,7 +214,7 @@ SUBTREE_EXTRA_MATRIX_PROJECTS = {
     # generator copy lives there too), so a TensileLite-only change must
     # activate "sparselt" the same way a hipblaslt-proper change does.
     "projects/hipblaslt/tensilelite": "sparselt",
-    "shared/host-validation": "rocroller",
+    "shared/host-numerics": "rocroller",
 }
 
 

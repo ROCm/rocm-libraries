@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "hipblaslt_init.hpp"
+#include <hipblaslt/host_numerics/hipblaslt_init.hpp>
 #include "hipblaslt_test.hpp"
 
 #include <hip/hip_runtime.h>
@@ -11,9 +11,9 @@
 
 namespace
 {
-    hipblaslt::host_validation::MatrixRole matrixRole(ABC_dims role)
+    hipblaslt::host_numerics::MatrixRole matrixRole(ABC_dims role)
     {
-        using hipblaslt::host_validation::MatrixRole;
+        using hipblaslt::host_numerics::MatrixRole;
 
         switch(role)
         {
@@ -40,10 +40,10 @@ void hipblaslt_init_device(
     size_t                                                     batchStride,
     size_t                                                     batchCount,
     bool                                                       positiveOnly,
-    std::optional<hipblaslt::host_validation::OneSpecialValue> oneSpecialValue)
+    std::optional<hipblaslt::host_numerics::OneSpecialValue> oneSpecialValue)
 {
-    using hipblaslt::host_validation::MatrixInitialization;
-    using roc::host_validation::Tensor;
+    using hipblaslt::host_numerics::MatrixInitialization;
+    using roc::host_numerics::Tensor;
 
     MatrixInitialization initialization;
     initialization.role             = matrixRole(abc);
@@ -58,7 +58,7 @@ void hipblaslt_init_device(
     initialization.oneSpecialValue  = oneSpecialValue;
     initialization.positiveOnly     = positiveOnly;
 
-    Tensor     matrix  = hipblaslt::host_validation::generateMatrix(initialization);
+    Tensor     matrix  = hipblaslt::host_numerics::generateMatrix(initialization);
     const auto storage = matrix.rawEncodedBackingStorage();
     if(!storage.empty())
     {

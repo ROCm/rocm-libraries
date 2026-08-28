@@ -21,6 +21,7 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
+#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
@@ -87,104 +88,41 @@ auto make_shared_device(std::ranges::range auto const& init, size_t padding = 0)
 std::shared_ptr<void> make_shared_device(rocRoller::CommandArgumentValue const& arg);
 
 template <typename T>
-double normL2(std::vector<T> a)
+roc::host_numerics::Tensor hostComparisonTensor(std::vector<T> const& values)
 {
-    double r = 0.0;
-
-#pragma omp parallel for reduction(+ : r)
-    for(int i = 0; i < a.size(); ++i)
-    {
-        double t = double(a[i]);
-        r        = r + t * t;
-    }
-    return std::sqrt(r);
+    constexpr size_t packing = rocRoller::TypeInfo<T>::Packing;
+    if(values.size() > std::numeric_limits<size_t>::max() / packing)
+        throw std::overflow_error("rocRoller comparison element count overflow.");
+    const size_t logicalElements = values.size() * packing;
+    const auto   type            = rocRoller::HostNumerics::hostScalarType(
+        rocRoller::TypeInfo<T>::SegmentVariableType.dataType);
+    return roc::host_numerics::Tensor::copyEncodedBackingStorage(
+        type,
+        roc::host_numerics::Layout::contiguousLastDimensionFastest(
+            roc::host_numerics::Shape{logicalElements}),
+        std::as_bytes(std::span<const T>(values)));
 }
 
 template <typename T>
-double relativeNormL2(std::vector<T> a, std::vector<T> b)
+double relativeNormL2(std::vector<T> const& observed, std::vector<T> const& expected)
 {
-    double d = 0.0;
-    double r = 0.0;
-
-#pragma omp parallel for reduction(+ : d, r)
-    for(size_t i = 0; i < a.size(); ++i)
-    {
-        double td = double(a[i] - b[i]);
-        double t  = double(b[i]);
-        d         = d + td * td;
-        r         = r + t * t;
-    }
-
-    return std::sqrt(d / r);
+    if(observed.size() != expected.size())
+        throw std::invalid_argument("rocRoller comparison vectors have different sizes.");
+    roc::host_numerics::ComparisonOptions options;
+    options.pointwise                              = false;
+    options.computePointwiseStatistics             = true;
+    options.computeFrobenius                       = true;
+    options.computeUlp                             = false;
+    options.maxReportedMismatches                  = 0;
+    options.zeroExpectedNormIsNaN                  = true;
+    options.nonFiniteValuesInvalidateRelativeNorms = true;
+    return roc::host_numerics::compare(
+               hostComparisonTensor(observed), hostComparisonTensor(expected), options)
+        .relativeFrobeniusError;
 }
 
-template <typename T>
-double normInf(std::vector<T> a)
-{
-    double r = 0.0;
-
-#pragma omp parallel for reduction(max : r)
-    for(int i = 0; i < a.size(); ++i)
-    {
-        double t = fabs(double(a[i]));
-        if(t > r)
-            r = t;
-    }
-    return r;
-}
-
-template <typename T>
-double relativeNormInf(std::vector<T> a, std::vector<T> b)
-{
-    double d = 0.0;
-    double r = 0.0;
-
-#pragma omp parallel for reduction(max : d, r)
-    for(size_t i = 0; i < a.size(); ++i)
-    {
-        double td = fabs(double(a[i] - b[i]));
-        double t  = fabs(double(b[i]));
-
-        if(td > d)
-            d = td;
-        if(t > r)
-            r = t;
-    }
-
-    return d / r;
-}
-
-struct AcceptableError
-{
-    double      relativeL2Tolerance;
-    std::string reasoning;
-};
-
-struct ComparisonResult
-{
-    bool ok;
-
-    double relativeNormL2, relativeNormInf;
-    double referenceNormL2, referenceNormInf;
-    double xNormL2, xNormInf;
-
-    AcceptableError acceptableError;
-
-    std::string message() const
-    {
-        std::stringstream ss;
-        ss << (ok ? "Comparison PASSED." : "Comparison FAILED.");
-        ss << "  Relative norms:";
-        ss << " L2 " << std::scientific << relativeNormL2;
-        ss << " Inf " << std::scientific << relativeNormInf;
-        ss << "  Norms (x/ref):";
-        ss << " L2 " << std::scientific << xNormL2 << "/" << referenceNormL2;
-        ss << " Inf " << std::scientific << xNormInf << "/" << referenceNormInf;
-        ss << "  Tolerance: " << std::scientific << acceptableError.relativeL2Tolerance;
-        ss << " (" << acceptableError.reasoning << ")";
-        return ss.str();
-    }
-};
+using AcceptableError  = rocRoller::HostNumerics::AcceptableGEMMError;
+using ComparisonResult = rocRoller::HostNumerics::HostComparisonResult;
 
 /**
  * Return expected machine epsilon for `T`.
@@ -192,23 +130,7 @@ struct ComparisonResult
 template <typename T>
 double epsilon()
 {
-    using namespace rocRoller;
-
-    double rv = 0.0;
-    if constexpr(std::is_same_v<T, __half>)
-        rv = std::pow(2.0, -10);
-    else if constexpr(std::is_same_v<T, BFloat16>)
-        rv = std::pow(2.0, -5);
-    else if constexpr(std::is_same_v<T, FP8>)
-        rv = std::pow(2.0, -3);
-    else if constexpr(std::is_same_v<T, BF8>)
-        rv = std::pow(2.0, -2);
-    else
-        rv = std::numeric_limits<T>::epsilon();
-
-    AssertFatal(rv != 0.0, "Unknown data type.");
-
-    return rv;
+    return rocRoller::HostNumerics::hostReferenceEpsilon<T>();
 }
 
 /**
@@ -221,92 +143,9 @@ double epsilon()
  * they did, we would want to include `M` and `N` in the scaling).
  */
 template <typename TA, typename TB, typename TD>
-AcceptableError
-    gemmAcceptableError(int M, int N, int K, rocRoller::GPUArchitectureTarget const& arch)
+AcceptableError gemmAcceptableError(int K, rocRoller::GPUArchitectureTarget const& arch)
 {
-    double eps       = epsilon<TD>();
-    double tolerance = 0.0;
-
-    std::stringstream ss;
-    ss << "Output epsilon: " << std::scientific << eps;
-
-    if constexpr(std::is_same_v<TD, rocRoller::FP8> || std::is_same_v<TD, rocRoller::BF8>)
-    {
-        tolerance = eps;
-        ss << " Error expected to be dominated by conversion.";
-    }
-    else
-    {
-        double scale             = std::sqrt(K);
-        double fudge             = 5;
-        double extraArchFudgeBF8 = 0.0;
-        double extraArchFudgeBF6 = 0.0;
-        double extraArchFudgeFP4 = 0.0;
-
-        if(arch.gfx == rocRoller::GPUArchitectureGFX::GFX1250)
-        {
-            extraArchFudgeBF8 = 5.8;
-            extraArchFudgeBF6 = 5.8;
-            extraArchFudgeFP4 = 2.8;
-        }
-        else if(arch.gfx == rocRoller::GPUArchitectureGFX::GFX950)
-        {
-            extraArchFudgeBF8 = 2.58;
-        }
-
-        ss << " K: " << K;
-        ss << " Problem size scaling: " << scale;
-        ss << " Fudge: " << fudge;
-
-        if constexpr(std::is_same_v<TA, TB>)
-        {
-            if constexpr(std::is_same_v<TA, rocRoller::BF6>)
-            {
-                fudge *= 3 + extraArchFudgeBF6;
-                ss << " Increase fudge for BF6: " << fudge;
-            }
-            if constexpr(std::is_same_v<TA, rocRoller::BF8>)
-            {
-                fudge *= 5 + extraArchFudgeBF8;
-                ss << " Increase fudge for BF8: " << fudge;
-            }
-            if constexpr(std::is_same_v<TA, rocRoller::FP8>)
-            {
-                fudge *= 6.0 + (arch.gfx == rocRoller::GPUArchitectureGFX::GFX950 ? 0.5 : 0.0);
-
-                ss << " Increase fudge for FP8: " << fudge;
-            }
-        }
-        else
-        {
-            if constexpr(std::is_same_v<TA, rocRoller::BF8> || std::is_same_v<TB, rocRoller::BF8>)
-            {
-                fudge *= 5 + extraArchFudgeBF8;
-                ss << " Increase fudge for mixed BF8: " << fudge;
-            }
-            else if constexpr(std::is_same_v<TA,
-                                             rocRoller::FP8> || std::is_same_v<TB, rocRoller::FP8>)
-            {
-                fudge *= 4.95;
-                ss << " Increase fudge for mixed FP8: " << fudge;
-            }
-            else if constexpr(std::is_same_v<TA,
-                                             rocRoller::BF6> || std::is_same_v<TB, rocRoller::BF6>)
-            {
-                fudge *= 3;
-                ss << " Increase fudge for mixed BF6: " << fudge;
-            }
-
-            if constexpr(std::is_same_v<TA, rocRoller::FP4> || std::is_same_v<TB, rocRoller::FP4>)
-            {
-                fudge *= 3 + extraArchFudgeFP4;
-                ss << " Increase fudge for mixed FP4: " << fudge;
-            }
-        }
-        tolerance = fudge * epsilon<TD>() * std::sqrt(K);
-    }
-
-    return {tolerance, ss.str()};
+    return rocRoller::HostNumerics::acceptableGEMMError<TA, TB, TD>(K, arch);
 }
 
 /**
@@ -322,19 +161,8 @@ ComparisonResult compare(std::vector<T> const&  x,
                          std::vector<T> const&  r,
                          AcceptableError const& acceptableError)
 {
-    ComparisonResult rv;
-
-    rv.acceptableError  = acceptableError;
-    rv.referenceNormL2  = normL2(r);
-    rv.referenceNormInf = normInf(r);
-    rv.xNormL2          = normL2(x);
-    rv.xNormInf         = normInf(x);
-    rv.relativeNormL2   = relativeNormL2(x, r);
-    rv.relativeNormInf  = relativeNormInf(x, r);
-
-    rv.ok = rv.relativeNormL2 < rv.acceptableError.relativeL2Tolerance;
-
-    return rv;
+    return rocRoller::HostNumerics::compareHostReference(
+        hostComparisonTensor(x), hostComparisonTensor(r), acceptableError);
 }
 
 int countSubstring(const std::string& str, const std::string& sub);
@@ -379,8 +207,8 @@ namespace rocRoller
     }
 
     template <typename F6x16>
-    requires(CIsAnyOf<F6x16, FP6x16, BF6x16>) //
-        inline void SetIdentityMatrix(std::vector<F6x16>& mat, size_t cols, size_t rows)
+        requires(CIsAnyOf<F6x16, FP6x16, BF6x16>) //
+    inline void SetIdentityMatrix(std::vector<F6x16>& mat, size_t cols, size_t rows)
     {
         std::fill(mat.begin(), mat.end(), F6x16()); // zero out the matrix
 

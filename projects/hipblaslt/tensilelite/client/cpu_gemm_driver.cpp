@@ -30,7 +30,6 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
-#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -39,12 +38,12 @@
 #include <vector>
 
 #include "ProgramOptions.hpp"
-#include <roc/host_validation/adapters/tensilelite/Reference.hpp>
+#include <roc/host_numerics/adapters/tensilelite/Reference.hpp>
 #include "rocisa/include/enum.hpp"
 #include <Tensile/Activation.hpp>
-#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
-#include <roc/host_validation/adapters/tensilelite/TensileDataGeneration.hpp>
-#include <roc/host_validation/validation.hpp>
+#include <roc/host_numerics/adapters/tensilelite/HostNumericsBridge.hpp>
+#include <roc/host_numerics/adapters/tensilelite/TensileDataGeneration.hpp>
+#include <roc/host_numerics/validation.hpp>
 
 /*
  * CPU GEMM Driver and Validator
@@ -57,8 +56,8 @@
  * The driver performs the following steps:
  * 1. Sets up a contraction problem based on user arguments (M, N, K, Transpose, etc).
  * 2. Initializes input matrices (A, B) with random data.
- * 3. Executes the "Device Under Test" (the optimized CPU solve).
- * 4. Optionally validates the result against a simple, golden reference implementation.
+ * 3. Executes the selected shared host-numerics backend.
+ * 4. Optionally validates the result against another shared backend.
  *
  * Usage Examples:
  * # Standard f32 run
@@ -68,9 +67,9 @@
  * ./cpu_gemm_driver --type bf16 --M 512 --N 512 --K 256 --validate 1
  *
  * # Benchmark mode (validation disabled)
- * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0 --tryFastPath 1
+ * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0 --backend blocked
  *
- * # Help messnage
+ * # Help message
  * ./cpu_gemm_driver --help
  */
 
@@ -152,12 +151,31 @@ namespace
         ScaleB     = 6,
     };
 
+    const char* backendName(roc::host_numerics::GemmBackend backend)
+    {
+        using roc::host_numerics::GemmBackend;
+        switch(backend)
+        {
+        case GemmBackend::Automatic:
+            return "automatic";
+        case GemmBackend::Pointwise:
+            return "pointwise";
+        case GemmBackend::Blocked:
+            return "blocked";
+        case GemmBackend::Blas:
+            return "blas";
+        case GemmBackend::Mixed:
+            return "mixed";
+        }
+        throw std::invalid_argument("Invalid host-numerics GEMM backend.");
+    }
+
     template <typename T>
     void generateValues(std::vector<T>&                                   destination,
-                        roc::host_validation::GenerationRecipe::Component component,
+                        roc::host_numerics::GenerationRecipe::Component component,
                         InitializationStream                              stream)
     {
-        using namespace roc::host_validation;
+        using namespace roc::host_numerics;
         static_assert(std::is_trivially_copyable_v<T>);
 
         const auto recipe
@@ -165,7 +183,7 @@ namespace
                                          tensilelite_adapter::dataInitializationSettings(
                                              42, static_cast<uint64_t>(stream)));
 
-        Tensor generated(toHostValidationScalarType(TypeTraits<T>::value),
+        Tensor generated(toHostNumericsScalarType(TypeTraits<T>::value),
                          Shape{destination.size()});
         generate(generated, recipe);
         const std::span<std::byte> destinationBytes
@@ -175,64 +193,6 @@ namespace
         std::memcpy(destinationBytes.data(), generated.rawEncodedBackingStorage().data(), destinationBytes.size());
     }
 
-    template <typename Destination, typename Source>
-    std::vector<Destination> convertValues(std::span<const Source> source)
-    {
-        using namespace roc::host_validation;
-        static_assert(std::is_trivially_copyable_v<Source>);
-        static_assert(std::is_trivially_copyable_v<Destination>);
-
-        const Tensor sourceTensor(toHostValidationScalarType(TypeTraits<Source>::value),
-                                  Layout::contiguousLastDimensionFastest(Shape{source.size()}),
-                                  std::as_bytes(source));
-        const Tensor converted
-            = sourceTensor.copyConvertedTo(toHostValidationScalarType(TypeTraits<Destination>::value));
-
-        std::vector<Destination>   result(source.size());
-        const std::span<std::byte> resultBytes
-            = std::as_writable_bytes(std::span<Destination>(result));
-        if(converted.rawEncodedBackingStorage().size() != resultBytes.size())
-            throw std::runtime_error("Converted tensor storage does not match CPU driver type.");
-        std::memcpy(resultBytes.data(), converted.rawEncodedBackingStorage().data(), resultBytes.size());
-        return result;
-    }
-
-#ifndef _WIN32
-    template <typename Destination>
-    std::vector<Destination> convertPackedFloat4Values(std::span<const Float4x2> source,
-                                                       size_t logicalElementsPerBatch,
-                                                       size_t batchCount)
-    {
-        using namespace roc::host_validation;
-        static_assert(sizeof(Float4x2) == 1);
-        static_assert(std::is_trivially_copyable_v<Destination>);
-
-        const size_t storageBytesPerBatch = (logicalElementsPerBatch + 1) / 2;
-        if(source.size_bytes() != storageBytesPerBatch * batchCount)
-            throw std::runtime_error("Packed FP4 storage does not match CPU driver batches.");
-
-        std::vector<Destination>         result(logicalElementsPerBatch * batchCount);
-        const std::span<const std::byte> sourceBytes = std::as_bytes(source);
-        for(size_t batch = 0; batch < batchCount; ++batch)
-        {
-            const Tensor sourceTensor(
-                ScalarType::Float4E2M1,
-                Layout::contiguousLastDimensionFastest(Shape{logicalElementsPerBatch}),
-                sourceBytes.subspan(batch * storageBytesPerBatch, storageBytesPerBatch));
-            const Tensor converted
-                = sourceTensor.copyConvertedTo(toHostValidationScalarType(TypeTraits<Destination>::value));
-            const std::span<std::byte> destinationBytes
-                = std::as_writable_bytes(std::span<Destination>(result).subspan(
-                    batch * logicalElementsPerBatch, logicalElementsPerBatch));
-            if(converted.rawEncodedBackingStorage().size() != destinationBytes.size())
-                throw std::runtime_error(
-                    "Converted FP4 tensor storage does not match CPU driver type.");
-            std::memcpy(
-                destinationBytes.data(), converted.rawEncodedBackingStorage().data(), destinationBytes.size());
-        }
-        return result;
-    }
-#endif
 }
 
 /*
@@ -252,7 +212,7 @@ int runGemm(size_t             m,
             float              beta,
             bool               validate,
             bool               injectValidationFailure,
-            bool               tryFastPath,
+            roc::host_numerics::GemmBackend backend,
             bool               useBias,
             ActivationType     activation,
             bool               useScaleAlphaVec,
@@ -296,8 +256,8 @@ int runGemm(size_t             m,
 
     if constexpr(isFP4)
     {
-        // One-sided MX (only A or only B scaled) is not supported by either
-        // reference path; they would disagree about what one-sided MX means.
+        // TensileLite MX problems require paired A and B scale tensors even
+        // though the shared numerical operation also supports one-sided scales.
         if((mxBlockA > 0) != (mxBlockB > 0))
         {
             std::cerr << "Error: one-sided MX is not supported "
@@ -333,19 +293,6 @@ int runGemm(size_t             m,
         if(int rc = checkSide("mxBlockB", mxBlockB))
             return rc;
 
-        // Asymmetric MX (mxBlockA != mxBlockB) is only supported on the fast
-        // path. The production slow path's MX inner loop uses a single scale
-        // per max(mxBlockA, mxBlockB)-sized segment, which collapses the
-        // smaller-blocked side's per-segment scales onto the first one and
-        // produces wrong results. Reject the combination at the driver rather
-        // than ship a known-wrong slow path.
-        if(mxBlockA != mxBlockB && !tryFastPath)
-        {
-            std::cerr << "Error: asymmetric MX (mxBlockA=" << mxBlockA
-                      << " != mxBlockB=" << mxBlockB << ") is only supported on the fast path "
-                      << "(use --tryFastPath)." << std::endl;
-            return 1;
-        }
     }
 
     // Calculate strides assuming standard column-major packed storage
@@ -395,9 +342,11 @@ int runGemm(size_t             m,
 #ifndef _WIN32
     if constexpr(isFP4)
     {
-        // Packed batch stride: 2 nibbles per byte, packed per batch slice.
-        storageA = ((numA + 1) / 2) * batchCount;
-        storageB = ((numB + 1) / 2) * batchCount;
+        // TensorDescriptor batch strides are measured in logical elements, so
+        // an odd-sized batch ends in the low nibble and the next batch starts
+        // in the high nibble of that same byte.
+        storageA = (numA * batchCount + 1) / 2;
+        storageB = (numB * batchCount + 1) / 2;
     }
     else
 #endif
@@ -413,23 +362,12 @@ int runGemm(size_t             m,
 
     const bool partialValidation = elementsToValidate > 0
                                    && static_cast<size_t>(elementsToValidate) < d.size();
-    std::vector<size_t>              selectedValidationIndices;
-    std::vector<std::vector<size_t>> selectedValidationIndicesByBatch;
+    std::vector<size_t> selectedValidationIndices;
     if(partialValidation)
     {
-        const auto selection = roc::host_validation::OutputSelection::primeStride(
+        const auto selection = roc::host_numerics::OutputSelection::primeStride(
             d.size(), d.size(), static_cast<size_t>(elementsToValidate));
         selectedValidationIndices = selection.indices(d.size());
-        selectedValidationIndicesByBatch.resize(batchCount);
-        for(const size_t globalIndex : selectedValidationIndices)
-        {
-            const size_t batch       = globalIndex / numC;
-            const size_t batchIndex  = globalIndex % numC;
-            const size_t row         = batchIndex % m;
-            const size_t column      = batchIndex / m;
-            const size_t logicalIndex = row * n + column;
-            selectedValidationIndicesByBatch[batch].push_back(logicalIndex);
-        }
     }
 
     // Initialize inputs with random values. We use ±1 (binary) for A and B by
@@ -453,32 +391,28 @@ int runGemm(size_t             m,
         // Drawing from the entire grid (not just the powers of two near zero)
         // exercises the MX-scale path with values whose products span more of
         // the FP4 range, while still being exactly representable.
-        const auto fp4Values = roc::host_validation::GenerationRecipe::candidateSet(
+        const auto fp4Values = roc::host_numerics::GenerationRecipe::candidateSet(
             {.values
              = {-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0}});
-        // Pack 2 logical FP4 values per byte (Float4x2). When the logical
-        // element count is odd, the second slot of the last byte has no
-        // element behind it — it's padding. We must still initialize that
-        // slot to a valid FP4 value (we use 0), because the fast-path
-        // ShadowBuffer FP4 decoder unconditionally reads both slots of every
-        // byte (the guard is on the *write* back, not the read), and reading
-        // uninitialized memory would be UB.
+        // Pack all batches as one logical nibble stream. This matches the
+        // descriptor's element-based batch stride even when one batch contains
+        // an odd number of values. Tensor zero-initializes the final unused
+        // nibble, if any.
         auto initFp4Operand = [&](auto&                vec,
                                   size_t               numLogical,
                                   InitializationStream initializationStream) {
-            const size_t       storagePerBatch = (numLogical + 1) / 2;
             std::vector<float> logicalValues(numLogical * batchCount);
             generateValues(logicalValues, fp4Values, initializationStream);
-            for(size_t batch = 0; batch < batchCount; ++batch)
-            {
-                auto packed = roc::host_validation::Tensor::copyValuesWithConversion(
-                    roc::host_validation::ScalarType::Float4E2M1,
-                    roc::host_validation::Shape{numLogical},
-                    std::span<const float>(logicalValues).subspan(batch * numLogical, numLogical));
-                std::memcpy(reinterpret_cast<std::byte*>(vec.data()) + batch * storagePerBatch,
-                            packed.rawEncodedBackingStorage().data(),
-                            storagePerBatch);
-            }
+            const auto packed = roc::host_numerics::Tensor::copyValuesWithConversion(
+                roc::host_numerics::ScalarType::Float4E2M1,
+                roc::host_numerics::Shape{logicalValues.size()},
+                std::span<const float>(logicalValues));
+            const auto destination = std::as_writable_bytes(std::span(vec));
+            if(destination.size() != packed.rawEncodedBackingStorage().size())
+                throw std::runtime_error("Packed FP4 storage does not match CPU driver type.");
+            std::memcpy(destination.data(),
+                        packed.rawEncodedBackingStorage().data(),
+                        destination.size());
         };
         initFp4Operand(a, numA, InitializationStream::OperandA);
         initFp4Operand(b, numB, InitializationStream::OperandB);
@@ -505,14 +439,14 @@ int runGemm(size_t             m,
                       // for storage=Half/compute=F8N, values like 0.7 that Half holds
                       // exactly but F8N rounds to 0.625 or 0.75.
                       generateValues(vec,
-                                     roc::host_validation::GenerationRecipe::uniformReal(
+                                     roc::host_numerics::GenerationRecipe::uniformReal(
                                          {.lower = -1.0, .upper = 1.0}),
                                      initializationStream);
                   }
                   else
                   {
                       generateValues(vec,
-                                     roc::host_validation::GenerationRecipe::candidateSet(
+                                     roc::host_numerics::GenerationRecipe::candidateSet(
                                          {.values = {-1.0, 1.0}}),
                                      initializationStream);
                   }
@@ -524,11 +458,11 @@ int runGemm(size_t             m,
         initOperand(b, quantizesB, InitializationStream::OperandB);
     }
     const auto binaryValues
-        = roc::host_validation::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
+        = roc::host_numerics::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
     generateValues(c, binaryValues, InitializationStream::MatrixC);
 
-    // Optional feature buffers — typed as AccumulateT so the slow path's
-    // GetValue(alphaType, ...) reads the correct byte width.
+    // Optional feature buffers use the coefficient type described by the
+    // contraction problem.
     std::vector<AccumulateT> biasVec;
     std::vector<AccumulateT> scaleAlphaVecBuf;
 
@@ -557,7 +491,7 @@ int runGemm(size_t             m,
         scaleCandidates.push_back(-magnitude);
         scaleCandidates.push_back(magnitude);
     }
-    const auto scaleValues = roc::host_validation::GenerationRecipe::candidateSet(
+    const auto scaleValues = roc::host_numerics::GenerationRecipe::candidateSet(
         {.values = std::move(scaleCandidates)});
 
     if(useScaleAB == "Scalar")
@@ -624,14 +558,14 @@ int runGemm(size_t             m,
 
             // Distinct exponents in [0..7] so wrong indexing breaks validation.
             auto fillScale = [](std::vector<E8>& values, uint64_t stream) {
-                roc::host_validation::Tensor generated(roc::host_validation::ScalarType::E8M0,
-                                                       roc::host_validation::Shape{values.size()});
-                const auto recipe = roc::host_validation::GenerationRecipe::realOnly(
-                    roc::host_validation::GenerationRecipe::randomEncodedExponent(
+                roc::host_numerics::Tensor generated(roc::host_numerics::ScalarType::E8M0Zero,
+                                                       roc::host_numerics::Shape{values.size()});
+                const auto recipe = roc::host_numerics::GenerationRecipe::realOnly(
+                    roc::host_numerics::GenerationRecipe::randomEncodedExponent(
                         {.lowerUnbiasedExponent = 0, .upperUnbiasedExponent = 7}),
-                    roc::host_validation::tensilelite_adapter::dataInitializationSettings(
+                    roc::host_numerics::tensilelite_adapter::dataInitializationSettings(
                         42, stream));
-                roc::host_validation::generate(generated, recipe);
+                roc::host_numerics::generate(generated, recipe);
                 std::memcpy(values.data(), generated.rawEncodedBackingStorage().data(), generated.rawEncodedBackingStorage().size());
             };
             fillScale(mxsa, 0);
@@ -661,20 +595,8 @@ int runGemm(size_t             m,
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    const auto execution = tryFastPath
-                               ? TensileLite::Client::ReferenceGemmExecution::BlockedRequired
-                               : TensileLite::Client::ReferenceGemmExecution::Pointwise;
-    const auto runInfo = TensileLite::Client::tryReferenceGemm(
-        contraction, inputs, elementsToValidate, execution);
-    if(!runInfo)
-    {
-        if(tryFastPath)
-            throw std::runtime_error(
-                "--tryFastPath requires execution by the blocked CPU GEMM backend, "
-                "but the normalized request is unsupported.");
-        throw std::runtime_error("The normalized request is unsupported by the "
-                                 "pointwise CPU GEMM backend.");
-    }
+    const auto runInfo
+        = TensileLite::Client::executeReferenceGemm(contraction, inputs, elementsToValidate, backend);
 
     auto                                      end      = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
@@ -694,182 +616,31 @@ int runGemm(size_t             m,
     {
         std::cout << "Validating..." << std::endl;
 
-        // Convert inputs to AccumulateT for the golden reference comparison.
-        // Batched FP4 storage is converted one slice at a time so odd logical
-        // sizes retain their per-batch byte padding.
-
-        std::vector<AccumulateT> aRef, bRef;
-
-#ifndef _WIN32
-        if constexpr(isFP4)
+        using roc::host_numerics::GemmBackend;
+        std::vector<GemmBackend> validationBackends;
+        if(backend == GemmBackend::Pointwise)
+            validationBackends.push_back(GemmBackend::Blocked);
+        else if(backend == GemmBackend::Blocked)
+            validationBackends.push_back(GemmBackend::Pointwise);
+        else if(backend == GemmBackend::Automatic)
         {
-            aRef = convertPackedFloat4Values<AccumulateT>(
-                std::span<const Float4x2>(a), numA, batchCount);
-            bRef = convertPackedFloat4Values<AccumulateT>(
-                std::span<const Float4x2>(b), numB, batchCount);
-        }
-        else if constexpr(std::is_same_v<InputAT, Float4x2> || std::is_same_v<InputBT, Float4x2>)
-        {
-            throw std::runtime_error("Mixed FP4 / non-FP4 input is not supported.");
+            if(runInfo.backendUsed == GemmBackend::Blocked)
+                validationBackends.push_back(GemmBackend::Pointwise);
+            else if(runInfo.backendUsed == GemmBackend::Pointwise)
+                validationBackends.push_back(GemmBackend::Blocked);
+            else if(runInfo.backendUsed == GemmBackend::Mixed)
+            {
+                validationBackends.push_back(GemmBackend::Pointwise);
+                validationBackends.push_back(GemmBackend::Blocked);
+            }
+            else
+                throw std::runtime_error(
+                    "Automatic CPU GEMM selected a backend without an independent validator.");
         }
         else
-#endif
         {
-            aRef = convertValues<AccumulateT>(std::span<const InputAT>(a));
-            bRef = convertValues<AccumulateT>(std::span<const InputBT>(b));
-        }
-
-        std::vector<AccumulateT> cRef = convertValues<AccumulateT>(std::span<const AccumulateT>(c));
-        std::vector<AccumulateT> dRef(d.size());
-
-#ifndef _WIN32
-        size_t mxsaBatchStride = 0, mxsbBatchStride = 0;
-        size_t mxsaStrideM = 0, mxsaStrideKBlk = 0;
-        size_t mxsbStrideN = 0, mxsbStrideKBlk = 0;
-        if constexpr(isFP4)
-        {
-            if(mxBlockA > 0)
-            {
-                auto const& mxsaTensor = contraction.mxsa();
-                mxsaStrideM            = mxsaTensor.strides()[contraction.freeIndicesA()[0].i];
-                mxsaStrideKBlk         = mxsaTensor.strides()[contraction.boundIndices()[0].a];
-                mxsaBatchStride        = mxsaTensor.strides()[contraction.batchIndices()[0].a];
-            }
-            if(mxBlockB > 0)
-            {
-                auto const& mxsbTensor = contraction.mxsb();
-                mxsbStrideN            = mxsbTensor.strides()[contraction.freeIndicesB()[0].i];
-                mxsbStrideKBlk         = mxsbTensor.strides()[contraction.boundIndices()[0].b];
-                mxsbBatchStride        = mxsbTensor.strides()[contraction.batchIndices()[0].b];
-            }
-        }
-#endif
-
-        // Run the runtime-typed golden reference per batch. The host buffers
-        // remain caller-owned; the validation component sees affine tensor
-        // views and product-independent scalar types.
-        for(size_t batch = 0; batch < batchCount; ++batch)
-        {
-            using namespace roc::host_validation;
-
-            const AccumulateT* aPtr = aRef.data() + batch * numA;
-            const AccumulateT* bPtr = bRef.data() + batch * numB;
-            const AccumulateT* cPtr = cRef.data() + batch * numC;
-            AccumulateT*       dPtr = dRef.data() + batch * numC;
-
-            const ptrdiff_t strideARow    = transA ? static_cast<ptrdiff_t>(k) : 1;
-            const ptrdiff_t strideAColumn = transA ? 1 : static_cast<ptrdiff_t>(m);
-            const ptrdiff_t strideBRow    = transB ? static_cast<ptrdiff_t>(n) : 1;
-            const ptrdiff_t strideBColumn = transB ? 1 : static_cast<ptrdiff_t>(k);
-
-            GemmOperand operandA(
-                Tensor::copyNativeStorage<AccumulateT>(Layout(Shape{m, k}, {strideARow, strideAColumn}),
-                                                std::span<const AccumulateT>(aPtr, numA)));
-            GemmOperand operandB(
-                Tensor::copyNativeStorage<AccumulateT>(Layout(Shape{k, n}, {strideBRow, strideBColumn}),
-                                                std::span<const AccumulateT>(bPtr, numB)));
-            if(computeInputA != dtypeEnumA)
-                operandA.computeType = toHostValidationScalarType(computeInputA);
-            if(computeInputB != dtypeEnumB)
-                operandB.computeType = toHostValidationScalarType(computeInputB);
-
-            Tensor outputTensor = Tensor::copyNativeStorage<AccumulateT>(
-                Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
-                std::span<AccumulateT>(dPtr, numC));
-            GemmRequest problem(
-                std::move(operandA),
-                std::move(operandB),
-                Tensor::copyNativeStorage<AccumulateT>(Layout(Shape{m, n}, {1, static_cast<ptrdiff_t>(m)}),
-                                                std::span<const AccumulateT>(cPtr, numC)),
-                outputTensor,
-                nativeScalarType<AccumulateT>);
-            if(partialValidation)
-                problem.outputSelection =
-                    OutputSelection::explicitIndices(selectedValidationIndicesByBatch[batch]);
-
-            problem.epilogue.alpha = static_cast<double>(
-                (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha);
-            problem.epilogue.beta       = static_cast<double>(beta);
-            problem.epilogue.activation = toHostValidationActivation(activation);
-            problem.mathMode            = isTF32 ? MathMode::XFloat32 : MathMode::Default;
-
-            if(useBias)
-            {
-                problem.epilogue.bias = VectorBinding{
-                    Tensor::copyNativeStorage<AccumulateT>(
-                        Layout::contiguousLastDimensionFastest(Shape{m}),
-                        std::span<const AccumulateT>(biasVec.data() + batch * m, m)),
-                    MatrixAxis::Row};
-            }
-            if(useScaleAlphaVec)
-            {
-                problem.epilogue.scaleAlpha
-                    = VectorBinding{Tensor::copyNativeStorage<AccumulateT>(
-                                        Layout::contiguousLastDimensionFastest(Shape{scaleAlphaVecBuf.size()}),
-                                        std::span<const AccumulateT>(scaleAlphaVecBuf)),
-                                    factorDim == 0 ? MatrixAxis::Row : MatrixAxis::Column};
-            }
-            if(useScaleAB == "Vector")
-            {
-                problem.epilogue.scaleA
-                    = Tensor::copyNativeStorage<AccumulateT>(Layout::contiguousLastDimensionFastest(Shape{scaleABuf.size()}),
-                                                      std::span<const AccumulateT>(scaleABuf));
-                problem.epilogue.scaleB
-                    = Tensor::copyNativeStorage<AccumulateT>(Layout::contiguousLastDimensionFastest(Shape{scaleBBuf.size()}),
-                                                      std::span<const AccumulateT>(scaleBBuf));
-            }
-
-            std::optional<Tensor> runtimeBlockScaleA;
-            std::optional<Tensor> runtimeBlockScaleB;
-#ifndef _WIN32
-            if constexpr(isFP4)
-            {
-                if(mxBlockA > 0)
-                {
-                    const size_t scaleABase  = batch * mxsaBatchStride;
-                    const size_t scaleBBase  = batch * mxsbBatchStride;
-                    const size_t blockCountA = k / static_cast<size_t>(mxBlockA)
-                                               + (k % static_cast<size_t>(mxBlockA) != 0 ? 1 : 0);
-                    const size_t blockCountB = k / static_cast<size_t>(mxBlockB)
-                                               + (k % static_cast<size_t>(mxBlockB) != 0 ? 1 : 0);
-                    runtimeBlockScaleA.emplace(ScalarType::Float32,
-                                               Layout(Shape{m, blockCountA},
-                                                      {static_cast<ptrdiff_t>(mxsaStrideM),
-                                                       static_cast<ptrdiff_t>(mxsaStrideKBlk)}));
-                    runtimeBlockScaleB.emplace(ScalarType::Float32,
-                                               Layout(Shape{n, blockCountB},
-                                                      {static_cast<ptrdiff_t>(mxsbStrideN),
-                                                       static_cast<ptrdiff_t>(mxsbStrideKBlk)}));
-                    for(size_t row = 0; row < m; ++row)
-                    {
-                        for(size_t block = 0; block < blockCountA; ++block)
-                        {
-                            const size_t index
-                                = scaleABase + row * mxsaStrideM + block * mxsaStrideKBlk;
-                            runtimeBlockScaleA->storeFrom({row, block},
-                                                          static_cast<float>(mxsa[index]));
-                        }
-                    }
-                    for(size_t column = 0; column < n; ++column)
-                    {
-                        for(size_t block = 0; block < blockCountB; ++block)
-                        {
-                            const size_t index
-                                = scaleBBase + column * mxsbStrideN + block * mxsbStrideKBlk;
-                            runtimeBlockScaleB->storeFrom({column, block},
-                                                          static_cast<float>(mxsb[index]));
-                        }
-                    }
-                    problem.a.blockScale
-                        = BlockScaleBinding{*runtimeBlockScaleA, static_cast<size_t>(mxBlockA)};
-                    problem.b.blockScale
-                        = BlockScaleBinding{*runtimeBlockScaleB, static_cast<size_t>(mxBlockB)};
-                }
-            }
-#endif
-
-            referenceGemm(problem);
-            std::memcpy(dPtr, outputTensor.rawEncodedBackingStorage().data(), outputTensor.rawEncodedBackingStorage().size());
+            throw std::runtime_error("CPU GEMM driver accepts only automatic, pointwise, and "
+                                     "blocked backends.");
         }
 
         // Compare results — reduced-precision types need wider tolerance.
@@ -882,10 +653,10 @@ int runGemm(size_t             m,
             return 0.05;
         }();
 
-        const auto comparisonType = toHostValidationScalarType(TypeTraits<AccumulateT>::value);
+        const auto comparisonType = toHostNumericsScalarType(TypeTraits<AccumulateT>::value);
         const auto comparisonLayout
-            = roc::host_validation::Layout::contiguousLastDimensionFastest(roc::host_validation::Shape{d.size()});
-        roc::host_validation::ComparisonOptions comparisonOptions{
+            = roc::host_numerics::Layout::contiguousLastDimensionFastest(roc::host_numerics::Shape{d.size()});
+        roc::host_numerics::ComparisonOptions comparisonOptions{
             .absoluteTolerance     = tolerance,
             .relativeTolerance     = 0.0,
             .maxReportedMismatches = 10,
@@ -898,31 +669,49 @@ int runGemm(size_t             m,
                     : 1;
             comparisonOptions.selection.maxElements = selectedValidationIndices.size();
         }
-        const auto comparison = roc::host_validation::compare(
-            roc::host_validation::Tensor::copyEncodedBackingStorage(
-                comparisonType, comparisonLayout, std::as_bytes(std::span<const AccumulateT>(d))),
-            roc::host_validation::Tensor::copyEncodedBackingStorage(
-                comparisonType, comparisonLayout,
-                std::as_bytes(std::span<const AccumulateT>(dRef))),
-            comparisonOptions);
+        for(const GemmBackend validationBackend : validationBackends)
+        {
+            std::vector<AccumulateT> dRef(d.size());
+            ContractionInputs        referenceInputs = inputs;
+            referenceInputs.d                        = dRef.data();
+            try
+            {
+                TensileLite::Client::executeReferenceGemm(
+                    contraction, referenceInputs, elementsToValidate, validationBackend);
+            }
+            catch(const std::invalid_argument& error)
+            {
+                throw std::runtime_error(std::string("Independent ")
+                                         + backendName(validationBackend)
+                                         + " validation backend is unsupported: " + error.what());
+            }
 
-        for(const auto& mismatch : comparison.reportedMismatches)
-        {
-            std::cout << "Mismatch at " << mismatch.index << ": observed=" << mismatch.observed
-                      << " expected=" << mismatch.expected
-                      << " diff=" << mismatch.absoluteDifference << std::endl;
-        }
+            const auto comparison = roc::host_numerics::compare(
+                roc::host_numerics::Tensor::copyEncodedBackingStorage(
+                    comparisonType,
+                    comparisonLayout,
+                    std::as_bytes(std::span<const AccumulateT>(d))),
+                roc::host_numerics::Tensor::copyEncodedBackingStorage(
+                    comparisonType,
+                    comparisonLayout,
+                    std::as_bytes(std::span<const AccumulateT>(dRef))),
+                comparisonOptions);
 
-        if(comparison.passed())
-        {
-            std::cout << "PASSED! (max diff: " << comparison.maxAbsoluteDifference << ")"
-                      << std::endl;
-        }
-        else
-        {
-            std::cout << "FAILED! (max diff: " << comparison.maxAbsoluteDifference << ")"
-                      << std::endl;
-            return 1;
+            for(const auto& mismatch : comparison.reportedMismatches)
+            {
+                std::cout << "Mismatch at " << mismatch.index << ": observed=" << mismatch.observed
+                          << " expected=" << mismatch.expected
+                          << " diff=" << mismatch.absoluteDifference << std::endl;
+            }
+
+            if(!comparison.passed())
+            {
+                std::cout << "FAILED against " << backendName(validationBackend)
+                          << " (max diff: " << comparison.maxAbsoluteDifference << ")" << std::endl;
+                return 1;
+            }
+            std::cout << "PASSED against " << backendName(validationBackend)
+                      << " (max diff: " << comparison.maxAbsoluteDifference << ")" << std::endl;
         }
     }
     return 0;
@@ -964,14 +753,13 @@ int main(int argc, char* argv[])
         "mimic kernels that quantize B.")(
         "validate",
         po::value<bool>()->default_value(true)->implicit_value(true),
-        "Run validation against ref")(
+        "Validate against a different shared host-numerics backend")(
         "injectValidationFailure",
         po::value<bool>()->default_value(false)->implicit_value(true),
-        "Perturb D before validation (negative-test hook)")("tryFastPath",
-                                                            po::value<bool>()
-                                                                ->default_value(false)
-                                                                ->implicit_value(true),
-                                                            "Require blocked reference execution")(
+        "Perturb D before validation (negative-test hook)")(
+        "backend",
+        po::value<std::string>()->default_value("pointwise"),
+        "Host-numerics backend (pointwise, blocked, automatic)")(
         "bias",
         po::value<bool>()->default_value(false)->implicit_value(true),
         "Enable bias vector")(
@@ -1108,7 +896,7 @@ int main(int argc, char* argv[])
     }
     bool        validate                = vm["validate"].as<bool>();
     bool        injectValidationFailure = vm["injectValidationFailure"].as<bool>();
-    bool        tryFastPath             = vm["tryFastPath"].as<bool>();
+    std::string backendString           = vm["backend"].as<std::string>();
     bool        useBias                 = vm["bias"].as<bool>();
     std::string activationStr           = vm["activation"].as<std::string>();
     bool        useScaleAlphaVec        = vm["scaleAlphaVec"].as<bool>();
@@ -1182,6 +970,20 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    roc::host_numerics::GemmBackend backend;
+    if(backendString == "pointwise")
+        backend = roc::host_numerics::GemmBackend::Pointwise;
+    else if(backendString == "blocked")
+        backend = roc::host_numerics::GemmBackend::Blocked;
+    else if(backendString == "automatic")
+        backend = roc::host_numerics::GemmBackend::Automatic;
+    else
+    {
+        std::cerr << "Unknown backend: " << backendString
+                  << " (expected pointwise, blocked, or automatic)" << std::endl;
+        return 1;
+    }
+
     ActivationType activation = ActivationType::None;
     if(activationStr == "relu")
         activation = ActivationType::Relu;
@@ -1193,14 +995,14 @@ int main(int argc, char* argv[])
 
     std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k << " TypeA=" << typeAStr
               << " TypeB=" << typeBStr << " ComputeInA=" << computeInputAStr
-              << " ComputeInB=" << computeInputBStr << " FastPath=" << tryFastPath;
+              << " ComputeInB=" << computeInputBStr << " Backend=" << backendName(backend);
     if(isTF32)
         std::cout << " MathOp=XFloat32";
     std::cout << std::endl;
 
     // Dispatcher: pick A storage type, then B storage type. Each leaf calls
     // runGemm<A,B>(...). Asymmetric A/B is required to repro mixed-precision
-    // bugs in the fast-path validator (e.g. F8N x Half).
+    // bugs in the blocked backend (e.g. F8N x Half).
     // tf32 = float storage + XFloat32 math-op. Dispatched as float with isTF32 flag.
     auto resolveAccumStorage = [](std::string& s) {
         if(s == "tf32")
@@ -1238,7 +1040,7 @@ int main(int argc, char* argv[])
                                              beta,
                                              validate,
                                              injectValidationFailure,
-                                             tryFastPath,
+                                             backend,
                                              useBias,
                                              activation,
                                              useScaleAlphaVec,

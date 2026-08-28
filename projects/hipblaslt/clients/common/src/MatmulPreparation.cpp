@@ -241,7 +241,8 @@ namespace hipblaslt::client
             set_alpha_type(preparedProblem.alpha, arguments, computeScalarType, inputTypeA);
             set_beta_type(preparedProblem.beta, arguments, computeScalarType, inputTypeA);
             if(arguments.scaleAlpha_vector)
-                set_computeInterface(preparedProblem.alpha, 1.0, computeScalarType, inputTypeA);
+                set_compute_type_value_from_double(
+                    preparedProblem.alpha, 1.0, computeScalarType, inputTypeA);
 
             preparedProblem.a.elements    = problem.a.allocationElements;
             preparedProblem.a.batchStride = problem.a.batchStride();
@@ -401,7 +402,7 @@ namespace hipblaslt::client
 
             const size_t biasBytes = preparedProblem.biasElements * realDataTypeSize(biasType);
             const size_t inputCBytes
-                = get_computeInterface(preparedProblem.beta, computeScalarType) == 0
+                = compute_type_value_as_double(preparedProblem.beta, computeScalarType) == 0
                       ? 0
                       : problem.c.allocationElements * realDataTypeSize(inputTypeC);
             if(problem.batchMode == HIPBLASLT_BATCH_MODE_STRIDED)

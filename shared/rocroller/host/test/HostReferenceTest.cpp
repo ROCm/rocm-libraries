@@ -19,10 +19,10 @@ namespace
 {
     using namespace rocRoller;
     using namespace rocRoller::HostNumerics;
-    using roc::host_validation::Layout;
-    using roc::host_validation::ScalarType;
-    using roc::host_validation::Shape;
-    using roc::host_validation::Tensor;
+    using roc::host_numerics::Layout;
+    using roc::host_numerics::ScalarType;
+    using roc::host_numerics::Shape;
+    using roc::host_numerics::Tensor;
 
     void require(bool condition, std::string const& message)
     {

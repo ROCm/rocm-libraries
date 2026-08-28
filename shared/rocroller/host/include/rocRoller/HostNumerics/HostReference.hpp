@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <span>
@@ -16,8 +17,8 @@
 #include <utility>
 #include <vector>
 
-#include <roc/host_validation/comparison.hpp>
-#include <roc/host_validation/tensor.hpp>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/tensor.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 
@@ -27,20 +28,20 @@ namespace rocRoller::HostNumerics
 {
     struct HostReferenceProblem
     {
-        HostReferenceProblem(roc::host_validation::Tensor aTensor,
-                             roc::host_validation::Tensor bTensor,
-                             roc::host_validation::Tensor cTensor)
+        HostReferenceProblem(roc::host_numerics::Tensor aTensor,
+                             roc::host_numerics::Tensor bTensor,
+                             roc::host_numerics::Tensor cTensor)
             : a(std::move(aTensor))
             , b(std::move(bTensor))
             , c(std::move(cTensor))
         {
         }
 
-        roc::host_validation::Tensor                a;
-        roc::host_validation::Tensor                b;
-        roc::host_validation::Tensor                c;
-        std::optional<roc::host_validation::Tensor> scaleA;
-        std::optional<roc::host_validation::Tensor> scaleB;
+        roc::host_numerics::Tensor                a;
+        roc::host_numerics::Tensor                b;
+        roc::host_numerics::Tensor                c;
+        std::optional<roc::host_numerics::Tensor> scaleA;
+        std::optional<roc::host_numerics::Tensor> scaleB;
         size_t                                      scaleBlockSize = 0;
         float                                       alpha          = 1.0f;
         float                                       beta           = 0.0f;
@@ -64,18 +65,18 @@ namespace rocRoller::HostNumerics
         double observedNormInf  = 0.0;
 
         AcceptableGEMMError                    acceptableError;
-        roc::host_validation::ComparisonResult statistics;
+        roc::host_numerics::ComparisonResult statistics;
 
         std::string message() const;
     };
 
-    roc::host_validation::Tensor hostScaleTensor(DataType                 type,
+    roc::host_numerics::Tensor hostScaleTensor(DataType                 type,
                                                  std::span<const uint8_t> values,
                                                  size_t                   freeExtent,
                                                  size_t                   reductionExtent,
                                                  size_t                   blockSize);
 
-    roc::host_validation::Tensor hostScaleTensor(DataType                 type,
+    roc::host_numerics::Tensor hostScaleTensor(DataType                 type,
                                                  std::span<const uint8_t> values,
                                                  TensorDescriptor const&  dataDescriptor,
                                                  size_t                   blockedDimension,
@@ -83,16 +84,16 @@ namespace rocRoller::HostNumerics
 
     HostReferenceProblem
         makeHostReferenceProblem(GeneratedGEMMInputs const&                  inputs,
-                                 std::optional<roc::host_validation::Tensor> runtimeScaleA,
-                                 std::optional<roc::host_validation::Tensor> runtimeScaleB,
+                                 std::optional<roc::host_numerics::Tensor> runtimeScaleA,
+                                 std::optional<roc::host_numerics::Tensor> runtimeScaleB,
                                  size_t                                      scaleBlockSize,
                                  float                                       alpha,
                                  float                                       beta);
 
-    roc::host_validation::Tensor computeHostReference(HostReferenceProblem const& problem);
+    roc::host_numerics::Tensor computeHostReference(HostReferenceProblem const& problem);
 
-    HostComparisonResult compareHostReference(roc::host_validation::Tensor observed,
-                                              roc::host_validation::Tensor expected,
+    HostComparisonResult compareHostReference(roc::host_numerics::Tensor observed,
+                                              roc::host_numerics::Tensor expected,
                                               AcceptableGEMMError          acceptableError);
 
     namespace HostReferenceDetail
@@ -101,15 +102,15 @@ namespace rocRoller::HostNumerics
         inline constexpr bool alwaysFalse = false;
 
         template <typename T>
-        constexpr roc::host_validation::ScalarType outputScalarType()
+        constexpr roc::host_numerics::ScalarType outputScalarType()
         {
             using Output = std::remove_cv_t<T>;
             if constexpr(std::is_same_v<Output, float>)
-                return roc::host_validation::ScalarType::Float32;
+                return roc::host_numerics::ScalarType::Float32;
             else if constexpr(std::is_same_v<Output, Half>)
-                return roc::host_validation::ScalarType::Float16;
+                return roc::host_numerics::ScalarType::Float16;
             else if constexpr(std::is_same_v<Output, BFloat16>)
-                return roc::host_validation::ScalarType::BFloat16;
+                return roc::host_numerics::ScalarType::BFloat16;
             else
                 static_assert(alwaysFalse<Output>,
                               "rocroller-gemm host reference supports only F32, F16, and BF16 "
@@ -118,7 +119,7 @@ namespace rocRoller::HostNumerics
     }
 
     template <typename T>
-    roc::host_validation::Tensor
+    roc::host_numerics::Tensor
         hostOutputTensor(std::span<const T> values, size_t rows, size_t columns)
     {
         if(columns != 0 && rows > std::numeric_limits<size_t>::max() / columns)
@@ -128,22 +129,22 @@ namespace rocRoller::HostNumerics
         if(values.size() != rows * columns)
             throw std::invalid_argument(
                 "rocRoller output storage does not match the matrix dimensions.");
-        return roc::host_validation::Tensor::copyEncodedBackingStorage(
+        return roc::host_numerics::Tensor::copyEncodedBackingStorage(
             HostReferenceDetail::outputScalarType<T>(),
-            roc::host_validation::Layout(roc::host_validation::Shape{rows, columns},
+            roc::host_numerics::Layout(roc::host_numerics::Shape{rows, columns},
                                          {1, static_cast<ptrdiff_t>(rows)}),
             std::as_bytes(values));
     }
 
     template <typename Output>
-    std::vector<Output> convertHostReference(roc::host_validation::Tensor floatOutput)
+    std::vector<Output> convertHostReference(roc::host_numerics::Tensor floatOutput)
     {
         static_assert(
             std::is_same_v<
                 Output,
                 float> || std::is_same_v<Output, Half> || std::is_same_v<Output, BFloat16>);
 
-        using namespace roc::host_validation;
+        using namespace roc::host_numerics;
         if(floatOutput.type() != ScalarType::Float32 || floatOutput.shape().rank() != 2)
             throw std::invalid_argument(
                 "rocRoller output conversion requires a rank-two F32 tensor.");
@@ -152,15 +153,20 @@ namespace rocRoller::HostNumerics
         const size_t columns = floatOutput.shape()[1];
         if(columns != 0 && rows > std::numeric_limits<size_t>::max() / columns)
             throw std::overflow_error("rocRoller output conversion element count overflow.");
+        ScalarConversionOptions conversion;
+        if constexpr(std::is_same_v<Output, BFloat16>)
+            conversion.bfloat16Rounding = BFloat16Rounding::Truncate;
+        const Tensor converted = floatOutput.copyConvertedTo(
+            HostReferenceDetail::outputScalarType<Output>(),
+            Layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(rows)}),
+            conversion);
+        const auto   storage   = converted.rawEncodedBackingStorage();
+        if(storage.size() != rows * columns * sizeof(Output))
+            throw std::invalid_argument(
+                "rocRoller output conversion requires contiguous column-major storage.");
         std::vector<Output> result(rows * columns);
-        for(size_t column = 0; column < columns; ++column)
-        {
-            for(size_t row = 0; row < rows; ++row)
-            {
-                const float value           = floatOutput.loadAs<float>({row, column});
-                result[row + column * rows] = Output(value);
-            }
-        }
+        if(!storage.empty())
+            std::memcpy(result.data(), storage.data(), storage.size());
         return result;
     }
 
