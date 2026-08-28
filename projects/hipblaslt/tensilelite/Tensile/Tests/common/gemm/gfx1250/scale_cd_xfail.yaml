@@ -116,7 +116,7 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       Batched: True
-      UseScaleAB: True
+      UseScaleAB: "Scalar"
       UseScaleCD: True
 
     - # BenchmarkProblemSizeGroup

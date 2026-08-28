@@ -287,7 +287,7 @@ BenchmarkProblems:
         - DepthU: [64]
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
-        - PreloadKernArgs: [1, 2]
+        - PreloadKernArgs: [false, true]
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 4, 128]   # batch=4
