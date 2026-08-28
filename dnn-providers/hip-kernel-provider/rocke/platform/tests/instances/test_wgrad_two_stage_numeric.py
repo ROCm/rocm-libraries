@@ -428,5 +428,55 @@ class TestWgradTwoStageNumeric(unittest.TestCase):
         )
 
 
+    def test_two_stage_grouped_g3_and_g11(self):
+        """groups=3 and groups=11 with split_k=4 match the CPU torch reference.
+
+        Exercises non-power-of-two group counts where wg_M and wg_N are small
+        relative to the tile (wg_M=kpg << tile_m), stressing the OOB guard
+        path in the Stage 1 epilogue.
+
+        Problem shapes:
+          groups=3:  C=24, K=24 → cpg=8, kpg=8,  wg_N=72
+          groups=11: C=44, K=44 → cpg=4, kpg=4,  wg_N=36
+        """
+        import torch
+
+        configs = [
+            dict(groups=3, C=24, K=24),
+            dict(groups=11, C=44, K=44),
+        ]
+        for cfg in configs:
+            with self.subTest(**cfg):
+                spec = _make_spec(
+                    self.ARCH,
+                    N=2, Hi=8, Wi=8,
+                    C=cfg["C"], K=cfg["K"],
+                    Y=3, X=3,
+                    split_k=4,
+                    groups=cfg["groups"],
+                )
+                p = spec.problem
+
+                torch.manual_seed(cfg["groups"])
+                X_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
+                dY_f32 = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
+
+                dW_ours = _run_two_stage_grouped(
+                    spec, self.ARCH, self.rt, dY_f32.half(), X_f32.half()
+                )
+                dW_ref = _cpu_wgrad_reference(X_f32, dY_f32, p)
+
+                max_abs = dW_ref.abs().max().item()
+                if max_abs < 1e-6:
+                    self.skipTest("reference output is near-zero — problem degenerate")
+
+                rel_err = (dW_ours - dW_ref).abs().max().item() / max_abs
+                self.assertLess(
+                    rel_err,
+                    self.TOL_FP16,
+                    f"groups={cfg['groups']} rel_err {rel_err:.3e} >= tol {self.TOL_FP16}",
+                )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
