@@ -741,6 +741,7 @@ class LogicalScheduler:
                                                       'SA': set(), 'SB': set()}
         self._tail_freed_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
                                                      'SA': set(), 'SB': set()}
+        self._kernel = None
 
     # ── Place LRs ─────────────────────────────────────────
 
@@ -3766,8 +3767,9 @@ class LogicalScheduler:
             else:
                 mt1_grs = self._make_preloop_mt1_grs()
                 # Change 3: PreloopGRClusterSize > 0 enables fused clustered preloop.
-                _k = getattr(self, "_kernel", None)
-                cluster_size = _k.get("PreloopGRClusterSize", -1) if _k else -1
+                # _kernel is set before build() in populate_instructions so this is
+                # always available here.
+                cluster_size = self._kernel.get("PreloopGRClusterSize", -1) if self._kernel else -1
                 if cluster_size > 0:
                     # Change 2: use _build_clustered_preloop_ops.
                     # gr0 = MT0 GR placements; gr1 = MT1 GR placements.
@@ -5215,10 +5217,10 @@ class LogicalScheduler:
         need_build = (self._preloop_emitted is None or self._ngll_emitted is None
                       or self._nll_emitted is None)
 
+        self._kernel = kernel
+
         if need_build:
             self.build()
-
-        self._kernel = kernel
 
         # Compute the distributable MFMA count from dtileInfo so
         # _build_clustered_preloop_ops can use weighted distribution.
