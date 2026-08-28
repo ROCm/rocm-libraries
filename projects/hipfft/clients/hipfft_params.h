@@ -1098,8 +1098,8 @@ private:
             auto&      buf      = externally_managed_workareas[workarea_idx];
             if(buf.size() < req_size)
             {
-                // too small, free and reallocate to meet current needs
-                buf.free();
+                // workarea_idx == device ID (natural GPU ordering used in this struct)
+                rocfft_scoped_device dev(workarea_idx);
                 if(buf.alloc(req_size) != hipSuccess)
                 {
                     return HIPFFT_ALLOC_FAILED;
@@ -1361,6 +1361,8 @@ private:
                 throw std::runtime_error("not enough devices for requested multi-gpu computation!");
 
             std::vector<int> GPUs(multiGPU);
+            // natural ordering used in this struct
+            // (NOTE: assumed elsewhere, see set_externally_managed_work_areas)
             std::iota(GPUs.begin(), GPUs.end(), 0);
             ret = hipfftXtSetGPUs(plan, static_cast<int>(multiGPU), GPUs.data());
             if(ret != HIPFFT_SUCCESS)
