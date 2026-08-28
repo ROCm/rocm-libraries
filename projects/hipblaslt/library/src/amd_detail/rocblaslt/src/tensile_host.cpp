@@ -36,6 +36,7 @@
 #include "Debug.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
+#include "rocblaslt_fused_a2a_peers.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -2088,6 +2089,17 @@ namespace
         tensileProblem.setScaleC(compute_type);
         tensileProblem.setScaleD(compute_type);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
+            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+        }
+#endif
+
         // set Actvation
         tensileProblem.setActivationType(is_act_enabled(prob.epilogue)
                                              ? TensileLite::ActivationType::Hipblaslt_all
@@ -2353,6 +2365,17 @@ namespace
         tensileProblem.setScaleB(compute_type, 1);
         tensileProblem.setScaleC(compute_type);
         tensileProblem.setScaleD(compute_type);
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
+            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+        }
+#endif
 
         // set Actvation
         tensileProblem.setActivationType(is_act_enabled(prob.epilogue)
@@ -2628,6 +2651,23 @@ namespace
             inputs.alpha          = static_cast<float>(std::get<hipblasLtHalf>(inputs.alpha));
             inputs.beta           = static_cast<float>(std::get<hipblasLtHalf>(inputs.beta));
         }
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        // Device-side fused-A2A operands.
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            inputs.fusedA2ACounter = prob.Synchronizer;
+            inputs.fusedA2APeers  = rocblaslt::buildFusedA2APeerFields(prob.fused_a2a_peer_flag,
+                                                                      fusedInfo.a2aRecvPtrs,
+                                                                      prob.fused_a2a_world,
+                                                                      fusedInfo.commChannel,
+                                                                      fusedInfo.a2aSdmaQueues);
+            inputs.fusedA2AMyRank = prob.fused_a2a_rank;
+            inputs.fusedA2ADrain  = rocblaslt::fusedA2ADrainFor(fusedInfo.a2aCompletionMode);
+        }
+#endif
 
         return inputs;
     }
