@@ -245,7 +245,12 @@
 // operations
 #define CK_USE_PK4_LAYOUT_SHUFFLE 1
 
-// block synchronization only s_wait lgkmcnt(0), not vmcnt(0)
+// CK_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM: when 1, block_sync_lds()
+// uses architecture-specific LDS-only barriers (lgkmcnt=0, vmcnt unconstrained)
+// instead of a full __syncthreads(). This is always enabled (defaulting to 1)
+// because the LDS-only wait is both correct and more efficient for all targets
+// CK supports. Each GPU architecture requires a different implementation --
+// see the detailed comments in synchronization.hpp before modifying.
 #define CK_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM 1
 
 // experimental feature: multi index implemented as array
