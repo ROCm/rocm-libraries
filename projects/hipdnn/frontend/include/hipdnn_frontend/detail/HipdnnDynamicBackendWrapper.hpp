@@ -336,6 +336,19 @@ public:
                                                        : missingSymbolStatus();
     }
 
+    hipdnnStatus_t writeEngineRankingResultsExt(hipdnnHandle_t handle,
+                                                hipdnnBackendDescriptor_t graphDescriptor,
+                                                const int64_t* engineIdsInRankOrder,
+                                                size_t engineIdCount,
+                                                hipdnnAutotuneCacheWriteOutcome_ext_t* outcome
+                                                = nullptr) override
+    {
+        return _writeEngineRankingResultsExt != nullptr
+                   ? _writeEngineRankingResultsExt(
+                         handle, graphDescriptor, engineIdsInRankOrder, engineIdCount, outcome)
+                   : missingSymbolStatus();
+    }
+
 private:
     static constexpr hipdnnStatus_t missingSymbolStatus()
     {
@@ -412,6 +425,9 @@ private:
             "hipdnnBackendSetGlobalLogLevel_ext");
         _backendGetGlobalLogLevelExt = resolve<decltype(&hipdnnBackendGetGlobalLogLevel_ext)>(
             "hipdnnBackendGetGlobalLogLevel_ext");
+        _writeEngineRankingResultsExt
+            = resolve<decltype(&hipdnnBackendWriteEngineRankingResults_ext)>(
+                "hipdnnBackendWriteEngineRankingResults_ext");
     }
 
     hipdnn_data_sdk::utilities::Version _version;
@@ -458,6 +474,7 @@ private:
     decltype(&hipdnnSetUserLogCallback_ext) _setUserLogCallbackExt = nullptr;
     decltype(&hipdnnBackendSetGlobalLogLevel_ext) _backendSetGlobalLogLevelExt = nullptr;
     decltype(&hipdnnBackendGetGlobalLogLevel_ext) _backendGetGlobalLogLevelExt = nullptr;
+    decltype(&hipdnnBackendWriteEngineRankingResults_ext) _writeEngineRankingResultsExt = nullptr;
 };
 
 } // namespace hipdnn_frontend::detail
