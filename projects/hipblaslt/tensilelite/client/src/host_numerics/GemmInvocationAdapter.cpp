@@ -268,9 +268,9 @@ namespace TensileLite::Client::HostNumerics
             return makeOutputTensorForType(typeD, layout);
         }
 
-        std::optional<TranslationFailure> preflight(ContractionProblemGemm const& problem,
-                                                    ContractionInputs const&      inputs,
-                                                    OutputSelection outputSelection)
+        std::optional<TranslationFailure>
+            normalizeProblem(ContractionProblemGemm const& problem,
+                             OutputSelection               outputSelection)
         {
             using namespace roc::host_numerics;
             using detail::failure;
@@ -296,7 +296,6 @@ namespace TensileLite::Client::HostNumerics
                 return failure(TranslationFailureCode::InvalidScaleConfiguration,
                                "One-sided MX block scaling is unsupported.");
             }
-            detail::ScaleABMode scaleABMode = detail::ScaleABMode::None;
             if(problem.useScaleAB() == "Scalar")
                 scaleABMode = detail::ScaleABMode::Scalar;
             else if(problem.useScaleAB() == "Vector")
@@ -306,6 +305,150 @@ namespace TensileLite::Client::HostNumerics
                 return failure(TranslationFailureCode::InvalidScaleConfiguration,
                                "ScaleAB mode must be empty, Scalar, or Vector.");
             }
+
+            try
+            {
+                typeA                    = toHostNumericsScalarType(problem.a().dataType());
+                typeB                    = toHostNumericsScalarType(problem.b().dataType());
+                typeC                    = toHostNumericsScalarType(problem.c().dataType());
+                typeD                    = toHostNumericsScalarType(problem.d().dataType());
+                operationAccumulatorType = toHostNumericsScalarType(problem.computeType());
+                betaType                 = toHostNumericsScalarType(problem.betaType());
+                alphaType                = toHostNumericsScalarType(problem.alphaType());
+                computeTypeA             = problem.computeInputTypeA() == rocisa::DataType::None
+                                               ? typeA
+                                               : toHostNumericsScalarType(problem.computeInputTypeA());
+                computeTypeB             = problem.computeInputTypeB() == rocisa::DataType::None
+                                               ? typeB
+                                               : toHostNumericsScalarType(problem.computeInputTypeB());
+                if(problem.useBias())
+                    biasType = toHostNumericsScalarType(problem.bias().dataType());
+                if(problem.useE())
+                    auxiliaryType = toHostNumericsScalarType(
+                        problem.tensors()[ContractionProblemGemm::TENSOR::E].dataType());
+                if(problem.useGateResidual())
+                    gateType = toHostNumericsScalarType(
+                        problem.tensors()[ContractionProblemGemm::TENSOR::GATE_RESIDUAL].dataType());
+            }
+            catch(std::invalid_argument const& error)
+            {
+                return failure(TranslationFailureCode::UnsupportedDataType, error.what());
+            }
+
+            useGradient    = problem.useGradient();
+            useBias        = problem.useBias();
+            biasSource     = problem.biasSrc();
+            scaleAlphaAxis = problem.getParams().factorDim() == 0 ? MatrixAxis::Row
+                                                                  : MatrixAxis::Column;
+            mathMode       = operationAccumulatorType == ScalarType::Float32
+                                       && problem.f32XdlMathOp() == rocisa::DataType::XFloat32
+                                 ? MathMode::XFloat32
+                                 : MathMode::Default;
+            useStandaloneEpilogue
+                = useGradient || problem.outputAmaxD() || problem.useE()
+                  || problem.useGateResidual();
+            preQuantizationScaleA
+                = scalarTypeInfo(typeA).storageBits > scalarTypeInfo(computeTypeA).storageBits;
+            preQuantizationScaleB
+                = scalarTypeInfo(typeB).storageBits > scalarTypeInfo(computeTypeB).storageBits;
+
+            ActivationType concreteActivation = problem.activationType();
+            if(concreteActivation == ActivationType::All
+               || concreteActivation == ActivationType::Hipblaslt_all)
+                concreteActivation = problem.getParams().activationEnum();
+            try
+            {
+                activation = toHostNumericsActivation(concreteActivation, useGradient);
+            }
+            catch(std::invalid_argument const& error)
+            {
+                return failure(TranslationFailureCode::UnsupportedActivation, error.what());
+            }
+            if((operationAccumulatorType == ScalarType::ComplexFloat32
+                || operationAccumulatorType == ScalarType::ComplexFloat64)
+               && activation != Activation::None)
+            {
+                return failure(TranslationFailureCode::UnsupportedActivation,
+                               "Complex GEMM activation is unsupported.");
+            }
+
+            const auto& freeIndexA = problem.freeIndicesA()[0];
+            const auto& freeIndexB = problem.freeIndicesB()[0];
+            indexMA                = freeIndexA.i;
+            indexKA                = problem.boundIndices()[0].a;
+            indexNB                = freeIndexB.i;
+            indexKB                = problem.boundIndices()[0].b;
+            indexMC                = freeIndexA.c;
+            indexNC                = freeIndexB.c;
+            indexMD                = freeIndexA.d;
+            indexND                = freeIndexB.d;
+            batchA                 = problem.batchIndices()[0].a;
+            batchB                 = problem.batchIndices()[0].b;
+            batchC                 = problem.batchIndices()[0].c;
+            batchD                 = problem.batchIndices()[0].d;
+            m                      = problem.freeSizeA(0);
+            n                      = problem.freeSizeB(0);
+            k                      = problem.boundSize(0);
+            batches                = problem.batchSize(0);
+
+            mxBlockA = problem.mxBlockA();
+            mxBlockB = problem.mxBlockB();
+            if(mxBlockA > 0)
+            {
+                try
+                {
+                    mxScaleTypeA = toHostNumericsMxScaleType(problem.mxTypeA());
+                    mxScaleTypeB = toHostNumericsMxScaleType(problem.mxTypeB());
+                }
+                catch(std::invalid_argument const& error)
+                {
+                    return failure(TranslationFailureCode::UnsupportedDataType, error.what());
+                }
+                strideMxsaM     = problem.mxsa().strides()[indexMA];
+                strideMxsaBlock = problem.mxsa().strides()[indexKA];
+                strideMxsbN     = problem.mxsb().strides()[indexNB];
+                strideMxsbBlock = problem.mxsb().strides()[indexKB];
+                strideBatchMxsa = problem.mxsa().strides()[batchA];
+                strideBatchMxsb = problem.mxsb().strides()[batchB];
+            }
+
+            for(auto const& operation : problem.aOps())
+                aConjugate |= operation.type == TensorOp::Type::ComplexConjugate;
+            for(auto const& operation : problem.bOps())
+                bConjugate |= operation.type == TensorOp::Type::ComplexConjugate;
+
+            const bool requiresCompleteD
+                = problem.outputAmaxD()
+                  || (useGradient && useBias && biasSource == ContractionProblemGemm::D);
+            const OutputSelection globalSelection
+                = requiresCompleteD ? OutputSelection::all(outputSelection.indexOrder())
+                                    : std::move(outputSelection);
+            selectAllOutputs = globalSelection.selectsAll();
+            selectedByBatch.clear();
+            if(!selectAllOutputs)
+            {
+                selectedByBatch.resize(batches);
+                const Shape outputShape(problem.d().sizes());
+                for(const size_t logicalIndex :
+                    globalSelection.indices(problem.d().totalLogicalElements()))
+                {
+                    const std::vector<size_t> coordinate
+                        = outputShape.coordinates(logicalIndex, globalSelection.indexOrder());
+                    const size_t selectedBatch = coordinate[batchD];
+                    const size_t row           = coordinate[indexMD];
+                    const size_t column        = coordinate[indexND];
+                    selectedByBatch.at(selectedBatch).push_back(row * n + column);
+                }
+            }
+            return std::nullopt;
+        }
+
+        std::optional<TranslationFailure> bindInputs(ContractionProblemGemm const& problem,
+                                                     ContractionInputs const&      inputs)
+        {
+            using namespace roc::host_numerics;
+            using detail::failure;
+
             if(problem.useBias() && inputs.bias == nullptr && inputs.batchBias == nullptr)
                 return failure(TranslationFailureCode::MissingInput, "Bias input is missing.");
             if(problem.useScaleAlphaVec() && inputs.scaleAlphaVec == nullptr)
@@ -346,47 +489,6 @@ namespace TensileLite::Client::HostNumerics
                                "A, B, C, or D input is missing.");
             }
 
-            ScalarType alphaType = ScalarType::Float32;
-            ScalarType betaType  = ScalarType::Float32;
-            try
-            {
-                typeA                    = toHostNumericsScalarType(problem.a().dataType());
-                typeB                    = toHostNumericsScalarType(problem.b().dataType());
-                typeC                    = toHostNumericsScalarType(problem.c().dataType());
-                typeD                    = toHostNumericsScalarType(problem.d().dataType());
-                operationAccumulatorType = toHostNumericsScalarType(problem.computeType());
-                betaType                 = toHostNumericsScalarType(problem.betaType());
-                alphaType                = toHostNumericsScalarType(problem.alphaType());
-                computeTypeA             = problem.computeInputTypeA() == rocisa::DataType::None
-                                               ? typeA
-                                               : toHostNumericsScalarType(problem.computeInputTypeA());
-                computeTypeB             = problem.computeInputTypeB() == rocisa::DataType::None
-                                               ? typeB
-                                               : toHostNumericsScalarType(problem.computeInputTypeB());
-            }
-            catch(std::invalid_argument const& error)
-            {
-                return failure(TranslationFailureCode::UnsupportedDataType, error.what());
-            }
-
-            useGradient           = problem.useGradient();
-            useBias               = problem.useBias();
-            biasSource            = problem.biasSrc();
-            scaleAlphaAxis        = problem.getParams().factorDim() == 0 ? MatrixAxis::Row
-                                                                         : MatrixAxis::Column;
-            mathMode              = operationAccumulatorType == ScalarType::Float32
-                                                && problem.f32XdlMathOp()
-                                                       == rocisa::DataType::XFloat32
-                                        ? MathMode::XFloat32
-                                        : MathMode::Default;
-            useStandaloneEpilogue
-                = useGradient || problem.outputAmaxD() || problem.useE()
-                  || problem.useGateResidual();
-            preQuantizationScaleA
-                = scalarTypeInfo(typeA).storageBits > scalarTypeInfo(computeTypeA).storageBits;
-            preQuantizationScaleB
-                = scalarTypeInfo(typeB).storageBits > scalarTypeInfo(computeTypeB).storageBits;
-
             try
             {
                 alpha = detail::scalarValue(problem.alphaType(), inputs.alpha);
@@ -395,26 +497,6 @@ namespace TensileLite::Client::HostNumerics
             catch(std::invalid_argument const& error)
             {
                 return failure(TranslationFailureCode::UnsupportedDataType, error.what());
-            }
-
-            ActivationType concreteActivation = problem.activationType();
-            if(concreteActivation == ActivationType::All
-               || concreteActivation == ActivationType::Hipblaslt_all)
-                concreteActivation = problem.getParams().activationEnum();
-            try
-            {
-                activation = toHostNumericsActivation(concreteActivation, useGradient);
-            }
-            catch(std::invalid_argument const& error)
-            {
-                return failure(TranslationFailureCode::UnsupportedActivation, error.what());
-            }
-            if((operationAccumulatorType == ScalarType::ComplexFloat32
-                || operationAccumulatorType == ScalarType::ComplexFloat64)
-               && activation != Activation::None)
-            {
-                return failure(TranslationFailureCode::UnsupportedActivation,
-                               "Complex GEMM activation is unsupported.");
             }
 
             const bool computeProduct = alpha != std::complex<double>(0.0, 0.0);
@@ -443,80 +525,6 @@ namespace TensileLite::Client::HostNumerics
             catch(std::invalid_argument const& error)
             {
                 return failure(TranslationFailureCode::UnsupportedDataType, error.what());
-            }
-
-            const auto&  freeIndexA = problem.freeIndicesA()[0];
-            const auto&  freeIndexB = problem.freeIndicesB()[0];
-            const size_t indexMA    = freeIndexA.i;
-            const size_t indexKA    = problem.boundIndices()[0].a;
-            const size_t indexNB    = freeIndexB.i;
-            const size_t indexKB    = problem.boundIndices()[0].b;
-            const size_t indexMC    = freeIndexA.c;
-            const size_t indexNC    = freeIndexB.c;
-            const size_t indexMD    = freeIndexA.d;
-            const size_t indexND    = freeIndexB.d;
-            const size_t batchA     = problem.batchIndices()[0].a;
-            const size_t batchB     = problem.batchIndices()[0].b;
-            const size_t batchC     = problem.batchIndices()[0].c;
-            const size_t batchD     = problem.batchIndices()[0].d;
-            m                       = problem.freeSizeA(0);
-            n                       = problem.freeSizeB(0);
-            k                       = problem.boundSize(0);
-            const size_t batches = problem.batchSize(0);
-
-            mxBlockA = problem.mxBlockA();
-            mxBlockB = problem.mxBlockB();
-            size_t strideMxsaM     = 0;
-            size_t strideMxsaBlock = 0;
-            size_t strideMxsbN     = 0;
-            size_t strideMxsbBlock = 0;
-            size_t strideBatchMxsa = 0;
-            size_t strideBatchMxsb = 0;
-            if(mxBlockA > 0)
-            {
-                try
-                {
-                    mxScaleTypeA = toHostNumericsMxScaleType(problem.mxTypeA());
-                    mxScaleTypeB = toHostNumericsMxScaleType(problem.mxTypeB());
-                }
-                catch(std::invalid_argument const& error)
-                {
-                    return failure(TranslationFailureCode::UnsupportedDataType, error.what());
-                }
-                strideMxsaM     = problem.mxsa().strides()[indexMA];
-                strideMxsaBlock = problem.mxsa().strides()[indexKA];
-                strideMxsbN     = problem.mxsb().strides()[indexNB];
-                strideMxsbBlock = problem.mxsb().strides()[indexKB];
-                strideBatchMxsa = problem.mxsa().strides()[batchA];
-                strideBatchMxsb = problem.mxsb().strides()[batchB];
-            }
-
-            for(auto const& operation : problem.aOps())
-                aConjugate |= operation.type == TensorOp::Type::ComplexConjugate;
-            for(auto const& operation : problem.bOps())
-                bConjugate |= operation.type == TensorOp::Type::ComplexConjugate;
-
-            const bool requiresCompleteD
-                = problem.outputAmaxD()
-                  || (useGradient && useBias && biasSource == ContractionProblemGemm::D);
-            const OutputSelection globalSelection
-                = requiresCompleteD ? OutputSelection::all(outputSelection.indexOrder())
-                                    : std::move(outputSelection);
-            std::vector<std::vector<size_t>> selectedByBatch;
-            if(!globalSelection.selectsAll())
-            {
-                selectedByBatch.resize(batches);
-                const Shape outputShape(problem.d().sizes());
-                for(const size_t logicalIndex :
-                    globalSelection.indices(problem.d().totalLogicalElements()))
-                {
-                    const std::vector<size_t> coordinate
-                        = outputShape.coordinates(logicalIndex, globalSelection.indexOrder());
-                    const size_t selectedBatch = coordinate[batchD];
-                    const size_t row           = coordinate[indexMD];
-                    const size_t column        = coordinate[indexND];
-                    selectedByBatch.at(selectedBatch).push_back(row * n + column);
-                }
             }
 
             for(size_t batch = 0; batch < batches; ++batch)
@@ -549,45 +557,13 @@ namespace TensileLite::Client::HostNumerics
             readB = computeProduct
                     || (useGradient && useBias && biasSource == ContractionProblemGemm::B);
             readC = beta != std::complex<double>(0.0, 0.0);
-            if(problem.useBias())
-            {
-                try
-                {
-                    biasType = toHostNumericsScalarType(problem.bias().dataType());
-                }
-                catch(std::invalid_argument const& error)
-                {
-                    return failure(TranslationFailureCode::UnsupportedDataType, error.what());
-                }
-            }
-
             TensorDescriptor const* auxiliaryDescriptor = nullptr;
             if(problem.useE())
-            {
                 auxiliaryDescriptor = &problem.tensors()[ContractionProblemGemm::TENSOR::E];
-                try
-                {
-                    auxiliaryType = toHostNumericsScalarType(auxiliaryDescriptor->dataType());
-                }
-                catch(std::invalid_argument const& error)
-                {
-                    return failure(TranslationFailureCode::UnsupportedDataType, error.what());
-                }
-            }
 
             TensorDescriptor const* gateDescriptor = nullptr;
             if(problem.useGateResidual())
-            {
                 gateDescriptor = &problem.tensors()[ContractionProblemGemm::TENSOR::GATE_RESIDUAL];
-                try
-                {
-                    gateType = toHostNumericsScalarType(gateDescriptor->dataType());
-                }
-                catch(std::invalid_argument const& error)
-                {
-                    return failure(TranslationFailureCode::UnsupportedDataType, error.what());
-                }
-            }
 
             if(problem.outputAmaxD())
             {
@@ -703,7 +679,7 @@ namespace TensileLite::Client::HostNumerics
                         typeC, layoutC, currentC, batchOffsetC),
                     .d = detail::makeBorrowedMutableTensor(
                         typeD, layoutD, currentD, batchOffsetD),
-                    .outputSelection = globalSelection.selectsAll()
+                    .outputSelection = selectAllOutputs
                                            ? OutputSelection::all()
                                            : OutputSelection::explicitIndices(
                                                  selectedByBatch[batch]),
@@ -890,6 +866,8 @@ namespace TensileLite::Client::HostNumerics
         ScalarType computeTypeB             = ScalarType::Float32;
         ScalarType mxScaleTypeA             = ScalarType::E8M0;
         ScalarType mxScaleTypeB             = ScalarType::E8M0;
+        ScalarType alphaType                = ScalarType::Float32;
+        ScalarType betaType                 = ScalarType::Float32;
 
         std::complex<double> alpha                = {1.0, 0.0};
         std::complex<double> beta                 = {0.0, 0.0};
@@ -910,13 +888,38 @@ namespace TensileLite::Client::HostNumerics
         ContractionProblemGemm::TENSOR biasSource = ContractionProblemGemm::D;
         MatrixAxis                     scaleAlphaAxis = MatrixAxis::Row;
         MathMode                       mathMode        = MathMode::Default;
+        detail::ScaleABMode            scaleABMode     = detail::ScaleABMode::None;
 
         size_t m = 0;
         size_t n = 0;
         size_t k = 0;
+        size_t batches = 0;
+
+        size_t indexMA = 0;
+        size_t indexKA = 0;
+        size_t indexNB = 0;
+        size_t indexKB = 0;
+        size_t indexMC = 0;
+        size_t indexNC = 0;
+        size_t indexMD = 0;
+        size_t indexND = 0;
+        size_t batchA  = 0;
+        size_t batchB  = 0;
+        size_t batchC  = 0;
+        size_t batchD  = 0;
 
         size_t mxBlockA = 0;
         size_t mxBlockB = 0;
+
+        size_t strideMxsaM     = 0;
+        size_t strideMxsaBlock = 0;
+        size_t strideMxsbN     = 0;
+        size_t strideMxsbBlock = 0;
+        size_t strideBatchMxsa = 0;
+        size_t strideBatchMxsb = 0;
+
+        std::vector<std::vector<size_t>> selectedByBatch;
+        bool                             selectAllOutputs = true;
 
         std::optional<Tensor>               scaleAlpha;
         std::optional<Tensor>               scaleA;
@@ -1202,9 +1205,11 @@ namespace TensileLite::Client::HostNumerics
         try
         {
             auto state = std::make_unique<GemmInvocationAdapter::State>();
-            if(auto preflightFailure
-               = state->preflight(problem, inputs, std::move(outputSelection)))
-                return std::move(*preflightFailure);
+            if(auto normalizationFailure
+               = state->normalizeProblem(problem, std::move(outputSelection)))
+                return std::move(*normalizationFailure);
+            if(auto bindingFailure = state->bindInputs(problem, inputs))
+                return std::move(*bindingFailure);
             return GemmInvocationAdapter(std::move(state));
         }
         catch(std::invalid_argument const& error)
