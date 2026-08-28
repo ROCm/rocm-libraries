@@ -796,8 +796,10 @@ hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle,
  *                                         this handle already carries a communicator, or the
  *                                         ranks disagree about \p world or \p nChannels.
  *  \retval HIPBLAS_STATUS_ALLOC_FAILED    the flag regions could not be allocated.
- *  \retval HIPBLAS_STATUS_NOT_SUPPORTED   a peer's flag region is in another process and cannot
- *                                         be mapped into this one.
+ *  \retval HIPBLAS_STATUS_NOT_SUPPORTED   a peer's flag region cannot be addressed from this
+ *                                         rank's device: it is in another process and cannot be
+ *                                         mapped into this one, or peer access to its device is
+ *                                         unavailable.
  *  Any other status is one the caller's \p allgather returned, propagated unchanged.
  */
 HIPBLASLT_EXPORT
