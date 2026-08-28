@@ -81,6 +81,25 @@ def _write_header_yaml(path, *, schedule="schedule", gfx="gfx942", devices="Devi
     return path
 
 
+def _write_mapping_form_header_yaml(path, *, schedule="schedule", gfx="gfx942", devices="Device 74a0"):
+    """A logic YAML using the mapping-form DeviceNames dialect
+    (``DeviceNames: [Device ...]``, used by e.g. Origami), as opposed to the
+    positional list form ``_write_header_yaml`` produces. See #11442."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                "- MinimumRequiredVersion: 4.33.0",
+                f"- {schedule}",
+                f"- {gfx}",
+                f"DeviceNames: [{devices}]",
+                "",
+            ]
+        )
+    )
+    return path
+
+
 def _write_overlay_yaml(path, *, schedule, gfx):
     path.parent.mkdir(parents=True, exist_ok=True)
     import yaml
@@ -90,6 +109,14 @@ def _write_overlay_yaml(path, *, schedule, gfx):
 
 def test_read_device_names_parses_header_line(tmp_path, vcc):
     f = _write_header_yaml(tmp_path / "a.yaml", devices="Device 74a0, Device 74a1")
+    assert vcc.read_device_names(f) == ("74a0", "74a1")
+
+
+def test_read_device_names_parses_mapping_form_header_line(tmp_path, vcc):
+    # Origami and similar logic files write DeviceNames as a mapping
+    # (``DeviceNames: [Device ...]``) rather than the positional list form;
+    # both dialects must parse to the same result. See #11442.
+    f = _write_mapping_form_header_yaml(tmp_path / "a.yaml", devices="Device 74a0, Device 74a1")
     assert vcc.read_device_names(f) == ("74a0", "74a1")
 
 
@@ -147,6 +174,24 @@ def test_sibling_device_names_flags_mismatched_siblings(tmp_path, vcc):
     assert len(violations) == 1
     assert "logic.yaml" in violations[0]
     assert "aldebaran/gfx950" in violations[0]
+
+
+def test_sibling_device_names_flags_mismatch_against_a_mapping_form_sibling(tmp_path, vcc):
+    # The exact shape #11442 found and fixed: one sibling in the positional
+    # list dialect, the other (e.g. an Origami file) in the mapping dialect.
+    # Before the regex matched both, the mapping-form file's DeviceNames read
+    # as None, so this divergence was silently skipped rather than flagged.
+    _write_header_yaml(
+        tmp_path / "gfx1250" / "gfx1250" / "Equality" / "logic.yaml",
+        devices="Device 73f0, Device 0073, Device 75c1",
+    )
+    _write_mapping_form_header_yaml(
+        tmp_path / "gfx1250" / "gfx1250" / "Origami" / "logic.yaml",
+        devices="Device 73f0",
+    )
+    violations = vcc.find_sibling_device_names_violations(tmp_path)
+    assert len(violations) == 1
+    assert "logic.yaml" in violations[0]
 
 
 def test_sibling_device_names_ignores_different_basenames(tmp_path, vcc):

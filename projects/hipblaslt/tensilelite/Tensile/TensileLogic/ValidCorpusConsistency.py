@@ -38,7 +38,11 @@ from Tensile.CustomYamlLoader import load_logic_gfx_arch, load_logic_schedule_na
 GFX1250 = "gfx1250"
 GFX1250V0 = "gfx1250v0"
 
-_DEVICE_NAMES_RE = re.compile(r"^\s*-\s*\[\s*Device\s+([^\]]+)\]\s*$")
+# Logic YAMLs come in two header dialects: the positional list form, where
+# DeviceNames is the 4th sequence entry (``- [Device ...]``), and the mapping
+# form used by e.g. Origami (``DeviceNames: [Device ...]``). Match both, or
+# divergence in the mapping-form files is silently skipped (see #11442).
+_DEVICE_NAMES_RE = re.compile(r"^\s*(?:-|DeviceNames:)\s*\[\s*Device\s+([^\]]+)\]\s*$")
 
 
 def iter_arch_dirs(logic_root: Path) -> Iterator[Tuple[str, Path]]:
@@ -60,10 +64,11 @@ def all_arch_names(logic_root: Path) -> List[str]:
 
 
 def read_device_names(yaml_path: Path) -> Optional[Tuple[str, ...]]:
-    """Return the sorted ``DeviceNames`` tuple from a logic-YAML header
-    (the ``- [Device ...]`` line within the first few lines), or ``None`` if
-    it can't be found/read. Intentionally a cheap line scan, not a full parse:
-    this runs over the whole corpus on every check-all invocation."""
+    """Return the sorted ``DeviceNames`` tuple from a logic-YAML header (the
+    ``- [Device ...]`` or ``DeviceNames: [Device ...]`` line within the first
+    few lines), or ``None`` if it can't be found/read. Intentionally a cheap
+    line scan, not a full parse: this runs over the whole corpus on every
+    check-all invocation."""
     try:
         with yaml_path.open("r") as f:
             for _ in range(8):
