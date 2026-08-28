@@ -234,6 +234,13 @@ def _validateSubtileGRKPartition(state, printRejectionReason):
     tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
     stack = int(tileInfo.subtileShape[0])
     perWaveMTiles = int(tileInfo.localMMATileGrid[0])
+    # An over-allocated strip is padded out to the stack, and the wave owns the
+    # padding along with the real tiles, so the straddle question is about the
+    # padded extent.  Comparing the raw tile count against a rounded-up stack
+    # would call every non-power-of-two tile a straddle.
+    wgSize = state["MIWaveGroup"][0 if tc == 'A' else 1]
+    mtTilesPadded = -(-int(tileInfo.macroTile // state["MatrixInstM"]) // stack) * stack
+    perWaveMTiles = max(1, mtTilesPadded // wgSize)
     if _subtileWaveStraddlesStrip(stack, perWaveMTiles):
       reject(state, printRejectionReason,
              "UseSubtileImpl=1 leaves a wave straddling an LDS strip on tensor %s: "
@@ -1174,6 +1181,29 @@ class Solution(collections.abc.Mapping):
               if mtTiles % cand == 0:
                 stack = cand
                 break
+            # A macro tile that is not a power of two only divides down to a
+            # small stack -- 224 free-dim elements give 14 MFMA-M tiles and so
+            # a 2-tile stack, a 16B contiguous run per K row.  At that width
+            # the GR lane map pins m_chunk to 0 and spends every lane on a
+            # different K column, so one buffer_load touches 64 cache lines and
+            # uses 16B of each.  The neighbouring strips do fill the rest of
+            # those lines, but only across separate instructions, and nothing
+            # keeps four waves in step to make that land in one line fill.
+            #
+            # Round the strip up to the next power of two.  The padding M tiles
+            # are fetched into LDS and never read back -- emitSingleDsRead
+            # indexes tiles as sId0 % stackM with sId0 < mtTiles -- so this buys
+            # a full-line run per K row for a fetch of rounded/mtTiles.
+            # Only when the padding is cheap.  The win is the line fill and the
+            # cost is rounded/mtTiles of extra A traffic, so it turns on how
+            # close the tile already is to the next power of two.  Measured on
+            # 5376x2048x2048: 14 tiles pad to 16 for 1.14x and gain 15% (1201 ->
+            # 1386 TFLOP/s), while 12 tiles pad to 16 for 1.33x and gain nothing
+            # (1467 -> 1471).  Cut between them.
+            rounded = min(16, 1 << (mtTiles - 1).bit_length()) if mtTiles > 1 else 2
+            if rounded > stack and rounded * 4 <= mtTiles * 5:
+              stack = rounded
+
             # The waves that fetch a strip divide it by (blocks per strip) x
             # (K windows).  When there are fewer such slots than waves in the
             # group, the surplus waves have nowhere of their own to read and
