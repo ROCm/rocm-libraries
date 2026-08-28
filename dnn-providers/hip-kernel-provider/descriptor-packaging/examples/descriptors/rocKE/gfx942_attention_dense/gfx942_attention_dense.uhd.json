@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "28f47778-0f72-4198-8510-1945d3f1d793",
+  "id": "6eea69ba-c256-41a4-9bc8-6958e581b16c",
   "name": "Gfx942AttentionDense selector",
   "kind": "native",
   "payload": "hipkernel.gfx942_attention_dense.score"
