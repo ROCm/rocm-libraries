@@ -38,6 +38,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <hipblaslt/hipblaslt.h>
@@ -242,17 +243,17 @@ private:
     std::unique_ptr<char, decltype(&hipHostFree)> m_d{nullptr, &hipHostFree};
 };
 
-#ifdef GOOGLE_TEST
-// FAIL() expands to a void return; call from a void helper so memory_pool<M>::get()
-// (which returns M) can still instantiate for M = d_memory.
-inline void hipblaslt_fail_pinned_host_memory_exhausted(size_t bytes)
+class pinned_host_memory_exhausted : public std::runtime_error
 {
-    FAIL() << "Fatal: cannot allocate " << (bytes >> 20)
-           << " MiB of pinned host memory even with an empty pool. This "
-              "problem does not fit in the memory available to this "
-              "process.";
-}
-#endif
+public:
+    explicit pinned_host_memory_exhausted(size_t bytes_mib)
+        : std::runtime_error("Fatal: cannot allocate " + std::to_string(bytes_mib)
+                             + " MiB of pinned host memory even with an empty pool. This "
+                               "problem does not fit in the memory available to this "
+                               "process.")
+    {
+    }
+};
 
 /* ============================================================================================ */
 /*! \brief  memory pool class to keep track of memory in either M = d_memory, or M = h_memory objects */
@@ -343,19 +344,7 @@ private:
             // the device buffer class -- so returning an empty one here means a null
             // pointer reaches as<T>() and gets written through. Fail attributably instead.
             if(!retry.get() && std::is_same<M, h_memory>::value)
-            {
-#ifdef GOOGLE_TEST
-                hipblaslt_fail_pinned_host_memory_exhausted(bytes);
-                return retry;
-#else
-                hipblaslt_cerr << "Fatal: cannot allocate " << (bytes >> 20)
-                               << " MiB of pinned host memory even with an empty pool. This "
-                                  "problem does not fit in the memory available to this "
-                                  "process."
-                               << std::endl;
-                exit(EXIT_FAILURE);
-#endif
-            }
+                throw pinned_host_memory_exhausted(bytes >> 20);
             return retry;
         }
     }
