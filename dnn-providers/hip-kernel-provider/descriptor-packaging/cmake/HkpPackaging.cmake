@@ -173,8 +173,15 @@ function(hkp_wire_pack_step)
     # child folder retriggers the pack step. The packer itself walks recursively
     # (load_flat_input uses rglob), so a flat glob here would drop the
     # dependency edge for every nested descriptor.
+    #
+    # `.uhd.fb` and `.bin` are not descriptors and the packer never globs for
+    # them -- it reaches them only through the `payload` of a `kind: "model"`
+    # UHD. They are listed here anyway because retraining a heuristic rewrites
+    # exactly those two files and nothing else, and without the edge the pack
+    # step would keep shipping the previous model.
     file(GLOB_RECURSE _source_inputs CONFIGURE_DEPENDS
-         "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp")
+         "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp"
+         "${ARG_SOURCE_ROOT}/*.fb" "${ARG_SOURCE_ROOT}/*.bin")
 
     # Editing the tool's own sources must retrigger the pack step, else the
     # artifacts go stale against the current pipeline code. The resolved

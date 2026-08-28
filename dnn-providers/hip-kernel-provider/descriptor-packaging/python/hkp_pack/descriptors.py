@@ -38,6 +38,29 @@ def type_from_filename(path):
     return parts[-2]
 
 
+@dataclass(frozen=True)
+class Sidecar:
+    """A non-descriptor file a descriptor names by relative path.
+
+    The packer is otherwise JSON-only: discovery globs `*.json`, so a file that
+    is not a descriptor is invisible to validation, staging and install alike.
+    A trained UHD needs one anyway -- `kind: "model"` names a `.uhd.fb`, which in
+    turn names a model artifact -- so those files are resolved at discovery and
+    carried alongside the descriptor that named them.
+
+    Fields are a resolved absolute source and the destination it keeps in an arch
+    tree. The destination preserves the authored layout rather than flattening to
+    the descriptor's own folder, so `payload` stays valid verbatim in the packed
+    tree and the runtime's `originDirectory / payload` join resolves the same way
+    it did in the source. This mirrors `kernel_source.library`, the only other
+    descriptor field naming a file the packer must carry.
+    """
+
+    source: Path
+    rel_dir: Path
+    name: str
+
+
 @dataclass
 class Descriptor:
     """A parsed descriptor loaded from a flat-folder JSON file.
@@ -52,6 +75,7 @@ class Descriptor:
     path: Path
     doc: dict
     rel_dir: Path = Path(".")
+    sidecars: list = field(default_factory=list)
 
     @property
     def type(self):
@@ -83,6 +107,10 @@ class FlatInput:
 
     def ukd_by_id(self):
         return {d.id: d for d in self.ukds()}
+
+    def sidecars_for(self, descriptors):
+        """Every sidecar the given descriptors name, in descriptor order."""
+        return [sidecar for desc in descriptors for sidecar in desc.sidecars]
 
 
 def _read_json(path):
@@ -362,12 +390,64 @@ def _validate_udd(desc):
     _require(desc.doc, ["name", "dispatch_symbol"], f"UDD {desc.path.name}")
 
 
-def _validate_uhd(desc):
+def _validate_uhd(desc, source_root):
     """UHD: kind is a closed enum, payload required. Mirrors
-    parseHeuristicDescriptor."""
+    parseHeuristicDescriptor.
+
+    `payload` means different things per kind, and only one of them is a file:
+
+      native -- a ScoreRegistry symbol name, resolved in-process. Nothing to
+                carry; a symbol the provider never registered is caught at load,
+                not here, because the packer cannot see the provider's registry.
+      model  -- a `.uhd.fb` path relative to this descriptor. It is a real file
+                that has to reach the packed tree, so it is resolved and recorded
+                as a sidecar.
+
+    A missing model artifact is a hard error rather than a warning. The runtime
+    treats an absent one as a reason to degrade to declared order, so shipping a
+    UHD whose artifact never got packaged produces an engine that silently stops
+    using its model -- the failure mode this check exists to prevent.
+    """
     where = f"UHD {desc.path.name}"
     _require(desc.doc, ["name", "kind", "payload"], where)
     _require_enum(desc.doc, "kind", _HEURISTIC_KINDS, where)
+
+    if desc.doc["kind"] != "model":
+        return
+
+    desc.sidecars.append(_resolve_sidecar(desc, source_root, desc.doc["payload"]))
+
+
+def _resolve_sidecar(desc, source_root, payload):
+    """Resolve a descriptor-relative payload path to a carriable Sidecar.
+
+    Descriptor-relative with no root-relative fallback, matching
+    compile_hip_variant: a fallback fires exactly when the local file is missing,
+    so a typo would stop being an error and bind silently to a same-named file
+    elsewhere in the tree. Sharing one artifact between sibling folders stays
+    expressible by saying so -- `"../shared/model.uhd.fb"`.
+
+    The destination keeps the resolved path's position under the root, so an
+    authored `../shared/...` lands in the packed tree where the same relative
+    path still reaches it.
+    """
+    root = Path(source_root).resolve()
+    resolved = (root / desc.rel_dir / payload).resolve()
+    where = f"UHD {desc.path.name}"
+
+    if not resolved.is_relative_to(root):
+        raise HkpPackError(
+            f"{where} payload escapes the source root: {payload} "
+            f"(from {Path(desc.rel_dir).as_posix()}, resolved to {resolved})"
+        )
+    if not resolved.is_file():
+        raise HkpPackError(
+            f"{where} payload source not found: {payload} (looked for {resolved}, "
+            f"resolved relative to descriptor folder {Path(desc.rel_dir).as_posix()})"
+        )
+
+    dest = resolved.relative_to(root)
+    return Sidecar(source=resolved, rel_dir=dest.parent, name=dest.name)
 
 
 def _validate_kmd(desc):
@@ -391,7 +471,7 @@ def _validate_kmd(desc):
         _require_enum(entry, "type", _METADATA_TYPES, entry_where)
 
 
-def _validate_shape(desc, log=print):
+def _validate_shape(desc, source_root, log=print):
     doc = desc.doc
     path = desc.path
     if not isinstance(doc, dict):
@@ -418,7 +498,7 @@ def _validate_shape(desc, log=print):
     if dtype == "udd":
         _validate_udd(desc)
     if dtype == "uhd":
-        _validate_uhd(desc)
+        _validate_uhd(desc, source_root)
     if dtype == "kmd":
         _validate_kmd(desc)
 
@@ -478,7 +558,7 @@ def load_flat_input(root, log=print):
             doc=_read_json(jp),
             rel_dir=rel_dir,
         )
-        _validate_shape(desc, log)
+        _validate_shape(desc, root, log)
         descriptors.append(desc)
 
     flat = FlatInput(descriptors=descriptors)
