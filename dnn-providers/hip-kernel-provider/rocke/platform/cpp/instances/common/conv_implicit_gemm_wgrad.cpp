@@ -1805,7 +1805,6 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
          ? rocke_f32()                                                                   \
          : rocke_b_io_ir_type(b, (dt_field) ? (dt_field) : (fallback)))
 
-    const char* dtype_d_str = spec->dtype_d ? spec->dtype_d : "fp16";
     const rocke_type_t* dw_elem = _WGRAD_ELEM_TYPE(spec->dtype_d, "fp16");
     const rocke_type_t* dw_glob = rocke_ptr_type(b, dw_elem, "global");
 
