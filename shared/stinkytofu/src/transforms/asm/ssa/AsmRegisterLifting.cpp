@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -88,6 +89,24 @@ bool usesTrue16Halves(const StinkyInstruction& instruction) {
         if (modifier->getSrc(src) != HighBitSel::NONE) return true;
     }
     return false;
+}
+
+/// Name of a register operand this lift covers, or nullopt when it covers none.
+/// Any witness will do; only existence decides. Not the operand the True16
+/// selector names, which is indexed by printed position: coarse but never unsound.
+std::optional<std::string> inScopeOperandName(const StinkyInstruction& instruction,
+                                              const RegClassSet& classes) {
+    const std::vector<StinkyRegister>& destRegs = instruction.getDestRegs();
+    for (size_t operand = 0; operand < destRegs.size(); ++operand) {
+        if (classifyOperand(destRegs[operand], classes).kind == OperandKind::AllocatableRange)
+            return "dst" + std::to_string(operand);
+    }
+    const std::vector<StinkyRegister>& srcRegs = instruction.getSrcRegs();
+    for (size_t operand = 0; operand < srcRegs.size(); ++operand) {
+        if (classifyOperand(srcRegs[operand], classes).kind == OperandKind::AllocatableRange)
+            return "src" + std::to_string(operand);
+    }
+    return std::nullopt;
 }
 
 /// Total order on register keys, so PHI placement and live-in creation visit
@@ -327,8 +346,16 @@ bool Lifter::validateInstruction(const StinkyInstruction& instruction, uint32_t 
                       "call sites need a calling convention to describe argument, result, "
                       "and clobbered registers");
     }
-    if (usesTrue16Halves(instruction))
-        return failAt(index, "True16 half operands need sub-DWORD SSA units");
+    // The selector records no register class, so it cannot say whether it is in
+    // scope. An operand left physical keeps its register through destruction and
+    // its selector on the modifier, so a half there cannot reach any SSA value.
+    if (usesTrue16Halves(instruction)) {
+        if (const std::optional<std::string> inScope =
+                inScopeOperandName(instruction, options_.classes)) {
+            return failAt(index, "True16 half operands need sub-DWORD SSA units; " + *inScope +
+                                     " is in the lift scope");
+        }
+    }
 
     for (size_t operand = 0; operand < instruction.getSrcRegs().size(); ++operand) {
         const OperandClass operandClass =

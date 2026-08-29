@@ -733,6 +733,37 @@ TEST_F(LiftAsmRegistersToSSATest, AnOutOfScopeClassIsNotAnError) {
     EXPECT_FALSE(anyOfClass(*func, RegType::V));
 }
 
+TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfOutsideTheLiftScopeIsNotAnError) {
+    // The selector names a vector operand and this lift covers only scalars, so
+    // the instruction keeps both registers and its modifier verbatim. Rejecting
+    // it would discard the whole function over an operand nothing touches.
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
+    mov->addDestReg(StinkyRegister("v", 0, 1));
+    mov->addSrcReg(StinkyRegister("v", 1, 1));
+    mov->addModifier<True16Modifiers>(
+        True16Modifiers(HighBitSel::HIGH, HighBitSel::NONE, {HighBitSel::NONE}));
+
+    lift(scopedTo(RegType::S));
+
+    EXPECT_EQ(valueCount(), 0u);
+    ASSERT_NE(mov->getModifier<True16Modifiers>(), nullptr);
+    EXPECT_EQ(mov->getModifier<True16Modifiers>()->getDst0(), HighBitSel::HIGH);
+}
+
+TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfOnAnInScopeOperandStillRejects) {
+    // Same scope, but a lifted operand now shares the instruction with the
+    // selector, so the lift cannot leave it physical and must decline. This is
+    // what keeps the guard scoped rather than simply gone.
+    StinkyInstruction* mov = createVMovFromSgpr(entry, /*destVgpr=*/0, /*srcSgpr=*/4);
+    mov->addModifier<True16Modifiers>(
+        True16Modifiers(HighBitSel::NONE, HighBitSel::NONE, {HighBitSel::LOW}));
+
+    const std::string error = liftError(scopedTo(RegType::S));
+    EXPECT_TRUE(contains(error, "True16 half operands")) << error;
+    EXPECT_TRUE(contains(error, "src0 is in the lift scope")) << error;
+}
+
 TEST_F(LiftAsmRegistersToSSATest, AClassTheLifterCannotModelIsStillAnError) {
     // Scoping selects among the classes lifting can model; it does not widen them.
     AsmIRBuilder builder(*entry, kArch);
