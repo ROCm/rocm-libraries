@@ -4927,8 +4927,8 @@ namespace TensileLite
             {
                 const size_t prefixEntries = streamKFlagPrefixBytes(hardware) / sizeof(int);
                 // An unknown architecture reports no prefix, and a prefix that
-                // swallowed the region would leave no grid to launch; both keep
-                // the full-region bound, which is no weaker than before.
+                // swallowed the region would leave no grid to launch; both fall
+                // back to the full-region bound the static paths use.
                 if(prefixEntries < flagEntries)
                     flagEntries -= prefixEntries;
             }
