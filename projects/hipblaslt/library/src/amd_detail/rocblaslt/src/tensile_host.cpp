@@ -93,8 +93,8 @@ static_assert(TensileLite::StreamKFlagElements == _rocblaslt_handle::c_syncSkSlo
               "Stream-K flag region size disagrees between TensileLite and the handle");
 
 // bindGroupedStreamKFlags() accepts a group of up to c_syncSkSlotsPerStream and
-// relies on gsuFlagsForProblem() being null for every index it rejects, so that
-// the rejection is the only way a problem can end up without a region. Raising
+// relies on gsuFlagsForProblem() being non-null for every index it accepts, so
+// that the rejection is the only way a problem can end up without a region. Raising
 // the Stream-K slot count past the GSU one would let a group through and then
 // hand its later problems a null pointer, which the device reads as a request
 // for the parallel reduction.
@@ -3242,9 +3242,9 @@ static bool bindStreamKFlags(rocblaslt_handle                handle,
 //
 // A group is one kernel launch, so two problems sharing a region would let one
 // clear a flag the other is spinning on. Past c_syncSkSlotsPerStream there is
-// no region to hand out, private or shared: gsuFlagsForProblem() is null there
-// - which the static_assert at the top of this file keeps true - and
-// generateSingleCallGroupedGemm() packs that null as Flags, which the device
+// no region to hand out, private or shared: gsuFlagsForProblem() is null there.
+// Every index this accepts has one, which the static_assert at the top of this
+// file keeps true. generateSingleCallGroupedGemm() packs a null as Flags, which the device
 // reads as a request for the parallel reduction. Reject rather than launch the
 // wrong reduction.
 static bool bindGroupedStreamKFlags(rocblaslt_handle                             handle,
@@ -3976,6 +3976,13 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
 
             data->algoIndex = *solutionIndex;
             auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            // A hand-rolled algo carries an index no predicate has vetted, and
+            // an unknown one resolves to an empty pointer.
+            if(!solution)
+            {
+                log_error(__func__, "no solution for the requested index");
+                return rocblaslt_status_invalid_value;
+            }
 
             if(data->problem.getParams().uniformSummationOrder())
                 warnUniformSummationOrderBypass(__func__, tuning != nullptr);
@@ -4041,6 +4048,13 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->algoIndex = *solutionIndex;
             auto solution
                 = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
+            // A hand-rolled algo carries an index no predicate has vetted, and
+            // an unknown one resolves to an empty pointer.
+            if(!solution)
+            {
+                log_error(__func__, "no solution for the requested index");
+                return rocblaslt_status_invalid_value;
+            }
 
             if(!data->problem.gemms.empty()
                && data->problem.gemms[0].getParams().uniformSummationOrder())
@@ -4326,8 +4340,8 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             // Same rebind as the single-GEMM branch above: the stream given to
             // initialize() is not necessarily the one this launch uses, and
             // every problem in the group holds a region of its own. The
-            // rejection cannot fire here - makeArgument() accepted this group
-            // size and it cannot change afterwards - and is kept fail-closed.
+            // rejection is kept because setProblem() can widen the group after
+            // makeArgument() accepted it, with no fresh initialize() required.
             if(data->skBinding.readsFlags && stream != data->skBinding.stream)
             {
                 if(!bindGroupedStreamKFlags(handle, stream, __func__, data->inputs.grouped))
@@ -4536,9 +4550,9 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
                                                       false);
             }
 
-            // Same rebind as runKernelFromInvocation(), rejection included, and
-            // just as unreachable. Done before the patch loop below, which
-            // rewrites the freshly built arguments.
+            // Same rebind as runKernelFromInvocation(), rejection included.
+            // Done before the patch loop below, which rewrites the freshly
+            // built arguments.
             if(data->skBinding.readsFlags && stream != data->skBinding.stream)
             {
                 if(!bindGroupedStreamKFlags(handle, stream, __func__, data->inputs.grouped))
