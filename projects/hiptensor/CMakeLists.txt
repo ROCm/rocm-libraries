@@ -24,6 +24,7 @@
  #
  ###############################################################################
 
+# Temporary no-op change to validate TheRock multi-arch CI project detection.
 cmake_minimum_required(VERSION 3.14)
 message(STATUS "CMake version: ${CMAKE_VERSION}")
 
