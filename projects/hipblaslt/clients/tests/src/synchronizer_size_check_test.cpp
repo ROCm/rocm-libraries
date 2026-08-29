@@ -26,6 +26,8 @@
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
+#include <sstream>
+
 namespace
 {
     using TensileLite::GsuSynchronizerElements;
@@ -94,5 +96,27 @@ namespace
         auto problem = makeProblem(kBetweenBounds, kBetweenBounds, 64, true, 1024);
         problem.setParams().setGSU(1);
         EXPECT_TRUE(pred(problem));
+    }
+
+    // debugEval is what --print_solution_rejection_reason drives, and it
+    // recomputes the verdict rather than reading operator()'s, so the unsplit
+    // short circuit has to exist on both. GSU -1 is the other unsplit spelling -
+    // let the kernel choose - and is skipped the same way.
+    //
+    // The row debugEval prints is not asserted: PredicateDebugger drops passing
+    // rows unless TENSILE_DB verbose mode is on, which is latched from the
+    // environment before any test runs.
+    TEST(SynchronizerSizeCheck, DebugEvalAcceptsUnsplitGsu)
+    {
+        SynchronizerSizeCheck pred(0, kUnitTile);
+        for(int16_t gsu : {int16_t(1), int16_t(-1)})
+        {
+            auto problem = makeProblem(kBetweenBounds, kBetweenBounds, 64, true, 1024);
+            problem.setParams().setGSU(gsu);
+            ASSERT_TRUE(pred(problem)) << "gsu=" << gsu;
+
+            std::ostringstream out;
+            EXPECT_TRUE(pred.debugEval(problem, out)) << "gsu=" << gsu;
+        }
     }
 } // namespace
