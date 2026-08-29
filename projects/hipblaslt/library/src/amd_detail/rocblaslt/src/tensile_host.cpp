@@ -3195,11 +3195,13 @@ static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 // Points `inputs.Synchronizer` at the Stream-K flag region this handle reserves
 // for (`stream`, `problemIndex`), and reports whether it found one.
 //
-// When it does not, the shared GSU region stays bound. That is what every
-// Stream-K launch used before these blocks existed, so it cannot turn a working
-// call into a failing one, and it is strictly better than refusing the call:
-// the caller keeps its result and only loses the isolation guarantee, which it
-// did not have to begin with.
+// With no region left it binds the shared GSU region explicitly rather than
+// leaving the field alone: on a rebind the field still holds the previous
+// stream's private block, and keeping that would put two streams on one region
+// - the deadlock these blocks exist to prevent, now aimed at a stream that did
+// claim its own. The shared region is what a Stream-K launch gets with no
+// private block at all, so the caller keeps its result and loses only the
+// isolation guarantee.
 static bool bindStreamKFlags(rocblaslt_handle                handle,
                              hipStream_t                     stream,
                              size_t                          problemIndex,
@@ -3214,9 +3216,10 @@ static bool bindStreamKFlags(rocblaslt_handle                handle,
         static std::atomic<bool> reported{false};
         if(!reported.exchange(true, std::memory_order_relaxed))
             log_error(__func__,
-                      "no Stream-K flag region left: this handle has already handed one to "
+                      "no Stream-K flag region left for this stream: a handle serves at most "
                       "c_syncSkStreamSlots distinct streams. Falling back to the shared "
                       "region, which concurrent Stream-K launches can deadlock on.");
+        inputs.Synchronizer = handle->gsuFlagsForProblem(problemIndex);
         return false;
     }
     inputs.Synchronizer = region;

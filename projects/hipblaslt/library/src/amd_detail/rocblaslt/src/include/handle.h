@@ -214,8 +214,8 @@ struct _rocblaslt_handle
     // past the block, every block taken - and means only "no private region",
     // never "the call must fail". A shared region is never handed back under
     // that name: doing so would silently reintroduce the cross-stream deadlock
-    // this separation exists to prevent. Callers leave the shared GSU region
-    // bound instead, which is what they did before these blocks existed.
+    // this separation exists to prevent. Falling back to it is the caller's
+    // decision to make explicitly; see bindStreamKFlags.
     void streamKFlagsForStream(hipStream_t stream, size_t problemIndex, void** out)
     {
         *out = nullptr;
