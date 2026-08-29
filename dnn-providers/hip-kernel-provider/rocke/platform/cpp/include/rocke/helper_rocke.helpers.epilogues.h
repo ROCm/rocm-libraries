@@ -213,6 +213,24 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
                                    rocke_value_t* bounds_m, /* NULL => no bounds */
                                    rocke_value_t* bounds_n);
 
+/* CShuffleEpilogue.atomic_store(b, accs, dw_ptr, wg_N, bounds=None).
+ * Split-K variant: scatter MFMA accs to LDS (same as store step 1), sync,
+ * then atomic-add each element from LDS into dw_ptr:
+ *   fp32  -> global_atomic_add (scalar) per element in the sv-wide chunk.
+ *   bf16  -> global_atomic_add_pk_bf16 (<2 x bfloat>) per adjacent pair.
+ *   fp16  -> global_atomic_add_pk_f16  (<2 x half>)   per adjacent pair.
+ * dw_ptr: i8* pointer to the dW global buffer (not a buffer-resource).
+ * wg_N:   i32 SSA value — row stride of dW in elements.
+ * bounds_m/bounds_n: NULL => no OOB guard. */
+void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
+                                          const rocke_cshuffle_epilogue_t* epi,
+                                          rocke_value_t* const* accs,
+                                          int num_accs,
+                                          rocke_value_t* dw_ptr,
+                                          rocke_value_t* wg_N,
+                                          rocke_value_t* bounds_m, /* NULL => no bounds */
+                                          rocke_value_t* bounds_n);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
