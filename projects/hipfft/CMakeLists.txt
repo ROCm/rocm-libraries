@@ -21,6 +21,7 @@
 # ############################################################################
 
 # CMake version according to latest ROCm platform requirements
+# Temporary no-op change to validate TheRock multi-arch CI project detection.
 cmake_minimum_required( VERSION 3.17 )
 
 # We use C++20 features, this will add compile option: -std=c++20
