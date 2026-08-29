@@ -155,6 +155,17 @@ def test_iter_arch_dirs_and_all_arch_names(tmp_path, vcc):
     assert vcc.all_arch_names(tmp_path) == ["gfx942", "gfx942_20cu", "gfx950"]
 
 
+def test_iter_arch_dirs_skips_non_directory_entries_at_the_codename_level(tmp_path, vcc):
+    # A stray file directly under logic_root (not a codename directory at
+    # all) must be skipped, not just a stray file *inside* a codename dir
+    # (test_iter_arch_dirs_and_all_arch_names, above).
+    _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml")
+    (tmp_path / "README.md").write_text("n/a")
+
+    pairs = list(vcc.iter_arch_dirs(tmp_path))
+    assert [codename for codename, _ in pairs] == ["aldebaran"]
+
+
 # ===========================================================================
 # _resolve_corpus_root / ancestor-root invocation
 #
@@ -187,6 +198,16 @@ def test_resolve_corpus_root_falls_back_to_input_when_no_asm_full_exists(tmp_pat
     # anywhere -- resolution must be a no-op rather than raising or finding a
     # false match.
     (tmp_path / "aldebaran" / "gfx950").mkdir(parents=True)
+    assert vcc._resolve_corpus_root(tmp_path) == tmp_path
+
+
+def test_resolve_corpus_root_skips_a_non_directory_asm_full_match(tmp_path, vcc):
+    # A stray *file* named "asm_full" (e.g. a leftover build artifact) must
+    # not be mistaken for the real corpus directory -- rglob() matches it by
+    # name, but the is_dir() check must reject it and keep looking, falling
+    # back to the input if nothing else matches.
+    (tmp_path / "aldebaran" / "asm_full").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "aldebaran" / "asm_full").write_text("n/a")
     assert vcc._resolve_corpus_root(tmp_path) == tmp_path
 
 
@@ -287,6 +308,21 @@ def test_sibling_device_names_ignores_different_basenames(tmp_path, vcc):
         tmp_path / "aldebaran" / "gfx950" / "Equality" / "b.yaml",
         devices="Device 75a3",
     )
+    assert vcc.find_sibling_device_names_violations(tmp_path) == []
+
+
+def test_sibling_device_names_skips_a_file_with_no_parseable_device_names(tmp_path, vcc):
+    # A same-basename sibling that read_device_names() can't parse (e.g. a
+    # malformed or unusually-shaped header) must be skipped rather than
+    # treated as an empty-tuple DeviceNames that would falsely diverge from
+    # every real sibling.
+    _write_header_yaml(
+        tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",
+        devices="Device 75a0",
+    )
+    unparseable = tmp_path / "aldebaran" / "gfx950" / "GridBased" / "logic.yaml"
+    unparseable.parent.mkdir(parents=True, exist_ok=True)
+    unparseable.write_text("not a logic header at all\n")
     assert vcc.find_sibling_device_names_violations(tmp_path) == []
 
 
