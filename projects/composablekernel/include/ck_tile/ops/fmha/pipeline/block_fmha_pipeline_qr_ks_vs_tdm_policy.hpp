@@ -905,32 +905,6 @@ struct QrTdmLdsArenaLayout
     static_assert(integer_least_multiple(kArenaBytes, 64 * 1024) * 2 <= 320 * 1024);
 };
 
-template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
-struct QrTdmLegacyPhaseLayout
-{
-    using Production = QrTdmLdsArenaLayout<Problem, QPadding, KPadding, VPadding>;
-
-    static_assert(Production::kDoubleBuffer,
-                  "legacy-phase diagnostics are defined only for the prefill path");
-
-    static constexpr bool kDiagnosticOnly       = true;
-    static constexpr index_t kQOffset            = 0;
-    static constexpr index_t kK0Offset           = 0;
-    static constexpr index_t kK1Offset           = Production::kKBytes;
-    static constexpr index_t kV0Offset           = 2 * Production::kKBytes + 256;
-    static constexpr index_t kV1Offset           = kV0Offset + Production::kVBytes;
-    static constexpr index_t kArenaBytes         = kV1Offset + Production::kVBytes;
-    static constexpr bool kHasProductionAlignment =
-        kQOffset % 256 == 0 && kK0Offset % 256 == 0 && kK1Offset % 256 == 0 &&
-        kV0Offset % 256 == 0 && kV1Offset % 256 == 0;
-
-    static_assert(kQOffset + Production::kQBytes <= kV0Offset);
-    static_assert(kK0Offset + Production::kKBytes <= kK1Offset);
-    static_assert(kK1Offset + Production::kKBytes <= kV0Offset);
-    static_assert(kV0Offset + Production::kVBytes <= kV1Offset);
-    static_assert(kV1Offset + Production::kVBytes <= kArenaBytes);
-};
-
 template <typename TensorTag, typename Problem, bool LoadOnce>
 CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_writer_distribution()
 {

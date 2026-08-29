@@ -296,6 +296,32 @@ constexpr bool has_aligned_production_regions()
     }
 }
 
+template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
+struct TestLegacyPhaseLayout
+{
+    using Production =
+        ck_tile::detail::QrTdmLdsArenaLayout<Problem, QPadding, KPadding, VPadding>;
+
+    static_assert(Production::kDoubleBuffer,
+                  "legacy-phase diagnostics are defined only for the prefill path");
+
+    static constexpr ck_tile::index_t kQOffset    = 0;
+    static constexpr ck_tile::index_t kK0Offset   = 0;
+    static constexpr ck_tile::index_t kK1Offset   = Production::kKBytes;
+    static constexpr ck_tile::index_t kV0Offset   = 2 * Production::kKBytes + 256;
+    static constexpr ck_tile::index_t kV1Offset   = kV0Offset + Production::kVBytes;
+    static constexpr ck_tile::index_t kArenaBytes = kV1Offset + Production::kVBytes;
+    static constexpr bool kHasAlignedRegions =
+        kQOffset % 256 == 0 && kK0Offset % 256 == 0 && kK1Offset % 256 == 0 &&
+        kV0Offset % 256 == 0 && kV1Offset % 256 == 0;
+
+    static_assert(kQOffset + Production::kQBytes <= kV0Offset);
+    static_assert(kK0Offset + Production::kKBytes <= kK1Offset);
+    static_assert(kK1Offset + Production::kKBytes <= kV0Offset);
+    static_assert(kV0Offset + Production::kVBytes <= kV1Offset);
+    static_assert(kV1Offset + Production::kVBytes <= kArenaBytes);
+};
+
 template <typename DataType>
 constexpr bool validate_arena_layouts()
 {
@@ -361,15 +387,13 @@ constexpr bool validate_arena_layouts()
     static_assert(ck_tile::integer_least_multiple(PrefillAll::kArenaBytes, 64 * 1024) * 2 <=
                   320 * 1024);
 
-    using Legacy =
-        ck_tile::detail::QrTdmLegacyPhaseLayout<PrefillProblem, QKPad, QKPad, VPad>;
+    using Legacy = TestLegacyPhaseLayout<PrefillProblem, QKPad, QKPad, VPad>;
     static_assert(Legacy::kK0Offset == 0);
     static_assert(Legacy::kK1Offset == 17392);
     static_assert(Legacy::kV0Offset == 35040);
     static_assert(Legacy::kV1Offset == 53440);
     static_assert(Legacy::kArenaBytes == 71840);
-    static_assert(Legacy::kDiagnosticOnly);
-    static_assert(!Legacy::kHasProductionAlignment);
+    static_assert(!Legacy::kHasAlignedRegions);
 
     return true;
 }
