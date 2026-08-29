@@ -180,6 +180,13 @@ store callbacks) of the transform.  A transform which does not
 specify a field and brick layout for input (or output) is
 considered to have a single brick for input (or output).
 
+.. note::
+   As JIT callbacks cannot currently be used on transforms that have
+   fields or bricks specified on the plan description, the length of the
+   array of callback data pointers will always be 1 if callback data is
+   specified.
+
+
 Here is an example showing how to pass filtering data to a load
 callback.
 
