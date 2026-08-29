@@ -1258,6 +1258,7 @@ struct FastGeluAsm
         y               = x / (1.f + emu);
     }
 
+#ifdef __HIP_DEVICE_COMPILE__
     // device code, use lower precision "__ocml_exp_f32" and "rcp"
     template <>
     CK_TILE_DEVICE void operator()<float, float>(float& y, const float& x) const
@@ -1281,6 +1282,7 @@ struct FastGeluAsm
                      : [v_x] "v"(x), [s_c1] "s"(c1), [v_c2] "v"(c2), [s_log2e] "s"(log2e_)
                      :);
     }
+#endif // __HIP_DEVICE_COMPILE__
 
     template <>
     CK_TILE_HOST void operator()<fp32x2_t, fp32x2_t>(fp32x2_t& y, const fp32x2_t& x) const
@@ -1295,6 +1297,7 @@ struct FastGeluAsm
         y.y              = x.y / (1.f + emu1);
     }
 
+#ifdef __HIP_DEVICE_COMPILE__
     // this is packed verion to remove data hazard for trans
     template <>
     CK_TILE_DEVICE void operator()<fp32x2_t, fp32x2_t>(fp32x2_t& y, const fp32x2_t& x) const
@@ -1336,6 +1339,7 @@ struct FastGeluAsm
         y.x = y0;
         y.y = y1;
     }
+#endif // __HIP_DEVICE_COMPILE__
 };
 
 // https://paperswithcode.com/method/gelu
