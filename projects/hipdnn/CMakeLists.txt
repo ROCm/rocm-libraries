@@ -1,6 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Temporary no-op change to validate TheRock multi-arch CI project detection.
 cmake_minimum_required(VERSION 3.25.2)
 
 # Used by the shared CTest test categorisation helpers
