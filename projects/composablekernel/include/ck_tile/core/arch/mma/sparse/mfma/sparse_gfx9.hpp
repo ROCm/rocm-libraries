@@ -134,7 +134,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 64u, CompilerTarget, MmaOpF
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {__builtin_amdgcn_smfmac_i32_16x16x64_i8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_i32_16x16x64_i8(
+            bit_cast<int32x2_t>(aVec), bit_cast<int32x4_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -153,7 +154,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 32u, 32u, 32u, CompilerTarget, MmaOpF
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {__builtin_amdgcn_smfmac_i32_32x32x32_i8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_i32_32x32x32_i8(
+            bit_cast<int32x2_t>(aVec), bit_cast<int32x4_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -172,8 +174,8 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_16x16x64_bf8_bf8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_16x16x64_bf8_bf8(
+            bit_cast<int32x2_t>(aVec), bit_cast<int32x4_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -192,8 +194,8 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_16x16x64_bf8_fp8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_16x16x64_bf8_fp8(
+            bit_cast<int32x2_t>(aVec), bit_cast<int32x4_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -212,8 +214,8 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_16x16x64_fp8_bf8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_16x16x64_fp8_bf8(
+            bit_cast<int32x2_t>(aVec), bit_cast<int32x4_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -232,8 +234,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8(
+            bit_cast<int32x2_t>(aVec), bit_cast<int32x4_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -252,8 +254,8 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 32u, 32u, 32u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_32x32x32_bf8_bf8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_32x32x32_bf8_bf8(
+            bit_cast<int32x2_t>(aVec), bit_cast<int32x4_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -272,8 +274,8 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 32u, 32u, 32u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_32x32x32_bf8_fp8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_32x32x32_bf8_fp8(
+            bit_cast<int32x2_t>(aVec), bit_cast<int32x4_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -292,8 +294,8 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 32u, 32u, 32u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_32x32x32_fp8_bf8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_32x32x32_fp8_bf8(
+            bit_cast<int32x2_t>(aVec), bit_cast<int32x4_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -312,8 +314,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 32u, 32u, 32u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_32x32x32_fp8_fp8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_32x32x32_fp8_fp8(
+            bit_cast<int32x2_t>(aVec), bit_cast<int32x4_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -418,7 +420,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 128u, CompilerTarget, MmaOp
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {__builtin_amdgcn_smfmac_i32_16x16x128_i8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_i32_16x16x128_i8(
+            bit_cast<int32x4_t>(aVec), bit_cast<int32x8_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -437,7 +440,8 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 32u, 32u, 64u, CompilerTarget, MmaOpF
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {__builtin_amdgcn_smfmac_i32_32x32x64_i8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_i32_32x32x64_i8(
+            bit_cast<int32x4_t>(aVec), bit_cast<int32x8_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -456,8 +460,8 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_16x16x128_bf8_bf8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_16x16x128_bf8_bf8(
+            bit_cast<int32x4_t>(aVec), bit_cast<int32x8_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -476,8 +480,8 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_16x16x128_bf8_fp8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_16x16x128_bf8_fp8(
+            bit_cast<int32x4_t>(aVec), bit_cast<int32x8_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -496,8 +500,8 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_16x16x128_fp8_bf8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_16x16x128_fp8_bf8(
+            bit_cast<int32x4_t>(aVec), bit_cast<int32x8_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -516,8 +520,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_16x16x128_fp8_fp8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_16x16x128_fp8_fp8(
+            bit_cast<int32x4_t>(aVec), bit_cast<int32x8_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -536,8 +540,8 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_32x32x64_bf8_bf8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_32x32x64_bf8_bf8(
+            bit_cast<int32x4_t>(aVec), bit_cast<int32x8_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -556,8 +560,8 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 32u, 32u, 64u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_32x32x64_bf8_fp8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_32x32x64_bf8_fp8(
+            bit_cast<int32x4_t>(aVec), bit_cast<int32x8_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -576,8 +580,8 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 32u, 32u, 64u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_32x32x64_fp8_bf8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_32x32x64_fp8_bf8(
+            bit_cast<int32x4_t>(aVec), bit_cast<int32x8_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
@@ -596,8 +600,8 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u, CompilerTarget, MmaOpFami
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
         using P = WarpGemmParamsParser<Params...>;
-        return {
-            __builtin_amdgcn_smfmac_f32_32x32x64_fp8_fp8(aVec, bVec, cVec, idx, P::cbsz, P::abid)};
+        return {__builtin_amdgcn_smfmac_f32_32x32x64_fp8_fp8(
+            bit_cast<int32x4_t>(aVec), bit_cast<int32x8_t>(bVec), cVec, idx, P::cbsz, P::abid)};
     }
 };
 
