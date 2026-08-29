@@ -44,11 +44,36 @@ GFX1250V0 = "gfx1250v0"
 # divergence in the mapping-form files is silently skipped (see #11442).
 _DEVICE_NAMES_RE = re.compile(r"^\s*(?:-|DeviceNames:)\s*\[\s*Device\s+([^\]]+)\]\s*$")
 
+# The corpus's ``<codename>/<gfx_arch>/...`` layout always lives under a
+# directory named ``asm_full``. Callers rarely pass that exact directory,
+# though: ``TensileLogic``'s own ``LogicPath`` CLI argument defaults (via
+# ``HIPBLASLT_LIBLOGIC_PATH``) to the whole ``library/`` tree, several
+# directories above the real corpus. Resolve down to it explicitly instead of
+# assuming a fixed depth below whatever ``logic_root`` the caller passed in.
+_ASM_FULL_DIRNAME = "asm_full"
+
+
+def _resolve_corpus_root(logic_root: Path) -> Path:
+    """Return the actual ``asm_full`` corpus directory, whether ``logic_root``
+    already is it (as in these checks' own unit tests, and any direct-path
+    CLI invocation) or is a higher ancestor of it (as in the default,
+    CMake-driven build). Falls back to ``logic_root`` unchanged if no
+    ``asm_full`` directory can be found anywhere below it, so hermetic test
+    fixtures that build a synthetic corpus under an arbitrarily-named
+    ``tmp_path`` keep working."""
+    if logic_root.name == _ASM_FULL_DIRNAME:
+        return logic_root
+    for candidate in sorted(logic_root.rglob(_ASM_FULL_DIRNAME)):
+        if candidate.is_dir():
+            return candidate
+    return logic_root
+
 
 def iter_arch_dirs(logic_root: Path) -> Iterator[Tuple[str, Path]]:
     """Yield (codename, arch_dir) for every ``gfx*`` directory one level below
     a codename directory directly under ``logic_root`` (the corpus's
     ``<codename>/<gfx_arch>/...`` layout)."""
+    logic_root = _resolve_corpus_root(logic_root)
     for codename_dir in logic_root.iterdir():
         if not codename_dir.is_dir():
             continue
@@ -93,6 +118,7 @@ def find_sibling_device_names_violations(logic_root: Path) -> List[str]:
     identical ``DeviceNames``; a divergence (e.g. one sibling missing a chip
     ID the other declares) shipped invisibly before this check existed --
     see https://github.com/ROCm/rocm-libraries/issues/11397."""
+    logic_root = _resolve_corpus_root(logic_root)
     violations: List[str] = []
     for codename, arch_dir in iter_arch_dirs(logic_root):
         by_basename: Dict[str, Dict[Tuple[str, ...], List[Path]]] = defaultdict(
@@ -155,6 +181,7 @@ def find_gfx1250v0_overlay_violations(logic_root: Path) -> List[str]:
        ``library/gfx1250v0/`` is a directory the runtime never reads); and
     4. no file *outside* the overlay claims ``ScheduleName: gfx1250v0``.
     """
+    logic_root = _resolve_corpus_root(logic_root)
     violations: List[str] = []
     overlay_root = logic_root / GFX1250V0
     overlay_files = sorted(overlay_root.rglob("*.yaml")) if overlay_root.is_dir() else []

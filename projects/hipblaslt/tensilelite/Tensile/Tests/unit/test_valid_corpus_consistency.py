@@ -82,16 +82,21 @@ def _write_header_yaml(path, *, schedule="schedule", gfx="gfx942", devices="Devi
 
 
 def _write_mapping_form_header_yaml(path, *, schedule="schedule", gfx="gfx942", devices="Device 74a0"):
-    """A logic YAML using the mapping-form DeviceNames dialect
-    (``DeviceNames: [Device ...]``, used by e.g. Origami), as opposed to the
-    positional list form ``_write_header_yaml`` produces. See #11442."""
+    """A logic YAML in the whole-file mapping dialect used by e.g. Origami
+    (every header field, including ``DeviceNames``, is a top-level mapping
+    key), as opposed to the positional-list-of-sequence-items form
+    ``_write_header_yaml`` produces. Mirrors a real Origami file's header
+    (``MinimumRequiredVersion``/``ScheduleName``/``ArchitectureName``/
+    ``DeviceNames`` all as mapping keys) rather than mixing a top-level
+    sequence with a top-level mapping key, which is not valid YAML. See
+    #11442."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "\n".join(
             [
-                "- MinimumRequiredVersion: 4.33.0",
-                f"- {schedule}",
-                f"- {gfx}",
+                "MinimumRequiredVersion: 4.33.0",
+                f"ScheduleName: {schedule}",
+                f"ArchitectureName: {gfx}",
                 f"DeviceNames: [{devices}]",
                 "",
             ]
@@ -141,6 +146,76 @@ def test_iter_arch_dirs_and_all_arch_names(tmp_path, vcc):
     pairs = sorted(vcc.iter_arch_dirs(tmp_path))
     assert [codename for codename, _ in pairs] == ["aldebaran", "aquavanjaram", "aquavanjaram"]
     assert vcc.all_arch_names(tmp_path) == ["gfx942", "gfx942_20cu", "gfx950"]
+
+
+# ===========================================================================
+# _resolve_corpus_root / ancestor-root invocation
+#
+# ``TensileLogic``'s own ``LogicPath`` CLI argument does not, in the default
+# CMake-driven build, point at the ``asm_full`` corpus root directly -- it
+# defaults (via ``HIPBLASLT_LIBLOGIC_PATH``) to the whole ``library/`` tree,
+# several directories above the real corpus. Every finder must still work
+# when called with that higher ancestor, not just with the corpus root
+# itself (which is all the other tests in this file exercise).
+# ===========================================================================
+
+def test_resolve_corpus_root_returns_input_unchanged_when_already_asm_full(tmp_path, vcc):
+    asm_full = tmp_path / "asm_full"
+    asm_full.mkdir()
+    assert vcc._resolve_corpus_root(asm_full) == asm_full
+
+
+def test_resolve_corpus_root_finds_a_nested_asm_full_directory(tmp_path, vcc):
+    # Mirrors HIPBLASLT_LIBLOGIC_PATH's default: LogicPath is `library`, and
+    # the real corpus is nested several directories below it.
+    library = tmp_path / "library"
+    asm_full = library / "src" / "amd_detail" / "rocblaslt" / "src" / "Tensile" / "Logic" / "asm_full"
+    asm_full.mkdir(parents=True)
+    assert vcc._resolve_corpus_root(library) == asm_full
+
+
+def test_resolve_corpus_root_falls_back_to_input_when_no_asm_full_exists(tmp_path, vcc):
+    # Hermetic tmp_path fixtures (as used throughout this file) build a
+    # synthetic corpus directly under tmp_path, with no `asm_full` directory
+    # anywhere -- resolution must be a no-op rather than raising or finding a
+    # false match.
+    (tmp_path / "aldebaran" / "gfx950").mkdir(parents=True)
+    assert vcc._resolve_corpus_root(tmp_path) == tmp_path
+
+
+def test_gfx1250v0_overlay_violations_identical_via_ancestor_or_direct_corpus_root(tmp_path, vcc):
+    # The exact shape that broke PR #11447's own CI: TensileLogic invoked
+    # with `library` (an ancestor of asm_full), not asm_full directly. An
+    # unresolved ancestor previously reported both a false "ships no logic"
+    # violation (overlay_root computed at the wrong, nonexistent path) and a
+    # false "outside the overlay" violation for every real overlay file.
+    asm_full = tmp_path / "library" / "src" / "amd_detail" / "rocblaslt" / "src" / "Tensile" / "Logic" / "asm_full"
+    _write_overlay_yaml(
+        asm_full / vcc.GFX1250V0 / "Equality" / "logic.yaml",
+        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
+    )
+    _write_overlay_yaml(
+        asm_full / "gfx1250" / "Equality" / "logic.yaml",
+        schedule="gfx1250", gfx=vcc.GFX1250,
+    )
+    assert vcc.find_gfx1250v0_overlay_violations(asm_full) == []
+    assert vcc.find_gfx1250v0_overlay_violations(tmp_path / "library") == []
+
+
+def test_sibling_device_names_violations_identical_via_ancestor_or_direct_corpus_root(tmp_path, vcc):
+    asm_full = tmp_path / "library" / "src" / "amd_detail" / "rocblaslt" / "src" / "Tensile" / "Logic" / "asm_full"
+    _write_header_yaml(
+        asm_full / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",
+        devices="Device 75a0",
+    )
+    _write_header_yaml(
+        asm_full / "aldebaran" / "gfx950" / "GridBased" / "logic.yaml",
+        devices="Device 75a3",
+    )
+    direct = vcc.find_sibling_device_names_violations(asm_full)
+    via_ancestor = vcc.find_sibling_device_names_violations(tmp_path / "library")
+    assert len(direct) == 1
+    assert direct == via_ancestor
 
 
 # ===========================================================================

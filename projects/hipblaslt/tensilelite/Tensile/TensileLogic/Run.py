@@ -266,10 +266,15 @@ def main():
     # Corpus-wide invariants (sibling DeviceNames, chip-ID-arch-lock,
     # gfx1250v0-overlay consistency) are architecture-independent, so they run
     # over the full logicPath -- not the already --architecture-filtered
-    # `files` -- and only when --check-all is given. Fail fast, before the
-    # (expensive) per-solution loop.
+    # `files` -- and only when --check-all is given.
     corpus_violations = check_corpus_invariants(logicPath) if check.All else []
     report_corpus_invariant_violations(corpus_violations)
+    if corpus_violations:
+        # These are unconditional hard failures with no known-bugs escape
+        # hatch (see module docstring), so fail fast here rather than
+        # spending the (expensive) per-solution loop's time first.
+        print(f"Corpus invariants  {len(corpus_violations)} violations")
+        exit(1)
 
     try:
         known_bugs = load_known_bugs(args.KnownBugs)
@@ -329,9 +334,6 @@ def main():
             f"Stale known-bugs  {stale_known_bugs} entries now pass validation "
             "(remove them from the known-bugs YAML)"
         )
-    if corpus_violations:
-        print(f"Corpus invariants  {len(corpus_violations)} violations")
-
     strict_stale = getattr(args, "StrictKnownBugs", False) and stale_known_bugs > 0
-    if rejects > 0 or chip_id_failures > 0 or strict_stale or corpus_violations:
+    if rejects > 0 or chip_id_failures > 0 or strict_stale:
         exit(1)
