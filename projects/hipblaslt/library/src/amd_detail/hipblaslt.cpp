@@ -155,48 +155,45 @@ try
         return HIPBLAS_STATUS_INVALID_VALUE;
     }
 
-    int             deviceId;
-    hipError_t      err;
-    hipblasStatus_t retval = HIPBLAS_STATUS_SUCCESS;
+    int deviceId;
     // Two flag regions with different shapes: GSU reduction keeps the large
-    // per-problem buffer it has always had, Stream-K gets a small one that can
-    // afford a private region per stream. Both are allocated here so that no
-    // matmul path allocates device memory, which would break hipGraph capture.
+    // per-problem buffer, Stream-K gets a small one that can afford a private
+    // region per stream. Both are allocated here so that no matmul path
+    // allocates device memory, which would break hipGraph capture.
     void*            d_Synchronizer = nullptr;
     void*            d_StreamKFlags = nullptr;
     constexpr size_t gsuBytes = _rocblaslt_handle::c_syncGsuTotalElements * sizeof(int);
     constexpr size_t skBytes  = _rocblaslt_handle::c_syncSkTotalElements * sizeof(int);
-    CHECK_HIP_ERROR(hipMalloc(&d_Synchronizer, gsuBytes));
-    if(hipError_t e = hipMemset(d_Synchronizer, 0, gsuBytes); e != hipSuccess)
-    {
-        static_cast<void>(hipFree(d_Synchronizer));
-        CHECK_HIP_ERROR(e);
-    }
-    if(hipError_t e = hipMalloc(&d_StreamKFlags, skBytes); e != hipSuccess)
-    {
-        static_cast<void>(hipFree(d_Synchronizer));
-        CHECK_HIP_ERROR(e);
-    }
-    if(hipError_t e = hipMemset(d_StreamKFlags, 0, skBytes); e != hipSuccess)
-    {
+
+    // Every failure past this point leaves *handle null, so it has to reach the
+    // caller as a status: reporting success would have it use whatever its
+    // pointer happened to hold. hipFree tolerates null, so one exit serves
+    // every stage.
+    auto fail = [&](hipblasStatus_t status) {
         static_cast<void>(hipFree(d_StreamKFlags));
         static_cast<void>(hipFree(d_Synchronizer));
-        CHECK_HIP_ERROR(e);
-    }
+        rocblaslt::Debug::Instance().markerStop();
+        return status;
+    };
+    auto allocZeroed = [](void** region, size_t bytes) {
+        if(hipMalloc(region, bytes) != hipSuccess)
+        {
+            *region = nullptr; // hipMalloc does not promise to on failure
+            return false;
+        }
+        return hipMemset(*region, 0, bytes) == hipSuccess;
+    };
 
-    // A failure here leaves *handle unwritten, so it must not be reported as a
-    // success: the caller would go on to use whatever the pointer happened to
-    // hold. Treated like the allocation failures above - free both regions,
-    // then report.
-    err = hipGetDevice(&deviceId);
-    if(err != hipSuccess)
-    {
-        static_cast<void>(hipFree(d_StreamKFlags));
-        static_cast<void>(hipFree(d_Synchronizer));
-        CHECK_HIP_ERROR(err);
-    }
+    if(!allocZeroed(&d_Synchronizer, gsuBytes) || !allocZeroed(&d_StreamKFlags, skBytes))
+        return fail(HIPBLAS_STATUS_ALLOC_FAILED);
 
-    retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
+    if(hipGetDevice(&deviceId) != hipSuccess)
+        return fail(HIPBLAS_STATUS_NOT_INITIALIZED);
+
+    hipblasStatus_t retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
+    if(retval != HIPBLAS_STATUS_SUCCESS)
+        return fail(retval);
+
     (*(rocblaslt_handle*)handle)->Synchronizer = d_Synchronizer;
     (*(rocblaslt_handle*)handle)->StreamKFlags = d_StreamKFlags;
     rocblaslt::Debug::Instance().markerStop();
