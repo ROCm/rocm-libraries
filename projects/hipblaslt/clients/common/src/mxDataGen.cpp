@@ -355,25 +355,45 @@ std::vector<float> generateData(T                           dgen,
     // Apply per-architecture scale swizzle on top of the natural-packed
     // scales mxDataGenerator wrote. Layouts are mutually exclusive by
     // construction (single enum), so no validation is needed here.
-    size_t const scaleRows = (elementsPerMXBlock > 0)
-                                 ? (static_cast<size_t>(sizes[0]) + static_cast<size_t>(elementsPerMXBlock)
-                                    - 1)
-                                       / static_cast<size_t>(elementsPerMXBlock)
-                                 : 0;
-    size_t const scaleCols = static_cast<size_t>(sizes[1]);
+    //
+    // preSwizzleScalesGFX950 takes {numScaleRows = MN, numScaleCols = K/blk}, so
+    // the block count has to come off whichever axis actually carries K. That is
+    // sizes[0] only when the operand is already K-major -- the same condition the
+    // reference-float branch below calls "aligned already". For a free-dim
+    // contiguous operand (TLU=1) sizes[0] is M or N instead, and blocking it gave
+    // a transposed grid: same element count, so the size check inside the swizzle
+    // could not catch it, but a different padded extent, which then overran the
+    // caller's buffer.
+    bool const   kIsRows = (isMatrixA && isTranspose) || (!isMatrixA && !isTranspose);
+    size_t const kExtent = static_cast<size_t>(kIsRows ? sizes[0] : sizes[1]);
+    size_t const kBlocks
+        = (elementsPerMXBlock > 0)
+              ? (kExtent + static_cast<size_t>(elementsPerMXBlock) - 1)
+                    / static_cast<size_t>(elementsPerMXBlock)
+              : 0;
+
+    // Take MN from the buffer the generator actually produced rather than from the
+    // data extent: it rounds MN up to a multiple of 32, so the data extent is short
+    // whenever the size is not already aligned (M=200 is emitted as 224). K is exact,
+    // so dividing it out recovers the emitted MN and keeps the swizzle's own
+    // rows*cols == input.size() check satisfied by construction.
+    size_t const mnExtent
+        = (kBlocks > 0 && scaleBytes.size() % kBlocks == 0)
+              ? scaleBytes.size() / kBlocks
+              : static_cast<size_t>(kIsRows ? sizes[1] : sizes[0]);
 
     switch(scaleLayout)
     {
     case MXScaleLayout::GFX950:
-        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {scaleCols, scaleRows});
+        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {mnExtent, kBlocks});
         break;
     case MXScaleLayout::GFX1250:
         if(elementsPerMXBlock > 0)
         {
             scaleBytes
                 = DGen::preSwizzleScalesGFX1250(scaleBytes,
-                                                /*slowDim=*/scaleCols,
-                                                /*fastDim=*/scaleRows,
+                                                /*slowDim=*/mnExtent,
+                                                /*fastDim=*/kBlocks,
                                                 /*mxBlock=*/static_cast<size_t>(
                                                     elementsPerMXBlock));
         }
