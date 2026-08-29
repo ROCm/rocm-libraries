@@ -1060,6 +1060,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1078,7 +1079,7 @@ def cases():
             tile_n=64,
             tile_k=32,
             pipeline="mem",
-            epilogue="default",
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1096,6 +1097,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1114,6 +1116,7 @@ def cases():
             tile_n=32,
             tile_k=16,
             split_k=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1131,6 +1134,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            dtype_d="fp32",
         ),
     )
     add(
@@ -1148,6 +1152,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            dtype_d="fp32",
         ),
     )
     # gfx90a wgrad mirrors the gfx942 MFMA path.
@@ -1166,6 +1171,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     # Grouped wgrad (grid-per-group, Gm=1) and group-merging (Gm=2). Guards the
@@ -1185,6 +1191,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1202,6 +1209,7 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=32,
+            epilogue="cshuffle",
         ),
     )
     # Grouped + cshuffle epilogue (MFMA): the LDS-staged store threads the
@@ -1224,8 +1232,8 @@ def cases():
             epilogue="cshuffle",
         ),
     )
-    # Grouped + split-K (MFMA): the group and the K-slice share block_id_z
-    # (z = groups*split_k) and the atomic epilogue folds group*kpg into k_out.
+    # Grouped + split-K + cshuffle (MFMA): the group and the K-slice share
+    # block_id_z (z = groups*split_k); cshuffle required for fp16 paired atomics.
     add(
         "conv_wgrad",
         "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4",
@@ -1242,6 +1250,7 @@ def cases():
             tile_n=64,
             tile_k=32,
             split_k=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1260,6 +1269,7 @@ def cases():
             tile_n=32,
             tile_k=16,
             split_k=4,
+            epilogue="cshuffle",
         ),
     )
     # gfx1250 WMMA grouped (wave32, 16x16x32 -- its only fp16/bf16 atom).
@@ -1278,6 +1288,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=32,
+            dtype_d="fp32",
         ),
     )
 
