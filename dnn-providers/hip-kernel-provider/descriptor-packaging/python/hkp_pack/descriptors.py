@@ -261,7 +261,7 @@ def _validate_ukd_fields(ukd, where, log=print):
     elif kind == "hsaco":
         _require(ks, ["file", "symbol"], where)
     elif kind == "kpack":
-        _require(ks, ["library", "toc_key", "symbol", "sha256"], where)
+        _require(ks, ["library", "toc_key", "symbol", "sha256", "signature"], where)
     else:
         raise HkpPackError(
             f"{where} kernel_source has unsupported kind '{kind}' "
