@@ -260,7 +260,8 @@ void sytrs2_getError(const rocblas_handle handle,
     for(I b = 0; b < bc; ++b)
     {
         err = norm_error('I', n, nrhs, ldb, hB[b], hBRes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        // *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, (*max_err));
     }
 }
 
