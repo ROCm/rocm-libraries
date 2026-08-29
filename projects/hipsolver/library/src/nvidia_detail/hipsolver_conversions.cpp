@@ -251,6 +251,33 @@ hipsolverDeterministicMode_t cuda2hip_deterministic(cusolverDeterministicMode_t 
 }
 #endif
 
+hipsolverStatus_t cuda2hip_status(cublasStatus_t cuStatus)
+{
+    switch(cuStatus)
+    {
+    case CUBLAS_STATUS_SUCCESS:
+        return HIPSOLVER_STATUS_SUCCESS;
+    case CUBLAS_STATUS_NOT_INITIALIZED:
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    case CUBLAS_STATUS_ALLOC_FAILED:
+        return HIPSOLVER_STATUS_ALLOC_FAILED;
+    case CUBLAS_STATUS_INVALID_VALUE:
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    case CUBLAS_STATUS_MAPPING_ERROR:
+        return HIPSOLVER_STATUS_MAPPING_ERROR;
+    case CUBLAS_STATUS_EXECUTION_FAILED:
+        return HIPSOLVER_STATUS_EXECUTION_FAILED;
+    case CUBLAS_STATUS_INTERNAL_ERROR:
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
+    case CUBLAS_STATUS_NOT_SUPPORTED:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    case CUBLAS_STATUS_ARCH_MISMATCH:
+        return HIPSOLVER_STATUS_ARCH_MISMATCH;
+    default:
+        return HIPSOLVER_STATUS_UNKNOWN;
+    }
+}
+
 hipsolverStatus_t cuda2hip_status(cusolverStatus_t cuStatus)
 {
     switch(cuStatus)
