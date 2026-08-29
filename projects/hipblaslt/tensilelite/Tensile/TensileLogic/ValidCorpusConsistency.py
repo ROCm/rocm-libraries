@@ -63,7 +63,12 @@ def _resolve_corpus_root(logic_root: Path) -> Path:
     ``tmp_path`` keep working."""
     if logic_root.name == _ASM_FULL_DIRNAME:
         return logic_root
-    for candidate in sorted(logic_root.rglob(_ASM_FULL_DIRNAME)):
+    # Deliberately unsorted: rglob() is a lazy walk, and library/ can be big
+    # under --check-all, so take the first match and stop walking rather than
+    # forcing sorted() to materialize (and order) every match in the tree.
+    # There is exactly one asm_full corpus below a project's library/, so
+    # first-found is unambiguous in practice.
+    for candidate in logic_root.rglob(_ASM_FULL_DIRNAME):
         if candidate.is_dir():
             return candidate
     return logic_root
@@ -118,6 +123,11 @@ def find_sibling_device_names_violations(logic_root: Path) -> List[str]:
     identical ``DeviceNames``; a divergence (e.g. one sibling missing a chip
     ID the other declares) shipped invisibly before this check existed --
     see https://github.com/ROCm/rocm-libraries/issues/11397."""
+    # Resolved here (not just inside iter_arch_dirs()) because relative_to()
+    # below needs the resolved root too. Not a duplicate walk: iter_arch_dirs()
+    # re-resolving this already-resolved path is an O(1) name check, since
+    # _resolve_corpus_root() short-circuits when logic_root.name is already
+    # "asm_full".
     logic_root = _resolve_corpus_root(logic_root)
     violations: List[str] = []
     for codename, arch_dir in iter_arch_dirs(logic_root):

@@ -273,7 +273,7 @@ def main():
         # These are unconditional hard failures with no known-bugs escape
         # hatch (see module docstring), so fail fast here rather than
         # spending the (expensive) per-solution loop's time first.
-        print(f"Corpus invariants  {len(corpus_violations)} violations")
+        print(f"Error: Corpus invariants: {len(corpus_violations)} violations", file=sys.stderr)
         exit(1)
 
     try:

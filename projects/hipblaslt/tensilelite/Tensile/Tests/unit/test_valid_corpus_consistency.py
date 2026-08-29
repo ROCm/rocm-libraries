@@ -44,10 +44,15 @@ def _install_rocisa_stub(monkeypatch):
     except ImportError:  # pragma: no cover
         _rocisa_stub = types.ModuleType("rocisa")
 
+        class _RocIsaInstanceStub:  # noqa: D401 - test helper
+            @staticmethod
+            def getData():
+                return {}
+
         class _RocIsaStub:  # noqa: D401 - test helper
             @staticmethod
             def getInstance():
-                return None
+                return _RocIsaInstanceStub()
 
         _rocisa_stub.rocIsa = _RocIsaStub
         monkeypatch.setitem(sys.modules, "rocisa", _rocisa_stub)
@@ -106,10 +111,12 @@ def _write_mapping_form_header_yaml(path, *, schedule="schedule", gfx="gfx942", 
 
 
 def _write_overlay_yaml(path, *, schedule, gfx):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    import yaml
-
-    path.write_text(yaml.safe_dump(["4.33.0", schedule, gfx]))
+    """gfx1250v0-overlay tests only care about ScheduleName / gfx arch, but
+    write the same full header shape ``_write_header_yaml`` does (rather than
+    a bare positional list of scalars) so these stay representative of the
+    real logic-file dialect that ``load_logic_schedule_name()`` /
+    ``load_logic_gfx_arch()`` parse."""
+    return _write_header_yaml(path, schedule=schedule, gfx=gfx)
 
 
 def test_read_device_names_parses_header_line(tmp_path, vcc):
