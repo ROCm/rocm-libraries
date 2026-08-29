@@ -26,10 +26,13 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include "streamk_test_util.hpp"
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <thread>
 #include <vector>
 
 namespace
@@ -123,6 +126,11 @@ namespace
         if(algos.empty())
             GTEST_SKIP() << "No solution for " << kM << "x" << kN << "x" << kK;
 
+        const std::string picked = streamk_test::solutionName(handle, algos[0].algo);
+        if(!streamk_test::isStreamKSolutionName(picked))
+            GTEST_SKIP() << "The heuristic did not pick a Stream-K solution for this device: "
+                         << picked;
+
         const size_t       bytesWs = algos[0].workspaceSize;
         std::vector<void*> dWs(kExtStreams, nullptr);
         if(bytesWs > 0)
@@ -182,6 +190,10 @@ namespace
                                   << iter;
                     std::_Exit(1);
                 }
+                if(draining)
+                    // Yield between polls: on a real deadlock this loop runs
+                    // for the whole deadline, and a bare spin would hold a core.
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
 

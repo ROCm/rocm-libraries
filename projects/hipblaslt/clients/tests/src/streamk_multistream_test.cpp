@@ -36,9 +36,12 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
+#include "streamk_test_util.hpp"
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <thread>
 #include <vector>
 
 namespace
@@ -164,6 +167,11 @@ namespace
         if(returned == 0)
             GTEST_SKIP() << "No solution for " << kM << "x" << kN << "x" << kK << " on this device";
 
+        const std::string picked = streamk_test::solutionName(r.handle, heuristic.algo);
+        if(!streamk_test::isStreamKSolutionName(picked))
+            GTEST_SKIP() << "The heuristic did not pick a Stream-K solution for this device: "
+                         << picked;
+
         // A and B are read-only, so every stream can share them. Only D and
         // the workspace have to be private, and the workspace is sized from
         // what the chosen solution actually asks for rather than the budget
@@ -265,6 +273,9 @@ namespace
                                   << iter;
                     std::_Exit(1);
                 }
+                // Yield between polls: on a real deadlock this loop runs for
+                // the whole deadline, and a bare spin would hold a core.
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
 
             static_cast<void>(hipEventDestroy(fork));
@@ -280,12 +291,11 @@ namespace
     // stream, claimed on that stream's first flag-reading matmul and held until
     // the handle is destroyed. Past that there is no private block left.
     //
-    // Running out is not an error. The launch keeps the shared region every
-    // Stream-K kernel used before these blocks existed, so it loses the
-    // isolation guarantee and nothing else -- and a stream running on its own,
-    // which is the case here, never needed it. Refusing instead would turn a
-    // working call into a failure on a handle that had merely been alive long
-    // enough, since blocks are never given back.
+    // Running out is not an error: the launch falls back to the shared region,
+    // so it loses the isolation guarantee and nothing else -- and a stream
+    // running on its own, which is the case here, never needed it. Refusing
+    // would turn a working call into a failure on a handle that had merely been
+    // alive long enough, since blocks are never given back.
     //
     // Raising c_syncSkStreamSlots is a fine thing to do; it just has to be
     // matched here.
@@ -347,6 +357,11 @@ namespace
                   HIPBLAS_STATUS_SUCCESS);
         if(returned == 0)
             GTEST_SKIP() << "No solution for " << kM << "x" << kN << "x" << kK << " on this device";
+
+        const std::string picked = streamk_test::solutionName(r.handle, heuristic.algo);
+        if(!streamk_test::isStreamKSolutionName(picked))
+            GTEST_SKIP() << "The heuristic did not pick a Stream-K solution for this device: "
+                         << picked;
 
         const size_t elemsA  = static_cast<size_t>(kM * kK);
         const size_t elemsB  = static_cast<size_t>(kK * kN);
