@@ -94,7 +94,7 @@ struct _rocblaslt_handle
     int asic_rev;
 
     // GSU (MBSK) reduction flags, and the amax reduction counter. Shared across
-    // streams, indexed by problem, exactly as before.
+    // streams, indexed by problem.
     void* Synchronizer = nullptr;
     // Stream-K inter-workgroup flags. Private to a (stream, problem) pair; see
     // streamKFlagsForStream below.
@@ -141,16 +141,12 @@ struct _rocblaslt_handle
     // would otherwise clear a flag the other was still spinning on, leaving that
     // workgroup spinning forever with no error reported.
     //
-    // There are two consumers and they want opposite things, so they get two
-    // buffers rather than one compromise.
-    //
-    // GSU reduction (MBSK) needs synchronizerSizePerWG * numTiles * batch ints,
-    // which runs into the tens of thousands on the shapes it is selected for.
-    // Shrinking that would price MBSK candidates out of selection, so this
-    // region keeps the size and the per-problem-only layout it has always had
-    // and stays shared across streams. Solution selection is therefore
-    // unchanged, and so is the cross-stream exposure of this path: no better
-    // than today, but no worse.
+    // The two consumers want opposite things, so they get two buffers rather
+    // than one compromise. GSU reduction (MBSK) needs synchronizerSizePerWG *
+    // numTiles * batch ints, tens of thousands on the shapes it is selected for;
+    // shrinking that to afford a region per stream would price MBSK candidates
+    // out of selection, so this region keeps its size and its per-problem-only
+    // layout and stays shared across streams.
     static constexpr size_t c_syncGsuSlotElements  = 409600;
     static constexpr size_t c_syncGsuSlotBytes     = c_syncGsuSlotElements * sizeof(int);
     static constexpr size_t c_syncGsuSlots         = 16;
@@ -159,10 +155,12 @@ struct _rocblaslt_handle
     // Hands back the GSU flag region for `problemIndex`, or null past the last
     // slot. A group holds any number of problems, so the index has to be bounded
     // here or the later ones would be given a pointer past the end of the
-    // allocation. Null rather than a shared slot, because nothing selectable for
-    // a group that wide reads it - SynchronizerSizeCheck bounds the MBSK
-    // reduction by the slots, and no shipped logic pairs a grouped problem with
-    // Stream-K or AmaxD - while a shared slot would be read as a private one.
+    // allocation; null rather than a shared slot, which would be read as a
+    // private one. A null flag pointer is not a safe launch either - the device
+    // reads it as a request for the parallel reduction - so a group this wide
+    // must not run a solution that reads these flags at all. SynchronizerSizeCheck
+    // keeps MBSK out of one, and makeArgument() rejects a Stream-K solution
+    // reaching one through a caller-supplied index.
     void* gsuFlagsForProblem(size_t problemIndex) const
     {
         if(Synchronizer == nullptr || problemIndex >= c_syncGsuSlots)
@@ -170,10 +168,11 @@ struct _rocblaslt_handle
         return static_cast<char*>(Synchronizer) + problemIndex * c_syncGsuSlotBytes;
     }
 
-    // Stream-K indexes its flags by workgroup id (StreamK.py emits "flag offset
-    // based on CTA index"), so a slot holds one int per Stream-K workgroup and
-    // no more; skGrid is 224 on gfx950, which has 256 CUs. At that size every
-    // stream can afford its own region, which is what closes the deadlock.
+    // Stream-K holds one int per Stream-K workgroup and no more: the flags are
+    // indexed by workgroup id on the static path and by partial-tile index on
+    // the dynamic-queue ones, and both are bounded by skGrid, which is 224 on
+    // gfx950's 256 CUs. At that size every stream can afford its own region,
+    // which is what closes the deadlock.
     static constexpr size_t c_syncSkSlotElements = 2048;
     static constexpr size_t c_syncSkSlotBytes    = c_syncSkSlotElements * sizeof(int);
     // Problem slots inside one stream's block. Selection does not pair a grouped
@@ -188,15 +187,12 @@ struct _rocblaslt_handle
     // however many it is asked for, and a 32-way fan-out needs 33 (the streams
     // plus the default one it forks from); 64 is that working set doubled.
     //
-    // Blocks are not recycled. A block may safely move to another stream once
-    // the owning stream's work has finished, but the library never learns that
-    // it has: the only test available is hipStreamQuery(owner), and the owner
-    // may have been destroyed since it was recorded. HIP does not validate the
-    // handle - querying a destroyed stream reads freed memory, which returns a
-    // plausible answer while that memory happens to survive and faults once it
-    // is recycled. There is no hipStreamDestroy hook to invalidate the record
-    // with, so the query cannot be made safe. Running past this bound therefore
-    // falls back to the shared GSU region rather than failing; see
+    // Blocks are not recycled. Reclaiming one needs proof the owning stream has
+    // drained, and the only test available is hipStreamQuery(owner) on a stream
+    // that may have been destroyed since it was recorded: HIP does not validate
+    // the handle, so the query reads freed memory, and there is no
+    // hipStreamDestroy hook to invalidate the record with. Running past this
+    // bound falls back to the shared GSU region rather than failing; see
     // streamKFlagsForStream.
     static constexpr size_t c_syncSkStreamSlots = 64;
     // Allocated once at handle creation: allocating device memory mid-run would

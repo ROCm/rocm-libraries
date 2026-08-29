@@ -3136,13 +3136,12 @@ namespace
 } // namespace
 
 // The Stream-K flag region baked into `kernels` belongs to one stream, and the
-// object API only learns the stream it will launch on at run() time. These
-// record which stream the pointers in `kernels` were built for, so a launch on
-// a different one can rebind before it goes ahead. `readsFlags` is false for
-// every solution that does not read the region as Stream-K flags; those never
-// need a rebind. `stream` is committed only once the solve that baked the
-// pointers in has returned, so a throwing solve leaves the pair describing the
-// kernels that are still there.
+// object API only learns the stream it will launch on at run() time, so record
+// which stream those pointers were built for and let a launch on a different
+// one rebind. `readsFlags` is false for solutions that never read the region as
+// flags; those need no rebind. `stream` is committed only once the solve that
+// baked the pointers in has returned, so a throwing solve leaves the pair
+// describing the kernels that are still there.
 struct StreamKFlagBinding
 {
     hipStream_t stream     = nullptr;
@@ -3173,17 +3172,20 @@ struct TensileDataGroupedGemm
 };
 
 // True when this solution reads the Synchronizer region as Stream-K flags, the
-// one use that needs a region private to the stream. GSU reduction and AmaxD
-// keep the shared region bound at problem creation, and the ForceDPOnly and
-// atomic kernels never take the pointer at all: singleCallArgs only appends the
-// Flags kernarg for streamK > 0 && streamKAtomic == 0 && streamKForceDPOnly ==
-// 0.
+// one use that needs a region private to the stream: singleCallArgs appends the
+// Flags kernarg only for streamK > 0 && streamKAtomic == 0 &&
+// streamKForceDPOnly == 0.
 //
-// That leaves one over-approximation. A parallel reduction is passed
-// Flags == nullptr and reads no region, but which reduction a launch ends up
-// with is decided inside solve(), from the problem, the hardware and the
-// workspace it was actually given - a parallel choice is downgraded to a tree
-// there when the workspace falls short. Predicting it here would trade a wasted
+// outputAmaxD is excluded although such a kernel does read the flags. It is
+// handed the same pointer a second time as AmaxSync, so the amax counter would
+// land on flag zero; the combination stays on the shared GSU region, where the
+// two already coexist. No shipped logic file pairs AmaxD with Stream-K, so this
+// is the only predicate that has to know: getSKGrid and
+// requiredSynchronizerSize describe the flag layout, not which region is bound.
+//
+// A parallel reduction is passed Flags == nullptr and reads no region, but
+// solve() decides the reduction from the problem, the hardware and the
+// workspace it was actually given. Predicting it here would trade a wasted
 // block, which costs nothing, for the chance of leaving a flag-reading kernel
 // on the shared region, which is the deadlock. So these claim a block too.
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
@@ -3223,6 +3225,32 @@ static bool bindStreamKFlags(rocblaslt_handle                handle,
         return false;
     }
     inputs.Synchronizer = region;
+    return true;
+}
+
+// Binds every problem of a group to `stream`'s flag regions, and reports
+// whether the group can run a flag-reading solution at all.
+//
+// A group is one kernel launch, so two problems sharing a region would let one
+// clear a flag the other is spinning on. Past c_syncSkSlotsPerStream there is
+// no region to hand out, private or shared: gsuFlagsForProblem() is null there,
+// and generateSingleCallGroupedGemm() packs that null as Flags, which the
+// device reads as a request for the parallel reduction. Reject rather than
+// launch the wrong reduction.
+static bool bindGroupedStreamKFlags(rocblaslt_handle                             handle,
+                                    hipStream_t                                  stream,
+                                    const char*                                  caller,
+                                    std::vector<TensileLite::ContractionInputs>& grouped)
+{
+    if(grouped.size() > _rocblaslt_handle::c_syncSkSlotsPerStream)
+    {
+        log_error(caller,
+                  "a Stream-K solution cannot run a grouped GEMM wider than "
+                  "c_syncSkSlotsPerStream problems: the problems past it have no flag region.");
+        return false;
+    }
+    for(size_t i = 0; i < grouped.size(); i++)
+        static_cast<void>(bindStreamKFlags(handle, stream, i, grouped[i]));
     return true;
 }
 
@@ -4044,34 +4072,18 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
             }
 
-            // Selection never pairs a grouped problem with a Stream-K solution:
+            // Selection never pairs a grouped problem with a Stream-K solution -
             // a solution matches only when its ProblemType.groupedGemm agrees
-            // with the problem (the GroupedGemm predicate on the heuristic path,
-            // isGemmTypeSame() on the getAllSolutions one), and no shipped logic
-            // file with GroupedGemm set carries StreamK. getSolutionByIndex()
-            // above evaluates no predicate at all, so a caller-supplied index is
-            // the one way a Stream-K solution reaches here, and it is what the
-            // binding below is for.
-            //
-            // Isolation then has to cover the stream as well as the problem
-            // index: offsetting by index alone keeps one grouped call internally
-            // safe but still shares the region with every other stream. Past one
-            // stream's block no private region is left, and every problem in a
-            // group runs in one kernel launch, so handing two of them the same
-            // region would let one clear a flag the other is spinning on. A
-            // wider group is therefore left with the GSU regions bound at
-            // problem creation, which are shared across streams and null past
-            // c_syncGsuSlots: no guarantee for flag use, but no solution that
-            // reads them is reachable for such a group either.
-            const bool readsFlags
-                = readsStreamKFlags(*solution)
-                  && data->inputs.grouped.size() <= _rocblaslt_handle::c_syncSkSlotsPerStream;
-            if(readsFlags)
-            {
-                for(size_t i = 0; i < data->inputs.grouped.size(); i++)
-                    static_cast<void>(
-                        bindStreamKFlags(handle, stream, i, data->inputs.grouped[i]));
-            }
+            // with the problem, and no shipped logic file with GroupedGemm set
+            // carries StreamK - but getSolutionByIndex() above evaluates no
+            // predicate, so a caller-supplied index can bring one here. The
+            // binding has to cover the stream as well as the problem index:
+            // offsetting by index alone keeps one grouped call internally safe
+            // but still shares the region with every other stream.
+            const bool readsFlags = readsStreamKFlags(*solution);
+            if(readsFlags
+               && !bindGroupedStreamKFlags(handle, stream, __func__, data->inputs.grouped))
+                return rocblaslt_status_invalid_value;
 
             data->useUserArgs = useUserArgs;
             if(useUserArgs)
@@ -4166,12 +4178,17 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             // initialize() takes a stream that defaults to 0 and is not
             // necessarily the one run() launches on, so the flag pointer baked
             // into the kernel arguments can belong to another stream. Point it
-            // at this stream's region and rebuild the arguments around it. Once
-            // rebound the binding sticks, so a caller that keeps to one stream
-            // pays for this at most once.
+            // at this stream's region and rebuild the arguments around it; the
+            // new binding sticks, so a caller that keeps to one stream pays for
+            // this at most once.
             if(data->skBinding.readsFlags && stream != data->skBinding.stream)
             {
                 auto solution = library->getSolutionByIndex(*hardware, data->algoIndex);
+                if(!solution)
+                {
+                    log_error(__func__, "no solution for the recorded algo index.");
+                    return rocblaslt_status_invalid_value;
+                }
                 static_cast<void>(bindStreamKFlags(handle, stream, 0, data->inputs));
                 data->kernels          = solution->solve(data->problem, data->inputs, *hardware);
                 data->skBinding.stream = stream;
@@ -4270,9 +4287,8 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             // every problem in the group holds a region of its own.
             if(data->skBinding.readsFlags && stream != data->skBinding.stream)
             {
-                for(size_t i = 0; i < data->inputs.grouped.size(); i++)
-                    static_cast<void>(
-                        bindStreamKFlags(handle, stream, i, data->inputs.grouped[i]));
+                if(!bindGroupedStreamKFlags(handle, stream, __func__, data->inputs.grouped))
+                    return rocblaslt_status_invalid_value;
                 data->kernels          = solution->solveGroupedGemm(data->problem.gemms,
                                                            data->inputs,
                                                            *hardware,
@@ -4478,9 +4494,8 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
             // arguments.
             if(data->skBinding.readsFlags && stream != data->skBinding.stream)
             {
-                for(size_t i = 0; i < data->inputs.grouped.size(); i++)
-                    static_cast<void>(
-                        bindStreamKFlags(handle, stream, i, data->inputs.grouped[i]));
+                if(!bindGroupedStreamKFlags(handle, stream, __func__, data->inputs.grouped))
+                    return rocblaslt_status_invalid_value;
                 data->kernels = solution->solveGroupedGemmGPU(
                     data->problem.gemms, data->inputs, *hardware, nullptr, data->inputs.ws, stream);
                 data->skBinding.stream = stream;
@@ -4577,16 +4592,15 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
             // Arguments are built below for this stream, so the flag pointers
-            // they pick up have to belong to it too. Unconditional rather than
-            // guarded on the recorded binding: the kernels built here are local
-            // and never update it, so the pointers left in data->inputs may
-            // belong to whichever stream called this last.
-            if(data->skBinding.readsFlags)
-            {
-                for(size_t i = 0; i < data->inputs.grouped.size(); i++)
-                    static_cast<void>(
-                        bindStreamKFlags(handle, stream, i, data->inputs.grouped[i]));
-            }
+            // they pick up have to belong to it too. Gated on the solution named
+            // by `algo`, which is the one about to be solved and need not be the
+            // one the object was initialized with. Unconditional in the stream:
+            // the kernels built here are local and never update skBinding, so
+            // the pointers left in data->inputs may belong to whichever stream
+            // called this last.
+            if(readsStreamKFlags(*solution)
+               && !bindGroupedStreamKFlags(handle, stream, __func__, data->inputs.grouped))
+                return rocblaslt_status_invalid_value;
             auto kernel = solution->solveGroupedGemmGPU(
                 data->problem.gemms, data->inputs, *hardware, deviceUserArgs, workspace, stream);
             status = hip2RocStatus(adapter->launchKernels(kernel, stream, nullptr, nullptr));
