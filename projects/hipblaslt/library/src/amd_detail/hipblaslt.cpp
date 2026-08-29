@@ -167,32 +167,48 @@ try
 
     // Every failure past this point leaves *handle null, so it has to reach the
     // caller as a status: reporting success would have it use whatever its
-    // pointer happened to hold. hipFree tolerates null, so one exit serves
-    // every stage.
-    auto fail = [&](hipblasStatus_t status) {
+    // pointer happened to hold. The status alone does not say what gave up -
+    // two allocations and two memsets all report HIPBLAS_STATUS_ALLOC_FAILED -
+    // so `what` carries the stage and the hipError_t to the log. hipFree
+    // tolerates null, so one exit serves every stage.
+    auto fail = [&](hipblasStatus_t status, const std::string& what) {
+        log_error("hipblasLtCreate", what);
         static_cast<void>(hipFree(d_StreamKFlags));
         static_cast<void>(hipFree(d_Synchronizer));
         rocblaslt::Debug::Instance().markerStop();
         return status;
     };
-    auto allocZeroed = [](void** region, size_t bytes) {
-        if(hipMalloc(region, bytes) != hipSuccess)
+    std::string failure;
+    auto        allocZeroed = [&failure](void** region, size_t bytes, const char* what) {
+        hipError_t err = hipMalloc(region, bytes);
+        if(err != hipSuccess)
         {
             *region = nullptr; // hipMalloc does not promise to on failure
+            failure = std::string("hipMalloc of the ") + what + " region (" + std::to_string(bytes)
+                      + " bytes): " + hipGetErrorString(err);
             return false;
         }
-        return hipMemset(*region, 0, bytes) == hipSuccess;
+        err = hipMemset(*region, 0, bytes);
+        if(err != hipSuccess)
+        {
+            failure = std::string("hipMemset of the ") + what
+                      + " region: " + hipGetErrorString(err);
+            return false;
+        }
+        return true;
     };
 
-    if(!allocZeroed(&d_Synchronizer, gsuBytes) || !allocZeroed(&d_StreamKFlags, skBytes))
-        return fail(HIPBLAS_STATUS_ALLOC_FAILED);
+    if(!allocZeroed(&d_Synchronizer, gsuBytes, "GSU synchronizer")
+       || !allocZeroed(&d_StreamKFlags, skBytes, "Stream-K flag"))
+        return fail(HIPBLAS_STATUS_ALLOC_FAILED, failure);
 
-    if(hipGetDevice(&deviceId) != hipSuccess)
-        return fail(HIPBLAS_STATUS_NOT_INITIALIZED);
+    if(hipError_t err = hipGetDevice(&deviceId); err != hipSuccess)
+        return fail(HIPBLAS_STATUS_NOT_INITIALIZED,
+                    std::string("hipGetDevice: ") + hipGetErrorString(err));
 
     hipblasStatus_t retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
     if(retval != HIPBLAS_STATUS_SUCCESS)
-        return fail(retval);
+        return fail(retval, "rocblaslt_create did not return success");
 
     (*(rocblaslt_handle*)handle)->Synchronizer = d_Synchronizer;
     (*(rocblaslt_handle*)handle)->StreamKFlags = d_StreamKFlags;
