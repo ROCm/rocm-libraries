@@ -27,10 +27,6 @@
 template <typename I, typename T>
 void testing_sptrsv_ell_bad_arg(const Arguments& arg)
 {
-    //
-    // Bad args of sptrsv is already tested in testing_sptrsv_csr_bad_arg
-    //
-    std::ignore = arg;
 }
 
 template <typename I, typename T>
@@ -331,7 +327,4 @@ INSTANTIATE(int64_t, float);
 INSTANTIATE(int64_t, double);
 INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
-void testing_sptrsv_ell_extra(const Arguments& arg)
-{
-    std::ignore = arg;
-}
+void testing_sptrsv_ell_extra(const Arguments& arg) {}
