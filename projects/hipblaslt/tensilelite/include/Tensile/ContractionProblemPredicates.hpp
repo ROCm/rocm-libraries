@@ -260,6 +260,13 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    // Mirrors operator(): an unsplit GSU never reaches the
+                    // flags, and printing a usage row for it would read as a
+                    // failure next to a passing verdict.
+                    int16_t gsu = problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[5];
+                    if(gsu == -1 || gsu == 1)
+                        return debugEvalCmp(problem, stream, "gsu", gsu, "in", "unsplit", "{-1,1}");
+
                     uint32_t synchronizerUsage
                         = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
                            * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
