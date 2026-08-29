@@ -1,0 +1,20 @@
+# Fetches that check_dependency_pins.py cannot pin, one <path>:<name> per line.
+#
+# Everything here downloads test data or generator input, not code that CMake
+# configures or the build compiles, and every entry names a URL assembled at
+# configure time from a matrix name, an environment mirror, or a "latest"
+# alias, so no fixed checksum exists to record. Nothing new belongs here: a
+# dependency whose content is fetched and then built must be pinned instead.
+
+# SuiteSparse / Matrix Market test matrices, selected per test run.
+projects/hipsparse/cmake/ClientMatrices.cmake:file(DOWNLOAD)
+projects/hipsparse/cmake/hipsparse_clientmatrices.cmake:file(DOWNLOAD)
+projects/rocsparse/cmake/ClientMatrices.cmake:file(DOWNLOAD)
+projects/rocsparse/cmake/rocsparse_clientmatrices.cmake:file(DOWNLOAD)
+projects/rocsparse/cmake/suitesparse/MatrixDownloadAndConvert.cmake:file(DOWNLOAD)
+
+# MIOpen performance databases, addressed by kernel name against a mirror URI.
+projects/miopen/cmake/embed.cmake:file(DOWNLOAD)
+
+# AMD machine-readable ISA spec, published only under a "latest" alias.
+shared/rocroller/GPUArchitectureGenerator/CMakeLists.txt:file(DOWNLOAD)

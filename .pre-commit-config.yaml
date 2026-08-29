@@ -124,6 +124,21 @@ repos:
 
   - repo: local
     hooks:
+      # Blocks new dependency fetches that resolve to whatever a remote serves
+      # at configure time. This is a security regression gate, so unlike the
+      # formatting hooks it must not be blinded by the top level opted-out
+      # projects exclude -- always_run with no filenames is the only way
+      # pre-commit lets a hook see past that list. It rescans every CMake file
+      # in the tree (about a second). Pre-existing fetches that cannot carry a
+      # checksum are listed in the baseline next to the script.
+      # See ROCM-26836 / SEC-00389.
+      - id: dependency-pins
+        name: dependencies are pinned to immutable content
+        entry: python tools/lint/check_dependency_pins.py --all
+        language: python
+        always_run: true
+        pass_filenames: false
+
       - id: flatc-hipdnn
         name: flatc (hipDNN)
         entry: python projects/hipdnn/scripts/run_flatc.py
