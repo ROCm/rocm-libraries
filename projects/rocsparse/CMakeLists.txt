@@ -21,6 +21,7 @@
 #
 # ########################################################################
 
+# Temporary no-op change to validate TheRock multi-arch CI project detection.
 cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 
 # Consider removing this in the future
