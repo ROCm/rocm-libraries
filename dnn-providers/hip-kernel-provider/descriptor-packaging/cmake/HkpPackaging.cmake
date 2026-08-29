@@ -323,8 +323,11 @@ endfunction()
 #     INSTALL_BASE  set to install the packed tree; omit for a root that exists
 #                   only for tests.
 #     REQUIRE_HIPCC ON makes a missing hipcc a configure error, OFF warns and
-#                   skips. A release must not silently ship nothing; a test
-#                   fixture must not break a developer's build.
+#                   skips. A release must not silently ship nothing, so the
+#                   shipping root passes ON unconditionally; the fixture root
+#                   passes the caller's policy, because a missing hipcc must not
+#                   break a developer's build but must stop a lane that exists
+#                   to pack.
 #
 #   ENABLE_ROCKE says whether the rocKE producer may run. It is a switch of its
 #   own rather than something inferred from the root, because the root names a
@@ -337,7 +340,8 @@ endfunction()
 #   packaged artifacts. Without that edge the kpacks would keep shipping kernels
 #   compiled from stale wheel contents.
 #
-#   Empty ARCHES wires nothing and warns either way, never fatally.
+#   Empty ARCHES wires nothing and warns either way, never fatally: the arches
+#   a build ends up with are a property of its environment, not a mistake.
 # ---------------------------------------------------------------------------
 function(hkp_wire_root)
     set(_one NAME GROUP SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR
@@ -383,7 +387,7 @@ function(hkp_wire_root)
         return()
     endif()
     if(NOT ARG_HIPCC)
-        # Fatal for a shipping root, skip for a fixture: see REQUIRE_HIPCC above.
+        # Whether this is fatal is the caller's policy: see REQUIRE_HIPCC above.
         if(ARG_REQUIRE_HIPCC)
             message(FATAL_ERROR
                 "hkp: source root '${ARG_NAME}' requires hipcc but it was not "
@@ -741,6 +745,17 @@ function(hkp_find_hipcc)
         HINTS "${_hipcc_hint}")
 endfunction()
 
+# Same shape as the KPACK_REQUIRE_* flags hkp_register_tests declares, and for
+# the same reason: a fixture root that wires nothing leaves every test that loads
+# it skipping, which is indistinguishable from a green run. OFF keeps a
+# toolchain-less developer's build working; ON is for lanes that exist to pack.
+# At file scope rather than beside the other knobs in hkp_add_packaging only to
+# keep that function under the lint's statement ceiling.
+set(HIPKERNELPROVIDER_KPACK_REQUIRE_WIRING OFF CACHE BOOL
+    "Fail (rather than warn) when the test-fixture source root cannot be wired \
+because hipcc was not found. Set ON in CI so a lane cannot silently pack \
+nothing.")
+
 # ---------------------------------------------------------------------------
 # hkp_add_packaging()
 #   Gate production packaging on ONE source root plus explicit per-producer
@@ -894,7 +909,7 @@ assertion: an unloadable path silently falls through to the next candidate.")
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             STAGE_ROOT "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
-            REQUIRE_HIPCC OFF)
+            REQUIRE_HIPCC "${HIPKERNELPROVIDER_KPACK_REQUIRE_WIRING}")
     endif()
 
     hkp_stage_all()
