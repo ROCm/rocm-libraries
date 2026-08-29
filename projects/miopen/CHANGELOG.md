@@ -17,6 +17,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Restored gfx12x support in the Winograd Rage solver, recovering performance that regressed when earlier gfx12 support was reverted.
 * [Conv] Refreshed the gfx1100, gfx1102, and gfx1201 (Navi) SystemDBs with updated tuned find/perf-database entries.
 * [Conv] Refreshed the gfx950 SystemDB with additional tuned entries to cover more models.
+* [Conv] Naive convolution solvers are now time-bounded during find when a non-naive solver has already succeeded. The warmup run is launched on a separate stream with a budget of 3x the best non-naive time; if it exceeds this budget the solver is skipped. Set `MIOPEN_NAIVE_TIMEOUT=0` to disable this behavior.
 
 ### Resolved Issues
 * [BatchNorm] Fixed an off-by-stride indexing bug in the backward CalcStats mean/variance remainder loop that caused a ~1% systematic bias in NCHW batch normalization backward results.
@@ -35,7 +36,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ### Changed
 * [Conv] Load the Composable Kernel (CK) dynamic library during handle creation (`miopenCreate`) instead of on first CK use, so the one-time library-load cost is paid at a predictable setup point rather than as an unpredictable mid-run stall.
-* [Conv] Naive convolution solvers are now skipped by default during find when any non-naive solver succeeds across any algorithm. Set `MIOPEN_NAIVE_DISABLE_IF_ALT=0` to restore the previous behavior.
 * [Conv] Refreshed the gfx942 SystemDB with updated tuned entries from recent perf-eval runs.
 * [Conv] Refined the 2D AI heuristics (Tunanet solver selection and kernel-tuning-network candidate ranking) with feature-engineered inputs for gfx942 and gfx950, improving selection for grouped implicit-GEMM convolutions.
 
