@@ -168,9 +168,9 @@ namespace
             GTEST_SKIP() << "No solution for " << kM << "x" << kN << "x" << kK << " on this device";
 
         const std::string picked = streamk_test::solutionName(r.handle, heuristic.algo);
-        if(!streamk_test::isStreamKSolutionName(picked))
-            GTEST_SKIP() << "The heuristic did not pick a Stream-K solution for this device: "
-                         << picked;
+        const std::string skip = streamk_test::flagRegionSkipReason(picked);
+        if(!skip.empty())
+            GTEST_SKIP() << skip;
 
         // A and B are read-only, so every stream can share them. Only D and
         // the workspace have to be private, and the workspace is sized from
@@ -359,9 +359,9 @@ namespace
             GTEST_SKIP() << "No solution for " << kM << "x" << kN << "x" << kK << " on this device";
 
         const std::string picked = streamk_test::solutionName(r.handle, heuristic.algo);
-        if(!streamk_test::isStreamKSolutionName(picked))
-            GTEST_SKIP() << "The heuristic did not pick a Stream-K solution for this device: "
-                         << picked;
+        const std::string skip = streamk_test::flagRegionSkipReason(picked);
+        if(!skip.empty())
+            GTEST_SKIP() << skip;
 
         const size_t elemsA  = static_cast<size_t>(kM * kK);
         const size_t elemsB  = static_cast<size_t>(kK * kN);

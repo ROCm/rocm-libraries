@@ -127,9 +127,9 @@ namespace
             GTEST_SKIP() << "No solution for " << kM << "x" << kN << "x" << kK;
 
         const std::string picked = streamk_test::solutionName(handle, algos[0].algo);
-        if(!streamk_test::isStreamKSolutionName(picked))
-            GTEST_SKIP() << "The heuristic did not pick a Stream-K solution for this device: "
-                         << picked;
+        const std::string skip = streamk_test::flagRegionSkipReason(picked);
+        if(!skip.empty())
+            GTEST_SKIP() << skip;
 
         const size_t       bytesWs = algos[0].workspaceSize;
         std::vector<void*> dWs(kExtStreams, nullptr);
