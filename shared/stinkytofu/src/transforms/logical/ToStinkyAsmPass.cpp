@@ -332,8 +332,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     // asm IR matches the native converter (dst, vcc, src0, src1[, vcc]).
     {
         const logical::Opcode op = irInst->getOpcode();
-        if (op == logical::VAddCOU32 || op == logical::VSubCoU32 ||
-            op == logical::VAddCCOU32) {
+        if (op == logical::VAddCOU32 || op == logical::VSubCoU32 || op == logical::VAddCCOU32) {
             const StinkyRegister vcc = StinkyRegister::getVCCRegister(getWaveFrontSize(arch));
             asmInst->addDestReg(vcc);  // carry-out (dst1)
             if (op == logical::VAddCCOU32) {
@@ -543,8 +542,7 @@ class ToStinkyAsmPassImpl : public Pass {
                         // depctr_va_vdst wait-insertion match; leaving the raw
                         // v_cmpx (legalized only in a text post-process) perturbs
                         // the schedule and drops required waits.
-                        const auto* archInfo =
-                            ArchHelper::getInstance().getArchInfo(arch);
+                        const auto* archInfo = ArchHelper::getInstance().getArchInfo(arch);
                         std::map<std::string, int> archCaps;
                         archCaps["CMPXWritesSGPR"] =
                             (archInfo && archInfo->major != 10 && archInfo->major != 11 &&
