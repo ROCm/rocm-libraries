@@ -30,18 +30,19 @@
 #include "asan_helpers.hpp"
 #include "auxiliary/rocauxiliary_stebz.hpp"
 #include "auxiliary/rocauxiliary_stein.hpp"
-#include "auxiliary/rocauxiliary_stedc.hpp"
+#include "auxiliary/rocauxiliary_steqr.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-#define STEDCX_EXTERNAL_GEMM false
-#define STEDCX_SETRANGE_THDS 256
 #define STEDCX_BDIM \
     ROCSOLVER_ASAN_VALUE(256, 512) // Number of threads per thread-block used in main stedc kernels
 
+// TODO: using macro STEDCX_EXTERNAL_GEMM = false for now. We can enable the use of
+// external gemm updates once the development is completed for stedc.
+#define STEDCX_EXTERNAL_GEMM false
 
 /***************** Device auxiliary functions *****************************************/
 /**************************************************************************************/
@@ -135,10 +136,11 @@ ROCSOLVER_KERNEL void stedcx_case1_kernel(const rocblas_erange range,
 }
 
 //--------------------------------------------------------------------------------------//
-/** STEDCX_SETRANGE_KERNEL determines the range for the partial decomposition **/
+/** STEDCX_SPLIT_KERNEL splits the matrix into independent blocks and determines range
+    for the partial decomposition **/
 template <typename S>
-ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_SETRANGE_THDS)
-    stedcx_setrange_kernel(const rocblas_erange range,
+ROCSOLVER_KERNEL void __launch_bounds__(STEBZ_SPLIT_THDS)
+    stedcx_split_kernel(const rocblas_erange range,
                         const rocblas_int n,
                         const S vl,
                         const S vu,
@@ -162,11 +164,18 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_SETRANGE_THDS)
     S* D = DD + bid * strideD;
     S* E = EE + bid * strideE;
     rocblas_int* splits = splitsA + bid * (5 * n + 2);
-    S* W = WW + bid * strideW;
-    S* bounds = workA + bid * (4 * n + 2);
-    
     // workspace
     rocblas_int* ninter = splits + n + 2;
+    rocblas_int* tmpIS = ninter + 2 * n;
+    // using W as temp array to store the spit off-diagonal
+    // (to use in case range = index)
+    S* W = WW + bid * strideW;
+    //nsplit is not needed; the number of split blocks goes into last entry
+    //of splits when compact = true
+    bool compact = true;
+    rocblas_int* nsplit = nullptr;
+    // range bounds
+    S* bounds = workA + bid * (4 * n + 2);
     S* pivmin = bounds + 2;
     S* Esqr = pivmin + 1;
     S* Dcpy = Esqr + n - 1;
@@ -180,18 +189,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_SETRANGE_THDS)
     }
 
     // shared memory setup for iamax.
-    __shared__ S sval[STEDCX_SETRANGE_THDS];
-    __shared__ rocblas_int sidx[STEDCX_SETRANGE_THDS];
-    
-    // Split blocks are no longer considered during the divide and conquer process.
-    // Set nsplit = IS = tmpIS = nullptr
-    rocblas_int* nsplit = nullptr;
-    rocblas_int* IS = nullptr;
-    rocblas_int* tmpIS = nullptr;
+    // (sidx also temporarily stores the number of blocks found by each thread)
+    __shared__ S sval[STEBZ_SPLIT_THDS];
+    __shared__ rocblas_int sidx[STEBZ_SPLIT_THDS];
 
-    run_stebz_splitting<STEDCX_SETRANGE_THDS>(tid, range, n, vl, vu, il, iu, D, E, nsplit, W, IS,
+    run_stebz_splitting<STEBZ_SPLIT_THDS>(tid, range, n, vl, vu, il, iu, D, E, nsplit, W, splits,
                                           tmpIS, pivmin, Esqr, bounds, inter, ninter, sval, sidx,
-                                          eps, ssfmin);
+                                          eps, ssfmin, compact);
 }
 
 //--------------------------------------------------------------------------------------//
@@ -420,7 +424,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
 
 //--------------------------------------------------------------------------------------//
 /** STEDCX_SYNTHESIS_KERNEL synthesizes the results of the partial decomposition **/
-template <typename T, typename S, typename U>
+template <typename S>
 ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     stedcx_synthesis_kernel(const rocblas_erange range,
                             const rocblas_int n,
@@ -431,8 +435,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
                             rocblas_int* nevA,
                             S* WW,
                             const rocblas_stride strideW,
-                            U VV,
-                            const rocblas_int shiftV,
+                            S* VV,
                             const rocblas_int ldv,
                             const rocblas_stride strideV,
                             const rocblas_int batch_count,
@@ -446,7 +449,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     const int bdim = hipBlockDim_x;
     S* D = DD + bid * strideD;
     S* W = WW + bid * strideW;
-    T* V = load_ptr_batch<T>(VV, bid, shiftV, strideV);
+    S* V = VV + bid * strideV;
     rocblas_int* nev = nevA + bid;
     rocblas_int* splits = splitsA + bid * (5 * n + 2);
     // workspace
@@ -1648,38 +1651,53 @@ template <bool BATCHED, typename T, typename S>
 void rocsolver_stedcx_getMemorySize(const rocblas_evect evect,
                                     const rocblas_int n,
                                     const rocblas_int batch_count,
-                                    size_t* size_work,
                                     size_t* size_work_stack,
+                                    size_t* size_work_steqr,
                                     size_t* size_tempvect,
                                     size_t* size_tempgemm,
                                     size_t* size_tmpz,
                                     size_t* size_splits,
                                     size_t* size_workArr)
 {
+    constexpr bool COMPLEX = rocblas_is_complex<T>;
+
     // if quick return no workspace needed
-    *size_work = 0;
-    *size_work_stack = 0;
-    *size_tempvect = 0;
-    *size_tempgemm = 0;
-    *size_tmpz = 0;
-    *size_splits = 0;
-    *size_workArr = 0;
     if(n <= 1 || !batch_count)
+    {
+        *size_work_stack = 0;
+        *size_work_steqr = 0;
+        *size_tempvect = 0;
+        *size_tempgemm = 0;
+        *size_workArr = 0;
+        *size_splits = 0;
+        *size_tmpz = 0;
         return;
-    
-    size_t s1, s2, t1, t2;
+    }
 
-    // requirements for D&C solver 
-    rocsolver_stedc_getMemorySize<BATCHED, T, S>(evect, n, batch_count, &s1,
-                    size_tempvect, size_tempgemm, size_tmpz, &t1, size_workArr);
+    size_t s1, s2;
 
-    // extra requirements for partial decomposition (range setup)
-    *size_work = sizeof(S) * (2 * n + 2) * batch_count;
-    s2 = sizeof(S) * (2 * n) * batch_count;
-    t2 = sizeof(rocblas_int) * (3 * n) * batch_count;
-    
+    // requirements for solver of small independent blocks
+    rocsolver_steqr_getMemorySize<T, S>(evect, n, batch_count, size_work_steqr);
+    s1 = sizeof(S) * (4 * n + 2) * batch_count;
+
+    // extra requirements for original eigenvectors of small independent blocks
+    *size_tempvect = (n * n) * batch_count * sizeof(S);
+    *size_tempgemm = 2 * (n * n) * batch_count * sizeof(S);
+    if(COMPLEX)
+        s2 = n * n * batch_count * sizeof(S);
+    else
+        s2 = 0;
+    if(BATCHED && !COMPLEX)
+        *size_workArr = sizeof(S*) * batch_count;
+    else
+        *size_workArr = 0;
     *size_work_stack = std::max(s1, s2);
-    *size_splits = std::max(t1, t2);
+
+    // size for split blocks and sub-blocks positions
+    *size_splits = sizeof(rocblas_int) * (5 * n + 2) * batch_count;
+
+    // size for temporary diagonal and rank-1 modif vector
+    *size_tmpz = sizeof(S) * (3 * n) * batch_count;
 }
 
 //--------------------------------------------------------------------------------------//
@@ -1771,11 +1789,6 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
     // NOTE: case evect = N is not implemented for now. This routine always compute vectors
     // as it is only for internal use by syevdx.
 
-printf("\n-----------INPUTS--------------\n");
-print_device_matrix(std::cout,"D",1,n,D,1);
-print_device_matrix(std::cout,"E",1,n-1,E,1);
-
-
     // quick return
     if(batch_count == 0)
         return rocblas_status_success;
@@ -1811,51 +1824,49 @@ print_device_matrix(std::cout,"E",1,n-1,E,1);
     rocblas_int blocksn = (n - 1) / BS2 + 1;
 
     // initialize identity matrix in C if required
-//    if(evect == rocblas_evect_tridiagonal)
-//        ROCSOLVER_LAUNCH_KERNEL(init_ident<T>, dim3(blocksn, blocksn, batch_count), dim3(BS2, BS2),
-//                                0, stream, n, n, C, shiftC, ldc, strideC);
+    if(evect == rocblas_evect_tridiagonal)
+        ROCSOLVER_LAUNCH_KERNEL(init_ident<T>, dim3(blocksn, blocksn, batch_count), dim3(BS2, BS2),
+                                0, stream, n, n, C, shiftC, ldc, strideC);
 
     // initialize identity matrix in tempvect
-//    rocblas_int ldt = n;
-//    rocblas_stride strideT = n * n;
-//    ROCSOLVER_LAUNCH_KERNEL(init_ident<S>, dim3(blocksn, blocksn, batch_count), dim3(BS2, BS2), 0,
-//                            stream, n, n, tempvect, 0, ldt, strideT);
+    rocblas_int ldt = n;
+    rocblas_stride strideT = n * n;
+    ROCSOLVER_LAUNCH_KERNEL(init_ident<S>, dim3(blocksn, blocksn, batch_count), dim3(BS2, BS2), 0,
+                            stream, n, n, tempvect, 0, ldt, strideT);
 
     // find max number of sub-blocks to consider during the divide phase
-//    rocblas_int maxlevs = stedcx_num_levels(n);
-//    rocblas_int maxblks = 1 << maxlevs;
+    rocblas_int maxlevs = stedcx_num_levels(n);
+    rocblas_int maxblks = 1 << maxlevs;
 
-    // find range for partial decomposition
-    ROCSOLVER_LAUNCH_KERNEL(stedcx_setrange_kernel, dim3(1, batch_count), dim3(STEDCX_SETRANGE_THDS), 0,
+    // find independent split blocks in matrix and prepare range for partial decomposition
+    ROCSOLVER_LAUNCH_KERNEL(stedcx_split_kernel, dim3(1, batch_count), dim3(STEBZ_SPLIT_THDS), 0,
                             stream, erange, n, vl, vu, il, iu, D, strideD, E, strideE, W, strideW,
                             splits, work_stack, eps, ssfmin);
 
-print_device_matrix(std::cout,"bounds",1,n+2,work_stack,1);
-
     // 1. divide phase
     //-----------------------------
-//    ROCSOLVER_LAUNCH_KERNEL((stedcx_divide_kernel<S>), dim3(batch_count), dim3(STEDCX_BDIM), 0,
-//                            stream, n, D, strideD, E, strideE, splits);
+    ROCSOLVER_LAUNCH_KERNEL((stedcx_divide_kernel<S>), dim3(batch_count), dim3(STEDCX_BDIM), 0,
+                            stream, n, D, strideD, E, strideE, splits);
 
     // 2. solve phase
     //-----------------------------
-//    ROCSOLVER_LAUNCH_KERNEL((stedcx_solve_kernel<S>),
-//                            dim3(maxblks, STEDC_NUM_SPLIT_BLKS, batch_count), dim3(1), 0, stream, n,
-//                            D, strideD, E, strideE, tempvect, 0, ldt, strideT, info, work_steqr,
-//                            splits, eps, ssfmin, ssfmax);
+    ROCSOLVER_LAUNCH_KERNEL((stedcx_solve_kernel<S>),
+                            dim3(maxblks, STEDC_NUM_SPLIT_BLKS, batch_count), dim3(1), 0, stream, n,
+                            D, strideD, E, strideE, tempvect, 0, ldt, strideT, info, work_steqr,
+                            splits, eps, ssfmin, ssfmax);
 
     // 3. merge phase
     //----------------
-//    size_t lmemsize1 = sizeof(S) * 2 * STEDCX_BDIM;
-//    size_t lmemsize3 = sizeof(S) * STEDCX_BDIM;
-//    rocblas_int numgrps3 = ((n - 1) / maxblks + 1) * maxblks;
+    size_t lmemsize1 = sizeof(S) * 2 * STEDCX_BDIM;
+    size_t lmemsize3 = sizeof(S) * STEDCX_BDIM;
+    rocblas_int numgrps3 = ((n - 1) / maxblks + 1) * maxblks;
 
     // launch merge for level k
     /** TODO: using max number of levels for now. Kernels return immediately when passing
         the actual number of levels in the split block. We should explore if synchronizing
         to copy back the actual number of levels makes any difference **/
-//    for(rocblas_int k = 0; k < maxlevs; ++k)
-//    {
+    for(rocblas_int k = 0; k < maxlevs; ++k)
+    {
         /** TODO: at the last level, kernels in steps b, c, and d could skip computations of
             eigen values and vectors that are out of the desired range. Whether this could be
             exploited somehow to improve performance must be explored in the future. For now,
@@ -1863,71 +1874,47 @@ print_device_matrix(std::cout,"bounds",1,n+2,work_stack,1);
             the computation of some of them does not seem to make much difference. **/
 
         // a. prepare secular equations
-//        rocblas_int numgrps2 = 1 << (maxlevs - 1 - k);
-//        ROCSOLVER_LAUNCH_KERNEL((stedcx_mergePrepare_kernel<S>),
-//                                dim3(numgrps2, STEDC_NUM_SPLIT_BLKS, batch_count),
-//                                dim3(STEDCX_BDIM), lmemsize1, stream, k, n, D, strideD, E, strideE,
-//                                tempvect, 0, ldt, strideT, tmpz, tempgemm, splits, eps);
+        rocblas_int numgrps2 = 1 << (maxlevs - 1 - k);
+        ROCSOLVER_LAUNCH_KERNEL((stedcx_mergePrepare_kernel<S>),
+                                dim3(numgrps2, STEDC_NUM_SPLIT_BLKS, batch_count),
+                                dim3(STEDCX_BDIM), lmemsize1, stream, k, n, D, strideD, E, strideE,
+                                tempvect, 0, ldt, strideT, tmpz, tempgemm, splits, eps);
 
         // b. solve to find merged eigen values
-//        ROCSOLVER_LAUNCH_KERNEL((stedcx_mergeValues_kernel<S>),
-//                                dim3(numgrps2, STEDC_NUM_SPLIT_BLKS, batch_count),
-//                                dim3(STEDCX_BDIM), 0, stream, k, n, D, strideD, E, strideE, tmpz,
-//                                tempgemm, splits, eps, ssfmin, ssfmax);
+        ROCSOLVER_LAUNCH_KERNEL((stedcx_mergeValues_kernel<S>),
+                                dim3(numgrps2, STEDC_NUM_SPLIT_BLKS, batch_count),
+                                dim3(STEDCX_BDIM), 0, stream, k, n, D, strideD, E, strideE, tmpz,
+                                tempgemm, splits, eps, ssfmin, ssfmax);
 
         // c. find merged eigen vectors
-//        ROCSOLVER_LAUNCH_KERNEL((stedcx_mergeVectors_kernel<STEDCX_EXTERNAL_GEMM, S>),
-//                                dim3(numgrps3, STEDC_NUM_SPLIT_BLKS, batch_count),
-//                                dim3(STEDCX_BDIM), lmemsize3, stream, k, n, D, strideD, E, strideE,
-//                                tempvect, 0, ldt, strideT, tmpz, tempgemm, splits);
+        ROCSOLVER_LAUNCH_KERNEL((stedcx_mergeVectors_kernel<STEDCX_EXTERNAL_GEMM, S>),
+                                dim3(numgrps3, STEDC_NUM_SPLIT_BLKS, batch_count),
+                                dim3(STEDCX_BDIM), lmemsize3, stream, k, n, D, strideD, E, strideE,
+                                tempvect, 0, ldt, strideT, tmpz, tempgemm, splits);
 
         // d. update level
-//        ROCSOLVER_LAUNCH_KERNEL((stedcx_mergeUpdate_kernel<S>),
-//                                dim3(numgrps3, STEDC_NUM_SPLIT_BLKS, batch_count),
-//                                dim3(STEDCX_BDIM), lmemsize3, stream, k, n, D, strideD, tempvect, 0,
-//                                ldt, strideT, tmpz, tempgemm, splits);
-//    }
+        ROCSOLVER_LAUNCH_KERNEL((stedcx_mergeUpdate_kernel<S>),
+                                dim3(numgrps3, STEDC_NUM_SPLIT_BLKS, batch_count),
+                                dim3(STEDCX_BDIM), lmemsize3, stream, k, n, D, strideD, tempvect, 0,
+                                ldt, strideT, tmpz, tempgemm, splits);
+    }
 
-    // find values and vectors with divide & conquer
-    /** TODO: at the last level of the merge tree, we could skip computations of
-            eigen values and vectors that are out of the desired range. Whether this could be
-            exploited somehow to improve performance must be explored in the future. **/
-    rocsolver_stedc_template<BATCHED, STRIDED, T>(
-        handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, 
-        C, shiftC, ldc, strideC, info, batch_count, work_stack, tempvect, 
-        tempgemm, tmpz, splits, workArr);        
-
-
-
-printf("\n-----------AFTER D&C--------------\n");
-print_device_matrix(std::cout,"D",1,n,D,1);
-print_device_matrix(std::cout,"E",1,n-1,E,1);
-print_device_matrix(std::cout,"C",n,n,C,ldc);
-
-    // Synthesize the results for given range (discard values and vectors out of range)
-    ROCSOLVER_LAUNCH_KERNEL((stedcx_synthesis_kernel<T>), dim3(1, batch_count), dim3(STEDCX_BDIM), 0,
-                            stream, erange, n, il, iu, D, strideD, nev, W, strideW, 
-                            C, shiftC, ldc, strideC, batch_count, splits, work_stack, eps);
+    // 4. update and sort
+    //----------------------
+    // Synthesize the results from all the split blocks
+    ROCSOLVER_LAUNCH_KERNEL(stedcx_synthesis_kernel, dim3(1, batch_count), dim3(STEDCX_BDIM), 0,
+                            stream, erange, n, il, iu, D, strideD, nev, W, strideW, tempvect, ldt,
+                            strideT, batch_count, splits, work_stack, eps);
 
     // eigenvectors C <- C*tempvect
-//    local_gemm<BATCHED, STRIDED, T>(handle, n, C, shiftC, ldc, strideC, tempvect, tempgemm,
-//                                    work_stack, 0, ldt, strideT, batch_count, workArr);
+    local_gemm<BATCHED, STRIDED, T>(handle, n, C, shiftC, ldc, strideC, tempvect, tempgemm,
+                                    work_stack, 0, ldt, strideT, batch_count, workArr);
 
-    // sort selected eigenvalues and eigenvectors
+    // sort eigenvalues and eigenvectors
     ROCSOLVER_LAUNCH_KERNEL((stedcx_sort<T>), dim3(1, 1, batch_count), dim3(BS1), 0, stream, n, W,
                             strideW, C, shiftC, ldc, strideC, batch_count, splits, nev);
-
-printf("\n-----------FINAL OUTPUTS--------------\n");
-print_device_matrix(std::cout,"nev",1,1,nev,1);
-print_device_matrix(std::cout,"W",1,n,W,1);
-print_device_matrix(std::cout,"C",n,n,C,ldc);
 
     return rocblas_status_success;
 }
 
-#undef STEDCX_EXTERNAL_GEMM
-#undef STEDCX_SETRANGE_THDS
-#undef STEDCX_BDIM
-
 ROCSOLVER_END_NAMESPACE
-

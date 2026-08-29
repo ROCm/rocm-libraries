@@ -217,9 +217,12 @@ __device__ void run_stebz_splitting(const int tid,
                                     T* sval,
                                     rocblas_int* sidx,
                                     T eps,
-                                    T sfmin,
-                                    bool compact = false)
+                                    T sfmin)
 {
+    // Split blocks are no longer considered during the divide and conquer process.
+    // So, no spliting is needed when calling from stedcx (nsplit = IS = tmpIS = nullptr)
+    bool dosplit = nsplit && IS && tmpIS;
+
     // the number of elements worked by this thread is nn
     rocblas_int nn = (n - 1) / DIM;
     if(tid < n - 1 - nn * DIM)
@@ -242,7 +245,9 @@ __device__ void run_stebz_splitting(const int tid,
 
     // this thread find its split-off blocks if necessary
     // tmpIS stores the block indices found by this thread
-    tmpIS += offset;
+    if(dosplit)
+        tmpIS += offset;
+    
     for(rocblas_int i = 0; i < nn; ++i)
     {
         j = i + offset;
@@ -250,7 +255,7 @@ __device__ void run_stebz_splitting(const int tid,
         tmp = E[j];
         tmp2 = tmp * tmp;
 
-        if(std::abs((D[j] * eps) * (D[j + 1] * eps)) + sfmin > tmp2)
+        if((std::abs((D[j] * eps) * (D[j + 1] * eps)) + sfmin > tmp2) && dosplit)
         {
             // found split
             tmpIS[tmpns] = j;
@@ -268,27 +273,24 @@ __device__ void run_stebz_splitting(const int tid,
     sidx[tid] = tmpns;
     __syncthreads();
 
-    // find split-off blocks in entire matrix
-    offset = compact ? 1 : 0;
-    for(int i = 0; i < tid; ++i)
-        offset += sidx[i];
-    for(int i = 0; i < tmpns; ++i)
-        IS[i + offset] = tmpIS[i] + 1;
-
-    // total number of split blocks
-    if(tid == DIM - 1)
+    if(dosplit)
     {
-        offset += tmpns;
-        IS[offset] = n;
-        if(compact)
+        // find split-off blocks in entire matrix
+        offset = 0;
+        for(int i = 0; i < tid; ++i)
+            offset += sidx[i];
+        for(int i = 0; i < tmpns; ++i)
+            IS[i + offset] = tmpIS[i] + 1;
+
+        // total number of split blocks
+        if(tid == DIM - 1)
         {
-            IS[0] = 0;
-            IS[n + 1] = offset;
-        }
-        else
+            offset += tmpns;
+            IS[offset] = n;
             *nsplit = offset + 1;
+        }
+        __syncthreads();
     }
-    __syncthreads();
 
     // find max squared off-diagonal element
     iamax<DIM>(tid, n - 1, Esqr, 1, sval, sidx);
