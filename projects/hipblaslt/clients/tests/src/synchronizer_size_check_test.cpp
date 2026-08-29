@@ -98,14 +98,15 @@ namespace
         EXPECT_TRUE(pred(problem));
     }
 
-    // debugEval is what --print_solution_rejection_reason drives, and it
-    // recomputes the verdict rather than reading operator()'s, so the unsplit
-    // short circuit has to exist on both. GSU -1 is the other unsplit spelling -
-    // let the kernel choose - and is skipped the same way.
+    // debugEval is what --print_solution_rejection_reason drives. GSU -1 is the
+    // other unsplit spelling - let the kernel choose - and is skipped the same way.
     //
-    // The row debugEval prints is not asserted: PredicateDebugger drops passing
-    // rows unless TENSILE_DB verbose mode is on, which is latched from the
-    // environment before any test runs.
+    // This pins the verdict and that debugEval runs, not the short circuit
+    // itself: debugEvalCmp returns operator()'s verdict, which short-circuits
+    // on GSU independently, so removing the one in debugEval would still give
+    // true here. What it changes is the row printed, and PredicateDebugger
+    // drops passing rows unless TENSILE_DB verbose mode is on, latched on first
+    // use. The guard is against a debugEval rewritten to judge for itself.
     TEST(SynchronizerSizeCheck, DebugEvalAcceptsUnsplitGsu)
     {
         SynchronizerSizeCheck pred(0, kUnitTile);
