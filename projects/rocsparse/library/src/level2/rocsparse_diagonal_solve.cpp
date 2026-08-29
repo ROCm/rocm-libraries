@@ -35,6 +35,7 @@
 #include "rocsparse_diagonal_solve_device.h"
 #include "rocsparse_indextype_utils.hpp"
 
+#include "rocsparse_assign_async.hpp"
 #include "rocsparse_csc_to_csr_descr.hpp"
 #include "rocsparse_cscsv.hpp"
 #include "rocsparse_csrsv_info.hpp"
@@ -342,6 +343,165 @@ rocsparse_status rocsparse::build_spdiag_view(rocsparse_const_spmat_descr A,
     view->diag_ind        = trm->get_diag_ind();
     view->transposed_perm = trm->get_transposed_perm();
     return rocsparse_status_success;
+}
+
+namespace rocsparse
+{
+    // Shared implementation for the format-specific diagonal solves. Everything is
+    // identical between CSR and CSC except the index type used for the analysis
+    // pivot, which the callers pass in.
+    static rocsparse_status diagonal_solve_from_info(rocsparse_handle            handle,
+                                                     rocsparse_operation         trans,
+                                                     rocsparse_diagonal_modifier modifier,
+                                                     const void*                 alpha,
+                                                     rocsparse_const_spmat_descr A,
+                                                     rocsparse_csrsv_info        info,
+                                                     rocsparse_indextype         pivot_indextype,
+                                                     int64_t                     nrhs,
+                                                     const void*                 x,
+                                                     int64_t                     x_row_stride,
+                                                     int64_t                     x_col_stride,
+                                                     int64_t                     x_batch_stride,
+                                                     void*                       y,
+                                                     int64_t                     y_row_stride,
+                                                     int64_t                     y_col_stride,
+                                                     int64_t                     y_batch_stride,
+                                                     int64_t                     batch_count,
+                                                     bool                        conj_x)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        rocsparse::spdiag_view diag{};
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::build_spdiag_view(A, trans, info, &diag));
+
+        hipStream_t stream = handle->stream;
+
+        info->create_singularity_numeric_exact(batch_count, pivot_indextype, stream);
+        auto numeric_exact = info->get_singularity_numeric_exact();
+        if(pivot_indextype == rocsparse_indextype_i32)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::assign_device_async<int32_t>(batch_count,
+                                                        (int32_t*)numeric_exact->get_position(),
+                                                        (const int32_t*)info->get_position(),
+                                                        stream));
+        }
+        else
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::assign_device_async<int64_t>(batch_count,
+                                                        (int64_t*)numeric_exact->get_position(),
+                                                        (const int64_t*)info->get_position(),
+                                                        stream));
+        }
+
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::diagonal_solve(handle,
+                                      trans,
+                                      modifier,
+                                      alpha,
+                                      A,
+                                      diag,
+                                      nrhs,
+                                      x,
+                                      x_row_stride,
+                                      x_col_stride,
+                                      x_batch_stride,
+                                      y,
+                                      y_row_stride,
+                                      y_col_stride,
+                                      y_batch_stride,
+                                      batch_count,
+                                      conj_x,
+                                      numeric_exact->get_position(),
+                                      1,
+                                      handle->pointer_mode == rocsparse_pointer_mode_host));
+
+        return rocsparse_status_success;
+    }
+}
+
+rocsparse_status rocsparse::diagonal_solve_csr(rocsparse_handle            handle,
+                                               rocsparse_operation         trans,
+                                               rocsparse_diagonal_modifier modifier,
+                                               const void*                 alpha,
+                                               rocsparse_const_spmat_descr A,
+                                               rocsparse_csrsv_info        info,
+                                               int64_t                     nrhs,
+                                               const void*                 x,
+                                               int64_t                     x_row_stride,
+                                               int64_t                     x_col_stride,
+                                               int64_t                     x_batch_stride,
+                                               void*                       y,
+                                               int64_t                     y_row_stride,
+                                               int64_t                     y_col_stride,
+                                               int64_t                     y_batch_stride,
+                                               int64_t                     batch_count,
+                                               bool                        conj_x)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    // The analysis pivot is typed like the CSR column index.
+    return rocsparse::diagonal_solve_from_info(handle,
+                                               trans,
+                                               modifier,
+                                               alpha,
+                                               A,
+                                               info,
+                                               A->col_type,
+                                               nrhs,
+                                               x,
+                                               x_row_stride,
+                                               x_col_stride,
+                                               x_batch_stride,
+                                               y,
+                                               y_row_stride,
+                                               y_col_stride,
+                                               y_batch_stride,
+                                               batch_count,
+                                               conj_x);
+}
+
+rocsparse_status rocsparse::diagonal_solve_csc(rocsparse_handle            handle,
+                                               rocsparse_operation         trans,
+                                               rocsparse_diagonal_modifier modifier,
+                                               const void*                 alpha,
+                                               rocsparse_const_spmat_descr A,
+                                               rocsparse_csrsv_info        info,
+                                               int64_t                     nrhs,
+                                               const void*                 x,
+                                               int64_t                     x_row_stride,
+                                               int64_t                     x_col_stride,
+                                               int64_t                     x_batch_stride,
+                                               void*                       y,
+                                               int64_t                     y_row_stride,
+                                               int64_t                     y_col_stride,
+                                               int64_t                     y_batch_stride,
+                                               int64_t                     batch_count,
+                                               bool                        conj_x)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    // build_csr_from_csc swaps row/col for CSC, so the analysis pivot is typed
+    // like the CSC row index rather than the column index.
+    return rocsparse::diagonal_solve_from_info(handle,
+                                               trans,
+                                               modifier,
+                                               alpha,
+                                               A,
+                                               info,
+                                               A->row_type,
+                                               nrhs,
+                                               x,
+                                               x_row_stride,
+                                               x_col_stride,
+                                               x_batch_stride,
+                                               y,
+                                               y_row_stride,
+                                               y_col_stride,
+                                               y_batch_stride,
+                                               batch_count,
+                                               conj_x);
 }
 
 #endif

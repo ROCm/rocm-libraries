@@ -65,6 +65,47 @@ namespace rocsparse
                                     void*                         zero_pivot,
                                     int64_t                       zero_pivot_stride,
                                     bool                          is_host_mode);
+
+    // Format-specific entry points that perform a complete diagonal solve: they
+    // build the diagonal view from the analysis info, seed the numeric zero-pivot
+    // buffer, and launch the solve. CSR and CSC differ only in how the analysis
+    // pivot is typed, so callers dispatch on the matrix format rather than sharing
+    // a single CSR-centric path.
+    rocsparse_status diagonal_solve_csr(rocsparse_handle            handle,
+                                        rocsparse_operation         trans,
+                                        rocsparse_diagonal_modifier modifier,
+                                        const void*                 alpha,
+                                        rocsparse_const_spmat_descr A,
+                                        rocsparse_csrsv_info        info,
+                                        int64_t                     nrhs,
+                                        const void*                 x,
+                                        int64_t                     x_row_stride,
+                                        int64_t                     x_col_stride,
+                                        int64_t                     x_batch_stride,
+                                        void*                       y,
+                                        int64_t                     y_row_stride,
+                                        int64_t                     y_col_stride,
+                                        int64_t                     y_batch_stride,
+                                        int64_t                     batch_count,
+                                        bool                        conj_x);
+
+    rocsparse_status diagonal_solve_csc(rocsparse_handle            handle,
+                                        rocsparse_operation         trans,
+                                        rocsparse_diagonal_modifier modifier,
+                                        const void*                 alpha,
+                                        rocsparse_const_spmat_descr A,
+                                        rocsparse_csrsv_info        info,
+                                        int64_t                     nrhs,
+                                        const void*                 x,
+                                        int64_t                     x_row_stride,
+                                        int64_t                     x_col_stride,
+                                        int64_t                     x_batch_stride,
+                                        void*                       y,
+                                        int64_t                     y_row_stride,
+                                        int64_t                     y_col_stride,
+                                        int64_t                     y_batch_stride,
+                                        int64_t                     batch_count,
+                                        bool                        conj_x);
 }
 
 #endif
