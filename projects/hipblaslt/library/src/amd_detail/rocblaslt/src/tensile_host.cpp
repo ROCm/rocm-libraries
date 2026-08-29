@@ -3469,14 +3469,40 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 //
 // The block is claimed here rather than when the problem is built, so a GEMM
 // that never reads the flags - which is most of them - does not spend one.
+//
+// Choosing and restoring are one operation so that no path leaves the field
+// describing another solution's region. `inputs` outlives the solution that
+// filled it: the object API builds it once at setProblem() and every later
+// initialize() only re-solves around it. A Stream-K initialize() followed by an
+// MBSK one would otherwise hand the MBSK reduction the small Stream-K block,
+// which it writes far past, over other streams' flags and off the end of the
+// allocation. The shared GSU region is what the problem carried in, so
+// restoring it puts the field back where GetTensileInputs() left it.
 static void bindFlagRegion(rocblaslt_handle                        handle,
-                           const RocblasltContractionProblem&      prob,
+                           hipStream_t                             stream,
                            const TensileLite::ContractionSolution& solution,
                            TensileLite::ContractionInputs&         inputs)
 {
-    if(!readsStreamKFlags(solution))
-        return;
-    static_cast<void>(bindStreamKFlags(handle, prob.stream, 0, inputs));
+    if(readsStreamKFlags(solution))
+        static_cast<void>(bindStreamKFlags(handle, stream, 0, inputs));
+    else
+        inputs.Synchronizer = handle->gsuFlagsForProblem(0);
+}
+
+// The grouped form of bindFlagRegion(), and the same reason for restoring: each
+// problem carried in the GSU slot at its own index, so that is what it goes
+// back to. Reports whether the group can run `solution` at all.
+static bool bindGroupedFlagRegions(rocblaslt_handle                             handle,
+                                   hipStream_t                                  stream,
+                                   const char*                                  caller,
+                                   const TensileLite::ContractionSolution&      solution,
+                                   std::vector<TensileLite::ContractionInputs>& grouped)
+{
+    if(readsStreamKFlags(solution))
+        return bindGroupedStreamKFlags(handle, stream, caller, grouped);
+    for(size_t i = 0; i < grouped.size(); i++)
+        grouped[i].Synchronizer = handle->gsuFlagsForProblem(i);
+    return true;
 }
 
 /******************************************************************************
@@ -3545,7 +3571,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         {
             auto picked = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
             if(picked)
-                bindFlagRegion(handle, prob, *picked, data->inputs);
+                bindFlagRegion(handle, prob.stream, *picked, data->inputs);
         }
 
         if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
@@ -3671,7 +3697,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // are packed. Passing GetTensileInputs(prob) straight in would use
             // the problem's original pointer and drop the choice.
             auto skInputs = GetTensileInputs(prob);
-            bindFlagRegion(handle, prob, *solution, skInputs);
+            bindFlagRegion(handle, prob.stream, *solution, skInputs);
             auto kernels = solution->solve(data->problem, skInputs, *hardware);
             // Remove this after supports getting comgr buffers from hip.
             bool isPreloaded = false;
@@ -3983,13 +4009,14 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->problem.setWorkspaceSize(workspaceSizeInBytes);
 
             // The flag pointer is baked into the kernel arguments by solve()
-            // just below. If this solution reads the flags as Stream-K, point
-            // them at a region private to `stream`. The object API may still
-            // launch on a different stream, which the run paths rebind for; the
-            // initialize() stream is only what it starts from.
+            // just below. A solution that reads the flags as Stream-K gets a
+            // region private to `stream`; every other one gets the shared GSU
+            // region back, which is what it would have had if this object had
+            // never been initialized with a Stream-K solution. The object API
+            // may still launch on a different stream, which the run paths
+            // rebind for; the initialize() stream is only what it starts from.
             const bool readsFlags = readsStreamKFlags(*solution);
-            if(readsFlags)
-                static_cast<void>(bindStreamKFlags(handle, stream, 0, data->inputs));
+            bindFlagRegion(handle, stream, *solution, data->inputs);
 
             data->kernels = solution->solve(data->problem, data->inputs, *hardware);
             // Only now do the kernels hold this stream's pointer. A solve that
@@ -4081,8 +4108,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // offsetting by index alone keeps one grouped call internally safe
             // but still shares the region with every other stream.
             const bool readsFlags = readsStreamKFlags(*solution);
-            if(readsFlags
-               && !bindGroupedStreamKFlags(handle, stream, __func__, data->inputs.grouped))
+            if(!bindGroupedFlagRegions(handle, stream, __func__, *solution, data->inputs.grouped))
                 return rocblaslt_status_invalid_value;
 
             data->useUserArgs = useUserArgs;
@@ -4592,14 +4618,14 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
             // Arguments are built below for this stream, so the flag pointers
-            // they pick up have to belong to it too. Gated on the solution named
-            // by `algo`, which is the one about to be solved and need not be the
-            // one the object was initialized with. Unconditional in the stream:
-            // the kernels built here are local and never update skBinding, so
-            // the pointers left in data->inputs may belong to whichever stream
-            // called this last.
-            if(readsStreamKFlags(*solution)
-               && !bindGroupedStreamKFlags(handle, stream, __func__, data->inputs.grouped))
+            // they pick up have to belong to it too. Driven by the solution
+            // named by `algo`, which is the one about to be solved and need not
+            // be the one the object was initialized with, so it decides the
+            // region rather than only whether to claim one. Unconditional in
+            // the stream: the kernels built here are local and never update
+            // skBinding, so the pointers left in data->inputs may belong to
+            // whichever stream called this last.
+            if(!bindGroupedFlagRegions(handle, stream, __func__, *solution, data->inputs.grouped))
                 return rocblaslt_status_invalid_value;
             auto kernel = solution->solveGroupedGemmGPU(
                 data->problem.gemms, data->inputs, *hardware, deviceUserArgs, workspace, stream);
