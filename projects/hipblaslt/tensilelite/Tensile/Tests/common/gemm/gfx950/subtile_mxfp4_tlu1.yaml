@@ -385,25 +385,17 @@ BenchmarkProblems:
     - # M/N edge coverage: every other block uses whole macro tiles, so the edge
       # goes untested there.
       #
-      # K stays a whole number of DepthU here, matching subtile_mxfp4.yaml, which
-      # only ever uses K in {256, 512, 768, 1024}.
+      # The K tail is covered here.  It used to return NaN on this layout, because
+      # the scale swizzle built its grid as if the row axis were always K -- true
+      # for a K-contiguous operand, transposed for a free-dim contiguous one.  The
+      # assert never caught it: 320 and 384 are both whole multiples of the MXBlock
+      # 32 that ASEM derives from.
       #
-      # This is a deliberate gap, not a passing case: a K tail on scaled F4 with a
-      # free-dim contiguous operand returns NaN (K=320 and K=384 against DepthU
-      # 256).  The tail loop is not the problem -- subtile_mxfp8_tail_loop sweeps
-      # K=32..512 step 32 under MX and passes, and the same K tails on TN F4 pass
-      # 270/270.  Both operands being K-contiguous is what makes those work, so
-      # the fault is in the TLU=1 scale path here.  Restore these sizes once it is
-      # fixed; the assert does not catch them, since 320 and 384 are both whole
-      # multiples of the MXBlock 32 that ASEM is derived from.
-      #
-      # Odd M/N is out of reach here, not untested: two fp4 share a byte, so an
-      # odd extent on a contiguous dim leaves the leading stride on a half byte
-      # and the geometry raises AssertFree0/1ElementMultiple on whichever operand
-      # is TLU=1.  Such sizes only ever come back DID_NOT_SATISFY_ASSERTS, so
-      # they are covered in subtile_mxfp4.yaml instead, where the contiguous dim
-      # is K and the assert does not apply.  This is a data-path constraint, not
-      # a scale one.
+      # Odd M/N cannot live here: two fp4 share a byte, so an odd extent on a
+      # contiguous dim leaves the leading stride on a half byte, and the subtile
+      # geometry raises AssertFree0/1ElementMultiple to 2 on whichever operand is
+      # TLU=1 -- every block in this file has at least one.  Those sizes are
+      # covered in subtile_mxfp4.yaml, where K is the contiguous dim.
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -437,4 +429,7 @@ BenchmarkProblems:
           - Exact: [200, 256, 1, 256]   # M edge
           - Exact: [256, 200, 1, 256]   # N edge
           - Exact: [200, 200, 1, 512]   # M and N edge together, two K windows
+          - Exact: [256, 256, 1, 320]   # K tail (320 = DepthU + 64)
+          - Exact: [256, 256, 1, 384]   # K tail (384 = DepthU + 128)
+          - Exact: [200, 200, 1, 320]   # M and N edge with a K tail
 
