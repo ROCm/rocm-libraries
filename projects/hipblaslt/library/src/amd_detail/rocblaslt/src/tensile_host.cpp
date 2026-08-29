@@ -4320,7 +4320,9 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
 
             // Same rebind as the single-GEMM branch above: the stream given to
             // initialize() is not necessarily the one this launch uses, and
-            // every problem in the group holds a region of its own.
+            // every problem in the group holds a region of its own. The
+            // rejection cannot fire here - makeArgument() accepted this group
+            // size and it cannot change afterwards - and is kept fail-closed.
             if(data->skBinding.readsFlags && stream != data->skBinding.stream)
             {
                 if(!bindGroupedStreamKFlags(handle, stream, __func__, data->inputs.grouped))
@@ -4524,10 +4526,9 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
                                                       false);
             }
 
-            // Same rebind as runKernelFromInvocation(): the stream given to
-            // initialize() is not necessarily the one this launch uses. Done
-            // before the patch loop below, which rewrites the freshly built
-            // arguments.
+            // Same rebind as runKernelFromInvocation(), rejection included, and
+            // just as unreachable. Done before the patch loop below, which
+            // rewrites the freshly built arguments.
             if(data->skBinding.readsFlags && stream != data->skBinding.stream)
             {
                 if(!bindGroupedStreamKFlags(handle, stream, __func__, data->inputs.grouped))

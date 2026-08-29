@@ -159,8 +159,10 @@ struct _rocblaslt_handle
     // private one. A null flag pointer is not a safe launch either - the device
     // reads it as a request for the parallel reduction - so a group this wide
     // must not run a solution that reads these flags at all. SynchronizerSizeCheck
-    // keeps MBSK out of one, and makeArgument() rejects a Stream-K solution
-    // reaching one through a caller-supplied index.
+    // keeps MBSK out of one, and all four paths that can bind a Stream-K
+    // solution to a group - makeArgument() and the three run paths that re-solve
+    // for their own stream - reject one reaching there through a
+    // caller-supplied index.
     void* gsuFlagsForProblem(size_t problemIndex) const
     {
         if(Synchronizer == nullptr || problemIndex >= c_syncGsuSlots)
