@@ -172,21 +172,27 @@ def find_gfx1250v0_overlay_violations(logic_root: Path) -> List[str]:
     file fails silently -- dropped from v0, or leaked into every v1 build --
     so this checks the invariant against the tree that actually ships:
 
-    1. the ``gfx1250v0`` overlay directory exists and ships at least one
-       logic file (an empty overlay means a v0 build reports success having
-       written a library with no solutions in it);
+    1. if the ``gfx1250v0`` overlay directory exists at all, it ships at
+       least one logic file (an *existing but empty* overlay means a v0
+       build reports success having written a library with no solutions in
+       it). Not every ``TensileLogic``-checked corpus does a v0/v1 split for
+       gfx1250 in the first place -- e.g. hipSPARSELt's corpus has no
+       ``gfx1250v0`` directory at all -- so a corpus with no overlay
+       directory is inapplicable, not a violation;
     2. every file inside the overlay declares ``ScheduleName: gfx1250v0``;
     3. every file inside the overlay keeps ``ArchitectureName: gfx1250``
        (a stepping there is rejected by ``TensileCreateLibrary``, and
        ``library/gfx1250v0/`` is a directory the runtime never reads); and
-    4. no file *outside* the overlay claims ``ScheduleName: gfx1250v0``.
+    4. no file *outside* the overlay claims ``ScheduleName: gfx1250v0``
+       (checked regardless of whether the overlay directory exists).
     """
     logic_root = _resolve_corpus_root(logic_root)
     violations: List[str] = []
     overlay_root = logic_root / GFX1250V0
-    overlay_files = sorted(overlay_root.rglob("*.yaml")) if overlay_root.is_dir() else []
+    overlay_exists = overlay_root.is_dir()
+    overlay_files = sorted(overlay_root.rglob("*.yaml")) if overlay_exists else []
 
-    if not overlay_files:
+    if overlay_exists and not overlay_files:
         violations.append(
             f"{GFX1250V0} overlay ships no logic under {overlay_root} -- an "
             "empty overlay means a v0 build reports success having written a "
@@ -208,7 +214,7 @@ def find_gfx1250v0_overlay_violations(logic_root: Path) -> List[str]:
             )
 
     for p in sorted(logic_root.rglob("*.yaml")):
-        if overlay_root.is_dir() and p.is_relative_to(overlay_root):
+        if overlay_exists and p.is_relative_to(overlay_root):
             continue
         if load_logic_schedule_name(p) == GFX1250V0:
             violations.append(

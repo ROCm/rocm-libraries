@@ -336,8 +336,21 @@ def test_gfx1250v0_overlay_clean(tmp_path, vcc):
     assert vcc.find_gfx1250v0_overlay_violations(tmp_path) == []
 
 
-def test_gfx1250v0_overlay_missing_is_a_violation(tmp_path, vcc):
-    # No gfx1250v0 directory at all -- an empty overlay is a broken build.
+def test_gfx1250v0_overlay_no_split_at_all_is_not_a_violation(tmp_path, vcc):
+    # No gfx1250v0 directory anywhere -- this corpus simply hasn't done a
+    # v0/v1 split for gfx1250 (e.g. hipSPARSELt's corpus, which ships only a
+    # unified gfx1250 tree with no per-revision overlay at all). Not every
+    # TensileLogic-checked corpus is hipBLASLt's, so this is inapplicable,
+    # not a violation.
+    (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
+    assert vcc.find_gfx1250v0_overlay_violations(tmp_path) == []
+
+
+def test_gfx1250v0_overlay_existing_but_empty_is_a_violation(tmp_path, vcc):
+    # The overlay directory exists on disk but ships no logic files -- this
+    # is the actually-broken case: something started the v0/v1 split for
+    # this corpus but the overlay ended up empty.
+    (tmp_path / vcc.GFX1250V0).mkdir(parents=True)
     (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
     violations = vcc.find_gfx1250v0_overlay_violations(tmp_path)
     assert len(violations) == 1
@@ -393,6 +406,10 @@ def test_check_corpus_invariants_aggregates_all_finders(tmp_path, vcc):
         devices="Device 75a3",
     )
     (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
+    # An existing-but-empty overlay directory, not merely a missing one, is
+    # what actually trips the gfx1250v0-overlay finder (see
+    # test_gfx1250v0_overlay_no_split_at_all_is_not_a_violation).
+    (tmp_path / vcc.GFX1250V0).mkdir(parents=True)
 
     violations = vcc.check_corpus_invariants(tmp_path)
     assert any("Divergent sibling DeviceNames" in v for v in violations)
