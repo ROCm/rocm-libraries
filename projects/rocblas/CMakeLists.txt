@@ -20,6 +20,7 @@
 #
 # ########################################################################
 
+# Temporary no-op change to validate TheRock multi-arch CI project detection.
 cmake_minimum_required( VERSION 3.24.4 )
 
 # This has to be initialized before the project() command appears
