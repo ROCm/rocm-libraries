@@ -32,7 +32,7 @@ if(NOT DEFINED ROCPRIM_ROOT)
   download_project(
     PROJ                rocprim
     GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-    GIT_TAG             master
+    GIT_TAG             2229b4b1f853441594e2eb1e0bbf9d7493a67f0c # master@2026-08-28
     INSTALL_DIR         ${ROCPRIM_ROOT}
     CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
     LOG_DOWNLOAD        TRUE

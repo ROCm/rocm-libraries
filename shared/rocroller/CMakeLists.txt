@@ -71,7 +71,7 @@ if(NOT fmt_FOUND)
         FetchContent_Declare(
             fmt
             GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-            GIT_TAG 11.1.3
+            GIT_TAG 9cf9f38eded63e5e0fb95cd536ba51be601d7fa2 # 11.1.3
         )
         FetchContent_MakeAvailable(fmt)
         set_property(DIRECTORY ${fmt_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
@@ -91,7 +91,7 @@ if(NOT spdlog_FOUND)
             FetchContent_Declare(
                 spdlog
                 GIT_REPOSITORY https://github.com/gabime/spdlog.git
-                GIT_TAG v1.x
+                GIT_TAG f5f173a1a57d0e2e0115f2ed71ee7ea316516853 # v1.x@2026-08-28
             )
             FetchContent_MakeAvailable(spdlog)
         endblock()
@@ -107,7 +107,7 @@ if(ROCROLLER_ENABLE_FETCH)
     FetchContent_Declare(
         libdivide
         GIT_REPOSITORY https://github.com/ridiculousfish/libdivide.git
-        GIT_TAG master
+        GIT_TAG 8d7b13ab34b2c4c791257d135f3af711926be33c # master@2026-08-28
     )
     FetchContent_MakeAvailable(libdivide)
     set_property(DIRECTORY ${libdivide_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
@@ -201,7 +201,7 @@ if(ROCROLLER_ENABLE_YAML_CPP)
             FetchContent_Declare(
                 yaml_cpp
                 GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-                GIT_TAG 0.8.0
+                GIT_TAG f7320141120f720aecc4c32be25586e7da9eb978 # 0.8.0
             )
             FetchContent_MakeAvailable(yaml_cpp)
         endblock()

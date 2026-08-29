@@ -161,7 +161,11 @@ function(_fetch_gtest VERSION HASH)
         _determine_git_tag(v v1.16.0)
     endif()
     if(HASH)
-        set(HASH_ARG HASH ${HASH})
+        set(HASH_ARG URL_HASH ${HASH})
+    elseif(GIT_TAG STREQUAL v1.16.0)
+        set(HASH_ARG URL_HASH
+            SHA256=a9607c9215866bd425a725610c5e0f739eeb50887a57903df48891446ce6fb3c
+        )
     endif()
     fetchcontent_declare(
         googletest URL https://github.com/google/googletest/archive/refs/tags/${GIT_TAG}.zip
@@ -186,6 +190,9 @@ endfunction()
 # Fetches FlatBuffers
 function(_fetch_flatbuffers VERSION HASH)
     _determine_git_tag(v "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}")
+    if(NOT HASH AND GIT_TAG STREQUAL v25.9.23)
+        set(GIT_TAG 187240970746d00bbd26b0f5873ed54d2477f9f3)
+    endif()
 
     _save_var(FLATBUFFERS_BUILD_FLATC)
     _save_var(FLATBUFFERS_INSTALL)
@@ -205,7 +212,6 @@ function(_fetch_flatbuffers VERSION HASH)
         flatbuffers
         GIT_REPOSITORY https://github.com/google/flatbuffers.git
         GIT_TAG ${GIT_TAG}
-        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
@@ -225,12 +231,14 @@ endfunction()
 # Fetches spdlog
 function(_fetch_spdlog VERSION HASH)
     _determine_git_tag(v v1.15.3)
+    if(NOT HASH AND GIT_TAG STREQUAL v1.15.3)
+        set(GIT_TAG 6fa36017cfd5731d617e1a934f0e5ea9c4445b13)
+    endif()
 
     fetchcontent_declare(
         spdlog
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
         GIT_TAG ${GIT_TAG}
-        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
@@ -251,7 +259,11 @@ function(_fetch_nlohmann_json VERSION HASH)
         set(VERSION "3.12.0")
     endif()
     if(HASH)
-        set(HASH_ARG HASH ${HASH})
+        set(HASH_ARG URL_HASH ${HASH})
+    elseif(VERSION STREQUAL 3.12.0)
+        set(HASH_ARG URL_HASH
+            SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
+        )
     endif()
     fetchcontent_declare(
         json URL https://github.com/nlohmann/json/releases/download/v${VERSION}/json.tar.xz

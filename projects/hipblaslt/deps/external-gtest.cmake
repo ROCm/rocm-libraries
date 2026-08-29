@@ -30,7 +30,7 @@ set( gtest_cmake_args -DCMAKE_INSTALL_PREFIX=${PREFIX_GTEST} )
 append_cmake_cli_arguments( gtest_cmake_args gtest_cmake_args )
 
 set( gtest_git_repository "https://github.com/google/googletest.git" CACHE STRING "URL to download gtest from" )
-set( gtest_git_tag "v1.14.0" CACHE STRING "URL to download gtest from" )
+set( gtest_git_tag "f8d7d77c06936315286eb55f8de22cd23c188571" CACHE STRING "URL to download gtest from" ) # v1.14.0
 
 if( MSVC )
   list( APPEND gtest_cmake_args -Dgtest_force_shared_crt=ON -DCMAKE_DEBUG_POSTFIX=d )

@@ -5,7 +5,7 @@ if(NOT LAPACK_FOUND AND HIPSPARSELT_ENABLE_FETCH)
     include(FetchContent)
     fetchcontent_declare(
         lapack GIT_REPOSITORY https://github.com/Reference-LAPACK/lapack-release
-        GIT_TAG lapack-3.7.1 GIT_SHALLOW TRUE
+        GIT_TAG 9f7abc2cc93fac3a5a8905307447c70163abdef2 # lapack-3.7.1@2026-08-28
     )
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "")
     set(CBLAS ON CACHE BOOL "")

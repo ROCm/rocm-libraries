@@ -351,7 +351,7 @@ if(USER_BUILD_TEST)
       FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG release-1.11.0
+        GIT_TAG e2239ee6043f73722e7aa812a459f54a28552929 # release-1.11.0
       )
     endif()
 
@@ -373,6 +373,7 @@ endif(USER_BUILD_TEST)
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
   set(CCCL_MINIMUM_VERSION 2.8.2)
+  set(CCCL_ARCHIVE_SHA256 ec322236647826e625df95a6637665730d64d62e6a4ed11f3ba734683e6d6284)
   if(NOT DOWNLOAD_CUB)
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()
@@ -381,6 +382,7 @@ if(HIP_COMPILER STREQUAL "nvcc")
     message(STATUS "CCCL not found, downloading and extracting CCCL ${CCCL_MINIMUM_VERSION}")
     file(DOWNLOAD https://github.com/NVIDIA/cccl/archive/refs/tags/v${CCCL_MINIMUM_VERSION}.zip
       ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}.zip
+      EXPECTED_HASH SHA256=${CCCL_ARCHIVE_SHA256}
       STATUS cccl_download_status LOG cccl_download_log)
 
     list(GET cccl_download_status 0 cccl_download_error_code)

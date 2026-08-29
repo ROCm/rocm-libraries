@@ -131,11 +131,11 @@ if(NOT ROCmCMakeBuildTools_FOUND)
   else()
     set(SOURCE_SUBDIR_ARG)
   endif()
-  set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
+  set(rocm_cmake_tag "5a34e72d9f113eb5d028e740c2def1f944619595" CACHE STRING "rocm-cmake tag to download") # master@2026-08-28
   FetchContent_Declare(
     rocm-cmake
     GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-    GIT_TAG        rocm-6.4.4
+    GIT_TAG        ecc716b97c2239cff00422ed7a43cd52a0839a0e # rocm-6.4.4
     ${SOURCE_SUBDIR_ARG}
   )
   FetchContent_GetProperties(rocm-cmake)
@@ -178,8 +178,7 @@ if(WITH_ROCRAND AND NOT rocrand_FOUND)
   download_project(
     PROJ                  rocrand
     GIT_REPOSITORY        https://github.com/ROCmSoftwarePlatform/rocRAND.git
-    GIT_TAG               develop
-    GIT_SHALLOW           TRUE
+    GIT_TAG               07f04364e33661ca31e6a9d2633b589f75dee90e # develop@2026-08-28
     INSTALL_DIR           ${ROCRAND_ROOT}
     LIST_SEPARATOR        |
     CMAKE_ARGS            -DCMAKE_CXX_COMPILER=hipcc -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}

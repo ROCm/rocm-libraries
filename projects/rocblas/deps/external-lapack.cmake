@@ -29,7 +29,7 @@ set( lapack_cmake_args -DCMAKE_INSTALL_PREFIX=${PREFIX_LAPACK} -DBUILD_SHARED_LI
 append_cmake_cli_arguments( lapack_cmake_args lapack_cmake_args )
 
 set( lapack_git_repository "https://github.com/Reference-LAPACK/lapack.git" CACHE STRING "URL to download lapack from" )
-set( lapack_git_tag "v3.9.1" CACHE STRING "git branch" )
+set( lapack_git_tag "77a0ceb6c9a3c757e7039027f1f324e2811e6ee0" CACHE STRING "git branch" ) # lapack 3.9.1
 
 # message( STATUS "lapack_make ( " ${lapack_make} " ) " )
 # message( STATUS "lapack_cmake_args ( " ${lapack_cmake_args} " ) " )

@@ -12,11 +12,15 @@ find_package(ROCmCMakeBuildTools QUIET PATHS ${ROCM_PATH})
 if(NOT ROCmCMakeBuildTools_FOUND)
   find_package(ROCM 0.7.3 CONFIG QUIET PATHS ${ROCM_PATH})
   if(NOT ROCM_FOUND)
-    set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
+    set(rocm_cmake_tag "5a34e72d9f113eb5d028e740c2def1f944619595" CACHE STRING "rocm-cmake tag to download") # master@2026-08-28
     set(rocm_cmake_url "https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip")
     set(rocm_cmake_path "${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}")
     set(rocm_cmake_archive "${rocm_cmake_path}.zip")
-    file(DOWNLOAD "${rocm_cmake_url}" "${rocm_cmake_archive}" STATUS status LOG log)
+    if(rocm_cmake_tag STREQUAL "5a34e72d9f113eb5d028e740c2def1f944619595")
+      set(rocm_cmake_hash_arg EXPECTED_HASH
+        SHA256=d2fa81fde4c2ee024fde5289c3c3d3076b94ff64d7e5f9e80040934436b11a9a)
+    endif()
+    file(DOWNLOAD "${rocm_cmake_url}" "${rocm_cmake_archive}" ${rocm_cmake_hash_arg} STATUS status LOG log)
 
     list(GET status 0 status_code)
     list(GET status 1 status_string)

@@ -105,6 +105,7 @@ if(MXDATAGENERATOR_BUILD_TESTING)
         FetchContent_Declare(
           googletest
           URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.zip
+          URL_HASH SHA256=24564e3b712d3eb30ac9a85d92f7d720f60cc0173730ac166f27dda7fed76cb2
         )
         FetchContent_MakeAvailable(googletest)
     endif()

@@ -16,7 +16,7 @@ function(fetch_gtest_dependency)
 
         fetchcontent_declare(
             googletest URL https://github.com/google/googletest/archive/refs/tags/v1.16.0.zip
-                           DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+                           URL_HASH SHA256=a9607c9215866bd425a725610c5e0f739eeb50887a57903df48891446ce6fb3c DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         )
 
         set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "")

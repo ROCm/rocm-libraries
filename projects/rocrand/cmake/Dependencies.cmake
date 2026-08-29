@@ -83,7 +83,7 @@ if(NOT ROCmCMakeBuildTools_FOUND)
   FetchContent_Declare(
     rocm-cmake
     GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-    GIT_TAG        rocm-6.4.4
+    GIT_TAG        ecc716b97c2239cff00422ed7a43cd52a0839a0e # rocm-6.4.4
     ${SOURCE_SUBDIR_ARG}
   )
   FetchContent_MakeAvailable(rocm-cmake)
@@ -125,7 +125,7 @@ if(BUILD_TEST)
     FetchContent_Declare(
       googletest
       GIT_REPOSITORY https://github.com/google/googletest.git
-      GIT_TAG        v1.15.2
+      GIT_TAG        b514bdc898e2951020cbdca1304b75f5950d1f59 # v1.15.2
     )
     FetchContent_MakeAvailable(googletest)
   endif()

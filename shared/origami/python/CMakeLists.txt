@@ -37,7 +37,7 @@ if(NOT nanobind_FOUND)
     FetchContent_Declare(
         nanobind
         GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-        GIT_TAG        v2.0.0
+        GIT_TAG        8d7f1ee0621c17fa370b704b2100ffa0243d5bfb # v2.0.0
     )
     FetchContent_MakeAvailable(nanobind)
     find_package(nanobind CONFIG REQUIRED)

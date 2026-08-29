@@ -43,6 +43,7 @@ include(VerifyCompiler)
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
   set(CCCL_MINIMUM_VERSION 2.8.2)
+  set(CCCL_ARCHIVE_SHA256 ec322236647826e625df95a6637665730d64d62e6a4ed11f3ba734683e6d6284)
   if(NOT DOWNLOAD_CUB)
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()
@@ -51,6 +52,7 @@ if(HIP_COMPILER STREQUAL "nvcc")
     message(STATUS "CCCL not found, downloading and extracting CCCL ${CCCL_MINIMUM_VERSION}")
     file(DOWNLOAD https://github.com/NVIDIA/cccl/archive/refs/tags/v${CCCL_MINIMUM_VERSION}.zip
                   ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}.zip
+        EXPECTED_HASH SHA256=${CCCL_ARCHIVE_SHA256}
         STATUS cccl_download_status LOG cccl_download_log)
 
     list(GET cccl_download_status 0 cccl_download_error_code)
@@ -86,7 +88,7 @@ else()
     FetchContent_Declare(
       prim
       GIT_REPOSITORY https://github.com/ROCm/rocPRIM.git
-      GIT_TAG        develop
+      GIT_TAG        9a9b2fa489764fc7a6e634894d8ce0ae3cdfb2ae # develop@2026-08-28
     )
     FetchContent_MakeAvailable(prim)
     if(NOT TARGET roc::rocprim)

@@ -8,7 +8,7 @@ if(NOT ROCmCMakeBuildTools_FOUND)
   find_package(ROCM 0.11.0 CONFIG QUIET PATHS "${ROCM_PATH}") # deprecated fallback
   if(NOT ROCM_FOUND)
     message(STATUS "ROCmCMakeBuildTools not found. Fetching...")
-    set(rocm_cmake_tag "rocm-6.4.0" CACHE STRING "rocm-cmake tag to download")
+    set(rocm_cmake_tag "ecc716b97c2239cff00422ed7a43cd52a0839a0e" CACHE STRING "rocm-cmake tag to download") # rocm-6.4.0
     FetchContent_Declare(
       rocm-cmake
       GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
