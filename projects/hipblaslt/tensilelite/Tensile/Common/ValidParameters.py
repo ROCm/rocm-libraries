@@ -842,6 +842,10 @@ validParameters = { # we need to make sure this matches develop
     # 1~8: Enable StoreRemap and set the global write vector width
     # Suggest optimum value: fp32 = [2,4], fp16 or bf16 = [4,8] (dwordx2 and dowrdx4)
     # -1:  Use dwordx2 if support SRVW, or set SRVW to 0
+    # F8WaveTranspose: classic-LDSTr f8 epilogue in-register wave-local transpose for coalesced
+    # store (barrier-free StoreRemap alternative). 0=off. Level = number of butterfly stages (lane
+    # bits transposed): 1 swaps lane bit0 (adjacent-lane pairs), up to 4 = full 16-lane transpose.
+    "F8WaveTranspose": [0, 1, 2, 3, 4],
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],

@@ -22,7 +22,7 @@
 
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOBALModifiers, \
-  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
+  SDWAModifiers, DPPModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   GlobalLoadB32, SLoadB128, \
@@ -39,7 +39,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
   VFmaF32, VFmaF64, VFmaPKF32, VFmaMixF32, VAndB32, VXorB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
-  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
+  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32, VOrB32
 from rocisa.functions import scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU
@@ -1766,6 +1766,27 @@ class GlobalWriteBatchWriter:
       and not self.kernel["StoreRemapVectorWidth"]
       and self.parentWriter.states.bpeCexternal == self.parentWriter.states.bpeCexternalGSU1
     )
+    # f8 wave32 in-register transpose store (barrier-free coalescing). Same preconditions as
+    # partner-merge plus the F8WaveTranspose knob; mutually exclusive with it.
+    waveContigF8Transpose = (
+      bool(self.kernel.get("F8WaveTranspose"))
+      and self.kernel.get("WaveContiguousOutput")
+      and not self.kernel.get("UseSubtileImpl")
+      and not self.edge
+      and self.kernel["WavefrontSize"] == 32
+      and self.kernel["ProblemType"]["DestDataType"].is8bitFloat()
+      and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
+      and self.kernel["BufferStore"]
+      and not self.kernel["StoreRemapVectorWidth"]
+      and self.parentWriter.states.bpeCexternal == self.parentWriter.states.bpeCexternalGSU1
+    )
+    if waveContigF8Transpose:
+      waveContigF8Merge = False  # transpose supersedes partner-merge when enabled
+      # WIP: the transpose network (_emitWaveTranspose8) is HW-verified, but the store-side
+      # integration (per-N-column re-addressing + coalesced store loop) is not wired yet. Fail
+      # loudly rather than silently emit an untransposed store, until that lands next.
+      raise RuntimeError("F8WaveTranspose store integration not implemented yet "
+                         "(transpose network verified; store loop is WIP)")
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
         "UseSubtileImpl 16bit optimized store requires BufferStore=1"
@@ -3915,6 +3936,48 @@ class GlobalWriteBatchWriter:
 
     self._epilogScratchFree(tmpInrSgpr)
     return module
+
+  def _emitWaveTranspose8(self, module: Module, base: int, vTmp0: int, vTmp1: int, vXpermIdx: int):
+    """Transpose the wave's 16(N,lane) x 8(M,vgpr) f32 output block IN PLACE (no LDS, no barrier).
+
+    Input (WMMA f8 C/D layout, SPG p158): value (M,N) lives at lane L=(Mhi<<4)|N, vgpr=Mlo,
+    where Mlo=M&7, Mhi=M>>3, N=L&15. After the 4 butterfly stages, lane L holds M=L&15 (adjacent
+    lanes = adjacent M, same N); vgpr index carries N. Enables one coalesced contiguous store.
+
+    `base`..`base+7` = the 8 contiguous f32 accumulators (modified in place). vTmp0/vTmp1 = 2 scratch
+    vgprs. vXpermIdx = 1 scratch vgpr for the S3 ds_bpermute lane index. Uses VCC.
+
+    Verified bit-exact on real gfx1250 layout via ~/tr16/xpose_full.s probe. Do NOT reorder stages.
+    """
+    def swapStage(bitI, pairs, dpp):
+      # Swap laneBit bitI against a vgpr bit, across the given vgpr pairs. dpp = the cross-lane fetch.
+      module.add(VAndB32(dst=vgpr(vTmp0), src0=(1 << bitI), src1=vgpr("Serial"), comment=f"laneBit{bitI}"))
+      module.add(VCmpEQU32(dst=VCC(), src0=(1 << bitI), src1=vgpr(vTmp0), comment=f"vcc = laneBit{bitI} set"))
+      for (a, b) in pairs:
+        module.add(VMovB32(dst=vgpr(vTmp0), src=vgpr(base + a), dpp=dpp, comment=f"dpp fetch r{a}"))
+        module.add(VMovB32(dst=vgpr(vTmp1), src=vgpr(base + b), dpp=dpp, comment=f"dpp fetch r{b}"))
+        module.add(VCndMaskB32(dst=vgpr(base + a), src0=vgpr(base + a), src1=vgpr(vTmp1), src2=VCC(), comment=f"r{a}"))
+        module.add(VCndMaskB32(dst=vgpr(base + b), src0=vgpr(vTmp0), src1=vgpr(base + b), src2=VCC(), comment=f"r{b}"))
+
+    # S0: laneBit0 <-> vgprBit0 ; S1: laneBit1 <-> vgprBit1 ; S2: laneBit2 <-> vgprBit2
+    swapStage(0, [(0,1),(2,3),(4,5),(6,7)], DPPModifiers(quad_perm=[1,0,3,2]))
+    swapStage(1, [(0,2),(1,3),(4,6),(5,7)], DPPModifiers(quad_perm=[2,3,0,1]))
+    swapStage(2, [(0,4),(1,5),(2,6),(3,7)], DPPModifiers(row_xmask=4))
+    # S3: laneBit3 <-> laneBit4 (both on the lane axis). Exchange values between lane L and the lane
+    # with bit3,bit4 swapped, via ds_bpermute. index = swapped-lane * 4.
+    module.add(VAndB32(dst=vgpr(vTmp0), src0=0x7, src1=vgpr("Serial"), comment="L low3"))
+    module.add(VLShiftRightB32(dst=vgpr(vTmp1), shiftHex=3, src=vgpr("Serial"), comment="L>>3"))
+    module.add(VAndB32(dst=vgpr(vXpermIdx), src0=1, src1=vgpr(vTmp1), comment="bit3"))
+    module.add(VAndB32(dst=vgpr(vTmp1), src0=2, src1=vgpr(vTmp1), comment="bit4"))
+    module.add(VLShiftRightB32(dst=vgpr(vTmp1), shiftHex=1, src=vgpr(vTmp1), comment="bit4 -> pos0"))
+    module.add(VLShiftLeftB32(dst=vgpr(vXpermIdx), shiftHex=1, src=vgpr(vXpermIdx), comment="bit3 -> pos1"))
+    module.add(VOrB32(dst=vgpr(vTmp1), src0=vgpr(vXpermIdx), src1=vgpr(vTmp1), comment="swapped {bit4,bit3}"))
+    module.add(VLShiftLeftB32(dst=vgpr(vTmp1), shiftHex=3, src=vgpr(vTmp1), comment="back to lane bit 3,4"))
+    module.add(VOrB32(dst=vgpr(vTmp1), src0=vgpr(vTmp1), src1=vgpr(vTmp0), comment="full swapped lane id"))
+    module.add(VLShiftLeftB32(dst=vgpr(vTmp1), shiftHex=2, src=vgpr(vTmp1), comment="*4 byte index"))
+    for k in range(8):
+      module.add(DSBPermuteB32(dst=vgpr(base + k), src0=vgpr(vTmp1), src1=vgpr(base + k), comment=f"S3 perm r{k}"))
+    module.add(SWaitCnt(dscnt=0, comment="wait S3 ds_bpermute"))
 
   def _emitF8PartnerMergeStore(self, addrCalc, sumIdx: int) -> Module:
     """Merge lane l's 8 f8 M-rows with partner lane l^16's (M+8..M+15, same N) into one

@@ -2578,6 +2578,16 @@ class Solution(collections.abc.Mapping):
     # gate contigOut = UseSubtileImpl or WaveContiguousOutput; does not enable subtile itself.
     state["WaveContiguousOutput"] = state["enableLDSTrB"] and not state["UseSubtileImpl"]
 
+    # F8WaveTranspose: in-register wave-local store transpose for f8, only valid on the classic
+    # LDSTr contiguous-output path (wave32, f8 dest, HPA). Auto-disable elsewhere so a stray yaml
+    # value cannot produce a broken kernel. Requires the WaveContiguousOutput layout precondition.
+    if state.get("F8WaveTranspose", 0):
+      f8Dest = state["ProblemType"]["DestDataType"].is8bitFloat()
+      if not (state["WaveContiguousOutput"] and not state["UseSubtileImpl"]
+              and state["WavefrontSize"] == 32 and f8Dest
+              and state["ProblemType"]["HighPrecisionAccumulate"]):
+        state["F8WaveTranspose"] = 0
+
     # This reject kernels in 950 logic yaml, temporarily comment it out.
     # finalLDSTrInst = state["enableLDSTrA"] or state["enableLDSTrB"]
     # if state["LDSTrInst"] != finalLDSTrInst:
