@@ -4304,6 +4304,11 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                                               false);
             }
             auto solution = library->getSolutionByIndex(*hardware, data->algoIndex);
+            if(!solution)
+            {
+                log_error(__func__, "no solution for the recorded algo index.");
+                return rocblaslt_status_invalid_value;
+            }
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
             {
                 logExtendedProfileFromTensileDataGemm(data->problem,
@@ -4512,6 +4517,11 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
                                               false);
             }
             auto solution = library->getSolutionByIndex(*hardware, data->algoIndex);
+            if(!solution)
+            {
+                log_error(__func__, "no solution for the recorded algo index.");
+                return rocblaslt_status_invalid_value;
+            }
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
             {
                 logExtendedProfileFromTensileDataGemm(data->problem,
@@ -4626,6 +4636,11 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
         if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
         {
             auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
+            if(!solution)
+            {
+                log_error(__func__, "no solution for the given algo index.");
+                return rocblaslt_status_invalid_value;
+            }
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
             // Arguments are built below for this stream, so the flag pointers
