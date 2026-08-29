@@ -55,7 +55,17 @@ protected:
         return _mode;
     }
 
-    void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack) override
+    // The stubbed executor is the engine here; these cases are about how its
+    // exceptions are routed, so the session says "accepted" and never opens a graph.
+    GraphSession openGraph() override
+    {
+        GraphSession session;
+        session.engines.accepted = true;
+        return session;
+    }
+
+    void executeGraphThroughEngine(GraphSession& /*session*/,
+                                   std::unordered_map<int64_t, void*>& variantPack) override
     {
         _engineStub(variantPack);
     }

@@ -9,9 +9,12 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
+using hipdnn_integration_tests::bundle::coverageFor;
 using hipdnn_integration_tests::bundle::printSupportClaimSummary;
+using hipdnn_integration_tests::bundle::SidecarState;
 using hipdnn_integration_tests::bundle::supportClaimCoverage;
 using hipdnn_integration_tests::bundle::SupportClaimVerdicts;
+using hipdnn_integration_tests::bundle::SupportObservation;
 using hipdnn_integration_tests::bundle::SupportResult;
 using hipdnn_integration_tests::bundle::SupportVerdict;
 using hipdnn_integration_tests::bundle::verifiedNothing;
@@ -406,6 +409,68 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWithOnlyQueries)
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
     EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
+}
+// ---------------------------------------------------------------------------
+// coverageFor(): the rules behind the counters, without the process-wide singleton.
+//
+// The one that matters is that `queried` follows the sidecar state and never
+// results.empty(): a sidecar read in full can legally leave no verdicts, and
+// counting those as gaps is what used to fail healthy runs.
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimCoverageRules, NoSidecarCountsNothing)
+{
+    const auto update = coverageFor(SupportObservation{SidecarState::NONE, {}},
+                                    /*enforcementExpected=*/false);
+
+    EXPECT_FALSE(update.queried);
+    EXPECT_FALSE(update.noApplicableClaim);
+    EXPECT_FALSE(update.missedQuery);
+}
+
+TEST(TestSupportClaimCoverageRules, ReadSidecarWithAVerdictCountsAsQueried)
+{
+    const auto update = coverageFor(
+        SupportObservation{SidecarState::CHECKED, {makeResult(SupportVerdict::CLAIM_ACCEPTED)}},
+        /*enforcementExpected=*/true);
+
+    EXPECT_TRUE(update.queried);
+    EXPECT_FALSE(update.noApplicableClaim);
+    EXPECT_FALSE(update.missedQuery);
+}
+
+// Read in full, but silent about this cell. Covered, and separately counted so it
+// does not read as "claimed and holds".
+TEST(TestSupportClaimCoverageRules, ReadSidecarWithNoVerdictsIsQueriedButUnclaimed)
+{
+    const auto update = coverageFor(SupportObservation{SidecarState::CHECKED, {}},
+                                    /*enforcementExpected=*/true);
+
+    EXPECT_TRUE(update.queried);
+    EXPECT_TRUE(update.noApplicableClaim);
+    EXPECT_FALSE(update.missedQuery);
+}
+
+// Drift is not a promise, so a sidecar that only produced UNCLAIMED_SUPPORT still
+// promised nothing about this cell.
+TEST(TestSupportClaimCoverageRules, DriftAloneStillCountsAsNothingPromised)
+{
+    const auto update = coverageFor(
+        SupportObservation{SidecarState::CHECKED, {makeResult(SupportVerdict::UNCLAIMED_SUPPORT)}},
+        /*enforcementExpected=*/true);
+
+    EXPECT_TRUE(update.queried);
+    EXPECT_TRUE(update.noApplicableClaim);
+}
+
+// The per-graph gap signal: enforcement was expected and the sidecar was never read.
+TEST(TestSupportClaimCoverageRules, ExpectedButUnreadSidecarIsAHarnessBug)
+{
+    const auto update = coverageFor(SupportObservation{SidecarState::NONE, {}},
+                                    /*enforcementExpected=*/true);
+
+    EXPECT_FALSE(update.queried);
+    EXPECT_TRUE(update.missedQuery);
 }
 
 // NOLINTEND(readability-identifier-naming)

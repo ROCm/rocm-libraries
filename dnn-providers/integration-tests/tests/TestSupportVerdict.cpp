@@ -20,14 +20,20 @@
 using hipdnn_frontend::ErrorCode;
 using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::bundle::baseArchToken;
+using hipdnn_integration_tests::bundle::claimBlocked;
+using hipdnn_integration_tests::bundle::enginesAccept;
 using hipdnn_integration_tests::bundle::FailureOrigin;
+using hipdnn_integration_tests::bundle::finalizeClaims;
 using hipdnn_integration_tests::bundle::isFailure;
+using hipdnn_integration_tests::bundle::isResolved;
 using hipdnn_integration_tests::bundle::LoadedEngine;
 using hipdnn_integration_tests::bundle::observeSupport;
 using hipdnn_integration_tests::bundle::promoteAcceptedClaim;
+using hipdnn_integration_tests::bundle::RankedEngines;
 using hipdnn_integration_tests::bundle::requiredDepth;
 using hipdnn_integration_tests::bundle::SidecarState;
 using hipdnn_integration_tests::bundle::SupportClaimLocator;
+using hipdnn_integration_tests::bundle::SupportObservation;
 using hipdnn_integration_tests::bundle::SupportResult;
 using hipdnn_integration_tests::bundle::SupportVerdict;
 using hipdnn_integration_tests::bundle::VerificationDepth;
@@ -51,6 +57,19 @@ const std::string PLAT = "linux";
 const std::string QUERY_MSG = "hipdnnBackendFinalize failed: HIPDNN_STATUS_INTERNAL_ERROR";
 
 const LoadedEngine ENGINE{UNDER_TEST_ID, UNDER_TEST};
+
+// One ranked-engine query, as openGraph() would have recorded it. `accepted` comes
+// from the shared predicate, so these tests exercise the same applicability answer
+// the executor and the enforcement rungs act on.
+RankedEngines ranked(ErrorCode status, std::vector<int64_t> ids, std::string message = {})
+{
+    RankedEngines engines;
+    engines.status = status;
+    engines.statusMessage = std::move(message);
+    engines.rankedIds = std::move(ids);
+    engines.accepted = enginesAccept(engines.status, engines.rankedIds, ENGINE);
+    return engines;
+}
 
 ScopedDirectory makeScopedTestDir(const std::string& prefix)
 {
@@ -113,7 +132,8 @@ SupportClaimLocator writeSweepSidecar(const ScopedDirectory& dir,
 
 TEST(TestSupportVerdict, NoSidecarPathEvaluatesNothing)
 {
-    const auto observation = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, {}, ENGINE, ARCH, PLAT);
+    const auto observation
+        = observeSupport(ranked(ErrorCode::OK, {UNDER_TEST_ID}), {}, ENGINE, ARCH, PLAT);
     EXPECT_EQ(observation.sidecar, SidecarState::NONE);
     EXPECT_TRUE(observation.results.empty());
     EXPECT_FALSE(observation.hasApplicableClaim());
@@ -126,7 +146,7 @@ TEST(TestSupportVerdict, MissingSidecarFileEvaluatesNothing)
     locator.diagnosticPath = "Bundle.json";
 
     const auto observation
-        = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+        = observeSupport(ranked(ErrorCode::OK, {UNDER_TEST_ID}), locator, ENGINE, ARCH, PLAT);
     EXPECT_EQ(observation.sidecar, SidecarState::NONE);
     EXPECT_TRUE(observation.results.empty());
 }
@@ -140,8 +160,8 @@ TEST(TestSupportVerdict, ClaimedAndInRankedListIsAccepted)
     const auto dir = makeScopedTestDir("verdict");
     const auto locator = writeSidecar(dir, {UNDER_TEST});
 
-    const auto observation
-        = observeSupport(ErrorCode::OK, {OTHER_ID, UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+    const auto observation = observeSupport(
+        ranked(ErrorCode::OK, {OTHER_ID, UNDER_TEST_ID}), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::CLAIM_ACCEPTED);
@@ -155,7 +175,8 @@ TEST(TestSupportVerdict, ClaimedButAbsentFromRankedListIsBroken)
     const auto dir = makeScopedTestDir("verdict");
     const auto locator = writeSidecar(dir, {UNDER_TEST});
 
-    const auto observation = observeSupport(ErrorCode::OK, {OTHER_ID}, locator, ENGINE, ARCH, PLAT);
+    const auto observation
+        = observeSupport(ranked(ErrorCode::OK, {OTHER_ID}), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::CLAIM_BROKEN);
@@ -168,7 +189,7 @@ TEST(TestSupportVerdict, GraphNotSupportedWithAClaimIsBroken)
     const auto locator = writeSidecar(dir, {UNDER_TEST});
 
     const auto observation
-        = observeSupport(ErrorCode::GRAPH_NOT_SUPPORTED, {}, locator, ENGINE, ARCH, PLAT);
+        = observeSupport(ranked(ErrorCode::GRAPH_NOT_SUPPORTED, {}), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::CLAIM_BROKEN);
@@ -185,7 +206,7 @@ TEST(TestSupportVerdict, ClaimedWithUnresolvedQueryIsErrored)
     const auto locator = writeSidecar(dir, {UNDER_TEST});
 
     const auto observation = observeSupport(
-        ErrorCode::HEURISTIC_QUERY_FAILED, {}, locator, ENGINE, ARCH, PLAT, QUERY_MSG);
+        ranked(ErrorCode::HEURISTIC_QUERY_FAILED, {}, QUERY_MSG), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     const auto& r = observation.results.front();
@@ -203,7 +224,7 @@ TEST(TestSupportVerdict, UnresolvedWithIdPresentIsStillErrored)
     const auto locator = writeSidecar(dir, {UNDER_TEST});
 
     const auto observation = observeSupport(
-        ErrorCode::HEURISTIC_QUERY_FAILED, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+        ranked(ErrorCode::HEURISTIC_QUERY_FAILED, {UNDER_TEST_ID}), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::QUERY_ERRORED);
@@ -217,7 +238,7 @@ TEST(TestSupportVerdict, UnresolvedQueryWithNoClaimReportsNothing)
     const auto locator = writeSidecar(dir, {});
 
     const auto observation = observeSupport(
-        ErrorCode::HEURISTIC_QUERY_FAILED, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+        ranked(ErrorCode::HEURISTIC_QUERY_FAILED, {UNDER_TEST_ID}), locator, ENGINE, ARCH, PLAT);
 
     EXPECT_EQ(observation.sidecar, SidecarState::CHECKED);
     EXPECT_TRUE(observation.results.empty());
@@ -230,7 +251,7 @@ TEST(TestSupportVerdict, UnknownErrorCodeTreatedAsUnresolved)
     const auto locator = writeSidecar(dir, {UNDER_TEST});
 
     const auto observation = observeSupport(
-        static_cast<ErrorCode>(9999), {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+        ranked(static_cast<ErrorCode>(9999), {UNDER_TEST_ID}), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::QUERY_ERRORED);
@@ -243,7 +264,7 @@ TEST(TestSupportVerdict, ResolvedQueryDoesNotStoreMessage)
     const auto locator = writeSidecar(dir, {UNDER_TEST});
 
     const auto observation = observeSupport(
-        ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT, "should be dropped");
+        ranked(ErrorCode::OK, {UNDER_TEST_ID}, "should be dropped"), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_TRUE(observation.results.front().queryMessage.empty());
@@ -259,7 +280,7 @@ TEST(TestSupportVerdict, SupportedWithoutAClaimIsDrift)
     const auto locator = writeSidecar(dir, {});
 
     const auto observation
-        = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+        = observeSupport(ranked(ErrorCode::OK, {UNDER_TEST_ID}), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::UNCLAIMED_SUPPORT);
@@ -275,7 +296,8 @@ TEST(TestSupportVerdict, NeitherClaimedNorSupportedProducesNoRecord)
     const auto dir = makeScopedTestDir("verdict");
     const auto locator = writeSidecar(dir, {});
 
-    const auto observation = observeSupport(ErrorCode::OK, {OTHER_ID}, locator, ENGINE, ARCH, PLAT);
+    const auto observation
+        = observeSupport(ranked(ErrorCode::OK, {OTHER_ID}), locator, ENGINE, ARCH, PLAT);
 
     EXPECT_EQ(observation.sidecar, SidecarState::CHECKED);
     EXPECT_TRUE(observation.results.empty());
@@ -292,7 +314,7 @@ TEST(TestSupportVerdict, ClaimForAnotherEngineIsNotDecidedHere)
     const auto dir = makeScopedTestDir("verdict");
     const auto locator = writeSidecar(dir, {OTHER_ENGINE});
 
-    const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
+    const auto observation = observeSupport(ranked(ErrorCode::OK, {}), locator, ENGINE, ARCH, PLAT);
 
     EXPECT_EQ(observation.sidecar, SidecarState::CHECKED);
     EXPECT_TRUE(observation.results.empty());
@@ -305,7 +327,7 @@ TEST(TestSupportVerdict, ClaimForAnotherEngineDoesNotSuppressOurDrift)
     const auto locator = writeSidecar(dir, {OTHER_ENGINE});
 
     const auto observation
-        = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+        = observeSupport(ranked(ErrorCode::OK, {UNDER_TEST_ID}), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::UNCLAIMED_SUPPORT);
@@ -322,7 +344,7 @@ TEST(TestSupportVerdict, ClaimForAnotherArchDoesNotApply)
     const auto locator = writeSidecar(dir, {UNDER_TEST}, "gfx90a", PLAT);
 
     const auto observation
-        = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+        = observeSupport(ranked(ErrorCode::OK, {UNDER_TEST_ID}), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::UNCLAIMED_SUPPORT);
@@ -337,7 +359,7 @@ TEST(TestSupportVerdict, ClaimForAnotherPlatformIsCheckedButNotApplicable)
     const auto dir = makeScopedTestDir("verdict");
     const auto locator = writeSidecar(dir, {UNDER_TEST}, ARCH, "windows");
 
-    const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
+    const auto observation = observeSupport(ranked(ErrorCode::OK, {}), locator, ENGINE, ARCH, PLAT);
 
     EXPECT_EQ(observation.sidecar, SidecarState::CHECKED);
     EXPECT_FALSE(observation.hasApplicableClaim());
@@ -353,7 +375,7 @@ TEST(TestSupportVerdict, SweepClaimAppliesToNamedCase)
     const auto dir = makeScopedTestDir("verdict");
     const auto locator = writeSweepSidecar(dir, UNDER_TEST, {"case_one", "case_two"}, "case_one");
 
-    const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
+    const auto observation = observeSupport(ranked(ErrorCode::OK, {}), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     EXPECT_EQ(observation.results.front().verdict, SupportVerdict::CLAIM_BROKEN);
@@ -365,7 +387,7 @@ TEST(TestSupportVerdict, SweepClaimDoesNotApplyToUnnamedCase)
     const auto dir = makeScopedTestDir("verdict");
     const auto locator = writeSweepSidecar(dir, UNDER_TEST, {"case_one"}, "case_three");
 
-    const auto observation = observeSupport(ErrorCode::OK, {}, locator, ENGINE, ARCH, PLAT);
+    const auto observation = observeSupport(ranked(ErrorCode::OK, {}), locator, ENGINE, ARCH, PLAT);
 
     EXPECT_EQ(observation.sidecar, SidecarState::CHECKED);
     EXPECT_FALSE(observation.hasApplicableClaim());
@@ -386,8 +408,9 @@ TEST(TestSupportVerdict, UnparseableSidecarThrows)
     locator.sidecarPath = path;
     locator.diagnosticPath = "dir/Bundle.json";
 
-    EXPECT_THROW(observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT),
-                 std::runtime_error);
+    EXPECT_THROW(
+        observeSupport(ranked(ErrorCode::OK, {UNDER_TEST_ID}), locator, ENGINE, ARCH, PLAT),
+        std::runtime_error);
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +423,7 @@ TEST(TestSupportVerdict, ResultCarriesLocatorAndCellMetadata)
     const auto locator = writeSidecar(dir, {UNDER_TEST});
 
     const auto observation
-        = observeSupport(ErrorCode::OK, {UNDER_TEST_ID}, locator, ENGINE, ARCH, PLAT);
+        = observeSupport(ranked(ErrorCode::OK, {UNDER_TEST_ID}), locator, ENGINE, ARCH, PLAT);
 
     ASSERT_EQ(observation.results.size(), 1u);
     const auto& r = observation.results.front();
@@ -569,6 +592,134 @@ TEST(TestSupportVerdict, BaseArchTokenEmptyInput)
 TEST(TestSupportVerdict, BaseArchTokenColonOnly)
 {
     EXPECT_EQ(baseArchToken(":"), "");
+}
+
+// ---------------------------------------------------------------------------
+// claimBlocked(): a failing verdict stands in for the comparison, because the
+// engine will not take the graph and running it would print a sentinel diff over
+// the real message.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+SupportResult verdict(SupportVerdict v, std::string engine = UNDER_TEST)
+{
+    SupportResult result;
+    result.verdict = v;
+    result.bundlePath = "dir/Bundle.json";
+    result.engineName = std::move(engine);
+    result.arch = ARCH;
+    result.platform = PLAT;
+    result.detail = "detail";
+    return result;
+}
+
+SupportObservation checked(std::vector<SupportResult> results)
+{
+    return SupportObservation{SidecarState::CHECKED, std::move(results)};
+}
+} // namespace
+
+TEST(TestSupportVerdict, HeldClaimsDoNotBlockTheComparison)
+{
+    EXPECT_FALSE(claimBlocked(checked({})).has_value());
+    EXPECT_FALSE(claimBlocked(checked({verdict(SupportVerdict::CLAIM_ACCEPTED)})).has_value());
+    EXPECT_FALSE(claimBlocked(checked({verdict(SupportVerdict::UNCLAIMED_SUPPORT)})).has_value());
+    // Already red for another reason; the claim itself held.
+    EXPECT_FALSE(claimBlocked(checked({verdict(SupportVerdict::CLAIM_FAILED_IN_USE)})).has_value());
+}
+
+TEST(TestSupportVerdict, BrokenClaimBlocksAsAnEngineFailure)
+{
+    const auto blocked = claimBlocked(checked({verdict(SupportVerdict::CLAIM_BROKEN)}));
+
+    ASSERT_TRUE(blocked.has_value());
+    EXPECT_EQ(blocked->status, hipdnn_integration_tests::bundle::OutcomeStatus::FAILED);
+    EXPECT_EQ(blocked->depth, VerificationDepth::NOT_REACHED);
+    EXPECT_EQ(blocked->origin, FailureOrigin::ENGINE);
+    EXPECT_NE(blocked->message.find("CLAIM_BROKEN"), std::string::npos);
+}
+
+TEST(TestSupportVerdict, ErroredQueryBlocksTheSameWay)
+{
+    const auto blocked = claimBlocked(checked({verdict(SupportVerdict::QUERY_ERRORED)}));
+
+    ASSERT_TRUE(blocked.has_value());
+    EXPECT_EQ(blocked->origin, FailureOrigin::ENGINE);
+    EXPECT_NE(blocked->message.find("QUERY_ERRORED"), std::string::npos);
+}
+
+// One FAIL() has to name every failing verdict; the first must not hide the rest.
+TEST(TestSupportVerdict, EveryFailingVerdictReachesTheMessage)
+{
+    const auto blocked = claimBlocked(checked(
+        {verdict(SupportVerdict::CLAIM_BROKEN), verdict(SupportVerdict::QUERY_ERRORED, "OTHER")}));
+
+    ASSERT_TRUE(blocked.has_value());
+    EXPECT_NE(blocked->message.find("CLAIM_BROKEN"), std::string::npos);
+    EXPECT_NE(blocked->message.find("QUERY_ERRORED"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// finalizeClaims(): only the engine this run drove can be promoted, and every
+// input verdict comes back exactly once so the report cannot lose rows.
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportVerdict, FinalizePromotesOnlyTheEngineUnderTest)
+{
+    const auto records = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED),
+                                         verdict(SupportVerdict::CLAIM_ACCEPTED, OTHER_ENGINE)},
+                                        UNDER_TEST,
+                                        VerificationOutcome::passed(VerificationDepth::VERIFIED),
+                                        VerificationDepth::VERIFIED);
+
+    ASSERT_EQ(records.size(), 2u);
+    EXPECT_EQ(records[0].verdict, SupportVerdict::CLAIM_CONFIRMED);
+    EXPECT_EQ(records[1].verdict, SupportVerdict::CLAIM_ACCEPTED)
+        << "another engine's claim was never executed by this run";
+}
+
+TEST(TestSupportVerdict, FinalizeWritesTheDepthIntoTheDetail)
+{
+    const auto records
+        = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED)},
+                         UNDER_TEST,
+                         VerificationOutcome::skipped(VerificationDepth::EXECUTED, "no oracle"),
+                         VerificationDepth::VERIFIED);
+
+    ASSERT_EQ(records.size(), 1u);
+    EXPECT_EQ(records[0].verdict, SupportVerdict::CLAIM_ACCEPTED);
+    EXPECT_NE(records[0].detail.find("executed"), std::string::npos);
+    EXPECT_NE(records[0].detail.find("verified"), std::string::npos)
+        << "the detail must name the depth the bundle asked for";
+}
+
+// Drift keeps its verdict — there is no claim to promote — but gains how far the
+// run got, which separates "this works, write it down" from "the list said so".
+TEST(TestSupportVerdict, FinalizeAnnotatesUnclaimedSupport)
+{
+    const auto records = finalizeClaims({verdict(SupportVerdict::UNCLAIMED_SUPPORT)},
+                                        UNDER_TEST,
+                                        VerificationOutcome::passed(VerificationDepth::VERIFIED),
+                                        VerificationDepth::VERIFIED);
+
+    ASSERT_EQ(records.size(), 1u);
+    EXPECT_EQ(records[0].verdict, SupportVerdict::UNCLAIMED_SUPPORT);
+    EXPECT_NE(records[0].detail.find("verified"), std::string::npos);
+}
+
+// A failing verdict is terminal, but it still has to reach the report.
+TEST(TestSupportVerdict, FinalizePassesFailingVerdictsThrough)
+{
+    const auto records
+        = finalizeClaims({verdict(SupportVerdict::CLAIM_BROKEN)},
+                         UNDER_TEST,
+                         VerificationOutcome::failed(
+                             VerificationDepth::NOT_REACHED, FailureOrigin::ENGINE, "blocked"),
+                         VerificationDepth::VERIFIED);
+
+    ASSERT_EQ(records.size(), 1u);
+    EXPECT_EQ(records[0].verdict, SupportVerdict::CLAIM_BROKEN);
 }
 
 // NOLINTEND(readability-identifier-naming)

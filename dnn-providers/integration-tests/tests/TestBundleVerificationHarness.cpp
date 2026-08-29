@@ -53,7 +53,18 @@ public:
     using IntegrationBundleVerificationHarness::TestBody;
 
 protected:
-    void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack) override
+    // The stubbed executor *is* the engine here, so there is no real graph to open.
+    // Without this the harness would build one on the shared handle just to be told
+    // nobody ranked it, and runEngine() would skip before reaching the stub.
+    GraphSession openGraph() override
+    {
+        GraphSession session;
+        session.engines.accepted = true;
+        return session;
+    }
+
+    void executeGraphThroughEngine(GraphSession& /*session*/,
+                                   std::unordered_map<int64_t, void*>& variantPack) override
     {
         _engineStub(variantPack);
     }

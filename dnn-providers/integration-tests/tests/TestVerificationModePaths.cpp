@@ -52,7 +52,17 @@ protected:
         return _mode;
     }
 
-    void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack) override
+    // The stubbed executor is the engine here; these cases are about mode dispatch,
+    // so the session says "accepted" and no real graph is ever opened.
+    GraphSession openGraph() override
+    {
+        GraphSession session;
+        session.engines.accepted = true;
+        return session;
+    }
+
+    void executeGraphThroughEngine(GraphSession& /*session*/,
+                                   std::unordered_map<int64_t, void*>& variantPack) override
     {
         _engineStub(variantPack);
     }
@@ -77,11 +87,11 @@ protected:
     void applyMetadataGuards() const override {}
 
     // Record the routing decision instead of running it. The real implementation
-    // calls getSharedHandle(), which this deviceless harness must not reach.
+    // compiles plans against a real graph, which this deviceless harness has none of.
     // unverifiable() is how the real enforceAtLevel() exits when it cannot verify,
     // so the stub returns the same shape of outcome. Assertions read enforcedLevel(),
     // so they prove routing specifically.
-    VerificationOutcome enforceAtLevel(EnforcementLevel level) override
+    VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& /*session*/) override
     {
         _enforcedLevel = level;
         return unverifiable("enforceAtLevel stubbed (deviceless)");

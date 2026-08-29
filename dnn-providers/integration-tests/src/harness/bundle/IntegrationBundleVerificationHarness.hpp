@@ -23,17 +23,13 @@
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
-
-namespace hipdnn_frontend::graph
-{
-class Graph;
-}
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -111,10 +107,15 @@ protected:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
+        // One from_binary, one ranked query, one applicability answer. Everything
+        // below takes the session as an argument, so nothing re-derives it and
+        // nothing caches it on the harness.
+        GraphSession session = openGraph();
+
         // Phase 1: read the claim facts before anything can cut the test short. This
         // has to sit above runComparison(): every mode has an early return that would
         // otherwise leave the graph's claims undecided while the run exited 0.
-        const auto observation = observeSupportForBundle();
+        const auto observation = adjudicateClaims(session);
         recordClaimCoverage(observation);
 
         // Phase 2: run as far as this bundle asks for. A broken claim means the
@@ -122,7 +123,7 @@ protected:
         // would only pile a sentinel-buffer diff on top of the real message — it is
         // reported as an engine failure without being tried.
         const std::optional<VerificationOutcome> blocked = claimBlocked(observation);
-        const VerificationOutcome outcome = blocked ? *blocked : runComparison();
+        const VerificationOutcome outcome = blocked ? *blocked : runComparison(session);
 
         // Kept as a live check because "the test did nothing and went green" is the
         // failure this harness exists to catch.
@@ -135,7 +136,8 @@ protected:
         reportOutcome(outcome);
     }
 
-    virtual void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack);
+    virtual void executeGraphThroughEngine(GraphSession& session,
+                                           std::unordered_map<int64_t, void*>& variantPack);
     virtual void runReferenceExecutor(ReferenceExecutorType type,
                                       std::unordered_map<int64_t, void*>& variantPack);
     virtual std::unique_ptr<IReferenceGraphExecutor>
@@ -144,14 +146,18 @@ protected:
     virtual bool isEnforcingSupportClaims() const;
     virtual void applyMetadataGuards() const;
 
-    // Virtual so deviceless tests can observe the non-FULL routing decision without
-    // reaching getSharedHandle(). The real implementation needs a device.
-    virtual VerificationOutcome enforceAtLevel(EnforcementLevel level);
+    // The one place a graph is built and the ranked list is asked for. Virtual
+    // because both need a handle: the deviceless unit harnesses return a session
+    // with a canned `engines` and no graph.
+    virtual GraphSession openGraph();
 
-    // Virtual for the same reason: the real implementation needs a handle to build
-    // the graph and ask for the ranked engine list. Deviceless harnesses return an
-    // empty observation.
-    virtual SupportObservation observeSupportForBundle();
+    // Virtual so a deviceless harness can inject verdicts without writing a sidecar
+    // for each one. The real implementation is a pure decision over the session.
+    virtual SupportObservation adjudicateClaims(const GraphSession& session);
+
+    // Virtual so deviceless tests can observe the non-FULL routing decision without
+    // reaching a real graph. The real implementation compiles plans.
+    virtual VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& session);
 
     // Protected so a stubbed enforceAtLevel() can exit the same way the real one
     // does when it cannot verify: records the bundle as unverifiable and yields the
@@ -175,13 +181,9 @@ protected:
     }
 
 private:
-    // Bumps the process-wide coverage counters, and fails this test if a sidecar
-    // exists that the query somehow did not reach.
+    // Applies the coverage rules to the process-wide counters, and fails this test
+    // if a sidecar exists that the query somehow did not reach.
     void recordClaimCoverage(const SupportObservation& observation);
-
-    // nullopt when the claims held and the comparison may run; otherwise the outcome
-    // that stands in for it, carrying every failing verdict's message.
-    std::optional<VerificationOutcome> claimBlocked(const SupportObservation& observation) const;
 
     // Publishes every verdict, promoting the engine-under-test's accepted claim by
     // what the run actually achieved. Called exactly once per test.
@@ -198,24 +200,12 @@ private:
                                   : VerificationDepth::VERIFIED;
     }
 
-    // Ranked-engine query result, populated by observeSupportForBundle() and reused
-    // by the executor and the enforcement rungs so one test makes one heuristic
-    // query instead of two.
-    struct RankedQuery
-    {
-        bool ran = false;
-        hipdnn_frontend::ErrorCode statusCode = hipdnn_frontend::ErrorCode::OK;
-        std::string statusMessage;
-        std::vector<int64_t> rankedIds;
-    };
-
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
     SupportClaimLocator _claimLocator;
     std::shared_ptr<IntegrationTestBundle> _bundle;
     InputFillRecipes _inputFillRecipes;
     std::optional<LoadedEngine> _engineUnderTest;
-    RankedQuery _query;
 
     enum class RefStatus
     {
@@ -242,18 +232,10 @@ private:
         OutputTensors outputs;
     };
 
-    VerificationOutcome runComparison();
-    VerificationOutcome runGoldenMode();
-    VerificationOutcome runExplicitRefMode(ReferenceExecutorType type);
-    VerificationOutcome runAutoMode();
-
-    // Builds the bundle's graph on the shared handle. Returns the frontend's message
-    // on failure, empty on success — callers choose how loud to be.
-    std::string buildGraph(hipdnn_frontend::graph::Graph& graph) const;
-
-    // One heuristic query per test. The ranked list is a property of (graph, handle),
-    // so a second call fans out to every plugin again for the same answer.
-    const RankedQuery& rankedEngineIds(hipdnn_frontend::graph::Graph& graph);
+    VerificationOutcome runComparison(GraphSession& session);
+    VerificationOutcome runGoldenMode(GraphSession& session);
+    VerificationOutcome runExplicitRefMode(GraphSession& session, ReferenceExecutorType type);
+    VerificationOutcome runAutoMode(GraphSession& session);
 
     // nullopt when the inputs are ready; otherwise the outcome to return.
     std::optional<VerificationOutcome> prepareInputs();
@@ -262,7 +244,7 @@ private:
     OutputTensors allocateSentinelOutputs() const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
                                                         bool useDevice) const;
-    EngineRunResult runEngine();
+    EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
     RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,

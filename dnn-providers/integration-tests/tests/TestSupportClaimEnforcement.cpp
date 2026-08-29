@@ -5,10 +5,10 @@
 // short-circuit, and an accepted claim is only published as confirmed support once
 // the engine has actually run the graph green.
 //
-// These drive the real TestBody() through a deviceless harness. The claim query is
-// stubbed at the observeSupportForBundle() seam — the seam exists precisely because
-// the real one needs a handle — so the assertions cover the routing and the
-// two-phase commit, not the backend.
+// These drive the real TestBody() through a deviceless harness. The graph and the
+// claim verdicts are stubbed at the openGraph() and adjudicateClaims() seams — they
+// exist precisely because the real ones need a handle — so the assertions cover the
+// routing and the two-phase commit, not the backend.
 
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
@@ -109,12 +109,21 @@ protected:
         return true;
     }
 
-    SupportObservation observeSupportForBundle() override
+    // No graph, no device: the session carries only what the decisions read.
+    GraphSession openGraph() override
+    {
+        GraphSession session;
+        session.engines.accepted = true;
+        return session;
+    }
+
+    SupportObservation adjudicateClaims(const GraphSession&) override
     {
         return _observation;
     }
 
-    void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack) override
+    void executeGraphThroughEngine(GraphSession& /*session*/,
+                                   std::unordered_map<int64_t, void*>& variantPack) override
     {
         _comparisonReached = true;
         auto* ptr = static_cast<float*>(variantPack.at(K_OUTPUT_UID));
@@ -148,7 +157,7 @@ protected:
 
     void applyMetadataGuards() const override {}
 
-    VerificationOutcome enforceAtLevel(EnforcementLevel) override
+    VerificationOutcome enforceAtLevel(EnforcementLevel, GraphSession& /*session*/) override
     {
         if(_enforceOutcome.has_value())
         {

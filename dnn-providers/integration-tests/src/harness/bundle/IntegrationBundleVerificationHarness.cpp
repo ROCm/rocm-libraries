@@ -37,76 +37,57 @@
 namespace hipdnn_integration_tests::bundle
 {
 
-// ---- shared graph plumbing -------------------------------------------------
+// ---- the one graph, the one query ------------------------------------------
 
-std::string
-    IntegrationBundleVerificationHarness::buildGraph(hipdnn_frontend::graph::Graph& graph) const
+GraphSession IntegrationBundleVerificationHarness::openGraph()
 {
+    GraphSession session;
+    if(_bundle == nullptr)
+    {
+        return session;
+    }
+
     auto handle = getSharedHandle();
+    session.graph = std::make_unique<hipdnn_frontend::graph::Graph>();
 
     const std::vector<uint8_t> graphBytes(
         _bundle->graphBuffer.data(), _bundle->graphBuffer.data() + _bundle->graphBuffer.size());
 
-    auto err = graph.from_binary(handle, graphBytes);
-    return err.is_good() ? std::string{} : err.get_message();
-}
-
-const IntegrationBundleVerificationHarness::RankedQuery&
-    IntegrationBundleVerificationHarness::rankedEngineIds(hipdnn_frontend::graph::Graph& graph)
-{
-    if(!_query.ran)
+    if(auto err = session.graph->from_binary(handle, graphBytes); !err.is_good())
     {
-        std::vector<int64_t> ids;
-        auto status = graph.get_ranked_engine_ids(ids);
-        _query.ran = true;
-        _query.statusCode = status.get_code();
-        _query.statusMessage = status.get_message();
-        _query.rankedIds = std::move(ids);
+        session.buildError = err.get_message();
+        return session;
     }
-    return _query;
+
+    // The only heuristic query this test makes. It is a pure read on the graph — the
+    // executor calls create_execution_plans() on this same object afterwards, which
+    // is what the unpinned path has always done.
+    std::vector<int64_t> ids;
+    auto status = session.graph->get_ranked_engine_ids(ids);
+    session.engines.status = status.get_code();
+    session.engines.statusMessage = status.get_message();
+    session.engines.rankedIds = std::move(ids);
+    session.engines.accepted
+        = enginesAccept(session.engines.status, session.engines.rankedIds, _engineUnderTest);
+
+    return session;
 }
 
 // ---- virtual defaults ------------------------------------------------------
 
 void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
-    std::unordered_map<int64_t, void*>& variantPack)
+    GraphSession& session, std::unordered_map<int64_t, void*>& variantPack)
 {
     auto handle = getSharedHandle();
 
-    hipdnn_frontend::graph::Graph graph;
-    const auto buildError = buildGraph(graph);
-    ASSERT_TRUE(buildError.empty()) << "from_binary failed: " << buildError;
+    ASSERT_NE(session.graph, nullptr) << "openGraph() produced no graph to execute";
+    auto& graph = *session.graph;
 
-    // Reuses the ranked list TestBody() already asked for when enforcement is on.
-    const RankedQuery& query = rankedEngineIds(graph);
-    const bool queryFailed = query.statusCode != hipdnn_frontend::ErrorCode::OK;
-    const std::vector<int64_t>& engineIds = query.rankedIds;
-
-    const auto graphSummary = [&] {
-        return std::to_string(_bundle->outputTensorUids.size()) + " output tensor(s), "
-               + std::to_string(engineIds.size()) + " ranked engine(s)";
-    };
-
+    // Applicability was settled once, in openGraph(); runEngine() has already turned
+    // a decline into a skip, so reaching here means the engine takes this graph.
     if(_engineUnderTest.has_value())
     {
-        const int64_t targetEngineId = _engineUnderTest->id;
-
-        if(queryFailed
-           || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
-        {
-            throw EngineNotApplicableError("Engine " + _engineUnderTest->name
-                                           + " does not support this graph (" + graphSummary()
-                                           + ")");
-        }
-        graph.set_preferred_engine_id_ext(targetEngineId);
-    }
-    else
-    {
-        if(queryFailed || engineIds.empty())
-        {
-            throw EngineNotApplicableError("No engine supports this graph (" + graphSummary()
-                                           + ")");
-        }
+        graph.set_preferred_engine_id_ext(_engineUnderTest->id);
     }
 
     auto result = graph.create_execution_plans();
@@ -165,56 +146,43 @@ bool IntegrationBundleVerificationHarness::isEnforcingSupportClaims() const
 
 // ---- support claims --------------------------------------------------------
 
-SupportObservation IntegrationBundleVerificationHarness::observeSupportForBundle()
+SupportObservation
+    IntegrationBundleVerificationHarness::adjudicateClaims(const GraphSession& session)
 {
     if(_bundle == nullptr || !shouldEnforceClaims())
     {
         return {};
     }
 
-    hipdnn_frontend::graph::Graph graph;
-    if(const auto buildError = buildGraph(graph); !buildError.empty())
+    if(!session.buildError.empty())
     {
-        // ADD_FAILURE rather than ASSERT_TRUE: this runs before runComparison(), and
-        // the executor's own ASSERT on the same call would otherwise be shadowed.
-        ADD_FAILURE() << "from_binary failed: " << buildError;
+        // ADD_FAILURE rather than ASSERT: this runs before runComparison(), which
+        // reports the same build failure as an outcome; asserting here would hide it.
+        ADD_FAILURE() << "from_binary failed: " << session.buildError;
         return {};
     }
 
-    const RankedQuery& query = rankedEngineIds(graph);
-
-    return observeSupport(query.statusCode,
-                          query.rankedIds,
+    return observeSupport(session.engines,
                           _claimLocator,
                           *_engineUnderTest,
                           baseArchToken(TestConfig::get().getCurrentArch()),
-                          currentPlatform(),
-                          query.statusMessage);
+                          currentPlatform());
 }
 
 void IntegrationBundleVerificationHarness::recordClaimCoverage(
     const SupportObservation& observation)
 {
-    const bool sidecarWasRead = observation.sidecar == SidecarState::CHECKED;
+    const CoverageUpdate update = coverageFor(observation, shouldEnforceClaims());
 
-    if(sidecarWasRead)
+    if(update.queried)
     {
         supportClaimCoverage().graphsQueried++;
-        if(!observation.hasApplicableClaim())
-        {
-            // Read in full, but silent about this arch/platform/case. Counted so
-            // "we checked and it holds" reads differently from "we checked and
-            // nobody had said anything" — the verdict tallies look the same for
-            // both, and only one of them means the cell is covered.
-            supportClaimCoverage().graphsWithNoApplicableClaim++;
-        }
     }
-
-    // Per-graph coverage check. The run-level guard only fires when *no* graph
-    // anywhere was queried, so a partial gap slips past it. Per graph, a future
-    // short-circuit above the query is loud straight away instead of hiding behind
-    // one healthy bundle.
-    if(shouldEnforceClaims() && !sidecarWasRead)
+    if(update.noApplicableClaim)
+    {
+        supportClaimCoverage().graphsWithNoApplicableClaim++;
+    }
+    if(update.missedQuery)
     {
         ADD_FAILURE() << "support claims exist for " << _bundlePath
                       << " but were never queried; enforcement would have passed "
@@ -222,73 +190,20 @@ void IntegrationBundleVerificationHarness::recordClaimCoverage(
     }
 }
 
-std::optional<VerificationOutcome>
-    IntegrationBundleVerificationHarness::claimBlocked(const SupportObservation& observation) const
-{
-    std::string aggregate;
-    for(const auto& result : observation.results)
-    {
-        if(isFailure(result.verdict))
-        {
-            // Gathered up rather than failed on sight, so one FAIL() names every
-            // failing verdict instead of the first one hiding the rest.
-            aggregate += formatVerdictMessage(result);
-        }
-    }
-
-    if(aggregate.empty())
-    {
-        return std::nullopt;
-    }
-
-    // CLAIM_BROKEN and QUERY_ERRORED both mean the engine will not take this graph:
-    // the first because it is not in the ranked list, the second because the list
-    // cannot be trusted at all. Either way the engine is what stands between this
-    // bundle and a verdict, so the outcome names it as the cause.
-    return VerificationOutcome::failed(
-        VerificationDepth::NOT_REACHED, FailureOrigin::ENGINE, std::move(aggregate));
-}
-
-// An accepted claim is a reading of the ranked list, taken before the graph was
-// built or run. Publishing it as working support when the same test then failed to
-// build, run, or match would put a cell in the support matrix that the run just
-// showed does not work — so the promotion happens here, once, from the outcome the
-// body returned, and only for the engine this test actually drove.
+// The decision is finalizeClaims(); this only publishes what it returns. results is
+// only ever non-empty when an engine was injected, so there is no engine-less case
+// to handle here.
 void IntegrationBundleVerificationHarness::commitClaims(const std::vector<SupportResult>& results,
                                                         const VerificationOutcome& outcome)
 {
-    // results is only ever non-empty when an engine was injected, so there is no
-    // engine-less case to handle here.
     if(!_engineUnderTest.has_value())
     {
         return;
     }
 
-    const VerificationDepth required = bundleRequiredDepth();
-    const std::string& underTest = _engineUnderTest->name;
-
-    for(auto record : results)
+    for(const auto& record :
+        finalizeClaims(results, _engineUnderTest->name, outcome, bundleRequiredDepth()))
     {
-        if(record.engineName != underTest)
-        {
-            // Another engine's claim, decided from the same ranked list but never run
-            // here. The run has no evidence either way, so it passes through.
-            SupportClaimVerdicts::get().record(record);
-            continue;
-        }
-
-        if(record.verdict == SupportVerdict::CLAIM_ACCEPTED)
-        {
-            record.verdict = promoteAcceptedClaim(outcome, required);
-            record.detail = describeOutcome(outcome, required);
-        }
-        else if(record.verdict == SupportVerdict::UNCLAIMED_SUPPORT)
-        {
-            // Drift is worth more when the graph actually ran: it is the difference
-            // between "add this cell to the sidecar" and "the ranked list said so and
-            // nothing tried it".
-            record.detail += " (" + describeOutcome(outcome, required) + ")";
-        }
         SupportClaimVerdicts::get().record(record);
     }
 }
@@ -319,7 +234,8 @@ void IntegrationBundleVerificationHarness::reportOutcome(const VerificationOutco
     }
 }
 
-VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level)
+VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level,
+                                                                         GraphSession& session)
 {
     if(level == EnforcementLevel::FULL)
     {
@@ -336,24 +252,11 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
         return unverifiable("enforcement_level requires --test-engine");
     }
 
-    hipdnn_frontend::graph::Graph graph;
-    if(const auto buildError = buildGraph(graph); !buildError.empty())
-    {
-        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
-                                           FailureOrigin::ENGINE,
-                                           "from_binary failed: " + buildError);
-    }
-
-    const RankedQuery& query = rankedEngineIds(graph);
-
     const std::string rung
         = level == EnforcementLevel::APPLICABILITY ? "applicability" : "buildable";
 
-    const int64_t targetEngineId = _engineUnderTest->id;
-
-    if(query.statusCode != hipdnn_frontend::ErrorCode::OK
-       || std::find(query.rankedIds.begin(), query.rankedIds.end(), targetEngineId)
-              == query.rankedIds.end())
+    // Same applicability answer the claim verdict and the executor read.
+    if(!session.engines.accepted)
     {
         return unverifiable("Engine " + _engineUnderTest->name
                             + " does not support this graph (enforcement_level=" + rung + ")");
@@ -366,7 +269,8 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
 
     // BUILDABLE: additionally compile plans. A rung failure is the engine's doing,
     // and says so through the outcome rather than through a bare assertion.
-    graph.set_preferred_engine_id_ext(targetEngineId);
+    auto& graph = *session.graph;
+    graph.set_preferred_engine_id_ext(_engineUnderTest->id);
 
     const auto rungFailure = [](const hipdnn_frontend::Error& error) {
         return VerificationOutcome::failed(VerificationDepth::APPLICABLE,
@@ -389,11 +293,21 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
 
-VerificationOutcome IntegrationBundleVerificationHarness::runComparison()
+VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSession& session)
 {
+    // A graph that would not load is the engine's problem, at every level, and it is
+    // the reason nothing below can run. Checked once, here, so the rungs and the
+    // modes can all assume a usable session.
+    if(!session.buildError.empty())
+    {
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::ENGINE,
+                                           "from_binary failed: " + session.buildError);
+    }
+
     if(_bundle->metadata.enforcementLevel != EnforcementLevel::FULL)
     {
-        return enforceAtLevel(_bundle->metadata.enforcementLevel);
+        return enforceAtLevel(_bundle->metadata.enforcementLevel, session);
     }
 
     if(_bundle->outputTensorUids.empty())
@@ -409,13 +323,13 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison()
     switch(getVerificationMode())
     {
     case VerificationMode::GOLDEN:
-        return runGoldenMode();
+        return runGoldenMode(session);
     case VerificationMode::GPU:
-        return runExplicitRefMode(ReferenceExecutorType::GPU);
+        return runExplicitRefMode(session, ReferenceExecutorType::GPU);
     case VerificationMode::CPU:
-        return runExplicitRefMode(ReferenceExecutorType::CPU);
+        return runExplicitRefMode(session, ReferenceExecutorType::CPU);
     case VerificationMode::AUTO:
-        return runAutoMode();
+        return runAutoMode(session);
     default:
         return VerificationOutcome::failed(
             VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, "Unknown verification mode");
@@ -441,7 +355,7 @@ VerificationOutcome
     return VerificationOutcome::failed(VerificationDepth::NOT_REACHED, FailureOrigin::ENGINE, {});
 }
 
-VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode()
+VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSession& session)
 {
     // An explicit --verification-mode=golden is a demand for a specific oracle, not
     // a preference. Skipping when that oracle is absent means the run did not do
@@ -456,7 +370,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode()
             "data; run `dvc pull` for it, or use --verification-mode=auto");
     }
 
-    auto engine = runEngine();
+    auto engine = runEngine(session);
     if(engine.status != EngineStatus::RAN)
     {
         return engineDidNotRun(engine);
@@ -465,9 +379,10 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode()
 }
 
 VerificationOutcome
-    IntegrationBundleVerificationHarness::runExplicitRefMode(ReferenceExecutorType type)
+    IntegrationBundleVerificationHarness::runExplicitRefMode(GraphSession& session,
+                                                             ReferenceExecutorType type)
 {
-    auto engine = runEngine();
+    auto engine = runEngine(session);
     if(engine.status != EngineStatus::RAN)
     {
         return engineDidNotRun(engine);
@@ -494,9 +409,9 @@ VerificationOutcome
     }
 }
 
-VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode()
+VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSession& session)
 {
-    auto engine = runEngine();
+    auto engine = runEngine(session);
     if(engine.status != EngineStatus::RAN)
     {
         return engineDidNotRun(engine);
@@ -662,18 +577,37 @@ std::unordered_map<int64_t, void*>
 }
 
 IntegrationBundleVerificationHarness::EngineRunResult
-    IntegrationBundleVerificationHarness::runEngine()
+    IntegrationBundleVerificationHarness::runEngine(GraphSession& session)
 {
     EngineRunResult run;
+
+    // Decided once, in openGraph(). Asking the executor to work this out again is
+    // what used to make one fact three different pieces of code. A harness that
+    // stubs the executor states what it is simulating by setting engines.accepted.
+    if(!session.engines.accepted)
+    {
+        const auto summary
+            = std::to_string(_bundle->outputTensorUids.size()) + " output tensor(s), "
+              + std::to_string(session.engines.rankedIds.size()) + " ranked engine(s)";
+        run.status = EngineStatus::DECLINED;
+        run.message = _engineUnderTest.has_value()
+                          ? "Engine " + _engineUnderTest->name + " does not support this graph ("
+                                + summary + ")"
+                          : "No engine supports this graph (" + summary + ")";
+        return run;
+    }
+
     run.outputs = allocateSentinelOutputs();
     auto variantPack = buildVariantPack(run.outputs, /*useDevice=*/_requiresDevice);
 
     try
     {
-        executeGraphThroughEngine(variantPack);
+        executeGraphThroughEngine(session, variantPack);
     }
     catch(const EngineNotApplicableError& e)
     {
+        // Still caught: a stubbed executor may raise it, and a provider is free to
+        // decline later than the ranked list suggested.
         run.status = EngineStatus::DECLINED;
         run.message = e.what();
         return run;

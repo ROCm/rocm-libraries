@@ -35,6 +35,23 @@ struct SupportClaimCoverage
 // registration-time factory lambda, so there is no seam to inject it through.
 SupportClaimCoverage& supportClaimCoverage();
 
+// What one graph's observation does to the coverage counters, and whether it is a
+// harness bug. Separated from the counters themselves so the rules are testable
+// without the process-wide singleton below.
+struct CoverageUpdate
+{
+    bool queried = false; ///< bump graphsQueried
+    bool noApplicableClaim = false; ///< bump graphsWithNoApplicableClaim
+    /// A sidecar exists and enforcement is on, but the query never happened. The
+    /// run-level guard only fires when *no* graph anywhere was queried, so a partial
+    /// gap needs its own signal; this one fails the individual test.
+    bool missedQuery = false;
+};
+
+// `enforcementExpected` is the harness's shouldEnforceClaims(): a sidecar exists,
+// enforcement is on, and an engine was named to decide against.
+CoverageUpdate coverageFor(const SupportObservation& observation, bool enforcementExpected);
+
 class SupportClaimVerdicts
 {
 public:

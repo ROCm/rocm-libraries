@@ -110,41 +110,72 @@ Three notes on the non-obvious ones:
 
 ## Lifecycle in `TestBody()`
 
-Three phases, in order, each producing a value the next one consumes. Nothing under
-`TestBody()` calls `GTEST_SKIP()` or `FAIL()` where it stands — the body returns a
-`VerificationOutcome`, and the verdict and the test result are both derived from it
-in one place each.
+One graph, then three phases, each producing a value the next one consumes. Nothing
+under `TestBody()` calls `GTEST_SKIP()` or `FAIL()` where it stands — the body
+returns a `VerificationOutcome`, and the verdict and the test result are both
+derived from it in one place each.
 
 ```mermaid
 graph TD
-  A["observeSupportForBundle()<br/>ONE ranked-engine query"] --> B{"sidecar read?"}
+  Z["openGraph()<br/>ONE from_binary + ONE ranked query"] --> A["adjudicateClaims(session)"]
+  A --> B{"sidecar read?"}
   B -->|yes| C["graphsQueried++"]
   B -->|no| D{"but a sidecar<br/>exists on disk?"}
-  D -->|yes| E["ADD_FAILURE<br/>coverage invariant"]
+  D -->|yes| E["ADD_FAILURE<br/>coverage check"]
   D -->|no| F
   C --> F{"any CLAIM_BROKEN<br/>or QUERY_ERRORED?"}
   F -->|yes| G["outcome = FAILED · ENGINE<br/>comparison not attempted"]
-  F -->|no| H["outcome = runComparison()<br/>mode dispatch, fallback chain intact"]
+  F -->|no| H["outcome = runComparison(session)<br/>mode dispatch, fallback chain intact"]
   G --> I["commitClaims(outcome)<br/>ACCEPTED → CONFIRMED / FAILED_IN_USE"]
   H --> I
   I --> J["reportOutcome(outcome)<br/>the only SKIP / FAIL"]
 ```
 
-### Phase 1 — query, above everything
+### One graph, one query, one applicability answer
 
-`observeSupportForBundle()` builds the graph, makes one `get_ranked_engine_ids()`
-call, and hands the result to `observeSupport()` for the set comparison. It returns
-`{sidecar, results}`.
+`openGraph()` is the only place a graph is built and the only place
+`get_ranked_engine_ids()` is called. It returns a `GraphSession`, which `TestBody()`
+hands to everything below it:
 
-It sits **above `runComparison()` on purpose.** The query needs only `from_binary`
-plus the ranked list — no inputs, no outputs, no golden data, no execution — so
-nothing in the comparison path is a prerequisite for it. Every early return inside
-`runComparison()` (no output tensors, inputs unavailable, non-`FULL` routing)
-would otherwise leave that graph's claims unqueried while the run still exited 0.
+```cpp
+struct GraphSession
+{
+    std::unique_ptr<Graph> graph;   // null ⇒ build failed, or a deviceless stub
+    std::string buildError;
+    RankedEngines engines;          // status, message, rankedIds, accepted
+};
+```
+
+`engines.accepted` is computed once, by `enginesAccept()`, and is the single
+definition of "will this engine take this graph". The claim verdict, `runEngine()`
+and the enforcement rungs all read that one bool, so a graph cannot be a broken
+claim to one of them and an engine decline to another. Before this, three places
+each rebuilt the graph and spelled the predicate their own way.
+
+`RankedEngines` is split out from the session on purpose: every decision needs only
+that part, and that part needs no device, no handle and no graph — so the decisions
+are unit-testable on their own (`TestGraphSession`).
+
+### Phase 1 — claims, above everything
+
+`adjudicateClaims(session)` hands `session.engines` to `observeSupport()` for the set
+comparison and returns `{sidecar, results}`.
+
+It sits **above `runComparison()` on purpose.** Adjudication needs only the ranked
+list — no inputs, no outputs, no golden data, no execution — so nothing in the
+comparison path is a prerequisite for it. Every early return inside
+`runComparison()` (build failure, no output tensors, inputs unavailable, non-`FULL`
+routing) would otherwise leave that graph's claims undecided while the run still
+exited 0.
 
 It returns an empty observation, touching nothing, when no engine was injected, no
-sidecar exists, or enforcement is off. That guard order is what lets the deviceless
-unit harnesses run `TestBody()` without ever reaching `getSharedHandle()`.
+sidecar exists, or enforcement is off.
+
+Both `openGraph()` and `adjudicateClaims()` are virtual: the first needs a handle,
+the second is where a deviceless test injects verdicts without writing a sidecar per
+case. A harness that stubs the executor stubs `openGraph()` too, and says what it is
+simulating by setting `engines.accepted` — otherwise it would open a real graph just
+to be told nobody ranked it.
 
 ### Coverage accounting
 

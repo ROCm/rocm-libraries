@@ -16,6 +16,21 @@ SupportClaimCoverage& supportClaimCoverage()
     return s_coverage;
 }
 
+CoverageUpdate coverageFor(const SupportObservation& observation, bool enforcementExpected)
+{
+    const bool read = observation.sidecar == SidecarState::CHECKED;
+
+    CoverageUpdate update;
+    update.queried = read;
+    // Read in full, but silent about this arch/platform/case. Counted so "we checked
+    // and it holds" reads differently from "we checked and nobody had said anything"
+    // — the verdict tallies look the same for both, and only one of them means the
+    // cell is covered.
+    update.noApplicableClaim = read && !observation.hasApplicableClaim();
+    update.missedQuery = enforcementExpected && !read;
+    return update;
+}
+
 bool verifiedNothing(const SupportClaimCoverage& coverage)
 {
     return coverage.graphsWithClaims > 0 && coverage.graphsQueried == 0;

@@ -5,19 +5,19 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <hipdnn_frontend/Error.hpp>
 
+#include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
-
-struct LoadedEngine;
 
 /// Outcome for one graph, adjudicated against the single engine under test.
 ///
@@ -121,9 +121,9 @@ struct SupportObservation
 /// Decide this graph's claim for the engine under test, from one ranked-engine
 /// query.
 ///
-/// `errorCode` / `rankedIds` come from one `Graph::get_ranked_engine_ids()` call.
-/// `arch` / `platform` are passed in rather than read from TestConfig so this stays
-/// a pure function.
+/// `engines` is the result of the single `Graph::get_ranked_engine_ids()` call this
+/// test makes; `arch` / `platform` are passed in rather than read from TestConfig,
+/// so this stays a pure function.
 ///
 /// Returns at most one result: the claim's verdict if the sidecar names this engine
 /// for this cell, otherwise UNCLAIMED_SUPPORT if the engine takes the graph anyway,
@@ -131,13 +131,36 @@ struct SupportObservation
 /// way.
 ///
 /// Throws std::runtime_error if the sidecar exists but cannot be opened or parsed.
-SupportObservation observeSupport(hipdnn_frontend::ErrorCode errorCode,
-                                  const std::vector<int64_t>& rankedIds,
+SupportObservation observeSupport(const RankedEngines& engines,
                                   const SupportClaimLocator& locator,
                                   const LoadedEngine& engineUnderTest,
                                   std::string_view arch,
-                                  std::string_view platform,
-                                  std::string_view queryMessage = {});
+                                  std::string_view platform);
+
+/// Should the comparison be skipped because a claim already failed?
+///
+/// nullopt when the claims held and the test may run. Otherwise the outcome that
+/// stands in for the comparison, carrying every failing verdict's message.
+///
+/// A broken claim means the engine will not take the graph, so running the
+/// comparison would execute nothing, leave the NaN sentinel outputs untouched, and
+/// print a full tensor diff on top of the real message.
+std::optional<VerificationOutcome> claimBlocked(const SupportObservation& observation);
+
+/// The verdicts to publish for this test, given what the run achieved.
+///
+/// Only the engine this test drove can be promoted: an accepted claim is a reading
+/// of the ranked list taken before the graph was built or run, and only execution
+/// can turn it into confirmed support or knock it back. Other engines' verdicts pass
+/// through untouched — this run never executed them, so it has no evidence either
+/// way. Positive drift for the engine under test keeps its verdict but picks up how
+/// far the run got.
+///
+/// Every input verdict comes back exactly once, so the report cannot lose rows.
+std::vector<SupportResult> finalizeClaims(std::vector<SupportResult> results,
+                                          std::string_view engineUnderTest,
+                                          const VerificationOutcome& outcome,
+                                          VerificationDepth required);
 
 /// "gfx942:sramecc+:xnack-" -> "gfx942"
 std::string baseArchToken(std::string_view fullArch);

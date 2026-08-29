@@ -85,14 +85,9 @@ SupportVerdict promoteAcceptedClaim(const VerificationOutcome& outcome, Verifica
 namespace
 {
 
-// Whitelist: only these two codes mean the query resolved and we can trust the
-// ranked list. Everything else (including future enum values) is unresolved —
-// fail closed toward "cannot evaluate", never toward a false "declined".
-bool isResolved(hipdnn_frontend::ErrorCode code)
-{
-    return code == hipdnn_frontend::ErrorCode::OK
-           || code == hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED;
-}
+// isResolved() lives in GraphSession.hpp: the executor and the enforcement rungs
+// need the same answer, and one graph cannot be "unresolved" to the claim verdict
+// and "declined" to everything else.
 
 SupportResult makeResult(SupportVerdict verdict,
                          const SupportClaimLocator& locator,
@@ -151,13 +146,11 @@ std::string formatVerdictMessage(const SupportResult& result)
     return os.str();
 }
 
-SupportObservation observeSupport(hipdnn_frontend::ErrorCode errorCode,
-                                  const std::vector<int64_t>& rankedIds,
+SupportObservation observeSupport(const RankedEngines& engines,
                                   const SupportClaimLocator& locator,
                                   const LoadedEngine& engineUnderTest,
                                   std::string_view arch,
-                                  std::string_view platform,
-                                  std::string_view queryMessage)
+                                  std::string_view platform)
 {
     if(locator.sidecarPath.empty() || !std::filesystem::exists(locator.sidecarPath))
     {
@@ -178,11 +171,10 @@ SupportObservation observeSupport(hipdnn_frontend::ErrorCode errorCode,
                                    .isClaimed(engineName, archToken, platformToken);
 
     // An unresolved status means the ranked list cannot be trusted, so a claim lands
-    // on QUERY_ERRORED rather than a false CLAIM_BROKEN.
-    const bool resolved = isResolved(errorCode);
-    const bool accepted
-        = resolved
-          && std::find(rankedIds.begin(), rankedIds.end(), engineUnderTest.id) != rankedIds.end();
+    // on QUERY_ERRORED rather than a false CLAIM_BROKEN. `accepted` is the same
+    // answer the executor and the enforcement rungs act on, taken at the query.
+    const bool resolved = isResolved(engines.status);
+    const bool accepted = engines.accepted;
 
     SupportObservation observation;
     observation.sidecar = SidecarState::CHECKED;
@@ -195,9 +187,9 @@ SupportObservation observeSupport(hipdnn_frontend::ErrorCode errorCode,
                                                  arch,
                                                  platform,
                                                  "sidecar claims support, but query returned "
-                                                     + hipdnn_frontend::to_string(errorCode),
-                                                 errorCode,
-                                                 queryMessage));
+                                                     + hipdnn_frontend::to_string(engines.status),
+                                                 engines.status,
+                                                 engines.statusMessage));
     }
     else if(claimed)
     {
@@ -209,9 +201,9 @@ SupportObservation observeSupport(hipdnn_frontend::ErrorCode errorCode,
                        platform,
                        accepted ? "engine in ranked list"
                                 : "sidecar claims support, but engine not in ranked list (status="
-                                      + hipdnn_frontend::to_string(errorCode) + ")",
-                       errorCode,
-                       queryMessage));
+                                      + hipdnn_frontend::to_string(engines.status) + ")",
+                       engines.status,
+                       engines.statusMessage));
     }
     else if(accepted)
     {
@@ -224,11 +216,67 @@ SupportObservation observeSupport(hipdnn_frontend::ErrorCode errorCode,
                        arch,
                        platform,
                        "engine supports this graph but has no claim in the sidecar",
-                       errorCode,
-                       queryMessage));
+                       engines.status,
+                       engines.statusMessage));
     }
 
     return observation;
+}
+
+std::optional<VerificationOutcome> claimBlocked(const SupportObservation& observation)
+{
+    std::string aggregate;
+    for(const auto& result : observation.results)
+    {
+        if(isFailure(result.verdict))
+        {
+            // Gathered up rather than failed on sight, so one FAIL() names every
+            // failing verdict instead of the first one hiding the rest.
+            aggregate += formatVerdictMessage(result);
+        }
+    }
+
+    if(aggregate.empty())
+    {
+        return std::nullopt;
+    }
+
+    // CLAIM_BROKEN and QUERY_ERRORED both mean the engine will not take this graph:
+    // the first because it is not in the ranked list, the second because the list
+    // cannot be trusted at all. Either way the engine is what stands between this
+    // bundle and a verdict, so the outcome names it as the cause.
+    return VerificationOutcome::failed(
+        VerificationDepth::NOT_REACHED, FailureOrigin::ENGINE, std::move(aggregate));
+}
+
+std::vector<SupportResult> finalizeClaims(std::vector<SupportResult> results,
+                                          std::string_view engineUnderTest,
+                                          const VerificationOutcome& outcome,
+                                          VerificationDepth required)
+{
+    for(auto& record : results)
+    {
+        if(record.engineName != engineUnderTest)
+        {
+            // Another engine's claim, decided from the same ranked list but never run
+            // here. The run has no evidence either way, so it passes through.
+            continue;
+        }
+
+        if(record.verdict == SupportVerdict::CLAIM_ACCEPTED)
+        {
+            record.verdict = promoteAcceptedClaim(outcome, required);
+            record.detail = describeOutcome(outcome, required);
+        }
+        else if(record.verdict == SupportVerdict::UNCLAIMED_SUPPORT)
+        {
+            // Drift is worth more when the graph actually ran: it is the difference
+            // between "add this cell to the sidecar" and "the ranked list said so and
+            // nothing tried it".
+            record.detail += " (" + describeOutcome(outcome, required) + ")";
+        }
+    }
+    return results;
 }
 
 } // namespace hipdnn_integration_tests::bundle

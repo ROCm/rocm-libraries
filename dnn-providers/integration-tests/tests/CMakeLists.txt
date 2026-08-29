@@ -5,6 +5,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     ../src/harness/bundle/BundleReferenceValidationHarness.cpp
+    ../src/harness/bundle/GraphSession.cpp
     ../src/harness/bundle/ReferenceOpCoverage.cpp
     ../src/harness/bundle/SupportClaimReport.cpp
     ../src/harness/bundle/SupportClaims.cpp
@@ -40,6 +41,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSupportClaimReport.cpp
     TestSupportClaimEnforcement.cpp
     TestSupportVerdict.cpp
+    TestGraphSession.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
