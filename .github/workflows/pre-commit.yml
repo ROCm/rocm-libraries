@@ -65,9 +65,10 @@ jobs:
       - name: Sparse-checkout changed projects
         run: |
           # Reduce each changed path to its project prefix and materialize only
-          # those subtrees.
-          mapfile -t DIRS < <(git diff --name-only "${FROM_REF}...HEAD" \
-            | awk -F/ 'NF==2{print $1} NF>=3{print $1"/"$2}' | sort -u)
+          # those subtrees. tools/lint is always materialized because the
+          # dependency-pins hook is always_run and lives there.
+          mapfile -t DIRS < <( { git diff --name-only "${FROM_REF}...HEAD" \
+            | awk -F/ 'NF==2{print $1} NF>=3{print $1"/"$2}'; echo tools/lint; } | sort -u)
           git sparse-checkout set --cone "${DIRS[@]}"
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0

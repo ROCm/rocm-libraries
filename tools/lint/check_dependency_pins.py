@@ -111,8 +111,7 @@ def mentions(block: str, keyword: str, values: dict[str, list[str]]) -> bool:
     return False
 
 
-def check_file(path: pathlib.Path) -> list[tuple[int, str, str]]:
-    raw = path.read_text(encoding="utf-8", errors="replace")
+def check_text(raw: str) -> list[tuple[int, str, str]]:
     text = strip_comments(raw)
     values = set_values(text)
     findings: list[tuple[int, str, str]] = []
@@ -128,12 +127,18 @@ def check_file(path: pathlib.Path) -> list[tuple[int, str, str]]:
         url = re.search(r"(?<![A-Za-z0-9_])URL\s+([^\s)]+)", block, re.IGNORECASE)
 
         if git_repo:
-            tag = re.search(r"(?<![A-Za-z0-9_])GIT_TAG\s+([^\s)]+)", block, re.IGNORECASE)
+            tag = re.search(
+                r"(?<![A-Za-z0-9_])GIT_TAG\s+([^\s)]+)", block, re.IGNORECASE
+            )
             if not tag:
                 findings.append((line, name, "git fetch has no GIT_TAG"))
             elif not resolves_to_sha(tag.group(1), values):
                 findings.append(
-                    (line, name, f"GIT_TAG {tag.group(1)} is not a 40-character commit SHA")
+                    (
+                        line,
+                        name,
+                        f"GIT_TAG {tag.group(1)} is not a 40-character commit SHA",
+                    )
                 )
             elif mentions(block, "GIT_SHALLOW", values):
                 findings.append(
@@ -167,6 +172,40 @@ def tracked_cmake_files() -> list[pathlib.Path]:
     return [pathlib.Path(name) for name in listing.stdout.split("\0") if name]
 
 
+def read_sources(paths: list[pathlib.Path]) -> list[tuple[pathlib.Path, str]]:
+    """Read each path from the worktree, falling back to its staged blob.
+
+    A sparse checkout leaves most tracked files absent from disk while git still
+    lists them, so CI would otherwise scan nothing but the materialized subtrees.
+    """
+    on_disk = [p for p in paths if p.is_file()]
+    absent = [p for p in paths if not p.is_file()]
+    sources = [(p, p.read_text(encoding="utf-8", errors="replace")) for p in on_disk]
+    if not absent:
+        return sources
+
+    request = "".join(f":{p.as_posix()}\n" for p in absent)
+    batch = subprocess.run(
+        ["git", "cat-file", "--batch"],
+        input=request.encode(),
+        stdout=subprocess.PIPE,
+        check=True,
+    )
+    stream = batch.stdout
+    offset = 0
+    for path in absent:
+        newline = stream.index(b"\n", offset)
+        header = stream[offset:newline].decode()
+        offset = newline + 1
+        if header.endswith(" missing"):
+            continue
+        size = int(header.rsplit(" ", 1)[1])
+        blob = stream[offset : offset + size]
+        offset += size + 1
+        sources.append((path, blob.decode("utf-8", errors="replace")))
+    return sources
+
+
 def load_baseline() -> set[str]:
     if not BASELINE.exists():
         return set()
@@ -178,37 +217,64 @@ def load_baseline() -> set[str]:
     return entries
 
 
+def merge_baseline(found: set[str]) -> list[str]:
+    """Append newly-found entries, leaving existing lines and rationale intact.
+
+    Rewriting the file wholesale would drop the comments recording why each
+    entry cannot be pinned, so entries are only ever added.
+    """
+    added = sorted(found - load_baseline())
+    if not added:
+        return []
+    existing = BASELINE.read_text(encoding="utf-8") if BASELINE.exists() else ""
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    BASELINE.write_text(existing + "\n".join(added) + "\n", encoding="utf-8")
+    return added
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=pathlib.Path)
     parser.add_argument(
-        "--all", action="store_true", help="scan the whole tree instead of the given paths"
+        "--all",
+        action="store_true",
+        help="scan the whole tree instead of the given paths",
     )
     parser.add_argument(
-        "--write-baseline", action="store_true", help="rewrite the baseline from --all findings"
+        "--write-baseline",
+        action="store_true",
+        help="append newly-found entries to the baseline",
     )
     args = parser.parse_args(argv)
 
     if args.all or args.write_baseline:
         paths = tracked_cmake_files()
     else:
-        paths = [p for p in args.paths if p.suffix == ".cmake" or p.name == "CMakeLists.txt"]
+        paths = [
+            p for p in args.paths if p.suffix == ".cmake" or p.name == "CMakeLists.txt"
+        ]
 
     baseline = load_baseline()
     found: list[str] = []
     failures = 0
-    for path in sorted(paths):
-        for line, name, reason in check_file(path):
+    for path, raw in sorted(read_sources(paths)):
+        for line, name, reason in check_text(raw):
             key = f"{path.as_posix()}:{name}"
             found.append(key)
             if key in baseline:
                 continue
             failures += 1
-            print(f"{path}:{line}: unpinned dependency '{name}': {reason}", file=sys.stderr)
+            print(
+                f"{path}:{line}: unpinned dependency '{name}': {reason}",
+                file=sys.stderr,
+            )
 
     if args.write_baseline:
-        BASELINE.write_text("\n".join(sorted(set(found))) + "\n", encoding="utf-8")
-        print(f"wrote {len(set(found))} baseline entries to {BASELINE}")
+        added = merge_baseline(set(found))
+        print(f"added {len(added)} baseline entries to {BASELINE}")
+        for key in added:
+            print(f"  {key}")
         return 0
 
     if failures:
