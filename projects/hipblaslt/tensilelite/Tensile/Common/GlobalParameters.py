@@ -587,6 +587,7 @@ defaultBenchmarkCommonParameters = [
     {"PreloadKernArgs": [True]},
     # {"CustomKernel": [{"name": "", "args": [], "macrotile": [0,0,0], "threads": [0,0,0], "grid": [0,0,0]}]},
     {"NoReject": [False]},
+    {"F8WaveTranspose": [0]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
     {"UseDualFMAC": [False]},
