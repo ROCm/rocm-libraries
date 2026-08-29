@@ -92,6 +92,15 @@ static_assert(TensileLite::SynchronizerGroupedSlots == _rocblaslt_handle::c_sync
 static_assert(TensileLite::StreamKFlagElements == _rocblaslt_handle::c_syncSkSlotElements,
               "Stream-K flag region size disagrees between TensileLite and the handle");
 
+// bindGroupedStreamKFlags() accepts a group of up to c_syncSkSlotsPerStream and
+// relies on gsuFlagsForProblem() being null for every index it rejects, so that
+// the rejection is the only way a problem can end up without a region. Raising
+// the Stream-K slot count past the GSU one would let a group through and then
+// hand its later problems a null pointer, which the device reads as a request
+// for the parallel reduction.
+static_assert(_rocblaslt_handle::c_syncSkSlotsPerStream <= _rocblaslt_handle::c_syncGsuSlots,
+              "a group the Stream-K slots accept must have a GSU slot for every problem");
+
 RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     trans_a,
                                                          hipblasOperation_t     trans_b,
                                                          int64_t                m,
@@ -3233,10 +3242,11 @@ static bool bindStreamKFlags(rocblaslt_handle                handle,
 //
 // A group is one kernel launch, so two problems sharing a region would let one
 // clear a flag the other is spinning on. Past c_syncSkSlotsPerStream there is
-// no region to hand out, private or shared: gsuFlagsForProblem() is null there,
-// and generateSingleCallGroupedGemm() packs that null as Flags, which the
-// device reads as a request for the parallel reduction. Reject rather than
-// launch the wrong reduction.
+// no region to hand out, private or shared: gsuFlagsForProblem() is null there
+// - which the static_assert at the top of this file keeps true - and
+// generateSingleCallGroupedGemm() packs that null as Flags, which the device
+// reads as a request for the parallel reduction. Reject rather than launch the
+// wrong reduction.
 static bool bindGroupedStreamKFlags(rocblaslt_handle                             handle,
                                     hipStream_t                                  stream,
                                     const char*                                  caller,
