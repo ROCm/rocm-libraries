@@ -3110,12 +3110,12 @@ struct FmhaFwdKernel
                     {
                         // allocate double lds
                         // add __restrict__ here to avoid aliasing
-                        __shared__ char smem_ptrk0
-                            [FmhaPipeline::Policy::template GetSmemSizeK<
-                                typename FmhaPipeline::Problem, true>()];
-                        __shared__ char smem_ptrk1
-                            [FmhaPipeline::Policy::template GetSmemSizeK<
-                                typename FmhaPipeline::Problem, true>()];
+                        __shared__ char smem_ptrk0[FmhaPipeline::Policy::template GetSmemSizeK<
+                            typename FmhaPipeline::Problem,
+                            true>()];
+                        __shared__ char smem_ptrk1[FmhaPipeline::Policy::template GetSmemSizeK<
+                            typename FmhaPipeline::Problem,
+                            true>()];
                         __shared__ char smem_ptrv0[FmhaPipeline::Policy::template GetSmemSizeV<
                             typename FmhaPipeline::Problem>()];
                         __shared__ char smem_ptrv1[FmhaPipeline::Policy::template GetSmemSizeV<

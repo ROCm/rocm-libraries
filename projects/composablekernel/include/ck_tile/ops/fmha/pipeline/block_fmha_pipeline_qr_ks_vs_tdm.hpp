@@ -173,25 +173,25 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto
     run_decode(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
-        const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
-        const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
-        const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
-        LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,        // M0*1 tile
-        FmhaMask mask,
-        PositionEncoding position_encoding,
-        float scale_s,
-        void* smem_arena,
-        float sink_v) const
+               const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
+               const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
+               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
+               LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,        // M0*1 tile
+               FmhaMask mask,
+               PositionEncoding position_encoding,
+               float scale_s,
+               void* smem_arena,
+               float sink_v) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
-        auto* smem_ptrq = reinterpret_cast<QDataType*>(static_cast<char*>(smem_arena) +
-                                                       Layout::kQOffset);
-        auto* smem_ptrk = reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) +
-                                                       Layout::kK0Offset);
-        auto* smem_ptrs = reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_arena) +
-                                                          Layout::kSOffset);
-        auto* smem_ptrv = reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) +
-                                                       Layout::kV0Offset);
+        auto* smem_ptrq =
+            reinterpret_cast<QDataType*>(static_cast<char*>(smem_arena) + Layout::kQOffset);
+        auto* smem_ptrk =
+            reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) + Layout::kK0Offset);
+        auto* smem_ptrs =
+            reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_arena) + Layout::kSOffset);
+        auto* smem_ptrv =
+            reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV0Offset);
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
                 std::is_same_v<KDataType, remove_cvref_t<typename KDramBlockWindowTmp::DataType>> &&
@@ -318,20 +318,20 @@ struct BlockFmhaPipelineQRKSVSTdm
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
         {
-            using QRaw = detail::EncodedTdmPadding<
-                typename Policy::template LdsPaddingConfigQ<Problem>>;
+            using QRaw =
+                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigQ<Problem>>;
             tdm_config_q.pad_enable              = QRaw::kEnabled;
             tdm_config_q.pad_config.pad_amount   = QRaw::kPadAmount;
             tdm_config_q.pad_config.pad_interval = QRaw::kPadInterval;
 
-            using KRaw = detail::EncodedTdmPadding<
-                typename Policy::template LdsPaddingConfigK<Problem>>;
+            using KRaw =
+                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigK<Problem>>;
             tdm_config_k.pad_enable              = KRaw::kEnabled;
             tdm_config_k.pad_config.pad_amount   = KRaw::kPadAmount;
             tdm_config_k.pad_config.pad_interval = KRaw::kPadInterval;
 
-            using VRaw = detail::EncodedTdmPadding<
-                typename Policy::template LdsPaddingConfigV<Problem>>;
+            using VRaw =
+                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigV<Problem>>;
             tdm_config_v.pad_enable              = VRaw::kEnabled;
             tdm_config_v.pad_config.pad_amount   = VRaw::kPadAmount;
             tdm_config_v.pad_config.pad_interval = VRaw::kPadInterval;
@@ -817,27 +817,27 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto
     run_prefill(const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
-        const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
-        const VDramBlockWindowTmp& __restrict__ v_dram_block_window_tmp,       // N1*K1 tile
-        const BiasDramBlockWindowTmp& __restrict__ bias_dram_block_window_tmp, // M0*N0 tile
-        LSEaccDramBlockWindowTmp& __restrict__ lse_acc_dram_window_tmp,        // M0*1 tile
-        FmhaMask mask,
-        PositionEncoding position_encoding,
-        float scale_s,
-        void* __restrict__ smem_arena,
-        float sink_v) const
+                const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
+                const VDramBlockWindowTmp& __restrict__ v_dram_block_window_tmp,       // N1*K1 tile
+                const BiasDramBlockWindowTmp& __restrict__ bias_dram_block_window_tmp, // M0*N0 tile
+                LSEaccDramBlockWindowTmp& __restrict__ lse_acc_dram_window_tmp,        // M0*1 tile
+                FmhaMask mask,
+                PositionEncoding position_encoding,
+                float scale_s,
+                void* __restrict__ smem_arena,
+                float sink_v) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
-        auto* smem_ptrq = reinterpret_cast<QDataType*>(static_cast<char*>(smem_arena) +
-                                                       Layout::kQOffset);
-        auto* smem_ptrk0 = reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) +
-                                                        Layout::kK0Offset);
-        auto* smem_ptrk1 = reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) +
-                                                        Layout::kK1Offset);
-        auto* smem_ptrv0 = reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) +
-                                                        Layout::kV0Offset);
-        auto* smem_ptrv1 = reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) +
-                                                        Layout::kV1Offset);
+        auto* smem_ptrq =
+            reinterpret_cast<QDataType*>(static_cast<char*>(smem_arena) + Layout::kQOffset);
+        auto* smem_ptrk0 =
+            reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) + Layout::kK0Offset);
+        auto* smem_ptrk1 =
+            reinterpret_cast<KDataType*>(static_cast<char*>(smem_arena) + Layout::kK1Offset);
+        auto* smem_ptrv0 =
+            reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV0Offset);
+        auto* smem_ptrv1 =
+            reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV1Offset);
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
                 std::is_same_v<KDataType, remove_cvref_t<typename KDramBlockWindowTmp::DataType>> &&
@@ -961,20 +961,20 @@ struct BlockFmhaPipelineQRKSVSTdm
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
         {
-            using QRaw = detail::EncodedTdmPadding<
-                typename Policy::template LdsPaddingConfigQ<Problem>>;
+            using QRaw =
+                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigQ<Problem>>;
             tdm_config_q.pad_enable              = QRaw::kEnabled;
             tdm_config_q.pad_config.pad_amount   = QRaw::kPadAmount;
             tdm_config_q.pad_config.pad_interval = QRaw::kPadInterval;
 
-            using KRaw = detail::EncodedTdmPadding<
-                typename Policy::template LdsPaddingConfigK<Problem>>;
+            using KRaw =
+                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigK<Problem>>;
             tdm_config_k.pad_enable              = KRaw::kEnabled;
             tdm_config_k.pad_config.pad_amount   = KRaw::kPadAmount;
             tdm_config_k.pad_config.pad_interval = KRaw::kPadInterval;
 
-            using VRaw = detail::EncodedTdmPadding<
-                typename Policy::template LdsPaddingConfigV<Problem>>;
+            using VRaw =
+                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigV<Problem>>;
             tdm_config_v.pad_enable              = VRaw::kEnabled;
             tdm_config_v.pad_config.pad_amount   = VRaw::kPadAmount;
             tdm_config_v.pad_config.pad_interval = VRaw::kPadInterval;
@@ -1065,12 +1065,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                              Policy::template MakeVDramTileDistribution<Problem>());
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
-            smem_ptrv0,
-            Policy::template MakeVLdsBlockDescriptor<Problem>());
+            smem_ptrv0, Policy::template MakeVLdsBlockDescriptor<Problem>());
 
         auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
-            smem_ptrv0,
-            Policy::template MakeVLdsBlockDescriptor<Problem>());
+            smem_ptrv0, Policy::template MakeVLdsBlockDescriptor<Problem>());
 
         auto v_lds_write_window =
             make_tile_window(v_lds_write_view,
@@ -1503,15 +1501,15 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         float sink_v) const
     {
         return run_decode(q_dram_block_window_tmp,
-                   k_dram_block_window_tmp,
-                   v_dram_block_window_tmp,
-                   bias_dram_block_window_tmp,
-                   lse_acc_dram_window_tmp,
-                   mask,
-                   position_encoding,
-                   scale_s,
-                   smem_ptr,
-                   sink_v);
+                          k_dram_block_window_tmp,
+                          v_dram_block_window_tmp,
+                          bias_dram_block_window_tmp,
+                          lse_acc_dram_window_tmp,
+                          mask,
+                          position_encoding,
+                          scale_s,
+                          smem_ptr,
+                          sink_v);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -1532,15 +1530,15 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         void* smem_arena) const
     {
         return run_prefill(q_dram_block_window_tmp,
-                   k_dram_block_window_tmp,
-                   v_dram_block_window_tmp,
-                   bias_dram_block_window_tmp,
-                   lse_acc_dram_window_tmp,
-                   mask,
-                   position_encoding,
-                   scale_s,
-                   smem_arena,
-                   sink_v);
+                           k_dram_block_window_tmp,
+                           v_dram_block_window_tmp,
+                           bias_dram_block_window_tmp,
+                           lse_acc_dram_window_tmp,
+                           mask,
+                           position_encoding,
+                           scale_s,
+                           smem_arena,
+                           sink_v);
     }
 };
 

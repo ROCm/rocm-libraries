@@ -34,8 +34,9 @@ byte_offset(const Descriptor& descriptor, ck_tile::index_t row, ck_tile::index_t
 }
 
 template <typename DataType>
-using PaddedQDescriptor = decltype(
-    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<DataType, 128, 128, QKPad, 16>());
+using PaddedQDescriptor =
+    decltype(ck_tile::detail::
+                 make_qr_tdm_row_major_lds_descriptor<DataType, 128, 128, QKPad, 16>());
 
 struct QTag
 {
@@ -60,23 +61,22 @@ struct VTag
 
 template <ck_tile::index_t M>
 using TestFmhaShape = ck_tile::TileFmhaShape<ck_tile::sequence<M, 64, 32, 128, 32, 128>,
-                                              ck_tile::sequence<4, 1, 1>,
-                                              ck_tile::sequence<16, 16, 32>,
-                                              ck_tile::sequence<4, 1, 1>,
-                                              ck_tile::sequence<16, 16, 32>,
-                                              true>;
+                                             ck_tile::sequence<4, 1, 1>,
+                                             ck_tile::sequence<16, 16, 32>,
+                                             ck_tile::sequence<4, 1, 1>,
+                                             ck_tile::sequence<16, 16, 32>,
+                                             true>;
 
-using TestFmhaTraits =
-    ck_tile::TileFmhaTraits<false,
-                            false,
-                            false,
-                            false,
-                            false,
-                            ck_tile::BlockAttentionBiasEnum::NO_BIAS,
-                            false,
-                            false,
-                            false,
-                            ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE>;
+using TestFmhaTraits = ck_tile::TileFmhaTraits<false,
+                                               false,
+                                               false,
+                                               false,
+                                               false,
+                                               ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                                               false,
+                                               false,
+                                               false,
+                                               ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE>;
 
 template <typename DataType, ck_tile::index_t M>
 using TestFmhaProblem =
@@ -128,23 +128,21 @@ constexpr bool is_disabled_selection()
 }
 
 using SelectionBaseProblem = TestFmhaProblem<ck_tile::half_t, 128>;
-using MixedTypeProblem = TestProblemWithDataTypes<SelectionBaseProblem,
-                                                  ck_tile::half_t,
-                                                  ck_tile::bf16_t,
-                                                  ck_tile::half_t>;
-using FloatProblem =
-    TestProblemWithDataTypes<SelectionBaseProblem, float, float, float>;
-using PackedProblem = TestProblemWithDataTypes<SelectionBaseProblem,
-                                               ck_tile::pk_fp4_t,
-                                               ck_tile::pk_fp4_t,
-                                               ck_tile::pk_fp4_t>;
-using QK64Shape = TestShapeWithHeadDims<TestFmhaShape<128>, 64, 128>;
-using V64Shape  = TestShapeWithHeadDims<TestFmhaShape<128>, 128, 64>;
-using QK64Problem = TestProblemWithShape<SelectionBaseProblem, QK64Shape>;
-using V64Problem  = TestProblemWithShape<SelectionBaseProblem, V64Shape>;
+using MixedTypeProblem     = TestProblemWithDataTypes<SelectionBaseProblem,
+                                                      ck_tile::half_t,
+                                                      ck_tile::bf16_t,
+                                                      ck_tile::half_t>;
+using FloatProblem         = TestProblemWithDataTypes<SelectionBaseProblem, float, float, float>;
+using PackedProblem        = TestProblemWithDataTypes<SelectionBaseProblem,
+                                                      ck_tile::pk_fp4_t,
+                                                      ck_tile::pk_fp4_t,
+                                                      ck_tile::pk_fp4_t>;
+using QK64Shape            = TestShapeWithHeadDims<TestFmhaShape<128>, 64, 128>;
+using V64Shape             = TestShapeWithHeadDims<TestFmhaShape<128>, 128, 64>;
+using QK64Problem          = TestProblemWithShape<SelectionBaseProblem, QK64Shape>;
+using V64Problem           = TestProblemWithShape<SelectionBaseProblem, V64Shape>;
 
-static_assert(
-    is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<MixedTypeProblem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<MixedTypeProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<FloatProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<PackedProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<QK64Problem>>());
@@ -173,21 +171,13 @@ static_assert(ck_tile::detail::EncodedTdmPadding<NoPad>::kPadInterval == 0);
 static_assert(ck_tile::detail::EncodedTdmPadding<NoPad>::kPadAmount == 0);
 
 constexpr auto q_nopad_bf16_desc =
-    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::bf16_t,
-                                                          128,
-                                                          128,
-                                                          NoPad,
-                                                          16>();
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::bf16_t, 128, 128, NoPad, 16>();
 static_assert(byte_offset<ck_tile::bf16_t>(q_nopad_bf16_desc, 0, 127) == 254);
 static_assert(byte_offset<ck_tile::bf16_t>(q_nopad_bf16_desc, 1, 0) == 256);
 static_assert(q_nopad_bf16_desc.get_element_space_size() * sizeof(ck_tile::bf16_t) == 32768);
 
 constexpr auto q_bf16_desc =
-    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::bf16_t,
-                                                          128,
-                                                          128,
-                                                          QKPad,
-                                                          16>();
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::bf16_t, 128, 128, QKPad, 16>();
 static_assert(byte_offset<ck_tile::bf16_t>(q_bf16_desc, 0, 0) == 0);
 static_assert(byte_offset<ck_tile::bf16_t>(q_bf16_desc, 0, 127) == 254);
 static_assert(byte_offset<ck_tile::bf16_t>(q_bf16_desc, 1, 0) == 272);
@@ -195,61 +185,33 @@ static_assert(byte_offset<ck_tile::bf16_t>(q_bf16_desc, 127, 127) == 34798);
 static_assert(q_bf16_desc.get_element_space_size() * sizeof(ck_tile::bf16_t) == 34800);
 
 constexpr auto k_prefill_bf16_desc =
-    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::bf16_t,
-                                                          64,
-                                                          128,
-                                                          QKPad,
-                                                          16>();
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::bf16_t, 64, 128, QKPad, 16>();
 static_assert(k_prefill_bf16_desc.get_element_space_size() * sizeof(ck_tile::bf16_t) == 17392);
 
 constexpr auto k_decode_bf16_desc =
-    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::bf16_t,
-                                                          64,
-                                                          32,
-                                                          QKPad,
-                                                          16>();
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::bf16_t, 64, 32, QKPad, 16>();
 static_assert(k_decode_bf16_desc.get_element_space_size() * sizeof(ck_tile::bf16_t) == 4336);
 
 constexpr auto v_bf16_desc =
-    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::bf16_t,
-                                                          64,
-                                                          128,
-                                                          VPad,
-                                                          16>();
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::bf16_t, 64, 128, VPad, 16>();
 static_assert(byte_offset<ck_tile::bf16_t>(v_bf16_desc, 1, 0) == 288);
 static_assert(v_bf16_desc.get_element_space_size() * sizeof(ck_tile::bf16_t) == 18400);
 
 constexpr auto q_half_desc =
-    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::half_t,
-                                                          128,
-                                                          128,
-                                                          QKPad,
-                                                          16>();
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::half_t, 128, 128, QKPad, 16>();
 static_assert(byte_offset<ck_tile::half_t>(q_half_desc, 1, 0) == 272);
 static_assert(q_half_desc.get_element_space_size() * sizeof(ck_tile::half_t) == 34800);
 
 constexpr auto k_prefill_half_desc =
-    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::half_t,
-                                                          64,
-                                                          128,
-                                                          QKPad,
-                                                          16>();
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::half_t, 64, 128, QKPad, 16>();
 static_assert(k_prefill_half_desc.get_element_space_size() * sizeof(ck_tile::half_t) == 17392);
 
 constexpr auto k_decode_half_desc =
-    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::half_t,
-                                                          64,
-                                                          32,
-                                                          QKPad,
-                                                          16>();
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::half_t, 64, 32, QKPad, 16>();
 static_assert(k_decode_half_desc.get_element_space_size() * sizeof(ck_tile::half_t) == 4336);
 
 constexpr auto v_half_desc =
-    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::half_t,
-                                                          64,
-                                                          128,
-                                                          VPad,
-                                                          16>();
+    ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<ck_tile::half_t, 64, 128, VPad, 16>();
 static_assert(byte_offset<ck_tile::half_t>(v_half_desc, 1, 0) == 288);
 static_assert(v_half_desc.get_element_space_size() * sizeof(ck_tile::half_t) == 18400);
 
@@ -299,8 +261,7 @@ constexpr bool has_aligned_production_regions()
 template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
 struct TestLegacyPhaseLayout
 {
-    using Production =
-        ck_tile::detail::QrTdmLdsArenaLayout<Problem, QPadding, KPadding, VPadding>;
+    using Production = ck_tile::detail::QrTdmLdsArenaLayout<Problem, QPadding, KPadding, VPadding>;
 
     static_assert(Production::kDoubleBuffer,
                   "legacy-phase diagnostics are defined only for the prefill path");
@@ -311,9 +272,9 @@ struct TestLegacyPhaseLayout
     static constexpr ck_tile::index_t kV0Offset   = 2 * Production::kKBytes + 256;
     static constexpr ck_tile::index_t kV1Offset   = kV0Offset + Production::kVBytes;
     static constexpr ck_tile::index_t kArenaBytes = kV1Offset + Production::kVBytes;
-    static constexpr bool kHasAlignedRegions =
-        kQOffset % 256 == 0 && kK0Offset % 256 == 0 && kK1Offset % 256 == 0 &&
-        kV0Offset % 256 == 0 && kV1Offset % 256 == 0;
+    static constexpr bool kHasAlignedRegions      = kQOffset % 256 == 0 && kK0Offset % 256 == 0 &&
+                                               kK1Offset % 256 == 0 && kV0Offset % 256 == 0 &&
+                                               kV1Offset % 256 == 0;
 
     static_assert(kQOffset + Production::kQBytes <= kV0Offset);
     static_assert(kK0Offset + Production::kKBytes <= kK1Offset);
@@ -329,9 +290,8 @@ constexpr bool validate_arena_layouts()
     using DecodeProblem  = TestFmhaProblem<DataType, 64>;
     using Policy         = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
 
-    using PrefillAll =
-        typename Policy::template LdsArenaLayout<PrefillProblem, QKPad, QKPad, VPad>;
-    using DecodeAll = typename Policy::template LdsArenaLayout<DecodeProblem, QKPad, QKPad, VPad>;
+    using PrefillAll = typename Policy::template LdsArenaLayout<PrefillProblem, QKPad, QKPad, VPad>;
+    using DecodeAll  = typename Policy::template LdsArenaLayout<DecodeProblem, QKPad, QKPad, VPad>;
 
     static_assert(PrefillAll::kQOffset == 0);
     static_assert(PrefillAll::kK0Offset == 0);
@@ -346,30 +306,21 @@ constexpr bool validate_arena_layouts()
 
     using PrefillNone =
         typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, NoPad, NoPad>;
-    using PrefillQKV =
-        typename Policy::template LdsArenaLayout<PrefillProblem, QKPad, QKPad, VPad>;
-    using PrefillKV =
-        typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, QKPad, VPad>;
-    using PrefillK =
-        typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, QKPad, NoPad>;
-    using PrefillV =
-        typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, NoPad, VPad>;
+    using PrefillQKV = typename Policy::template LdsArenaLayout<PrefillProblem, QKPad, QKPad, VPad>;
+    using PrefillKV  = typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, QKPad, VPad>;
+    using PrefillK = typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, QKPad, NoPad>;
+    using PrefillV = typename Policy::template LdsArenaLayout<PrefillProblem, NoPad, NoPad, VPad>;
     static_assert(PrefillNone::kArenaBytes == 65536);
     static_assert(PrefillQKV::kArenaBytes == 71680);
     static_assert(PrefillKV::kArenaBytes == 71680);
     static_assert(PrefillK::kArenaBytes == 67584);
     static_assert(PrefillV::kArenaBytes == 69632);
 
-    using DecodeNone =
-        typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, NoPad, NoPad>;
-    using DecodeQKV =
-        typename Policy::template LdsArenaLayout<DecodeProblem, QKPad, QKPad, VPad>;
-    using DecodeKV =
-        typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, QKPad, VPad>;
-    using DecodeK =
-        typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, QKPad, NoPad>;
-    using DecodeV =
-        typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, NoPad, VPad>;
+    using DecodeNone = typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, NoPad, NoPad>;
+    using DecodeQKV  = typename Policy::template LdsArenaLayout<DecodeProblem, QKPad, QKPad, VPad>;
+    using DecodeKV   = typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, QKPad, VPad>;
+    using DecodeK    = typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, QKPad, NoPad>;
+    using DecodeV    = typename Policy::template LdsArenaLayout<DecodeProblem, NoPad, NoPad, VPad>;
     static_assert(DecodeNone::kArenaBytes == 20480);
     static_assert(DecodeQKV::kArenaBytes == 22784);
     static_assert(DecodeKV::kArenaBytes == 22784);
@@ -425,19 +376,14 @@ constexpr bool validate_policy_coupling()
     static_assert(KRaw::kEnabled && KRaw::kPadInterval == 5 && KRaw::kPadAmount == 3);
     static_assert(VRaw::kEnabled && VRaw::kPadInterval == 5 && VRaw::kPadAmount == 7);
     static_assert(q_desc.calculate_offset(ck_tile::make_tuple(1, 0)) == 128);
-    static_assert(k_desc.get_element_space_size() * sizeof(DataType) ==
-                  (M > 64 ? 17392 : 4336));
+    static_assert(k_desc.get_element_space_size() * sizeof(DataType) == (M > 64 ? 17392 : 4336));
     static_assert(v_desc.get_element_space_size() * sizeof(DataType) == 18400);
     static_assert(Layout::kArenaBytes == (M > 64 ? 71680 : 22784));
 
-    using EnabledQ = ck_tile::detail::LdsPaddingConfig<true, 256, 16>;
+    using EnabledQ   = ck_tile::detail::LdsPaddingConfig<true, 256, 16>;
     using EnabledRaw = ck_tile::detail::EncodedTdmPadding<EnabledQ>;
     constexpr auto enabled_desc =
-        ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<DataType,
-                                                               M,
-                                                               128,
-                                                               EnabledQ,
-                                                               16>();
+        ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<DataType, M, 128, EnabledQ, 16>();
     static_assert(EnabledRaw::kPadInterval == 5 && EnabledRaw::kPadAmount == 3);
     static_assert(enabled_desc.get_element_space_size() > q_desc.get_element_space_size());
     static_assert(!std::is_same_v<ck_tile::remove_cvref_t<decltype(enabled_desc)>,
@@ -452,21 +398,21 @@ static_assert(validate_policy_coupling<ck_tile::bf16_t, 64>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 128>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64>());
 #else
-static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<
-              TestFmhaProblem<ck_tile::bf16_t, 128>>>());
-static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<
-              TestFmhaProblem<ck_tile::bf16_t, 64>>>());
-static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<
-              TestFmhaProblem<ck_tile::half_t, 128>>>());
-static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<
-              TestFmhaProblem<ck_tile::half_t, 64>>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 128>>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 64>>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 128>>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 64>>>());
 #endif
 
 using DispatchProblem = TestFmhaProblem<ck_tile::half_t, 128>;
-static_assert(ck_tile::detail::uses_qr_tdm_lds_arena_v<
-              ck_tile::BlockFmhaPipelineQRKSVSTdm<DispatchProblem>>);
-static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
-              ck_tile::BlockFmhaPipelineQRKSVS<DispatchProblem>>);
+static_assert(
+    ck_tile::detail::uses_qr_tdm_lds_arena_v<ck_tile::BlockFmhaPipelineQRKSVSTdm<DispatchProblem>>);
+static_assert(
+    !ck_tile::detail::uses_qr_tdm_lds_arena_v<ck_tile::BlockFmhaPipelineQRKSVS<DispatchProblem>>);
 static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
               ck_tile::BlockFmhaPipelineQRKSVSAsync<DispatchProblem>>);
 static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
@@ -487,25 +433,25 @@ template <typename TensorTag,
           ck_tile::index_t RegionIndex>
 struct QrTdmRoundTripKernel
 {
-    using Policy = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
-    using Shape  = typename Problem::BlockFmhaShape;
+    using Policy   = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+    using Shape    = typename Problem::BlockFmhaShape;
     using DataType = std::conditional_t<TensorTag::Id == 0,
                                         typename Problem::QDataType,
                                         std::conditional_t<TensorTag::Id == 1,
                                                            typename Problem::KDataType,
                                                            typename Problem::VDataType>>;
-    using Padding = std::conditional_t<TensorTag::Id == 0,
-                                       QConfig,
-                                       std::conditional_t<TensorTag::Id == 1, KConfig, VConfig>>;
-    using Layout = typename Policy::template LdsArenaLayout<Problem, QConfig, KConfig, VConfig>;
+    using Padding  = std::conditional_t<TensorTag::Id == 0,
+                                        QConfig,
+                                        std::conditional_t<TensorTag::Id == 1, KConfig, VConfig>>;
+    using Layout   = typename Policy::template LdsArenaLayout<Problem, QConfig, KConfig, VConfig>;
 
-    static constexpr ck_tile::index_t kBlockSize = Problem::kBlockSize;
-    static constexpr bool kPrefill = Shape::kM0 > 64;
-    static constexpr ck_tile::index_t kRows = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
-    static constexpr ck_tile::index_t kCols =
-        TensorTag::Id == 0   ? Shape::kSubQKHeaddim
-        : TensorTag::Id == 1 ? (kPrefill ? Shape::kSubQKHeaddim : Shape::kK0)
-                             : Shape::kN1;
+    static constexpr ck_tile::index_t kBlockSize    = Problem::kBlockSize;
+    static constexpr bool kPrefill                  = Shape::kM0 > 64;
+    static constexpr ck_tile::index_t kRows         = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
+    static constexpr ck_tile::index_t kCols         = TensorTag::Id == 0 ? Shape::kSubQKHeaddim
+                                                      : TensorTag::Id == 1
+                                                          ? (kPrefill ? Shape::kSubQKHeaddim : Shape::kK0)
+                                                          : Shape::kN1;
     static constexpr ck_tile::index_t kRegionOffset = [] {
         if constexpr(TensorTag::Id == 0)
             return Layout::kQOffset;
@@ -533,9 +479,9 @@ struct QrTdmRoundTripKernel
         block_sync_lds();
 
         auto* region = reinterpret_cast<DataType*>(arena + kRegionOffset);
-        constexpr auto lds_desc = detail::make_qr_tdm_row_major_lds_descriptor<
-            DataType, kRows, kCols, Padding, 16>();
-        auto lds_view = make_tensor_view<address_space_enum::lds>(region, lds_desc);
+        constexpr auto lds_desc =
+            detail::make_qr_tdm_row_major_lds_descriptor<DataType, kRows, kCols, Padding, 16>();
+        auto lds_view         = make_tensor_view<address_space_enum::lds>(region, lds_desc);
         auto lds_write_window = make_tile_window(lds_view, lds_desc.get_lengths(), {0, 0});
 
         const auto input_view = make_naive_tensor_view<address_space_enum::global>(
@@ -544,15 +490,15 @@ struct QrTdmRoundTripKernel
             make_tuple(kCols, 1),
             number<8>{},
             number<1>{});
-        auto input_window = make_tile_window(
-            input_view,
-            make_tuple(number<kRows>{}, number<kCols>{}),
-            {0, 0},
-            detail::make_qr_tdm_writer_distribution<TensorTag, Problem, TensorTag::Id == 1 &&
-                                                                             kPrefill>());
+        auto input_window = make_tile_window(input_view,
+                                             make_tuple(number<kRows>{}, number<kCols>{}),
+                                             {0, 0},
+                                             detail::make_qr_tdm_writer_distribution < TensorTag,
+                                             Problem,
+                                             TensorTag::Id == 1 && kPrefill > ());
 
         TDMConfig config;
-        using Raw = detail::EncodedTdmPadding<Padding>;
+        using Raw                      = detail::EncodedTdmPadding<Padding>;
         config.pad_enable              = Raw::kEnabled;
         config.pad_config.pad_interval = Raw::kPadInterval;
         config.pad_config.pad_amount   = Raw::kPadAmount;
@@ -567,12 +513,16 @@ struct QrTdmRoundTripKernel
                 make_tuple(kCols, 1),
                 number<8>{},
                 number<1>{});
-            auto read_window = make_tile_window(
-                lds_view, lds_desc.get_lengths(), {0, 0}, Policy::template MakeQRegTileDistribution<Problem>());
-            auto output_window = make_tile_window(output_view,
-                                                  lds_desc.get_lengths(),
-                                                  {0, 0},
-                                                  Policy::template MakeQRegTileDistribution<Problem>());
+            auto read_window =
+                make_tile_window(lds_view,
+                                 lds_desc.get_lengths(),
+                                 {0, 0},
+                                 Policy::template MakeQRegTileDistribution<Problem>());
+            auto output_window =
+                make_tile_window(output_view,
+                                 lds_desc.get_lengths(),
+                                 {0, 0},
+                                 Policy::template MakeQRegTileDistribution<Problem>());
             store_tile(output_window, load_tile(read_window));
         }
         else if constexpr(TensorTag::Id == 1)
@@ -587,10 +537,16 @@ struct QrTdmRoundTripKernel
             static_for<0, Windows, 1>{}([&](auto i) {
                 constexpr auto lengths = make_tuple(number<Shape::kN0>{}, number<Shape::kK0>{});
                 const array<index_t, 2> origin{0, i * Shape::kK0};
-                auto read_window = make_tile_window(
-                    lds_view, lengths, origin, Policy::template MakeKRegTileDistribution<Problem>());
-                auto output_window = make_tile_window(
-                    output_view, lengths, origin, Policy::template MakeKRegTileDistribution<Problem>());
+                auto read_window =
+                    make_tile_window(lds_view,
+                                     lengths,
+                                     origin,
+                                     Policy::template MakeKRegTileDistribution<Problem>());
+                auto output_window =
+                    make_tile_window(output_view,
+                                     lengths,
+                                     origin,
+                                     Policy::template MakeKRegTileDistribution<Problem>());
                 store_tile(output_window, load_tile(read_window));
             });
         }
@@ -606,8 +562,11 @@ struct QrTdmRoundTripKernel
             static_for<0, Windows, 1>{}([&](auto i) {
                 constexpr auto lengths = make_tuple(number<Shape::kK1>{}, number<Shape::kN1>{});
                 const array<index_t, 2> origin{i * Shape::kK1, 0};
-                auto read_window = make_tile_window(
-                    lds_view, lengths, origin, Policy::template MakeVRegTileDistribution<Problem>());
+                auto read_window =
+                    make_tile_window(lds_view,
+                                     lengths,
+                                     origin,
+                                     Policy::template MakeVRegTileDistribution<Problem>());
                 auto tile = load_tile_transpose(read_window);
                 constexpr auto output_lengths =
                     make_tuple(number<Shape::kN1>{}, number<Shape::kK1>{});
@@ -640,7 +599,7 @@ template <typename TensorTag,
           typename VConfig>
 bool run_qr_tdm_round_trip()
 {
-    using Kernel0 = QrTdmRoundTripKernel<TensorTag, Problem, QConfig, KConfig, VConfig, 0>;
+    using Kernel0  = QrTdmRoundTripKernel<TensorTag, Problem, QConfig, KConfig, VConfig, 0>;
     using DataType = typename Kernel0::DataType;
     constexpr ck_tile::index_t Rows = Kernel0::kRows;
     constexpr ck_tile::index_t Cols = Kernel0::kCols;
@@ -662,11 +621,9 @@ bool run_qr_tdm_round_trip()
                        output_device.GetDeviceBuffer(),
                        static_cast<int*>(guard_device.GetDeviceBuffer())};
     const ck_tile::stream_config stream{nullptr, false, 0, 0, 1};
-    const auto block_size =
-        ck_tile::is_wave32() ? Problem::kBlockSize / 2 : Problem::kBlockSize;
+    const auto block_size = ck_tile::is_wave32() ? Problem::kBlockSize / 2 : Problem::kBlockSize;
     ck_tile::launch_kernel(stream,
-                           ck_tile::make_kernel(
-                               Kernel0{}, dim3(1), dim3(block_size), 0, args));
+                           ck_tile::make_kernel(Kernel0{}, dim3(1), dim3(block_size), 0, args));
 
     output_device.FromDevice(output.data());
     int guard_ok = 0;
@@ -693,8 +650,8 @@ bool run_qr_tdm_round_trip()
 
     if(!validate_result())
     {
-        std::cerr << "round-trip failure: tensor=" << TensorTag::Id << ", M="
-                  << Problem::BlockFmhaShape::kM0 << ", q=" << QConfig::kEnabled
+        std::cerr << "round-trip failure: tensor=" << TensorTag::Id
+                  << ", M=" << Problem::BlockFmhaShape::kM0 << ", q=" << QConfig::kEnabled
                   << ", k=" << KConfig::kEnabled << ", v=" << VConfig::kEnabled << '\n';
         return false;
     }
@@ -705,8 +662,7 @@ bool run_qr_tdm_round_trip()
         output_device.SetZero();
         guard_device.SetZero();
         ck_tile::launch_kernel(stream,
-                               ck_tile::make_kernel(
-                                   Kernel1{}, dim3(1), dim3(block_size), 0, args));
+                               ck_tile::make_kernel(Kernel1{}, dim3(1), dim3(block_size), 0, args));
         output_device.FromDevice(output.data());
         guard_device.FromDevice(&guard_ok);
         if(!validate_result())
