@@ -498,11 +498,11 @@ struct intrin_wmma_bf16_16x16x32_bf16<16, 16>
         reg_c.template AsType<bhalf8_t>()(Number<0>{}) =
             bit_cast<bhalf8_t>(__builtin_amdgcn_wmma_bf16_16x16x32_bf16(
                 0,
-                bit_cast<bf16x16_native_t>(reg_a),
+                bit_cast<llvm_bf16x16_t>(reg_a),
                 0,
-                bit_cast<bf16x16_native_t>(reg_b),
+                bit_cast<llvm_bf16x16_t>(reg_b),
                 0,
-                bit_cast<bf16x8_native_t>(reg_c.template AsType<bhalf8_t>()[Number<0>{}]),
+                bit_cast<llvm_bf16x8_t>(reg_c.template AsType<bhalf8_t>()[Number<0>{}]),
                 false,
                 false));
 #else
@@ -551,9 +551,9 @@ struct intrin_wmma_f32_16x16x32_bf16<16, 16>
 #if defined(__gfx125__)
         reg_c.template AsType<float8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_f32_16x16x32_bf16(0,
-                                                    bit_cast<bf16x16_native_t>(reg_a),
+                                                    bit_cast<llvm_bf16x16_t>(reg_a),
                                                     0,
-                                                    bit_cast<bf16x16_native_t>(reg_b),
+                                                    bit_cast<llvm_bf16x16_t>(reg_b),
                                                     0,
                                                     reg_c.template AsType<float8_t>()[Number<0>{}],
                                                     false,
@@ -581,9 +581,9 @@ struct intrin_wmma_bf16f32_16x16x32_bf16<16, 16>
         reg_d.template AsType<bhalf8_t>()(Number<0>{}) =
             bit_cast<bhalf8_t>(__builtin_amdgcn_wmma_bf16f32_16x16x32_bf16(
                 0,
-                bit_cast<bf16x16_native_t>(reg_a),
+                bit_cast<llvm_bf16x16_t>(reg_a),
                 0,
-                bit_cast<bf16x16_native_t>(reg_b),
+                bit_cast<llvm_bf16x16_t>(reg_b),
                 0,
                 reg_c.template AsType<float8_t>()[Number<0>{}],
                 false,

@@ -81,8 +81,7 @@ using bf16x16_t = bfloat16_t __attribute__((ext_vector_type(16)));
 using bf16x32_t = bfloat16_t __attribute__((ext_vector_type(32)));
 using bf16x64_t = bfloat16_t __attribute__((ext_vector_type(64)));
 
-// operand type of the bf16 matrix-core builtins, which take native __bf16 regardless of
-// whether bfloat16_t is spelled __bf16 or ushort
+// take native __bf16 regardless of whether bfloat16_t is spelled __bf16 or ushort
 using llvm_bf16x8_t  = __bf16 __attribute__((ext_vector_type(8)));
 using llvm_bf16x16_t = __bf16 __attribute__((ext_vector_type(16)));
 

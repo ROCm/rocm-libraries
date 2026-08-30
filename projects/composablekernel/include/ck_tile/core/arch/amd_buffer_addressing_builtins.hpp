@@ -3426,7 +3426,7 @@ amd_tdm_load(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descriptor
     static constexpr auto I4 = number<4>{};
 
     auto tdm_desc_grp = descriptor.getResourceDescriptorGroup();
-    __builtin_amdgcn_tensor_load_to_lds(tdm_desc_grp.get(I0),
+    __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(tdm_desc_grp.get(I0)),
                                         tdm_desc_grp.get(I1),
                                         tdm_desc_grp.get(I2),
                                         tdm_desc_grp.get(I3),
@@ -3452,7 +3452,7 @@ amd_tdm_store(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descripto
     static constexpr auto I4 = number<4>{};
 
     auto tdm_desc_grp = descriptor.getResourceDescriptorGroup();
-    __builtin_amdgcn_tensor_store_from_lds(tdm_desc_grp.get(I0),
+    __builtin_amdgcn_tensor_store_from_lds(bit_cast<uint32x4_t>(tdm_desc_grp.get(I0)),
                                            tdm_desc_grp.get(I1),
                                            tdm_desc_grp.get(I2),
                                            tdm_desc_grp.get(I3),

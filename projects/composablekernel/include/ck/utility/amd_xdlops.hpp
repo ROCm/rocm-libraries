@@ -275,8 +275,8 @@ struct intrin_mfma_f32_32x32x16bf16<32, 32>
     {
 #if defined(__gfx950__)
         reg_c.template AsType<float16_t>()(Number<0>{}) =
-            __builtin_amdgcn_mfma_f32_32x32x16_bf16(bit_cast<bf16x8_native_t>(reg_a),
-                                                    bit_cast<bf16x8_native_t>(reg_b),
+            __builtin_amdgcn_mfma_f32_32x32x16_bf16(bit_cast<llvm_bf16x8_t>(reg_a),
+                                                    bit_cast<llvm_bf16x8_t>(reg_b),
                                                     reg_c.template AsType<float16_t>()[Number<0>{}],
                                                     0,
                                                     0,
@@ -300,8 +300,8 @@ struct intrin_mfma_f32_16x16x32bf16<16, 16>
     {
 #if defined(__gfx950__)
         reg_c.template AsType<float4_t>()(Number<0>{}) =
-            __builtin_amdgcn_mfma_f32_16x16x32_bf16(bit_cast<bf16x8_native_t>(reg_a),
-                                                    bit_cast<bf16x8_native_t>(reg_b),
+            __builtin_amdgcn_mfma_f32_16x16x32_bf16(bit_cast<llvm_bf16x8_t>(reg_a),
+                                                    bit_cast<llvm_bf16x8_t>(reg_b),
                                                     reg_c.template AsType<float4_t>()[Number<0>{}],
                                                     0,
                                                     0,

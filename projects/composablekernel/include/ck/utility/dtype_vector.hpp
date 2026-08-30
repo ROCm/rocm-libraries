@@ -740,10 +740,9 @@ using int16x4_t  = NativeVectorT<int16_t, 4>;
 using int16x8_t  = NativeVectorT<int16_t, 8>;
 using int16x16_t = NativeVectorT<int16_t, 16>;
 
-// the gfx950 bf16 matrix-core builtins take native __bf16 vectors, regardless of how bhalf_t is
-// spelled
-using bf16x8_native_t  = NativeVectorT<__bf16, 8>;
-using bf16x16_native_t = NativeVectorT<__bf16, 16>;
+// take native __bf16 regardless of whether bfloat16_t is spelled __bf16 or ushort
+using llvm_bf16x8_t  = NativeVectorT<__bf16, 8>;
+using llvm_bf16x16_t = NativeVectorT<__bf16, 16>;
 
 // u32
 using uint32x2_t  = typename vector_type<uint32_t, 2>::type;
