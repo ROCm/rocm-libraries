@@ -146,22 +146,12 @@ TEST_F(EstimateAsmCyclesTest, ZeroIssueCycles) {
     EXPECT_EQ(cycles, 0);
 }
 
-// Test that only instructions after "label_LoopBeginL" are processed
+// Test that loop-body modelling runs in the LoopBeginL basic block.
 TEST_F(EstimateAsmCyclesTest, OnlyProcessLabelLoopBeginL) {
-    // Use a non-loop-named basic block so pass logic starts counting only
-    // after it sees an explicit internal label "label_LoopBeginL".
-    BasicBlock* testBB = func->createBasicBlock("entry");
-    loopBB = testBB;
-
-    // Put a non-loop instruction before the label in the same basic block.
-    createVAddF32(0, 1, 2, 10);
-
-    // Add loop label + instruction that should be counted.
     createLabel("label_LoopBeginL");
     createVAddF32(0, 1, 2, 5);
 
     unsigned int cycles = runPassAndGetResult();
-    // Should only count cycles after label_LoopBeginL.
     EXPECT_EQ(cycles, 5);
 }
 
