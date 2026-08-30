@@ -412,6 +412,47 @@ struct FmhaD192SplitSoftmax
     }
 };
 
+struct FmhaD192CrossTilePrologue
+{
+    using Mapping = FmhaD192ScoreFragmentMapping;
+    using Softmax = FmhaD192SplitSoftmax;
+
+    static constexpr index_t kBackEdgeOperation = Softmax::kCurrentPart2OperationEnd - 1;
+
+    template <bool ValidateMax,
+              bool HasNextTile,
+              typename OneTileConsumer,
+              typename MultiTileConsumer>
+    CK_TILE_DEVICE static void Run(FmhaD192SoftmaxState& state,
+                                   FmhaD192SoftmaxClosureState& closure,
+                                   float scale_log2,
+                                   OneTileConsumer& consume_one_tile,
+                                   MultiTileConsumer& consume_multi_tile)
+    {
+        static_for<0, Softmax::kPart0OperationCount, 1>{}([&](auto op) {
+            static_for<0, Mapping::kNumMsb, 1>{}([&](auto msb) {
+                Softmax::template EmitPart0Op<decltype(msb)::value, decltype(op)::value>(
+                    state, closure, scale_log2);
+            });
+        });
+        static_for<0, Softmax::kPart1OperationCount, 1>{}([&](auto op) {
+            Softmax::template EmitPart1Op<ValidateMax, decltype(op)::value>(
+                state, closure, scale_log2);
+        });
+        static_for<0, Softmax::kCurrentPart2OperationEnd, 1>{}([&](auto op) {
+            static_for<0, Mapping::kNumMsb, 1>{}([&](auto msb) {
+                Softmax::template EmitCurrentPart2Op<decltype(msb)::value, decltype(op)::value>(
+                    state, closure, scale_log2);
+            });
+        });
+
+        FmhaD192CrossTileBackEdge::template Transfer<HasNextTile>(
+            state, closure, consume_one_tile, consume_multi_tile);
+    }
+};
+
+static_assert(FmhaD192CrossTilePrologue::kBackEdgeOperation == 31);
+
 static_assert(FmhaD192SplitSoftmax::kCurrentPart2OperationEnd == 8 + 16 + 8);
 static_assert(FmhaD192SplitSoftmax::kPart2OperationCount == 8 + 16 + 32 + 16 + 8 + 4 + 2 + 3);
 

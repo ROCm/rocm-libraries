@@ -14,11 +14,12 @@ namespace ck_tile {
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmD192V128Policy>
 struct BlockFmhaPipelineQRKSVSTdmD192V128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Policy_>
 {
-    using Base             = BlockFmhaPipelineQRKSVSTdm<Problem_, Policy_>;
-    using Problem          = remove_cvref_t<Problem_>;
-    using Policy           = remove_cvref_t<Policy_>;
-    using ScheduleExecutor = BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor;
-    using SplitSoftmax     = FmhaD192SplitSoftmax;
+    using Base              = BlockFmhaPipelineQRKSVSTdm<Problem_, Policy_>;
+    using Problem           = remove_cvref_t<Problem_>;
+    using Policy            = remove_cvref_t<Policy_>;
+    using ScheduleExecutor  = BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor;
+    using SplitSoftmax      = FmhaD192SplitSoftmax;
+    using CrossTilePrologue = FmhaD192CrossTilePrologue;
 
     using QDataType           = typename Base::QDataType;
     using KDataType           = typename Base::KDataType;

@@ -351,6 +351,35 @@ struct FmhaD192SoftmaxClosureState
     array<PerMsb, Mapping::kNumMsb> msb{};
 };
 
+struct FmhaD192OneTileFlush
+{
+    static constexpr bool kHasNextTile = false;
+};
+
+struct FmhaD192MultiTileFirstSteady
+{
+    static constexpr bool kHasNextTile = true;
+};
+
+struct FmhaD192CrossTileBackEdge
+{
+    template <bool HasNextTile, typename OneTileConsumer, typename MultiTileConsumer>
+    CK_TILE_DEVICE static void Transfer(FmhaD192SoftmaxState& state,
+                                        FmhaD192SoftmaxClosureState& closure,
+                                        OneTileConsumer& consume_one_tile,
+                                        MultiTileConsumer& consume_multi_tile)
+    {
+        if constexpr(HasNextTile)
+        {
+            consume_multi_tile(FmhaD192MultiTileFirstSteady{}, state, closure);
+        }
+        else
+        {
+            consume_one_tile(FmhaD192OneTileFlush{}, state, closure);
+        }
+    }
+};
+
 static_assert(sizeof(FmhaD192ScoreFragments) == 128 * sizeof(float));
 static_assert(sizeof(FmhaD192ProbabilityFragments) == 128 * sizeof(bf16_t));
 static_assert(FmhaD192ProbabilityFragments::ValidatePvOperandMapping());

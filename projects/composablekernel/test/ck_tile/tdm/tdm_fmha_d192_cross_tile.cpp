@@ -23,6 +23,15 @@ using ScoreState  = ck_tile::FmhaD192SoftmaxState;
 using Probability = ck_tile::FmhaD192ProbabilityFragments;
 using Closure     = ck_tile::FmhaD192SoftmaxClosureState;
 using Softmax     = ck_tile::FmhaD192SplitSoftmax;
+using Prologue    = ck_tile::FmhaD192CrossTilePrologue;
+
+enum class InputPattern
+{
+    Finite,
+    MixedFiniteAndMasked,
+    AllMaskedEmpty,
+    AllMaskedFiniteHistory,
+};
 
 using D192BlockShape = ck_tile::TileFmhaShape<ck_tile::sequence<128, 128, 32, 128, 32, 192>,
                                               ck_tile::sequence<4, 1, 1>,
@@ -117,16 +126,19 @@ constexpr ck_tile::index_t kCkPvOperandOffset    = kPvOperandOffset + kPvOperand
 constexpr ck_tile::index_t kMergedRowSumOffset   = kCkPvOperandOffset + kCkPvOperandCount;
 constexpr ck_tile::index_t kScaleOutputOffset    = kMergedRowSumOffset + 2;
 constexpr ck_tile::index_t kLocalMaxOutputOffset = kScaleOutputOffset + 2;
-constexpr ck_tile::index_t kOutputStride         = kLocalMaxOutputOffset + Mapping::kNumMsb;
+constexpr ck_tile::index_t kBackEdgePhaseOffset  = kLocalMaxOutputOffset + Mapping::kNumMsb;
+constexpr ck_tile::index_t kBackEdgeAliasOffset  = kBackEdgePhaseOffset + 1;
+constexpr ck_tile::index_t kOutputStride         = kBackEdgeAliasOffset + 1;
 
 static_assert(Softmax::kPart0OperationCount == 22);
 static_assert(Softmax::kPart1OperationCount == 8);
 static_assert(Softmax::kCurrentPart2OperationEnd == 32);
 static_assert(Softmax::kPart2OperationCount == 89);
+static_assert(Prologue::kBackEdgeOperation == 31);
 static_assert(sizeof(ck_tile::FmhaD192ScoreFragments) == 128 * sizeof(float));
 static_assert(sizeof(Probability) == 128 * sizeof(ck_tile::bf16_t));
 
-template <bool Masking>
+template <InputPattern Pattern, bool HasNextTile>
 __global__ __launch_bounds__(kThreads, 1) void RunCrossTilePrimitives(const float* input,
                                                                       float* output)
 {
@@ -152,21 +164,53 @@ __global__ __launch_bounds__(kThreads, 1) void RunCrossTilePrimitives(const floa
     const auto scales      = ck_tile::FmhaD192Scale::FromKernelScale(lane_input[kInputScaleOffset]);
     const float scale_log2 = scales.scale_log2;
 
-    ck_tile::static_for<0, Softmax::kPart0OperationCount, 1>{}([&](auto op) {
-        ck_tile::static_for<0, Mapping::kNumMsb, 1>{}([&](auto msb) {
-            Softmax::template EmitPart0Op<decltype(msb)::value, decltype(op)::value>(
-                state, closure, scale_log2);
+    if constexpr(Pattern == InputPattern::AllMaskedFiniteHistory)
+    {
+        auto ignore_one_tile   = [](ck_tile::FmhaD192OneTileFlush, ScoreState&, Closure&) {};
+        auto ignore_multi_tile = [](ck_tile::FmhaD192MultiTileFirstSteady, ScoreState&, Closure&) {
+        };
+        Prologue::template Run<true, true>(
+            state, closure, scale_log2, ignore_one_tile, ignore_multi_tile);
+        ck_tile::static_for<Softmax::kPreviousPart2OperationBeg,
+                            Softmax::kPart2OperationCount,
+                            1>{}([&](auto op) {
+            ck_tile::static_for<0, Mapping::kNumMsb, 1>{}([&](auto msb) {
+                Softmax::template EmitPreviousPart2Op<decltype(msb)::value, decltype(op)::value>(
+                    state, probability, closure, scale_log2);
+            });
         });
-    });
-    ck_tile::static_for<0, Softmax::kPart1OperationCount, 1>{}([&](auto op) {
-        Softmax::template EmitPart1Op<Masking, decltype(op)::value>(state, closure, scale_log2);
-    });
-    ck_tile::static_for<0, Softmax::kCurrentPart2OperationEnd, 1>{}([&](auto op) {
-        ck_tile::static_for<0, Mapping::kNumMsb, 1>{}([&](auto msb) {
-            Softmax::template EmitCurrentPart2Op<decltype(msb)::value, decltype(op)::value>(
-                state, closure, scale_log2);
-        });
-    });
+        ck_tile::static_ford<ck_tile::sequence<Mapping::kNumMsb, Mapping::kPairsPerMsb>>{}(
+            [&](auto indices) {
+                constexpr ck_tile::index_t msb        = indices[ck_tile::number<0>{}];
+                constexpr ck_tile::index_t pair       = indices[ck_tile::number<1>{}];
+                state.score.template Get<msb, pair>() = ck_tile::fp32x2_t{
+                    -ck_tile::numeric<float>::infinity(), -ck_tile::numeric<float>::infinity()};
+            });
+        closure = Closure{};
+    }
+
+    constexpr bool kValidateMax = Pattern != InputPattern::Finite;
+    float back_edge_phase       = -1.0f;
+    float back_edge_alias       = 0.0f;
+    auto consume_one_tile       = [&](ck_tile::FmhaD192OneTileFlush,
+                                ScoreState& transferred_state,
+                                Closure& transferred_closure) {
+        back_edge_phase = 0.0f;
+        back_edge_alias =
+            &transferred_state == &state && &transferred_closure == &closure ? 1.0f : 0.0f;
+    };
+    auto consume_multi_tile = [&](ck_tile::FmhaD192MultiTileFirstSteady,
+                                  ScoreState& transferred_state,
+                                  Closure& transferred_closure) {
+        back_edge_phase = 1.0f;
+        back_edge_alias =
+            &transferred_state == &state && &transferred_closure == &closure ? 1.0f : 0.0f;
+    };
+    Prologue::template Run<kValidateMax, HasNextTile>(
+        state, closure, scale_log2, consume_one_tile, consume_multi_tile);
+
+    lane_output[kBackEdgePhaseOffset] = back_edge_phase;
+    lane_output[kBackEdgeAliasOffset] = back_edge_alias;
 
     ck_tile::static_for<0, Mapping::kNumMsb, 1>{}([&](auto msb) {
         constexpr ck_tile::index_t m           = decltype(msb)::value;
@@ -280,7 +324,20 @@ bool Near(float actual, float expected, float tolerance = 2.0e-5f)
            std::abs(actual - expected) <= tolerance * std::max(1.0f, std::abs(expected));
 }
 
-template <bool Masking>
+template <InputPattern Pattern>
+constexpr const char* PatternName()
+{
+    if constexpr(Pattern == InputPattern::Finite)
+        return "finite";
+    else if constexpr(Pattern == InputPattern::MixedFiniteAndMasked)
+        return "mixed_finite_masked";
+    else if constexpr(Pattern == InputPattern::AllMaskedEmpty)
+        return "masked_all_inf_empty";
+    else
+        return "masked_all_inf_finite_history";
+}
+
+template <InputPattern Pattern, bool HasNextTile>
 bool RunCase(float attention_scale)
 {
     std::vector<float> input(kThreads * kInputStride);
@@ -294,15 +351,37 @@ bool RunCase(float attention_scale)
         {
             for(ck_tile::index_t scalar = 0; scalar < Mapping::kElementsPerMsb; ++scalar)
             {
-                lane[kInputScoreOffset + msb * Mapping::kElementsPerMsb + scalar] =
-                    Masking ? -std::numeric_limits<float>::infinity()
-                            : -10.0f + 2.0f * static_cast<float>(msb) +
-                                  0.125f * static_cast<float>(scalar) +
-                                  0.01f * static_cast<float>(lane_id);
+                const float finite_value = -10.0f + 2.0f * static_cast<float>(msb) +
+                                           0.125f * static_cast<float>(scalar) +
+                                           0.01f * static_cast<float>(lane_id);
+                if constexpr(Pattern == InputPattern::AllMaskedEmpty)
+                {
+                    lane[kInputScoreOffset + msb * Mapping::kElementsPerMsb + scalar] =
+                        -std::numeric_limits<float>::infinity();
+                }
+                else if constexpr(Pattern == InputPattern::MixedFiniteAndMasked)
+                {
+                    lane[kInputScoreOffset + msb * Mapping::kElementsPerMsb + scalar] =
+                        (scalar + msb + lane_id) % 5 == 0 ? -std::numeric_limits<float>::infinity()
+                                                          : finite_value;
+                }
+                else
+                {
+                    lane[kInputScoreOffset + msb * Mapping::kElementsPerMsb + scalar] =
+                        finite_value;
+                }
             }
-            lane[kInputOldMaxOffset + msb] =
-                Masking ? -std::numeric_limits<float>::infinity() : (msb < 2 ? -0.4f : -0.2f);
-            lane[kInputRowSumOffset + msb] = Masking ? 0.0f : 0.25f + 0.1f * msb;
+            if constexpr(Pattern == InputPattern::AllMaskedEmpty ||
+                         Pattern == InputPattern::AllMaskedFiniteHistory)
+            {
+                lane[kInputOldMaxOffset + msb] = -std::numeric_limits<float>::infinity();
+                lane[kInputRowSumOffset + msb] = 0.0f;
+            }
+            else
+            {
+                lane[kInputOldMaxOffset + msb] = msb < 2 ? -0.4f : -0.2f;
+                lane[kInputRowSumOffset + msb] = 0.25f + 0.1f * msb;
+            }
         }
 #if CK_TILE_FMHA_FWD_FAST_EXP2
         lane[kInputScaleOffset] = attention_scale * ck_tile::log2e_v<float>;
@@ -318,7 +397,7 @@ bool RunCase(float attention_scale)
     CheckHip(
         hipMemcpy(device_input, input.data(), input.size() * sizeof(float), hipMemcpyHostToDevice),
         "hipMemcpy input");
-    hipLaunchKernelGGL((RunCrossTilePrimitives<Masking>),
+    hipLaunchKernelGGL((RunCrossTilePrimitives<Pattern, HasNextTile>),
                        dim3(1),
                        dim3(kThreads),
                        0,
@@ -347,6 +426,8 @@ bool RunCase(float attention_scale)
         const auto* peer_in  = input.data() + peer * kInputStride;
         valid &= Near(lane_out[kScaleOutputOffset], attention_scale);
         valid &= Near(lane_out[kScaleOutputOffset + 1], scale_log2);
+        valid &= Near(lane_out[kBackEdgePhaseOffset], HasNextTile ? 1.0f : 0.0f);
+        valid &= Near(lane_out[kBackEdgeAliasOffset], 1.0f);
         float local_row_sums[4]{};
         for(ck_tile::index_t row = 0; row < 2; ++row)
         {
@@ -363,14 +444,36 @@ bool RunCase(float attention_scale)
                         peer_in[kInputScoreOffset + msb * Mapping::kElementsPerMsb + scalar]);
                 }
             }
-            const float exponent_max = Masking ? 0.0f : logical_max;
+            constexpr bool kValidateMax = Pattern != InputPattern::Finite;
+            const float exponent_max =
+                kValidateMax && std::isinf(logical_max) && std::signbit(logical_max) ? 0.0f
+                                                                                     : logical_max;
 
             for(ck_tile::index_t msb = 2 * row; msb < 2 * row + 2; ++msb)
             {
-                const float old_max = lane_in[kInputOldMaxOffset + msb];
+                const float old_max = Pattern == InputPattern::AllMaskedFiniteHistory
+                                          ? logical_max
+                                          : lane_in[kInputOldMaxOffset + msb];
                 const float delta   = std::fma(-exponent_max, scale_log2, old_max * scale_log2);
                 const float alpha   = std::exp2(delta);
                 float local_sum     = 0.0f;
+
+                if constexpr(Pattern == InputPattern::AllMaskedFiniteHistory)
+                {
+                    for(ck_tile::index_t scalar = 0; scalar < Mapping::kElementsPerMsb; ++scalar)
+                    {
+                        const auto offset = msb * Mapping::kElementsPerMsb + scalar;
+                        local_sum += std::exp2(std::fma(lane_in[kInputScoreOffset + offset],
+                                                        scale_log2,
+                                                        -exponent_max * scale_log2));
+                    }
+                }
+
+                const float old_row_sum = Pattern == InputPattern::AllMaskedFiniteHistory
+                                              ? local_sum
+                                              : lane_in[kInputRowSumOffset + msb];
+                float current_local_sum =
+                    Pattern == InputPattern::AllMaskedFiniteHistory ? 0.0f : local_sum;
 
                 valid &= Near(lane_out[kLogicalMaxOffset + msb], logical_max);
                 valid &= Near(lane_out[kLocalMaxOutputOffset + msb], logical_max);
@@ -378,25 +481,25 @@ bool RunCase(float attention_scale)
                 valid &= Near(lane_out[kDeltaOffset + msb], delta);
                 valid &= Near(lane_out[kExpDeltaOffset + msb], alpha);
                 valid &= Near(lane_out[kOldMaxOffset + msb], logical_max);
-                valid &= Near(lane_out[kPartialRowSumOffset + msb],
-                              lane_in[kInputRowSumOffset + msb] * alpha);
+                valid &= Near(lane_out[kPartialRowSumOffset + msb], old_row_sum * alpha);
 
                 for(ck_tile::index_t scalar = 0; scalar < Mapping::kElementsPerMsb; ++scalar)
                 {
                     const auto offset    = msb * Mapping::kElementsPerMsb + scalar;
-                    const float shifted  = std::fma(lane_in[kInputScoreOffset + offset],
-                                                   scale_log2,
-                                                   -exponent_max * scale_log2);
+                    const float score    = Pattern == InputPattern::AllMaskedFiniteHistory
+                                               ? -std::numeric_limits<float>::infinity()
+                                               : lane_in[kInputScoreOffset + offset];
+                    const float shifted  = std::fma(score, scale_log2, -exponent_max * scale_log2);
                     const float expected = std::exp2(shifted);
-                    local_sum += expected;
+                    current_local_sum += expected;
                     valid &= Near(lane_out[kPartialScoreOffset + offset],
                                   scalar < 8 ? expected : shifted);
                     valid &= Near(lane_out[kFinalScoreOffset + offset], expected);
                     valid &= Near(lane_out[kProbabilityOffset + offset], expected, 5.0e-3f);
                 }
                 valid &= Near(lane_out[kFinalRowSumOffset + msb],
-                              lane_in[kInputRowSumOffset + msb] * alpha + local_sum);
-                local_row_sums[msb] = lane_in[kInputRowSumOffset + msb] * alpha + local_sum;
+                              old_row_sum * alpha + current_local_sum);
+                local_row_sums[msb] = old_row_sum * alpha + current_local_sum;
             }
 
             const auto* peer_out = output.data() + peer * kOutputStride;
@@ -430,8 +533,8 @@ bool RunCase(float attention_scale)
     }
 
     valid &= ck_mapping_valid;
-    std::cout << (Masking ? "masked_all_inf" : "finite") << " attention_scale=" << attention_scale
-              << ": " << (valid ? "pass" : "fail")
+    std::cout << PatternName<Pattern>() << " path=" << (HasNextTile ? "multi" : "one")
+              << " attention_scale=" << attention_scale << ": " << (valid ? "pass" : "fail")
               << " ck_mapping=" << (ck_mapping_valid ? "pass" : "fail") << '\n';
     return valid;
 }
@@ -459,8 +562,12 @@ int main()
         }
 
         constexpr float kDefaultAttentionScale = 0.07216878f;
-        return RunCase<false>(kDefaultAttentionScale) && RunCase<false>(0.25f) &&
-                       RunCase<true>(kDefaultAttentionScale)
+        return RunCase<InputPattern::Finite, false>(kDefaultAttentionScale) &&
+                       RunCase<InputPattern::Finite, true>(kDefaultAttentionScale) &&
+                       RunCase<InputPattern::Finite, true>(0.25f) &&
+                       RunCase<InputPattern::MixedFiniteAndMasked, true>(kDefaultAttentionScale) &&
+                       RunCase<InputPattern::AllMaskedEmpty, false>(kDefaultAttentionScale) &&
+                       RunCase<InputPattern::AllMaskedFiniteHistory, true>(kDefaultAttentionScale)
                    ? 0
                    : 1;
     }
