@@ -758,7 +758,11 @@ class StreamK(Component):
         # (bit 31) and the 5-bit shift into a temp. MagicShiftItersPerTile
         # aliases SKTiles and must keep that overlay.
         if kernel["StreamK"] == 5:
-            sMaskedShift = writer.sgprPool.checkOut(1, "SK5MaskedMagicShift")
+            # PAP calls skTileIndex inside the OptNLL window, where the SGPR pool
+            # sits at its high-water mark. Let this scratch temp grow the pool
+            # (see _fetchWorkItemAndBroadcast) instead of tripping the
+            # preventOverflow guard and failing kernel generation outright.
+            sMaskedShift = writer.sgprPool.checkOut(1, "SK5MaskedMagicShift", preventOverflow=False)
             module.add(SAndB32(dst=sgpr(sMaskedShift), src0=sgpr(sMagicShift), src1=hex(0x8000001F),
                                comment="SK5: magic add bit (31) + 5-bit shift in temp, keep SKTiles overlay"))
             sMagicShiftForDiv = sMaskedShift
