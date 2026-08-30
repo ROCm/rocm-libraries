@@ -90,11 +90,8 @@ set(REGRESSION_EXAMPLES
 # List of examples currently failing on gfx1250 emulator.
 # All of the failing examples must be fixed asap.
 set(KNOWN_FAILING_EXAMPLES
-    example_gemm_multiply_multiply_xdl_fp8_blockscale_bpreshuffle
     example_gemm_mx_fp6
     example_gemm_mx_bf6
-    example_gemm_mx_fp8_fp4
-    example_gemm_mx_fp8_fp4_bpreshuffle
 )
 
 
@@ -218,6 +215,9 @@ function(add_example_executable EXAMPLE_NAME FILE_NAME)
         set_property(TARGET ${EXAMPLE_NAME} PROPERTY HIP_ARCHITECTURES ${EX_TARGETS})
         add_dependencies(examples ${EXAMPLE_NAME})
         add_dependencies(check ${EXAMPLE_NAME})
+	if(${EXAMPLE_NAME} MATCHES "example_moe_gemm1_xdl_fp8")
+            set_tests_properties(${EXAMPLE_NAME}  PROPERTIES TIMEOUT 3600)
+	endif()
         rocm_install(TARGETS ${EXAMPLE_NAME} COMPONENT examples)
         set(result 0)
     endif()

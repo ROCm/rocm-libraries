@@ -387,7 +387,7 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return r == nb::cast<StinkyRegister>(other);
             },
-            nb::arg("other").none(true))
+            nb::arg("other").none())
         .def(
             "__ne__",
             [](const StinkyRegister& r, const nb::object& other) -> bool {
@@ -396,7 +396,7 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return r != nb::cast<StinkyRegister>(other);
             },
-            nb::arg("other").none(true))
+            nb::arg("other").none())
 
         // --- Copy semantics (KernelWriter does copy.deepcopy on registers) -
         // StinkyRegister is value-like (trivially copyable for the union; the
