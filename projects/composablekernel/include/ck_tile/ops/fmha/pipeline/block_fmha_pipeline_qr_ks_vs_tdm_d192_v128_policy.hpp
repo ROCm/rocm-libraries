@@ -5,7 +5,6 @@
 
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
-#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_deferred_p.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_load.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_output.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_schedule_executor.hpp"
@@ -13,10 +12,6 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp"
 
 namespace ck_tile {
-
-#ifndef CK_TILE_FMHA_GFX125_D192_DEFERRED_P_LDS
-#define CK_TILE_FMHA_GFX125_D192_DEFERRED_P_LDS 0
-#endif
 
 struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 {
@@ -42,12 +37,9 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
     static constexpr bool kUseCustomQkStageSchedule   = true;
     static constexpr bool kUseCustomPvStageSchedule   = true;
     static constexpr bool kUseOutputFragments         = true;
-    static constexpr bool kUseDeferredPGroupLdsPhase = CK_TILE_FMHA_GFX125_D192_DEFERRED_P_LDS != 0;
-    static constexpr bool kUsePreviousTileLdsPhase   = kUseDeferredPGroupLdsPhase;
-    static constexpr auto kORescaleToken             = FmhaD192ScheduleToken::ORescale;
+    static constexpr auto kORescaleToken              = FmhaD192ScheduleToken::ORescale;
 
-    using OutputFragments  = FmhaD192OutputFragments;
-    using DeferredPStorage = FmhaD192DeferredPLdsLayout;
+    using OutputFragments = FmhaD192OutputFragments;
 
     static_assert(kKFootprintBytes == 0xc800);
     static_assert(kVFootprintBytes == 0x9000);
@@ -341,53 +333,6 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
             merge_sequences(sequence<m_iter, full_n_iter>{}, c_warp_y_index_zeros),
             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
             c_warp_tensor.get_thread_buffer());
-    }
-
-    template <index_t WmmaOrdinal,
-              typename BlockGemm,
-              typename PHalf,
-              typename BBlockTensor,
-              typename OutputFragment>
-    CK_TILE_DEVICE static void RunPvHalfWmma(const PHalf& p_half,
-                                             const BBlockTensor& b_block_tensor,
-                                             OutputFragment& output_fragment)
-    {
-        using WarpGemm    = typename BlockGemm::WarpGemm;
-        using AWarpDstr   = typename WarpGemm::AWarpDstr;
-        using BWarpDstr   = typename WarpGemm::BWarpDstr;
-        using AWarpTensor = typename WarpGemm::AWarpTensor;
-        using BWarpTensor = typename WarpGemm::BWarpTensor;
-        using CWarpTensor = typename WarpGemm::CWarpTensor;
-
-        static_assert(WmmaOrdinal >= 0 && WmmaOrdinal < 16);
-        static_assert(AWarpTensor::get_thread_buffer_size() == DeferredPStorage::kValuesPerMHalf);
-        static_assert(sizeof(OutputFragment) ==
-                      OutputFragments::kElementsPerFragment * sizeof(float));
-
-        constexpr index_t d_msb       = WmmaOrdinal / OutputFragments::kNumN;
-        constexpr index_t n           = WmmaOrdinal % OutputFragments::kNumN;
-        constexpr index_t m_half      = d_msb / 2;
-        constexpr index_t v_msb       = d_msb % 2;
-        constexpr index_t full_n_iter = n * 2 + v_msb;
-        static_assert(m_half == WmmaOrdinal / 8);
-
-        constexpr auto b_warp_y_lengths =
-            to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
-        constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
-
-        AWarpTensor a_warp_tensor;
-        static_for<0, DeferredPStorage::kValuesPerMHalf, 1>{}(
-            [&](auto i) { a_warp_tensor.get_thread_buffer()[i] = p_half[decltype(i)::value]; });
-
-        BWarpTensor b_warp_tensor;
-        b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
-            merge_sequences(sequence<0, full_n_iter>{}, b_warp_y_index_zeros),
-            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
-
-        CWarpTensor c_warp_tensor;
-        c_warp_tensor.get_thread_buffer().template set_as<fp32x8_t>(number<0>{}, output_fragment);
-        WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
-        output_fragment = c_warp_tensor.get_thread_buffer().template get_as<fp32x8_t>(number<0>{});
     }
 
     template <index_t Stage,

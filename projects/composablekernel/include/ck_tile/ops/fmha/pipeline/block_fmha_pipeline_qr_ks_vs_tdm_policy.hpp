@@ -236,8 +236,6 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     static constexpr bool kUseCustomQkStageSchedule   = false;
     static constexpr bool kUseCustomPvStageSchedule   = false;
     static constexpr bool kUseOutputFragments         = false;
-    static constexpr bool kUsePreviousTileLdsPhase    = false;
-    static constexpr bool kUseDeferredPGroupLdsPhase  = false;
 
     template <index_t Stage,
               typename BlockGemm,

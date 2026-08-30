@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "ck_tile/core.hpp"
@@ -73,6 +74,26 @@ struct D192PolicyProblem
 
 using D192Policy   = ck_tile::BlockFmhaPipelineQRKSVSTdmD192V128Policy;
 using D192Pipeline = ck_tile::BlockFmhaPipelineQRKSVSTdmD192V128<D192PolicyProblem>;
+
+struct DummyWindow
+{
+};
+
+struct DummyPositionEncoding
+{
+};
+
+static_assert(!std::is_invocable_v<D192Pipeline,
+                                   const DummyWindow&,
+                                   const DummyWindow&,
+                                   const DummyWindow&,
+                                   const DummyWindow&,
+                                   DummyWindow&,
+                                   D192PolicyProblem::FmhaMask,
+                                   DummyPositionEncoding,
+                                   float,
+                                   void*,
+                                   float>);
 
 static_assert(D192Policy::IsSupportedProblem<D192PolicyProblem>());
 static_assert(std::string_view{D192Pipeline::name} == "qr_tdm_d192_v128");
