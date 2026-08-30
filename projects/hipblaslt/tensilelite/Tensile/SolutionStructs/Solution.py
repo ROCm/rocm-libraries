@@ -2579,13 +2579,19 @@ class Solution(collections.abc.Mapping):
     state["WaveContiguousOutput"] = state["enableLDSTrB"] and not state["UseSubtileImpl"]
 
     # WaveTransposeStore: in-register wave-local block-lane-permutation store, valid on the classic
-    # LDSTr contiguous-output path (wave32, HPA) for f8/bf16/fp16 dest. Auto-disable elsewhere so a
-    # stray yaml value cannot produce a broken kernel. Requires the WaveContiguousOutput precondition.
+    # LDSTr contiguous-output path (wave32, HPA) for f8/bf16/fp16 dest. The value T is the MERGE
+    # FACTOR: a wave's MIWaveTile[0] M-tiles are stored as MIWaveTile[0]//T sub-groups of T tiles.
+    # So T must divide MIWaveTile[0] and 2T must be a power of 2 (the transpose spans 2T lane blocks).
+    # Auto-disable elsewhere so a stray yaml value cannot produce a broken kernel.
     if state.get("WaveTransposeStore", 0):
       dtype  = state["ProblemType"]["DestDataType"]
       dtypeOK = dtype.is8bitFloat() or dtype.isBFloat16() or dtype.isHalf()
+      T = state["WaveTransposeStore"]
+      miwt0 = state["MIWaveTile"][0] if "MIWaveTile" in state and len(state["MIWaveTile"]) == 2 else 0
+      twoT = 2 * T
+      tOK = miwt0 > 0 and (miwt0 % T == 0) and (twoT & (twoT - 1)) == 0
       if not (state["WaveContiguousOutput"] and not state["UseSubtileImpl"]
-              and state["WavefrontSize"] == 32 and dtypeOK
+              and state["WavefrontSize"] == 32 and dtypeOK and tOK
               and state["ProblemType"]["HighPrecisionAccumulate"]):
         state["WaveTransposeStore"] = 0
 

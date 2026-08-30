@@ -2452,18 +2452,20 @@ class GlobalWriteBatchWriter:
             self._epilogScratchFree(tmpInrSgpr)
           # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
           if waveContigXposeStore:
-            # Block-lane-permutation store: trigger on the LAST M-tile (tt0==MIWaveTile[0]-1) of each
-            # (tt1,vc1) column group and consume all MIWaveTile[0] M-tiles together, no-op the rest.
-            # MUST be the last tt0, not the first: packdata for each element runs in ITS OWN loop
-            # iteration (module.add(packModule) above), so only at the last tt0 have all T tiles been
-            # packed. Triggering on tt0==0 gathers not-yet-packed garbage for tiles 1..T-1.
-            miwt0 = self.kernel["MIWaveTile"][0]
-            if element[1] == miwt0 - 1:
-              firstElementIdx = elementIdx - (miwt0 - 1)
-              xposeModule, xposeStores = self._emitWaveTransposeStore(firstElementIdx, miwt0, element[0])
+            # Block-lane-permutation store, SUB-GROUP form: a wave's MIWaveTile[0] M-tiles are split
+            # into nSub = miwt0//T sub-groups of T tiles each (T = the WaveTransposeStore knob value,
+            # the real merge factor). Each sub-group is one coalesced store group. Trigger on the LAST
+            # tt0 of each sub-group (tt0 % T == T-1) so all T tiles of that sub-group are already
+            # packed (pack is per-element in ascending tt0 in the loop above); the other tiles no-op.
+            # sub-group index sgM = tt0 // T selects the M-slice (coord0 offset in the packer).
+            T = self.kernel["WaveTransposeStore"]
+            if (element[1] % T) == (T - 1):
+              sgM = element[1] // T
+              firstElementIdx = elementIdx - (T - 1)
+              xposeModule, xposeStores = self._emitWaveTransposeStore(firstElementIdx, T, element[0], sgM)
               storeCodeModule.add(xposeModule)
               self.storesIssued += xposeStores
-            # else: this tt0 is packed now, consumed by its group's last-tt0 trigger -> emit nothing.
+            # else: this tt0 is packed now, consumed by its sub-group's last-tt0 trigger -> no-op.
           elif waveContigF8Merge:
             storeCodeModule.add(self._emitF8PartnerMergeStore(addrCalc, sumIdx))
             self.storesIssued += 1
@@ -4027,13 +4029,14 @@ class GlobalWriteBatchWriter:
     module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
     return module
 
-  def _emitWaveTransposeStore(self, elementIdx: int, T: int, tt1: int):
+  def _emitWaveTransposeStore(self, elementIdx: int, T: int, tt1: int, sgM: int = 0):
     """Barrier-free in-register block-lane-permutation store (order A: pack-then-permute).
 
-    Combines T adjacent M-tiles of one wave into coalesced stores WITHOUT the StoreRemap LDS
-    round-trip / s_barrier. Triggered on the LAST M-tile of a (tt1,vc1) column group; consumes all
-    T M-tiles (elementIdx..elementIdx+T-1, already packed in-place at their sumIdx). dtype-agnostic:
-    dwordsPerBlock = 2*bpe (f8 -> 2 dwords -> b64 store; bf16/fp16 -> 4 dwords -> b128 store).
+    Combines T adjacent M-tiles of one wave SUB-GROUP into coalesced stores WITHOUT the StoreRemap
+    LDS round-trip / s_barrier. A wave owns MIWaveTile[0] M-tiles = miwt0//T sub-groups of T tiles;
+    sgM is this sub-group's index along M (0..miwt0//T-1). Triggered on the LAST M-tile of the
+    sub-group; consumes its T M-tiles (elementIdx..elementIdx+T-1, already packed in-place at their
+    sumIdx). dtype-agnostic: dwordsPerBlock = 2*bpe (f8 -> 2 dwords -> b64; bf16/fp16 -> 4 -> b128).
 
     Geometry (HW-verified, ~/tr16/xpose4p.s): T tiles -> 2T M-blocks (each 8 M = dwordsPerBlock
     packed dwords). Output lane L' holds block blk = L' & (2T-1) at column N_local = L' >> log2(2T);
@@ -4119,9 +4122,12 @@ class GlobalWriteBatchWriter:
     module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=vgpr(sTmp0), comment="srcLane(p=0) = N_local + Mhi<<4"))
     module.add(VLShiftLeftB32(dst=vgpr(vSrcIdx), shiftHex=2, src=vgpr(vSrcIdx), comment="*4 byte index"))
 
-    # coord0 (M) = blk*8*bpe + wg0*MT0*bpe + waveId0*MIWaveTile0*matM*bpe -> vAddr (pass-invariant).
+    # coord0 (M) = blk*8*bpe + sgM*(T*matM)*bpe + wg0*MT0*bpe + waveId0*MIWaveTile0*matM*bpe -> vAddr.
+    # Each sub-group covers T*matM (=16T) contiguous M rows; sgM shifts to this sub-group's M-slice.
     module.add(VAndB32(dst=vgpr(vAddr), src0=twoT - 1, src1=vgpr(vSerial), comment="blk = L'&(2T-1)"))
     module.add(VLShiftLeftB32(dst=vgpr(vAddr), shiftHex=int(log2(8 * bpe)), src=vgpr(vAddr), comment="M-block byte = blk*8*bpe"))
+    if sgM > 0:  # sgM==0 (nSub==1, T==miwt0) emits nothing -> byte-identical to the pre-subgroup path.
+      module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=sgM * T * matM * bpe, comment="+ sub-group M-slice offset = sgM*T*matM*bpe"))
     module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=self.kernel["MacroTile0"] * bpe, comment="wg0*MT0*bpe"))
     module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=sgpr(tmpS), comment="vaddr += wg0 M base"))
     if miwg0 > 1:
