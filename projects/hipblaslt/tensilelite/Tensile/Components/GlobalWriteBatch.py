@@ -1766,21 +1766,22 @@ class GlobalWriteBatchWriter:
       and not self.kernel["StoreRemapVectorWidth"]
       and self.parentWriter.states.bpeCexternal == self.parentWriter.states.bpeCexternalGSU1
     )
-    # f8 wave32 in-register transpose store (barrier-free coalescing). Same preconditions as
-    # partner-merge plus the F8WaveTranspose knob; mutually exclusive with it.
-    waveContigF8Transpose = (
-      bool(self.kernel.get("F8WaveTranspose"))
+    # wave32 in-register block-lane-permutation store (barrier-free coalescing) for f8/bf16/fp16.
+    # Same preconditions as partner-merge plus the WaveTransposeStore knob; supersedes partner-merge.
+    destDtype = self.kernel["ProblemType"]["DestDataType"]
+    waveContigXposeStore = (
+      bool(self.kernel.get("WaveTransposeStore"))
       and self.kernel.get("WaveContiguousOutput")
       and not self.kernel.get("UseSubtileImpl")
       and not self.edge
       and self.kernel["WavefrontSize"] == 32
-      and self.kernel["ProblemType"]["DestDataType"].is8bitFloat()
+      and (destDtype.is8bitFloat() or destDtype.isBFloat16() or destDtype.isHalf())
       and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
       and self.kernel["BufferStore"]
       and not self.kernel["StoreRemapVectorWidth"]
       and self.parentWriter.states.bpeCexternal == self.parentWriter.states.bpeCexternalGSU1
     )
-    if waveContigF8Transpose:
+    if waveContigXposeStore:
       waveContigF8Merge = False  # transpose supersedes partner-merge when enabled
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
@@ -2450,7 +2451,7 @@ class GlobalWriteBatchWriter:
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpInrSgpr, self.laneSGPRC), "apply exec mask"))
             self._epilogScratchFree(tmpInrSgpr)
           # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
-          if waveContigF8Transpose:
+          if waveContigXposeStore:
             # Block-lane-permutation store: trigger on the LAST M-tile (tt0==MIWaveTile[0]-1) of each
             # (tt1,vc1) column group and consume all MIWaveTile[0] M-tiles together, no-op the rest.
             # MUST be the last tt0, not the first: packdata for each element runs in ITS OWN loop
@@ -2459,7 +2460,7 @@ class GlobalWriteBatchWriter:
             miwt0 = self.kernel["MIWaveTile"][0]
             if element[1] == miwt0 - 1:
               firstElementIdx = elementIdx - (miwt0 - 1)
-              xposeModule, xposeStores = self._emitF8WaveTransposeStore(firstElementIdx, miwt0, element[0])
+              xposeModule, xposeStores = self._emitWaveTransposeStore(firstElementIdx, miwt0, element[0])
               storeCodeModule.add(xposeModule)
               self.storesIssued += xposeStores
             # else: this tt0 is packed now, consumed by its group's last-tt0 trigger -> emit nothing.
@@ -4026,12 +4027,13 @@ class GlobalWriteBatchWriter:
     module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
     return module
 
-  def _emitF8WaveTransposeStore(self, elementIdx: int, T: int, tt1: int):
-    """Barrier-free in-register block-lane-permutation store for f8 (order A: pack-then-permute).
+  def _emitWaveTransposeStore(self, elementIdx: int, T: int, tt1: int):
+    """Barrier-free in-register block-lane-permutation store (order A: pack-then-permute).
 
     Combines T adjacent M-tiles of one wave into coalesced stores WITHOUT the StoreRemap LDS
-    round-trip / s_barrier. Triggered on the first M-tile (tt0==0) of a (tt1,vc1) column group;
-    consumes all T M-tiles (elementIdx..elementIdx+T-1, already f8-packed in-place at their sumIdx).
+    round-trip / s_barrier. Triggered on the LAST M-tile of a (tt1,vc1) column group; consumes all
+    T M-tiles (elementIdx..elementIdx+T-1, already packed in-place at their sumIdx). dtype-agnostic:
+    dwordsPerBlock = 2*bpe (f8 -> 2 dwords -> b64 store; bf16/fp16 -> 4 dwords -> b128 store).
 
     Geometry (HW-verified, ~/tr16/xpose4p.s): T tiles -> 2T M-blocks (each 8 M = dwordsPerBlock
     packed dwords). Output lane L' holds block blk = L' & (2T-1) at column N_local = L' >> log2(2T);
@@ -4041,24 +4043,26 @@ class GlobalWriteBatchWriter:
 
     Only wired/validated for the natural T = MIWaveTile[0]; asserts otherwise.
     """
-    module = Module("F8WaveTransposeStore")
+    module = Module("WaveTransposeStore")
     bpe  = self.parentWriter.states.bpeCexternal
-    dwordsPerBlock = 2 * bpe          # f8 -> 2 (8 M packed into 2 dwords)
+    dwordsPerBlock = 2 * bpe          # f8 -> 2 ; bf16/fp16 -> 4 (8 M packed into dwordsPerBlock dwords)
+    assert dwordsPerBlock in (2, 4), "WaveTransposeStore supports 1-byte (b64) or 2-byte (b128) dest only"
+    storeCls = BufferStoreB128 if dwordsPerBlock == 4 else BufferStoreB64
     twoT = 2 * T
     log2TwoT = int(log2(twoT))
     ntd = self.kernel["NonTemporalD"]
     isGlc = bool(ntd & 0x1); isSlc = bool(ntd & 0x2); isNT = bool(ntd & 0x4)
 
-    assert twoT & (twoT - 1) == 0, "F8WaveTranspose requires 2T a power of 2"
+    assert twoT & (twoT - 1) == 0, "WaveTransposeStore requires 2T a power of 2"
 
     # The T M-tiles' packed blocks live at each element's sumIdx (captured now: pool-allocated,
     # only valid within this batch -> must snapshot, cannot recompute from startVgprValu for MI path).
     tileBase = [self.ss.elementSumIdx[elementIdx + j] for j in range(T)]
 
     # Scratch region (low bank, from batch setup): gather buffer [T*dwordsPerBlock] + selected
-    # [dwordsPerBlock, 2-aligned b64 store src] + srcIdx(1) + gsel(1) + vAddr(1) + serialLo(1) +
-    # waveId(1) + vDelta(1) (per-pass vaddr byte step, held across the loop).
-    base    = self.cvtVgprStruct.vgprF8XposeBase
+    # [dwordsPerBlock, store src: 2-align/b64 for f8, 4-align/b128 for bf16] + srcIdx(1) + gsel(1) +
+    # vAddr(1) + serialLo(1) + waveId(1) + vDelta(1) (per-pass vaddr byte step, held across the loop).
+    base    = self.cvtVgprStruct.vgprXposeBase
     gather  = base                                 # T*dwordsPerBlock dwords
     sel     = base + T * dwordsPerBlock             # dwordsPerBlock dwords
     vSrcIdx = base + T * dwordsPerBlock + dwordsPerBlock
@@ -4089,7 +4093,7 @@ class GlobalWriteBatchWriter:
     nPasses = matN // colsPerPass
 
     if miwg0 > 1 and (miwg0 & (miwg0 - 1)) != 0:
-      raise NotImplementedError("F8WaveTranspose needs power-of-2 MIWaveGroup[0]")
+      raise NotImplementedError("WaveTransposeStore needs power-of-2 MIWaveGroup[0]")
 
     # Group index g = (L'>>1)&(T-1) (which M-tile owns this lane's block); constant across passes.
     module.addComment1("f8 wave-transpose: g = (L'>>1)&%d (which M-tile)" % (T - 1))
@@ -4167,13 +4171,13 @@ class GlobalWriteBatchWriter:
                                  src1=vgpr(gather + g * dwordsPerBlock + d), src2=VCC(),
                                  comment="select group %d dword %d" % (g, d)))
 
-      module.add(BufferStoreB64(
+      module.add(storeCls(
         src=vgpr(sel, dwordsPerBlock),
         vaddr=vgpr(vAddr),
         saddr=sgpr("SrdD", 4),
         soffset=0,
         mubuf=MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT),
-        comment="f8 wave-transpose coalesced b64 store (8 M/lane)"))
+        comment="wave-transpose coalesced store (8 M/lane, %d dwords)" % dwordsPerBlock))
 
       # advance to next pass: srcLane += colsPerPass (byte index += colsPerPass*4), vaddr += delta.
       if p + 1 < nPasses:

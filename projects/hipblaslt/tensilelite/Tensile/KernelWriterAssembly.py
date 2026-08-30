@@ -15544,6 +15544,11 @@ class KernelWriterAssembly(KernelWriter):
     vgprPermAddr: int = -1        # per-lane ds_bpermute byte address (partner_lane*4); constant for the whole batch
     vgprLaneGroupDelta: int = -1  # per-lane lane_group*8: M-row byte offset added to addrDVgpr for the dwordx4 store
     vgprAddrScratch: int = -1     # per-store scratch: holds (addrDVgpr scaled + lane_group*8) without modifying addrDVgpr
+    # wave-transpose store scratch (bf16/fp16 b128 path): T*dwordsPerBlock gather + block + temps.
+    # 4-aligned region (b128 store src); layout computed in the packer from T. Shared field name with
+    # FP8CVTVgprStruct so _emitWaveTransposeStore reads self.cvtVgprStruct.vgprXposeBase uniformly.
+    vgprXposeBase: int = -1
+    vgprXposeCount: int = 0
 
   class FP8CVTVgprStruct(NamedTuple):
     vgprFp8NanInf: int = -1
@@ -15552,10 +15557,11 @@ class KernelWriterAssembly(KernelWriter):
     vgprFp8Max: int    = -1
     # f8 partner-merge scratch: 4-aligned b128 payload for v_permlane16_swap merge.
     vgprF8MergePack: int     = -1
-    # f8 wave-transpose scratch: T*dwordsPerBlock gather buffer + selected block + addr/index temps.
-    # Base of a contiguous, 2-aligned region; layout computed in the packer from T.
-    vgprF8XposeBase: int     = -1
-    vgprF8XposeCount: int    = 0
+    # wave-transpose store scratch (f8 b64 path): T*dwordsPerBlock gather buffer + block + temps.
+    # Base of a contiguous, 2-aligned region; layout computed in the packer from T. Shared field name
+    # with BF16CVTVgprStruct so the packer reads self.cvtVgprStruct.vgprXposeBase uniformly.
+    vgprXposeBase: int     = -1
+    vgprXposeCount: int    = 0
 
   class BF8CVTVgprStruct(NamedTuple):
     vgprBF8NanInf: int = -1
@@ -16185,11 +16191,22 @@ class KernelWriterAssembly(KernelWriter):
       cvtVgprStruct  = None
       cvtVgpr        = None
       f8MergePack     = -1  # f8 partner-merge scratch (freed in cleanup below)
-      f8XposeBase     = -1  # f8 wave-transpose scratch (freed in cleanup below)
-      f8XposeCount    = 0
+      xposeBase       = -1  # wave-transpose store scratch, f8 or bf16 (freed in cleanup below)
+      xposeCount      = 0
       is16bitHPA = (kernel["ProblemType"]["DestDataType"].isBFloat16() or
                     kernel["ProblemType"]["DestDataType"].isHalf()) and \
                    kernel["ProblemType"]["HighPrecisionAccumulate"]
+      # Shared helper: wave-transpose store scratch (low bank). dwordsPerBlock = 2*bpe (f8->2 b64,
+      # bf16/fp16->4 b128); align to dwordsPerBlock so the b128 store src (sel) is 4-aligned.
+      def _checkoutXposeScratch():
+        T = kernel["WaveTransposeStore"]
+        dwordsPerBlock = 2 * self.states.bpeCexternal
+        # gather[T*dwordsPerBlock] + sel[dwordsPerBlock] + srcIdx + gsel + vAddr + serialLo +
+        # waveId + vDelta (6 singles; vDelta holds the per-pass vaddr byte step).
+        cnt = T * dwordsPerBlock + dwordsPerBlock + 6
+        return self.vgprPool.checkOutAligned(cnt, dwordsPerBlock, tag="globalWriteElements_xpose"), cnt
+      wantXpose = (kernel.get("WaveTransposeStore") and kernel.get("WaveContiguousOutput")
+                   and not kernel.get("UseSubtileImpl") and kernel["WavefrontSize"] == 32)
       if is16bitHPA:
         # For UseSubtileImpl, allocate 7 vgprs with 2-alignment (64-bit aligned) so
         # that the first 4 (reused as pack scratch for the paired 16bit store) satisfy
@@ -16207,31 +16224,28 @@ class KernelWriterAssembly(KernelWriter):
         numCvtVgprs = 7 if kernel.get("UseSubtileImpl") else 4
         cvtAlign    = 2 if kernel.get("UseSubtileImpl") else 1
         cvtVgpr = self.vgprPool.checkOutAligned(numCvtVgprs, cvtAlign, tag="globalWriteElements_cvtVgpr")
+        # bf16/fp16 wave-transpose store: b128 scratch (dwordsPerBlock=4, 4-aligned), low bank.
+        if wantXpose:
+          xposeBase, xposeCount = _checkoutXposeScratch()
         cvtVgprStruct = self.BF16CVTVgprStruct(vgprBf16Temp=cvtVgpr, vgprBf16Mask=(cvtVgpr+1), \
                                                vgprFp32Nan=(cvtVgpr+2), vgprBf16Inc=(cvtVgpr+3), \
                                                vgprPermAddr=(cvtVgpr+4) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprLaneGroupDelta=(cvtVgpr+5) if kernel.get("UseSubtileImpl") else -1, \
-                                               vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1)
+                                               vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1, \
+                                               vgprXposeBase=xposeBase, vgprXposeCount=xposeCount)
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr2")
-        # f8 partner-merge scratch, reserved here so it lands in the low VGPR bank.
+        # f8 partner-merge / wave-transpose scratch, reserved here so it lands in the low VGPR bank.
         if kernel.get("WaveContiguousOutput") and not kernel.get("UseSubtileImpl") \
            and kernel["WavefrontSize"] == 32:
-          if kernel.get("F8WaveTranspose"):
-            # Wave-transpose scratch (low bank): T*dwordsPerBlock gather + dwordsPerBlock selected +
-            # src-index + vaddr + group-select temp. dwordsPerBlock = 2*bpeCexternal (f8 -> 2).
-            T = kernel["F8WaveTranspose"]
-            dwordsPerBlock = 2 * self.states.bpeCexternal
-            # gather[T*dwordsPerBlock] + sel[dwordsPerBlock] + srcIdx + gsel + vAddr + serialLo +
-            # waveId + vDelta (6 singles; vDelta holds the per-pass vaddr byte step).
-            f8XposeCount = T * dwordsPerBlock + dwordsPerBlock + 6
-            f8XposeBase = self.vgprPool.checkOutAligned(f8XposeCount, 2, tag="globalWriteElements_f8Xpose")
+          if wantXpose:
+            xposeBase, xposeCount = _checkoutXposeScratch()
           else:
             f8MergePack = self.vgprPool.checkOutAligned(4, 4, tag="globalWriteElements_f8MergePack")
         cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \
                                               vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3), \
                                               vgprF8MergePack=f8MergePack, \
-                                              vgprF8XposeBase=f8XposeBase, vgprF8XposeCount=f8XposeCount)
+                                              vgprXposeBase=xposeBase, vgprXposeCount=xposeCount)
       elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr3")
         cvtVgprStruct = self.BF8CVTVgprStruct(vgprBF8Temp=cvtVgpr, vgprBF8NanInf=(cvtVgpr+1), \
@@ -16445,8 +16459,8 @@ class KernelWriterAssembly(KernelWriter):
         self.vgprPool.checkIn(cvtVgpr)
       if f8MergePack is not None and f8MergePack != -1:
         self.vgprPool.checkIn(f8MergePack)
-      if f8XposeBase is not None and f8XposeBase != -1:
-        self.vgprPool.checkIn(f8XposeBase)
+      if xposeBase is not None and xposeBase != -1:
+        self.vgprPool.checkIn(xposeBase)
       if gsuLimit > 1 and gsuLimitIdx == 0:
         if deferGSU0:
           # GSU0 store code is done. Append it to deferredGSU0 (placed after persistent loop),
@@ -16538,11 +16552,11 @@ class KernelWriterAssembly(KernelWriter):
     # partially covers an N-column still touches the full acc range of that
     # column.  Aligning to MIWaveTile[0] ensures batches break on N-column
     # boundaries, avoiding accesses beyond the ValuC range.
-    # F8WaveTranspose also needs a column's MIWaveTile[0] M-tiles co-resident in one batch (the
+    # WaveTransposeStore also needs a column's MIWaveTile[0] M-tiles co-resident in one batch (the
     # block-permutation gathers their sumIdx together), so apply the same alignment.
-    f8WaveTranspose = (kernel.get("F8WaveTranspose") and not kernel.get("UseSubtileImpl")
-                       and kernel.get("EnableMatrixInstruction"))
-    if (kernel.get("UseSubtileImpl") and kernel.get("EnableMatrixInstruction")) or f8WaveTranspose:
+    waveTransposeStore = (kernel.get("WaveTransposeStore") and not kernel.get("UseSubtileImpl")
+                          and kernel.get("EnableMatrixInstruction"))
+    if (kernel.get("UseSubtileImpl") and kernel.get("EnableMatrixInstruction")) or waveTransposeStore:
       miwt0 = kernel["MIWaveTile"][0]
       totalElems = kernel["MIWaveTile"][0] * kernel["MIWaveTile"][1]
       if numElementsPerBatch >= totalElems:
