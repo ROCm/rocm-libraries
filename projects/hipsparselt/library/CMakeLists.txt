@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 add_library(hipsparselt)
-if(NOT HIPSPARSELT_BUILD_SHARED_LIBS)
+if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(hipsparselt PRIVATE HIPSPARSELT_STATIC_LIB)
 endif()
 

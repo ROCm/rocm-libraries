@@ -60,16 +60,7 @@ if(HIPSPARSELT_ENABLE_CUDA AND HIPSPARSELT_ENABLE_HIP)
     message(FATAL_ERROR "Cannot enable CUDA and HIP support simultaneously.")
 endif()
 
-set(_hipsparselt_build_shared_default ON)
-if(DEFINED BUILD_SHARED_LIBS AND NOT "${BUILD_SHARED_LIBS}" STREQUAL "")
-    set(_hipsparselt_build_shared_default "${BUILD_SHARED_LIBS}")
-endif()
-option(HIPSPARSELT_BUILD_SHARED_LIBS
-    "Build the hipSPARSELt shared library."
-    "${_hipsparselt_build_shared_default}"
-)
-unset(_hipsparselt_build_shared_default)
-set(BUILD_SHARED_LIBS "${HIPSPARSELT_BUILD_SHARED_LIBS}")
+option(BUILD_SHARED_LIBS "Build libraries as shared by default." ON)
 option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
 option(HIPSPARSELT_BUILD_COVERAGE "Build tests with coverage enabled." OFF)
 
@@ -231,7 +222,7 @@ endif()
 # --- Packaging and installation ---
 
 if(HIPSPARSELT_ENABLE_HIP)
-    if(HIPSPARSELT_BUILD_SHARED_LIBS)
+    if(BUILD_SHARED_LIBS)
         rocm_package_add_dependencies(
             COMPONENT runtime
             DEPENDS "hipblaslt >= ${hipblaslt_VERSION}"
@@ -374,9 +365,7 @@ if(HIPSPARSELT_ENABLE_CLIENT)
 endif()
 
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPSPARSELT_IS_SUBPROJECT)
-    # rocm_create_package makes decisions on what type of package to produce based on
-    # BUILD_SHARED_LIBS. If we don't set this here we will only get a dev package.
-    set(BUILD_SHARED_LIBS ${HIPSPARSELT_BUILD_SHARED_LIBS})
+    # rocm_create_package uses BUILD_SHARED_LIBS to select the package layout.
     set(HIPSPARSELT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
         CACHE PATH "Path placed into ldconfig file"
     )

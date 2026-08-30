@@ -20,22 +20,13 @@ include(dependencies)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 
-set(_origami_build_shared_default "${ORIGAMI_STANDALONE}")
-if(DEFINED BUILD_SHARED_LIBS AND NOT "${BUILD_SHARED_LIBS}" STREQUAL "")
-    set(_origami_build_shared_default "${BUILD_SHARED_LIBS}")
-endif()
-option(ORIGAMI_BUILD_SHARED_LIBS
-    "Build shared libraries."
-    "${_origami_build_shared_default}"
-)
-unset(_origami_build_shared_default)
+option(BUILD_SHARED_LIBS "Build libraries as shared by default." "${ORIGAMI_STANDALONE}")
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
 find_package(hip REQUIRED)
 
-set(BUILD_SHARED_LIBS "${ORIGAMI_BUILD_SHARED_LIBS}")
 add_library(origami)
 
 rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
@@ -56,7 +47,7 @@ generate_export_header(origami
     EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
     STATIC_DEFINE ORIGAMI_STATIC
 )
-if(ORIGAMI_LIBRARY_TYPE STREQUAL "STATIC")
+if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(origami PUBLIC ORIGAMI_STATIC)
 endif()
 
@@ -157,7 +148,6 @@ rocm_install(
 )
 
 if(ROCM_LIBS_SUPERBUILD OR ORIGAMI_STANDALONE)
-    set(BUILD_SHARED_LIBS ${ORIGAMI_BUILD_SHARED_LIBS})
     set(ORIGAMI_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
         CACHE PATH "Path placed into ldconfig file"
     )

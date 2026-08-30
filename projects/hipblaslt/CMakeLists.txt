@@ -61,20 +61,6 @@ option(HIPBLASLT_ENABLE_MATRIX_TRANSFORM "Build hipBLASLt MatrixTransform device
 option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
 option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
 option(BUILD_SHARED_LIBS "Build libraries as shared by default." ON)
-set(_hipblaslt_build_shared_default ON)
-if(NOT "${BUILD_SHARED_LIBS}" STREQUAL "")
-    set(_hipblaslt_build_shared_default "${BUILD_SHARED_LIBS}")
-endif()
-option(HIPBLASLT_BUILD_SHARED_LIBS
-    "Build the hipblaslt library as shared vs static"
-    "${_hipblaslt_build_shared_default}"
-)
-option(TENSILELITE_BUILD_SHARED_LIBS
-    "Build tensilelite-host as shared vs static"
-    "${_hipblaslt_build_shared_default}"
-)
-unset(_hipblaslt_build_shared_default)
-mark_as_advanced(HIPBLASLT_BUILD_SHARED_LIBS TENSILELITE_BUILD_SHARED_LIBS)
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
@@ -368,24 +354,17 @@ if(_hipblaslt_mxdatagen_enabled)
     add_subdirectory(clients/common)
 endif()
 
-block(SCOPE_FOR VARIABLES)
-    set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
-    add_subdirectory(tensilelite)
-endblock()
+add_subdirectory(tensilelite)
 
 if(HIPBLASLT_ENABLE_HOST)
-    if(HIPBLASLT_BUILD_SHARED_LIBS)
-        add_library(hipblaslt SHARED)
-    else()
-        add_library(hipblaslt STATIC)
-    endif()
-    if(WIN32 AND HIPBLASLT_BUILD_SHARED_LIBS AND _hipblaslt_have_version_rc)
+    add_library(hipblaslt)
+    if(WIN32 AND BUILD_SHARED_LIBS AND _hipblaslt_have_version_rc)
         target_sources(
             hipblaslt
             PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc"
         )
     endif()
-    if(NOT HIPBLASLT_BUILD_SHARED_LIBS)
+    if(NOT BUILD_SHARED_LIBS)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
     endif()
     if(HIPBLASLT_ENABLE_ROCROLLER)
@@ -496,7 +475,7 @@ if(HIPBLASLT_ENABLE_HOST)
         rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")
     else()
         set(hipblas_common_minimum 1.0.0)
-        if(HIPBLASLT_BUILD_SHARED_LIBS)
+        if(BUILD_SHARED_LIBS)
             rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
             rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-devel >= ${hipblas_common_minimum}")
         else()
@@ -865,10 +844,7 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
 endif()
 
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
-    # rocm_create_package makes decisions on what type of package to produce
-    # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
-    # a dev package.
-    set(BUILD_SHARED_LIBS "${HIPBLASLT_BUILD_SHARED_LIBS}")
+    # rocm_create_package uses BUILD_SHARED_LIBS to select the package layout.
     set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
     rocm_create_package(
         NAME hipblaslt

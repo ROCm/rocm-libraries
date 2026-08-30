@@ -146,7 +146,7 @@ Refer to the available build options using `./install.sh --help`
 *Build control options*:
 
 * `GPU_TARGETS`: AMD GFX targets to cross-compile for (default: `all`)
-* `HIPSPARSELT_BUILD_SHARED_LIBS`: Build the hipSPARSELt shared or static library (default: `ON`)
+* `BUILD_SHARED_LIBS`: Build libraries as shared rather than static (default: `ON`)
 * `HIPSPARSELT_BUILD_TESTING`: Build test client (default: `ON`)
 * `HIPSPARSELT_BUILD_COVERAGE`: Build tests with coverage support (default: `OFF`)
 

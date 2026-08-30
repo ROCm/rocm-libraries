@@ -250,7 +250,7 @@ cmake --install build/
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `ORIGAMI_BUILD_SHARED_LIBS` | Build shared libraries | `ON` (standalone), `OFF` (as part of rocm-libraries) |
+| `BUILD_SHARED_LIBS` | Build shared libraries | `ON` standalone; inherited when used as a subproject |
 | `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
 | `ORIGAMI_BUILD_TESTING` | Enable Python binding tests | `OFF` |
 | `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
