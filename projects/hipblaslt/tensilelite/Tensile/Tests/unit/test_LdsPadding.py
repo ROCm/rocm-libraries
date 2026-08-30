@@ -290,10 +290,10 @@ def test_b64_config_is_legal_over_the_reachable_shapes():
                 if perBlock == 0:
                     assert pad == 0, (mt, wt, wg, pad)
                     continue
-                assert perBlock in _L._TDM_VALID_BLOCK_BYTES, (mt, wt, wg, perBlock)
+                assert perBlock in _L._LDS_PAD_BLOCK_BYTES, (mt, wt, wg, perBlock)
                 padBytes = int(round(pad * bpeDS))
                 assert padBytes % 8 == 0, (mt, wt, wg, padBytes)
-                assert 0 < padBytes <= _L._TDM_MAX_PAD_BYTES, (mt, wt, wg, padBytes)
+                assert 0 < padBytes <= _L._LDS_MAX_PAD_BYTES, (mt, wt, wg, padBytes)
 
 
 def test_b128_wave_costs_pads_the_instruction_offset_on_its_own():
@@ -322,10 +322,10 @@ def test_fp16_config_is_legal_over_the_reachable_shapes():
                 if perBlock == 0:
                     assert pad == 0, (mt, wt, wg, pad)
                     continue
-                assert perBlock in _L._TDM_VALID_BLOCK_BYTES, (mt, wt, wg, perBlock)
+                assert perBlock in _L._LDS_PAD_BLOCK_BYTES, (mt, wt, wg, perBlock)
                 padBytes = pad * 2
                 assert padBytes % 8 == 0, (mt, wt, wg, padBytes)
-                assert 0 < padBytes <= _L._TDM_MAX_PAD_BYTES, (mt, wt, wg, padBytes)
+                assert 0 < padBytes <= _L._LDS_MAX_PAD_BYTES, (mt, wt, wg, padBytes)
 
 
 def test_b32_wave_costs_counts_one_bank_per_thread():
@@ -353,10 +353,10 @@ def test_fp32_config_is_legal_over_the_reachable_shapes():
                 if perBlock == 0:
                     assert pad == 0, (mt, wt, wg, vw, pad)
                     continue
-                assert perBlock in _L._TDM_VALID_BLOCK_BYTES, (mt, wt, wg, vw, perBlock)
+                assert perBlock in _L._LDS_PAD_BLOCK_BYTES, (mt, wt, wg, vw, perBlock)
                 padBytes = pad * 4
                 assert padBytes % 8 == 0, (mt, wt, wg, vw, padBytes)
-                assert 0 < padBytes <= _L._TDM_MAX_PAD_BYTES, (mt, wt, wg, vw, padBytes)
+                assert 0 < padBytes <= _L._LDS_MAX_PAD_BYTES, (mt, wt, wg, vw, padBytes)
 
 
 def test_pick_best_ranks_cost_over_overhead():
@@ -383,7 +383,7 @@ def test_valid_blocks_divide_the_tail_loop_step():
                                   writeMinBytes=0, writeRowBytes=0)
         for b in blocks:
             assert incBytes % b == 0, (incBytes, b)
-        for b in _L._TDM_VALID_BLOCK_BYTES:
+        for b in _L._LDS_PAD_BLOCK_BYTES:
             if incBytes % b:
                 assert b not in blocks, (incBytes, b)
 
@@ -408,3 +408,63 @@ def test_chosen_block_divides_the_tail_loop_step():
                 perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM)
                 if perBlock:
                     assert mt * 4 * _K_B32 % perBlock == 0, (mt, wt, wg, vw, perBlock)
+
+
+def test_chosen_block_is_one_the_validator_accepts():
+    # The search picks from _valid_blocks_for and Solution.py holds a
+    # hand-written block to the same list. If the two ever read different
+    # shapes, a config the solver produced would be rejected as unusable.
+    for wg in _WAVE_GROUPS:
+        for wt in _WAVE_TILES:
+            mt = 16 * wt * wg
+            for tdm in (True, False):
+                for getter, blocksFn, args in (
+                        (get_fp8_mt_config, _L.get_fp8_valid_blocks, (wt, wg, _K_B64, tdm)),
+                        (get_fp4_mt_config, _L.get_fp4_valid_blocks, (wt, wg, _K_B64, tdm))):
+                    perBlock = getter(mt, "perBlock", *args)
+                    if perBlock:
+                        assert perBlock in blocksFn(mt, *args), (mt, wt, wg, tdm, perBlock)
+
+                perBlock = get_fp16_mt_config(mt, "perBlock", wg, 16, 8, wt, 1, _K_B128, tdm)
+                if perBlock:
+                    assert perBlock in _L.get_fp16_valid_blocks(
+                        mt, wg, 16, 8, wt, 1, _K_B128, tdm), (mt, wt, wg, tdm, perBlock)
+
+                for vw in (1, 2, 4):
+                    if wt % vw:
+                        continue
+                    perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, tdm)
+                    if perBlock:
+                        assert perBlock in _L.get_fp32_valid_blocks(
+                            mt, vw, 2, wg, 2, wt, _K_B32, tdm), (mt, wt, wg, vw, tdm, perBlock)
+
+
+def test_chosen_pad_and_block_are_a_legal_pair():
+    # A pad shifts every address past the first block, so it has to carry the
+    # load's own alignment: 16 bytes for ds_load_tr16_b128, 8 for the rest.
+    # Checking pad and block apart misses a pair that breaks it.
+    for wg in _WAVE_GROUPS:
+        for wt in _WAVE_TILES:
+            mt = 16 * wt * wg
+            for tdm in (True, False):
+                sh = _L._fp16_shape(mt, wg, 16, 8, wt, 1, _K_B128, tdm)
+                block = get_fp16_mt_config(mt, "perBlock", wg, 16, 8, wt, 1, _K_B128, tdm)
+                pad = get_fp16_mt_config(mt, "pad", wg, 16, 8, wt, 1, _K_B128, tdm) * 2
+                assert _L._b128_wave_costs(sh.rawAddrs, block, pad,
+                                           sh.wOffsets, sh.instOffs) is not None, \
+                    (mt, wt, wg, tdm, block, pad)
+
+                sh = _L._fp8_shape(mt, wt, wg, _K_B64, tdm)
+                block = get_fp8_mt_config(mt, "perBlock", wt, wg, _K_B64, tdm)
+                pad = get_fp8_mt_config(mt, "pad", wt, wg, _K_B64, tdm)
+                assert _L._b64_wave_costs(sh.rawAddrs, block, pad,
+                                          sh.instOffs, sh.wOffsets) is not None, \
+                    (mt, wt, wg, tdm, block, pad)
+
+
+def test_a_pad_below_the_load_alignment_is_illegal():
+    # 8 bytes is an even number of dwords, so the even-dword rule lets it
+    # through, but ds_load_tr16_b128 needs 16.
+    sh = _L._fp16_shape(128, 2, 16, 8, 4, 1, _K_B128, True)
+    assert _L._b128_wave_costs(sh.rawAddrs, 256, 8, sh.wOffsets, sh.instOffs) is None
+    assert _L._b128_wave_costs(sh.rawAddrs, 256, 16, sh.wOffsets, sh.instOffs) is not None

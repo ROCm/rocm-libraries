@@ -45,35 +45,31 @@ get_fp32_mt_config, get_mxs_mt_config, get_metadata_mt_config. key is
 "perBlock" or "pad".
 """
 
+from collections import namedtuple
 from functools import lru_cache
 from typing import Dict
 
-# TDM hardware encoding caps for LdsBlockSizePerPad / LdsPad:
-#   pad_interval = log2(LdsBlockSizePerPad // 4) - 1, must fit in 3 bits => <=7
-#   pad_amount   = LdsPad // 4 - 1,                  must fit in 7 bits => <=127
-# Therefore valid LdsBlockSizePerPad values (in bytes) are powers of 2 in
-# [8, 1024], and LdsPad in bytes is a positive multiple of 4 up to 512.
-_TDM_VALID_BLOCK_BYTES = (8, 16, 32, 64, 128, 256, 512, 1024)
-_TDM_MAX_PAD_BYTES     = 512
+# Common.ValidParameters reads these too, so a yaml can name what is picked here.
+from ..Common.LdsPaddingLimits import (
+    LDS_MAX_PAD_BYTES as _LDS_MAX_PAD_BYTES,
+    LDS_PAD_STEP_BYTES as _LDS_PAD_STEP_BYTES,
+    LDS_PAD_BLOCK_BYTES as _LDS_PAD_BLOCK_BYTES,
+)
 
-# LdsPad in bytes must be an even number of dwords. Odd-dword padding leaves
-# the hardware in a state we do not understand, so it is never a candidate.
-_TDM_PAD_STEP_BYTES = 8
-
-def _pad_candidate_bytes(step: int = _TDM_PAD_STEP_BYTES):
+def _pad_candidate_bytes(step: int = _LDS_PAD_STEP_BYTES):
   """Legal LdsPad values in bytes, smallest first.
 
   step must be a multiple of 8. The b128 path passes 16 because a pad that
   is a multiple of 8 but not 16 breaks its 16-byte alignment.
   """
-  return range(step, _TDM_MAX_PAD_BYTES + 1, step)
+  return range(step, _LDS_MAX_PAD_BYTES + 1, step)
 
 def _even_dword_only(cfg: Dict[str, int], bpeDS: float) -> Dict[str, int]:
   """Return cfg, or an all-zero config if pad is an odd number of dwords.
 
   cfg["pad"] counts elements, so 8 bytes is 8 / bpeDS elements.
   """
-  padStepElements = int(_TDM_PAD_STEP_BYTES / bpeDS)
+  padStepElements = int(_LDS_PAD_STEP_BYTES / bpeDS)
   if cfg["pad"] % padStepElements:
     return {key: 0 for key in cfg}
   return cfg
@@ -161,7 +157,7 @@ def _valid_blocks(incBytes, readBases, readOffs, writeMinBytes, writeRowBytes):
     if writeRowBytes and writeRowBytes % b and b % writeRowBytes:
       return False
     return _no_block_carry(readBases, readOffs, b)
-  return [b for b in _TDM_VALID_BLOCK_BYTES if usable(b)]
+  return [b for b in _LDS_PAD_BLOCK_BYTES if usable(b)]
 
 def _search_padding(validB, padStep, floorFn, costFn):
   """Rank every legal (B, P) candidate and return the best one.
@@ -225,11 +221,9 @@ def _b64_wave_costs(rawAddrs, B, P, instOffs, wOffsets):
   generator. Cost per instruction is the largest number of threads on one
   bank, summed over the instructions a wave issues.
 
-  Every address here is 8-byte aligned: the base addresses, the per-wave
-  offsets and the instruction offsets are all multiples of 8, and P is too,
-  so pad() leaves x mod 8 alone. The hardware therefore takes each wave in
-  one batch. Returns None if a candidate ever breaks that alignment, since
-  the cost below would not describe it.
+  Every address is 8-byte aligned -- bases, per-wave offsets, instruction
+  offsets and P are all multiples of 8 -- so the hardware takes each wave in
+  one batch. Returns None if a candidate breaks that.
   """
   def pad(x):
     return x + (x // B) * P if B else x
@@ -246,23 +240,30 @@ def _b64_wave_costs(rawAddrs, B, P, instOffs, wOffsets):
     perWave.append(total)
   return perWave
 
-def _b64_compute_config(mt: int, bpeDS: float,
-                        addrFn, minB: int,
-                        instOffs, wOffsets, incBytes: int,
-                        writeRowBytes: int = 0) -> Dict[str, int]:
+# One operand's local read pattern, in bytes. _valid_blocks turns it into the
+# blocks the generator can address; Solution.py checks a hand-written block
+# against the same list.
+_Shape = namedtuple("_Shape",
+                    "rawAddrs instOffs wOffsets incBytes minBlockBytes writeRowBytes")
+
+def _valid_blocks_for(shape: _Shape) -> list:
+  """Block sizes the code generator can address correctly for this operand."""
+  bases = [a + wOff for a in shape.rawAddrs for wOff in shape.wOffsets]
+  return _valid_blocks(shape.incBytes, bases, shape.instOffs,
+                       shape.minBlockBytes, shape.writeRowBytes)
+
+def _b64_compute_config(shape: _Shape) -> Dict[str, int]:
   """Pick (B, P) by ranking every legal candidate.
 
   No block padding is one of the candidates. Returns {"perBlock", "pad"}
   with pad in bytes.
   """
-  rawAddrs = addrFn(mt)
-  bases = [a + wOff for a in rawAddrs for wOff in wOffsets]
   best = _search_padding(
-    _valid_blocks(incBytes, bases, instOffs, minB, writeRowBytes),
-    _TDM_PAD_STEP_BYTES,
-    lambda: len(instOffs),   # one thread per bank on every instruction
-    lambda cand: _b64_wave_costs(rawAddrs, cand[0], cand[1],
-                                 instOffs, wOffsets))
+    _valid_blocks_for(shape),
+    _LDS_PAD_STEP_BYTES,
+    lambda: len(shape.instOffs),   # one thread per bank on every instruction
+    lambda cand: _b64_wave_costs(shape.rawAddrs, cand[0], cand[1],
+                                 shape.instOffs, shape.wOffsets))
   # The no-padding candidate is always legal here, so best is never None
   # today. Kept in case a future change narrows the candidate set.
   if best is None:
@@ -296,19 +297,23 @@ def _b64_w_offsets(miWaveGroup, matrixInstMBytes):
   return tuple(w * matrixInstMBytes for w in range(max(miWaveGroup, 1)))
 
 @lru_cache(maxsize=None)
+def _fp4_shape(mt: int, miWaveTile: int, miWaveGroup: int,
+               matrixInstK: int, usesTDM: bool,
+               lrvw: int = 32, miInputPerThread: int = 64,
+               matrixInstM: int = 16) -> _Shape:
+  # FP4: bpeDS=0.5. Per-wave M shift in BYTES = matrixInstM * bpeDS = 8.
+  return _Shape(_b64_base_addrs_fp4(mt),
+                _b64_emit_instOffs(mt, 0.5, lrvw, miInputPerThread, miWaveTile),
+                _b64_w_offsets(miWaveGroup, int(matrixInstM * 0.5)),
+                int(mt * 0.5) * matrixInstK,
+                _min_block_bytes(usesTDM),
+                _write_row_bytes(mt, 0.5, usesTDM))
+
+@lru_cache(maxsize=None)
 def _compute_fp4_config(mt: int, miWaveTile: int, miWaveGroup: int,
-                        matrixInstK: int, usesTDM: bool,
-                        lrvw: int = 32,
-                        miInputPerThread: int = 64,
-                        matrixInstM: int = 16) -> Dict[str, int]:
-  # FP4: bpeDS=0.5.
-  # Per-wave M shift in BYTES = matrixInstM (elements) * bpeDS = 16 * 0.5 = 8.
-  instOffs = _b64_emit_instOffs(mt, 0.5, lrvw, miInputPerThread, miWaveTile)
-  wOffsets = _b64_w_offsets(miWaveGroup, int(matrixInstM * 0.5))
-  result = _b64_compute_config(mt, 0.5, _b64_base_addrs_fp4,
-                               _min_block_bytes(usesTDM),
-                               instOffs, wOffsets, int(mt * 0.5) * matrixInstK,
-                               _write_row_bytes(mt, 0.5, usesTDM))
+                        matrixInstK: int, usesTDM: bool) -> Dict[str, int]:
+  result = _b64_compute_config(
+    _fp4_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM))
   # bpeDS=0.5 -> convert pad from bytes to elements
   return {"perBlock": result["perBlock"], "pad": result["pad"] * 2}
 
@@ -317,27 +322,44 @@ def get_fp4_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int,
   return _even_dword_only(
     _compute_fp4_config(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM), 0.5)[key]
 
+def get_fp4_valid_blocks(mt: int, miWaveTile: int, miWaveGroup: int,
+                         matrixInstK: int, usesTDM: bool) -> tuple:
+  return tuple(_valid_blocks_for(
+    _fp4_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM)))
+
+@lru_cache(maxsize=None)
+def _fp8_shape(mt: int, miWaveTile: int, miWaveGroup: int,
+               matrixInstK: int, usesTDM: bool,
+               incDivisor: int = 1, lrvw: int = 16,
+               miInputPerThread: int = 64, matrixInstM: int = 16) -> _Shape:
+  # FP8: bpeDS=1, pad already in bytes. Per-wave M shift = matrixInstM = 16.
+  # incDivisor matches the tail loop, which divides its step for metadata.
+  return _Shape(_b64_base_addrs_fp8(mt),
+                _b64_emit_instOffs(mt, 1.0, lrvw, miInputPerThread, miWaveTile),
+                _b64_w_offsets(miWaveGroup, matrixInstM * 1),
+                mt * matrixInstK // incDivisor,
+                _min_block_bytes(usesTDM),
+                _write_row_bytes(mt, 1.0, usesTDM))
+
 @lru_cache(maxsize=None)
 def _compute_fp8_config(mt: int, miWaveTile: int, miWaveGroup: int,
                         matrixInstK: int, usesTDM: bool,
                         incDivisor: int = 1,
                         lrvw: int = 16,
-                        miInputPerThread: int = 64,
-                        matrixInstM: int = 16) -> Dict[str, int]:
-  # FP8: bpeDS=1, pad already in bytes.
-  # Per-wave M shift in BYTES = matrixInstM (elements) * bpeDS = 16 * 1 = 16.
-  # incDivisor matches the tail loop, which divides its step for metadata.
-  instOffs = _b64_emit_instOffs(mt, 1.0, lrvw, miInputPerThread, miWaveTile)
-  wOffsets = _b64_w_offsets(miWaveGroup, matrixInstM * 1)
-  return _b64_compute_config(mt, 1.0, _b64_base_addrs_fp8,
-                             _min_block_bytes(usesTDM),
-                             instOffs, wOffsets, mt * matrixInstK // incDivisor,
-                             _write_row_bytes(mt, 1.0, usesTDM))
+                        miInputPerThread: int = 64) -> Dict[str, int]:
+  return _b64_compute_config(
+    _fp8_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM,
+               incDivisor, lrvw, miInputPerThread))
 
 def get_fp8_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int,
                       matrixInstK: int, usesTDM: bool) -> int:
   return _even_dword_only(
     _compute_fp8_config(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM), 1.0)[key]
+
+def get_fp8_valid_blocks(mt: int, miWaveTile: int, miWaveGroup: int,
+                         matrixInstK: int, usesTDM: bool) -> tuple:
+  return tuple(_valid_blocks_for(
+    _fp8_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM)))
 
 def get_metadata_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int,
                            lrvwBytes: int, miInputPerThreadBytes: int,
@@ -357,7 +379,7 @@ def get_metadata_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int,
 
 # -- FP16 b128 padding ---------------------------------------------
 
-def _b128_base_addrs_fp16(mt: int) -> tuple:
+def _b128_base_addrs_fp16(mt: int) -> list:
   """Per-thread byte addresses for ds_load_tr16_b128 half-wave (16 threads)."""
   return [k * 2 * mt for k in range(8)] + [16 + k * 2 * mt for k in range(8)]
 
@@ -399,13 +421,25 @@ def _build_fp16_instOffs(mt: int, miInputPerThUnroll: int, lrvw: int,
   }))
 
 @lru_cache(maxsize=None)
+def _fp16_shape(mt: int, miWaveGroup: int, miInputPerThUnroll: int, lrvw: int,
+                miWaveTile: int, vw: int, matrixInstK: int, usesTDM: bool,
+                matrixInstM: int = 16) -> _Shape:
+  instOffs = _build_fp16_instOffs(mt, miInputPerThUnroll, lrvw,
+                                  miWaveTile, miWaveGroup, vw)
+  return _Shape(_b128_base_addrs_fp16(mt),
+                instOffs if instOffs else (0,),
+                tuple(w * matrixInstM * 2 for w in range(max(miWaveGroup, 1))),
+                mt * 2 * matrixInstK,
+                _min_block_bytes(usesTDM),
+                _write_row_bytes(mt, 2.0, usesTDM))
+
+@lru_cache(maxsize=None)
 def _compute_fp16_config(mt: int, miWaveGroup: int,
                          miInputPerThUnroll: int,
                          lrvw: int,
                          miWaveTile: int,
                          vw: int,
-                         matrixInstK: int, usesTDM: bool,
-                         matrixInstM: int = 16) -> Dict[str, int]:
+                         matrixInstK: int, usesTDM: bool) -> Dict[str, int]:
   """Pick (B, P) for ds_load_tr16_b128 by ranking every legal candidate.
 
   No block padding is one of the candidates. Returns {"perBlock", "pad"}
@@ -414,20 +448,14 @@ def _compute_fp16_config(mt: int, miWaveGroup: int,
   P steps by 16 bytes here, see _pad_candidate_bytes, and stops growing
   once a candidate reaches one thread per bank on every instruction.
   """
-  half = _b128_base_addrs_fp16(mt)
-  wOffsets = tuple(w * matrixInstM * 2 for w in range(max(miWaveGroup, 1)))
-  instOffs = _build_fp16_instOffs(mt, miInputPerThUnroll, lrvw,
-                                  miWaveTile, miWaveGroup, vw)
-  offs = instOffs if instOffs else (0,)
-  bases = [a + wOff for a in half for wOff in wOffsets]
+  shape = _fp16_shape(mt, miWaveGroup, miInputPerThUnroll, lrvw,
+                      miWaveTile, vw, matrixInstK, usesTDM)
   best = _search_padding(
-    _valid_blocks(mt * 2 * matrixInstK, bases, offs,
-                  _min_block_bytes(usesTDM),
-                  _write_row_bytes(mt, 2.0, usesTDM)),
+    _valid_blocks_for(shape),
     16,
-    lambda: len(offs),   # one thread per bank on every instruction
-    lambda cand: _b128_wave_costs(half, cand[0], cand[1], wOffsets, instOffs))
-
+    lambda: len(shape.instOffs),   # one thread per bank on every instruction
+    lambda cand: _b128_wave_costs(shape.rawAddrs, cand[0], cand[1],
+                                  shape.wOffsets, shape.instOffs))
   if best is None:
     return {"perBlock": 0, "pad": 0}
   return {"perBlock": best[0], "pad": best[1] // 2}
@@ -443,6 +471,13 @@ def get_fp16_mt_config(mt: int, key: str, miWaveGroup: int,
                                                vw=vw,
                                                matrixInstK=matrixInstK,
                                                usesTDM=usesTDM), 2.0)[key]
+
+def get_fp16_valid_blocks(mt: int, miWaveGroup: int, miInputPerThUnroll: int,
+                          lrvw: int, miWaveTile: int, vw: int,
+                          matrixInstK: int, usesTDM: bool) -> tuple:
+  return tuple(_valid_blocks_for(
+    _fp16_shape(mt, miWaveGroup, miInputPerThUnroll, lrvw,
+                miWaveTile, vw, matrixInstK, usesTDM)))
 
 # -- FP32 b32 padding ------------------------------------------------
 
@@ -493,32 +528,39 @@ def _build_fp32_instOffs(mt: int, vw: int, lrvw: int,
   }))
 
 @lru_cache(maxsize=None)
+def _fp32_shape(mt: int, vw: int, lrvw: int, miWaveGroup: int,
+                miInputPerThread: int, miWaveTile: int,
+                matrixInstK: int, usesTDM: bool,
+                xf32EmuPack: bool = False, matrixInstM: int = 16) -> _Shape:
+  instOffs = _build_fp32_instOffs(mt, vw, lrvw, miInputPerThread, miWaveTile,
+                                  miWaveGroup, xf32EmuPack)
+  return _Shape([(t % 16 * vw + t // 16 * mt * lrvw) * 4 for t in range(32)],
+                instOffs if instOffs else (0,),
+                tuple(w * matrixInstM * vw * 4 for w in range(max(miWaveGroup, 1))),
+                mt * 4 * matrixInstK,
+                _min_block_bytes(usesTDM),
+                _write_row_bytes(mt, 4.0, usesTDM))
+
+@lru_cache(maxsize=None)
 def _compute_fp32_config(mt: int, vw: int, lrvw: int,
                          miWaveGroup: int,
                          miInputPerThread: int,
                          miWaveTile: int,
                          matrixInstK: int, usesTDM: bool,
-                         xf32EmuPack: bool = False,
-                         matrixInstM: int = 16) -> Dict[str, int]:
+                         xf32EmuPack: bool = False) -> Dict[str, int]:
   """Pick (B, P) for ds_load_b32 by ranking every legal candidate.
 
   No block padding is one of the candidates. Returns {"perBlock", "pad"}
   with pad in dwords.
   """
-  rawAddrs = [(t % 16 * vw + t // 16 * mt * lrvw) * 4 for t in range(32)]
-  wOffsets = tuple(w * matrixInstM * vw * 4 for w in range(max(miWaveGroup, 1)))
-  instOffs = _build_fp32_instOffs(mt, vw, lrvw, miInputPerThread, miWaveTile,
-                                  miWaveGroup, xf32EmuPack)
-  offs = instOffs if instOffs else (0,)
-  bases = [a + wOff for a in rawAddrs for wOff in wOffsets]
+  shape = _fp32_shape(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
+                      matrixInstK, usesTDM, xf32EmuPack)
   best = _search_padding(
-    _valid_blocks(mt * 4 * matrixInstK, bases, offs,
-                  _min_block_bytes(usesTDM),
-                  _write_row_bytes(mt, 4.0, usesTDM)),
-    _TDM_PAD_STEP_BYTES,
-    lambda: len(offs),   # one thread per bank on every instruction
-    lambda cand: _b32_wave_costs(rawAddrs, cand[0], cand[1],
-                                 wOffsets, instOffs))
+    _valid_blocks_for(shape),
+    _LDS_PAD_STEP_BYTES,
+    lambda: len(shape.instOffs),   # one thread per bank on every instruction
+    lambda cand: _b32_wave_costs(shape.rawAddrs, cand[0], cand[1],
+                                 shape.wOffsets, shape.instOffs))
   if best is None:
     return {"perBlock": 0, "pad": 0}
   return {"perBlock": best[0], "pad": best[1] // 4}
@@ -536,6 +578,18 @@ def get_fp32_mt_config(mt: int, key: str, vw: int, lrvw: int,
                                                usesTDM=usesTDM,
                                                xf32EmuPack=xf32EmuPack), 4.0)[key]
 
+def get_fp32_valid_blocks(mt: int, vw: int, lrvw: int, miWaveGroup: int,
+                          miInputPerThread: int, miWaveTile: int,
+                          matrixInstK: int, usesTDM: bool,
+                          xf32EmuPack: bool = False) -> tuple:
+  return tuple(_valid_blocks_for(
+    _fp32_shape(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
+                matrixInstK, usesTDM, xf32EmuPack)))
+
+# The one pair the MX scale layout uses when it pads at all.
+MXS_LDS_BLOCK_BYTES = 256
+MXS_LDS_PAD_BYTES   = 16
+
 @lru_cache(maxsize=None)
 def _compute_mxs_config(matrixInstK: int, mxBlock: int, vw: int) -> Dict[str, int]:
   if mxBlock <= 0:
@@ -543,7 +597,7 @@ def _compute_mxs_config(matrixInstK: int, mxBlock: int, vw: int) -> Dict[str, in
   d = (matrixInstK // mxBlock) * vw
   if vw < 4 or d == 0 or d % 16 != 0 or (d // 16) & 1:
     return {"perBlock": 0, "pad": 0}
-  return {"perBlock": 256, "pad": 16}
+  return {"perBlock": MXS_LDS_BLOCK_BYTES, "pad": MXS_LDS_PAD_BYTES}
 
 def get_mxs_mt_config(matrixInstK: int, mxBlock: int, vw: int, key: str) -> int:
   # The pad is a fixed 16 bytes, already an even number of dwords, so the

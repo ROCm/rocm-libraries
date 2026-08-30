@@ -171,11 +171,18 @@ def test_b64_wave_costs_not_8_byte_aligned_none():
 
 
 def test_b64_compute_config_no_valid_block_returns_zero(snapshot):
-    # minB larger than every valid block size -> validB is empty, but the
-    # candidate list always starts with the no-padding pair (B=0, P=0). That
-    # one is legal here, so the ranking picks it on cost/overhead/pad, not
-    # through the "no legal candidate" branch.
-    cfg = L._b64_compute_config(128, 0.5, L._b64_base_addrs_fp4, 2048, (0,), (0,), 64 * _K_B64)
+    # minBlockBytes larger than every valid block size -> _valid_blocks_for is
+    # empty, but the candidate list always starts with the no-padding pair
+    # (B=0, P=0). That one is legal here, so the ranking picks it on
+    # cost/overhead/pad, not through the "no legal candidate" branch.
+    shape = L._Shape(rawAddrs=L._b64_base_addrs_fp4(128),
+                     instOffs=(0,),
+                     wOffsets=(0,),
+                     incBytes=64 * _K_B64,
+                     minBlockBytes=2048,
+                     writeRowBytes=0)
+    assert L._valid_blocks_for(shape) == []
+    cfg = L._b64_compute_config(shape)
     assert cfg == snapshot
 
 
