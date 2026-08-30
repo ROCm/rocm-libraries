@@ -190,6 +190,17 @@ void IntegrationBundleVerificationHarness::recordClaimCoverage(
     }
 }
 
+VerificationOutcome
+    IntegrationBundleVerificationHarness::runVerification(GraphSession& session,
+                                                          const SupportObservation& observation)
+{
+    if(auto blocked = claimBlocked(observation))
+    {
+        return *blocked;
+    }
+    return runComparison(session);
+}
+
 // The decision is finalizeClaims(); this only publishes what it returns. results is
 // only ever non-empty when an engine was injected, so there is no engine-less case
 // to handle here.
@@ -678,30 +689,25 @@ void IntegrationBundleVerificationHarness::markOutputsModifiedFor(OutputTensors&
 VerificationOutcome
     IntegrationBundleVerificationHarness::compareAgainstGolden(OutputTensors& engineOutputs)
 {
-    return comparisonOutcome(
-        compareEach(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-            return *_bundle->tensors->at(uid);
-        }));
+    return compareAgainst(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
+        return *_bundle->tensors->at(uid);
+    });
 }
 
 VerificationOutcome
     IntegrationBundleVerificationHarness::compareOutputs(OutputTensors& engineOutputs,
                                                          OutputTensors& expected)
 {
-    return comparisonOutcome(
-        compareEach(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-            return *expected.at(uid);
-        }));
+    return compareAgainst(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
+        return *expected.at(uid);
+    });
 }
 
-// Every output tensor is compared even after the first mismatch: one failing test
-// should name every tensor that drifted, not just the lowest uid.
-template <typename ExpectedLookup>
-bool IntegrationBundleVerificationHarness::compareEach(OutputTensors& engineOutputs,
-                                                       ExpectedLookup expectedFor)
+VerificationOutcome
+    IntegrationBundleVerificationHarness::compareAgainst(OutputTensors& engineOutputs,
+                                                         const ExpectedTensorLookup& expectedFor)
 {
     auto wrapper = _bundle->graphWrapper();
-    const auto& tensorAttrMap = wrapper.getTensorMap();
 
     const auto tomlOverride = TestConfig::get().findToleranceOverride(currentTestName());
     if(tomlOverride)
@@ -711,25 +717,28 @@ bool IntegrationBundleVerificationHarness::compareEach(OutputTensors& engineOutp
                                                                  << " rtol=" << tomlOverride->rtol);
     }
 
-    bool allMatched = true;
-    for(const int64_t uid : _bundle->outputTensorUids)
+    const auto toleranceFor = [&](hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+        ComparisonTolerance tolerance;
+        tolerance::resolveTolerance(
+            wrapper, dataType, currentTestName(), tolerance.atol, tolerance.rtol);
+        return tolerance;
+    };
+
+    const auto mismatches = bundle::compareOutputs(wrapper,
+                                                   _bundle->outputTensorUids,
+                                                   engineOutputs,
+                                                   expectedFor,
+                                                   toleranceFor,
+                                                   "Bundle: " + _bundlePath.string());
+
+    // Reported one per tensor so each diff lands next to the tensor it describes;
+    // the outcome carries no message because of it.
+    for(const auto& mismatch : mismatches)
     {
-        auto& actualTensor = *engineOutputs.at(uid);
-        auto& expectedTensor = expectedFor(uid);
-
-        auto* attrs = tensorAttrMap.at(uid);
-        const auto dataType = attrs->data_type();
-
-        float atol = 0.0f;
-        float rtol = 0.0f;
-        tolerance::resolveTolerance(wrapper, dataType, currentTestName(), atol, rtol);
-
-        if(!compareOutputTensor(uid, *attrs, dataType, expectedTensor, actualTensor, atol, rtol))
-        {
-            allMatched = false;
-        }
+        ADD_FAILURE() << mismatch.report;
     }
-    return allMatched;
+
+    return comparisonOutcome(mismatches.empty());
 }
 
 // ---- reporting helpers -----------------------------------------------------
@@ -752,48 +761,6 @@ void IntegrationBundleVerificationHarness::recordRefError(const std::string& rea
 std::string IntegrationBundleVerificationHarness::refLabel(ReferenceExecutorType type)
 {
     return type == ReferenceExecutorType::GPU ? "GPU reference" : "CPU reference";
-}
-
-// ---- comparison + tolerance machinery --------------------------------------
-
-bool IntegrationBundleVerificationHarness::compareOutputTensor(
-    int64_t uid,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-    hipdnn_data_sdk::utilities::ITensor& expected,
-    hipdnn_data_sdk::utilities::ITensor& actual,
-    float atol,
-    float rtol) const
-{
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, atol, rtol);
-    const bool passed = validator->allClose(expected, actual);
-
-    if(!passed)
-    {
-        const auto label = labelFor(uid, attrs);
-        hipdnn_test_sdk::utilities::ComparisonContext ctx;
-        ctx.contextLine = "Bundle: " + _bundlePath.string();
-        ctx.tensorLabel = label + " (UID " + std::to_string(uid) + ", output)";
-        ctx.dtypeName = hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
-        ctx.atol = atol;
-        ctx.rtol = rtol;
-
-        std::ostringstream report;
-        report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, expected);
-        hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(
-            report, dataType, label, expected, actual, atol, rtol);
-        // Reported here so the diff lands next to the tensor it describes; the
-        // outcome carries no message because of it.
-        EXPECT_TRUE(false) << report.str();
-    }
-    return passed;
-}
-
-std::string IntegrationBundleVerificationHarness::labelFor(
-    int64_t uid, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs)
-{
-    const auto* name = attrs.name();
-    return (name != nullptr && !name->empty()) ? name->str() : ("uid=" + std::to_string(uid));
 }
 
 void IntegrationBundleVerificationHarness::applyMetadataGuards() const

@@ -157,6 +157,7 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     src/harness/bundle/BundleReferenceValidationHarness.cpp
     src/harness/bundle/GraphSession.cpp
+    src/harness/bundle/OutputComparison.cpp
     src/harness/bundle/ReferenceOpCoverage.cpp
     src/harness/bundle/SupportClaimReport.cpp
     src/harness/bundle/SupportClaims.cpp

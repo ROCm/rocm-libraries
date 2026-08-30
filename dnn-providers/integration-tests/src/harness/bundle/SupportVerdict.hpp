@@ -118,6 +118,24 @@ struct SupportObservation
     }
 };
 
+/// The verdict for one cell, from the three facts that decide it.
+///
+///   claimed  — the sidecar names this engine for this arch/platform (and case)
+///   resolved — the ranked-engine query returned an answer we can believe
+///   accepted — this engine is in the ranked list
+///
+/// nullopt means there is nothing to record: neither claimed nor accepted carries
+/// no information, and recording it would make the verdict count say more than what
+/// was actually promised.
+///
+/// Split out and returned rather than pushed so the whole table can be read — and
+/// tested — in one place, instead of being reconstructed from nested conditions at
+/// the point a result is built.
+std::optional<SupportVerdict> chooseVerdict(bool claimed, bool resolved, bool accepted);
+
+/// The human-readable reason behind `verdict`, for the report's detail column.
+std::string verdictDetail(SupportVerdict verdict, hipdnn_frontend::ErrorCode status);
+
 /// Decide this graph's claim for the engine under test, from one ranked-engine
 /// query.
 ///

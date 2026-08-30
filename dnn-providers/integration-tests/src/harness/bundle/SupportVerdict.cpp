@@ -146,6 +146,55 @@ std::string formatVerdictMessage(const SupportResult& result)
     return os.str();
 }
 
+std::optional<SupportVerdict> chooseVerdict(bool claimed, bool resolved, bool accepted)
+{
+    if(!claimed)
+    {
+        if(!accepted)
+        {
+            // Neither promised nor offered. Nothing happened here worth a row.
+            return std::nullopt;
+        }
+        // Supported but not written down. Not a failure; it is how an engine that
+        // gained support gets noticed so the sidecar can be updated.
+        return SupportVerdict::UNCLAIMED_SUPPORT;
+    }
+
+    if(!resolved)
+    {
+        // The ranked list cannot be believed, so acceptance is unknown. Reporting a
+        // decline here would state a fact nobody read.
+        return SupportVerdict::QUERY_ERRORED;
+    }
+
+    if(accepted)
+    {
+        return SupportVerdict::CLAIM_ACCEPTED;
+    }
+
+    return SupportVerdict::CLAIM_BROKEN;
+}
+
+std::string verdictDetail(SupportVerdict verdict, hipdnn_frontend::ErrorCode status)
+{
+    switch(verdict)
+    {
+    case SupportVerdict::QUERY_ERRORED:
+        return "sidecar claims support, but query returned " + hipdnn_frontend::to_string(status);
+    case SupportVerdict::CLAIM_BROKEN:
+        return "sidecar claims support, but engine not in ranked list (status="
+               + hipdnn_frontend::to_string(status) + ")";
+    case SupportVerdict::CLAIM_ACCEPTED:
+        return "engine in ranked list";
+    case SupportVerdict::UNCLAIMED_SUPPORT:
+        return "engine supports this graph but has no claim in the sidecar";
+    default:
+        // CONFIRMED and FAILED_IN_USE are written by finalizeClaims(), which knows
+        // what the run achieved; observeSupport() never produces them.
+        return "unexpected verdict from the ranked-engine query";
+    }
+}
+
 SupportObservation observeSupport(const RankedEngines& engines,
                                   const SupportClaimLocator& locator,
                                   const LoadedEngine& engineUnderTest,
@@ -164,60 +213,34 @@ SupportObservation observeSupport(const RankedEngines& engines,
     // Does the sidecar promise *this* engine for this cell? One lane tests one
     // engine, so another engine's claim is another lane's business — enforcing it
     // here would report a verdict this run has no way to act on.
-    const bool claimed = locator.isSweep()
-                             ? loadSweepSupportClaimsFromPath(locator.sidecarPath)
-                                   .isClaimed(locator.caseId, engineName, archToken, platformToken)
-                             : loadSupportClaimsFromPath(locator.sidecarPath)
-                                   .isClaimed(engineName, archToken, platformToken);
-
-    // An unresolved status means the ranked list cannot be trusted, so a claim lands
-    // on QUERY_ERRORED rather than a false CLAIM_BROKEN. `accepted` is the same
-    // answer the executor and the enforcement rungs act on, taken at the query.
-    const bool resolved = isResolved(engines.status);
-    const bool accepted = engines.accepted;
+    bool claimed = false;
+    if(locator.isSweep())
+    {
+        claimed = loadSweepSupportClaimsFromPath(locator.sidecarPath)
+                      .isClaimed(locator.caseId, engineName, archToken, platformToken);
+    }
+    else
+    {
+        claimed = loadSupportClaimsFromPath(locator.sidecarPath)
+                      .isClaimed(engineName, archToken, platformToken);
+    }
 
     SupportObservation observation;
     observation.sidecar = SidecarState::CHECKED;
 
-    if(claimed && !resolved)
+    // `accepted` is the same answer the executor and the enforcement rungs act on,
+    // taken once at the query.
+    const auto verdict = chooseVerdict(claimed, isResolved(engines.status), engines.accepted);
+    if(verdict.has_value())
     {
-        observation.results.push_back(makeResult(SupportVerdict::QUERY_ERRORED,
+        observation.results.push_back(makeResult(*verdict,
                                                  locator,
                                                  engineName,
                                                  arch,
                                                  platform,
-                                                 "sidecar claims support, but query returned "
-                                                     + hipdnn_frontend::to_string(engines.status),
+                                                 verdictDetail(*verdict, engines.status),
                                                  engines.status,
                                                  engines.statusMessage));
-    }
-    else if(claimed)
-    {
-        observation.results.push_back(
-            makeResult(accepted ? SupportVerdict::CLAIM_ACCEPTED : SupportVerdict::CLAIM_BROKEN,
-                       locator,
-                       engineName,
-                       arch,
-                       platform,
-                       accepted ? "engine in ranked list"
-                                : "sidecar claims support, but engine not in ranked list (status="
-                                      + hipdnn_frontend::to_string(engines.status) + ")",
-                       engines.status,
-                       engines.statusMessage));
-    }
-    else if(accepted)
-    {
-        // Supported but not written down. Not a failure; it is how an engine that
-        // gained support gets noticed so the sidecar can be updated.
-        observation.results.push_back(
-            makeResult(SupportVerdict::UNCLAIMED_SUPPORT,
-                       locator,
-                       engineName,
-                       arch,
-                       platform,
-                       "engine supports this graph but has no claim in the sidecar",
-                       engines.status,
-                       engines.statusMessage));
     }
 
     return observation;

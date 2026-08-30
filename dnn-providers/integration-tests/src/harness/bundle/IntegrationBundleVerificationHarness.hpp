@@ -26,6 +26,7 @@
 #include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
@@ -34,8 +35,8 @@
 namespace hipdnn_integration_tests::bundle
 {
 
-using OutputTensors
-    = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+// OutputTensors and ExpectedTensorLookup come from OutputComparison.hpp, which owns
+// the comparison this harness drives.
 
 namespace detail
 {
@@ -118,12 +119,8 @@ protected:
         const auto observation = adjudicateClaims(session);
         recordClaimCoverage(observation);
 
-        // Phase 2: run as far as this bundle asks for. A broken claim means the
-        // engine will not take the graph, so the comparison has nothing to run and
-        // would only pile a sentinel-buffer diff on top of the real message — it is
-        // reported as an engine failure without being tried.
-        const std::optional<VerificationOutcome> blocked = claimBlocked(observation);
-        const VerificationOutcome outcome = blocked ? *blocked : runComparison(session);
+        // Phase 2: run as far as this bundle asks for, unless a claim already failed.
+        const VerificationOutcome outcome = runVerification(session, observation);
 
         // Kept as a live check because "the test did nothing and went green" is the
         // failure this harness exists to catch.
@@ -184,6 +181,12 @@ private:
     // Applies the coverage rules to the process-wide counters, and fails this test
     // if a sidecar exists that the query somehow did not reach.
     void recordClaimCoverage(const SupportObservation& observation);
+
+    // Runs the comparison, unless a claim already failed. A broken claim means the
+    // engine will not take the graph, so the comparison has nothing to run and would
+    // only pile a sentinel-buffer diff on top of the real message.
+    VerificationOutcome runVerification(GraphSession& session,
+                                        const SupportObservation& observation);
 
     // Publishes every verdict, promoting the engine-under-test's accepted claim by
     // what the run actually achieved. Called exactly once per test.
@@ -255,8 +258,13 @@ private:
     VerificationOutcome compareAgainstGolden(OutputTensors& engineOutputs);
     VerificationOutcome compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
 
+    // Resolves tolerances, runs bundle::compareOutputs(), and turns each mismatch it
+    // returns into one failure. The comparison itself owns no gtest state.
+    VerificationOutcome compareAgainst(OutputTensors& engineOutputs,
+                                       const ExpectedTensorLookup& expectedFor);
+
     // VERIFIED either way: the oracle ran and the outputs were examined. A mismatch
-    // carries no message because compareOutputTensor() already printed the diff.
+    // carries no message because the per-tensor diffs are already on the record.
     static VerificationOutcome comparisonOutcome(bool allMatched)
     {
         return allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
@@ -264,22 +272,8 @@ private:
                                 VerificationDepth::VERIFIED, FailureOrigin::COMPARISON, {});
     }
 
-    template <typename ExpectedLookup>
-    bool compareEach(OutputTensors& engineOutputs, ExpectedLookup expectedFor);
-
-    bool compareOutputTensor(int64_t uid,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                             hipdnn_data_sdk::utilities::ITensor& expected,
-                             hipdnn_data_sdk::utilities::ITensor& actual,
-                             float atol,
-                             float rtol) const;
-
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);
-
-    static std::string
-        labelFor(int64_t uid, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs);
 };
 
 } // namespace hipdnn_integration_tests::bundle

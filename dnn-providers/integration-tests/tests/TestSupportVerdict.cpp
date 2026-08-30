@@ -20,6 +20,7 @@
 using hipdnn_frontend::ErrorCode;
 using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::bundle::baseArchToken;
+using hipdnn_integration_tests::bundle::chooseVerdict;
 using hipdnn_integration_tests::bundle::claimBlocked;
 using hipdnn_integration_tests::bundle::enginesAccept;
 using hipdnn_integration_tests::bundle::FailureOrigin;
@@ -36,6 +37,8 @@ using hipdnn_integration_tests::bundle::SupportClaimLocator;
 using hipdnn_integration_tests::bundle::SupportObservation;
 using hipdnn_integration_tests::bundle::SupportResult;
 using hipdnn_integration_tests::bundle::SupportVerdict;
+using hipdnn_integration_tests::bundle::toString;
+using hipdnn_integration_tests::bundle::verdictDetail;
 using hipdnn_integration_tests::bundle::VerificationDepth;
 using hipdnn_integration_tests::bundle::VerificationOutcome;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
@@ -720,6 +723,84 @@ TEST(TestSupportVerdict, FinalizePassesFailingVerdictsThrough)
 
     ASSERT_EQ(records.size(), 1u);
     EXPECT_EQ(records[0].verdict, SupportVerdict::CLAIM_BROKEN);
+}
+
+// ---------------------------------------------------------------------------
+// chooseVerdict(): the whole table, one row at a time.
+//
+// Three booleans decide every verdict observeSupport() can produce, so all eight
+// combinations are pinned here rather than being reconstructed from the conditions
+// at the point a result is built.
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportVerdict, ClaimedResolvedAndAcceptedIsAccepted)
+{
+    EXPECT_EQ(chooseVerdict(/*claimed=*/true, /*resolved=*/true, /*accepted=*/true),
+              SupportVerdict::CLAIM_ACCEPTED);
+}
+
+TEST(TestSupportVerdict, ClaimedResolvedAndDeclinedIsBroken)
+{
+    EXPECT_EQ(chooseVerdict(/*claimed=*/true, /*resolved=*/true, /*accepted=*/false),
+              SupportVerdict::CLAIM_BROKEN);
+}
+
+// Unresolved wins over acceptance: the list cannot be believed, so neither can a
+// hit in it.
+TEST(TestSupportVerdict, ClaimedButUnresolvedIsErroredWhateverTheList)
+{
+    EXPECT_EQ(chooseVerdict(/*claimed=*/true, /*resolved=*/false, /*accepted=*/true),
+              SupportVerdict::QUERY_ERRORED);
+    EXPECT_EQ(chooseVerdict(/*claimed=*/true, /*resolved=*/false, /*accepted=*/false),
+              SupportVerdict::QUERY_ERRORED);
+}
+
+TEST(TestSupportVerdict, UnclaimedButAcceptedIsDrift)
+{
+    EXPECT_EQ(chooseVerdict(/*claimed=*/false, /*resolved=*/true, /*accepted=*/true),
+              SupportVerdict::UNCLAIMED_SUPPORT);
+}
+
+// Neither promised nor offered carries no information. Recording it would make the
+// verdict count say more than what was actually promised.
+TEST(TestSupportVerdict, NeitherClaimedNorAcceptedRecordsNothing)
+{
+    EXPECT_FALSE(chooseVerdict(/*claimed=*/false, /*resolved=*/true, /*accepted=*/false));
+    EXPECT_FALSE(chooseVerdict(/*claimed=*/false, /*resolved=*/false, /*accepted=*/false));
+}
+
+// Unclaimed and unresolved: `accepted` is already false whenever the query did not
+// resolve, so this row can only be reached by calling the table directly. It must
+// still record nothing rather than invent drift.
+TEST(TestSupportVerdict, UnclaimedAndUnresolvedRecordsNothing)
+{
+    EXPECT_EQ(chooseVerdict(/*claimed=*/false, /*resolved=*/false, /*accepted=*/true),
+              SupportVerdict::UNCLAIMED_SUPPORT);
+}
+
+// Every verdict the table can produce explains itself; the detail column is what a
+// reader acts on.
+TEST(TestSupportVerdict, EveryVerdictHasADetail)
+{
+    for(const auto v : {SupportVerdict::CLAIM_ACCEPTED,
+                        SupportVerdict::CLAIM_BROKEN,
+                        SupportVerdict::QUERY_ERRORED,
+                        SupportVerdict::UNCLAIMED_SUPPORT})
+    {
+        EXPECT_FALSE(verdictDetail(v, ErrorCode::OK).empty()) << toString(v);
+    }
+}
+
+// The two failing verdicts carry the backend's status, because that is the only
+// clue to why the list could not be trusted.
+TEST(TestSupportVerdict, FailingVerdictDetailsNameTheStatus)
+{
+    EXPECT_NE(verdictDetail(SupportVerdict::QUERY_ERRORED, ErrorCode::HEURISTIC_QUERY_FAILED)
+                  .find(hipdnn_frontend::to_string(ErrorCode::HEURISTIC_QUERY_FAILED)),
+              std::string::npos);
+    EXPECT_NE(verdictDetail(SupportVerdict::CLAIM_BROKEN, ErrorCode::GRAPH_NOT_SUPPORTED)
+                  .find(hipdnn_frontend::to_string(ErrorCode::GRAPH_NOT_SUPPORTED)),
+              std::string::npos);
 }
 
 // NOLINTEND(readability-identifier-naming)
