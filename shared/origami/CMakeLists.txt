@@ -13,9 +13,6 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# Set cpack license file here to avoid rocm-cmake warning
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
-
 include(dependencies)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
@@ -146,17 +143,3 @@ rocm_install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" DESTINATION
     "${CMAKE_INSTALL_LIBDIR}/cmake/origami" COMPONENT devel
 )
-
-if(ROCM_LIBS_SUPERBUILD OR ORIGAMI_STANDALONE)
-    set(ORIGAMI_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
-        CACHE PATH "Path placed into ldconfig file"
-    )
-
-    rocm_create_package(
-        NAME origami
-        DESCRIPTION "Origami: Analytical Solution Selection for GEMM"
-        MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
-        LDCONFIG
-        LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
-    )
-endif()
