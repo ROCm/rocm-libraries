@@ -102,6 +102,7 @@
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \
+    X(EnableWmmaReorder, bool)                    \
     X(ArchName, std::string)
 
 namespace stinkytofu {

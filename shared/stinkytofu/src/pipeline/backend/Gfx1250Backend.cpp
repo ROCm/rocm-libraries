@@ -63,6 +63,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyWmmaReorderPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsStaticPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
@@ -99,6 +100,16 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     }
 
     // addPeepholeOptPasses(pm, optLevel);
+
+    // WMMA is the scheduling anchor, so the wmma pattern has to be final before
+    // the DAG runs: scheduleInDAG derives every ds_read priority from the wmma
+    // order it finds in the block (see the dsReadPriority pre-scan), and moving
+    // a wmma afterwards would leave those priorities describing an order that no
+    // longer exists. Running here also puts it after RemoveWaitCnt, so no
+    // leftover s_waitcnt chops the window the reorder is allowed to move in.
+    if (module.getModuleOptions().EnableWmmaReorder) {
+        pm.addPass(createStinkyWmmaReorderPass());
+    }
 
     // Instruction scheduling
     pm.addPass(createStinkyBuildImplicitDependencyPass());
