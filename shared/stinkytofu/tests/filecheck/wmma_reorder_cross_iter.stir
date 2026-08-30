@@ -1,0 +1,88 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWmmaReorderPass=reverse,distance=2 --print-output
+#
+# StinkyWmmaReorderPass: change the wmma pattern, then re-place the
+# ds_loads that feed it — including across the loop back-edge.
+#
+# Input is a 4-wmma unrolled body over four A tiles sharing one B tile:
+#
+#   A0 = v[20:27]  A1 = v[28:35]  A2 = v[36:43]  A3 = v[44:51]
+#
+# Each A tile is loaded by two ds_load_b128. The kernel arrives already
+# software-pipelined for the *original* wmma order (A0, A1, A2, A3) at a
+# prefetch distance of 2: A0's and A1's loads are issued one iteration early,
+# so ^preheader holds their iteration-0 copies and the body copies read one
+# iteration ahead (offset + 512). A2's and A3's loads are same-iteration and
+# have no preheader copy.
+#
+# `reverse` flips the wmma pattern to (A3, A2, A1, A0). The same four wmma are
+# still issued — only the order changed — but the pipeline underneath it is now
+# wrong in both directions:
+#
+#   - A0 and A1 are consumed *late* in the new order, so they no longer need a
+#     head start. Their preheader prefetches are deleted and their body copies
+#     are de-rotated back to this iteration's offsets (512 -> 0, 528 -> 16,
+#     544 -> 32, 560 -> 48).
+#
+#   - A2 and A3 are consumed *first*, so their loads no longer fit ahead of
+#     their consumers. They become cross-iteration: a preheader prefetch is
+#     added at the original offset and the body copy is pushed one iteration
+#     ahead (64 -> 576, 80 -> 592, 96 -> 608, 112 -> 624).
+#
+# The 512-byte per-iteration stride is never assumed — it is read off the
+# preheader/body pairs the kernel already had.
+#
+# The body is a pure permutation throughout: the same 8 ds_loads and 4 wmma,
+# reordered. Everything added or removed happens in the preheader.
+
+# CHECK-LABEL: @wmma_reorder_cross_iter
+
+# === Preheader: A0/A1 prefetches gone, A2/A3 prefetches added ===============
+# CHECK-LABEL: ^preheader:
+# CHECK-NEXT: v[36:39] = "st.ds_load_b128"{{.*}}offset = 64
+# CHECK-NEXT: v[40:43] = "st.ds_load_b128"{{.*}}offset = 80
+# CHECK-NEXT: v[44:47] = "st.ds_load_b128"{{.*}}offset = 96
+# CHECK-NEXT: v[48:51] = "st.ds_load_b128"{{.*}}offset = 112
+# CHECK-NEXT: s_branch
+
+# === Body: reversed wmma order, ds_loads re-placed around it ================
+# A1 is read by the 3rd wmma of the new order, so with distance 2 its loads
+# open the body at this iteration's offsets.
+# CHECK-LABEL: ^label_LoopBeginL:
+# CHECK-NEXT: v[28:31] = "st.ds_load_b128"{{.*}}offset = 32
+# CHECK-NEXT: v[32:35] = "st.ds_load_b128"{{.*}}offset = 48
+# CHECK-NEXT: v[124:131] = "st.v_wmma_f32_16x16x32_bf16"(v[44:51],
+# CHECK-NEXT: v[20:23] = "st.ds_load_b128"{{.*}}offset = 0
+# CHECK-NEXT: v[24:27] = "st.ds_load_b128"{{.*}}offset = 16
+# CHECK-NEXT: v[116:123] = "st.v_wmma_f32_16x16x32_bf16"(v[36:43],
+# A3 is now cross-iteration: its loads sit after the wmma that reads A3 this
+# iteration, and address the next iteration.
+# CHECK-NEXT: v[44:47] = "st.ds_load_b128"{{.*}}offset = 608
+# CHECK-NEXT: v[48:51] = "st.ds_load_b128"{{.*}}offset = 624
+# CHECK-NEXT: v[108:115] = "st.v_wmma_f32_16x16x32_bf16"(v[28:35],
+# CHECK-NEXT: v[36:39] = "st.ds_load_b128"{{.*}}offset = 576
+# CHECK-NEXT: v[40:43] = "st.ds_load_b128"{{.*}}offset = 592
+# CHECK-NEXT: v[100:107] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27],
+# CHECK-NEXT: s_branch
+
+st.func @wmma_reorder_cross_iter() {
+^preheader:
+  v[20:23] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[24:27] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false } }
+  v[28:31] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false } }
+  v[32:35] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false } }
+  "st.s_branch"("label_LoopBeginL")
+^label_LoopBeginL:
+  v[20:23] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 512, gds = false } }
+  v[24:27] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 528, gds = false } }
+  v[28:31] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 544, gds = false } }
+  v[32:35] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 560, gds = false } }
+  v[36:39] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false } }
+  v[40:43] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 80, gds = false } }
+  v[44:47] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 96, gds = false } }
+  v[48:51] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 112, gds = false } }
+  v[100:107] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[60:67], v[100:107]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[108:115] = "st.v_wmma_f32_16x16x32_bf16"(v[28:35], v[60:67], v[108:115]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[116:123] = "st.v_wmma_f32_16x16x32_bf16"(v[36:43], v[60:67], v[116:123]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[124:131] = "st.v_wmma_f32_16x16x32_bf16"(v[44:51], v[60:67], v[124:131]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_branch"("label_LoopBeginL")
+}

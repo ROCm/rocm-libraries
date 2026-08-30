@@ -1,0 +1,59 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWmmaReorderPass=reverse,distance=2 --print-output
+#
+# StinkyWmmaReorderPass on a loop that is not software-pipelined: the
+# preheader holds no ds_load, so there is no preheader/body pair to read the
+# per-iteration LDS stride off.
+#
+# The pass never invents an address rotation. With no stride available it
+# refuses to move any ds_load across the back-edge and instead permutes the
+# body in place: the wmma take the new order, and every ds_load is pulled as
+# far ahead of its first consumer as the top of the body allows.
+#
+# With `reverse` the new order is (A3, A2, A1, A0) and distance 2:
+#   A3 wants slot -2, A2 slot -1, A1 slot 0 — all clamped to the top of the
+#   body; A0 is consumed last and lands at slot 1, ahead of the 2nd wmma.
+#
+# No ds offset changes, and the preheader is untouched.
+
+# CHECK-LABEL: @wmma_reorder_no_pipeline
+
+# === Preheader is left exactly as it was ===================================
+# CHECK-LABEL: ^preheader:
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_branch
+
+# === Body: reversed wmma, ds_loads hoisted but never rotated ===============
+# CHECK-LABEL: ^label_LoopBeginL:
+# CHECK-NEXT: v[28:31] = "st.ds_load_b128"{{.*}}offset = 32
+# CHECK-NEXT: v[32:35] = "st.ds_load_b128"{{.*}}offset = 48
+# CHECK-NEXT: v[36:39] = "st.ds_load_b128"{{.*}}offset = 64
+# CHECK-NEXT: v[40:43] = "st.ds_load_b128"{{.*}}offset = 80
+# CHECK-NEXT: v[44:47] = "st.ds_load_b128"{{.*}}offset = 96
+# CHECK-NEXT: v[48:51] = "st.ds_load_b128"{{.*}}offset = 112
+# CHECK-NEXT: v[124:131] = "st.v_wmma_f32_16x16x32_bf16"(v[44:51],
+# CHECK-NEXT: v[20:23] = "st.ds_load_b128"{{.*}}offset = 0
+# CHECK-NEXT: v[24:27] = "st.ds_load_b128"{{.*}}offset = 16
+# CHECK-NEXT: v[116:123] = "st.v_wmma_f32_16x16x32_bf16"(v[36:43],
+# CHECK-NEXT: v[108:115] = "st.v_wmma_f32_16x16x32_bf16"(v[28:35],
+# CHECK-NEXT: v[100:107] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27],
+# CHECK-NEXT: s_branch
+
+st.func @wmma_reorder_no_pipeline() {
+^preheader:
+  s0 = "st.s_mov_b32"(0)
+  "st.s_branch"("label_LoopBeginL")
+^label_LoopBeginL:
+  v[20:23] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false } }
+  v[24:27] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false } }
+  v[28:31] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false } }
+  v[32:35] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false } }
+  v[36:39] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false } }
+  v[40:43] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 80, gds = false } }
+  v[44:47] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 96, gds = false } }
+  v[48:51] = "st.ds_load_b128"(v10) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 112, gds = false } }
+  v[100:107] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[60:67], v[100:107]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[108:115] = "st.v_wmma_f32_16x16x32_bf16"(v[28:35], v[60:67], v[108:115]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[116:123] = "st.v_wmma_f32_16x16x32_bf16"(v[36:43], v[60:67], v[116:123]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[124:131] = "st.v_wmma_f32_16x16x32_bf16"(v[44:51], v[60:67], v[124:131]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_branch"("label_LoopBeginL")
+}

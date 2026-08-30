@@ -64,6 +64,8 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyWmmaReorderPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyWmmaVgprReorderPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
@@ -88,6 +90,14 @@ inline bool hasPassArg(const std::vector<std::string>& args, const char* flag) {
     for (const auto& a : args)
         if (a == flag) return true;
     return false;
+}
+
+// Helper: value of a `key=value` argument, or nullptr when `key` is absent.
+inline const char* getPassArgValue(const std::vector<std::string>& args, const char* key) {
+    const std::string prefix = std::string(key) + "=";
+    for (const auto& a : args)
+        if (a.rfind(prefix, 0) == 0) return a.c_str() + prefix.size();
+    return nullptr;
 }
 
 // List of available passes
@@ -206,6 +216,17 @@ const std::vector<PassInfo> availablePasses = {
     {"RegionClonePass",
      [](const auto&) {
          return createRegionClonePass({CloneSpec{"InitCIterWmma", "label_LoopBeginL"}});
+     }},
+    {"StinkyWmmaVgprReorderPass", [](const auto&) { return createStinkyWmmaVgprReorderPass(); }},
+    {"StinkyWmmaReorderPass",
+     [](const std::vector<std::string>& args) {
+         WmmaReorderOptions options;
+         options.allowCrossIteration = !hasPassArg(args, "noCrossIteration");
+         if (const char* d = getPassArgValue(args, "distance")) options.prefetchDistance = atoi(d);
+         if (const char* l = getPassArgValue(args, "loopLabel")) options.loopLabel = l;
+         std::unique_ptr<IWmmaOrderProvider> mode;
+         if (hasPassArg(args, "reverse")) mode = std::make_unique<ReverseOrderProvider>();
+         return createStinkyWmmaReorderPass(std::move(mode), std::move(options));
      }},
 };
 

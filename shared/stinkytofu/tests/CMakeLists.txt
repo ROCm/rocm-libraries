@@ -83,6 +83,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/VerifyInstrumentationTest.cpp
     unit/asm/DebugPrintInstrumentation_test.cpp
     unit/asm/AccumulateInstructionSizePassRunTest.cpp
+    unit/asm/StinkyWmmaReorderPassTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
     unit/asm/RemoveInstructionPassTest.cpp
     unit/asm/RemoveDscntPassTest.cpp

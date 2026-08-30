@@ -484,6 +484,12 @@ bool serializeVisit(const MemTokenData& mod, std::ostream& os) {
     return true;
 }
 
+// WmmaPoolData
+bool serializeVisit(const WmmaPoolData& mod, std::ostream& os) {
+    os << ", mod.wmma_pool = { poolIndex = " << mod.poolIndex << " }";
+    return true;
+}
+
 // LabelData
 bool serializeVisit(const LabelData& mod, std::ostream& os) {
     os << ", mod.label = { label = \"" << mod.label << "\""
@@ -511,8 +517,8 @@ bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
                           CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
                           VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
                           SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
-                          SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData,
-                          CallTargetData>(mod, os);
+                          SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData,
+                          WmmaPoolData, LabelData, CallTargetData>(mod, os);
 }
 
 /*
@@ -651,6 +657,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         if (fields.contains("tokens")) {
             inst->addModifier(MemTokenData(getIntVector(fields, "tokens")));
         }
+    } else if (attrKey == "mod.wmma_pool") {
+        inst->addModifier(WmmaPoolData(static_cast<uint32_t>(getInt(fields, "poolIndex", 0))));
     } else if (attrKey == "mod.label") {
         inst->addModifier(LabelData(getStr(fields, "label", ""),
                                     static_cast<uint16_t>(getInt(fields, "alignment", 1))));
