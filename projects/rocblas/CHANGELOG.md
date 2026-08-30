@@ -7,8 +7,8 @@ rocBLAS documentation is available at
 
 ### Optimized
 
-* `gemm` with a unit free dimension (`m == 1` or `n == 1`) and `batch_count == 1` now uses the GEMV kernels from the plain `rocblas_?gemm` entry point, not only from `gemm_ex`. The dispatch that `gemm_ex` has had since 5.0.0 is shared rather than duplicated. On gfx11 the per-precision heuristics guarding it are also bypassed, because they assume Tensile has size-tuned fp32/fp64 logic that consumer RDNA does not ship. Measured on gfx1100 at free dimension 1328, `k = 101067`: `dgemm` 10.6-10.8 ms to 1.55-1.70 ms, `sgemm` up to 9.99 ms to 0.80 ms. The `1x1` case, and architectures other than gfx11, keep the existing behaviour.
-* Level 2 `gemv` non-transposed (`transA == N`) for a short output and a long reduction. The grid was sized by the output length alone, so a small `m` could not fill the device however large `n` was; the `n` reduction is now split across `gridDim.y` and reduced, mirroring the existing skinny-`n` path on the transposed side. Measured on gfx1100 at a fixed 1074 MB operand, fp64: `m = 32` 25.9 ms to 1.75 ms, `m = 64` 17.6 ms to 1.66 ms, `m = 128` 15.4 ms to 1.66 ms, `m = 256` 7.78 ms to 1.65 ms, `m = 512` 3.96 ms to 1.62 ms. Applies for `m <= 512` (`m <= 256` for double-complex) with at least 2^20 elements; other shapes and `transA != N` are unchanged.
+* Improved the performance of Level 3 `gemm` for the problem sizes where `m == 1` or `n == 1` and `batch_count == 1` by using `gemv` kernels, previously applied only in `gemm_ex`. On gfx11 the per-precision heuristics guarding this path are also bypassed, except for the `1x1` case.
+* Improved the performance of Level 2 `gemv` non-transposed (`TransA == N`) for the problem sizes where `m` is small and `n` is large by splitting the reduction across the grid, as the transposed case already does.
 
 ### Added
 
@@ -16,6 +16,7 @@ rocBLAS documentation is available at
 
 ### Resolved issues
 
+* Fix out-of-bounds workspace access in Level 3 batched and strided-batched `syrk` and `herk` on gfx90a and gfx942 with `batch_count` greater than 65536, `k` of at least 500, and `n` below an internal per-architecture threshold, where the GEMM-only path advanced its workspace pointer cumulatively on each pass of the batch sweep and so wrote past the end of the workspace. This could corrupt memory past a workspace supplied through `rocblas_set_workspace` or, when the device memory pool was sized to the requirement reported by a size query, fault or return incorrect results. The ILP64 (`_64`) forms were unaffected.
 * Fix incorrect results from Level 1 `dot` and `dotc` batched and strided-batched forms, including their `_ex` forms, when `batch_count` is greater than 65535. Every batch item at index 65535 and beyond reduced an empty range and returned zero. The ILP64 (`_64`) forms were unaffected, as they chunk the batch dimension below that limit.
 
 ## rocBLAS 5.6.0
