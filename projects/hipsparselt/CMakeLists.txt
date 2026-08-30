@@ -65,6 +65,10 @@ option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
 option(HIPSPARSELT_BUILD_COVERAGE "Build tests with coverage enabled." OFF)
 
 option(HIPSPARSELT_ENABLE_DEVICE "Build hipSPARSELt device libraries." ON)
+set(TENSILELITE_LIBLOGIC_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
+    CACHE PATH "Path to the hipSPARSELt TensileLite logic files."
+)
 option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
 if(HIPSPARSELT_ENABLE_CLIENT)
     option(HIPSPARSELT_ENABLE_BENCHMARKS "Build benchmark client." ON)
