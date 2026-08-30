@@ -163,6 +163,23 @@ class STINKYTOFU_EXPORT PoolVaryingReorderAlgorithm : public IWmmaReorderAlgorit
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Analysis entry point
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compute the desired wmma order and alias map for @p bb.
+///
+/// This is the whole analysis; the pass below is a thin wrapper that runs it
+/// over a function and caches the results. Callers that only need the order for
+/// one block — StinkyWmmaReorderPass's vgpr-analysis mode — call this
+/// directly, so they do not depend on the pass having run first.
+STINKYTOFU_EXPORT WmmaReorderAnalysisResult
+analyzeWmmaVgprReorder(const BasicBlock& bb, const IRegLivenessAnalysis& liveness,
+                       const IWmmaReorderAlgorithm& algorithm);
+
+/// Same, with the default backends (WmmaIntervalLiveness, PoolVaryingReorderAlgorithm).
+STINKYTOFU_EXPORT WmmaReorderAnalysisResult analyzeWmmaVgprReorder(const BasicBlock& bb);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Pass factory
 // ─────────────────────────────────────────────────────────────────────────────
 

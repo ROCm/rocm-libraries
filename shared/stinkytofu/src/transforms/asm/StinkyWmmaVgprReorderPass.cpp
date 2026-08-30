@@ -323,7 +323,7 @@ class StinkyWmmaVgprReorderPassImpl : public StinkyInstPass {
         gResults.clear();
         for (BasicBlock& bb : func) {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-            WmmaReorderAnalysisResult res = analyzeBlock(bb);
+            WmmaReorderAnalysisResult res = analyzeWmmaVgprReorder(bb, *liveness_, *algorithm_);
             PASS_DEBUG(if (res.applicable) std::cerr
                            << "[WmmaVgprReorderPass] " << res.totalVgprSaved << " VGPRs saveable, "
                            << res.replacements.size() << " operand replacements\n";);
@@ -335,67 +335,77 @@ class StinkyWmmaVgprReorderPassImpl : public StinkyInstPass {
    private:
     std::unique_ptr<IRegLivenessAnalysis> liveness_;
     std::unique_ptr<IWmmaReorderAlgorithm> algorithm_;
-
-    WmmaReorderAnalysisResult analyzeBlock(const BasicBlock& bb) {
-        auto pools = groupWmmaByPool(bb);
-        if (pools.size() < 2) return {};
-
-        // Identify which src operand is A (pool-varying) vs B (pool-shared).
-        auto [aIdx, bIdx] = detectABIndices(pools);
-
-        // Rebuild WmmaNode A/B groups with the correct src assignment.
-        for (auto& pool : pools)
-            for (auto& node : pool) {
-                node.aGroup = toRegGroup(node.inst->getSrcReg(aIdx));
-                node.bGroup = toRegGroup(node.inst->getSrcReg(bIdx));
-            }
-
-        // Flatten into a single sequence for liveness computation.
-        std::vector<WmmaNode> wmmaSeq;
-        for (const auto& pool : pools)
-            for (const auto& n : pool) wmmaSeq.push_back(n);
-
-        const auto intervals = liveness_->computeLiveness(bb, wmmaSeq);
-        auto [idealOrder, idealAliases] = algorithm_->solve(pools, intervals);
-        if (idealAliases.empty()) return {};
-
-        // Apply dependency constraints per pool: reorder as much as possible without
-        // violating RAW/WAR/barrier constraints from non-wmma instructions.
-        std::vector<WmmaNode> constrainedSeq;
-        size_t offset = 0;
-        for (const auto& pool : pools) {
-            std::vector<WmmaNode> idealPool(idealOrder.begin() + offset,
-                                            idealOrder.begin() + offset + pool.size());
-            auto constrained = constrainedReorder(bb, pool, idealPool);
-            for (const WmmaNode& n : constrained) constrainedSeq.push_back(n);
-            offset += pool.size();
-        }
-
-        // Re-compute liveness on the constrained ordering and keep only alias pairs
-        // whose intervals no longer overlap — partial reordering may still save some.
-        const auto constrainedIntervals = liveness_->computeLiveness(bb, constrainedSeq);
-        std::vector<AliasCandidate> aliases;
-        for (const AliasCandidate& a : idealAliases) {
-            auto itC = constrainedIntervals.find(a.canonical);
-            auto itA = constrainedIntervals.find(a.aliasable);
-            if (itC == constrainedIntervals.end() || itA == constrainedIntervals.end()) continue;
-            if (!itC->second.overlaps(itA->second)) aliases.push_back(a);
-        }
-        if (aliases.empty()) return {};
-
-        WmmaReorderAnalysisResult out;
-        out.applicable = true;
-        out.replacements = buildReplacements(bb, aliases);
-        for (const AliasCandidate& a : aliases) out.totalVgprSaved += a.vgprSaved;
-        out.desiredWmmaOrder.reserve(constrainedSeq.size());
-        for (const WmmaNode& n : constrainedSeq) out.desiredWmmaOrder.push_back(n.inst);
-        return out;
-    }
 };
 
 char StinkyWmmaVgprReorderPassImpl::ID = 0;
 
 }  // namespace
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Analysis entry point
+// ─────────────────────────────────────────────────────────────────────────────
+
+WmmaReorderAnalysisResult analyzeWmmaVgprReorder(const BasicBlock& bb,
+                                                 const IRegLivenessAnalysis& liveness,
+                                                 const IWmmaReorderAlgorithm& algorithm) {
+    auto pools = groupWmmaByPool(bb);
+    if (pools.size() < 2) return {};
+
+    // Identify which src operand is A (pool-varying) vs B (pool-shared).
+    auto [aIdx, bIdx] = detectABIndices(pools);
+
+    // Rebuild WmmaNode A/B groups with the correct src assignment.
+    for (auto& pool : pools)
+        for (auto& node : pool) {
+            node.aGroup = toRegGroup(node.inst->getSrcReg(aIdx));
+            node.bGroup = toRegGroup(node.inst->getSrcReg(bIdx));
+        }
+
+    // Flatten into a single sequence for liveness computation.
+    std::vector<WmmaNode> wmmaSeq;
+    for (const auto& pool : pools)
+        for (const auto& n : pool) wmmaSeq.push_back(n);
+
+    const auto intervals = liveness.computeLiveness(bb, wmmaSeq);
+    auto [idealOrder, idealAliases] = algorithm.solve(pools, intervals);
+    if (idealAliases.empty()) return {};
+
+    // Apply dependency constraints per pool: reorder as much as possible without
+    // violating RAW/WAR/barrier constraints from non-wmma instructions.
+    std::vector<WmmaNode> constrainedSeq;
+    size_t offset = 0;
+    for (const auto& pool : pools) {
+        std::vector<WmmaNode> idealPool(idealOrder.begin() + offset,
+                                        idealOrder.begin() + offset + pool.size());
+        auto constrained = constrainedReorder(bb, pool, idealPool);
+        for (const WmmaNode& n : constrained) constrainedSeq.push_back(n);
+        offset += pool.size();
+    }
+
+    // Re-compute liveness on the constrained ordering and keep only alias pairs
+    // whose intervals no longer overlap — partial reordering may still save some.
+    const auto constrainedIntervals = liveness.computeLiveness(bb, constrainedSeq);
+    std::vector<AliasCandidate> aliases;
+    for (const AliasCandidate& a : idealAliases) {
+        auto itC = constrainedIntervals.find(a.canonical);
+        auto itA = constrainedIntervals.find(a.aliasable);
+        if (itC == constrainedIntervals.end() || itA == constrainedIntervals.end()) continue;
+        if (!itC->second.overlaps(itA->second)) aliases.push_back(a);
+    }
+    if (aliases.empty()) return {};
+
+    WmmaReorderAnalysisResult out;
+    out.applicable = true;
+    out.replacements = buildReplacements(bb, aliases);
+    for (const AliasCandidate& a : aliases) out.totalVgprSaved += a.vgprSaved;
+    out.desiredWmmaOrder.reserve(constrainedSeq.size());
+    for (const WmmaNode& n : constrainedSeq) out.desiredWmmaOrder.push_back(n.inst);
+    return out;
+}
+
+WmmaReorderAnalysisResult analyzeWmmaVgprReorder(const BasicBlock& bb) {
+    return analyzeWmmaVgprReorder(bb, WmmaIntervalLiveness{}, PoolVaryingReorderAlgorithm{});
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ABI 1 — WmmaIntervalLiveness (out-of-line)
