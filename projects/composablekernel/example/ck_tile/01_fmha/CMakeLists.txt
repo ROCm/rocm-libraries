@@ -249,3 +249,14 @@ set_property(TARGET ${EXAMPLE_FMHA_BWD} PROPERTY HIP_ARCHITECTURES ${INST_TARGET
 # however, this property may affect global
 # TODO: consider codegen a makefile by us
 set_property(GLOBAL PROPERTY RULE_MESSAGES OFF)
+
+if(BUILD_TESTING)
+  add_test(
+    NAME test_ck_tile_fmha_fwd_d192_codegen
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test_fmha_fwd_d192_codegen.py
+  )
+  set_tests_properties(test_ck_tile_fmha_fwd_d192_codegen PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    LABELS "CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
+  )
+endif()

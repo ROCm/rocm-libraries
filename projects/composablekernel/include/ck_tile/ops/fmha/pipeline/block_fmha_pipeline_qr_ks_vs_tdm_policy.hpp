@@ -230,6 +230,51 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                                            /* NumPrefetchK = */ 1,
                                                            /* NumPrefetchV = */ 1>;
 
+    static constexpr bool kUseFullHeadKSuQk           = false;
+    static constexpr bool kUseSplitSoftmax            = false;
+    static constexpr bool kSkipExactFullTilePredicate = false;
+    static constexpr bool kUseCustomQkStageSchedule   = false;
+    static constexpr bool kUseCustomPvStageSchedule   = false;
+    static constexpr bool kUseOutputFragments         = false;
+    static constexpr bool kUsePreviousTileLdsPhase    = false;
+    static constexpr bool kUseDeferredPGroupLdsPhase  = false;
+
+    template <index_t Stage,
+              typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor,
+              typename NextBBlockTensor,
+              typename BTileWindow>
+    CK_TILE_DEVICE static void RunQkScheduledStage(const BlockGemm& block_gemm,
+                                                   CBlockTensor& c_block_tensor,
+                                                   const ABlockTensor& a_block_tensor,
+                                                   const BBlockTensor& b_block_tensor,
+                                                   NextBBlockTensor&,
+                                                   const BTileWindow&)
+    {
+        ignore = number<Stage>{};
+        block_gemm(c_block_tensor, a_block_tensor, b_block_tensor);
+    }
+
+    template <index_t Stage,
+              typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor,
+              typename NextBBlockTensor,
+              typename BTileWindow>
+    CK_TILE_DEVICE static void RunPvScheduledStage(const BlockGemm& block_gemm,
+                                                   CBlockTensor& c_block_tensor,
+                                                   const ABlockTensor& a_block_tensor,
+                                                   const BBlockTensor& b_block_tensor,
+                                                   NextBBlockTensor&,
+                                                   const BTileWindow&)
+    {
+        ignore = number<Stage>{};
+        block_gemm(c_block_tensor, a_block_tensor, b_block_tensor);
+    }
+
     template <typename Problem>
     using LdsPaddingConfigQ = typename detail::QrTdmPaddingSelection<Problem>::Q;
 

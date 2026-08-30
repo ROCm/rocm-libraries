@@ -121,6 +121,39 @@ struct has_use_trload_flag<
 template <typename T>
 static inline constexpr bool is_using_trload_v = has_use_trload_flag<T>::value;
 
+template <typename T>
+using has_untransposed_v_kernel_path = decltype(T::kUsesUntransposedVKernelPath);
+
+template <typename T>
+using has_tdm_affine_dram_path = decltype(T::kUsesTdmAffineDramPath);
+
+template <typename T>
+using has_fixed_segmented_lds_arena = decltype(T::kUsesFixedSegmentedLdsArena);
+
+template <typename T>
+static inline constexpr bool uses_untransposed_v_kernel_path_v = []() {
+    if constexpr(is_detected<has_untransposed_v_kernel_path, T>::value)
+        return static_cast<bool>(T::kUsesUntransposedVKernelPath);
+    else
+        return false;
+}();
+
+template <typename T>
+static inline constexpr bool uses_tdm_affine_dram_path_v = []() {
+    if constexpr(is_detected<has_tdm_affine_dram_path, T>::value)
+        return static_cast<bool>(T::kUsesTdmAffineDramPath);
+    else
+        return false;
+}();
+
+template <typename T>
+static inline constexpr bool uses_fixed_segmented_lds_arena_v = []() {
+    if constexpr(is_detected<has_fixed_segmented_lds_arena, T>::value)
+        return static_cast<bool>(T::kUsesFixedSegmentedLdsArena);
+    else
+        return false;
+}();
+
 } // namespace detail
 
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
@@ -162,21 +195,26 @@ struct FmhaFwdKernel
     static constexpr auto QScaleEnum        = FmhaPipeline::Problem::QScaleEnum;
     static constexpr bool kSkipMinSeqlenQ   = FmhaPipeline::Problem::kSkipMinSeqlenQ;
     static constexpr bool kHasSink          = FmhaPipeline::kHasSink;
+    static constexpr bool kUsesUntransposedVKernelPath =
+        detail::uses_untransposed_v_kernel_path_v<FmhaPipeline>;
+    static constexpr bool kUsesTdmAffineDramPath =
+        detail::uses_tdm_affine_dram_path_v<FmhaPipeline>;
+    static constexpr bool kUsesFixedSegmentedLdsArena =
+        detail::uses_fixed_segmented_lds_arena_v<FmhaPipeline>;
 
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
 
-    static constexpr bool kUseAsyncCopy = FmhaPipeline::Policy::AsyncCopy;
-    static constexpr bool kUseTrLoad    = detail::is_using_trload_v<FmhaPipeline>;
+    static constexpr bool kUseAsyncCopy             = FmhaPipeline::Policy::AsyncCopy;
+    static constexpr bool kUseTrLoad                = detail::is_using_trload_v<FmhaPipeline>;
+    static constexpr std::string_view kPipelineName = FmhaPipeline::name;
 
 #if defined(__gfx950__)
     static constexpr bool kIsAvailable = true;
 #else
     static constexpr bool kIsAvailable = !kUseTrLoad;
 #endif
-
-    static constexpr std::string_view kPipelineName = FmhaPipeline::name;
 
     template <ck_tile::index_t I> // to avoid duplicated base class prblem, introduce an template
                                   // arg
@@ -1659,12 +1697,9 @@ struct FmhaFwdKernel
 
     CK_TILE_DEVICE void run_(Kargs kargs) const
     {
-        // qr_tdm shares the same V dram layout convention as qr_async_trload
-        // (V window shape = (kK1, kN1) = (seqlen, hdim_v), no explicit dram
-        // transpose) -- its pipeline expects the else-branch layout. Without
-        // this guard, qr_tdm wrongly falls into the standard transposed path
-        // and PV computes garbage output.
-        if constexpr(kPipelineName != "qr_async_trload" && kPipelineName != "qr_tdm")
+        // Pipelines with native row-major V consume (seqlen, hdim_v) windows
+        // without the explicit DRAM transpose used by the generic path.
+        if constexpr(!kUsesUntransposedVKernelPath)
         {
             // allocate LDS
             __shared__ char smem_ptr[GetSmemSize()];
@@ -2643,7 +2678,7 @@ struct FmhaFwdKernel
                         sequence<false, kPadHeadDimQ>{});
 
                     // TDM box-major DMA cannot honor a software XOR layout
-                    // on the dram side, so the qr_tdm pipeline must consume
+                    // on the dram side, so affine-TDM pipelines must consume
                     // an affine pad-only view. Bypass the unmerge/xor/merge_v3
                     // chain below: that chain (i) is dead code for TDM (TDM
                     // box write can't produce XOR'd LDS -- see
@@ -2655,7 +2690,7 @@ struct FmhaFwdKernel
                     // to read garbage rows. Returning the affine naive view
                     // (no head-dim pad) keeps get_lengths()[hdim] at the true
                     // head-dim so the TDM box clamp zero-fills the OOB tail.
-                    if constexpr(kPipelineName == "qr_tdm")
+                    if constexpr(kUsesTdmAffineDramPath)
                     {
                         return q_dram_naive;
                     }
@@ -2785,14 +2820,14 @@ struct FmhaFwdKernel
                     make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kK0>{}),
                     sequence<false, kPadHeadDimQ>{});
 
-                // Same rationale as the qr_tdm dispatch in make_q_dram above:
+                // Same rationale as the affine-TDM dispatch in make_q_dram above:
                 // TDM box-major DMA can't honor software XOR'd dram views,
                 // the unmerge/xor/merge_v3 chain below is dead code for TDM,
                 // and calculate_offset(unit_vec) would otherwise produce an
                 // XOR-polluted stride. Return the affine naive view (no
                 // head-dim pad) so get_lengths()[hdim] stays at the true
                 // head-dim and the TDM box clamp zero-fills the OOB tail.
-                if constexpr(kPipelineName == "qr_tdm")
+                if constexpr(kUsesTdmAffineDramPath)
                 {
                     return k_dram_naive;
                 }
@@ -2942,14 +2977,14 @@ struct FmhaFwdKernel
                     make_tuple(number<FmhaPipeline::kK1>{}, number<FmhaPipeline::kN1>{}),
                     sequence<kPadSeqLenK, false>{});
 
-                // Same rationale as the qr_tdm dispatch in make_q_dram and
+                // Same rationale as the affine-TDM dispatch in make_q_dram and
                 // make_k_dram above: TDM box-major DMA can't honor software
                 // XOR'd dram views, the unmerge/xor/merge_v3 chain below is
                 // dead code for TDM, and calculate_offset(unit_vec) would
                 // otherwise produce an XOR-polluted stride. Return the naive
                 // view: a pad transform reports the pad rows as real and the
                 // DMA reads past the end of V.
-                if constexpr(kPipelineName == "qr_tdm")
+                if constexpr(kUsesTdmAffineDramPath)
                 {
                     return v_dram_naive;
                 }
@@ -3282,7 +3317,26 @@ struct FmhaFwdKernel
             auto o_acc_tile = [&]() {
                 if constexpr(PrefillCase)
                 {
-                    if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline>)
+                    if constexpr(kUsesFixedSegmentedLdsArena)
+                    {
+                        using Policy = typename FmhaPipeline::Policy;
+                        static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
+                        __shared__ char smem_arena[Policy::GetLdsArenaSize()];
+                        return invoke_fmha_pipeline(q_dram_window,
+                                                    k_dram_window,
+                                                    v_dram_window,
+                                                    bias_dram_window,
+                                                    lse_dram_window,
+                                                    mask,
+                                                    position_encoding,
+                                                    scale_s,
+                                                    sink_value,
+                                                    smem_arena + Policy::GetLdsOffsetK0(),
+                                                    smem_arena + Policy::GetLdsOffsetK1(),
+                                                    smem_arena + Policy::GetLdsOffsetV0(),
+                                                    smem_arena + Policy::GetLdsOffsetV1());
+                    }
+                    else if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline>)
                     {
                         using Layout = typename FmhaPipeline::Policy::template LdsArenaLayout<
                             typename FmhaPipeline::Problem>;
