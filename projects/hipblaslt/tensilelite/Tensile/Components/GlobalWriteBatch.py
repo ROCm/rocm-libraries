@@ -4056,15 +4056,17 @@ class GlobalWriteBatchWriter:
     tileBase = [self.ss.elementSumIdx[elementIdx + j] for j in range(T)]
 
     # Scratch region (low bank, from batch setup): gather buffer [T*dwordsPerBlock] + selected
-    # [dwordsPerBlock, 2-aligned b64 store src] + srcIdx(1) + gsel(1) + vAddr(1).
+    # [dwordsPerBlock, 2-aligned b64 store src] + srcIdx(1) + gsel(1) + vAddr(1) + serialLo(1) +
+    # waveId(1) + vDelta(1) (per-pass vaddr byte step, held across the loop).
     base    = self.cvtVgprStruct.vgprF8XposeBase
     gather  = base                                 # T*dwordsPerBlock dwords
     sel     = base + T * dwordsPerBlock             # dwordsPerBlock dwords
     vSrcIdx = base + T * dwordsPerBlock + dwordsPerBlock
     vGsel   = vSrcIdx + 1
-    vAddr   = vSrcIdx + 2
+    vAddr   = vSrcIdx + 2                           # per-lane vaddr, HELD + advanced by vDelta each pass.
     vSerial = vSrcIdx + 3                           # low-bank copy of LANE-IN-WAVE (Serial & (ws-1)).
     vWaveId = vSrcIdx + 4                           # low-bank copy of waveId (Serial >> log2(ws)).
+    vDelta  = vSrcIdx + 5                           # vaddr byte step between passes = colsPerPass*StrideD*bpe.
     # CRITICAL: blk/N_local/srcLane/g are per-WAVE (lane 0..31), so use lane-in-wave = Serial&(ws-1),
     # NOT the full thread id (0..127) — else waves >=1 miscompute M/N. waveId (Serial>>5) is separate.
     module.addComment1("f8 wave-transpose: lane-in-wave + waveId (low bank, avoid high-VGPR hazard)")
@@ -4094,20 +4096,61 @@ class GlobalWriteBatchWriter:
     module.add(VLShiftRightB32(dst=vgpr(vGsel), shiftHex=1, src=vgpr(vSerial), comment="L'>>1"))
     module.add(VAndB32(dst=vgpr(vGsel), src0=T - 1, src1=vgpr(vGsel), comment="g = (L'>>1)&(T-1)"))
 
+    # --- Pre-loop: compute the pass-INVARIANT gather index + vaddr base + pass delta ONCE. ---
+    # Adjacent passes advance the N column by colsPerPass, so BOTH the gather srcLane byte index and
+    # the store vaddr step by a constant (srcIdx += colsPerPass*4 ; vaddr += colsPerPass*StrideD*bpe).
+    # coord0 (M) is fully pass-invariant. Hoisting this out of the loop replaces ~15 address
+    # instructions/pass with 2 adds; the emitted addresses are bit-identical to the per-pass form.
+    # gather[] is not populated until the first ds_bpermute below, so borrow gather+0/+1 as scratch.
+    sTmp0 = gather
+    sTmp1 = gather + 1
+    module.addComment1("f8 wave-transpose: hoist pass-invariant gather index + vaddr base + delta")
+
+    # N_local = L'>>log2(2T): the pass-invariant part shared by srcLane and coord1.
+    module.add(VLShiftRightB32(dst=vgpr(sTmp0), shiftHex=log2TwoT, src=vgpr(vSerial), comment="N_local = L'>>log2(2T)"))
+
+    # p=0 gather byte index = (N_local + (blk&1)<<4) * 4 ; held in vSrcIdx, advanced per pass.
+    module.add(VAndB32(dst=vgpr(vSrcIdx), src0=1, src1=vgpr(vSerial), comment="blk&1 = Mhi"))
+    module.add(VLShiftLeftB32(dst=vgpr(vSrcIdx), shiftHex=4, src=vgpr(vSrcIdx), comment="Mhi<<4"))
+    module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=vgpr(sTmp0), comment="srcLane(p=0) = N_local + Mhi<<4"))
+    module.add(VLShiftLeftB32(dst=vgpr(vSrcIdx), shiftHex=2, src=vgpr(vSrcIdx), comment="*4 byte index"))
+
+    # coord0 (M) = blk*8*bpe + wg0*MT0*bpe + waveId0*MIWaveTile0*matM*bpe -> vAddr (pass-invariant).
+    module.add(VAndB32(dst=vgpr(vAddr), src0=twoT - 1, src1=vgpr(vSerial), comment="blk = L'&(2T-1)"))
+    module.add(VLShiftLeftB32(dst=vgpr(vAddr), shiftHex=int(log2(8 * bpe)), src=vgpr(vAddr), comment="M-block byte = blk*8*bpe"))
+    module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=self.kernel["MacroTile0"] * bpe, comment="wg0*MT0*bpe"))
+    module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=sgpr(tmpS), comment="vaddr += wg0 M base"))
+    if miwg0 > 1:
+      module.add(VAndB32(dst=vgpr(sTmp1), src0=miwg0 - 1, src1=vgpr(vWaveId), comment="waveId0 = waveId & (miwg0-1)"))
+      module.add(SMovB32(dst=sgpr(tmpS), src=self.kernel["MIWaveTile"][0] * matM * bpe, comment="waveM stride*bpe"))
+      module.add(VMulLOU32(dst=vgpr(sTmp1), src0=vgpr(sTmp1), src1=sgpr(tmpS), comment="waveId0*strideM"))
+      module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(sTmp1), comment="vaddr += wave0 M off"))
+
+    # coord1 (N) for p=0 = N_local + tt1*matN + waveId1*MIWaveTile1*matN ; *StrideD ; *bpe -> += vAddr.
+    # (p*colsPerPass is handled by the per-pass vaddr delta, not here.) sTmp0 still holds N_local.
+    nTileBase = tt1 * matN
+    if nTileBase > 0:
+      module.add(VAddU32(dst=vgpr(sTmp0), src0=vgpr(sTmp0), src1=nTileBase, comment="coord1(p=0) += tt1*matN"))
+    if miwg1 > 1:
+      module.add(VLShiftRightB32(dst=vgpr(sTmp1), shiftHex=int(log2(miwg0)), src=vgpr(vWaveId), comment="waveId1 = waveId >> log2(miwg0)"))
+      module.add(SMovB32(dst=sgpr(tmpS), src=self.kernel["MIWaveTile"][1] * matN, comment="waveN stride"))
+      module.add(VMulLOU32(dst=vgpr(sTmp1), src0=vgpr(sTmp1), src1=sgpr(tmpS), comment="waveId1*strideN"))
+      module.add(VAddU32(dst=vgpr(sTmp0), src0=vgpr(sTmp0), src1=vgpr(sTmp1), comment="coord1 += wave1 N off"))
+    module.add(VMulLOU32(dst=vgpr(sTmp0), src0=vgpr(sTmp0), src1=sgpr(strideD1J), comment="coord1 * StrideD"))
+    if bpe > 1:
+      module.add(VLShiftLeftB32(dst=vgpr(sTmp0), shiftHex=int(log2(bpe)), src=vgpr(sTmp0), comment="* bpe"))
+    module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(sTmp0), comment="vaddr(p=0) = M_off + N_off"))
+
+    # pass delta = colsPerPass * StrideD * bpe (constant vaddr byte step between passes).
+    if nPasses > 1:
+      module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr(strideD1J), src1=colsPerPass * bpe, comment="vaddr pass delta = colsPerPass*StrideD*bpe"))
+      module.add(VMovB32(dst=vgpr(vDelta), src=sgpr(tmpS), comment="hold pass delta"))
+
     numStores = 0
     for p in range(nPasses):
       module.addComment1("f8 wave-transpose store pass %d/%d (columns %d..%d)"
                          % (p + 1, nPasses, p * colsPerPass, p * colsPerPass + colsPerPass - 1))
-      # source lane = (p*colsPerPass + (L'>>log2(2T))) + ((L'&1)<<4); *4 = ds_bpermute byte index.
-      module.add(VLShiftRightB32(dst=vgpr(vSrcIdx), shiftHex=log2TwoT, src=vgpr(vSerial), comment="N_local = L'>>log2(2T)"))
-      if p > 0:
-        module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=p * colsPerPass, comment="+ pass column base"))
-      module.add(VAndB32(dst=vgpr(vAddr), src0=1, src1=vgpr(vSerial), comment="blk&1 = Mhi"))
-      module.add(VLShiftLeftB32(dst=vgpr(vAddr), shiftHex=4, src=vgpr(vAddr), comment="Mhi<<4"))
-      module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=vgpr(vAddr), comment="source lane"))
-      module.add(VLShiftLeftB32(dst=vgpr(vSrcIdx), shiftHex=2, src=vgpr(vSrcIdx), comment="*4 byte index"))
-
-      # gather all T tile-groups' packed dwords from the source lane (re-gathered every pass).
+      # gather all T tile-groups' packed dwords from the HELD source-lane index (advanced per pass).
       for g in range(T):
         for d in range(dwordsPerBlock):
           module.add(DSBPermuteB32(dst=vgpr(gather + g * dwordsPerBlock + d), src0=vgpr(vSrcIdx),
@@ -4124,34 +4167,6 @@ class GlobalWriteBatchWriter:
                                  src1=vgpr(gather + g * dwordsPerBlock + d), src2=VCC(),
                                  comment="select group %d dword %d" % (g, d)))
 
-      # per-lane vaddr = coord0(M-block bytes) + coord1(N)*StrideD*bpe ; SrdD base encodes wg1*MT1.
-      # coord0 = blk*8*bpe + wg0*MT0*bpe + waveId0*MIWaveTile0*matM*bpe.
-      module.add(VAndB32(dst=vgpr(vAddr), src0=twoT - 1, src1=vgpr(vSerial), comment="blk = L'&(2T-1)"))
-      module.add(VLShiftLeftB32(dst=vgpr(vAddr), shiftHex=int(log2(8 * bpe)), src=vgpr(vAddr), comment="M-block byte = blk*8*bpe"))
-      module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=self.kernel["MacroTile0"] * bpe, comment="wg0*MT0*bpe"))
-      module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=sgpr(tmpS), comment="vaddr += wg0 M base"))
-      if miwg0 > 1:
-        module.add(VAndB32(dst=vgpr(vSrcIdx), src0=miwg0 - 1, src1=vgpr(vWaveId), comment="waveId0 = waveId & (miwg0-1)"))
-        module.add(SMovB32(dst=sgpr(tmpS), src=self.kernel["MIWaveTile"][0] * matM * bpe, comment="waveM stride*bpe"))
-        module.add(VMulLOU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=sgpr(tmpS), comment="waveId0*strideM"))
-        module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(vSrcIdx), comment="vaddr += wave0 M off"))
-      # coord1 (N) = tt1*matN + (p*colsPerPass + N_local) + waveId1*MIWaveTile1*matN ; *StrideD*bpe.
-      # tt1*matN = this N-tile's column base within the wave; p*colsPerPass = pass column base.
-      nTileBase = tt1 * matN + p * colsPerPass
-      module.add(VLShiftRightB32(dst=vgpr(vSrcIdx), shiftHex=log2TwoT, src=vgpr(vSerial), comment="N_local = L'>>log2(2T)"))
-      if nTileBase > 0:
-        module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=nTileBase, comment="+ tt1*matN + pass column base"))
-      if miwg1 > 1:
-        vW1 = gather  # gather already consumed into sel -> reuse as scratch
-        module.add(VLShiftRightB32(dst=vgpr(vW1), shiftHex=int(log2(miwg0)), src=vgpr(vWaveId), comment="waveId1 = waveId >> log2(miwg0)"))
-        module.add(SMovB32(dst=sgpr(tmpS), src=self.kernel["MIWaveTile"][1] * matN, comment="waveN stride"))
-        module.add(VMulLOU32(dst=vgpr(vW1), src0=vgpr(vW1), src1=sgpr(tmpS), comment="waveId1*strideN"))
-        module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=vgpr(vW1), comment="N += wave1 N off"))
-      module.add(VMulLOU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=sgpr(strideD1J), comment="N * StrideD"))
-      if bpe > 1:
-        module.add(VLShiftLeftB32(dst=vgpr(vSrcIdx), shiftHex=int(log2(bpe)), src=vgpr(vSrcIdx), comment="* bpe"))
-      module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(vSrcIdx), comment="vaddr = M_off + N_off"))
-
       module.add(BufferStoreB64(
         src=vgpr(sel, dwordsPerBlock),
         vaddr=vgpr(vAddr),
@@ -4159,6 +4174,11 @@ class GlobalWriteBatchWriter:
         soffset=0,
         mubuf=MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT),
         comment="f8 wave-transpose coalesced b64 store (8 M/lane)"))
+
+      # advance to next pass: srcLane += colsPerPass (byte index += colsPerPass*4), vaddr += delta.
+      if p + 1 < nPasses:
+        module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=colsPerPass * 4, comment="next pass: srcIdx += colsPerPass*4"))
+        module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(vDelta), comment="next pass: vaddr += delta"))
       numStores += 1
 
     return module, numStores

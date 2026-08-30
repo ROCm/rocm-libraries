@@ -16222,8 +16222,9 @@ class KernelWriterAssembly(KernelWriter):
             # src-index + vaddr + group-select temp. dwordsPerBlock = 2*bpeCexternal (f8 -> 2).
             T = kernel["F8WaveTranspose"]
             dwordsPerBlock = 2 * self.states.bpeCexternal
-            # gather[T*dwordsPerBlock] + sel[dwordsPerBlock] + srcIdx + gsel + vAddr + serialLo(1).
-            f8XposeCount = T * dwordsPerBlock + dwordsPerBlock + 5
+            # gather[T*dwordsPerBlock] + sel[dwordsPerBlock] + srcIdx + gsel + vAddr + serialLo +
+            # waveId + vDelta (6 singles; vDelta holds the per-pass vaddr byte step).
+            f8XposeCount = T * dwordsPerBlock + dwordsPerBlock + 6
             f8XposeBase = self.vgprPool.checkOutAligned(f8XposeCount, 2, tag="globalWriteElements_f8Xpose")
           else:
             f8MergePack = self.vgprPool.checkOutAligned(4, 4, tag="globalWriteElements_f8MergePack")
