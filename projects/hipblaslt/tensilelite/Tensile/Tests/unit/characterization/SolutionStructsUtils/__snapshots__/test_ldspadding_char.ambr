@@ -3,7 +3,6 @@
   dict({
     'pad': 0,
     'perBlock': 0,
-    'shift': 0,
   })
 # ---
 # name: test_fp16_odd_n_no_padding
@@ -285,37 +284,30 @@
     64: dict({
       'pad': 16,
       'perBlock': 1024,
-      'shift': 0,
     }),
     96: dict({
       'pad': 0,
       'perBlock': 0,
-      'shift': 0,
     }),
     128: dict({
       'pad': 16,
       'perBlock': 128,
-      'shift': 0,
     }),
     192: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     256: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     384: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     512: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
   })
 # ---
@@ -324,37 +316,30 @@
     64: dict({
       'pad': 16,
       'perBlock': 1024,
-      'shift': 0,
     }),
     96: dict({
       'pad': 0,
       'perBlock': 0,
-      'shift': 0,
     }),
     128: dict({
       'pad': 16,
       'perBlock': 128,
-      'shift': 0,
     }),
     192: dict({
       'pad': 16,
       'perBlock': 32,
-      'shift': 0,
     }),
     256: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     384: dict({
       'pad': 16,
       'perBlock': 64,
-      'shift': 0,
     }),
     512: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
   })
 # ---
@@ -363,37 +348,30 @@
     64: dict({
       'pad': 16,
       'perBlock': 1024,
-      'shift': 0,
     }),
     96: dict({
       'pad': 0,
       'perBlock': 0,
-      'shift': 0,
     }),
     128: dict({
       'pad': 16,
       'perBlock': 128,
-      'shift': 0,
     }),
     192: dict({
       'pad': 16,
       'perBlock': 32,
-      'shift': 0,
     }),
     256: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     384: dict({
       'pad': 16,
       'perBlock': 64,
-      'shift': 0,
     }),
     512: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
   })
 # ---
@@ -402,37 +380,30 @@
     64: dict({
       'pad': 0,
       'perBlock': 0,
-      'shift': 0,
     }),
     96: dict({
       'pad': 0,
       'perBlock': 0,
-      'shift': 0,
     }),
     128: dict({
       'pad': 16,
       'perBlock': 128,
-      'shift': 0,
     }),
     192: dict({
       'pad': 0,
       'perBlock': 0,
-      'shift': 0,
     }),
     256: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     384: dict({
       'pad': 16,
       'perBlock': 64,
-      'shift': 0,
     }),
     512: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
   })
 # ---
@@ -441,37 +412,30 @@
     64: dict({
       'pad': 16,
       'perBlock': 128,
-      'shift': 0,
     }),
     96: dict({
       'pad': 0,
       'perBlock': 0,
-      'shift': 0,
     }),
     128: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     192: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     256: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     384: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     512: dict({
       'pad': 16,
       'perBlock': 1024,
-      'shift': 0,
     }),
   })
 # ---
@@ -480,37 +444,30 @@
     64: dict({
       'pad': 16,
       'perBlock': 128,
-      'shift': 0,
     }),
     96: dict({
       'pad': 0,
       'perBlock': 0,
-      'shift': 0,
     }),
     128: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     192: dict({
       'pad': 8,
       'perBlock': 64,
-      'shift': 0,
     }),
     256: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     384: dict({
       'pad': 8,
       'perBlock': 128,
-      'shift': 0,
     }),
     512: dict({
       'pad': 16,
       'perBlock': 1024,
-      'shift': 0,
     }),
   })
 # ---
@@ -519,37 +476,30 @@
     64: dict({
       'pad': 16,
       'perBlock': 128,
-      'shift': 0,
     }),
     96: dict({
       'pad': 0,
       'perBlock': 0,
-      'shift': 0,
     }),
     128: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     192: dict({
       'pad': 8,
       'perBlock': 64,
-      'shift': 0,
     }),
     256: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     384: dict({
       'pad': 8,
       'perBlock': 128,
-      'shift': 0,
     }),
     512: dict({
       'pad': 16,
       'perBlock': 1024,
-      'shift': 0,
     }),
   })
 # ---
@@ -558,37 +508,30 @@
     64: dict({
       'pad': 8,
       'perBlock': 16,
-      'shift': 0,
     }),
     96: dict({
       'pad': 0,
       'perBlock': 0,
-      'shift': 0,
     }),
     128: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     192: dict({
       'pad': 8,
       'perBlock': 16,
-      'shift': 0,
     }),
     256: dict({
       'pad': 16,
       'perBlock': 512,
-      'shift': 0,
     }),
     384: dict({
       'pad': 8,
       'perBlock': 128,
-      'shift': 0,
     }),
     512: dict({
       'pad': 16,
       'perBlock': 1024,
-      'shift': 0,
     }),
   })
 # ---

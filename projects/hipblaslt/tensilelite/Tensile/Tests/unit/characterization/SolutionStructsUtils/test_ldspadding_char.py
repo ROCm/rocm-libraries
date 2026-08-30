@@ -27,7 +27,7 @@
 numeric LDS-padding solvers (``get_fp4/fp8/fp16/fp32/mxs_mt_config`` and their
 ``_compute_*`` / bank-conflict-check helpers). Each public selector is exercised
 over a grid of (macro-tile, wave, vector-width) inputs and the full result
-config (``perBlock`` / ``pad`` / ``shift``) is snapshotted, so the padding
+config (``perBlock`` / ``pad``) is snapshotted, so the padding
 tables are pinned and the candidate ranking is walked.
 """
 
@@ -45,7 +45,7 @@ import Tensile.SolutionStructs.LdsPadding as L
 
 pytestmark = pytest.mark.unit
 
-_B64_KEYS = ("perBlock", "pad", "shift")
+_B64_KEYS = ("perBlock", "pad")
 _B128_KEYS = ("perBlock", "pad")
 
 _MTS = [64, 96, 128, 192, 256, 384, 512]
@@ -165,18 +165,17 @@ def test_b128_wave_costs_bank_conflict():
     assert L._b128_wave_costs([0, 0], 1024, 0, (0,), (0,)) == [2]
 
 
-def test_b64_wave_costs_not_dword_aligned_none():
-    # A per-thread address not 4-byte aligned -> illegal candidate -> None.
-    assert L._b64_wave_costs([2], [0], 1024, 0, (0,), (0,), 0) is None
+def test_b64_wave_costs_not_8_byte_aligned_none():
+    # A per-thread address not 8-byte aligned -> illegal candidate -> None.
+    assert L._b64_wave_costs([4], 1024, 0, (0,), (0,)) is None
 
 
 def test_b64_compute_config_no_valid_block_returns_zero(snapshot):
     # minB larger than every valid block size -> validB is empty, but the
-    # candidate list always starts with the two no-padding pairs (B=0, P=0,
-    # shift 0 and shift 4). Those are legal here, so the ranking picks one of
-    # them on cost/overhead/pad, not through the "no legal candidate" branch.
+    # candidate list always starts with the no-padding pair (B=0, P=0). That
+    # one is legal here, so the ranking picks it on cost/overhead/pad, not
+    # through the "no legal candidate" branch.
     cfg = L._b64_compute_config(128, 0.5, L._b64_base_addrs_fp4, 2048, (0,), (0,), 64 * _K_B64)
-    assert cfg["shift"] == 0
     assert cfg == snapshot
 
 

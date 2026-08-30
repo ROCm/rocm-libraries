@@ -24,7 +24,7 @@
 
 """LDS padding for gfx1250 tile-major layouts.
 
-Returns (LdsBlockSizePerPad, ldsPad, shift) for the ds_load_tr* read paths:
+Returns (LdsBlockSizePerPad, ldsPad) for the ds_load_tr* read paths:
 
   FP4  -- ds_load_tr4_b64   (2 banks per thread)
   FP8  -- ds_load_tr8_b64   (2 banks per thread)
@@ -42,7 +42,7 @@ The MX scale table (get_mxs_mt_config) is a fixed lookup, not a search.
 
 Entry points: get_fp4_mt_config, get_fp8_mt_config, get_fp16_mt_config,
 get_fp32_mt_config, get_mxs_mt_config, get_metadata_mt_config. key is
-"perBlock", "pad", or "shift" (FP4/FP8 only).
+"perBlock" or "pad".
 """
 
 from functools import lru_cache
@@ -78,27 +78,24 @@ def _even_dword_only(cfg: Dict[str, int], bpeDS: float) -> Dict[str, int]:
     return {key: 0 for key in cfg}
   return cfg
 
-# FP4/FP8 share ds_load_tr*_b64 (64-bit/thread, 2 banks/thread). HW
-# picks half-wave vs full-wave per instruction by per-thread address
-# alignment.
+# FP4/FP8 share ds_load_tr*_b64 (64-bit/thread, 2 banks/thread).
 
-def _b64_base_addrs_fp4(mt: int) -> tuple:
-  """Return (half0_16, half1_16) per-lane base addresses for FP4."""
+def _b64_base_addrs_fp4(mt: int) -> list:
+  """Per-lane base addresses for FP4, one entry per lane of the wave."""
   bpeDS = 0.5
   addrs = []
   for w in range(32):
     t = (w // 16) * 8 + ((w % 16) // 8) * 32 + w % 8
     addrs.append(int(t * mt * bpeDS))
-  return addrs[:16], addrs[16:]
+  return addrs
 
-def _b64_base_addrs_fp8(mt: int) -> tuple:
-  """Return (half0_16, half1_16) per-lane base addresses for FP8."""
-  kH0 = (0,1,2,3,0,1,2,3,4,5,6,7,4,5,6,7)
-  kH1 = (16,17,18,19,16,17,18,19,20,21,22,23,20,21,22,23)
-  tH  = (0,0,0,0,8,8,8,8,0,0,0,0,8,8,8,8)
-  half0 = [tH[i] + kH0[i] * mt for i in range(16)]
-  half1 = [tH[i] + kH1[i] * mt for i in range(16)]
-  return half0, half1
+def _b64_base_addrs_fp8(mt: int) -> list:
+  """Per-lane base addresses for FP8, one entry per lane of the wave."""
+  k  = (0,1,2,3,0,1,2,3,4,5,6,7,4,5,6,7,
+        16,17,18,19,16,17,18,19,20,21,22,23,20,21,22,23)
+  t  = (0,0,0,0,8,8,8,8,0,0,0,0,8,8,8,8,
+        0,0,0,0,8,8,8,8,0,0,0,0,8,8,8,8)
+  return [t[i] + k[i] * mt for i in range(32)]
 
 def _max_threads_per_bank(addrs, banksPerThread: int) -> int:
   """Largest number of threads landing on any one of the 64 LDS banks.
@@ -166,29 +163,26 @@ def _valid_blocks(incBytes, readBases, readOffs, writeMinBytes, writeRowBytes):
     return _no_block_carry(readBases, readOffs, b)
   return [b for b in _TDM_VALID_BLOCK_BYTES if usable(b)]
 
-def _search_padding(validB, padStep, shifts, floorFn, costFn):
-  """Rank every legal (B, P, shift) candidate and return the best one.
+def _search_padding(validB, padStep, floorFn, costFn):
+  """Rank every legal (B, P) candidate and return the best one.
 
   Rank: largest per-wave cost, summed cost, LDS overhead P / B, then the
-  larger block. No padding, (0, 0), is a candidate at every shift.
+  larger block. No padding, (0, 0), is always a candidate.
 
-  floorFn(shift) gives the lowest cost a wave can reach at that shift, or
-  None when every candidate at that shift is illegal. Growing P past the
-  floor can only cost more LDS, never less bank pressure, so the search
-  drops the rest of that (B, shift).
+  floorFn() gives the lowest cost a wave can reach, or None when every
+  candidate is illegal. Growing P past the floor can only cost more LDS,
+  never less bank pressure, so the search drops the rest of that B.
 
   costFn(cand) gives the per-wave costs of one candidate, or None when it
   is illegal. Returns None if every candidate is illegal.
   """
-  candidates = [(0, 0, shift) for shift in shifts]
+  candidates = [(0, 0)]
   cache = {}
-  for shift in shifts:
-    floor = floorFn(shift)
-    if floor is None:
-      continue
+  floor = floorFn()
+  if floor is not None:
     for B in validB:
       for P in _pad_candidate_bytes(padStep):
-        cand = (B, P, shift)
+        cand = (B, P)
         candidates.append(cand)
         costs = costFn(cand)
         cache[cand] = costs
@@ -224,86 +218,56 @@ def _pick_best(candidates, costFn):
       best = cand
   return best
 
-def _b64_wave_costs(half0, half1, B, P, instOffs, wOffsets, shift):
-  """Cost of one (B, P, shift) candidate, one entry per wave.
+def _b64_wave_costs(rawAddrs, B, P, instOffs, wOffsets):
+  """Cost of one (B, P) candidate, one entry per wave.
 
-  A thread reads pad(natural + wOff) + shift + pad(instOff), matching the
-  code generator.
+  A thread reads pad(natural + wOff) + pad(instOff), matching the code
+  generator. Cost per instruction is the largest number of threads on one
+  bank, summed over the instructions a wave issues.
 
-  When all 32 addresses are 8-byte aligned the hardware takes the wave in
-  one batch, and the cost is the largest number of threads on one bank.
-  Otherwise it takes two batches of 16, and the cost is twice the larger
-  batch. Costs are summed over the instructions a wave issues.
-
-  Returns None when an address is below dword alignment.
+  Every address here is 8-byte aligned: the base addresses, the per-wave
+  offsets and the instruction offsets are all multiples of 8, and P is too,
+  so pad() leaves x mod 8 alone. The hardware therefore takes each wave in
+  one batch. Returns None if a candidate ever breaks that alignment, since
+  the cost below would not describe it.
   """
   def pad(x):
     return x + (x // B) * P if B else x
   perWave = []
   for wOff in wOffsets:
-    base0 = [pad(a + wOff) for a in half0]
-    base1 = [pad(a + wOff) for a in half1]
+    base = [pad(a + wOff) for a in rawAddrs]
     total = 0
     for instOff in instOffs:
-      delta = shift + pad(instOff)
-      addr0 = [a + delta for a in base0]
-      addr1 = [a + delta for a in base1]
-      addrAll = addr0 + addr1
-      if any(p % 4 for p in addrAll):
+      delta = pad(instOff)
+      addrs = [a + delta for a in base]
+      if any(a % 8 for a in addrs):
         return None
-      if all(p % 8 == 0 for p in addrAll):
-        total += _max_threads_per_bank(addrAll, 2)
-      else:
-        total += 2 * max(_max_threads_per_bank(addr0, 2),
-                         _max_threads_per_bank(addr1, 2))
+      total += _max_threads_per_bank(addrs, 2)
     perWave.append(total)
   return perWave
-
-def _b64_min_possible_cost(half0, half1, instOffs, wOffsets, shift):
-  """Lowest per-wave cost any (B, P) can reach at this shift.
-
-  P is always a multiple of 8, so pad(x) keeps x mod 4 and x mod 8. Dword
-  alignment and the choice of batching mode therefore do not depend on
-  (B, P), and the floor -- 1 per instruction for one batch, 2 for two --
-  can be computed once from the unpadded addresses.
-
-  Returns None when an instruction is illegal at this shift for every
-  (B, P).
-  """
-  best = 0
-  for wOff in wOffsets:
-    total = 0
-    for instOff in instOffs:
-      delta = shift + instOff
-      addrAll = [a + wOff + delta for a in half0] + [a + wOff + delta for a in half1]
-      if any(p % 4 for p in addrAll):
-        return None
-      total += 1 if all(p % 8 == 0 for p in addrAll) else 2
-    best = max(best, total)
-  return best
 
 def _b64_compute_config(mt: int, bpeDS: float,
                         addrFn, minB: int,
                         instOffs, wOffsets, incBytes: int,
                         writeRowBytes: int = 0) -> Dict[str, int]:
-  """Pick (B, P, shift) by ranking every legal candidate.
+  """Pick (B, P) by ranking every legal candidate.
 
-  No block padding is one of the candidates. Returns {"perBlock", "pad",
-  "shift"} with pad in bytes.
+  No block padding is one of the candidates. Returns {"perBlock", "pad"}
+  with pad in bytes.
   """
-  half0, half1 = addrFn(mt)
-  bases = [a + wOff for a in half0 + half1 for wOff in wOffsets]
+  rawAddrs = addrFn(mt)
+  bases = [a + wOff for a in rawAddrs for wOff in wOffsets]
   best = _search_padding(
     _valid_blocks(incBytes, bases, instOffs, minB, writeRowBytes),
-    _TDM_PAD_STEP_BYTES, (0, 4),
-    lambda shift: _b64_min_possible_cost(half0, half1, instOffs, wOffsets, shift),
-    lambda cand: _b64_wave_costs(half0, half1, cand[0], cand[1],
-                                 instOffs, wOffsets, cand[2]))
-  # The no-padding candidates are always legal here, so best is never None
+    _TDM_PAD_STEP_BYTES,
+    lambda: len(instOffs),   # one thread per bank on every instruction
+    lambda cand: _b64_wave_costs(rawAddrs, cand[0], cand[1],
+                                 instOffs, wOffsets))
+  # The no-padding candidate is always legal here, so best is never None
   # today. Kept in case a future change narrows the candidate set.
   if best is None:
-    return {"perBlock": 0, "pad": 0, "shift": 0}
-  return {"perBlock": best[0], "pad": best[1], "shift": best[2]}
+    return {"perBlock": 0, "pad": 0}
+  return {"perBlock": best[0], "pad": best[1]}
 
 # Mirrors LocalRead.py per-instruction offset formulas.
 # (vwTrLoad, outerInc, innerInc) per type:
@@ -346,7 +310,7 @@ def _compute_fp4_config(mt: int, miWaveTile: int, miWaveGroup: int,
                                instOffs, wOffsets, int(mt * 0.5) * matrixInstK,
                                _write_row_bytes(mt, 0.5, usesTDM))
   # bpeDS=0.5 -> convert pad from bytes to elements
-  return {"perBlock": result["perBlock"], "pad": result["pad"] * 2, "shift": result["shift"]}
+  return {"perBlock": result["perBlock"], "pad": result["pad"] * 2}
 
 def get_fp4_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int,
                       matrixInstK: int, usesTDM: bool) -> int:
@@ -460,8 +424,8 @@ def _compute_fp16_config(mt: int, miWaveGroup: int,
     _valid_blocks(mt * 2 * matrixInstK, bases, offs,
                   _min_block_bytes(usesTDM),
                   _write_row_bytes(mt, 2.0, usesTDM)),
-    16, (0,),
-    lambda shift: len(offs),   # one thread per bank on every instruction
+    16,
+    lambda: len(offs),   # one thread per bank on every instruction
     lambda cand: _b128_wave_costs(half, cand[0], cand[1], wOffsets, instOffs))
 
   if best is None:
@@ -551,8 +515,8 @@ def _compute_fp32_config(mt: int, vw: int, lrvw: int,
     _valid_blocks(mt * 4 * matrixInstK, bases, offs,
                   _min_block_bytes(usesTDM),
                   _write_row_bytes(mt, 4.0, usesTDM)),
-    _TDM_PAD_STEP_BYTES, (0,),
-    lambda shift: len(offs),   # one thread per bank on every instruction
+    _TDM_PAD_STEP_BYTES,
+    lambda: len(offs),   # one thread per bank on every instruction
     lambda cand: _b32_wave_costs(rawAddrs, cand[0], cand[1],
                                  wOffsets, instOffs))
   if best is None:
