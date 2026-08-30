@@ -110,8 +110,7 @@ pipeline {
     }
     options {
         skipDefaultCheckout()
-        // No parallelsAlwaysFailFast(): a failure on one architecture must not abort the
-        // remaining architectures, so a single run reports every broken target.
+        parallelsAlwaysFailFast()
     }
     parameters {
         booleanParam(
