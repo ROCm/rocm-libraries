@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_softmax.hpp"
 
 namespace ck_tile {
 
@@ -381,6 +382,28 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Schedule
         return position;
     }
 
+    template <index_t N>
+    CK_TILE_HOST_DEVICE static constexpr index_t
+    NthTokenPosition(const Row (&rows)[N], Token token, index_t ordinal)
+    {
+        index_t count = 0;
+        for(index_t row = 0; row < N; ++row)
+        {
+            for(index_t slot = 0; slot < rows[row].size; ++slot)
+            {
+                if(rows[row][slot] == token)
+                {
+                    if(count == ordinal)
+                    {
+                        return row * Row::kMaxTokens + slot;
+                    }
+                    ++count;
+                }
+            }
+        }
+        return -1;
+    }
+
     template <index_t Stage>
     CK_TILE_HOST_DEVICE static constexpr const Row& GetQkRow(index_t wmma)
     {
@@ -525,8 +548,65 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Schedule
         return dimensions && qk_counts && pv_counts && total_loads && stage_tdm && softmax_order &&
                ordinals;
     }
+
+    CK_TILE_HOST_DEVICE static constexpr bool ValidateSoftmaxDependencies()
+    {
+        constexpr Token p0_tokens[4]  = {Token::P0M0, Token::P0M1, Token::P0M2, Token::P0M3};
+        constexpr Token p2_tokens[4]  = {Token::P2M0, Token::P2M1, Token::P2M2, Token::P2M3};
+        constexpr Token exp_tokens[4] = {Token::ExpM0, Token::ExpM1, Token::ExpM2, Token::ExpM3};
+        constexpr index_t pv_p2_counts[4] = {25, 26, 24, 24};
+
+        bool valid = CountToken(kPvRows, Token::P1) == FmhaD192SplitSoftmax::kPart1OperationCount;
+        for(index_t msb = 0; msb < 4; ++msb)
+        {
+            valid &=
+                CountToken(kPvRows, p0_tokens[msb]) == FmhaD192SplitSoftmax::kPart0OperationCount;
+            valid &= CountToken(kQkRows, p2_tokens[msb]) ==
+                     FmhaD192SplitSoftmax::kPart2OperationCount -
+                         FmhaD192SplitSoftmax::kPreviousPart2OperationBeg;
+            valid &= CountToken(kPvRows, p2_tokens[msb]) == pv_p2_counts[msb];
+            valid &= CountToken(kPvRows, exp_tokens[msb]) == 8;
+
+            valid &= NthTokenPosition(kPvRows, p0_tokens[msb], 0) <
+                         NthTokenPosition(kPvRows, p0_tokens[msb], 4) &&
+                     NthTokenPosition(kPvRows, p0_tokens[msb], 4) <
+                         NthTokenPosition(kPvRows, p0_tokens[msb], 8) &&
+                     NthTokenPosition(kPvRows, p0_tokens[msb], 8) <
+                         NthTokenPosition(kPvRows, p0_tokens[msb], 12) &&
+                     NthTokenPosition(kPvRows, p0_tokens[msb], 12) <
+                         NthTokenPosition(kPvRows, p0_tokens[msb], 16) &&
+                     NthTokenPosition(kPvRows, p0_tokens[msb], 16) <
+                         NthTokenPosition(kPvRows, p0_tokens[msb], 17) &&
+                     NthTokenPosition(kPvRows, p0_tokens[msb], 17) <
+                         NthTokenPosition(kPvRows, p0_tokens[msb], 18) &&
+                     NthTokenPosition(kPvRows, p0_tokens[msb], 18) <
+                         NthTokenPosition(kPvRows, p0_tokens[msb], 19) &&
+                     NthTokenPosition(kPvRows, p0_tokens[msb], 19) <
+                         NthTokenPosition(kPvRows, p0_tokens[msb], 21) &&
+                     NthTokenPosition(kPvRows, p0_tokens[msb], 20) <
+                         NthTokenPosition(kPvRows, p0_tokens[msb], 21);
+            valid &= NthTokenPosition(kPvRows, p0_tokens[msb], 21) <
+                     NthTokenPosition(kPvRows, Token::P1, 0);
+            valid &= NthTokenPosition(kPvRows, Token::P1, 7) <
+                     NthTokenPosition(kPvRows, p2_tokens[msb], 0);
+            for(index_t exp = 0; exp < 8; ++exp)
+            {
+                valid &= NthTokenPosition(kPvRows, p2_tokens[msb], 8 + exp / 2) <
+                         NthTokenPosition(kPvRows, exp_tokens[msb], exp);
+            }
+        }
+        valid &=
+            NthTokenPosition(kPvRows, Token::P1, 0) < NthTokenPosition(kPvRows, Token::P1, 2) &&
+            NthTokenPosition(kPvRows, Token::P1, 1) < NthTokenPosition(kPvRows, Token::P1, 3) &&
+            NthTokenPosition(kPvRows, Token::P1, 0) < NthTokenPosition(kPvRows, Token::P1, 4) &&
+            NthTokenPosition(kPvRows, Token::P1, 1) < NthTokenPosition(kPvRows, Token::P1, 5) &&
+            NthTokenPosition(kPvRows, Token::P1, 2) < NthTokenPosition(kPvRows, Token::P1, 6) &&
+            NthTokenPosition(kPvRows, Token::P1, 3) < NthTokenPosition(kPvRows, Token::P1, 7);
+        return valid;
+    }
 };
 
 static_assert(BlockFmhaPipelineQRKSVSTdmD192V128Schedule::ValidateContract());
+static_assert(BlockFmhaPipelineQRKSVSTdmD192V128Schedule::ValidateSoftmaxDependencies());
 
 } // namespace ck_tile

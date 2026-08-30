@@ -3,6 +3,10 @@
 
 #pragma once
 
+#ifndef CK_TILE_FMHA_GFX125_D192_CROSS_TILE
+#define CK_TILE_FMHA_GFX125_D192_CROSS_TILE 0
+#endif
+
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_load.hpp"
@@ -37,6 +41,7 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Policy : BlockFmhaPipelineQRKSVSTdmDefa
     static constexpr bool kUseCustomQkStageSchedule   = true;
     static constexpr bool kUseCustomPvStageSchedule   = true;
     static constexpr bool kUseOutputFragments         = true;
+    static constexpr bool kUseCrossTile               = CK_TILE_FMHA_GFX125_D192_CROSS_TILE != 0;
     static constexpr auto kORescaleToken              = FmhaD192ScheduleToken::ORescale;
 
     using OutputFragments = FmhaD192OutputFragments;

@@ -3,159 +3,20 @@
 
 #pragma once
 
-#include "ck_tile/core.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_state.hpp"
 
 namespace ck_tile {
-
-struct FmhaD192ScoreFragmentMapping
-{
-    using Pair = ext_vector_t<float, 2>;
-
-    struct Coordinate
-    {
-        index_t msb;
-        index_t su;
-        index_t pair;
-        index_t element;
-    };
-
-    static constexpr index_t kNumMIter         = 2;
-    static constexpr index_t kNumNIter         = 8;
-    static constexpr index_t kNumMsb           = 4;
-    static constexpr index_t kNumSu            = 4;
-    static constexpr index_t kPairsPerFragment = 4;
-    static constexpr index_t kElementsPerPair  = 2;
-    static constexpr index_t kElementsPerWmma  = kPairsPerFragment * kElementsPerPair;
-    static constexpr index_t kPairsPerMsb      = kNumSu * kPairsPerFragment;
-    static constexpr index_t kElementsPerMsb   = kPairsPerMsb * kElementsPerPair;
-    static constexpr index_t kThreadBufferSize = kNumMsb * kElementsPerMsb;
-    static constexpr index_t kNIterPerSu       = 2;
-
-    static_assert(kNumMIter * kNumNIter * kElementsPerWmma == kThreadBufferSize);
-    static_assert(kNumSu * kNIterPerSu == kNumNIter);
-
-    CK_TILE_HOST_DEVICE static constexpr index_t GetMIter(index_t msb) { return msb / 2; }
-
-    CK_TILE_HOST_DEVICE static constexpr index_t GetNIterInSu(index_t msb) { return msb % 2; }
-
-    CK_TILE_HOST_DEVICE static constexpr index_t GetFullNIter(index_t msb, index_t su)
-    {
-        return su * kNIterPerSu + GetNIterInSu(msb);
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr index_t
-    GetThreadBufferOffset(index_t msb, index_t pair, index_t element)
-    {
-        const index_t su               = pair / kPairsPerFragment;
-        const index_t pair_in_fragment = pair % kPairsPerFragment;
-        const index_t fragment         = GetMIter(msb) * kNumNIter + GetFullNIter(msb, su);
-        return fragment * kElementsPerWmma + pair_in_fragment * kElementsPerPair + element;
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr index_t GetPairBufferOffset(index_t msb, index_t pair)
-    {
-        return GetThreadBufferOffset(msb, pair, 0) / kElementsPerPair;
-    }
-
-    template <index_t Msb, index_t PairIndex, typename ScoreTensor>
-    CK_TILE_HOST_DEVICE static constexpr Pair LoadPair(const ScoreTensor& score)
-    {
-        static_assert(Msb >= 0 && Msb < kNumMsb);
-        static_assert(PairIndex >= 0 && PairIndex < kPairsPerMsb);
-        static_assert(std::is_same_v<remove_cvref_t<typename ScoreTensor::DataType>, float>);
-        static_assert(ScoreTensor::get_thread_buffer_size() == kThreadBufferSize);
-
-        constexpr index_t pair_offset = GetPairBufferOffset(Msb, PairIndex);
-        return score.get_thread_buffer().template get_as<Pair>(number<pair_offset>{});
-    }
-
-    template <index_t Msb, index_t PairIndex, typename ScoreTensor>
-    CK_TILE_HOST_DEVICE static constexpr void StorePair(ScoreTensor& score, const Pair& value)
-    {
-        static_assert(Msb >= 0 && Msb < kNumMsb);
-        static_assert(PairIndex >= 0 && PairIndex < kPairsPerMsb);
-        static_assert(std::is_same_v<remove_cvref_t<typename ScoreTensor::DataType>, float>);
-        static_assert(ScoreTensor::get_thread_buffer_size() == kThreadBufferSize);
-
-        constexpr index_t pair_offset = GetPairBufferOffset(Msb, PairIndex);
-        score.get_thread_buffer().template set_as<Pair>(number<pair_offset>{}, value);
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr Coordinate DecodeThreadBufferOffset(index_t offset)
-    {
-        const index_t fragment            = offset / kElementsPerWmma;
-        const index_t element_in_fragment = offset % kElementsPerWmma;
-        const index_t m_iter              = fragment / kNumNIter;
-        const index_t full_n_iter         = fragment % kNumNIter;
-        const index_t su                  = full_n_iter / kNIterPerSu;
-        const index_t n_iter_in_su        = full_n_iter % kNIterPerSu;
-        const index_t pair_in_fragment    = element_in_fragment / kElementsPerPair;
-
-        return Coordinate{m_iter * 2 + n_iter_in_su,
-                          su,
-                          su * kPairsPerFragment + pair_in_fragment,
-                          element_in_fragment % kElementsPerPair};
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr bool IsValidCoordinate(const Coordinate& coordinate)
-    {
-        return coordinate.msb >= 0 && coordinate.msb < kNumMsb && coordinate.su >= 0 &&
-               coordinate.su < kNumSu && coordinate.pair >= 0 && coordinate.pair < kPairsPerMsb &&
-               coordinate.element >= 0 && coordinate.element < kElementsPerPair &&
-               coordinate.su == coordinate.pair / kPairsPerFragment;
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr bool ValidateBijection()
-    {
-        bool seen[kThreadBufferSize] = {};
-
-        for(index_t msb = 0; msb < kNumMsb; ++msb)
-        {
-            for(index_t pair = 0; pair < kPairsPerMsb; ++pair)
-            {
-                for(index_t element = 0; element < kElementsPerPair; ++element)
-                {
-                    const index_t offset      = GetThreadBufferOffset(msb, pair, element);
-                    const index_t pair_offset = GetPairBufferOffset(msb, pair);
-                    if(offset < 0 || offset >= kThreadBufferSize || seen[offset])
-                    {
-                        return false;
-                    }
-
-                    if(offset / kElementsPerPair != pair_offset)
-                    {
-                        return false;
-                    }
-
-                    seen[offset]                = true;
-                    const Coordinate coordinate = DecodeThreadBufferOffset(offset);
-                    if(!IsValidCoordinate(coordinate) || coordinate.msb != msb ||
-                       coordinate.pair != pair || coordinate.element != element)
-                    {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        for(bool visited : seen)
-        {
-            if(!visited)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-};
-
-static_assert(FmhaD192ScoreFragmentMapping::ValidateBijection());
 
 struct FmhaD192SplitSoftmax
 {
     using Mapping = FmhaD192ScoreFragmentMapping;
     using Pair    = typename Mapping::Pair;
+
+    static constexpr index_t kPart0OperationCount       = 22;
+    static constexpr index_t kPart1OperationCount       = 8;
+    static constexpr index_t kPart2OperationCount       = 89;
+    static constexpr index_t kCurrentPart2OperationEnd  = 32;
+    static constexpr index_t kPreviousPart2OperationBeg = kCurrentPart2OperationEnd;
 
     struct Part0State
     {
@@ -319,6 +180,298 @@ struct FmhaD192SplitSoftmax
     {
         return cvt_pk_bf16_f32(value[0], value[1]);
     }
+
+    template <index_t Msb, index_t Op>
+    CK_TILE_DEVICE static void
+    EmitPart0Op(FmhaD192SoftmaxState& state, FmhaD192SoftmaxClosureState& closure, float scale_log2)
+    {
+        static_assert(Msb >= 0 && Msb < Mapping::kNumMsb);
+        static_assert(Op >= 0 && Op < kPart0OperationCount);
+        auto& local = closure.msb[number<Msb>{}];
+
+        if constexpr(Op < 4)
+        {
+            constexpr index_t pair_base   = Op * Mapping::kPairsPerFragment;
+            const auto pair0              = state.score.template Get<Msb, pair_base>();
+            const auto pair1              = state.score.template Get<Msb, pair_base + 1>();
+            local.group_max[number<Op>{}] = Max3(pair0[0], pair0[1], pair1[0]);
+        }
+        else if constexpr(Op < 8)
+        {
+            constexpr index_t group     = Op - 4;
+            constexpr index_t pair_base = group * Mapping::kPairsPerFragment;
+            const auto pair1            = state.score.template Get<Msb, pair_base + 1>();
+            const auto pair2            = state.score.template Get<Msb, pair_base + 2>();
+            local.group_max[number<group>{}] =
+                Max3(pair1[1], pair2[0], local.group_max[number<group>{}]);
+        }
+        else if constexpr(Op < 12)
+        {
+            constexpr index_t group     = Op - 8;
+            constexpr index_t pair_base = group * Mapping::kPairsPerFragment;
+            const auto pair2            = state.score.template Get<Msb, pair_base + 2>();
+            const auto pair3            = state.score.template Get<Msb, pair_base + 3>();
+            local.group_max[number<group>{}] =
+                Max3(pair2[1], pair3[0], local.group_max[number<group>{}]);
+        }
+        else if constexpr(Op < 16)
+        {
+            constexpr index_t group     = Op - 12;
+            constexpr index_t pair_base = group * Mapping::kPairsPerFragment;
+            const auto pair0            = state.score.template Get<Msb, pair_base>();
+            const auto pair3            = state.score.template Get<Msb, pair_base + 3>();
+            local.group_max[number<group>{}] =
+                Max3(pair3[1], local.group_max[number<group>{}], pair0[0]);
+        }
+        else if constexpr(Op == 16)
+        {
+            local.group_max[number<0>{}] = Max3(local.group_max[number<0>{}],
+                                                local.group_max[number<1>{}],
+                                                local.group_max[number<2>{}]);
+        }
+        else if constexpr(Op == 17)
+        {
+            local.group_max[number<0>{}] = Max3(local.group_max[number<0>{}],
+                                                local.group_max[number<3>{}],
+                                                local.group_max[number<1>{}]);
+        }
+        else if constexpr(Op == 18)
+        {
+            local.permute_input = local.group_max[number<0>{}] + 0.0f;
+        }
+        else if constexpr(Op == 19)
+        {
+            local.permuted_max = PermuteLaneX16(local.permute_input);
+        }
+        else if constexpr(Op == 20)
+        {
+            local.pre_max_log2e_scl = state.old_max[number<Msb>{}] * scale_log2;
+        }
+        else
+        {
+            state.local_max[number<Msb>{}] = Max3(
+                local.group_max[number<0>{}], local.permuted_max, state.old_max[number<Msb>{}]);
+        }
+    }
+
+    template <bool ValidateMax, index_t Op>
+    CK_TILE_DEVICE static void
+    EmitPart1Op(FmhaD192SoftmaxState& state, FmhaD192SoftmaxClosureState& closure, float scale_log2)
+    {
+        static_assert(Op >= 0 && Op < kPart1OperationCount);
+
+        if constexpr(Op < 2)
+        {
+            constexpr index_t even_msb = 2 * Op;
+            constexpr index_t odd_msb  = even_msb + 1;
+            const float logical_max =
+                max(state.local_max[number<even_msb>{}], state.local_max[number<odd_msb>{}]);
+            state.local_max[number<even_msb>{}]       = logical_max;
+            state.logical_row_max[number<even_msb>{}] = logical_max;
+            closure.msb[number<even_msb>{}].exponent_max =
+                ValidateMax && __builtin_isinf_sign(logical_max) < 0 ? 0.0f : logical_max;
+        }
+        else if constexpr(Op < 4)
+        {
+            constexpr index_t odd_msb                = 2 * (Op - 2) + 1;
+            constexpr index_t even_msb               = odd_msb - 1;
+            state.local_max[number<odd_msb>{}]       = state.local_max[number<even_msb>{}];
+            state.logical_row_max[number<odd_msb>{}] = state.logical_row_max[number<even_msb>{}];
+            closure.msb[number<odd_msb>{}].exponent_max =
+                closure.msb[number<even_msb>{}].exponent_max;
+        }
+        else
+        {
+            constexpr index_t kDeltaOrder[4] = {0, 2, 1, 3};
+            constexpr index_t msb            = kDeltaOrder[Op - 4];
+            state.delta[number<msb>{}] =
+                __builtin_fmaf(-closure.msb[number<msb>{}].exponent_max,
+                               scale_log2,
+                               closure.msb[number<msb>{}].pre_max_log2e_scl);
+        }
+    }
+
+    template <index_t Msb, index_t Op, typename ProbabilityFragments>
+    CK_TILE_DEVICE static void EmitPart2Op(FmhaD192SoftmaxState& state,
+                                           ProbabilityFragments& probability,
+                                           FmhaD192SoftmaxClosureState& closure,
+                                           float scale_log2)
+    {
+        static_assert(Msb >= 0 && Msb < Mapping::kNumMsb);
+        static_assert(Op >= 0 && Op < kPart2OperationCount);
+        auto& local = closure.msb[number<Msb>{}];
+
+        if constexpr(Op == 0)
+        {
+            state.old_max[number<Msb>{}] = state.logical_row_max[number<Msb>{}];
+            local.scale_log2_pair        = Broadcast(scale_log2);
+        }
+        else if constexpr(Op == 1)
+        {
+            local.scaled_max_0 = local.exponent_max * scale_log2;
+        }
+        else if constexpr(Op == 2)
+        {
+            state.exp_delta[number<Msb>{}] = Exp2(state.delta[number<Msb>{}]);
+        }
+        else if constexpr(Op == 3)
+        {
+            local.scaled_max_1 = local.exponent_max * scale_log2;
+        }
+        else if constexpr(Op == 4)
+        {
+            local.scaled_max_scalar = local.exponent_max * scale_log2;
+        }
+        else if constexpr(Op == 5)
+        {
+            local.scaled_max_pair = Broadcast(local.scaled_max_scalar);
+        }
+        else if constexpr(Op == 6)
+        {
+            local.exp_delta_copy = state.exp_delta[number<Msb>{}];
+        }
+        else if constexpr(Op == 7)
+        {
+            state.row_sum[number<Msb>{}] *= state.exp_delta[number<Msb>{}];
+        }
+        else if constexpr(Op < 24)
+        {
+            constexpr index_t pair = Op - 8;
+            state.score.template Get<Msb, pair>() =
+                __builtin_elementwise_fma(state.score.template Get<Msb, pair>(),
+                                          local.scale_log2_pair,
+                                          -local.scaled_max_pair);
+        }
+        else if constexpr(Op < 56)
+        {
+            constexpr index_t scalar              = Op - 24;
+            constexpr index_t pair                = scalar / 2;
+            constexpr index_t element             = scalar % 2;
+            auto value                            = state.score.template Get<Msb, pair>();
+            value[element]                        = Exp2(value[element]);
+            state.score.template Get<Msb, pair>() = value;
+        }
+        else if constexpr(Op < 72)
+        {
+            constexpr index_t pair = Op - 56;
+            probability.template Get<Msb, pair>() =
+                ConvertPairToBf16(state.score.template Get<Msb, pair>());
+        }
+        else if constexpr(Op < 80)
+        {
+            constexpr index_t pair       = Op - 72;
+            local.sum_l0[number<pair>{}] = AddPair(state.score.template Get<Msb, 2 * pair>(),
+                                                   state.score.template Get<Msb, 2 * pair + 1>());
+        }
+        else if constexpr(Op < 84)
+        {
+            constexpr index_t pair = Op - 80;
+            local.sum_l1[number<pair>{}] =
+                AddPair(local.sum_l0[number<2 * pair>{}], local.sum_l0[number<2 * pair + 1>{}]);
+        }
+        else if constexpr(Op < 86)
+        {
+            constexpr index_t pair = Op - 84;
+            local.sum_l2[number<pair>{}] =
+                AddPair(local.sum_l1[number<2 * pair>{}], local.sum_l1[number<2 * pair + 1>{}]);
+        }
+        else if constexpr(Op == 86)
+        {
+            local.final_pair = AddPair(local.sum_l2[number<0>{}], local.sum_l2[number<1>{}]);
+        }
+        else if constexpr(Op == 87)
+        {
+            local.final_sum = HorizontalAdd(local.final_pair);
+        }
+        else
+        {
+            state.row_sum[number<Msb>{}] += local.final_sum;
+        }
+    }
+
+    template <index_t Msb, index_t Op>
+    CK_TILE_DEVICE static void EmitCurrentPart2Op(FmhaD192SoftmaxState& state,
+                                                  FmhaD192SoftmaxClosureState& closure,
+                                                  float scale_log2)
+    {
+        static_assert(Op < kCurrentPart2OperationEnd);
+        struct NoProbabilityFragments
+        {
+        } unused_probability;
+        EmitPart2Op<Msb, Op>(state, unused_probability, closure, scale_log2);
+    }
+
+    template <index_t Msb, index_t Op>
+    CK_TILE_DEVICE static void EmitPreviousPart2Op(FmhaD192SoftmaxState& state,
+                                                   FmhaD192ProbabilityFragments& probability,
+                                                   FmhaD192SoftmaxClosureState& closure,
+                                                   float scale_log2)
+    {
+        static_assert(Op >= kPreviousPart2OperationBeg && Op < kPart2OperationCount);
+        EmitPart2Op<Msb, Op>(state, probability, closure, scale_log2);
+    }
 };
+
+static_assert(FmhaD192SplitSoftmax::kCurrentPart2OperationEnd == 8 + 16 + 8);
+static_assert(FmhaD192SplitSoftmax::kPart2OperationCount == 8 + 16 + 32 + 16 + 8 + 4 + 2 + 3);
+
+struct FmhaD192SoftmaxTokenContract
+{
+    static constexpr index_t kPart0Merge01       = 16;
+    static constexpr index_t kPart0Merge3        = 17;
+    static constexpr index_t kPart0PermuteInput  = 18;
+    static constexpr index_t kPart0Permute       = 19;
+    static constexpr index_t kPart0ScalePriorMax = 20;
+    static constexpr index_t kPart0FinalMax      = 21;
+
+    static constexpr index_t kPart2PackedFmaBegin = 8;
+    static constexpr index_t kPart2ExpBegin       = 24;
+    static constexpr index_t kPart2ConvertBegin   = 56;
+    static constexpr index_t kPart2SumL0Begin     = 72;
+    static constexpr index_t kPart2SumL1Begin     = 80;
+    static constexpr index_t kPart2SumL2Begin     = 84;
+    static constexpr index_t kPart2FinalPair      = 86;
+    static constexpr index_t kPart2FinalSum       = 87;
+    static constexpr index_t kPart2Accumulate     = 88;
+
+    CK_TILE_HOST_DEVICE static constexpr bool Validate()
+    {
+        bool valid = kPart0Merge01 == 16 && kPart0Merge3 > kPart0Merge01 &&
+                     kPart0PermuteInput > kPart0Merge3 && kPart0Permute > kPart0PermuteInput &&
+                     kPart0ScalePriorMax < kPart0FinalMax &&
+                     kPart0FinalMax + 1 == FmhaD192SplitSoftmax::kPart0OperationCount;
+
+        valid &= kPart2PackedFmaBegin == 8 && kPart2ExpBegin == 24 &&
+                 FmhaD192SplitSoftmax::kCurrentPart2OperationEnd == kPart2ExpBegin + 8 &&
+                 kPart2ConvertBegin == 56 && kPart2SumL0Begin == 72 && kPart2SumL1Begin == 80 &&
+                 kPart2SumL2Begin == 84 && kPart2FinalPair == 86 && kPart2FinalSum == 87 &&
+                 kPart2Accumulate == 88 &&
+                 kPart2Accumulate + 1 == FmhaD192SplitSoftmax::kPart2OperationCount;
+
+        for(index_t pair = 0; pair < FmhaD192ScoreFragmentMapping::kPairsPerMsb; ++pair)
+        {
+            const index_t packed_fma_producer = kPart2PackedFmaBegin + pair;
+            const index_t exp_low_producer    = kPart2ExpBegin + pair * 2;
+            const index_t exp_high_producer   = exp_low_producer + 1;
+            const index_t p_producer          = kPart2ConvertBegin + pair;
+            valid &= packed_fma_producer < exp_low_producer &&
+                     exp_low_producer < exp_high_producer && exp_high_producer < p_producer &&
+                     p_producer < kPart2SumL0Begin;
+        }
+
+        for(index_t i = 0; i < 8; ++i)
+        {
+            valid &= kPart2SumL0Begin + i < kPart2SumL1Begin + i / 2;
+        }
+        for(index_t i = 0; i < 4; ++i)
+        {
+            valid &= kPart2SumL1Begin + i < kPart2SumL2Begin + i / 2;
+        }
+        return valid && kPart2SumL2Begin + 1 < kPart2FinalPair &&
+               kPart2FinalPair < kPart2FinalSum && kPart2FinalSum < kPart2Accumulate;
+    }
+};
+
+static_assert(FmhaD192SoftmaxTokenContract::Validate());
 
 } // namespace ck_tile
