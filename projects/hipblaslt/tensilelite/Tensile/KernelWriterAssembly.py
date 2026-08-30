@@ -15552,6 +15552,10 @@ class KernelWriterAssembly(KernelWriter):
     vgprFp8Max: int    = -1
     # f8 partner-merge scratch: 4-aligned b128 payload for v_permlane16_swap merge.
     vgprF8MergePack: int     = -1
+    # f8 wave-transpose scratch: T*dwordsPerBlock gather buffer + selected block + addr/index temps.
+    # Base of a contiguous, 2-aligned region; layout computed in the packer from T.
+    vgprF8XposeBase: int     = -1
+    vgprF8XposeCount: int    = 0
 
   class BF8CVTVgprStruct(NamedTuple):
     vgprBF8NanInf: int = -1
@@ -16181,6 +16185,8 @@ class KernelWriterAssembly(KernelWriter):
       cvtVgprStruct  = None
       cvtVgpr        = None
       f8MergePack     = -1  # f8 partner-merge scratch (freed in cleanup below)
+      f8XposeBase     = -1  # f8 wave-transpose scratch (freed in cleanup below)
+      f8XposeCount    = 0
       is16bitHPA = (kernel["ProblemType"]["DestDataType"].isBFloat16() or
                     kernel["ProblemType"]["DestDataType"].isHalf()) and \
                    kernel["ProblemType"]["HighPrecisionAccumulate"]
@@ -16211,10 +16217,20 @@ class KernelWriterAssembly(KernelWriter):
         # f8 partner-merge scratch, reserved here so it lands in the low VGPR bank.
         if kernel.get("WaveContiguousOutput") and not kernel.get("UseSubtileImpl") \
            and kernel["WavefrontSize"] == 32:
-          f8MergePack = self.vgprPool.checkOutAligned(4, 4, tag="globalWriteElements_f8MergePack")
+          if kernel.get("F8WaveTranspose"):
+            # Wave-transpose scratch (low bank): T*dwordsPerBlock gather + dwordsPerBlock selected +
+            # src-index + vaddr + group-select temp. dwordsPerBlock = 2*bpeCexternal (f8 -> 2).
+            T = kernel["F8WaveTranspose"]
+            dwordsPerBlock = 2 * self.states.bpeCexternal
+            # gather[T*dwordsPerBlock] + sel[dwordsPerBlock] + srcIdx + gsel + vAddr + serialLo(1).
+            f8XposeCount = T * dwordsPerBlock + dwordsPerBlock + 5
+            f8XposeBase = self.vgprPool.checkOutAligned(f8XposeCount, 2, tag="globalWriteElements_f8Xpose")
+          else:
+            f8MergePack = self.vgprPool.checkOutAligned(4, 4, tag="globalWriteElements_f8MergePack")
         cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \
                                               vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3), \
-                                              vgprF8MergePack=f8MergePack)
+                                              vgprF8MergePack=f8MergePack, \
+                                              vgprF8XposeBase=f8XposeBase, vgprF8XposeCount=f8XposeCount)
       elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr3")
         cvtVgprStruct = self.BF8CVTVgprStruct(vgprBF8Temp=cvtVgpr, vgprBF8NanInf=(cvtVgpr+1), \
@@ -16428,6 +16444,8 @@ class KernelWriterAssembly(KernelWriter):
         self.vgprPool.checkIn(cvtVgpr)
       if f8MergePack is not None and f8MergePack != -1:
         self.vgprPool.checkIn(f8MergePack)
+      if f8XposeBase is not None and f8XposeBase != -1:
+        self.vgprPool.checkIn(f8XposeBase)
       if gsuLimit > 1 and gsuLimitIdx == 0:
         if deferGSU0:
           # GSU0 store code is done. Append it to deferredGSU0 (placed after persistent loop),
@@ -16519,7 +16537,11 @@ class KernelWriterAssembly(KernelWriter):
     # partially covers an N-column still touches the full acc range of that
     # column.  Aligning to MIWaveTile[0] ensures batches break on N-column
     # boundaries, avoiding accesses beyond the ValuC range.
-    if kernel.get("UseSubtileImpl") and kernel.get("EnableMatrixInstruction"):
+    # F8WaveTranspose also needs a column's MIWaveTile[0] M-tiles co-resident in one batch (the
+    # block-permutation gathers their sumIdx together), so apply the same alignment.
+    f8WaveTranspose = (kernel.get("F8WaveTranspose") and not kernel.get("UseSubtileImpl")
+                       and kernel.get("EnableMatrixInstruction"))
+    if (kernel.get("UseSubtileImpl") and kernel.get("EnableMatrixInstruction")) or f8WaveTranspose:
       miwt0 = kernel["MIWaveTile"][0]
       totalElems = kernel["MIWaveTile"][0] * kernel["MIWaveTile"][1]
       if numElementsPerBatch >= totalElems:
