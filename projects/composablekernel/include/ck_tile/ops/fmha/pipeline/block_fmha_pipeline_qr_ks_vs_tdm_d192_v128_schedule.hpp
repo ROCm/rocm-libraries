@@ -404,6 +404,30 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Schedule
         return -1;
     }
 
+    CK_TILE_HOST_DEVICE static constexpr bool QkRowNeedsCompletionDependency(index_t row)
+    {
+        for(index_t slot = 0; slot < kQkRows[row].size; ++slot)
+        {
+            const auto token = kQkRows[row][slot];
+            if(token == Token::ORescale)
+            {
+                return true;
+            }
+            if(token >= Token::P2M0 && token <= Token::P2M3)
+            {
+                const index_t ordinal = CountTokenBefore(kQkRows, token, row, slot);
+                const index_t operation =
+                    FmhaD192SplitSoftmax::kPreviousPart2OperationBeg + ordinal;
+                if(operation >= FmhaD192SoftmaxTokenContract::kPart2ConvertBegin &&
+                   operation < FmhaD192SoftmaxTokenContract::kPart2SumL0Begin)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     template <index_t Stage>
     CK_TILE_HOST_DEVICE static constexpr const Row& GetQkRow(index_t wmma)
     {
@@ -546,7 +570,7 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Schedule
             LastTokenPosition(kPvRows, Token::P1) < FirstTokenPosition(kPvRows, Token::ExpM3);
         const bool ordinals = ValidateTokenOrdinals(kQkRows) && ValidateTokenOrdinals(kPvRows);
         return dimensions && qk_counts && pv_counts && total_loads && stage_tdm && softmax_order &&
-               ordinals;
+               ordinals && !QkRowNeedsCompletionDependency(kNumQkRows - 1);
     }
 
     CK_TILE_HOST_DEVICE static constexpr bool ValidateSoftmaxDependencies()
