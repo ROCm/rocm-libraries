@@ -413,6 +413,12 @@ using SelectedKernel = {struct};
             ck_q=ck_q,
             ck_acc=ck_acc,
             extra_lines=(
+                # Global re-export of ALayout/BLayout so the ctypes guard can name
+                # them (mirrors the AQuantGroupSize re-export already used
+                # host-side). Host-only type aliases -- do NOT change the device
+                # kernel/struct.
+                f"using ALayout = {ns}::ALayout;\n"
+                f"using BLayout = {ns}::BLayout;\n"
                 f"using AQuantGroupSize = {ns}::AQuantGroupSize;\n"
                 f"using BQuantGroupSize = {ns}::BQuantGroupSize;\n"
                 f"constexpr ck_tile::index_t AGroupSizeK = {ns}::{struct}::AGroupSizeK;\n"

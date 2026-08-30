@@ -301,24 +301,44 @@ class ABQuantDispatcherLib(DispatcherLibBase):
         QN_B: int,
         k_batch: int = 1,
         aq_column_major: bool = False,
+        a_column_major: bool = False,
+        b_column_major: bool = True,
     ) -> Tuple[int, float]:
         """
         Call dispatcher_run_abquant_gemm with ctypes-wrapped pointers.
 
         A, B, AQ, BQ, C must be numpy arrays (C-contiguous, packed).
-        B should be a packed (K, N) array supplied column-major (stride_B=K).
+        B is a packed (K, N) array; supplied column-major (stride_B=K) when
+        b_column_major (rcr/ccr, BLayout=ColumnMajor) or row-major (stride_B=N)
+        for the RowMajor-B families crr/rrr. The caller sets stride_B to match.
         C must be the array that will receive output.
         aq_column_major supplies AQ as column-major bytes (leading dim = M) for
         the n=128 EightWaves fast path; otherwise AQ is row-major (leading dim=QK_A).
+        a_column_major supplies A as column-major bytes (leading dim = M) for the
+        ccr/crr families (ALayout=ColumnMajor, StrideA=M) so A[m,k] lives at
+        k*M+m; otherwise A is row-major (leading dim = K, StrideA=K). The caller
+        must set stride_A to match (M when a_column_major, else K).
         Returns (status, time_ms).
         """
         import numpy as np
 
-        A  = np.ascontiguousarray(A)
-        # Kernel BLayout is ColumnMajor (rcr): B[k,n] lives at offset n*K+k.
-        # Supply column-major bytes for 2-D B; ascontiguousarray would force
-        # row-major and silently transpose. Packed 1-D B (fp4) stays as-is.
-        B  = np.asfortranarray(B) if B.ndim == 2 else np.ascontiguousarray(B)
+        # ALayout is ColumnMajor for ccr/crr (StrideA=M): supply Fortran-order
+        # [M, K] bytes so A[m,k] lives at k*M+m. RowMajor (rcr/rrr, StrideA=K)
+        # keeps C-contiguous bytes. ascontiguousarray on ColumnMajor A would
+        # walk k*K+m off the M*K allocation for large K (illegal access).
+        if a_column_major and A.ndim == 2:
+            A = np.asfortranarray(A)
+        else:
+            A = np.ascontiguousarray(A)
+        # BLayout is ColumnMajor for rcr/ccr (StrideB=K): B[k,n] at n*K+k, supply
+        # column-major bytes. RowMajor for crr/rrr (StrideB=N): B[k,n] at k*N+n,
+        # supply row-major bytes -- forcing Fortran order there would transpose
+        # and (like the A bug) mis-stride off the K*N allocation for large N.
+        # Packed 1-D B (fp4) stays as-is.
+        if B.ndim == 2:
+            B = np.asfortranarray(B) if b_column_major else np.ascontiguousarray(B)
+        else:
+            B = np.ascontiguousarray(B)
         # AQLayout is ColumnMajor for the n=128 EightWaves fast path (StrideAQ=M):
         # supply Fortran-order [M, QK_A] bytes so AQ[m,qk] lives at qk*M+m.
         if aq_column_major and AQ.ndim == 2:
@@ -363,6 +383,29 @@ class ABQuantDispatcherLib(DispatcherLibBase):
         the 'bqg1x128x' N-group segment in the byte-exact kernel name.
         """
         return "eightwaves" in kernel_name and "bqg1x128x" in kernel_name
+
+    @staticmethod
+    def kernel_uses_column_major_a(kernel_name: str) -> bool:
+        """Whether a kernel name resolves to ColumnMajor A (ccr/crr families).
+
+        The byte-exact kernel name embeds the layout token verbatim as a discrete
+        underscore-delimited segment (make_quant_kernel_name:
+        gemm_abquant_<variant>_<layout>_<pipeline>_...), where <layout> is one of
+        ccr/crr/rcr/rrr and the FIRST char encodes ALayout ('c' => ColumnMajor A,
+        StrideA=M; 'r' => RowMajor A, StrideA=K). Detect the '_ccr_'/'_crr_'
+        segment, consistent with kernel_uses_column_major_aq's name-parsing.
+        """
+        return "_ccr_" in kernel_name or "_crr_" in kernel_name
+
+    @staticmethod
+    def kernel_uses_column_major_b(kernel_name: str) -> bool:
+        """Whether a kernel name resolves to ColumnMajor B (rcr/ccr families).
+
+        The layout token's SECOND char encodes BLayout ('c' => ColumnMajor B,
+        StrideB=K; 'r' => RowMajor B, StrideB=N). rcr/ccr are ColumnMajor B;
+        crr/rrr are RowMajor B. Detect the '_rcr_'/'_ccr_' segment.
+        """
+        return "_rcr_" in kernel_name or "_ccr_" in kernel_name
 
 
 # =============================================================================
@@ -413,9 +456,28 @@ class ABQuantGpuGemmRunner:
         # RowMajor (StrideAQ=QK_A) everywhere else.
         aq_column_major = ABQuantDispatcherLib.kernel_uses_column_major_aq(self.kernel_name)
 
-        # Strides (in elements). A / C are row-major; B / BQ are col-major.
-        stride_A  = K                    # A is row-major [M, K]
-        stride_B  = K                    # B is col-major [K, N] -> leading dim = K
+        # ALayout is ColumnMajor for the ccr/crr families (StrideA=M); RowMajor
+        # (StrideA=K) for rcr/rrr. Derive from the byte-exact kernel name layout
+        # token (first char of ccr/crr/rcr/rrr == 'c' => ColumnMajor A), the same
+        # way aq_column_major is derived. Prefer problem.layout if a runner ever
+        # exposes it. Without this, ccr/crr use stride_A=K on row-major bytes and
+        # address A[m,k] at k*K+m instead of k*M+m -> OOB read / illegal access.
+        prob_layout = getattr(problem, "layout", None)
+        if isinstance(prob_layout, str) and len(prob_layout) >= 2:
+            a_column_major = prob_layout[0] == "c"
+            b_column_major = prob_layout[1] == "c"
+        elif isinstance(prob_layout, str) and len(prob_layout) >= 1:
+            a_column_major = prob_layout[0] == "c"
+            b_column_major = ABQuantDispatcherLib.kernel_uses_column_major_b(self.kernel_name)
+        else:
+            a_column_major = ABQuantDispatcherLib.kernel_uses_column_major_a(self.kernel_name)
+            b_column_major = ABQuantDispatcherLib.kernel_uses_column_major_b(self.kernel_name)
+
+        # Strides (in elements). BQ is col-major; C is row-major.
+        # A leading dim per ALayout: M (ColumnMajor ccr/crr) or K (RowMajor).
+        # B leading dim per BLayout: K (ColumnMajor rcr/ccr) or N (RowMajor crr/rrr).
+        stride_A  = M if a_column_major else K
+        stride_B  = K if b_column_major else N
         stride_AQ = M if aq_column_major else QK_A  # AQ leading dim per AQLayout
         stride_BQ = QK_B                 # BQ is col-major [QK_B, QN_B] -> leading dim = QK_B
         stride_C  = N                    # C is row-major [M, N]
@@ -433,6 +495,8 @@ class ABQuantGpuGemmRunner:
             QN_B=QN_B,
             k_batch=problem.k_batch,
             aq_column_major=aq_column_major,
+            a_column_major=a_column_major,
+            b_column_major=b_column_major,
         )
 
         if rc != 0:

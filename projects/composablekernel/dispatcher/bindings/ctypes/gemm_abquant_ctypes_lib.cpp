@@ -101,18 +101,29 @@ int dispatcher_run_abquant_gemm(const void* A,
        !check_quant_group_count(kFn, "QN_B", QN_B, "N", N, BQuantGroupSize::kN))
         return -1;
 
-    // Only packed layouts are supported. AQ leading dim depends on AQLayout: the
-    // n=128 EightWaves fast path uses ColumnMajor [M, QK_A] -> M; otherwise
-    // RowMajor -> QK_A. BQ is ColumnMajor [QK_B, QN_B] -> leading dim QK_B.
+    // Only packed layouts are supported. A leading dim depends on ALayout: the
+    // ccr/crr families use ColumnMajor A [M, K] -> M; rcr/rrr use RowMajor -> K.
+    // AQ leading dim depends on AQLayout: the n=128 EightWaves fast path uses
+    // ColumnMajor [M, QK_A] -> M; otherwise RowMajor -> QK_A. BQ is ColumnMajor
+    // [QK_B, QN_B] -> leading dim QK_B. ALayout is the generated-header typedef
+    // (ck_tile::tensor_layout::gemm::{Row,Column}Major), in scope via the bridge
+    // namespace -- no new codegen field needed, mirrors AQIsColumnMajor intent.
+    constexpr bool kAIsColumnMajor =
+        std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::ColumnMajor>;
+    constexpr bool kBIsColumnMajor =
+        std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::ColumnMajor>;
+    const int64_t expected_stride_A  = kAIsColumnMajor ? M : K;
+    const int64_t expected_stride_B  = kBIsColumnMajor ? K : N; // ColMajor->K, RowMajor->N
     const int64_t expected_stride_AQ = SelectedKernel::AQIsColumnMajor ? M : QK_A;
-    if(stride_A != K || stride_B != K || stride_AQ != expected_stride_AQ || stride_BQ != QK_B ||
-       stride_C != N)
+    if(stride_A != expected_stride_A || stride_B != expected_stride_B ||
+       stride_AQ != expected_stride_AQ || stride_BQ != QK_B || stride_C != N)
     {
-        std::cerr << kFn << ": non-packed strides are not supported. Expected stride_A=" << K
-                  << " stride_B=" << K << " stride_AQ=" << expected_stride_AQ
-                  << " stride_BQ=" << QK_B << " stride_C=" << N << ", got stride_A=" << stride_A
-                  << " stride_B=" << stride_B << " stride_AQ=" << stride_AQ
-                  << " stride_BQ=" << stride_BQ << " stride_C=" << stride_C << "\n";
+        std::cerr << kFn << ": non-packed strides are not supported. Expected stride_A="
+                  << expected_stride_A << " stride_B=" << expected_stride_B
+                  << " stride_AQ=" << expected_stride_AQ << " stride_BQ=" << QK_B
+                  << " stride_C=" << N << ", got stride_A=" << stride_A << " stride_B=" << stride_B
+                  << " stride_AQ=" << stride_AQ << " stride_BQ=" << stride_BQ
+                  << " stride_C=" << stride_C << "\n";
         return -1;
     }
 
