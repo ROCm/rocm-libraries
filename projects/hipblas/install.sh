@@ -361,7 +361,7 @@ cat <<EOF
     --cmake_install               Install minimum cmake version if required.
 
     --cuda, --use-cuda            Build library for CUDA backend (deprecated).
-                                  The target HIP platform is determined by \`hipconfig --platform\`.
+                                  The target HIP platform defaults to amd.
                                   To explicitly specify a platform, set the \`HIP_PLATFORM\` environment variable.
 
     -d, --dependencies            Build and install external dependencies. Dependencies are to be installed in /usr/local.
@@ -574,7 +574,7 @@ fi
 
 # this can be removed and be done in rmake.py once --cuda flag support is gone
 if [[ "${build_cuda}" != true ]]; then
-  export HIP_PLATFORM="$(${rocm_path}/bin/hipconfig --platform)"
+  export HIP_PLATFORM="amd"
 fi
 
 if [[ "${rmake_invoked}" == false ]]; then
