@@ -20,8 +20,9 @@ write side (which global K-row each lane fetches) and the LR read side (which
 chunk each lane addresses); the LDS image round-trips A exactly.
 
 The transform is selected by the stack size ``subtileShape[0]`` (number of MMA
-tiles stacked along the free dim).  Only the 2x1 fp4 stack is wired today; other
-stacks fall back to no swizzle (``None``) until their rules are validated.
+tiles stacked along the free dim): 2x1 and 4x1 use the XOR above, 8x1 and 16x1
+use the column-scatter layout instead (see ``TLUColScatter``), and any stack
+whose rules are not validated falls back to no swizzle (``None``).
 """
 
 from dataclasses import dataclass
@@ -144,33 +145,41 @@ _SWIZZLE_BY_STACK = {
 }
 
 
-def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
-    """Return the TLUSwizzle for this tile's stack, or None if unsupported.
+def _sharedStrip(tileInfo) -> bool:
+    """True when a strip is split across waves, so the XOR path cannot be used.
 
-    Guarded to the fp4 (bpe 0.5) TLU stacks the bank model covers; anything
-    else returns None so the emit paths keep their baseline addressing.
+    The XOR acts on the *physical* chunk index, and a shared strip gives each
+    wave a sub-strip offset that lands in that same index -- axis-waves sharing
+    a strip (grWavesPerStrip) or other-axis waves taking K slices of one
+    (grKSplit).  Either way the wave is not expressible as an offset applied
+    after the XOR.  col_scatter has no such coupling: there the load index
+    enters purely additively as a K-column shift.
     """
-    # When waves share a strip the XOR cannot be used: it acts on the physical
-    # chunk index, and the wave contributes a high chunk bit that the XOR transforms
-    # (e.g. chunk[7] for the 4x1 stack), so the wave cannot be expressed as an
-    # offset applied afterwards.  col_scatter has no such coupling -- there the
-    # load index enters purely additively as a K-column shift -- so wide GR uses
-    # col_scatter only.
-    if int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1:
-        return None
-    # Same coupling when the other-axis waves take K slices of a strip that a
-    # single axis-wave owns: that sub-strip offset also lands in the chunk index.
-    if int(getattr(tileInfo, "grKSplit", 1)) > 1:
-        return None
+    return (int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1
+            or int(getattr(tileInfo, "grKSplit", 1)) > 1)
+
+
+def _stackOf(tileInfo) -> Optional[int]:
+    """Stack size for this tile, or None if it is not an fp4 TLU stack."""
     try:
         stack = int(tileInfo.subtileShape[0])
     except (AttributeError, TypeError, ValueError):
         # Narrow on purpose: returning None here means "no swizzle", so a wider
         # catch would turn a rename into silently bank-conflicting kernels.
         return None
-    if float(tileInfo.bpe) != 0.5:
+    return stack if float(tileInfo.bpe) == 0.5 else None
+
+
+def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
+    """Return the TLUSwizzle for this tile's stack, or None if unsupported.
+
+    Guarded to the fp4 (bpe 0.5) TLU stacks the bank model covers; anything
+    else returns None so the emit paths keep their baseline addressing.
+    """
+    if _sharedStrip(tileInfo):
         return None
-    return _SWIZZLE_BY_STACK.get(stack)
+    stack = _stackOf(tileInfo)
+    return _SWIZZLE_BY_STACK.get(stack) if stack is not None else None
 
 
 # Stacks that use the column-scatter layout instead of a single-bit XOR.
@@ -183,21 +192,13 @@ def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
     Mutually exclusive with selectTLUSwizzle: the XOR path handles 2x1/4x1 and
     the col_scatter path 8x1 and 16x1.  Guarded to fp4.
     """
-    try:
-        stack = int(tileInfo.subtileShape[0])
-    except (AttributeError, TypeError, ValueError):
-        # Narrow on purpose: returning None here means "no swizzle", so a wider
-        # catch would turn a rename into silently bank-conflicting kernels.
+    stack = _stackOf(tileInfo)
+    if stack is None:
         return None
-    if float(tileInfo.bpe) != 0.5:
-        return None
-    # When waves share a strip every stack uses col_scatter: the XOR path cannot
-    # absorb the wave's contribution to the physical chunk index, and the bank
-    # model shows col_scatter reaches 1-way at stacks 2, 4, 8 and 16 alike (the
-    # XOR is only preferred elsewhere because it costs fewer VALU ops).
-    # Any per-wave sub-strip offset -- axis-waves sharing a strip, or other-axis
-    # waves taking K slices of one -- needs col_scatter.
-    if int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1 or int(getattr(tileInfo, "grKSplit", 1)) > 1:
+    if _sharedStrip(tileInfo):
+        # A shared strip rules out the XOR (see _sharedStrip), so every stack
+        # falls here; the bank model reaches 1-way at 2, 4, 8 and 16 alike (the
+        # XOR wins elsewhere only on VALU cost).
         if stack not in (2, 4, 8, 16, 32):
             return None
     elif stack not in _COL_SCATTER_STACKS:
@@ -221,15 +222,11 @@ def swizzlePadPerStrip(tileInfo) -> int:
     if not swz and not cs:
         return 0
     padBytes = int(swz.padBytes) if swz else int(cs.padBytes)
-    # A subtile strip spans exactly ONE MFMA K-window (subtileShape[1] MFMA
-    # tiles of instK K-rows), regardless of DepthU: DepthU > instK just stacks
-    # additional K-windows as further strips (sId1 in the emit paths).  One DTL
-    # load-block covers wavesize chunks and a pad is inserted above each block
-    # boundary except the first, so the block count is per-K-window.  Deriving it
-    # from instK (not DepthU) keeps stripStride correct for DepthU > instK.  A
-    # taller stack makes each K row chunksPerK = mStripBytes/16 b128 chunks wide,
-    # so a K-window holds instK*stackK*chunksPerK chunks -- the block count must
-    # scale by chunksPerK (2x1: chunksPerK=1, unchanged; 4x1: 2 -> 4 blocks).
+    # Block count is per-K-window, so derive it from instK and NOT from DepthU:
+    # a strip spans exactly one MFMA K-window, and DepthU > instK just stacks
+    # further K-windows as further strips (sId1 in the emit paths).
+    # A taller stack widens each K row to chunksPerK = mStripBytes/16 chunks, so
+    # the window holds instK*stackK*chunksPerK (2x1: 1 block; 4x1: 2 -> 4).
     instK = int(tileInfo.mmaTileShape[1])
     stackK = int(tileInfo.subtileShape[1])
     waveSize = int(getattr(tileInfo, "waveSize", 0)) or 64
