@@ -73,7 +73,7 @@ def parse_args():
                         help='Specify path to host compiler. Default is amdclang++.')
 
     parser.add_argument('--cuda', '--use-cuda', dest='use_cuda', required=False, default=False, action='store_true',
-                        help='[DEPRECATED] Build library for CUDA backend. Deprecated, use HIP_PLATFORM environment variable to override default which is determined by `hipconfig --platform`')
+                        help='[DEPRECATED] Build library for CUDA backend. Deprecated, use HIP_PLATFORM environment variable to set platform (default: amd)')
 
     parser.add_argument(      '--cudapath', type=str, required=False, default='/usr/local/cuda', dest='cuda_path',
                         help='Specify path of CUDA install.')
@@ -392,13 +392,7 @@ def main():
         os.environ['HIP_PLATFORM'] = 'nvidia'
         print("--cuda option is deprecated (use environment variable HIP_PLATFORM=nvidia)")
 
-    # otherwise query hipconfig to get platform
-    if which('hipconfig') is not None:
-        os.environ['HIP_PLATFORM'] = subprocess.getoutput('hipconfig --platform')
-    elif which(f'{rocm_path}/bin/hipconfig') is not None:
-        os.environ['HIP_PLATFORM'] = subprocess.getoutput(f'{rocm_path}/bin/hipconfig --platform')
-    else:
-        os.environ['HIP_PLATFORM'] = 'amd' # if can't find hipconfig, default amd
+    os.environ['HIP_PLATFORM'] = 'amd'
 
     if os.environ['HIP_PLATFORM'] == 'nvidia' and args.static_lib:
         fatal("Static library not supported for CUDA backend. Not continuing.")

@@ -629,7 +629,7 @@ fi
   if [[ "${build_cuda}" == true ]]; then
     export HIP_PLATFORM="nvidia"
   else
-    export HIP_PLATFORM="$(${rocm_path}/bin/hipconfig --platform)"
+    export HIP_PLATFORM="amd"
   fi
 
   # clients
