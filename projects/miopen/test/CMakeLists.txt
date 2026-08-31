@@ -486,7 +486,6 @@ set(LONG_TESTS
     test_immed_conv3d
     test_conv3d_extra
     test_conv_3d
-    test_conv_ck_igemm_fwd_v6r1_dlops_nchw
     )
 
 # Assign a ctest COST to a test so long-running tests are scheduled first.
@@ -730,8 +729,7 @@ function(add_custom_test NAME)
         AND (${NAME} MATCHES "test_conv_3d"
           OR ${NAME} MATCHES "test_conv_group"
           OR ${NAME} MATCHES "test_conv_extra"
-          OR ${NAME} MATCHES "test_conv_for_implicit_gemm"
-          OR ${NAME} MATCHES "test_conv_ck_igemm_fwd_v6r1_dlops_nchw"))
+          OR ${NAME} MATCHES "test_conv_for_implicit_gemm"))
         set_tests_properties(${NAME} PROPERTIES RUN_SERIAL On)
     endif()
 
@@ -849,12 +847,6 @@ add_custom_test(test_regression_issue_2624 SKIP_UNLESS_ALL GFX900_DISABLED GFX90
     ENVIRONMENT ${IMPLICITGEMM_TESTING_ENV} MIOPEN_LOG_LEVEL=5
     COMMAND $<TARGET_FILE:test_conv2d> ${MIOPEN_TEST_FLOAT_ARG} --verbose --input 2 1 22 22 --weights 1 1 4 4 --pads_strides_dilations 1 2 4 4 3 2 --disable-backward-data --disable-backward-weights
 )
-
-# MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW is explicitly enabled due to the kernel is disabled by default via #2306
-set(CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW_ENV
-    MIOPEN_FIND_MODE=normal
-    MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvCkIgemmFwdV6r1DlopsNchw
-    MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW=1)
 
 # NOTES ON WRITING TESTS FOR TUNABLE SOLVERS
 # * Enforce tuning (SEARCH_DB_UPDATE).

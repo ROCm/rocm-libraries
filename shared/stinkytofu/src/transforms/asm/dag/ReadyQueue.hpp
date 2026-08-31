@@ -91,6 +91,13 @@ struct DAGNode {
     // gate short of real cycles to cover the gap with, falling back to a simulated
     // wait that has no matching instruction.
     int hazardDeadline = INT_MAX;
+    // --- Cluster-barrier SCC (ClusterBarrier kernels; see cluster-barrier.md) ---
+    bool handshakeBarrier = false;
+    unsigned sccChainId = 0;
+    unsigned sccChainReaders = 0;  // def node only
+    bool sccChainDef = false;
+    // kRule3CrossLoop false: INT_MIN. true: live-out SCC def lead floor.
+    int earliestClock = INT_MIN;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };
@@ -140,6 +147,13 @@ class ReadyQueue {
 
     const PassContext& getPassContext() const {
         return passCtx_;
+    }
+
+    // Mirrors ModuleOptions::ClusterBarrier (wired in Gfx1250Backend as
+    // PassFeatureConfig::dagFeatures::clusterBarrier). When false, the DAG
+    // scheduler follows the pre-cluster-barrier path.
+    bool clusterBarrierEnabled() const {
+        return passCtx_.getPassFeatureConfig().dagFeatures.clusterBarrier;
     }
 
     virtual ~ReadyQueue() = default;
