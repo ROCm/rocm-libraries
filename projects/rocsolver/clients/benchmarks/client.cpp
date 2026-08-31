@@ -132,6 +132,13 @@ try
             "                           Only applicable to functions with hybrid support.\n"
             "                           ")
 
+        ("hetrd_alg_mode",
+         value<rocblas_int>(&argus.hetrd_alg_mode)->default_value(1),
+            "0 = auto, 1 = 1-stage (default), 2 = 2-stage\n"
+            "                           Controls whether syevd/heevd uses 1-stage (hetrd) or 2-stage\n"
+            "                           (he2hb + hb2st) tridiagonalization.\n"
+            "                           ")
+
         ("mem_query",
          value<rocblas_int>(&argus.mem_query)->default_value(0),
             "Calculate the required amount of device workspace memory? 0 = No, 1 = Yes.\n"

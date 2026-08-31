@@ -46,76 +46,74 @@ static int countStinkyInstructions(const BasicBlock& bb) {
     return count;
 }
 
-TEST(HardSchedulingConstraintOverlayTest, EnforcesBarrierTensorAndDsOrdering) {
-    // Base DAG descendants: barrierAfter -> tensorLoad and barrierBefore -> dsLoad.
-    std::vector<std::unordered_set<unsigned>> baseGraph(4);
-    baseGraph[0].insert(1);
-    baseGraph[2].insert(3);
-    std::vector<unsigned> baseInDegree{0, 1, 0, 1};
-
-    dag::HardSchedulingConstraintOverlay overlay(baseGraph);
-    ASSERT_TRUE(overlay.tryAdd(0, 2));  // barrierAfter -> barrierBefore
-    ASSERT_TRUE(overlay.tryAdd(1, 2));  // tensorLoad -> barrierBefore
-    ASSERT_TRUE(overlay.tryAdd(1, 3));  // tensorLoad -> dsLoad
-
-    EXPECT_TRUE(overlay.isReady(0, baseInDegree[0]));
-    EXPECT_FALSE(overlay.isReady(1, baseInDegree[1]));
-    EXPECT_FALSE(overlay.isReady(2, baseInDegree[2]));
-    EXPECT_FALSE(overlay.isReady(3, baseInDegree[3]));
-
-    --baseInDegree[1];
-    overlay.satisfyFrom(0);
-    EXPECT_TRUE(overlay.isReady(1, baseInDegree[1]));
-    EXPECT_FALSE(overlay.isReady(2, baseInDegree[2]));
-
-    overlay.satisfyFrom(1);
-    EXPECT_TRUE(overlay.isReady(2, baseInDegree[2]));
-    EXPECT_FALSE(overlay.isReady(3, baseInDegree[3]));
-
-    --baseInDegree[3];
-    overlay.satisfyFrom(2);
-    EXPECT_TRUE(overlay.isReady(3, baseInDegree[3]));
+// Adds a hard scheduling constraint edge directly into \p graph/\p inDegree, mirroring
+// what StinkyDAGSchedulerPass.cpp does: reject edges that would form a cycle, otherwise
+// merge into the same graph used for the register-dependency DAG.
+static bool addHardConstraint(std::vector<std::unordered_set<unsigned>>& graph,
+                              std::vector<unsigned>& inDegree, unsigned predecessor,
+                              unsigned successor) {
+    if (graph[predecessor].contains(successor)) return true;
+    if (dag::hasPath(graph, successor, predecessor)) return false;
+    graph[predecessor].insert(successor);
+    ++inDegree[successor];
+    return true;
 }
 
-TEST(HardSchedulingConstraintOverlayTest, SkipsCycleAndPreservesScheduleCompleteness) {
-    std::vector<std::unordered_set<unsigned>> baseGraph(3);
-    baseGraph[0].insert(1);
-    baseGraph[1].insert(2);
-    std::vector<unsigned> baseInDegree{0, 1, 1};
+TEST(HardSchedulingConstraintMergeTest, MergesConstraintsIntoBaseDagAndPreservesReadinessOrder) {
+    // Base DAG descendants: barrierAfter -> tensorLoad and barrierBefore -> dsLoad.
+    std::vector<std::unordered_set<unsigned>> graph(4);
+    graph[0].insert(1);
+    graph[2].insert(3);
+    std::vector<unsigned> inDegree{0, 1, 0, 1};
 
-    dag::HardSchedulingConstraintOverlay overlay(baseGraph);
-    EXPECT_FALSE(overlay.tryAdd(2, 0));  // Would close 0 -> 1 -> 2 -> 0.
+    ASSERT_TRUE(addHardConstraint(graph, inDegree, 0, 2));  // barrierAfter -> barrierBefore
+    ASSERT_TRUE(addHardConstraint(graph, inDegree, 1, 2));  // tensorLoad -> barrierBefore
+    ASSERT_TRUE(addHardConstraint(graph, inDegree, 1, 3));  // tensorLoad -> dsLoad
+
+    EXPECT_EQ(inDegree[0], 0u);
+    EXPECT_EQ(inDegree[1], 1u);
+    EXPECT_EQ(inDegree[2], 2u);  // base 0->2 (none) + constraints 0->2, 1->2
+    EXPECT_EQ(inDegree[3], 2u);  // base 2->3 + constraint 1->3
+
+    // Simulate Kahn's algorithm and check the readiness order the constraints impose.
+    unsigned order[] = {0, 1, 2, 3};
+    for (unsigned i = 0; i < 4; ++i) {
+        EXPECT_EQ(inDegree[order[i]], 0u)
+            << "node " << order[i] << " should be ready at step " << i;
+        for (unsigned successor : graph[order[i]]) --inDegree[successor];
+    }
+}
+
+TEST(HardSchedulingConstraintMergeTest, SkipsCycleAndPreservesScheduleCompleteness) {
+    std::vector<std::unordered_set<unsigned>> graph(3);
+    graph[0].insert(1);
+    graph[1].insert(2);
+    std::vector<unsigned> inDegree{0, 1, 1};
+
+    EXPECT_FALSE(addHardConstraint(graph, inDegree, 2, 0));  // Would close 0 -> 1 -> 2 -> 0.
+    EXPECT_EQ(inDegree, (std::vector<unsigned>{0, 1, 1}));   // Rejected edge left no trace.
 
     unsigned scheduled = 0;
     for (unsigned node = 0; node < 3; ++node) {
-        ASSERT_TRUE(overlay.isReady(node, baseInDegree[node]));
+        ASSERT_EQ(inDegree[node], 0u);
         ++scheduled;
-        for (unsigned successor : baseGraph[node]) --baseInDegree[successor];
-        overlay.satisfyFrom(node);
+        for (unsigned successor : graph[node]) --inDegree[successor];
     }
     EXPECT_EQ(scheduled, 3u);
 }
 
-TEST(HardSchedulingConstraintOverlayTest, WaitsForBaseDagAndHardConstraintReadiness) {
+TEST(HardSchedulingConstraintMergeTest, WaitsForBaseDagAndHardConstraintReadiness) {
     // C requires both the base edge A -> C and the independent hard link B -> C.
-    std::vector<std::unordered_set<unsigned>> baseGraph(3);
-    baseGraph[0].insert(2);
+    std::vector<std::unordered_set<unsigned>> graph(3);
+    graph[0].insert(2);
+    std::vector<unsigned> inDegree{0, 0, 1};
+    ASSERT_TRUE(addHardConstraint(graph, inDegree, 1, 2));
+    EXPECT_EQ(inDegree[2], 2u);
 
-    dag::HardSchedulingConstraintOverlay baseFirst(baseGraph);
-    ASSERT_TRUE(baseFirst.tryAdd(1, 2));
-    unsigned cBaseInDegree = 1;
-    --cBaseInDegree;  // A completes first.
-    EXPECT_FALSE(baseFirst.isReady(2, cBaseInDegree));
-    baseFirst.satisfyFrom(1);
-    EXPECT_TRUE(baseFirst.isReady(2, cBaseInDegree));
-
-    dag::HardSchedulingConstraintOverlay constraintFirst(baseGraph);
-    ASSERT_TRUE(constraintFirst.tryAdd(1, 2));
-    cBaseInDegree = 1;
-    constraintFirst.satisfyFrom(1);  // B completes first.
-    EXPECT_FALSE(constraintFirst.isReady(2, cBaseInDegree));
-    --cBaseInDegree;
-    EXPECT_TRUE(constraintFirst.isReady(2, cBaseInDegree));
+    --inDegree[2];  // A completes first.
+    EXPECT_NE(inDegree[2], 0u);
+    --inDegree[2];  // B completes.
+    EXPECT_EQ(inDegree[2], 0u);
 }
 
 class DAGSchedulerPassTest : public ::testing::Test {
