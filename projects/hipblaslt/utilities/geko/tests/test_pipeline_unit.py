@@ -212,10 +212,15 @@ def test_run_search_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, t
             (p / "lib.yaml").write_text("x\n")
 
     monkeypatch.setattr(pipeline.library.operations, "extract_solutions", lambda *_a, **_k: _FakeLibs())
-    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: pd.DataFrame([{"dummy": 1}]))
+    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: (pd.DataFrame([{"dummy": 1}]), pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])))
     monkeypatch.setattr(
         pipeline.library,
         "from_dataframe",
+        lambda *_a, **_k: _FakeLibs(),
+    )
+    monkeypatch.setattr(
+        pipeline.library,
+        "from_full_dataframe",
         lambda *_a, **_k: _FakeLibs(),
     )
 
@@ -260,7 +265,12 @@ def test_run_search_success_without_analysis_result(monkeypatch: pytest.MonkeyPa
             (p / "lib.yaml").write_text("x\n")
 
     monkeypatch.setattr(pipeline.library.operations, "extract_solutions", lambda *_a, **_k: _FakeLibs())
-    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: (None, pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])))
+    monkeypatch.setattr(
+        pipeline.library,
+        "from_full_dataframe",
+        lambda *_a, **_k: _FakeLibs(),
+    )
 
     pipeline.run_search(str(hip), str(workload), devices=[0], workdir=str(workdir))
     assert not (workdir / "final_libs").exists()
@@ -312,7 +322,12 @@ def test_run_search_keeps_existing_artifacts_when_winners_unchanged(monkeypatch:
             (p / "lib.yaml").write_text("x\n")
 
     monkeypatch.setattr(pipeline.library.operations, "extract_solutions", lambda *_a, **_k: _FakeLibs())
-    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: (None, pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])))
+    monkeypatch.setattr(
+        pipeline.library,
+        "from_full_dataframe",
+        lambda *_a, **_k: _FakeLibs(),
+    )
 
     pipeline.run_search(str(hip), str(workload), devices=[0], workdir=str(workdir))
     assert (lib_dir / "keep.txt").is_file()
@@ -400,8 +415,9 @@ def test_run_optimize_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch,
             (p / "lib.yaml").write_text("x\n")
 
     monkeypatch.setattr(pipeline.library, "merge_solutions", lambda *_a, **_k: _FakeLibs())
-    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: pd.DataFrame([{"dummy": 1}]))
+    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: (pd.DataFrame([{"dummy": 1}]), pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])))
     monkeypatch.setattr(pipeline.library, "from_dataframe", lambda *_a, **_k: _FakeLibs())
+    monkeypatch.setattr(pipeline.library, "from_full_dataframe", lambda *_a, **_k: _FakeLibs())
 
     pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0])
     assert (workdir / "final_libs" / "lib.yaml").is_file()
@@ -432,7 +448,8 @@ def test_run_optimize_success_without_analysis_result(monkeypatch: pytest.Monkey
             (p / "lib.yaml").write_text("x\n")
 
     monkeypatch.setattr(pipeline.library, "merge_solutions", lambda *_a, **_k: _FakeLibs())
-    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: (None, pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])))
+    monkeypatch.setattr(pipeline.library, "from_full_dataframe", lambda *_a, **_k: _FakeLibs())
 
     pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0])
     assert not (workdir / "final_libs").exists()
@@ -467,7 +484,8 @@ def test_run_optimize_skips_cleanup_when_not_needed(monkeypatch: pytest.MonkeyPa
             (p / "lib.yaml").write_text("x\n")
 
     monkeypatch.setattr(pipeline.library, "merge_solutions", lambda *_a, **_k: _FakeLibs())
-    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: (None, pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])))
+    monkeypatch.setattr(pipeline.library, "from_full_dataframe", lambda *_a, **_k: _FakeLibs())
 
     pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0], retry=False)
     assert (workdir / "build" / "keep.txt").is_file()

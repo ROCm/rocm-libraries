@@ -30,158 +30,6 @@
 #include "logging.hpp"
 #include "rocblas_gemm_ex.hpp"
 
-template <bool BATCHED, typename TScal, typename TiConstPtr, typename ToConstPtr, typename ToPtr>
-bool rocblas_use_gemv_in_gemm(rocblas_handle    handle,
-                              rocblas_operation trans_a,
-                              rocblas_operation trans_b,
-                              rocblas_int       m,
-                              rocblas_int       n,
-                              rocblas_int       k,
-                              rocblas_int       lda,
-                              rocblas_int       ldb,
-                              ToConstPtr        c,
-                              rocblas_stride    offset_c,
-                              rocblas_int       ldc,
-                              rocblas_stride    stride_c,
-                              ToPtr             d,
-                              rocblas_stride    offset_d,
-                              rocblas_int       ldd,
-                              rocblas_stride    stride_d)
-{
-    // Can only use gemv in the case where m == 1 || n == 1
-    if((m == 1 || n == 1) && k != 0)
-    {
-        using Tex = rocblas_type_from_ptr_t<TScal, false>;
-        using Ti  = rocblas_type_from_ptr_t<TiConstPtr, BATCHED>;
-        using Toc = rocblas_type_from_ptr_t<ToConstPtr, BATCHED>;
-        using Tod = rocblas_type_from_ptr_t<ToPtr, BATCHED>;
-        constexpr bool is_sgemv
-            = std::is_same_v<
-                  Tex,
-                  float> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
-        constexpr bool is_dgemv
-            = std::is_same_v<
-                  Tex,
-                  double> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
-        constexpr bool is_cgemv
-            = std::is_same_v<
-                  Tex,
-                  rocblas_float_complex> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
-        constexpr bool is_zgemv
-            = std::is_same_v<
-                  Tex,
-                  rocblas_double_complex> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
-        constexpr bool is_hshgemv
-            = std::is_same_v<
-                  Tex,
-                  float> && std::is_same_v<Ti, rocblas_half> && std::is_same_v<Toc, rocblas_half> && std::is_same_v<Toc, Tod>;
-        constexpr bool is_hssgemv
-            = std::is_same_v<
-                  Tex,
-                  float> && std::is_same_v<Ti, rocblas_half> && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
-        constexpr bool is_tstgemv
-            = std::is_same_v<
-                  Tex,
-                  float> && std::is_same_v<Ti, rocblas_bfloat16> && std::is_same_v<Toc, rocblas_bfloat16> && std::is_same_v<Toc, Tod>;
-        constexpr bool is_tssgemv
-            = std::is_same_v<
-                  Tex,
-                  float> && std::is_same_v<Ti, rocblas_bfloat16> && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
-
-        bool gemv_constraints = rocblas_can_use_gemv_in_gemm(trans_a,
-                                                             trans_b,
-                                                             m,
-                                                             n,
-                                                             k,
-                                                             (void*)c,
-                                                             offset_c,
-                                                             ldc,
-                                                             stride_c,
-                                                             (void*)d,
-                                                             offset_d,
-                                                             ldd,
-                                                             stride_d);
-
-        // for now not using on gfx94x or gfx12
-        int arch    = handle->getArch();
-        int archMaj = handle->getArchMajor();
-        int supported_arch
-            = (arch == 906 || arch == 908 || arch == 910) || (archMaj == 10 || archMaj == 11);
-
-        if(gemv_constraints && supported_arch)
-        {
-            bool transNN = (trans_a == rocblas_operation_none && trans_b == rocblas_operation_none);
-            bool transNT = (trans_a == rocblas_operation_none && trans_b != rocblas_operation_none);
-            bool transTN = (trans_a != rocblas_operation_none && trans_b == rocblas_operation_none);
-            bool transTT = (trans_a != rocblas_operation_none && trans_b != rocblas_operation_none);
-
-            // These are heuristics set by us to try to determine whether gemv kernels will outperform Tensile
-            if(is_sgemv)
-            {
-                if(n == 1 && transNN && ldb > 1)
-                    return false;
-                else if(n == 1 && transNT)
-                    return false;
-                else if(n == 1 && ldb > 8)
-                    return false;
-                else if(n == 1 && ldb > 1 && transTT && arch == 906)
-                    return false;
-                else if(m == 1 && transNT)
-                    return false;
-                else if(m == 1 && (lda > 1 || ldc > 1))
-                    return false;
-            }
-            else if(is_dgemv)
-            {
-                if(n == 1 && transTT && ldb > 8)
-                    return false;
-                else if(m == 1 && transNN && (lda > 8 || ldc > 8))
-                    return false;
-                else if(m == 1 && transTT)
-                    return false;
-            }
-            else if(is_hshgemv || is_hssgemv)
-            {
-                if(n == 1 && (transNN || transTN))
-                    return false;
-                else if(n == 1 && transTT && ldb > 8)
-                    return false;
-                else if(m == 1 && (transNN || transTN))
-                    return false;
-            }
-            else if(is_tstgemv || is_tssgemv)
-            {
-                if(n == 1 && (transNN || transTN))
-                    return false;
-                else if(n == 1 && transNT && (arch == 908 || arch == 910))
-                    return false;
-                else if(n == 1 && ldb > 8)
-                    return false;
-                else if(m == 1 && (transNN || transTN))
-                    return false;
-            }
-            else if(is_cgemv)
-            {
-                if(n == 1 && transTT && ldb > 8)
-                    return false;
-                else if(m == 1 && transNN && (lda > 8 || ldc > 8))
-                    return false;
-            }
-            else if(is_zgemv)
-            {
-                if(n == 1 && transTT && ldb > 8)
-                    return false;
-                else if(m == 1 && transNN && (lda > 8 || ldc > 8))
-                    return false;
-            }
-
-            return true;
-        }
-    }
-
-    return false;
-}
-
 // if no Tensile then we use rocblas_internal_gemm_ex_typecasting_64 and rocblas_internal_gemm_ex_64
 // with source kernels so don't even provide rocblas_internal_gemm_ex
 
@@ -276,71 +124,27 @@ rocblas_status rocblas_internal_gemm_ex(rocblas_handle     handle,
 
         if(use_gemv_sol || use_gemv_perf)
         {
-            if(n == 1)
-            {
-                // If transB is transpose, then just use ldb as increment. Currently can't handle trans_b as conjugate.
-                rocblas_int incx_gemv = trans_b == rocblas_operation_none ? 1 : ldb;
-
-                // gemm and gemv handle transA differently
-                rocblas_int m_gemv = trans_a == rocblas_operation_none ? m : k;
-                rocblas_int n_gemv = trans_a == rocblas_operation_none ? k : m;
-                return rocblas_internal_gemv_launcher(handle,
-                                                      trans_a,
-                                                      m_gemv,
-                                                      n_gemv,
-                                                      alpha,
-                                                      0,
-                                                      a,
-                                                      offset_a,
-                                                      lda,
-                                                      stride_a,
-                                                      b,
-                                                      offset_b,
-                                                      incx_gemv,
-                                                      stride_b,
-                                                      beta,
-                                                      0,
-                                                      d,
-                                                      offset_d,
-                                                      1,
-                                                      stride_d,
-                                                      batch_count);
-            }
-            else if(m == 1)
-            {
-                // Can't handle either trans_a or trans_b as conjugate
-                rocblas_operation transA_gemv = trans_b == rocblas_operation_none
-                                                    ? rocblas_operation_transpose
-                                                    : rocblas_operation_none;
-                rocblas_int       incx_gemv   = trans_a == rocblas_operation_none ? lda : 1;
-
-                // gemm and gemv handle transA differently
-                rocblas_int m_gemv = transA_gemv == rocblas_operation_none ? n : k;
-                rocblas_int n_gemv = transA_gemv == rocblas_operation_none ? k : n;
-                return rocblas_internal_gemv_launcher(handle,
-                                                      transA_gemv,
-                                                      m_gemv,
-                                                      n_gemv,
-                                                      alpha,
-                                                      0,
-                                                      b,
-                                                      offset_b,
-                                                      ldb,
-                                                      stride_b,
-                                                      a,
-                                                      offset_a,
-                                                      incx_gemv,
-                                                      stride_a,
-                                                      beta,
-                                                      0,
-                                                      d,
-                                                      offset_d,
-                                                      ldd,
-                                                      stride_d,
-                                                      batch_count);
-            }
-
-            return rocblas_status_internal_error; // rocblas_use_gemv_in_gemm() requires m == 1 || n == 1
+            return rocblas_gemv_in_gemm_launcher(handle,
+                                                 trans_a,
+                                                 trans_b,
+                                                 m,
+                                                 n,
+                                                 k,
+                                                 alpha,
+                                                 a,
+                                                 offset_a,
+                                                 lda,
+                                                 stride_a,
+                                                 b,
+                                                 offset_b,
+                                                 ldb,
+                                                 stride_b,
+                                                 beta,
+                                                 d,
+                                                 offset_d,
+                                                 ldd,
+                                                 stride_d,
+                                                 batch_count);
         }
     }
 
@@ -911,6 +715,124 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
 }
 
 #undef EX_TYPECASTING_PARM
+
+#include "blas_ex/rocblas_gemm_grouped_batched_ex.hpp"
+
+template <typename API_INT>
+ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
+    rocblas_internal_gemm_grouped_batched_ex_template(rocblas_handle           handle,
+                                                      const rocblas_operation* transa_array,
+                                                      const rocblas_operation* transb_array,
+                                                      const API_INT*           m_array,
+                                                      const API_INT*           n_array,
+                                                      const API_INT*           k_array,
+                                                      const void*              alpha_array,
+                                                      const void* const*       Aarray,
+                                                      rocblas_datatype         a_type,
+                                                      const API_INT*           lda_array,
+                                                      const void* const*       Barray,
+                                                      rocblas_datatype         b_type,
+                                                      const API_INT*           ldb_array,
+                                                      const void*              beta_array,
+                                                      const void* const*       Carray,
+                                                      rocblas_datatype         c_type,
+                                                      const API_INT*           ldc_array,
+                                                      void* const*             Darray,
+                                                      rocblas_datatype         d_type,
+                                                      const API_INT*           ldd_array,
+                                                      API_INT                  group_count,
+                                                      const API_INT*           group_size,
+                                                      rocblas_datatype         compute_type,
+                                                      rocblas_gemm_algo        algo,
+                                                      int32_t                  solution_index,
+                                                      uint32_t                 flags)
+{
+    const size_t scalar_stride = rocblas_gemm_ex_compute_type_size(compute_type);
+    int64_t      idx           = 0;
+
+    for(API_INT g = 0; g < group_count; ++g)
+    {
+        const void* alpha_g
+            = static_cast<const char*>(alpha_array) + static_cast<size_t>(g) * scalar_stride;
+        const void* beta_g
+            = static_cast<const char*>(beta_array) + static_cast<size_t>(g) * scalar_stride;
+
+        rocblas_status status = rocblas_gemm_ex_template<true>(
+            handle,
+            transa_array[g],
+            transb_array[g],
+            m_array[g],
+            n_array[g],
+            k_array[g],
+            alpha_g,
+            reinterpret_cast<const void*>(Aarray + idx),
+            a_type,
+            0,
+            lda_array[g],
+            0,
+            reinterpret_cast<const void*>(Barray + idx),
+            b_type,
+            0,
+            ldb_array[g],
+            0,
+            beta_g,
+            reinterpret_cast<const void*>(Carray + idx),
+            c_type,
+            0,
+            ldc_array[g],
+            0,
+            const_cast<void*>(reinterpret_cast<const void*>(Darray + idx)),
+            d_type,
+            0,
+            ldd_array[g],
+            0,
+            group_size[g],
+            compute_type,
+            algo,
+            solution_index,
+            flags);
+        if(status != rocblas_status_success)
+            return status;
+        idx += group_size[g];
+    }
+    return rocblas_status_success;
+}
+
+#ifdef INSTANTIATE_GEMM_GROUPED_BATCHED_EX_TEMPLATE
+#error INSTANTIATE_GEMM_GROUPED_BATCHED_EX_TEMPLATE already defined
+#endif
+
+#define INSTANTIATE_GEMM_GROUPED_BATCHED_EX_TEMPLATE(TI_)       \
+    template ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status    \
+        rocblas_internal_gemm_grouped_batched_ex_template<TI_>( \
+            rocblas_handle           handle,                    \
+            const rocblas_operation* transa_array,              \
+            const rocblas_operation* transb_array,              \
+            const TI_*               m_array,                   \
+            const TI_*               n_array,                   \
+            const TI_*               k_array,                   \
+            const void*              alpha_array,               \
+            const void* const*       Aarray,                    \
+            rocblas_datatype         a_type,                    \
+            const TI_*               lda_array,                 \
+            const void* const*       Barray,                    \
+            rocblas_datatype         b_type,                    \
+            const TI_*               ldb_array,                 \
+            const void*              beta_array,                \
+            const void* const*       Carray,                    \
+            rocblas_datatype         c_type,                    \
+            const TI_*               ldc_array,                 \
+            void* const*             Darray,                    \
+            rocblas_datatype         d_type,                    \
+            const TI_*               ldd_array,                 \
+            TI_                      group_count,               \
+            const TI_*               group_size,                \
+            rocblas_datatype         compute_type,              \
+            rocblas_gemm_algo        algo,                      \
+            int32_t                  solution_index,            \
+            uint32_t                 flags);
+
+INSTANTIATE_GEMM_GROUPED_BATCHED_EX_TEMPLATE(rocblas_int)
 
 #ifdef INSTANTIATE_GEMM_EX_TEMPLATE
 #error INSTANTIATE_GEMM_EX_TEMPLATE already defined

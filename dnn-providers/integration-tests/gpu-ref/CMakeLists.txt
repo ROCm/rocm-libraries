@@ -30,7 +30,9 @@ add_custom_command(
 
 add_library(
     hipdnn_gpu_ref STATIC
+    src/GpuReferencePointwise.cpp
     src/GpuFpReferenceConvolution.cpp
+    src/GpuFpReferenceSdpa.cpp
     src/GpuFpReferenceRMSNorm.cpp
     src/GpuFpReferenceValidation.cpp
     src/GpuIntReferenceValidation.cpp

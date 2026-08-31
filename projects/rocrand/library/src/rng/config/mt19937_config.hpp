@@ -47,6 +47,7 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_MT19937, T>
             case target_arch::gfx908: return 512;
             case target_arch::gfx1150: return 128;
             case target_arch::gfx1201: return 64;
+            case target_arch::gfx950: return 1024;
             default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_MT19937, T>::threads;
         }
     }
@@ -64,6 +65,7 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_MT19937, T>
             case target_arch::gfx908: return 64;
             case target_arch::gfx1150: return 256;
             case target_arch::gfx1201: return 512;
+            case target_arch::gfx950: return 256;
             default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_MT19937, T>::blocks;
         }
     }

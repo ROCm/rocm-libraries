@@ -57,12 +57,38 @@ void StinkyInstruction::dump(std::ostream& out) const {
     printer.print(*this);
 }
 
+void StinkyInstruction::resolveMatrixFmtOverrides() {
+    if (!hwInstDesc) return;
+    const bool hasCost = !hwInstDesc->matrixFmtCostOverrides.empty();
+    const bool hasCoIssue = !hwInstDesc->matrixFmtCoIssueOverrides.empty();
+    if (!hasCost && !hasCoIssue) return;
+
+    const auto* fmt = getModifier<MatrixFmtModifiers>();
+    if (!fmt) return;
+    const auto a = static_cast<uint8_t>(fmt->fmtA);
+    const auto b = static_cast<uint8_t>(fmt->fmtB);
+
+    for (const auto& ov : hwInstDesc->matrixFmtCostOverrides) {
+        if (ov.fmtA == a && ov.fmtB == b) {
+            issueCycles = ov.issue;
+            latencyCycles = ov.latency;
+            break;
+        }
+    }
+    for (const auto& ov : hwInstDesc->matrixFmtCoIssueOverrides) {
+        if (ov.fmtA == a && ov.fmtB == b) {
+            coIssueWindow = ov.coIssueWindow;
+            break;
+        }
+    }
+}
+
 //----------------------------------------------------------------------
 // AsmIRBuilder implementation
 //----------------------------------------------------------------------
 StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label, uint16_t alignment) {
     static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
     StinkyInstruction* labelInst = create(&labelMCID);
     labelInst->addModifier<LabelData>(LabelData{label, alignment});
@@ -71,7 +97,7 @@ StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label, uint16_t 
 
 StinkyInstruction* AsmIRBuilder::createPhi(RegType type, unsigned regIdx, IRBase* insertPt) {
     static const HwInstDesc phiMCID{
-        GFX::PHI, GFX::PHI, 0, 0, 0, "PHI", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::PHI, GFX::PHI, 0, 0, 0, 0, "PHI", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
     const size_t numPreds = bb->getPredecessors().size();
 

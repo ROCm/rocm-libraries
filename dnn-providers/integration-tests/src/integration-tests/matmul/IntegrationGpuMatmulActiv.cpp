@@ -5,6 +5,7 @@
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "common/ActivationCommon.hpp"
@@ -60,7 +61,7 @@ public:
         auto cAttr = graphObj.matmul(aTensorAttr, bTensorAttr, matmulAttrs);
 
         graph::PointwiseAttributes activAttrs;
-        activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        activAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
             activAttrs.set_relu_lower_clip(activTestCase.reluLowerClip.value());
@@ -116,7 +117,7 @@ protected:
         this->registerValidator(outputs.c, this->getTolerance(graphObj, outputs.c));
 
         this->setTestCaseNote(activTestCase.note);
-        this->synthesis().setGlobalSeed(matmulTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(matmulTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

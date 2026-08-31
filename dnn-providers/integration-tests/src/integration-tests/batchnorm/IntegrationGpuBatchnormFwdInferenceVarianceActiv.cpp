@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "common/ActivationCommon.hpp"
@@ -103,7 +104,7 @@ public:
         yTensorAttr->set_data_type(intermediateDataType);
 
         graph::PointwiseAttributes pointwiseAttrs;
-        pointwiseAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        pointwiseAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
             pointwiseAttrs.set_relu_lower_clip(activTestCase.reluLowerClip.value());
@@ -151,7 +152,7 @@ public:
 
     BatchnormFwdInferenceVarianceActiv()
     {
-        this->synthesis()
+        this->inputFillRecipes()
             .setRange(BnInfVarActivTensorIds::X_UID, -1.0f, 1.0f)
             .setRange(BnInfVarActivTensorIds::MEAN_UID, -1.0f, 1.0f)
             .setRange(BnInfVarActivTensorIds::VARIANCE_UID, 0.1f, 1.0f)
@@ -171,7 +172,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis().setGlobalSeed(bnTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(bnTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };
