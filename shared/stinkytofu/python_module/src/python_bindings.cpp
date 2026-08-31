@@ -628,7 +628,23 @@ NB_MODULE(_stinkytofu, m) {
             },
             nb::arg("op_sel") = std::vector<int>{}, nb::arg("op_sel_hi") = std::vector<int>{},
             nb::arg("byte_sel") = std::vector<int>{},
-            "Set VOP3P (op_sel/op_sel_hi/byte_sel) modifiers");
+            "Set VOP3P (op_sel/op_sel_hi/byte_sel) modifiers")
+        .def(
+            "set_memtoken",
+            [](LogicalInstruction& inst, const std::vector<int>& tokens) {
+                inst.memtoken = tokens;
+            },
+            nb::arg("tokens"),
+            "Set memory token IDs for LDS dependency tracking (forwarded to MemTokenData)")
+        .def(
+            "set_swaitcnt",
+            [](LogicalInstruction& inst, int vlcnt, int vscnt, int dlcnt, int dscnt, int kmcnt) {
+                inst.swaitcnt = std::array<int, 5>{vlcnt, vscnt, dlcnt, dscnt, kmcnt};
+            },
+            nb::arg("vlcnt") = -1, nb::arg("vscnt") = -1, nb::arg("dlcnt") = -1,
+            nb::arg("dscnt") = -1, nb::arg("kmcnt") = -1,
+            "Set per-counter s_waitcnt values (forwarded to SWaitCntData; gfx12+ "
+            "legalizeWaitCnt splits the s_waitcnt into typed waits)");
 
     // ========================================================================
     // Auto-generated Python bindings for all IR instructions (~273 classes)
