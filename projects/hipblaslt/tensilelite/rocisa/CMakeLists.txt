@@ -368,7 +368,9 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
     endif()
 
-    if(HIPBLASLT_BUNDLE_PYTHON_DEPS AND NOT ROCISA_STANDALONE)
+    if(HIPBLASLT_BUNDLE_PYTHON_DEPS
+            AND NOT ROCISA_STANDALONE
+            AND PROJECT_NAME STREQUAL "hipblaslt")
         set(_rocisa_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa")
         install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"

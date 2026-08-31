@@ -171,22 +171,64 @@ if(HIPSPARSELT_ENABLE_CUDA)
 endif()
 
 if(HIPSPARSELT_ENABLE_HIP)
-    message(STATUS "hipSPARSELt links the installed hipBLASLt package.")
-    find_package(hipblaslt CONFIG REQUIRED)
+    if(NOT HIPBLASLT_TENSILELITE_PATH)
+        set(HIPBLASLT_TENSILELITE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt/tensilelite")
+    endif()
+
+    find_package(hipblaslt CONFIG QUIET)
+    if(hipblaslt_FOUND)
+        message(STATUS "hipSPARSELt uses support from the installed hipBLASLt package.")
+    else()
+        if(NOT EXISTS "${HIPBLASLT_TENSILELITE_PATH}/CMakeLists.txt")
+            message(FATAL_ERROR
+                "hipSPARSELt requires either an installed hipBLASLt package or the "
+                "hipBLASLt tensilelite source at '${HIPBLASLT_TENSILELITE_PATH}'.")
+        endif()
+
+        message(STATUS
+            "hipBLASLt package not found; building its source-tree support libraries for hipSPARSELt.")
+        include("${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt/cmake/hipblaslt_codegen.cmake")
+        find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
+        if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
+            set(HIPBLASLT_ENABLE_YAML ON)
+            find_package(LLVM REQUIRED)
+        else()
+            set(HIPBLASLT_ENABLE_YAML OFF)
+            find_package(msgpack-cxx CONFIG)
+            if(msgpack-cxx_FOUND)
+                set(hipblaslt_msgpack_target msgpack-cxx)
+            else()
+                find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+                set(hipblaslt_msgpack_target msgpackc-cxx)
+            endif()
+        endif()
+        set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON)
+        set(HIPBLASLT_PYTHON_DEPS _rocisa)
+        set(TENSILELITE_ENABLE_HOST ON)
+        set(TENSILELITE_ENABLE_CLIENT OFF)
+        set(TENSILELITE_BUILD_TESTING OFF)
+        block()
+            set(BUILD_SHARED_LIBS OFF)
+            set(BUILD_TESTING OFF)
+            add_subdirectory(
+                "${HIPBLASLT_TENSILELITE_PATH}"
+                "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/tensilelite"
+                EXCLUDE_FROM_ALL
+            )
+        endblock()
+    endif()
 
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
         CACHE FILEPATH "License file for package" FORCE
     )
 
     if(HIPSPARSELT_ENABLE_DEVICE)
-        if(NOT HIPBLASLT_TENSILELITE_PATH)
-            set(HIPBLASLT_TENSILELITE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt/tensilelite")
-        endif()
         if(NOT EXISTS "${HIPBLASLT_TENSILELITE_PATH}/Tensile/bin/TensileLogic")
             message(FATAL_ERROR
                 "hipSPARSELt device codegen needs the hipBLASLt tensilelite source at "
                 "'${HIPBLASLT_TENSILELITE_PATH}'; set -DHIPBLASLT_TENSILELITE_PATH.")
         endif()
+
         set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
         set(_hipsparselt_yaml_format OFF)
         if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
