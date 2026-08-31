@@ -262,5 +262,64 @@ class TestCodegenNameContract(unittest.TestCase):
         self.assertTrue(name.startswith("mx_gemm_fp8_rcr_"))
 
 
+# --- gfx1250 (MI400 / RDNA-WMMA) enablement --------------------------------
+# The mx_gemm bridge historically pinned the Python arch surface to gfx950 only.
+# gfx1250 has WMMA microscaling support in ck_tile (preShuffleScaleBuffer_gfx1250
+# + WMMA MX 16x16x128) and defaults to OCP fp8, so codegen and the numpy
+# reference can be opened for it. These CPU-only tests lock that surface in.
+# (GPU .so builds for gfx1250 still fail at the C++ ctypes static_assert until a
+# preShuffleScaleBuffer_gfx1250 branch lands there -- documented in the PR body.)
+from mx_gemm_utils import fp8_ocp_is_default_for_arch  # noqa: E402
+
+
+class TestGfx1250MxEnablement(unittest.TestCase):
+    def test_fp8_ocp_default_for_gfx1250(self):
+        # gfx1250 defaults to OCP e4m3, so the fp8 numpy reference codec is valid.
+        self.assertTrue(fp8_ocp_is_default_for_arch("gfx1250"))
+
+    def test_default_fp8_config_accepts_gfx1250(self):
+        cfg = default_fp8_config("gfx1250")
+        self.assertEqual(cfg.gpu_target, "gfx1250")
+        self.assertEqual(cfg.datatype, "fp8")
+
+    def test_default_fp4_config_accepts_gfx1250(self):
+        cfg = default_fp4_config("gfx1250")
+        self.assertEqual(cfg.gpu_target, "gfx1250")
+        self.assertEqual(cfg.datatype, "fp4")
+
+    def test_warp_tile_is_wmma_mx_shape(self):
+        # gfx1250 WMMA MX and gfx950 XDL MX share the 16x16x128 warp tile, so the
+        # single mx warp-tile config is arch-portable.
+        cfg = default_fp8_config("gfx1250")
+        self.assertEqual(
+            (cfg.warp_tile_m, cfg.warp_tile_n, cfg.warp_tile_k), (16, 16, 128)
+        )
+
+    def test_gfx1250_codegen_name_fp8(self):
+        try:
+            from unified_mx_gemm_codegen import kernel_name
+        except Exception as exc:  # noqa: BLE001
+            self.skipTest(f"codegen import unavailable: {exc}")
+        cfg = default_fp8_config("gfx1250")
+        try:
+            name = kernel_name(cfg.to_codegen_config())
+        except Exception as exc:  # noqa: BLE001
+            self.skipTest(f"Old-TE builder unavailable: {exc}")
+        self.assertTrue(name.startswith("mx_gemm_fp8_rcr_"))
+        self.assertIn("16x16x128", name)
+
+    def test_gfx1250_codegen_name_fp4(self):
+        try:
+            from unified_mx_gemm_codegen import kernel_name
+        except Exception as exc:  # noqa: BLE001
+            self.skipTest(f"codegen import unavailable: {exc}")
+        cfg = default_fp4_config("gfx1250")
+        try:
+            name = kernel_name(cfg.to_codegen_config())
+        except Exception as exc:  # noqa: BLE001
+            self.skipTest(f"Old-TE builder unavailable: {exc}")
+        self.assertTrue(name.startswith("mx_gemm_fp4_rcr_"))
+
+
 if __name__ == "__main__":
     unittest.main()
