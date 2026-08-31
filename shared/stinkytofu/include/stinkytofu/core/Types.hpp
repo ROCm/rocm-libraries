@@ -108,6 +108,9 @@ struct PassFeatureConfig {
         /// CDNA5ReadyQueue paths that enforce it (see
         /// ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
+        /// Mirrors moduleOptions.EnableESM2TrackValuVsrc. The mode2 WAR gate only
+        /// recovers waits va_vsrc tracking creates, so it is inert when false.
+        bool enableESM2TrackValuVsrc = false;
     };
 
     LoopConfig loopConfig;
