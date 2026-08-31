@@ -183,6 +183,73 @@ and validates shape).
 engine's shape: one pack per operation, sharing one KMD/UED/UHD/UDD, each pack naming
 its own operation-scoped UMD via `discriminator`).
 
+`configs/axes_example.yaml` -- pack-level `axes`: one `kernel_template` crossed with
+a few value lists, expanded at load time.
+
+`configs/variants_example.yaml` -- pack-level `variants`: a shape list crossed
+per-shape with a named knob set. See below.
+
+## Generated variant sets: `variants`
+
+A generated set is written one YAML block per kernel. The largest shipped gfx942
+attention_dense config was **89,265 lines for 2,710 kernels**, committed compressed
+because that was the only way it fit. Compression is not the fix: the file is
+unreadable either way, and it is the ONE file worth reviewing in a descriptor PR,
+because the descriptors are its deterministic output.
+
+`variants` states what the enumeration stands for -- **about 1,150 lines for the same
+2,710 kernels**, generating byte-identical descriptors:
+
+```yaml
+packs:
+  - name: attention_dense
+    kernel_defaults:                        # constant across every kernel
+      kind: rocke
+      source: kernels/gfx942/attention_dense.py
+      builder: build_attention_dense
+    variants:
+      - name: dense.{dtype}_sq{seqlen_q}_bm{block_m}_{tag}
+        metadata: [dtype, seqlen_q, block_m, use_exp2_fast]
+        vocabulary: {dtype: {bf16: BF16}}     # the spelling the MATCHER compares
+        policy_knobs: [use_exp2_fast]         # the kernel's policy decides these
+        spec_order: [dtype, seqlen_q, block_m]  # key order reaches the descriptor
+        spec_defaults: {block_n: 64}          # constant across THIS group
+        knob_sets:
+          pair:
+            - {block_m: 128, tag: 'e{md_use_exp2_fast}'}
+            - {block_m: 256, use_exp2_fast: false, tag: ed}
+        shapes:
+          - {dtype: bf16, seqlen_q: 512, knobs: pair, resolved: {use_exp2_fast: 1}}
+```
+
+`configs/variants_example.yaml` is the runnable version, with every key exercised.
+
+**Why not `axes`.** `axes` crosses ONE `kernel_template`. A dispatcher-derived set has
+no single template: `dispatch_parity.py` asks the library for a spec per shape, so
+every shape carries its own resolved values for the fields the dispatcher derives.
+
+**It is not a grid.** Each shape names its own knob set. On the shipped sets most
+shapes carry four arms and 63 carry six; one global cross-product would invent
+variants for some shapes and drop them for others.
+
+**The tri-state.** A knob absent from an arm is absent from the emitted
+`kernel_source.spec`, which tells the builder its own policy decides at build time.
+That is NOT the same as pinning it `false`, and both reach metadata as `0`. The shape
+states the policy's answer under `resolved`; an arm may also pin `metadata` directly,
+for a knob swept in the catalog while the binary is unchanged.
+
+**Names.** The template must encode everything that varies, and the loader rejects a
+pack whose expansion produces two kernels with the same name. A slot is a spec field,
+an `md_<field>` metadata mirror, the arm's `{tag}`, or `{ordinal}` -- a per-shape
+serial the shape sets and each arm shifts with `ordinal_offset`, for grammars that
+number their kernels instead of naming every field.
+
+Expansion runs at load time (`codegen/config_loader.py`), so `generate.py`, the
+emitters and the dedup pass see ordinary kernel dicts. `tools/dispatch_parity.py`
+emits this form directly; `tools/factorise_config.py` converts an already-enumerated
+config, re-expanding its own output and refusing to write anything that does not
+reproduce the input kernel-for-kernel.
+
 ## Config surface
 
 ```yaml

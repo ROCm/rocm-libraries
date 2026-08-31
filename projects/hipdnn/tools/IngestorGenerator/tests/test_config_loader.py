@@ -545,9 +545,10 @@ class TestPackKernelDefaults:
 class TestGzippedConfig:
     """A `.gz` config loads identically to its plain-text twin.
 
-    Enumerated variant sets run to thousands of kernels and compress 40-50x, because
-    almost every line repeats. Committing the compressed form keeps a config beside
-    the descriptors it generates rather than stranding it outside the repo.
+    A generated variant set belongs in the repo as plain text, so `.gz` is a
+    retained capability rather than the way a config is expected to ship. It still
+    has to work: a config that arrives compressed must load identically, not
+    almost-identically.
     """
 
     def _raw(self):

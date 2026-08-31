@@ -95,6 +95,29 @@ def _unservable() -> list[dict]:
     ]
 
 
+def _emitted_kernels(config_path) -> list[dict]:
+    """The kernels an emitted config stands for, as plain dicts.
+
+    Read through the config loader rather than off the YAML, because the tool emits
+    the COMPACT `variants` form -- a shape list crossed with named knob sets -- and
+    what these tests are about is the variant set that reaches a descriptor, not the
+    syntax it was written in. Expanding through the loader is also the only reading
+    that stays honest if the compact form ever gains a feature: a test that parsed
+    the YAML itself would quietly stop seeing some of the kernels.
+    """
+    sys.path.insert(0, str(_TOOLS.parent))
+    from codegen.config_loader import load_config
+
+    return [
+        {
+            "name": kernel.name,
+            "metadata": dict(kernel.metadata),
+            "kernel_source": {"spec": dict(kernel.kernel_source.spec)},
+        }
+        for kernel in load_config(config_path).packs[0].kernels
+    ]
+
+
 @pytest.fixture(scope="module")
 def parity(tmp_path_factory):
     """Run the tool once; every test reads the same emitted config."""
@@ -127,6 +150,7 @@ def parity(tmp_path_factory):
         "stdout": result.stdout,
         "config_path": config,
         "config": yaml.safe_load(config.read_text()),
+        "kernels": _emitted_kernels(config),
         "n_shapes": len(_shapes()),
     }
 
@@ -141,7 +165,7 @@ class TestDerivedFieldsSurvive:
         hand got this backwards on most of a shipped set while every gate stayed
         green.
         """
-        kernels = parity["config"]["packs"][0]["kernels"]
+        kernels = parity["kernels"]
         assert kernels, "no kernels emitted"
         disagreed = []
         for kernel in kernels:
@@ -159,8 +183,7 @@ class TestDerivedFieldsSurvive:
     def test_both_sides_of_the_persistent_rule_are_present(self, parity):
         """Otherwise the test above passes on a constant."""
         values = {
-            bool(k["kernel_source"]["spec"]["persistent"])
-            for k in parity["config"]["packs"][0]["kernels"]
+            bool(k["kernel_source"]["spec"]["persistent"]) for k in parity["kernels"]
         }
         assert values == {True, False}, (
             "corpus must straddle the persistent threshold or the rule check is "
@@ -170,16 +193,14 @@ class TestDerivedFieldsSurvive:
     def test_num_persistent_is_the_arch_value_not_the_shared_default(self, parity):
         """304 is gfx942's CU count; the shared dataclass default 256 is gfx950's."""
         values = {
-            int(k["kernel_source"]["spec"]["num_persistent"])
-            for k in parity["config"]["packs"][0]["kernels"]
+            int(k["kernel_source"]["spec"]["num_persistent"]) for k in parity["kernels"]
         }
         assert values == {304}, f"expected the gfx942 CU count, got {values}"
 
     def test_waves_per_eu_comes_from_the_kernels_policy(self, parity):
         """Policy-resolved per (head_size, dtype), so it must not be one value."""
         values = {
-            int(k["kernel_source"]["spec"]["waves_per_eu"])
-            for k in parity["config"]["packs"][0]["kernels"]
+            int(k["kernel_source"]["spec"]["waves_per_eu"]) for k in parity["kernels"]
         }
         assert len(values) > 1, (
             f"waves_per_eu is policy-owned and varies by head_size; got {values} -- "
@@ -190,17 +211,14 @@ class TestDerivedFieldsSurvive:
 class TestMetadataDescribesTheBinary:
     def test_dtype_is_written_in_the_matchers_vocabulary(self, parity):
         """The spec says bf16; the matcher compares BF16."""
-        for kernel in parity["config"]["packs"][0]["kernels"]:
+        for kernel in parity["kernels"]:
             assert kernel["metadata"]["dtype"] in ("BF16", "FP16")
             assert kernel["kernel_source"]["spec"]["dtype"] in ("bf16", "fp16")
 
     def test_a_policy_owned_tristate_is_resolved_not_omitted(self, parity):
         """`use_exp2_fast` is absent from the dispatcher's shared spec, but the
         binary still has a definite setting, so metadata must state it."""
-        values = {
-            k["metadata"].get("use_exp2_fast")
-            for k in parity["config"]["packs"][0]["kernels"]
-        }
+        values = {k["metadata"].get("use_exp2_fast") for k in parity["kernels"]}
         assert None not in values, "a policy knob was left for the KMD default"
         assert values <= {0, 1}, f"unresolved or bogus values: {values}"
         assert len(values) > 1, (
@@ -216,7 +234,7 @@ class TestMetadataDescribesTheBinary:
         name ship as separate descriptors that cannot be told apart in a log, a
         winner record, or a failure message.
         """
-        names = [k["name"] for k in parity["config"]["packs"][0]["kernels"]]
+        names = [k["name"] for k in parity["kernels"]]
         assert len(names) == len(set(names)), "emitted kernel names collide"
 
 
@@ -391,8 +409,8 @@ class TestTheShippingCrossProduct:
         assert result.returncode == 0, result.stderr
         import yaml
 
-        base = yaml.safe_load(base_out.read_text())["packs"][0]["kernels"]
-        ship = yaml.safe_load(out.read_text())["packs"][0]["kernels"]
+        base = _emitted_kernels(base_out)
+        ship = _emitted_kernels(out)
         assert len(ship) == 2 * len(base), (
             "the shipping set must be the dispatcher's set crossed with the "
             "survivors, not a re-derivation of it"
@@ -415,8 +433,8 @@ class TestTheShippingCrossProduct:
 
     def test_every_crossed_variant_is_named_apart(self, tmp_path):
         """Two variants of one shape differ only in the pinned knob. If the name
-        does not encode it they collide, and nothing downstream catches kernel-name
-        collisions -- the loader checks PACK names."""
+        does not encode it they collide; the loader rejects that, so a set this tool
+        emits must encode the knob rather than lean on the rejection."""
         result, out = _run_parity(
             tmp_path, "--knobs", '{"use_exp2_fast": [0, 1]}', name="n.yaml"
         )
@@ -424,9 +442,7 @@ class TestTheShippingCrossProduct:
             pytest.skip("dispatcher unavailable")
         import yaml
 
-        names = [
-            k["name"] for k in yaml.safe_load(out.read_text())["packs"][0]["kernels"]
-        ]
+        names = [k["name"] for k in _emitted_kernels(out)]
         assert len(names) == len(set(names))
 
     def test_an_undeclared_knob_is_refused_not_crossed(self, tmp_path):
@@ -463,7 +479,7 @@ class TestTheShippingCrossProduct:
             pytest.skip("dispatcher unavailable")
         import yaml
 
-        kernels = yaml.safe_load(out.read_text())["packs"][0]["kernels"]
+        kernels = _emitted_kernels(out)
         by_shape = {}
         for kernel in kernels:
             by_shape.setdefault(kernel["name"].rsplit(".", 1)[0], set()).add(

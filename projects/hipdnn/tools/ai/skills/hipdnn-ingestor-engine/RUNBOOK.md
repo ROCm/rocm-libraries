@@ -574,16 +574,30 @@ Cover each capability once, then spend what remains on tuning variants for the
 configurations that matter. Say what you pruned and why.
 
 **Once the set is driven by tuning axes rather than a handful of shapes, do not enumerate
-it by hand.** A pack may declare `axes:` plus a `kernel_template:` and the loader expands
-the cross-product at load time into ordinary kernels — nothing downstream can tell the
-difference. `configs/axes_example.yaml` is the worked example. Enumerating instead is what
-turns a config into a six-figure-line diff that no build step reads and nobody can review:
-the information content is the axes and the shape source, roughly thirty lines. Axis values
-are written into both `spec` and `metadata` and the expanded names encode every axis, so
-they cannot collide.
+it by hand.** Two forms collapse the enumeration at load time into ordinary kernels —
+nothing downstream can tell the difference:
 
-**A large generated config compresses about 40-50x, and the loader reads `.gz`
-transparently.** Commit `configs/$SLUG.yaml.gz` rather than the raw YAML.
+- `axes:` plus a `kernel_template:` crosses ONE template with a few value lists.
+  `configs/axes_example.yaml` is the worked example.
+- `variants:` crosses a SHAPE LIST with per-shape named knob sets. That is the form a
+  dispatcher-derived set takes, because `dispatch_parity.py` asks the library for a spec
+  per shape and every shape carries its own resolved values — there is no one template to
+  cross. `configs/variants_example.yaml` is the worked example, and
+  `dispatch_parity.py --out` emits this form directly.
+
+Enumerating instead is what turns a config into a six-figure-line diff that no build step
+reads and nobody can review: the largest shipped gfx942 set was 89,265 lines for 2,710
+kernels, and about 1,150 in `variants` form. Under `axes` the expanded name encodes every
+axis by construction. Under `variants` the template is yours to write: it must encode
+everything that varies, and the loader rejects a pack whose expansion produces two kernels
+with the same name.
+
+**Commit the config as PLAIN TEXT.** The loader still reads `.gz` transparently, but
+compressing a generated set is not the fix for its size — it is how an unreviewable file
+got committed in the first place. The config is the one file in a descriptor PR worth
+reviewing, because the descriptors are its deterministic output. To convert a config that
+is already enumerated, run `tools/factorise_config.py`, which refuses to write anything
+that does not re-expand to the input kernel-for-kernel.
 
 **When the axes are not orthogonal.** The guidance above assumes axes that cross freely.
 Many kernels are not like that: features can be mutually exclusive in non-obvious ways, so

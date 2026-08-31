@@ -420,6 +420,37 @@ def build_config(
     }
 
 
+def _compact(config: dict, knob_fields: list, profile: dict) -> str:
+    """The enumerated config, rewritten as `variants` and rendered.
+
+    A fully-enumerated set is one YAML block per kernel: the largest shipped gfx942
+    attention_dense config was 89,265 lines for 2,710 kernels, and a config nobody
+    can read is a config nobody checks -- while being the ONE file in a descriptor
+    PR worth reviewing, since the descriptors are its deterministic output.
+
+    Shared with the retrofit path (`factorise_config.py`) rather than reimplemented,
+    so the two cannot disagree about what a compact config means. The factoriser
+    verifies its own output by re-expanding it, so a set that cannot be compacted
+    losslessly fails here instead of shipping a config that generates something else.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from factorise_config import FactoriseError, _round_trip, dump, factorise
+
+    try:
+        compact = factorise(config, list(knob_fields), profile.get("vocabulary") or {})
+        # Not optional. The compact form is what ships, so it has to be checked
+        # against the enumeration it stands for -- and that check is also what
+        # catches a kernel-name collision before the loader's own uniqueness check
+        # rejects the whole pack -- and it names the inference that caused it.
+        _round_trip(config, compact)
+    except FactoriseError as exc:
+        raise ParityError(
+            f"the emitted set could not be written in the compact `variants` form: "
+            f"{exc}"
+        )
+    return dump(compact)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate the dispatcher-resolved variant set (stage 1 parity).",
@@ -499,11 +530,6 @@ def main(argv=None) -> int:
 
     if args.out:
         try:
-            import yaml
-        except ImportError:  # pragma: no cover - environment-dependent
-            print("FAIL: PyYAML is needed to write a config.", file=sys.stderr)
-            return 2
-        try:
             knobs = json.loads(args.knobs) if args.knobs else {}
             if not isinstance(knobs, dict):
                 raise ParityError(
@@ -511,13 +537,24 @@ def main(argv=None) -> int:
                     f"values, got {type(knobs).__name__}."
                 )
             config = build_config(resolutions, profile, knobs)
+            # Emit the COMPACT form. build_config stays the source of truth --
+            # every spec field the dispatcher set, written out, never transcribed --
+            # and factorise_config collapses the result into the shape x knob-set
+            # form a reviewer can read. One mechanism, not two: the factoriser
+            # re-expands what it wrote and refuses to emit anything that does not
+            # reproduce the enumeration kernel-for-kernel, so the compact config and
+            # the longhand one it stands for cannot drift.
+            #
+            # The knob axes are exactly --knobs: the dispatcher returns ONE spec per
+            # shape, so those are the only fields that vary within a shape.
+            text = _compact(config, sorted(knobs), profile)
         except json.JSONDecodeError as exc:
             print(f"FAIL: --knobs is not valid JSON: {exc}", file=sys.stderr)
             return 2
         except ParityError as exc:
             print(f"FAIL: {exc}", file=sys.stderr)
             return 2
-        Path(args.out).write_text(yaml.safe_dump(config, sort_keys=False))
+        Path(args.out).write_text(text)
         count = len(config["packs"][0]["kernels"])
         if knobs:
             arms = math.prod(len(v) for v in knobs.values())

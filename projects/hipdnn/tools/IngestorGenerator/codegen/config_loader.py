@@ -15,6 +15,7 @@ generation.md`` §3 and ``06-gotchas.md``.
 
 import gzip
 import itertools
+import re
 import warnings as _warnings
 from pathlib import Path
 
@@ -57,12 +58,11 @@ class ConfigError(Exception):
 def load_config(path: Path) -> IngestorConfig:
     """Load and validate a YAML config file, returning an ``IngestorConfig``.
 
-    A ``.gz`` path is decompressed transparently. Enumerated variant sets are large
-    -- one YAML block per kernel, and a sweep runs to thousands -- but they are also
-    almost entirely repetition, so they compress 40-50x. Committing the compressed
-    form keeps the config beside the descriptors it generates instead of stranding it
-    outside the repo, which matters because generation is deterministic: the config
-    is the source of truth and the descriptor set is its output.
+    A ``.gz`` path is decompressed transparently. That is a capability, not the
+    expected shipping form: a generated variant set belongs in the repo as plain text
+    a reviewer can read, because generation is deterministic and the config -- not the
+    descriptor set -- is the source of truth. See ``variants`` below for the form that
+    keeps a generated set readable at that size.
 
     Raises ``ConfigError`` on any structural problem or failed pre-mint
     check. No UUID is minted here or anywhere reachable from here --
@@ -137,8 +137,14 @@ def load_config(path: Path) -> IngestorConfig:
         # hand-authored ones -- so it composes with `kernel_defaults` for free and
         # generator.py, the emitters and the dedup pass need no changes at all.
         axis_kernels_raw = _expand_axis_kernels(pack_raw, kmd_field_names)
+        # `variants` collapses the OTHER shape of repetition: a set where every
+        # shape carries its own dispatcher-resolved spec, so there is no single
+        # kernel_template for `axes` to cross. See `_expand_variant_kernels`.
+        variant_kernels_raw = _expand_variant_kernels(pack_raw, kmd_field_names)
         kernels = []
-        for kernel_raw in list(pack_raw.get("kernels", [])) + axis_kernels_raw:
+        for kernel_raw in (
+            list(pack_raw.get("kernels", [])) + axis_kernels_raw + variant_kernels_raw
+        ):
             for required in ("name", "kernel_source"):
                 if required not in kernel_raw:
                     raise ConfigError(
@@ -199,6 +205,7 @@ def load_config(path: Path) -> IngestorConfig:
                     arch=list(kernel_raw.get("arch", [])),
                 )
             )
+        _check_kernel_names_unique(kernels, pack_raw["name"])
         packs.append(
             PackSpec(
                 name=pack_raw["name"],
@@ -229,6 +236,48 @@ def load_config(path: Path) -> IngestorConfig:
     _validate_config(config)
 
     return config
+
+
+def _check_kernel_names_unique(kernels: list, pack_name: str) -> None:
+    """Every kernel in a pack has its own name -- hand-authored or expanded.
+
+    NOTHING downstream catches a collision. The loader's other checks cover PACK
+    name uniqueness, and the de-duplication pass in ``generator.py`` keys on the
+    resolved METADATA rather than the name, so two entries that share a name but
+    differ in metadata are emitted as two descriptors the runtime cannot tell apart
+    -- in a log, in a winner record, or in a failure message. Two entries that share
+    a name AND metadata are worse: the survivor is whichever came first, silently.
+
+    That is not hypothetical. A previous version of the naming code hardcoded a
+    subset of attention's field names and, on any other op, found none of them and
+    gave two distinct conv variants the same name.
+
+    The check lives here rather than beside a name TEMPLATE because a name can also
+    be hand-authored, and because a template that is injective over the fields it
+    renders is still not injective if two shapes differ only in a field the template
+    omits. Only the rendered result proves it.
+    """
+    seen: dict = {}
+    collisions: dict = {}
+    for kernel in kernels:
+        if kernel.name in seen:
+            collisions.setdefault(kernel.name, 1)
+            collisions[kernel.name] += 1
+        seen[kernel.name] = kernel
+    if not collisions:
+        return
+    shown = ", ".join(
+        f"{name!r} x{count}" for name, count in sorted(collisions.items())[:3]
+    )
+    more = f" (+{len(collisions) - 3} more)" if len(collisions) > 3 else ""
+    raise ConfigError(
+        f"pack '{pack_name}' declares {len(collisions)} duplicated kernel name(s): "
+        f"{shown}{more}. Kernel names must be unique within a pack: nothing "
+        f"downstream catches a collision, so the entries ship as descriptors that "
+        f"cannot be told apart in a log or a failure message. If these came from a "
+        f"'variants' group, its name template omits a field the shapes differ in -- "
+        f"add that field to the template, or a per-arm 'tag' that distinguishes them."
+    )
 
 
 def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
@@ -356,6 +405,342 @@ def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
     return expanded
 
 
+def _require_sequence(value, scope: str) -> list:
+    """A key the loader is about to iterate as a list of names must be one.
+
+    A bare string is the trap: `policy_knobs: use_exp2_fast` is valid YAML and
+    iterates as CHARACTERS, so the knob is never recognised and the specific
+    policy-knob diagnostic never fires. `spec_order: dtype` is worse -- it silently
+    reorders nothing, and key order is part of the descriptor bytes.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str) or not isinstance(value, (list, tuple)):
+        raise ConfigError(
+            f"{scope} must be a list of field names; got "
+            f"{type(value).__name__} ({value!r}). A bare string iterates as "
+            f"characters, which silently does nothing."
+        )
+    return list(value)
+
+
+def _drop_tag_slot(match) -> str:
+    """Replace a `{tag}` slot and ONE adjacent separator when the tag is empty.
+
+    `_x_` -> `_`, `_x` -> `` , `x_` -> ``, `x` -> ``. Keeping one separator when the
+    slot sits between two rendered parts is what stops `a_{tag}_b` becoming `ab`.
+    """
+    text = match.group(0)
+    leading = text.startswith("_")
+    trailing = text.endswith("_")
+    return "_" if leading and trailing else ""
+
+
+#: A ``knob_set`` arm's own keys, which are NOT spec fields. Everything else in
+#: an arm is written into the kernel's ``kernel_source.spec``.
+_ARM_CONTROL_KEYS = frozenset({"tag", "ordinal_offset", "metadata"})
+#: A shape entry's own keys, likewise not spec fields.
+_SHAPE_CONTROL_KEYS = frozenset({"knobs", "resolved", "ordinal"})
+
+
+def _expand_variant_kernels(pack_raw: dict, kmd_field_names: set) -> list:
+    """Expand a pack's ``variants`` groups into ordinary kernel dicts, at load
+    time, so ``generator.py``, the emitters and the dedup pass see exactly the
+    shape a hand-authored kernel produces and need no changes.
+
+    WHY NOT ``axes``. ``axes`` crosses ONE ``kernel_template``, which fits a sweep
+    over a single base kernel. A dispatcher-derived variant set does not look like
+    that: ``dispatch_parity.py`` asks the library for a spec PER SHAPE, so every
+    shape carries its own resolved values for the fields the dispatcher derives
+    (``waves_per_eu`` and ``persistent`` on gfx942 attention_dense). There is no one
+    template to cross. Forcing it into ``axes`` would mean either crossing those
+    derived fields as axes -- which manufactures combinations the dispatcher would
+    never resolve to, the exact mistake ``--report-knobs`` exists to prevent -- or
+    one ``axes`` block per shape, which is the enumeration again with extra syntax.
+
+    So a group is a shape LIST crossed per-shape with a NAMED knob set. The set is
+    not a grid: on the shipped gfx942 sets most shapes carry four arms and 63 carry
+    six, and a format that assumed a clean cross-product would silently drop the
+    difference.
+
+    THE TRI-STATE. A knob absent from an arm is absent from the emitted
+    ``kernel_source.spec``, which is what tells the builder "your own policy decides
+    this at build time". That is NOT the same as pinning it to ``false``, and both
+    reach the metadata as the same ``0``. The distinction decides which binary is
+    compiled, so the shape states the policy's answer under ``resolved`` and the arm
+    states an override by naming the knob; a format collapsing the two into one
+    boolean axis would throw the policy away silently.
+
+    Returns ``[]`` if the pack declares no ``variants``.
+    """
+    groups = pack_raw.get("variants")
+    pack_name = pack_raw.get("name", "<unnamed>")
+    if not groups:
+        return []
+    if not isinstance(groups, list):
+        raise ConfigError(
+            f"pack '{pack_name}' 'variants' must be a list of groups, got "
+            f"{type(groups).__name__}."
+        )
+    expanded = []
+    for position, group in enumerate(groups):
+        expanded.extend(
+            _expand_one_variant_group(group, position, pack_name, kmd_field_names)
+        )
+    return expanded
+
+
+def _expand_one_variant_group(
+    group: dict, position: int, pack_name: str, kmd_field_names: set
+) -> list:
+    """One ``variants[]`` group -> the kernel dicts it stands for."""
+    where = f"pack '{pack_name}' variants[{position}]"
+    if not isinstance(group, dict):
+        raise ConfigError(f"{where} must be a mapping, got {type(group).__name__}.")
+    unknown = sorted(set(group) - _KNOWN_VARIANT_GROUP)
+    if unknown:
+        raise ConfigError(
+            f"{where} declares {unknown}, which this loader does not read. Known "
+            f"keys: {sorted(_KNOWN_VARIANT_GROUP)}."
+        )
+    for required in ("name", "metadata", "knob_sets", "shapes"):
+        if required not in group:
+            raise ConfigError(f"{where} is missing required key '{required}'.")
+
+    name_template = group["name"]
+    metadata_fields = list(group["metadata"])
+    vocabulary = dict(group.get("vocabulary") or {})
+    # Knobs whose value the KERNEL'S OWN POLICY decides when the spec leaves them
+    # absent. Naming them here is what makes "absent" legible as a third state
+    # rather than as a missing key: each shape must then state what the policy
+    # resolved to, so the metadata the matcher compares still describes the binary.
+    policy_knobs = set(
+        _require_sequence(group.get("policy_knobs"), f"{where} policy_knobs")
+    )
+    # A key naming a field the group does not emit has NO effect, and the silence is
+    # the whole problem: a mistyped `vocabulary` entry leaves the builder's spelling
+    # in the metadata, which loads cleanly, reconciles on every count, and matches
+    # nothing. Cheaper to reject than to debug.
+    for label, names in (
+        ("vocabulary", sorted(vocabulary)),
+        ("policy_knobs", sorted(policy_knobs)),
+    ):
+        stray = [n for n in names if n not in metadata_fields]
+        if stray:
+            raise ConfigError(
+                f"{where} {label} names {stray}, which this group's 'metadata' list "
+                f"does not carry, so it would have no effect. Declared metadata: "
+                f"{metadata_fields}."
+            )
+    spec_order = list(_require_sequence(group.get("spec_order"), f"{where} spec_order"))
+    # Spec fields constant across THIS group. Pack-level `kernel_defaults.spec`
+    # already hoists what is constant across every kernel; a group needs its own
+    # because the key ORDER of the emitted spec differs between groups of one set,
+    # and order is part of the descriptor bytes.
+    if group.get("spec_defaults") is not None:
+        _require_mapping(group["spec_defaults"], f"{where} spec_defaults")
+    spec_defaults = dict(group.get("spec_defaults") or {})
+    for field_name, mapping in vocabulary.items():
+        _require_mapping(mapping, f"{where} vocabulary['{field_name}']")
+
+    undeclared = sorted(set(metadata_fields) - kmd_field_names)
+    if undeclared:
+        raise ConfigError(
+            f"{where} lists {undeclared} in 'metadata', which no kmd_fields entry "
+            f"declares. An undeclared metadata field drops the WHOLE pack at "
+            f"resolveDescriptorSets(), so expansion must not manufacture one."
+        )
+
+    knob_sets = group["knob_sets"]
+    if not isinstance(knob_sets, dict) or not knob_sets:
+        raise ConfigError(
+            f"{where} 'knob_sets' must be a non-empty mapping of set name to a "
+            f"non-empty list of arms."
+        )
+    for set_name, arms in knob_sets.items():
+        if not isinstance(arms, list) or not arms:
+            raise ConfigError(
+                f"{where} knob_set '{set_name}' must be a non-empty list of arms, "
+                f"got {arms!r}. An empty set expands its shapes to ZERO kernels "
+                f"instead of failing here."
+            )
+
+    expanded = []
+    for index, shape in enumerate(group["shapes"]):
+        shape_where = f"{where} shapes[{index}]"
+        if not isinstance(shape, dict):
+            raise ConfigError(
+                f"{shape_where} must be a mapping, got {type(shape).__name__}."
+            )
+        set_name = shape.get("knobs")
+        if set_name not in knob_sets:
+            raise ConfigError(
+                f"{shape_where} names knob_set {set_name!r}, which this group does "
+                f"not declare. Declared: {sorted(knob_sets)}."
+            )
+        # A near-miss control key -- `ordinl` for `ordinal`, `resolvd` for
+        # `resolved` -- would otherwise fall through into the SPEC, changing the
+        # binary the descriptor names while the config still loads. When the group
+        # declares `spec_order` it has already enumerated its spec fields, so anything
+        # else is a typo. Groups without one are unconstrained, since nothing there
+        # says what the field set should be.
+        if spec_order:
+            allowed = set(spec_order) | set(spec_defaults) | _SHAPE_CONTROL_KEYS
+            stray = sorted(k for k in shape if k not in allowed)
+            if stray:
+                raise ConfigError(
+                    f"{shape_where} declares {stray}, which is neither a control key "
+                    f"({sorted(_SHAPE_CONTROL_KEYS)}) nor a field named in this "
+                    f"group's spec_order. A misspelled control key becomes a spec "
+                    f"field silently, which changes the binary the descriptor names."
+                )
+        if shape.get("resolved") is not None:
+            _require_mapping(shape["resolved"], f"{shape_where} resolved")
+        resolved = dict(shape.get("resolved") or {})
+        ordinal = shape.get("ordinal", 0)
+        shape_spec = {
+            **spec_defaults,
+            **{
+                key: value
+                for key, value in shape.items()
+                if key not in _SHAPE_CONTROL_KEYS
+            },
+        }
+        for arm in knob_sets[set_name]:
+            expanded.append(
+                _expand_one_arm(
+                    arm,
+                    shape_spec,
+                    resolved,
+                    ordinal,
+                    name_template,
+                    metadata_fields,
+                    vocabulary,
+                    policy_knobs,
+                    spec_order,
+                    shape_where,
+                )
+            )
+    return expanded
+
+
+def _expand_one_arm(
+    arm: dict,
+    shape_spec: dict,
+    resolved: dict,
+    ordinal: int,
+    name_template: str,
+    metadata_fields: list,
+    vocabulary: dict,
+    policy_knobs: set,
+    spec_order: list,
+    shape_where: str,
+) -> dict:
+    """One (shape, arm) pair -> one kernel dict."""
+    if not isinstance(arm, dict):
+        raise ConfigError(
+            f"{shape_where}: every knob_set arm must be a mapping, got "
+            f"{type(arm).__name__}."
+        )
+    if arm.get("metadata") is not None:
+        # Easy to get wrong: a group's `metadata` IS a list of field names, while an
+        # arm's is a mapping of field to value. Same key, one level apart.
+        _require_mapping(arm["metadata"], f"{shape_where}: knob_set arm metadata")
+    arm_metadata = dict(arm.get("metadata") or {})
+    arm_spec = {k: v for k, v in arm.items() if k not in _ARM_CONTROL_KEYS}
+    spec = {**shape_spec, **arm_spec}
+    if spec_order:
+        # The emitted spec's KEY ORDER is part of the descriptor bytes, and the
+        # shipped sets were written in an order that is neither the shape's nor
+        # sorted. Stating it once per group reproduces those bytes without
+        # reordering the config to match.
+        ordered = {key: spec[key] for key in spec_order if key in spec}
+        ordered.update({k: v for k, v in spec.items() if k not in ordered})
+        spec = ordered
+
+    metadata = {}
+    for field_name in metadata_fields:
+        if field_name in arm_metadata:
+            # The arm states the matcher-visible value directly. This is how a knob
+            # the SPEC does not carry gets swept: the dispatcher returns the shared
+            # spec and leaves arch-private knobs to the kernel's policy, so pinning
+            # one changes which descriptor the matcher selects without changing the
+            # binary the spec builds. The two arms are genuinely different catalog
+            # entries over the same kernel, and the config has to be able to say so.
+            value = arm_metadata[field_name]
+        elif field_name in spec:
+            value = spec[field_name]
+        elif field_name in resolved:
+            # Absent from the spec but known: either the kernel's own policy decided
+            # it at build time (a `policy_knobs` tri-state), or it is an arch-private
+            # field the shared spec never carries while the builder's own default
+            # does. Either way the binary is definite, and the shape says what it is.
+            # Without this the loader would substitute the KMD default_value as the
+            # catalog key while the kernel was compiled from something else -- two
+            # independent defaults that are not required to agree, and whose
+            # disagreement is silent.
+            value = resolved[field_name]
+        elif field_name in policy_knobs:
+            raise ConfigError(
+                f"{shape_where}: '{field_name}' is a policy knob left absent "
+                f"from the spec, so the kernel's own policy decides it at build "
+                f"time -- but this shape's 'resolved' block does not say what it "
+                f"decided. The matcher compares metadata, and an absent knob "
+                f"resolves to the KMD default_value, which can select a "
+                f"different binary than the descriptor was built from."
+            )
+        else:
+            raise ConfigError(
+                f"{shape_where}: metadata field '{field_name}' is in neither the "
+                f"shape, the arm, nor 'resolved'. Nothing here decides its value."
+            )
+        if isinstance(value, bool):
+            value = int(value)
+        if field_name in vocabulary and isinstance(value, str):
+            # The matcher compares the hipDNN spelling; the spec carries the
+            # builder's. Copying one over the other declines every graph while the
+            # engine still loads and every count reconciles.
+            value = vocabulary[field_name].get(value, value)
+        metadata[field_name] = value
+
+    # The name must be injective over everything that varies. `_check_kernel_names_
+    # unique` enforces that over the whole expansion, because nothing after this does:
+    # dedup keys on metadata rather than name, so a collision reaching it would ship
+    # as descriptors nothing can tell apart in a log, a winner record or a failure
+    # message.
+    # A bool renders as `True`/`False` under str.format, but every shipped grammar
+    # spells these flags `c1`/`p0`. Normalise so a template slot for `causal` reads
+    # the same as the metadata mirror of the same field.
+    fields = {k: int(v) if isinstance(v, bool) else v for k, v in spec.items()}
+    fields.update({f"md_{k}": v for k, v in metadata.items()})
+    fields["ordinal"] = ordinal + arm.get("ordinal_offset", 0)
+    try:
+        fields["tag"] = str(arm.get("tag", "")).format(**fields)
+        template = name_template
+        if not fields["tag"]:
+            # An empty tag would leave `..._p0__e1` or a trailing `_`. Drop ONE
+            # adjacent separator from the TEMPLATE, where the slot's position is
+            # known, rather than squeezing the rendered name: a rendered-name fixup
+            # cannot tell its own separator from one inside a value, so it collapses
+            # a legitimate `a__b` and can land two distinct kernels on one name.
+            template = re.sub(r"_?\{tag\}_?", _drop_tag_slot, template, count=1)
+        name = template.format(**fields)
+    except KeyError as exc:
+        raise ConfigError(
+            f"{shape_where}: the group's name template or tag names {exc}, which "
+            f"neither the shape, the arm nor the resolved metadata provides. A name "
+            f"built from a field that is not there cannot be unique."
+        )
+    except (ValueError, IndexError, AttributeError) as exc:
+        raise ConfigError(
+            f"{shape_where}: the group's name template {name_template!r} (tag "
+            f"{arm.get('tag', '')!r}) could not be rendered: {exc}. Every slot must "
+            f"be a plain {{field}} naming a spec field, an md_<field> metadata "
+            f"mirror, {{tag}} or {{ordinal}}."
+        )
+    return {"name": name, "kernel_source": {"spec": spec}, "metadata": metadata}
+
+
 def _reject_deprecated_dict_key(
     raw_items: list, key: str, item_label_key: str, message: str
 ) -> None:
@@ -424,6 +809,21 @@ _KNOWN_PACK = frozenset(
         "discriminator",
         "axes",
         "kernel_template",
+        "variants",
+    }
+)
+#: One ``variants[]`` group's keys. Closed for the same reason every other level
+#: is: a typo'd key here silently expands to something other than what was meant.
+_KNOWN_VARIANT_GROUP = frozenset(
+    {
+        "name",
+        "metadata",
+        "knob_sets",
+        "shapes",
+        "vocabulary",
+        "policy_knobs",
+        "spec_defaults",
+        "spec_order",
     }
 )
 _KNOWN_KERNEL = frozenset({"name", "kernel_source", "metadata", "priority", "arch"})
