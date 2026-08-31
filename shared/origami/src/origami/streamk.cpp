@@ -350,9 +350,16 @@ size_t grid_k_split_aware(const problem_t& problem,
   auto causes_partial_cachelines = [&](size_t candidate_grid) -> bool {
     constexpr size_t CACHE_LINE_BYTES = 128;
     if (candidate_grid == 0 || iters_per_tile == 0) return false;
-    const size_t iters_total    = num_iters_total(tiles, iters_per_tile);
-    const size_t iters_per_cta  = num_iters_per_cta(iters_total, candidate_grid);
-    const size_t fragment_iters = iters_per_cta % iters_per_tile;
+    const size_t iters_total       = num_iters_total(tiles, iters_per_tile);
+    // SK distributes iters_total across CTAs: some get ceil, some get floor.
+    // Both must land on complete-tile boundaries.  The original check only
+    // validated ceil — missing the floor case, which causes partial tile
+    // fragments and cache-line misalignment for those CTAs.
+    const size_t iters_ceil        = num_iters_per_cta(iters_total, candidate_grid);
+    const size_t iters_floor       = iters_total / candidate_grid;
+    // Use the more conservative (floor) fragment for the alignment test.
+    const size_t fragment_iters    = std::max(iters_ceil % iters_per_tile,
+                                              iters_floor % iters_per_tile);
     const size_t bpe_a          = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
     const size_t bpe_b          = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
     const size_t a_contig_bytes = (problem.a_transpose == transpose_t::T)
@@ -438,6 +445,48 @@ size_t grid_k_split_aware(const problem_t& problem,
   if (tiles % sk_grid != 0 && tile_size * sk_grid > config.workspace_size) sk_grid = tiles;
 
   return sk_grid;
+}
+
+size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
+                                          size_t tiles,
+                                          size_t iters_per_tile,
+                                          size_t cu_count,
+                                          size_t batch) {
+  if (sk_grid == 0 || sk_grid >= tiles) return sk_grid;
+
+  // Batched GEMMs benefit from SK tile-streaming: consecutive batch tiles share
+  // the same A/B operand data, keeping it warm in L1/L2 across iterations.
+  // Forcing DP destroys this cross-tile reuse.  Skip all corrections for batch > 1.
+  if (batch > 1) return sk_grid;
+
+  // iters_per_tile == 1: pure tile-streaming (no K-split).  For non-batched
+  // large-N streaming shapes, N-tiles have disjoint B data so DP's spatial
+  // locality wins when there are enough tiles to keep all CUs busy.
+  if (iters_per_tile <= 1) {
+    if (cu_count > 0 && tiles >= cu_count * 2) return tiles;
+    return sk_grid;
+  }
+
+  // For K-splitting shapes: force DP only when DP achieves high CU efficiency
+  // (≥ 90%).  Below 90% SK's better utilization outweighs the partial-tile
+  // workspace overhead.  Empirical calibration:
+  //   tiles=419/224 = 1.87 waves, DP_eff=93.5% → DP better (L2 thrashing in SK)
+  //   tiles=382/224 = 1.70 waves, DP_eff=85.3% → SK better (last DP wave 70% full)
+  if (cu_count > 0 && sk_grid >= cu_count) {
+    // SK fills all CUs.  Only force DP when the DP partial last-wave waste is
+    // small enough (≥ 80% efficiency) that workspace savings justify switching.
+    // When sk_grid < cu_count we fall through directly to the floor check:
+    // idle CUs + partial tiles is always worse than DP, but a clean small grid
+    // (sk_grid < cu_count but floor % ipt == 0) can legitimately stay in SK.
+    const size_t dp_waves    = (tiles + cu_count - 1) / cu_count;
+    const size_t dp_cu_steps = dp_waves * cu_count;
+    constexpr size_t DP_EFF_THRESHOLD = 80;
+    if (tiles * 100 < dp_cu_steps * DP_EFF_THRESHOLD) return sk_grid;
+  }
+
+  const size_t iters_total = tiles * iters_per_tile;
+  const size_t floor_iters = iters_total / sk_grid;
+  return (floor_iters % iters_per_tile != 0) ? tiles : sk_grid;
 }
 
 size_t select_grid_size(const problem_t& problem,
