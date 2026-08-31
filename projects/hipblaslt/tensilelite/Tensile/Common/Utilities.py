@@ -477,3 +477,40 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
         assert False, f"Unsupported datatype bitwidth: {dtypeBitWidth}"
     else:
         assert False, f"Unhandled WMMA: {wmma}"
+
+# Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
+SWIZZLE_LOAD_BYTES = 16
+
+def swizzleGeometry(solution, tc: str) -> dict:
+    """Layout of the pre-swizzled (pre-tiled) tensor `tc` ("A" or "B").
+
+    The tensor is a sequence of swizzle blocks; a block is one wave's global load, of
+    MI_{M|N} rows each holding laneSize contiguous unroll elements.
+
+    Lanes replicate across the wave on gfx10/gfx11 WMMA, so only WavefrontSize/dupFactor
+    lanes are distinct; dupFactor is 1 for MFMA and gfx12.
+
+    dtvLaneSize is what the DirectToVgpr emitter derives instead of laneSize. It equals
+    laneSize only for MFMA 16x16xK on wave64, which is every configuration gfx942 ships;
+    the emitter is not fixed here, so callers must reject DirectToVgpr where the two
+    disagree.
+
+    `solution` may be a partly derived state; only MIInputPerThread{tc}, MatrixInst{M,N,K},
+    WavefrontSize and ProblemType.DataType{tc} are read.
+    """
+    bpe       = int(solution["ProblemType"][f"DataType{tc}"].numBytes())
+    miInput   = solution[f"MIInputPerThread{tc}"]
+    miMorN    = solution["MatrixInstM"] if tc == "A" else solution["MatrixInstN"]
+    # Pack several MI steps into one load when one operand is narrower than a dwordx4.
+    packK     = max(1, SWIZZLE_LOAD_BYTES // miInput // bpe)
+    miOperand = miInput * packK
+    laneSize  = min(miOperand, SWIZZLE_LOAD_BYTES // bpe)
+    # Elements the wave holds vs. distinct elements the instruction consumes.
+    dupFactor = max(1, (solution["WavefrontSize"] * miInput) // (miMorN * solution["MatrixInstK"]))
+    lanesUsed = solution["WavefrontSize"] // dupFactor
+    return {
+        "packK":       packK,
+        "laneSize":    laneSize,
+        "swizzleK":    max(1, lanesUsed // miMorN) * laneSize,
+        "dtvLaneSize": (solution["MatrixInstK"] // 4) * packK,
+    }

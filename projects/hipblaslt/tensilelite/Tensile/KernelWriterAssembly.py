@@ -3590,7 +3590,7 @@ class KernelWriterAssembly(KernelWriter):
           swzBlockSize = swzMorN * swzStride
           vw = kernel[f"VectorWidth{tc}"]
           kPack = tP["swizzlePackK"]
-          laneSize = int(kernel["MatrixInstK"] / 4) * kPack  # the size of one swizzle's lane
+          laneSize = tP["swizzleDtvLaneSize"]  # the size of one swizzle's lane
 
           with self.allocTmpSgpr(2, tag="graTileOffsets_tmpSgprInfo") as tmpSgprInfo:
             swzBlkVWSizeSgpr = tmpSgprInfo.idx
@@ -3724,8 +3724,7 @@ class KernelWriterAssembly(KernelWriter):
         swzMorN = kernel["MatrixInstN"]
       swzStride = tP["swizzleK"]
       vw = kernel[f"VectorWidth{tc}"]
-      kPack = tP["swizzlePackK"]
-      laneSize = int(kernel["MatrixInstK"] / 4) * kPack  # the size of one swizzle's lane
+      laneSize = tP["swizzleDtvLaneSize"]  # the size of one swizzle's lane
       numElmInSwzBlk = swzMorN * swzStride
 
       # Calculate local index in a swizzled block

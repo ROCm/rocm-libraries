@@ -56,7 +56,7 @@ from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, log2, clusterEnabled, streamKMulticast
+  INDEX_CHARS, IsaVersion, log2, clusterEnabled, streamKMulticast, swizzleGeometry
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
@@ -10461,9 +10461,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["isSwizzled"] = (kernel["ProblemType"]["SwizzleTensorB"] and tP["isB"]) or (kernel["ProblemType"]["SwizzleTensorA"] and tP["isA"])
 
     if tP["isSwizzled"]:
-      # 16 means bytes of buffer_load_dwordx4
-      tP["swizzlePackK"] = 16 // kernel["MIInputPerThread%s"%cM] // int(kernel["ProblemType"]["DataType%s"%cM].numBytes())
-      tP["swizzleK"] = kernel["MatrixInstK"] * tP["swizzlePackK"]
+      swz = swizzleGeometry(kernel, cM)
+      tP["swizzlePackK"]       = swz["packK"]
+      tP["swizzleK"]           = swz["swizzleK"]
+      tP["swizzleLaneSize"]    = swz["laneSize"]
+      tP["swizzleDtvLaneSize"] = swz["dtvLaneSize"]
 
   ##############################################################################
   # Global Read Addresses: Tile Assignment A/B

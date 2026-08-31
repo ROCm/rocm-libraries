@@ -36,7 +36,8 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    streamKMulticast, streamK2DMulticast
+                    streamKMulticast, streamK2DMulticast, \
+                    swizzleGeometry
 from Tensile.Common.DataType import DataType
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.CustomKernels import supportsUserSgprKernargPreload
@@ -3959,9 +3960,6 @@ class Solution(collections.abc.Mapping):
           optGRVW = int(16 // datatype.numBytes())
         return optGRVW
 
-      def calSwizzlePackK(state, tc):
-        return 16 // state[f"MIInputPerThread{tc}"] // int(state["ProblemType"][f"DataType{tc}"].numBytes())
-
       genGRVWA = False
       genGRVWB = False
       # Default GlobalReadVectorWidthA
@@ -3975,7 +3973,7 @@ class Solution(collections.abc.Mapping):
               reject(state, printRejectionReason, "GRVWA=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthA"] == -1:
             if state["ProblemType"]["SwizzleTensorA"]:
-              state["GlobalReadVectorWidthA"] = state["MIInputPerThreadA"] * calSwizzlePackK(state, "A")
+              state["GlobalReadVectorWidthA"] = swizzleGeometry(state, "A")["laneSize"]
             elif state["ProblemType"]["DataTypeA"].is6bitFloat():
               state["GlobalReadVectorWidthA"] = 32	  
             elif state["enableGLTrA"]:
@@ -4022,7 +4020,7 @@ class Solution(collections.abc.Mapping):
               reject(state, printRejectionReason, "GRVWB=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthB"] == -1:
             if state["ProblemType"]["SwizzleTensorB"]:
-              state["GlobalReadVectorWidthB"] = state["MIInputPerThreadB"] * calSwizzlePackK(state, "B")
+              state["GlobalReadVectorWidthB"] = swizzleGeometry(state, "B")["laneSize"]
             elif state["ProblemType"]["DataTypeB"].is6bitFloat():
               state["GlobalReadVectorWidthB"] = 32
             elif state["enableGLTrB"]:
@@ -4074,18 +4072,26 @@ class Solution(collections.abc.Mapping):
             state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], state["_DepthUMXSB"])
           state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], 16)
 
-      #for tensor swizzling, we calculate pack-k to achieve buffer_load_dwordx4
+      # One lane reads exactly one swizzle row per load, so GRVW is pinned to the lane size.
       for tc in ("A", "B",):
         if state["ProblemType"][f"SwizzleTensor{tc}"]:
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
-          # Print rejection reason instead of force set
-          # 16 means bytes of buffer_load_dwordx4
-          SwizzlePackK = calSwizzlePackK(state, tc)
-          if state[f"GlobalReadVectorWidth{tc}"] != state[f"MIInputPerThread{tc}"] * SwizzlePackK:
-            GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
-            MIInPerThread = state[f"MIInputPerThread{tc}"]
-            reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != MIInputPerThread{tc} ({MIInPerThread}) * {SwizzlePackK}")
+            continue
+          swz = swizzleGeometry(state, tc)
+          laneSize = swz["laneSize"]
+          GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
+          if GRVW_TC != laneSize:
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
+          # The DirectToVgpr address emitter derives the lane size as MatrixInstK/4 *
+          # packK, which only matches the real layout for MFMA 16x16xK on wave64. On
+          # gfx10/gfx11 WMMA the two disagree and the kernel walks the pre-tiled buffer
+          # with the wrong per-lane stride -- it assembles and runs, and every result is
+          # wrong. Reject instead; SwizzleGlobalLoadMode covers those targets.
+          if state[f"DirectToVgpr{tc}"] and swz["dtvLaneSize"] != laneSize:
+            reject(state, printRejectionReason,
+                   f"DirectToVgpr{tc} + SwizzleTensor{tc} needs the DirectToVgpr lane size "
+                   f"({swz['dtvLaneSize']}) to match the swizzle lane size ({laneSize})")
 
       if state["ProblemType"]["SwizzleTensorA"]:
         if not state["DirectToVgprA"]:
@@ -4379,14 +4385,12 @@ class Solution(collections.abc.Mapping):
           # swizzle
           if state["LocalSplitU"] > 1:
             if state["ProblemType"]["SwizzleTensorA"]:
-              SwizzlePackK = calSwizzlePackK(state, "A")
-              if depthUA < state["MatrixInstK"] * SwizzlePackK * state["LocalSplitU"]:
+              if depthUA < swizzleGeometry(state, "A")["swizzleK"] * state["LocalSplitU"]:
                 validDepthU = False
                 extraComment = ": DepthU(%u) < Min-DU for swizzleA + LSU(%u)"%(depthUA, state["LocalSplitU"])
 
             if state["ProblemType"]["SwizzleTensorB"]:
-              SwizzlePackK = calSwizzlePackK(state, "B")
-              if depthUB < state["MatrixInstK"] * SwizzlePackK * state["LocalSplitU"]:
+              if depthUB < swizzleGeometry(state, "B")["swizzleK"] * state["LocalSplitU"]:
                 validDepthU = False
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
 

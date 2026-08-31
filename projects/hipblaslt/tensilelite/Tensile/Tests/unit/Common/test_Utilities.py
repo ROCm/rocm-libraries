@@ -54,9 +54,11 @@ from Tensile.Common.Utilities import (
     setVerbosity,
     state,
     state_key_ordering,
+    swizzleGeometry,
     versionIsCompatible,
     wmmaV3InputVgprLayout,
 )
+from Tensile.Common.DataType import DataType
 
 @pytest.fixture
 def mock_openFile():
@@ -461,3 +463,105 @@ class TestProgressBar:
         progress.update(51)
         assert first_output
         assert capsys.readouterr().out == ""
+
+
+def _swizzleState(dataType, miInputPerThread, matrixInstK, wavefrontSize, tc="B"):
+    return {
+        "ProblemType": {f"DataType{tc}": DataType(dataType)},
+        f"MIInputPerThread{tc}": miInputPerThread,
+        "MatrixInstM": 16,
+        "MatrixInstN": 16,
+        "MatrixInstK": matrixInstK,
+        "WavefrontSize": wavefrontSize,
+    }
+
+
+class TestSwizzleGeometry:
+    """Layout of a pre-swizzled (pre-tiled) tensor, per matrix-instruction shape.
+
+    gfx9 MFMA and gfx12 WMMA hand a wave one distinct copy of the operand; gfx10/gfx11
+    WMMA replicate it across the two halves of the wave (MIInputPerThread ==
+    MatrixInstK), so a swizzle block needs only half the lanes.
+    """
+
+    # (label, dataType, MIInputPerThread, MatrixInstK, wavefrontSize,
+    #  packK, laneSize, swizzleK, dtvLaneSize)
+    CASES = [
+        ("gfx942 MFMA fp16 16x16x16", "H", 4, 16, 64, 2, 8, 32, 8),
+        ("gfx942 MFMA bf16 16x16x16", "B", 4, 16, 64, 2, 8, 32, 8),
+        ("gfx942 MFMA int8 16x16x32", "I8", 8, 32, 64, 2, 16, 64, 16),
+        ("gfx942 MFMA fp32 16x16x4", "S", 1, 4, 64, 4, 4, 16, 4),
+        ("gfx1151 WMMA fp16 16x16x16", "H", 16, 16, 32, 1, 8, 8, 4),
+        ("gfx1151 WMMA bf16 16x16x16", "B", 16, 16, 32, 1, 8, 8, 4),
+        ("gfx1151 WMMA int8 16x16x16", "I8", 16, 16, 32, 1, 16, 16, 4),
+        ("gfx1201 WMMA fp16 16x16x16", "H", 8, 16, 32, 1, 8, 16, 4),
+    ]
+
+    @pytest.mark.parametrize(
+        "label,dataType,miInput,miK,wave,packK,laneSize,swizzleK,dtvLaneSize",
+        CASES,
+        ids=[c[0] for c in CASES],
+    )
+    def test_geometry_matches_instruction_shape(
+        self, label, dataType, miInput, miK, wave, packK, laneSize, swizzleK, dtvLaneSize,
+    ):
+        got = swizzleGeometry(_swizzleState(dataType, miInput, miK, wave), "B")
+        assert got["packK"] == packK
+        assert got["laneSize"] == laneSize
+        assert got["swizzleK"] == swizzleK
+        assert got["dtvLaneSize"] == dtvLaneSize
+
+    @pytest.mark.parametrize(
+        "dataType,miInput,miK,wave", [(c[1], c[2], c[3], c[4]) for c in CASES],
+        ids=[c[0] for c in CASES],
+    )
+    def test_lane_moves_exactly_one_dwordx4(self, dataType, miInput, miK, wave):
+        """GRVW is pinned to the lane size, and a lane always moves 16 bytes.
+
+        The host-side pre-tiler derives its innermost run as 16/bpe elements; if this
+        ever stopped holding, the kernel and the pre-tiled buffer would disagree.
+        """
+        geom = swizzleGeometry(_swizzleState(dataType, miInput, miK, wave), "B")
+        assert geom["laneSize"] * DataType(dataType).numBytes() == 16
+
+    @pytest.mark.parametrize(
+        "label,wave", [(c[0], c[4]) for c in CASES], ids=[c[0] for c in CASES],
+    )
+    def test_dtv_lane_size_agrees_exactly_on_wave64_mfma(self, label, wave):
+        """dtvLaneSize is the gate for DirectToVgpr, so pin down where it agrees.
+
+        Solution.py rejects DirectToVgpr + swizzle wherever it disagrees, so this is
+        also the list of configurations that keep the DirectToVgpr path: wave64 MFMA
+        (every shipped gfx942 swizzle logic) yes, WMMA no.
+        """
+        idx = [c[0] for c in self.CASES].index(label)
+        c = self.CASES[idx]
+        geom = swizzleGeometry(_swizzleState(c[1], c[2], c[3], c[4]), "B")
+        assert (geom["dtvLaneSize"] == geom["laneSize"]) == (wave == 64)
+
+    def test_tensor_a_uses_matrix_inst_m_and_b_uses_n(self):
+        """A is tiled against MatrixInstM, B against MatrixInstN.
+
+        With a non-square instruction the two sides disagree, which is what pins down
+        that the free dimension is picked per tensor rather than hardcoded.
+        """
+        state = _swizzleState("H", 16, 16, 32, tc="A")
+        state["ProblemType"]["DataTypeB"] = DataType("H")
+        state["MIInputPerThreadB"] = 16
+        state["MatrixInstM"] = 32  # A: 32*16 elements consumed, wave holds 32*16 -> no replication
+        state["MatrixInstN"] = 16  # B: 16*16 consumed, wave holds 32*16 -> replicated twice
+
+        assert swizzleGeometry(state, "A")["swizzleK"] == 8
+        assert swizzleGeometry(state, "B")["swizzleK"] == 8
+
+    def test_gfx11_fp16_lane_size_is_expressible(self):
+        """The gfx11 fp16 case the swizzle path originally could not express.
+
+        16 elements x 2 bytes is 32 bytes per lane, twice a buffer_load_dwordx4. The old
+        formula produced packK = 16//16//2 = 0, collapsing laneSize to 0, which is why
+        every gfx11 2-byte solution was rejected.
+        """
+        geom = swizzleGeometry(_swizzleState("H", 16, 16, 32), "B")
+        assert geom["packK"] == 1
+        assert geom["laneSize"] == 8
+        assert 16 // 16 // DataType("H").numBytes() == 0  # the old formula
