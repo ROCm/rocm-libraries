@@ -80,235 +80,254 @@ inline auto scan_impl(void*               temporary_storage,
     const auto use_sleepy_scan_variant
         = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(use_sleepy_scan);
 
+    using Selector = scan_config_selector<AccType>;
+
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
-            using scan_state_type = detail::lookback_scan_state<AccType, use_sleepy_scan>;
-            using block_id_type   = detail::block_id_wrapper<unsigned int, use_atomic_block_id>;
-            scan_state_type scan_state;
+            using block_id_type = detail::block_id_wrapper<unsigned int, use_atomic_block_id>;
             block_id_type   block_id;
 
-            using Selector = scan_config_selector<AccType>;
-
-            const target current_target(stream);
-
-            const auto params = get_config<Selector>(Config{}, current_target);
-
-            const unsigned int block_size       = params.kernel_config.block_size;
-            const unsigned int items_per_thread = params.kernel_config.items_per_thread;
-            const unsigned int items_per_block  = block_size * items_per_thread;
-
-            const size_t size_limit         = params.kernel_config.size_limit;
-            const size_t aligned_size_limit = ::rocprim::max<size_t>(
-                size_limit - (size_limit % static_cast<size_t>(items_per_block)),
-                items_per_block);
-            size_t     limited_size     = std::min<size_t>(size, aligned_size_limit);
-            const bool use_limited_size = limited_size == aligned_size_limit;
-
-            unsigned int number_of_blocks = (limited_size + items_per_block - 1) / items_per_block;
-
-            // Pointer to array with block_prefixes
-            void*    scan_state_storage;
-            AccType* previous_last_element;
-            AccType* new_last_element;
-
-            detail::temp_storage::layout layout{};
-            ROCPRIM_RETURN_ON_ERROR(
-                scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
-
-            void* block_id_storage;
-
-            ROCPRIM_RETURN_ON_ERROR(detail::temp_storage::partition(
-                temporary_storage,
-                storage_size,
-                detail::temp_storage::make_linear_partition(
-                    // This is valid even with offset_scan_state_with_sleep_type
-                    detail::temp_storage::make_partition(&scan_state_storage, layout),
-                    detail::temp_storage::ptr_aligned_array(&previous_last_element,
-                                                            use_limited_size ? 1 : 0),
-                    detail::temp_storage::ptr_aligned_array(&new_last_element,
-                                                            use_limited_size ? 1 : 0),
-                    detail::temp_storage::make_partition(
-                        &block_id_storage,
-                        block_id_type::get_temp_storage_layout()))));
-
-            if(temporary_storage == nullptr || number_of_blocks == 0u)
-            {
-                return hipSuccess;
-            }
-
-            // Start point for time measurements
-            std::chrono::steady_clock::time_point start;
-
-            if(number_of_blocks > 1 || use_limited_size)
-            {
-                // Create and initialize lookback_scan_state obj
-                ROCPRIM_RETURN_ON_ERROR(
-                    scan_state.create(scan_state, scan_state_storage, number_of_blocks, stream));
-                block_id = block_id.create(block_id_storage);
-                if(debug_synchronous)
+            ROCPRIM_RETURN_ON_ERROR(::rocprim::detail::visit_config<Config, scan_targets>(
+                stream,
+                [&](auto launcher, auto config, auto target, auto /* wavefront */)
                 {
-                    start = std::chrono::steady_clock::now();
-                }
-
-                const size_t number_of_launch = (size + limited_size - 1) / limited_size;
-                for(size_t i = 0, offset = 0; i < number_of_launch; i++, offset += limited_size)
-                {
-                    size_t current_size = std::min<size_t>(size - offset, limited_size);
-                    number_of_blocks    = (current_size + items_per_block - 1) / items_per_block;
-                    auto grid_size      = (number_of_blocks + block_size - 1) / block_size;
-
-                    if(debug_synchronous)
-                    {
-                        std::cout << "use_limited_size " << use_limited_size << '\n';
-                        std::cout << "aligned_size_limit " << aligned_size_limit << '\n';
-                        std::cout << "number_of_launch " << number_of_launch << '\n';
-                        std::cout << "index " << i << '\n';
-                        std::cout << "size " << current_size << '\n';
-                        std::cout << "block_size " << block_size << '\n';
-                        std::cout << "number of blocks " << number_of_blocks << '\n';
-                        std::cout << "items_per_block " << items_per_block << '\n';
-                    }
-
-                    init_lookback_scan_state_kernel<<<dim3(grid_size),
-                                                      dim3(block_size),
-                                                      0,
-                                                      stream>>>(scan_state,
-                                                                number_of_blocks,
-                                                                block_id);
-                    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
-                                                                number_of_blocks,
-                                                                start);
-
-                    if(debug_synchronous)
-                    {
-                        start = std::chrono::steady_clock::now();
-                    }
-                    grid_size = number_of_blocks;
-
-                    if(debug_synchronous)
-                    {
-                        std::cout << "use_limited_size " << use_limited_size << '\n';
-                        std::cout << "aligned_size_limit " << aligned_size_limit << '\n';
-                        std::cout << "size " << current_size << '\n';
-                        std::cout << "block_size " << block_size << '\n';
-                        std::cout << "number of blocks " << number_of_blocks << '\n';
-                        std::cout << "items_per_block " << items_per_block << '\n';
-                    }
-
-                    auto lookback_scan_kernel = [=](auto target_config)
-                    {
-                        lookback_scan_kernel_impl<decltype(target_config),
-                                                  Determinism,
-                                                  Exclusive,
-                                                  UseInitialValue>(
-                            input + offset,
-                            output + offset,
-                            current_size,
-                            static_cast<AccType>(get_input_value(initial_value)),
-                            scan_op,
-                            scan_state,
-                            number_of_blocks,
-                            previous_last_element,
-                            new_last_element,
-                            (i != size_t(0)),
-                            (number_of_launch > 1),
-                            block_id);
-                    };
-                    ROCPRIM_RETURN_ON_ERROR(
-                        execute_launch_plan<Config, Selector>(current_target,
-                                                              lookback_scan_kernel,
-                                                              dim3(grid_size),
-                                                              dim3(block_size),
-                                                              0,
-                                                              stream));
-                    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel",
-                                                                current_size,
-                                                                start);
-
-                    // Swap the last_elements
-                    if(number_of_launch > 1)
-                    {
-                        ROCPRIM_RETURN_ON_ERROR(::rocprim::transform(new_last_element,
-                                                                     previous_last_element,
-                                                                     1,
-                                                                     ::rocprim::identity<AccType>(),
-                                                                     stream,
-                                                                     debug_synchronous));
-                    }
-                }
-            }
-            else
-            {
-                if(debug_synchronous)
-                {
-                    std::cout << "size " << size << '\n';
-                    std::cout << "block_size " << block_size << '\n';
-                    std::cout << "number of blocks " << number_of_blocks << '\n';
-                    std::cout << "items_per_block " << items_per_block << '\n';
-                    start = std::chrono::steady_clock::now();
-                }
-
-                auto single_scan_kernel = [=](auto target_config) mutable
-                {
-                    using TargetConfig                         = decltype(target_config);
-                    static constexpr scan_config_params params = TargetConfig::params;
+                    constexpr auto params = get_config<Selector>(config, target);
 
                     constexpr unsigned int block_size       = params.kernel_config.block_size;
                     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
+                    constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
-                    using block_load_type  = ::rocprim::block_load<AccType,
-                                                                   block_size,
-                                                                   items_per_thread,
-                                                                   params.block_load_method,
-                                                                   1,
-                                                                   1,
-                                                                   TargetConfig::wavefront>;
-                    using block_store_type = ::rocprim::block_store<AccType,
-                                                                    block_size,
-                                                                    items_per_thread,
-                                                                    params.block_store_method,
-                                                                    1,
-                                                                    1,
-                                                                    TargetConfig::wavefront>;
-                    using block_scan_type  = ::rocprim::block_scan<AccType,
-                                                                   block_size,
-                                                                   params.block_scan_method,
-                                                                   1,
-                                                                   1,
-                                                                   TargetConfig::wavefront>;
+                    constexpr size_t size_limit         = params.kernel_config.size_limit;
+                    constexpr size_t aligned_size_limit = ::rocprim::max<size_t>(
+                        size_limit - (size_limit % static_cast<size_t>(items_per_block)),
+                        items_per_block);
 
-                    ROCPRIM_SHARED_MEMORY union
+                    const size_t limited_size     = std::min<size_t>(size, aligned_size_limit);
+                    const bool   use_limited_size = limited_size == aligned_size_limit;
+
+                    unsigned int number_of_blocks
+                        = (limited_size + items_per_block - 1) / items_per_block;
+
+                    using scan_state_type
+                        = detail::lookback_scan_state<AccType,
+                                                      use_sleepy_scan,
+                                                      params.lookback_scan_state_alignment>;
+                    scan_state_type scan_state;
+
+                    // Pointer to array with block_prefixes
+                    void*    scan_state_storage;
+                    AccType* previous_last_element;
+                    AccType* new_last_element;
+
+                    detail::temp_storage::layout layout{};
+                    ROCPRIM_RETURN_ON_ERROR(
+                        scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
+
+                    void* block_id_storage;
+
+                    ROCPRIM_RETURN_ON_ERROR(detail::temp_storage::partition(
+                        temporary_storage,
+                        storage_size,
+                        detail::temp_storage::make_linear_partition(
+                            // This is valid even with offset_scan_state_with_sleep_type
+                            detail::temp_storage::make_partition(&scan_state_storage, layout),
+                            detail::temp_storage::ptr_aligned_array(&previous_last_element,
+                                                                    use_limited_size ? 1 : 0),
+                            detail::temp_storage::ptr_aligned_array(&new_last_element,
+                                                                    use_limited_size ? 1 : 0),
+                            detail::temp_storage::make_partition(
+                                &block_id_storage,
+                                block_id_type::get_temp_storage_layout()))));
+
+                    if(temporary_storage == nullptr || number_of_blocks == 0u)
                     {
-                        typename block_load_type::storage_type  load;
-                        typename block_store_type::storage_type store;
-                        typename block_scan_type::storage_type  scan;
-                    } storage;
+                        return hipSuccess;
+                    }
 
-                    AccType values[items_per_thread];
-                    // load input values into values
-                    block_load_type().load(input, values, size, *(input), storage.load);
-                    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+                    // Start point for time measurements
+                    std::chrono::steady_clock::time_point start;
 
-                    single_scan_block_scan<Exclusive, UseInitialValue, block_scan_type>(
-                        values, // input
-                        values, // output
-                        static_cast<AccType>(get_input_value(initial_value)),
-                        storage.scan,
-                        scan_op);
-                    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+                    if(number_of_blocks > 1 || use_limited_size)
+                    {
+                        // Create and initialize lookback_scan_state obj
+                        ROCPRIM_RETURN_ON_ERROR(scan_state.create(scan_state,
+                                                                  scan_state_storage,
+                                                                  number_of_blocks,
+                                                                  stream));
+                        block_id = block_id.create(block_id_storage);
+                        if(debug_synchronous)
+                        {
+                            start = std::chrono::steady_clock::now();
+                        }
 
-                    // Save values into output array
-                    block_store_type().store(output, values, size, storage.store);
-                };
-                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
-                                                                              single_scan_kernel,
-                                                                              dim3(1),
-                                                                              dim3(block_size),
-                                                                              0,
-                                                                              stream));
-                ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
-            }
+                        const size_t number_of_launch = (size + limited_size - 1) / limited_size;
+                        for(size_t i = 0, offset = 0; i < number_of_launch;
+                            i++, offset += limited_size)
+                        {
+                            size_t current_size = std::min<size_t>(size - offset, limited_size);
+                            number_of_blocks
+                                = (current_size + items_per_block - 1) / items_per_block;
+                            auto grid_size = (number_of_blocks + block_size - 1) / block_size;
+
+                            if(debug_synchronous)
+                            {
+                                std::cout << "use_limited_size " << use_limited_size << '\n';
+                                std::cout << "aligned_size_limit " << aligned_size_limit << '\n';
+                                std::cout << "number_of_launch " << number_of_launch << '\n';
+                                std::cout << "index " << i << '\n';
+                                std::cout << "size " << current_size << '\n';
+                                std::cout << "block_size " << block_size << '\n';
+                                std::cout << "number of blocks " << number_of_blocks << '\n';
+                                std::cout << "items_per_block " << items_per_block << '\n';
+                            }
+
+                            init_lookback_scan_state_kernel<<<dim3(grid_size),
+                                                              dim3(block_size),
+                                                              0,
+                                                              stream>>>(scan_state,
+                                                                        number_of_blocks,
+                                                                        block_id);
+                            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(
+                                "init_lookback_scan_state_kernel",
+                                number_of_blocks,
+                                start);
+
+                            if(debug_synchronous)
+                            {
+                                start = std::chrono::steady_clock::now();
+                            }
+                            grid_size = number_of_blocks;
+
+                            if(debug_synchronous)
+                            {
+                                std::cout << "use_limited_size " << use_limited_size << '\n';
+                                std::cout << "aligned_size_limit " << aligned_size_limit << '\n';
+                                std::cout << "size " << current_size << '\n';
+                                std::cout << "block_size " << block_size << '\n';
+                                std::cout << "number of blocks " << number_of_blocks << '\n';
+                                std::cout << "items_per_block " << items_per_block << '\n';
+                            }
+
+                            auto lookback_scan_kernel = [=](auto target_config)
+                            {
+                                lookback_scan_kernel_impl<decltype(target_config),
+                                                          Determinism,
+                                                          Exclusive,
+                                                          UseInitialValue>(
+                                    input + offset,
+                                    output + offset,
+                                    current_size,
+                                    static_cast<AccType>(get_input_value(initial_value)),
+                                    scan_op,
+                                    scan_state,
+                                    number_of_blocks,
+                                    previous_last_element,
+                                    new_last_element,
+                                    (i != size_t(0)),
+                                    (number_of_launch > 1),
+                                    block_id);
+                            };
+                            ROCPRIM_RETURN_ON_ERROR(launcher.template execute_launch_plan<Selector>(
+                                lookback_scan_kernel,
+                                dim3(grid_size),
+                                dim3(block_size),
+                                0,
+                                stream));
+                            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel",
+                                                                        current_size,
+                                                                        start);
+
+                            // Swap the last_elements
+                            if(number_of_launch > 1)
+                            {
+                                ROCPRIM_RETURN_ON_ERROR(
+                                    ::rocprim::transform(new_last_element,
+                                                         previous_last_element,
+                                                         1,
+                                                         ::rocprim::identity<AccType>(),
+                                                         stream,
+                                                         debug_synchronous));
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if(debug_synchronous)
+                        {
+                            std::cout << "size " << size << '\n';
+                            std::cout << "block_size " << block_size << '\n';
+                            std::cout << "number of blocks " << number_of_blocks << '\n';
+                            std::cout << "items_per_block " << items_per_block << '\n';
+                            start = std::chrono::steady_clock::now();
+                        }
+
+                        auto single_scan_kernel = [=](auto target_config) mutable
+                        {
+                            using TargetConfig                         = decltype(target_config);
+                            static constexpr scan_config_params params = TargetConfig::params;
+
+                            constexpr unsigned int block_size = params.kernel_config.block_size;
+                            constexpr unsigned int items_per_thread
+                                = params.kernel_config.items_per_thread;
+
+                            using block_load_type = ::rocprim::block_load<AccType,
+                                                                          block_size,
+                                                                          items_per_thread,
+                                                                          params.block_load_method,
+                                                                          1,
+                                                                          1,
+                                                                          TargetConfig::wavefront>;
+                            using block_store_type
+                                = ::rocprim::block_store<AccType,
+                                                         block_size,
+                                                         items_per_thread,
+                                                         params.block_store_method,
+                                                         1,
+                                                         1,
+                                                         TargetConfig::wavefront>;
+                            using block_scan_type = ::rocprim::block_scan<AccType,
+                                                                          block_size,
+                                                                          params.block_scan_method,
+                                                                          1,
+                                                                          1,
+                                                                          TargetConfig::wavefront>;
+
+                            ROCPRIM_SHARED_MEMORY union
+                            {
+                                typename block_load_type::storage_type  load;
+                                typename block_store_type::storage_type store;
+                                typename block_scan_type::storage_type  scan;
+                            } storage;
+
+                            AccType values[items_per_thread];
+                            // load input values into values
+                            block_load_type().load(input, values, size, *(input), storage.load);
+                            ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+                            single_scan_block_scan<Exclusive, UseInitialValue, block_scan_type>(
+                                values, // input
+                                values, // output
+                                static_cast<AccType>(get_input_value(initial_value)),
+                                storage.scan,
+                                scan_op);
+                            ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+                            // Save values into output array
+                            block_store_type().store(output, values, size, storage.store);
+                        };
+                        ROCPRIM_RETURN_ON_ERROR(
+                            launcher.template execute_launch_plan<Selector>(single_scan_kernel,
+                                                                            dim3(1),
+                                                                            dim3(block_size),
+                                                                            0,
+                                                                            stream));
+                        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel",
+                                                                    size,
+                                                                    start);
+                    }
+                    return hipSuccess;
+                }));
             return hipSuccess;
         },
         use_sleepy_scan_variant,
