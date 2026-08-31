@@ -3518,7 +3518,11 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
     T* work = (T*)dwptr->work("latrd_work");
     T* norms = (T*)dwptr->work("latrd_norms");
     T** workArr = (T**)dwptr->work("latrd_workArr");
-    dwptr->set_workspace();
+
+    dwptr->set_work("latrd_scalars");
+    dwptr->set_work("latrd_work");
+    dwptr->set_work("latrd_norms");
+    dwptr->set_work("latrd_workArr");
 
     if(dwptr->size("latrd_scalars") > 0)
         init_scalars(handle, (T*)scalars);

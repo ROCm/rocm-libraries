@@ -291,8 +291,8 @@ void latrd_getError(const rocblas_handle handle,
     auto ARes = (*AResWrap).block(BDesc().nrows(n).ncols(n));
     /* std::cout << "Matrix Ares.diag() (rocsolver):" << std::endl; */
     /* ARes.diag().print(); */
-    std::cout << "Matrix Ares (rocsolver):" << std::endl;
-    ARes.print();
+    /* std::cout << "Matrix Ares (rocsolver):" << std::endl; */
+    /* ARes.print(); */
     auto ERes = *HMat::Convert(hERes[0], 1, n - 1);
     /* std::cout << "Matrix E (rocsolver):" << std::endl; */
     /* E.print(); */
@@ -303,8 +303,8 @@ void latrd_getError(const rocblas_handle handle,
     Tr.sub_diag(ERes);
     Tr.sup_diag(ERes);
     auto WRes = (*WResWrap).block(BDesc().nrows(n).ncols(k));
-    std::cout << "Matrix Wres (rocsolver):" << std::endl;
-    WRes.print();
+    /* std::cout << "Matrix Wres (rocsolver):" << std::endl; */
+    /* WRes.print(); */
 
     //
     // Old error bounds, comparing rocsolver's outputs with lapack's outputs

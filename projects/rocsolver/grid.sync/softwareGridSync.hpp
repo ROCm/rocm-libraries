@@ -79,6 +79,9 @@ class SoftwareGridSync
         size_t row_offset = (size_t)m_syncIdx * m_size;
 
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+        // Prevent wave 0 from signaling completion before waves 1..N have
+        // written their global data. 
+        __builtin_amdgcn_s_barrier();
         //elect a wave to do the l2 flush (maybe we can do it once per xcc?)
         if(m_waveID == 0)
         {
@@ -107,6 +110,9 @@ class SoftwareGridSync
     void __device__ barrier()
     {
         size_t row_offset = (size_t)m_syncIdx * m_size;
+        // Prevent wave 0 from signaling completion before waves 1..N have
+        // written their global data. 
+        __builtin_amdgcn_s_barrier();
         //elect a wave to do the grid sync
         if(m_waveID == 0)
         {

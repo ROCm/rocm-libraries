@@ -346,7 +346,15 @@ auto rocsolver_sytrd_hetrd_getWorkItems(rocblas_handle handle,
         + create_work_item({"sytrd_tmptau_W", size_tmptau_W})
         + create_work_item({"sytrd_workArr", size_workArr});
 
-    return sytrd_work_items;
+    // eff_k mirrors the panel size used by getMemorySize (0 => pure SYTD2, no LATRD call)
+    rocblas_int eff_k = (n <= 128) ? 0 : (n <= 256) ? 32 : xxTRD_BLOCKSIZE;
+    rocblas_int ldw = n;
+    rocblas_stride strideW = (rocblas_stride)n * (eff_k > 0 ? eff_k : 1);
+    auto latrd_work_items = rocsolver_latrd_forsytrd_getWorkItems(
+        handle, uplo, n, eff_k, A, shiftA, lda, strideA, E, strideE, tau, strideP, (T*)nullptr, 0,
+        ldw, strideW, batch_count);
+
+    return latrd_work_items + sytrd_work_items;
 }
 
 template <bool BATCHED, typename T, typename S, typename U>
