@@ -433,3 +433,87 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 384]   # K tail (384 = DepthU + 128)
           - Exact: [200, 200, 1, 320]   # M and N edge with a K tail
 
+
+  -
+    - # NT, macro tile 96 at 4 waves, DepthU 512: the fetch group is spread over
+      # both the K slices of a window AND several K windows, so a wave issues
+      # more than one window at a per-wave window offset.
+      #
+      # K=1024 is 32 K blocks, which is where the scale buffer's padded extent
+      # first differs between the two orientations; it used to abort in the
+      # client's scale swizzle.  K=512 brackets it from below.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128 wg1x4
+          - [16, 16, 128, 1,  1, 2, 6,  4, 1]   # MT128x96 wg4x1
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0, 1]
+        - DepthU: [512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [384, 768, 1, 512]
+          - Exact: [384, 768, 1, 1024]
+
+  -
+    - # The free-dim tail of the buffer window.  The last workgroup owns fewer
+      # than a macro tile when the size leaves a remainder, so the window runs
+      # past the tensor.  Faulting needs the operand to end on a page too:
+      # 2048 over a tile of 96 leaves 32 rows and an A of exactly 2MB.
+      # Keep the sizes -- the shapes make this reachable, not the tiles.
+      #
+      # At K=2048 these are also the largest scale buffers here, so they cover
+      # the padded-extent path that used to abort in the client's scale swizzle.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128  wg1x4
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2048, 2048, 1, 2048]   # M tail vs tile 96, operand ends on a page
+          - Exact: [1920, 2048, 1, 2048]   # same scale shape, no tail -- the control
+          - Exact: [2048, 2000, 1, 2048]   # N tail on the other operand
