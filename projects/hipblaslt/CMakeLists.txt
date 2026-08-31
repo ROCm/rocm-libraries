@@ -77,6 +77,13 @@ cmake_dependent_option(HIPBLASLT_INSTALL_ROCISA
        ${TENSILELITE_ENABLE_HOST} "HIPBLASLT_BUNDLE_PYTHON_DEPS" OFF)
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
+if(NOT HIPBLASLT_ENABLE_HOST
+        AND NOT TENSILELITE_ENABLE_HOST
+        AND NOT HIPBLASLT_ENABLE_DEVICE
+        AND NOT HIPBLASLT_ENABLE_CLIENT)
+    message(FATAL_ERROR "hipBLASLt has no enabled build products.")
+endif()
+
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
@@ -273,19 +280,21 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     endif()
 endif()
 
-if(NOT ROCM_LIBS_SUPERBUILD)
-    if(HIPBLASLT_ENABLE_THEROCK)
-        find_package(origami CONFIG QUIET)
-    else()
-        block(SCOPE_FOR VARIABLES)
-            set(ORIGAMI_ENABLE_FETCH ON)
-            set(ORIGAMI_BUILD_TESTING OFF)
-            set(ORIGAMI_ENABLE_PYTHON OFF)
-            set(BUILD_TESTING OFF)
-            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami")
-        endblock()
+if(ROCM_LIBS_SUPERBUILD)
+    if(NOT TARGET roc::origami)
+        message(FATAL_ERROR "The ROCm libraries superbuild must provide the roc::origami target before configuring hipBLASLt.")
     endif()
+elseif(HIPBLASLT_ENABLE_THEROCK)
+    find_package(origami CONFIG REQUIRED)
+else()
+    block(SCOPE_FOR VARIABLES)
+        set(ORIGAMI_ENABLE_FETCH ON)
+        set(ORIGAMI_BUILD_TESTING OFF)
+        set(ORIGAMI_ENABLE_PYTHON OFF)
+        set(BUILD_TESTING OFF)
+        set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami")
+    endblock()
 endif()
 
 add_library(hipblaslt-headers INTERFACE)
@@ -504,7 +513,7 @@ if(TENSILELITE_ENABLE_HOST)
     list(APPEND _hipblaslt_export_targets roc::tensilelite-host)
 endif()
 
-if(HIPBLASLT_ENABLE_HOST OR ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
+if(_hipblaslt_export_targets)
     rocm_export_targets(
         TARGETS ${_hipblaslt_export_targets}
         DEPENDS ${_hipblaslt_export_depends}
