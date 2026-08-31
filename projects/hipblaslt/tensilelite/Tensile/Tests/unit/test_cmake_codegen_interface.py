@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +11,9 @@ TENSILELITE_ROOT = Path(__file__).resolve().parents[3]
 CODEGEN_MODULE = TENSILELITE_ROOT.parent / "cmake" / "hipblaslt_codegen.cmake"
 
 
-def _configure(tmp_path: Path, body: str) -> subprocess.CompletedProcess[str]:
+def _configure(
+    tmp_path: Path, body: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     source_dir = tmp_path / "source"
     build_dir = tmp_path / "build"
     source_dir.mkdir()
@@ -24,6 +27,7 @@ def _configure(tmp_path: Path, body: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["cmake", "-S", str(source_dir), "-B", str(build_dir), "-G", "Ninja"],
         capture_output=True,
+        env=env,
         text=True,
     )
 
@@ -87,3 +91,22 @@ def test_create_device_library_rejects_incomplete_source_root(tmp_path):
     )
     assert result.returncode != 0
     assert "required codegen resource not found" in result.stdout + result.stderr
+
+
+def test_create_device_library_preserves_runtime_library_path(tmp_path):
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = "/existing/runtime/path"
+    result = _configure(
+        tmp_path,
+        "create_device_library(\n"
+        f'  CODEGEN_ROOT "{TENSILELITE_ROOT.as_posix()}"\n'
+        f'  LOGIC_PATH "{(TENSILELITE_ROOT / "Tensile" / "Tests" / "unit").as_posix()}"\n'
+        f'  OUTPUT_DIR "{(tmp_path / "output").as_posix()}"\n'
+        f'  PYTHON_EXECUTABLE "{Path(sys.executable).as_posix()}"\n'
+        '  CXX_COMPILER "/usr/bin/c++"\n'
+        "  ARCHES gfx950\n"
+        ")",
+        env=env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "/existing/runtime/path" in (tmp_path / "build" / "build.ninja").read_text()
