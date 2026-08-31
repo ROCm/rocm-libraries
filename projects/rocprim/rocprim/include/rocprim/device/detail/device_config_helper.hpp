@@ -289,6 +289,7 @@ struct scan_config_params
     ::rocprim::block_load_method    block_load_method{};
     ::rocprim::block_store_method   block_store_method{};
     ::rocprim::block_scan_algorithm block_scan_method{};
+    int                             lookback_scan_state_alignment{};
 };
 
 } // namespace detail
@@ -306,7 +307,8 @@ template<unsigned int                    BlockSize,
          ::rocprim::block_load_method    BlockLoadMethod,
          ::rocprim::block_store_method   BlockStoreMethod,
          ::rocprim::block_scan_algorithm BlockScanMethod,
-         unsigned int                    SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+         unsigned int                    SizeLimit         = ROCPRIM_GRID_SIZE_LIMIT,
+         unsigned int                    LookbackAlignment = 0>
 struct scan_config : ::rocprim::detail::scan_config_params
 {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -327,13 +329,17 @@ struct scan_config : ::rocprim::detail::scan_config_params
     /// \brief Limit on the number of items for a single scan kernel launch.
     static constexpr unsigned int size_limit = SizeLimit;
 
+    /// \brief Alignment
+    static constexpr unsigned int lookback_alignment = LookbackAlignment;
+
     constexpr scan_config()
         : ::rocprim::detail::scan_config_params{
-            {BlockSize, ItemsPerThread, SizeLimit},
-            BlockLoadMethod,
-            BlockStoreMethod,
-            BlockScanMethod
-    } {};
+              {BlockSize, ItemsPerThread, SizeLimit},
+              BlockLoadMethod,
+              BlockStoreMethod,
+              BlockScanMethod,
+              LookbackAlignment
+    } { };
 #endif
 };
 
