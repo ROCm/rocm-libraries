@@ -313,22 +313,7 @@ namespace rocsparse
                                   int64_t                   ell_width,
                                   rocsparse_index_base      idx_base,
                                   size_t                    buffer_size,
-                                  void*                     temp_buffer)
-        {
-            return this->recreate(trans,
-                                  descr->fill_mode,
-                                  handle,
-                                  trans,
-                                  m,
-                                  n,
-                                  descr,
-                                  ell_col_ind_indextype,
-                                  ell_col_ind,
-                                  ell_width,
-                                  idx_base,
-                                  buffer_size,
-                                  temp_buffer);
-        }
+                                  void*                     temp_buffer);
 
         template <typename I>
         rocsparse_status recreate(rocsparse_handle          handle,

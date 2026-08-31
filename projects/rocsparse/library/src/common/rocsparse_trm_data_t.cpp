@@ -130,6 +130,33 @@ rocsparse::trm_info_t* rocsparse::trm_data_t::create(rocsparse_handle          h
     return trm_info;
 }
 
+rocsparse_status rocsparse::trm_data_t::recreate(rocsparse_handle          handle,
+                                                 rocsparse_operation       trans,
+                                                 int64_t                   m,
+                                                 int64_t                   n,
+                                                 const rocsparse_mat_descr descr,
+                                                 rocsparse_indextype       ell_col_ind_indextype,
+                                                 const void*               ell_col_ind,
+                                                 int64_t                   ell_width,
+                                                 rocsparse_index_base      idx_base,
+                                                 size_t                    buffer_size,
+                                                 void*                     temp_buffer)
+{
+    return this->recreate(trans,
+                          descr->fill_mode,
+                          handle,
+                          trans,
+                          m,
+                          n,
+                          descr,
+                          ell_col_ind_indextype,
+                          ell_col_ind,
+                          ell_width,
+                          idx_base,
+                          buffer_size,
+                          temp_buffer);
+}
+
 rocsparse_indextype rocsparse::trm_data_t::get_indextype_J() const
 {
     for(int i = 0; i < 4; ++i)
