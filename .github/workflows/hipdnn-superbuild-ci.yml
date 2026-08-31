@@ -13,6 +13,9 @@ on:
       - '.github/workflows/hipdnn-superbuild-ci.yml'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
 permissions:
   contents: read
 
@@ -29,7 +32,6 @@ jobs:
         shell: bash
     env:
       VENV_PATH: B:\rocm_wheels
-      PYTHON_BUILD_DIR: B:\hipdnn-python
       THIRD_PARTY_DEPS_DIR: B:\third-party-deps
       GPU_TARGET: gfx1151
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
@@ -71,6 +73,11 @@ jobs:
             projects/miopen
             test
 
+      # Shared CI constants, kpack-ref among them, defined in one place.
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -111,6 +118,48 @@ jobs:
           & "$env:VENV_PATH\Scripts\python.exe" .github/scripts/check_wheel_freshness.py --max-age-days 14
           if ($LASTEXITCODE -ne 0) { throw "ROCm nightly wheels are stale" }
 
+      - name: Download third-party dependency sources
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          & $python projects/hipdnn/python/download_third_party_deps.py `
+            --deps-dir $env:THIRD_PARTY_DEPS_DIR
+          if ($LASTEXITCODE -ne 0) { throw "Failed to download third-party dependency sources" }
+
+      - name: Install rocm_kpack
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          # Sparse, blobless, depth-1 checkout of just shared/kpack: the pinned
+          # commit lives in the rocm-systems monorepo, so cloning it whole (or
+          # letting pip do it via a git+ URL) would pull far more than the packer.
+          $kpackSrc = Join-Path $env:RUNNER_TEMP "rocm-systems-kpack"
+          if (Test-Path $kpackSrc) { Remove-Item -Recurse -Force $kpackSrc }
+          New-Item -ItemType Directory -Path $kpackSrc | Out-Null
+          # pwsh does not stop on a native command's exit code, so check the
+          # setup calls as a group before the guarded fetch.
+          git -C $kpackSrc init -q .
+          git -C $kpackSrc remote add origin https://github.com/ROCm/rocm-systems.git
+          git -C $kpackSrc sparse-checkout init --cone
+          git -C $kpackSrc sparse-checkout set shared/kpack
+          if ($LASTEXITCODE -ne 0) { throw "Failed to prepare the rocm-systems sparse checkout" }
+          git -C $kpackSrc fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to fetch rocm-systems ${{ steps.ci-env.outputs.kpack-ref }}" }
+          git -C $kpackSrc checkout -q FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw "Failed to check out ${{ steps.ci-env.outputs.kpack-ref }}" }
+          # Confirms the fetch landed on the pinned commit.
+          $fetched = (& git -C $kpackSrc rev-parse HEAD).Trim()
+          if ($fetched -ne "${{ steps.ci-env.outputs.kpack-ref }}") { throw "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" }
+          # Installing the directory rebuilds and reinstalls every time, so a
+          # warm venv cannot keep an older build of this same 0.1.0 version.
+          & $python -m pip install (Join-Path $kpackSrc "shared\kpack")
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install rocm_kpack" }
+          # From the installed module, which also proves it imports.
+          $sitePackages = (& $python -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
+          if ($LASTEXITCODE -ne 0) { throw "rocm_kpack is not importable after install" }
+          if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
+          echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
+
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
@@ -120,10 +169,29 @@ jobs:
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
-            -DENABLE_CLANG_TIDY=OFF
+            -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
+            -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPDNN_ENABLE_SDPA=ON \
+            -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
+            -DENABLE_CLANG_TIDY=OFF \
+            -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
+            -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
+            -DPython_EXECUTABLE="$VENV_PATH/Scripts/python.exe" \
+            -DPython3_EXECUTABLE="$VENV_PATH/Scripts/python.exe"
 
       - name: Build
         run: cmake --build build
+
+      # Packing is skipped with a STATUS message, so a resolution regression
+      # would otherwise pass CI while producing no archives.
+      - name: Verify kpack archives were produced
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
+          test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
+          printf '%s\n' "${kpacks[@]}"
 
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
@@ -133,7 +201,17 @@ jobs:
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
-        run: cmake --install build --prefix $env:ROCM_SDK_PATH
+        run: |
+          cmake --install build --prefix $env:ROCM_SDK_PATH
+          # On Windows, rocm_sdk.initialize_process() preloads "hipdnn" by base
+          # name before the extension module is imported (Windows extension
+          # loading ignores PATH), resolving it via the sibling
+          # _rocm_sdk_libraries package -- not the _rocm_sdk_devel prefix
+          # patched above. Without also patching _rocm_sdk_libraries, that
+          # preload keeps loading the stale nightly-wheel hipdnn_backend.dll
+          # and every superbuild fix here goes untested.
+          $librariesPath = $env:ROCM_SDK_PATH -replace '_rocm_sdk_devel$', '_rocm_sdk_libraries'
+          cmake --install build --prefix $librariesPath
 
       - name: Install Python build dependencies
         shell: pwsh
@@ -142,50 +220,19 @@ jobs:
           & $python -m pip install --upgrade build numpy pytest
           if ($LASTEXITCODE -ne 0) { throw "Failed to install Python build dependencies" }
 
-      - name: Download third-party dependency sources
-        shell: pwsh
-        run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          & $python projects/hipdnn/python/download_third_party_deps.py `
-            --deps-dir $env:THIRD_PARTY_DEPS_DIR
-          if ($LASTEXITCODE -ne 0) { throw "Failed to download third-party dependency sources" }
-
-      - name: Configure frontend bindings
-        shell: pwsh
-        run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          $rocmSdkPath = $env:ROCM_SDK_PATH -replace '\\', '/'
-          $workspace = $env:GITHUB_WORKSPACE -replace '\\', '/'
-          $toolchainFile = "$workspace/cmake/toolchains/rocm-clang.cmake"
-          cmake -S projects/hipdnn/python/frontend_bindings `
-                -B $env:PYTHON_BUILD_DIR `
-                -GNinja `
-                -DCMAKE_BUILD_TYPE=Release `
-                "-DCMAKE_TOOLCHAIN_FILE=$toolchainFile" `
-                "-DROCM_PATH=$rocmSdkPath" `
-                "-DCMAKE_PREFIX_PATH=$rocmSdkPath" `
-                "-DCMAKE_PROGRAM_PATH=$rocmSdkPath/lib/llvm/bin" `
-                "-DFETCHCONTENT_SOURCE_DIR_NANOBIND=$env:THIRD_PARTY_DEPS_DIR\nanobind-2.12.0" `
-                "-DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP=$env:THIRD_PARTY_DEPS_DIR\robin-map-1.4.1" `
-                "-DPython_EXECUTABLE=$python"
-
-      - name: Build frontend bindings
-        shell: pwsh
-        run: cmake --build $env:PYTHON_BUILD_DIR
-
       - name: Pack frontend wheel
         shell: pwsh
         run: |
           $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
           & $python projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py `
-            --build-dir $env:PYTHON_BUILD_DIR `
-            --wheel-dir (Join-Path $env:PYTHON_BUILD_DIR "wheel_package")
+            --build-dir build `
+            --wheel-dir (Join-Path "build" "wheel_package")
 
       - name: Install frontend wheel
         shell: pwsh
         run: |
           $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          $wheel = Get-ChildItem (Join-Path $env:PYTHON_BUILD_DIR "wheel_package\hipdnn_frontend-*.whl") | Select-Object -First 1
+          $wheel = Get-ChildItem (Join-Path "build" "wheel_package\hipdnn_frontend-*.whl") | Select-Object -First 1
           if (-not $wheel) { throw "No hipdnn_frontend wheel found" }
           & $python -m pip install --force-reinstall $wheel.FullName
 
@@ -205,7 +252,6 @@ jobs:
       GPU_TARGET: gfx94X-dcgpu
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
       DEVICE_TARGET: gfx942
-      PYTHON_BUILD_DIR: build/hipdnn-python
     steps:
       - name: Runner health status
         run: |
@@ -229,6 +275,11 @@ jobs:
             projects/hipdnn
             projects/miopen
             test
+
+      # Shared CI constants, kpack-ref among them, defined in one place.
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
 
       - name: Set environment
         run: |
@@ -258,6 +309,11 @@ jobs:
           echo "Installing ROCm wheels from multi-arch nightlies (device: $DEVICE_TARGET)"
           pip install --index-url "https://rocm.nightlies.amd.com/whl-multi-arch/" "rocm[libraries,devel,device-$DEVICE_TARGET]"
 
+          # rocm_kpack is used from a source tree, so pip never resolves the
+          # msgpack/zstandard it declares. The descriptor-packaging tool imports
+          # it, so this lane needs them present in the configuring interpreter.
+          pip install "msgpack>=1.0.0" "zstandard>=0.20.0"
+
           echo "Initializing ROCm SDK"
           rocm-sdk init
 
@@ -266,9 +322,61 @@ jobs:
           echo "ROCM_SDK_PATH=$ROCM_SDK_PATH"
           echo "ROCM_SDK_PATH=$ROCM_SDK_PATH" >> "$GITHUB_ENV"
 
+          # rocKE loads libamd_comgr through ctypes, not through CMake, so
+          # -DROCM_PATH below is invisible to it. It resolves via $ROCM_PATH in
+          # the environment or a globbed /opt/rocm*, and this runner is
+          # wheel-only: there is no /opt/rocm, and the devel wheel's lib/ holds
+          # headers and CMake config, not the runtime .so. comgr ships in the
+          # sibling _rocm_sdk_core wheel, so name it explicitly.
+          #
+          # Exported under HKP_ROCKE_COMGR_LIB and fed to the configure step as
+          # -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB, not as rocke's own
+          # ROCKE_COMGR_LIB: the cache variable is the channel hkp already
+          # forwards to the configure probe, the pack step and the ctest
+          # entries, so all four ask about the same library. Exporting rocke's
+          # runtime name directly would instead override every python process
+          # in every later step of this job, including ones that should be
+          # exercising normal resolution.
+          COMGR_LIB=$(ls "$SITE_PACKAGES/_rocm_sdk_core/lib/libamd_comgr.so".* 2>/dev/null | head -n1)
+          test -n "$COMGR_LIB" || { echo "no libamd_comgr.so under $SITE_PACKAGES/_rocm_sdk_core/lib" >&2; exit 1; }
+          echo "HKP_ROCKE_COMGR_LIB=$COMGR_LIB"
+          echo "HKP_ROCKE_COMGR_LIB=$COMGR_LIB" >> "$GITHUB_ENV"
+
       - name: Check ROCm wheel freshness
         run: |
           "$VENV_PATH/bin/python" .github/scripts/check_wheel_freshness.py --max-age-days 14
+
+      - name: Download third-party dependency sources
+        run: |
+          set -euo pipefail
+          "$VENV_PATH/bin/python" projects/hipdnn/python/download_third_party_deps.py \
+            --deps-dir "$THIRD_PARTY_DEPS_DIR"
+
+      - name: Install rocm_kpack
+        run: |
+          set -euo pipefail
+          # Sparse, blobless, depth-1 checkout of just shared/kpack: the pinned
+          # commit lives in the rocm-systems monorepo, so cloning it whole (or
+          # letting pip do it via a git+ URL) would pull far more than the packer.
+          KPACK_SRC="${RUNNER_TEMP}/rocm-systems-kpack"
+          rm -rf "$KPACK_SRC"
+          mkdir -p "$KPACK_SRC"
+          git -C "$KPACK_SRC" init -q .
+          git -C "$KPACK_SRC" remote add origin https://github.com/ROCm/rocm-systems.git
+          git -C "$KPACK_SRC" sparse-checkout init --cone
+          git -C "$KPACK_SRC" sparse-checkout set shared/kpack
+          git -C "$KPACK_SRC" fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
+          git -C "$KPACK_SRC" checkout -q FETCH_HEAD
+          # Confirms the fetch landed on the pinned commit.
+          fetched=$(git -C "$KPACK_SRC" rev-parse HEAD)
+          test "$fetched" = "${{ steps.ci-env.outputs.kpack-ref }}" || { echo "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" >&2; exit 1; }
+          # Installing the directory rebuilds and reinstalls every time, so a
+          # warm venv cannot keep an older build of this same 0.1.0 version.
+          "$VENV_PATH/bin/pip" install "$KPACK_SRC/shared/kpack"
+          # Derived from the installed module, which also proves it imports.
+          KPACK_PYTHON_DIR=$("$VENV_PATH/bin/python" -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
+          test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
+          echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
 
       - name: Configure superbuild
         run: |
@@ -280,13 +388,43 @@ jobs:
             -DENABLE_CLANG_FORMAT=OFF \
             -DENABLE_CLANG_TIDY=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
-            -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20
+            -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
+            -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPDNN_ENABLE_SDPA=ON \
+            -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
+            -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP=ON \
+            -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE=ON \
+            -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
+            -DHIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC=ON \
+            -DHIPKERNELPROVIDER_KPACK_REQUIRE_COMGR=ON \
+            -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
+            -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20 \
+            -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
+            -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
+            -DPython_EXECUTABLE="$VENV_PATH/bin/python" \
+            -DPython3_EXECUTABLE="$VENV_PATH/bin/python"
 
       - name: Build
         run: cmake --build build
 
+      # Packing is skipped with a STATUS message, so a resolution regression
+      # would otherwise pass CI while producing no archives.
+      - name: Verify kpack archives were produced
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
+          test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
+          printf '%s\n' "${kpacks[@]}"
+
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+
+      - name: Validate golden data against CPU ref (nightly)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          HIPDNN_TEST_VERIFICATION_MODE: golden-check
+        run: ctest --test-dir build --output-on-failure -L external_integration_test
 
       - name: Patch ROCm SDK with superbuild outputs
         run: cmake --install build --prefix "$ROCM_SDK_PATH"
@@ -296,44 +434,24 @@ jobs:
           set -euo pipefail
           "$VENV_PATH/bin/python" -m pip install --upgrade build numpy pytest
 
-      - name: Download third-party dependency sources
-        run: |
-          set -euo pipefail
-          "$VENV_PATH/bin/python" projects/hipdnn/python/download_third_party_deps.py \
-            --deps-dir "$THIRD_PARTY_DEPS_DIR"
-
-      - name: Configure frontend bindings
-        run: |
-          cmake -S projects/hipdnn/python/frontend_bindings \
-                -B "$PYTHON_BUILD_DIR" \
-                -GNinja \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/rocm-clang.cmake" \
-                -DROCM_PATH="$ROCM_SDK_PATH" \
-                -DCMAKE_PREFIX_PATH="$ROCM_SDK_PATH" \
-                -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
-                -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
-                -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
-                -DPython_EXECUTABLE="$VENV_PATH/bin/python"
-
-      - name: Build frontend bindings
-        run: cmake --build "$PYTHON_BUILD_DIR"
-
       - name: Pack frontend wheel
         run: |
           "$VENV_PATH/bin/python" projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py \
-            --build-dir "$PYTHON_BUILD_DIR" \
-            --wheel-dir "$PYTHON_BUILD_DIR/wheel_package"
+            --build-dir build \
+            --wheel-dir build/wheel_package
 
       - name: Install frontend wheel
         run: |
           set -euo pipefail
-          wheel=$(ls "$PYTHON_BUILD_DIR"/wheel_package/hipdnn_frontend-*.whl)
+          wheel=$(ls build/wheel_package/hipdnn_frontend-*.whl)
           "$VENV_PATH/bin/python" -m pip install --force-reinstall "$wheel"
 
       - name: Run frontend wheel tests
         run: |
-          LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
+          # ROCM_PATH is what conftest.py resolves test_good_plugin from;
+          # LD_LIBRARY_PATH is how the wheel's extension finds libhipdnn_backend.
+          ROCM_PATH="$ROCM_SDK_PATH" \
+            LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
             "$VENV_PATH/bin/python" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
   hipdnn_build_summary:

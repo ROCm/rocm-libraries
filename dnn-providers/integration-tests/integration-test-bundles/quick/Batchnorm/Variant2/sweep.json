@@ -9180,6 +9180,135 @@
         },
         "seed": 42
       }
+    },
+    {
+      "id": "2_3_1_bfp16_ncl_cd34ad",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "tensor_patches": [
+        {
+          "uid": 5,
+          "set": {
+            "is_runtime_pass_by_value": true
+          },
+          "remove": [
+            "value_type",
+            "value"
+          ]
+        }
+      ],
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdTraining",
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "generated_at": "2026-07-27T00:00:00Z",
+        "seed": 42,
+        "notes": "Runtime PBV scalars: epsilon (uid=5) promoted to is_runtime_pass_by_value=true, detection value 1.0. The harness supplies the detection value(s) via inputs; both the CPU reference and the provider read from the variantPack. A provider that ignores the runtime tensor and uses any other value produces diverging output.",
+        "inputs": {
+          "5": {
+            "kind": "fixed",
+            "value": 1.0
+          }
+        }
+      }
     }
   ]
 }

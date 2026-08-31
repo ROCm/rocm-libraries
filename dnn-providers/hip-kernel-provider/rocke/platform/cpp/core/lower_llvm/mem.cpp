@@ -251,23 +251,33 @@ static void op_memref_global_atomic_add_f32(rocke_lower_t* L, const rocke_op_t* 
 
 static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op_t* op)
 {
+    /* Mirror of Python _op_memref_global_atomic_add_pk_bf16: there is NO
+     * llvm.amdgcn.global.atomic.fadd.v2bf16 intrinsic in the shipping ROCm
+     * LLVM, so lower to a generic atomicrmw fadd <2 x bfloat> with the AMDGPU
+     * memory-model metadata (backend selects global_atomic_pk_add_bf16). GEP
+     * uses the idx operand's own width (i64 after the wide C-scatter fix). */
     const rocke_value_t* ptr = op->operands[0];
     const rocke_value_t* idx = op->operands[1];
     const rocke_value_t* val = op->operands[2];
-    const char* gep;
-    rocke_ll_need(L, "global.atomic.fadd.v2bf16");
-    gep = rocke_ll_fresh(L, "gep");
+    const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
+    const char* gep = rocke_ll_fresh(L, "gep");
+    const char* ordering = ll_attr_str(op, "ordering", "monotonic");
     rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds bfloat, ptr addrspace(1) %s, i32 %s",
+                   "  %s = getelementptr inbounds bfloat, ptr addrspace(1) %s, %s %s",
                    gep,
                    rocke_ll_operand(L, ptr),
+                   idx_ty,
                    rocke_ll_operand(L, idx));
+    L->needs_fp_atomic_md = true;
     rocke_ll_emitf(L,
-                   "  %s = call <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
-                   "ptr addrspace(1) %s, <2 x bfloat> %s)",
+                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x bfloat> %s %s"
+                   ", !amdgpu.no.fine.grained.memory !1"
+                   ", !amdgpu.no.remote.memory !1"
+                   ", !amdgpu.ignore.denormal.mode !1",
                    ll_res(op),
                    gep,
-                   rocke_ll_operand(L, val));
+                   rocke_ll_operand(L, val),
+                   ordering);
 }
 
 static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_t* op)
@@ -561,6 +571,12 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
         }
     }
     int64_t align = vec * elem_bytes;
+    /* gfx1250: vec==8 loads are marked volatile to block the WMMA-aware backend
+     * pass from substituting ds_load_tr16_b128 (transposed) for the plain
+     * sequential ds_read_b128. Mirrors Python _op_tile_smem_load_vN lines
+     * 2726-2730: volatile = "volatile " if vec==8 and backend.blocks_ds_load_tr16. */
+    const char* volatile_kw
+        = (vec == 8 && L->backend && L->backend->blocks_ds_load_tr16) ? "volatile " : "";
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
                    base,
@@ -571,8 +587,9 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     {
         const char* scalar = rocke_ll_fresh(L, "smem.s");
         rocke_ll_emitf(L,
-                       "  %s = load %s, ptr addrspace(3) %s, align %lld",
+                       "  %s = load %s%s, ptr addrspace(3) %s, align %lld",
                        scalar,
+                       volatile_kw,
                        elem_ty,
                        base,
                        (long long)align);
@@ -586,8 +603,9 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     else
     {
         rocke_ll_emitf(L,
-                       "  %s = load <%lld x %s>, ptr addrspace(3) %s, align %lld",
+                       "  %s = load %s<%lld x %s>, ptr addrspace(3) %s, align %lld",
                        ll_res(op),
+                       volatile_kw,
                        (long long)vec,
                        elem_ty,
                        base,

@@ -1288,6 +1288,7 @@ Tests:
   category: stress
   arguments:
     - { M: 3, N: 3, lda: 3, ldb: 3, batch_count: *c_grid_yz_require_passes }
+    - { M: 3, N: 5, lda: 3, ldb: 3, batch_count: *c_grid_yz_require_passes } # catch quick return error for m != n case.
   side: [ L, R ]
   uplo: [ L, U ]
   transA: [ N ]

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/execution_policy.h>
 #include <thrust/fill.h>
 #include <thrust/logical.h>
 #include <thrust/memory.h>
@@ -23,21 +24,57 @@
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 
-#include <iostream>
+#include <cstddef>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
+TEST(HipThrustMemory, VoidMalloc)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-// WAR NVIDIA/cccl#1731
-// Some tests miscompile for non-CUDA backends on MSVC 2017 and 2019 (though 2022 is fine).
-// This is due to a bug in the compiler that breaks __THRUST_DEFINE_HAS_MEMBER_FUNCTION.
-#if defined(_MSC_VER) && _MSC_VER <= 1929 && THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  define WAR_BUG_1731
-#endif
+  const size_t size = 9001;
+  thrust::device_system_tag dev_tag;
+
+  using pointer = thrust::pointer<int, thrust::device_system_tag>;
+  // Malloc on device
+  auto void_ptr = thrust::malloc(dev_tag, sizeof(int) * size);
+  pointer ptr   = pointer(static_cast<int*>(void_ptr.get()));
+  // Free
+  thrust::free(dev_tag, ptr);
+}
+
+TEST(HipThrustMemory, TypeMalloc)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  const size_t size = 9001;
+  thrust::device_system_tag dev_tag;
+
+  // Malloc on device
+  auto ptr = thrust::malloc<int>(dev_tag, sizeof(int) * size);
+  // Free
+  thrust::free(dev_tag, ptr);
+}
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+TEST(HipThrustMemory, MallocUseMemory)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  const size_t size = 1024;
+  thrust::device_system_tag dev_tag;
+
+  // Malloc on device
+  auto ptr = thrust::malloc<int>(dev_tag, sizeof(int) * size);
+
+  // Try allocated memory with HIP function
+  HIP_CHECK(hipMemset(ptr.get(), 0, size * sizeof(int)));
+
+  // Free
+  thrust::free(dev_tag, ptr);
+}
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 // Define a new system class, as the my_system one is already used with a thrust::sort template definition
 // that calls back into sort.cu
@@ -115,10 +152,11 @@ get_temporary_buffer(my_new_temporary_allocation_system, std::ptrdiff_t)
 }
 
 template <typename Pointer>
-void return_temporary_buffer(my_new_temporary_allocation_system, Pointer)
+void return_temporary_buffer(my_new_temporary_allocation_system, Pointer p)
 {
   // This should never be called (the three-argument with size overload below
   // should be preferred) and shouldn't be ambiguous.
+  THRUST_UNUSED_VAR(p);
   ASSERT_EQ(true, false);
 }
 
@@ -189,20 +227,20 @@ TEST(MemoryTests, TestGetTemporaryBuffer)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  const std::ptrdiff_t n = 9001;
+  const size_t size = 9001;
 
   thrust::device_system_tag dev_tag;
   using pointer                                    = thrust::pointer<int, thrust::device_system_tag>;
-  thrust::pair<pointer, std::ptrdiff_t> ptr_and_sz = thrust::get_temporary_buffer<int>(dev_tag, n);
+  thrust::pair<pointer, std::ptrdiff_t> ptr_and_sz = thrust::get_temporary_buffer<int>(dev_tag, size);
 
-  ASSERT_EQ(ptr_and_sz.second, n);
+  ASSERT_EQ(ptr_and_sz.second, size);
 
   const int ref_val = 13;
-  thrust::device_vector<int> ref(n, ref_val);
+  thrust::device_vector<int> ref(size, ref_val);
 
-  thrust::fill_n(ptr_and_sz.first, n, ref_val);
+  thrust::fill_n(ptr_and_sz.first, size, ref_val);
 
-  ASSERT_EQ(true, thrust::all_of(ptr_and_sz.first, ptr_and_sz.first + n, thrust::placeholders::_1 == ref_val));
+  ASSERT_EQ(true, thrust::all_of(ptr_and_sz.first, ptr_and_sz.first + size, thrust::placeholders::_1 == ref_val));
 
   thrust::return_temporary_buffer(dev_tag, ptr_and_sz.first, ptr_and_sz.second);
 }
@@ -211,18 +249,18 @@ TEST(MemoryTests, TestMalloc)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  const std::ptrdiff_t n = 9001;
+  const size_t size = 9001;
 
   thrust::device_system_tag dev_tag;
   using pointer = thrust::pointer<int, thrust::device_system_tag>;
-  pointer ptr   = pointer(static_cast<int*>(thrust::malloc(dev_tag, sizeof(int) * n).get()));
+  pointer ptr   = pointer(static_cast<int*>(thrust::malloc(dev_tag, sizeof(int) * size).get()));
 
   const int ref_val = 13;
-  thrust::device_vector<int> ref(n, ref_val);
+  thrust::device_vector<int> ref(size, ref_val);
 
-  thrust::fill_n(ptr, n, ref_val);
+  thrust::fill_n(ptr, size, ref_val);
 
-  ASSERT_EQ(true, thrust::all_of(ptr, ptr + n, thrust::placeholders::_1 == ref_val));
+  ASSERT_EQ(true, thrust::all_of(ptr, ptr + size, thrust::placeholders::_1 == ref_val));
 
   thrust::free(dev_tag, ptr);
 }
@@ -238,10 +276,10 @@ TEST(MemoryTests, TestMallocDispatchExplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  const size_t n = 0;
+  const size_t size = 0;
 
   my_memory_system sys(0);
-  thrust::malloc(sys, n);
+  thrust::malloc(sys, size);
 
   ASSERT_EQ(true, sys.is_valid());
 }
@@ -266,55 +304,51 @@ TEST(MemoryTests, TestFreeDispatchExplicit)
 
 template <typename T>
 thrust::pair<thrust::pointer<T, my_memory_system>, std::ptrdiff_t>
-get_temporary_buffer(my_memory_system& system, std::ptrdiff_t n)
+get_temporary_buffer(my_memory_system& system, std::ptrdiff_t size)
 {
   system.validate_dispatch();
 
   thrust::device_system_tag device_sys;
   thrust::pair<thrust::pointer<T, thrust::device_system_tag>, std::ptrdiff_t> result =
-    thrust::get_temporary_buffer<T>(device_sys, n);
+    thrust::get_temporary_buffer<T>(device_sys, size);
   return thrust::make_pair(thrust::pointer<T, my_memory_system>(result.first.get()), result.second);
 }
 
-// [NON-CCCL PARITY BEGIN]
 template <typename Pointer>
 void return_temporary_buffer(my_memory_system& system, Pointer p, std::ptrdiff_t n)
 {
   system.validate_dispatch();
 
   thrust::device_system_tag device_sys;
-  thrust::pointer<typename _THRUST_STD::iterator_traits<Pointer>::value_type, thrust::device_system_tag> device_ptr(
-    p.get());
+  thrust::pointer<typename thrust::iterator_traits<Pointer>::value_type, 
+                           thrust::device_system_tag> device_ptr(p.get());
   thrust::return_temporary_buffer(device_sys, device_ptr, n);
 }
-// [NON-CCCL PARITY END]
 
-TEST(MemoryTests, TestGetTemporaryBufferDispatchExplicit)
+TEST(MemoryTests, TestGetTemporaryBufferDispatchImplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  const std::ptrdiff_t n = 9001;
+  const size_t size = 9001;
 
   my_memory_system sys(0);
   using pointer                                    = thrust::pointer<int, thrust::device_system_tag>;
-  thrust::pair<pointer, std::ptrdiff_t> ptr_and_sz = thrust::get_temporary_buffer<int>(sys, n);
+  thrust::pair<pointer, std::ptrdiff_t> ptr_and_sz = thrust::get_temporary_buffer<int>(sys, size);
 
-  ASSERT_EQ(ptr_and_sz.second, n);
+  ASSERT_EQ(ptr_and_sz.second, size);
   ASSERT_EQ(true, sys.is_valid());
 
   const int ref_val = 13;
-  thrust::device_vector<int> ref(n, ref_val);
+  thrust::device_vector<int> ref(size, ref_val);
 
-  thrust::fill_n(ptr_and_sz.first, n, ref_val);
+  thrust::fill_n(ptr_and_sz.first, size, ref_val);
 
-  ASSERT_EQ(true, thrust::all_of(ptr_and_sz.first, ptr_and_sz.first + n, thrust::placeholders::_1 == ref_val));
+  ASSERT_EQ(true, thrust::all_of(ptr_and_sz.first, ptr_and_sz.first + size, thrust::placeholders::_1 == ref_val));
 
   thrust::return_temporary_buffer(sys, ptr_and_sz.first, ptr_and_sz.second);
 }
 
-#ifndef WAR_BUG_1731
-
-TEST(MemoryTests, TestGetTemporaryBufferDispatchImplicit)
+TEST(MemoryTests, TestGetTemporaryBufferDispatchExplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -332,7 +366,6 @@ TEST(MemoryTests, TestGetTemporaryBufferDispatchImplicit)
 
     // call something we know will invoke get_temporary_buffer
     my_memory_system sys(0);
-
     thrust::sort(sys, vec.begin(), vec.end());
 
     ASSERT_EQ(true, thrust::is_sorted(vec.begin(), vec.end()));
@@ -340,12 +373,9 @@ TEST(MemoryTests, TestGetTemporaryBufferDispatchImplicit)
   }
 }
 
-#endif
-
 TEST(MemoryTests, TestTemporaryBufferOldCustomization)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
   using system           = my_old_namespace::my_old_temporary_allocation_system;
   using pointer          = thrust::pointer<int, system>;
   using pointer_and_size = thrust::pair<pointer, std::ptrdiff_t>;
@@ -381,50 +411,3 @@ TEST(MemoryTests, TestTemporaryBufferNewCustomization)
     thrust::return_temporary_buffer(sys, ps.first, ps.second);
   }
 }
-
-TEST(HipThrustMemory, VoidMalloc)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  const size_t size = 9001;
-  thrust::device_system_tag dev_tag;
-
-  using pointer = thrust::pointer<int, thrust::device_system_tag>;
-  // Malloc on device
-  auto void_ptr = thrust::malloc(dev_tag, sizeof(int) * size);
-  pointer ptr   = pointer(static_cast<int*>(void_ptr.get()));
-  // Free
-  thrust::free(dev_tag, ptr);
-}
-
-TEST(HipThrustMemory, TypeMalloc)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  const size_t size = 9001;
-  thrust::device_system_tag dev_tag;
-
-  // Malloc on device
-  auto ptr = thrust::malloc<int>(dev_tag, sizeof(int) * size);
-  // Free
-  thrust::free(dev_tag, ptr);
-}
-
-#if THRUST_HAS_HIP_COMPILER()
-TEST(HipThrustMemory, MallocUseMemory)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  const size_t size = 1024;
-  thrust::device_system_tag dev_tag;
-
-  // Malloc on device
-  auto ptr = thrust::malloc<int>(dev_tag, sizeof(int) * size);
-
-  // Try allocated memory with HIP function
-  HIP_CHECK(hipMemset(ptr.get(), 0, size * sizeof(int)));
-
-  // Free
-  thrust::free(dev_tag, ptr);
-}
-#endif // THRUST_HAS_HIP_COMPILER()

@@ -35,6 +35,7 @@ jobs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
     steps:
       - name: Checkout rocm-libraries
+        timeout-minutes: 30
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github
@@ -123,15 +124,17 @@ jobs:
     runs-on: azure-linux-scale-rocm
     steps:
       - name: Checkout rocm-libraries
+        timeout-minutes: 30
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: ${{ matrix.checkout_paths_str }}
           sparse-checkout-cone-mode: true
 
       - name: Checkout TheRock
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
+          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
           path: TheRock
 
       - name: Install base dependencies

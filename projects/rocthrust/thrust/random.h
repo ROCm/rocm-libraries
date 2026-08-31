@@ -22,15 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-#include <cstdint>
-
 // RNGs
 #include <thrust/random/discard_block_engine.h>
 #include <thrust/random/linear_congruential_engine.h>
@@ -42,6 +33,8 @@
 #include <thrust/random/normal_distribution.h>
 #include <thrust/random/uniform_int_distribution.h>
 #include <thrust/random/uniform_real_distribution.h>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 

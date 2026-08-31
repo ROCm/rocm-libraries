@@ -370,6 +370,20 @@ validParameters = { # we need to make sure this matches develop
     #   PGR==2: reject (use -1 or 0 in that case)
     # 1LDSBuffer will be 0 if DtlPlusLdsBuf if enabled
     "DtlPlusLdsBuf": [-1,0,1],
+    # Force allocating PGR+1 (i.e. 3) LDS buffers when PrefetchGlobalRead==2,
+    # if we have enough LDS memory size. It targets the TDM (datamover) PGR2 path
+    # (e.g. gfx1250). The extra LDS block lets the next-iteration global reads be
+    # scheduled over the barrier without colliding with the buffer currently
+    # being read.
+    # -1: auto (3 buffers if they fit in MaxLDS, otherwise fall back to 2)
+    #  0: disable
+    #  1: enable (forced; no MaxLDS fallback, so a kernel whose 3 buffers do not
+    #     fit is rejected by the usual LDS size check)
+    # Silently downgraded to 0 without TDM on both A and B, for
+    # PrefetchGlobalRead!=2, and for PrefetchAcrossPersistent=1.
+    # 1LDSBuffer never competes with this: TDM already resolves 1LDSBuffer==-1 to 0
+    # and rejects 1LDSBuffer==1 with PGR2.
+    "TDMPlusLdsBuf": [-1,0,1],
     # We use double LDS buffer when PrefetchGlobalRead.
     # While it reads data from LDS[0]/[1], it prefetch global data and writes to LDS[1]/[0]
     # If we can make sure all data are read from LDS to register before writing data to LDS, we can use 1 LDS buffer to save LDS memory.
@@ -382,22 +396,23 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
-    # gfx1250 LDS segment interleave: raises LDS read bandwidth by putting operand A's
-    # two halves in different 64KiB LDS segments so its two MFMA read ports stop conflicting.
-    # Supported: TDMInst=3 (TDM load for A and B), gfx1250, MIWaveGroup [2,2], dtype bf16 / fp16 /
-    # fp8 (incl. MXFP8). Not applied for 1LDSBuffer, subtile, sparse, or TDMSplit kernels.
-    # Mechanism: reorder LDS from the baseline [A0][A1][B0][B1] to [A0][B0][A1][B1]. Only operand A
-    # is helped -- B's halves move too, but both ports can still hit the same B segment.
-    # Two cases:
-    #   tight   (one A-half + one B-half >= 64KiB): [A0][B0] fills a segment, so [A1][B1] land in
-    #            the next one -- no extra LDS.
-    #   aligned (< 64KiB): pad [A0][B0] up to the segment boundary to push [A1][B1] over -- uses
-    #            more LDS, and needs PrefetchGlobalRead=2.
+    # gfx1250 LDS segment interleave: puts an operand's two components in different 64KiB LDS segments
+    # so the two read ports (one per SIMD pair) read different segments, avoiding a segment conflict
+    # (both ports reading one segment at once).
+    #
+    # Applies only to gfx1250 wave-separated TDM kernels, and requires:
+    #   - TDMInst=3, UnrollMajorLDS, MIWaveGroup [2,2], [4,1], [1,4]
+    #   - dtype bf16 / fp16 / fp8 / fp4 (incl. MXFP8/MXFP4 and mixed narrow types such as F8xF4)
+    #   - VWA (for [2,2], [4,1]) = WaveTileA or WaveTileA/2; VWB (for [1,4]) = WaveTileB or WaveTileB/2;
+    #     the WaveTile/2 case needs TDMSplit
+    # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
+    #
     # Values:
-    #   -1 = auto: apply "tight" only (skip "aligned").
+    #   -1 = auto: enable only where it needs no extra LDS reserved.
     #    0 = off (default): baseline layout.
-    #    1 = force on: apply both "tight" and "aligned" wherever valid.
-    # Recommended: set [0, 1] when tuning, so both baseline and interleaved kernels are benchmarked.
+    #    1 = on: enable wherever valid, including cases that reserve more LDS to reach a segment
+    #            boundary (needs PrefetchGlobalRead=2).
+    # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
@@ -1171,6 +1186,11 @@ validParameters = { # we need to make sure this matches develop
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
     "TDMSplit": [False, True],
+    # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
+    # (different TDM wait groups) so every wave finishes the urgent group before any
+    # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
+    # gfx1250 / ScheduleIterAlg=4 path only, off by default.
+    "TDMLoadWaveSync": [False, True],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default

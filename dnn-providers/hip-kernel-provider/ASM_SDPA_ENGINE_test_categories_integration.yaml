@@ -9,37 +9,49 @@
 # forward/backward suites under dnn-providers/integration-tests), not
 # hip_kernel_provider_tests or hip_kernel_provider_integration_tests names.
 #
-# "Smoke/*Sdpa*" covers both the common-suite SDPA forward correctness cases
-# (IntegrationGpuSdpaFwdBfp16) and the ported backward cases
-# (IntegrationGpuSdpaBwdBfp16 / IntegrationGpuSdpaBwdFp16). The harness's
-# generic engine-support check (checkEngineSupportOrSkip / verifyGraph) skips
-# any case ASM_SDPA_ENGINE doesn't service, so pinning the whole SDPA surface
-# here is safe.
+# Tier pattern shape mirrors miopen-provider/test_categories_integration.yaml,
+# scoped to the SDPA surface this engine actually implements:
+#   - "quick_*Sdpa*"/"standard_*Sdpa*" match the bundle suites
+#     (integration-test-bundles/{quick,standard}/SdpaFwd*), whose names mirror
+#     the on-disk tier directory; bundles are the CI driver.
+#   - "Smoke/*Sdpa*" (slash) matches the C++ parameterised suites
+#     (Smoke/IntegrationGpuSdpaFwdBfp16 and the ported backward cases
+#     Smoke/IntegrationGpuSdpaBwd{Bfp16,Fp16}). These no longer build by
+#     default -- see BUILD_CPP_GRAPH_TESTS in
+#     dnn-providers/integration-tests/src/integration-tests/CMakeLists.txt --
+#     but keep the pattern regardless so a graph-tests-enabled build still
+#     picks them up.
+#   - "*Sdpa*" (comprehensive/full) covers the whole SDPA surface in either
+#     authoring style, including any future full-tier SDPA bundle.
+# The harness's generic engine-support check (checkEngineSupportOrSkip /
+# verifyGraph) skips any case ASM_SDPA_ENGINE doesn't service, so pinning the
+# whole SDPA surface at the comprehensive/full tier is safe.
 _common_excludes: &common_excludes
   - "*DISABLED*"
+  # SdpaBackward bundles fail on two independent issues:
+  #   1. ASM kernel .co files missing from TheRock artifact (hipError 301)
+  #   2. CPU reference rejects LSE tensor shape ("lse must be rank-4")
+  # Tracked upstream — re-enable once hip-kernel-provider ships the kernels
+  # and the CPU ref handles the new LSE layout.
+  - "*SdpaBackward*"
 
-# TEMPORARY TIER REMAPPING (revert once CI has proper test-label support).
-# Mirrors HIP_MLOPS_ENGINE_test_categories_integration.yaml's rationale: CI
-# cannot yet select tests by label, so only the standard tier is populated
-# until label-based selection lands.
 test_categories:
-  # quick: commented out -- see HIP_MLOPS_ENGINE_test_categories_integration.yaml
-  # for rationale. Uncomment and give it a distinct pattern once label-based
-  # selection lands.
-  #
-  # quick:
-  #   description: "Smoke SDPA cases"
-  #   test_patterns:
-  #     - "Smoke/*Sdpa*"
-  #   exclude: *common_excludes
-  #   labels:
-  #     - "quick"
-  #     - "pre-commit"
-  #     - "smoke"
+  quick:
+    description: "Fast ASM SDPA external integration coverage: quick-tier bundle sweeps plus Smoke SDPA cases"
+    test_patterns:
+      - "quick_*Sdpa*"
+      - "Smoke/*Sdpa*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
 
   standard:
-    description: "ASM SDPA external integration coverage (temporary: standard tier only until CI label support lands)"
+    description: "Standard ASM SDPA external integration coverage: quick coverage plus standard-tier bundles"
     test_patterns:
+      - "quick_*Sdpa*"
+      - "standard_*Sdpa*"
       - "Smoke/*Sdpa*"
     exclude: *common_excludes
     labels:
@@ -47,31 +59,41 @@ test_categories:
       - "pr"
       - "precheckin"
 
-  # Commented out (not just left empty): the shared category validator rejects
-  # a category whose test_patterns is empty, so these no-op tiers are
-  # commented out entirely until CI label support lands.
-  #
-  # comprehensive:
-  #   description: "Disabled for now (temporary: runs nothing until CI label support lands)"
-  #   test_patterns: []
-  #   exclude: *common_excludes
-  #   labels:
-  #     - "comprehensive"
-  #     - "nightly"
-  #     - "extended"
-  #
-  # full:
-  #   description: "Disabled for now (temporary: runs nothing until CI label support lands)"
-  #   test_patterns: []
-  #   exclude: *common_excludes
-  #   labels:
-  #     - "full"
-  #     - "all"
+  comprehensive:
+    description: "Nightly comprehensive ASM SDPA external integration coverage"
+    test_patterns:
+      - "*Sdpa*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete ASM SDPA external integration coverage"
+    test_patterns:
+      - "*Sdpa*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: quick-tier bundle sweeps plus Smoke SDPA cases"
+    test_patterns:
+      - "quick_*Sdpa*"
+      - "Smoke/*Sdpa*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
 
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   category_timeouts:
+    quick: 1200
     standard: 2700
-    # comprehensive: 25200
-    # full: 28800
+    comprehensive: 25200
+    full: 28800
+    ffm-quick: 7200  # 2 hours

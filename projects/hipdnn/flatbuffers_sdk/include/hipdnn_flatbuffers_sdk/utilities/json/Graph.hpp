@@ -5,6 +5,7 @@
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/BatchnormAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/BatchnormInferenceAttributes.hpp>
@@ -19,6 +20,8 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/LayernormAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/LayernormBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/MatmulAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/MoeGroupedMatmulBwdAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/PointwiseAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormBackwardAttributes.hpp>
@@ -28,6 +31,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/SdpaBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/TensorAttributes.hpp>
+#include <optional>
 
 namespace hipdnn_flatbuffers_sdk::data_objects
 {
@@ -55,6 +59,8 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::ReductionAttributes, "ReductionAttributes"},
      {NodeAttributes::ResampleFwdAttributes, "ResampleFwdAttributes"},
      {NodeAttributes::ResampleBwdAttributes, "ResampleBwdAttributes"},
+     {NodeAttributes::MoeGroupedMatmulAttributes, "MoeGroupedMatmulAttributes"},
+     {NodeAttributes::MoeGroupedMatmulBwdAttributes, "MoeGroupedMatmulBwdAttributes"},
      {NodeAttributes::NONE, ""}})
 
 NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
@@ -132,6 +138,12 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
     case data_objects::NodeAttributes::ResampleBwdAttributes:
         nodeJson = *node.attributes_as_ResampleBwdAttributes();
         break;
+    case data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
+        nodeJson = *node.attributes_as_MoeGroupedMatmulAttributes();
+        break;
+    case data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
+        nodeJson = *node.attributes_as_MoeGroupedMatmulBwdAttributes();
+        break;
     default:
         throw std::runtime_error(
             "hipdnn_flatbuffers_sdk::data_objects::to_json(Node): Unsupported NodeAttributes type: "
@@ -155,6 +167,10 @@ inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
     if(graph.preferred_engine_id().has_value())
     {
         graphJson["preferred_engine_id"] = graph.preferred_engine_id().value();
+    }
+    if(graph.id() != nullptr)
+    {
+        graphJson["id"] = utilities::formatUuid(utilities::toUuidBytes(*graph.id()));
     }
     if(const auto* version = graph.min_required_engine_api_version())
     {
@@ -220,6 +236,10 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ResampleFwdAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::ResampleBwdAttributes:
             return to<data_objects::ResampleBwdAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
+            return to<data_objects::MoeGroupedMatmulAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
+            return to<data_objects::MoeGroupedMatmulBwdAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error("hipdnn_flatbuffers_sdk::json::to<data_objects::Node>(): "
                                      "Unsupported NodeAttributes type: "
@@ -248,6 +268,16 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
         preferredEngineId = entry["preferred_engine_id"].get<int64_t>();
     }
     const bool isOverrideShapeEnabled = entry.value("is_override_shape_enabled", false);
+    std::optional<data_objects::Uuid> id;
+    if(entry.contains("id"))
+    {
+        if(!entry["id"].is_string())
+        {
+            throw std::runtime_error("Graph id must be a canonical UUID string");
+        }
+        id.emplace(
+            utilities::toFlatbufferUuid(utilities::parseUuid(entry["id"].get<std::string>())));
+    }
 
     const data_objects::EngineApiVersion* minRequiredEngineApiVersion = nullptr;
     data_objects::EngineApiVersion parsedMinRequiredEngineApiVersion;
@@ -272,7 +302,8 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
                                            &nodes,
                                            preferredEngineId,
                                            isOverrideShapeEnabled,
-                                           minRequiredEngineApiVersion);
+                                           minRequiredEngineApiVersion,
+                                           id ? &*id : nullptr);
 }
 
 }
