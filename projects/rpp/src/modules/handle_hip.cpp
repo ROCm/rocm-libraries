@@ -35,6 +35,7 @@ SOFTWARE.
 #ifdef AUDIO_SUPPORT
 #ifdef RPP_USE_ROCFFT
 #include <rocfft/rocfft.h>
+
 #include <map>
 #endif
 #endif
@@ -195,8 +196,7 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
 #ifdef AUDIO_SUPPORT
 #ifdef RPP_USE_ROCFFT
     // Initialize rocFFT library once per handle
-    if (rocfft_setup() != rocfft_status_success)
-        RPP_THROW("rocFFT library initialization failed");
+    if (rocfft_setup() != rocfft_status_success) RPP_THROW("rocFFT library initialization failed");
 #endif
 #endif
 }
@@ -230,8 +230,7 @@ void Handle::rpp_destroy_object_gpu() {
     this->impl->rocfft_plan_cache.clear();
 
     // Cleanup rocFFT library once per handle
-    if (rocfft_cleanup() != rocfft_status_success)
-        RPP_THROW("rocFFT library cleanup failed");
+    if (rocfft_cleanup() != rocfft_status_success) RPP_THROW("rocFFT library cleanup failed");
 #endif
 #endif
 
@@ -331,7 +330,8 @@ std::size_t Handle::GetMaxComputeUnits() {
 #ifdef RPP_USE_ROCFFT
 // Get or create a cached rocFFT plan for the given nfft size and batch count
 // Cache key combines nfft and batchCount to handle different workload sizes
-RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan, rocfft_plan_description* desc) {
+RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan,
+                          rocfft_plan_description* desc) {
     auto& cache = handle.impl->rocfft_plan_cache;
 
     // Create composite key: upper 32 bits = nfft, lower 32 bits = batchCount
@@ -355,26 +355,19 @@ RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan*
     size_t outStride[1] = {1};
     int numBins = (nfft / 2 + 1);
 
-    if (rocfft_plan_description_set_data_layout(new_desc,
-                                                 rocfft_array_type_real,
-                                                 rocfft_array_type_hermitian_interleaved,
-                                                 nullptr, nullptr,
-                                                 1, inStride, static_cast<size_t>(nfft),
-                                                 1, outStride, static_cast<size_t>(numBins))
-        != rocfft_status_success) {
+    if (rocfft_plan_description_set_data_layout(
+            new_desc, rocfft_array_type_real, rocfft_array_type_hermitian_interleaved, nullptr,
+            nullptr, 1, inStride, static_cast<size_t>(nfft), 1, outStride,
+            static_cast<size_t>(numBins)) != rocfft_status_success) {
         rocfft_plan_description_destroy(new_desc);
         return RPP_ERROR_INVALID_ARGUMENTS;
     }
 
     rocfft_plan new_plan = nullptr;
     // Create plan with the actual batch count for efficient batch FFT execution
-    if (rocfft_plan_create(&new_plan,
-                           rocfft_placement_notinplace,
-                           rocfft_transform_type_real_forward,
-                           rocfft_precision_single,
-                           1, lengths,
-                           static_cast<size_t>(batchCount),
-                           new_desc) != rocfft_status_success) {
+    if (rocfft_plan_create(&new_plan, rocfft_placement_notinplace,
+                           rocfft_transform_type_real_forward, rocfft_precision_single, 1, lengths,
+                           static_cast<size_t>(batchCount), new_desc) != rocfft_status_success) {
         rocfft_plan_description_destroy(new_desc);
         return RPP_ERROR_NOT_ENOUGH_MEMORY;
     }
