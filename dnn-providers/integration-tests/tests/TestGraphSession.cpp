@@ -117,7 +117,8 @@ TEST(TestGraphSession, DefaultSessionHasNoGraphAndAcceptsNothing)
     EXPECT_TRUE(session.buildError.empty());
     EXPECT_FALSE(session.engines.accepted);
     EXPECT_TRUE(session.engines.rankedIds.empty());
-    EXPECT_EQ(session.engines.status, ErrorCode::OK);
+    EXPECT_EQ(session.engines.status.get_code(), ErrorCode::OK);
+    EXPECT_TRUE(session.engines.status.get_message().empty());
 }
 
 TEST(TestGraphSession, SessionIsMovable)

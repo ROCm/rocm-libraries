@@ -230,7 +230,8 @@ SupportObservation observeSupport(const RankedEngines& engines,
 
     // `accepted` is the same answer the executor and the enforcement rungs act on,
     // taken once at the query.
-    const auto verdict = chooseVerdict(claimed, isResolved(engines.status), engines.accepted);
+    const auto verdict
+        = chooseVerdict(claimed, isResolved(engines.status.get_code()), engines.accepted);
     if(verdict.has_value())
     {
         observation.results.push_back(makeResult(*verdict,
@@ -238,9 +239,9 @@ SupportObservation observeSupport(const RankedEngines& engines,
                                                  engineName,
                                                  arch,
                                                  platform,
-                                                 verdictDetail(*verdict, engines.status),
-                                                 engines.status,
-                                                 engines.statusMessage));
+                                                 verdictDetail(*verdict, engines.status.get_code()),
+                                                 engines.status.get_code(),
+                                                 engines.status.get_message()));
     }
 
     return observation;

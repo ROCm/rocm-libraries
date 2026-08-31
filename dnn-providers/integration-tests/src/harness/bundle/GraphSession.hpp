@@ -49,11 +49,13 @@ bool enginesAccept(hipdnn_frontend::ErrorCode status,
 /// decisions are all testable on their own.
 struct RankedEngines
 {
-    hipdnn_frontend::ErrorCode status = hipdnn_frontend::ErrorCode::OK;
-    std::string statusMessage;
+    /// The frontend's own answer, kept whole rather than decomposed into a code and
+    /// a message. isResolved() and enginesAccept() still take the bare ErrorCode --
+    /// they are pure predicates over it -- so callers pass status.get_code().
+    hipdnn_frontend::Error status;
     std::vector<int64_t> rankedIds;
 
-    /// enginesAccept() applied to the three fields above, computed once at the query.
+    /// enginesAccept() applied to the fields above, computed once at the query.
     bool accepted = false;
 };
 

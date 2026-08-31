@@ -38,12 +38,10 @@ GraphSession
     // executor calls create_execution_plans() on this same object afterwards, which
     // is what the unpinned path has always done.
     std::vector<int64_t> ids;
-    auto status = session.graph->get_ranked_engine_ids(ids);
-    session.engines.status = status.get_code();
-    session.engines.statusMessage = status.get_message();
+    session.engines.status = session.graph->get_ranked_engine_ids(ids);
     session.engines.rankedIds = std::move(ids);
-    session.engines.accepted
-        = enginesAccept(session.engines.status, session.engines.rankedIds, engineUnderTest);
+    session.engines.accepted = enginesAccept(
+        session.engines.status.get_code(), session.engines.rankedIds, engineUnderTest);
 
     return session;
 }
@@ -65,19 +63,32 @@ EngineOpResult
         graph.set_preferred_engine_id_ext(engineUnderTest->id);
     }
 
+    // Each stage returns the frontend's own Error; the first bad one is the answer
+    // and carries its message out. Returning an optional rather than the result
+    // keeps the early return visible at the call site instead of hiding it in a
+    // macro.
+    const auto firstFailure
+        = [](const hipdnn_frontend::Error& result) -> std::optional<EngineOpResult> {
+        if(!result.is_good())
+        {
+            return EngineOpResult::failed(result.get_message());
+        }
+        return std::nullopt;
+    };
+
     try
     {
-        if(auto result = graph.create_execution_plans(); !result.is_good())
+        if(auto failed = firstFailure(graph.create_execution_plans()))
         {
-            return EngineOpResult::failed(result.get_message());
+            return *failed;
         }
-        if(auto result = graph.check_support(); !result.is_good())
+        if(auto failed = firstFailure(graph.check_support()))
         {
-            return EngineOpResult::failed(result.get_message());
+            return *failed;
         }
-        if(auto result = graph.build_plans(); !result.is_good())
+        if(auto failed = firstFailure(graph.build_plans()))
         {
-            return EngineOpResult::failed(result.get_message());
+            return *failed;
         }
     }
     // A provider is free to decline later than the ranked list suggested. That is

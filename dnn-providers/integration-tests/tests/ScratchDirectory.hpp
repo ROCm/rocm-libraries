@@ -72,6 +72,7 @@ inline hipdnn_test_sdk::utilities::ScopedDirectory makeDir(std::string_view pref
         {
             // Name taken by a concurrent run. Draw the next one -- the counter has
             // already advanced, so this cannot spin on the same candidate.
+            continue;
         }
     }
     throw std::runtime_error("scratch::makeDir: no free temp directory name after 64 attempts");

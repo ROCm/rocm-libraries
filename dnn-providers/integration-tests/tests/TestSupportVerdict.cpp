@@ -67,10 +67,9 @@ const LoadedEngine ENGINE{UNDER_TEST_ID, UNDER_TEST};
 RankedEngines ranked(ErrorCode status, std::vector<int64_t> ids, std::string message = {})
 {
     RankedEngines engines;
-    engines.status = status;
-    engines.statusMessage = std::move(message);
+    engines.status = hipdnn_frontend::Error{status, std::move(message)};
     engines.rankedIds = std::move(ids);
-    engines.accepted = enginesAccept(engines.status, engines.rankedIds, ENGINE);
+    engines.accepted = enginesAccept(engines.status.get_code(), engines.rankedIds, ENGINE);
     return engines;
 }
 
