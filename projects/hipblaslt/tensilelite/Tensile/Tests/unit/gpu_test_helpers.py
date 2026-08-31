@@ -6,6 +6,7 @@
 #   - TileConfig dataclass for parameterized tile configurations
 #   - Mock/kernel creation helpers (_mock_dtype, _create_kernel, create_writer)
 #   - rocIsa initialization (init_rocisa)
+#   - Scoped rocIsa state preservation (preserve_rocisa_kernel_state)
 #   - Unified kernel asm generator (generate_kernel_asm)
 #   - Prologue builder (generate_load_params) and export epilogue (generate_export_epilogue)
 #   - Assembly & GPU execution (assemble_kernel, assemble_and_run)
@@ -14,6 +15,7 @@
 ################################################################################
 
 import ctypes
+from contextlib import contextmanager
 import os
 import re
 import shutil
@@ -377,6 +379,38 @@ def init_rocisa(target=None, wavesize=None):
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
     ri.init(isa, asmpath)
     ri.setKernel(isa, wavesize if wavesize is not None else WAVESIZE)
+
+
+@contextmanager
+def preserve_rocisa_kernel_state():
+    """Restore rocisa's thread-local kernel/register state after a test scope.
+
+    ``rocIsa.init`` intentionally keeps its per-ISA capability cache, but
+    ``rocIsa.setKernel`` also selects the ISA used to spell instructions and
+    resets register-name tracking.  Test support probes and broad fixtures must
+    not leave those process-local settings behind for the next pytest item.
+    """
+    from rocisa import rocIsa
+
+    ri = rocIsa.getInstance()
+    previous_kernel = ri.getKernel()
+    previous_vgpr_idx = dict(ri.getVgprIdx())
+    previous_vgpr_msb = ri.getVgprMsb()
+    try:
+        yield
+    finally:
+        previous_isa = getattr(previous_kernel, "isa", None)
+        if previous_isa is None:
+            # The StinkyTofu adaptor represents "never pinned" with isa=None.
+            ri.setKernelInfo(previous_kernel)
+        else:
+            ri.setKernel(tuple(previous_isa), previous_kernel.wavefrontSize)
+        # Native rocisa clears this map in setKernel; the StinkyTofu adaptor
+        # exposes the live dict and currently does not. Clear handles both.
+        ri.getVgprIdx().clear()
+        for name, idx in previous_vgpr_idx.items():
+            ri.setVgprIdx(name, idx)
+        ri.setVgprMsb(previous_vgpr_msb)
 
 
 # ---- Kernel assembly generator ----
