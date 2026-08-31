@@ -6,10 +6,19 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ## (Unreleased) hipSOLVER
 
 ### Added
+
+* Added compatibility-only functions:
+  * larft
+    * hipsolverDnXlarft_bufferSize
+    * hipsolverDnXlarft
+
 ### Changed
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed hipsolverDnXpotrs calling 32-bit potrs instead of 64-bit potrs.
+
 ### Known issues
 ### Upcoming changes
 

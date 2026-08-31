@@ -157,8 +157,8 @@ struct buffer_load<16, pre_nop>
         using mbuf_t = typename impl::buffer_load_trait<16, T>::payload_t;
 #if HAS_RAW_BUFFER_BUILTINS
         index_t s_offset                 = i_offset;
-        reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b128(
-            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+        reinterpret_cast<mbuf_t&>(value) = bit_cast<mbuf_t>(__builtin_amdgcn_raw_buffer_load_b128(
+            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0));
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -191,8 +191,8 @@ struct buffer_load<8, pre_nop>
         using mbuf_t = typename impl::buffer_load_trait<8, T>::payload_t;
 #if HAS_RAW_BUFFER_BUILTINS
         index_t s_offset                 = i_offset;
-        reinterpret_cast<mbuf_t&>(value) = __builtin_amdgcn_raw_buffer_load_b64(
-            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
+        reinterpret_cast<mbuf_t&>(value) = bit_cast<mbuf_t>(__builtin_amdgcn_raw_buffer_load_b64(
+            cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0));
 #else
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
@@ -2325,6 +2325,14 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                       ,
                   "wrong! not implemented");
 
+    // gfx1250 requires DEVICE scope (16) for cross-CU buffer atomics; CU scope (0) is sufficient
+    // elsewhere.
+#if defined(__gfx125__)
+    constexpr int coherence_flag = 16;
+#else
+    constexpr int coherence_flag = 0;
+#endif
+
     if constexpr(std::is_same<T, float>::value)
     {
         if constexpr(N == 1)
@@ -2333,7 +2341,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                                                    dst_wave_buffer_resource,
                                                    dst_thread_addr_offset,
                                                    dst_wave_addr_offset,
-                                                   0);
+                                                   coherence_flag);
         }
         else if constexpr(N == 2)
         {
@@ -2342,14 +2350,14 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset,
-                0);
+                coherence_flag);
 
             llvm_amdgcn_raw_buffer_atomic_add_fp32(
                 src_thread_data.template get_as<float>()[number<1>{}],
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset + sizeof(float),
-                0);
+                coherence_flag);
         }
         else if constexpr(N == 4)
         {
@@ -2358,28 +2366,28 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset,
-                0);
+                coherence_flag);
 
             llvm_amdgcn_raw_buffer_atomic_add_fp32(
                 src_thread_data.template get_as<float>()[number<1>{}],
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset + sizeof(float),
-                0);
+                coherence_flag);
 
             llvm_amdgcn_raw_buffer_atomic_add_fp32(
                 src_thread_data.template get_as<float>()[number<2>{}],
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset + 2 * sizeof(float),
-                0);
+                coherence_flag);
 
             llvm_amdgcn_raw_buffer_atomic_add_fp32(
                 src_thread_data.template get_as<float>()[number<3>{}],
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset + 3 * sizeof(float),
-                0);
+                coherence_flag);
         }
     }
     else if constexpr(std::is_same<T, fp16_t>::value)
@@ -2390,7 +2398,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                                                      dst_wave_buffer_resource,
                                                      dst_thread_addr_offset,
                                                      dst_wave_addr_offset,
-                                                     0);
+                                                     coherence_flag);
         }
         else if constexpr(N == 4)
         {
@@ -2400,7 +2408,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                     dst_wave_buffer_resource,
                     dst_thread_addr_offset,
                     dst_wave_addr_offset + i * sizeof(fp16x2_t),
-                    0);
+                    coherence_flag);
             });
         }
         else if constexpr(N == 8)
@@ -2411,7 +2419,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                     dst_wave_buffer_resource,
                     dst_thread_addr_offset,
                     dst_wave_addr_offset + i * sizeof(fp16x2_t),
-                    0);
+                    coherence_flag);
             });
         }
     }
@@ -2423,7 +2431,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                                                      dst_wave_buffer_resource,
                                                      dst_thread_addr_offset,
                                                      dst_wave_addr_offset,
-                                                     0);
+                                                     coherence_flag);
         }
         else if constexpr(N == 4)
         {
@@ -2433,7 +2441,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                     dst_wave_buffer_resource,
                     dst_thread_addr_offset,
                     dst_wave_addr_offset + i * sizeof(bf16x2_t),
-                    0);
+                    coherence_flag);
             });
         }
         else if constexpr(N == 8)
@@ -2444,7 +2452,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                     dst_wave_buffer_resource,
                     dst_thread_addr_offset,
                     dst_wave_addr_offset + i * sizeof(bf16x2_t),
-                    0);
+                    coherence_flag);
             });
         }
     }
@@ -2456,7 +2464,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                                                   dst_wave_buffer_resource,
                                                   dst_thread_addr_offset,
                                                   dst_wave_addr_offset,
-                                                  0);
+                                                  coherence_flag);
         }
         else if constexpr(N == 2)
         {
@@ -2465,14 +2473,14 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset,
-                0);
+                coherence_flag);
 
             llvm_amdgcn_raw_buffer_atomic_add_i32(
                 src_thread_data.template get_as<int32_t>()[number<1>{}],
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset + sizeof(int32_t),
-                0);
+                coherence_flag);
         }
         else if constexpr(N == 4)
         {
@@ -2481,28 +2489,28 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset,
-                0);
+                coherence_flag);
 
             llvm_amdgcn_raw_buffer_atomic_add_i32(
                 src_thread_data.template get_as<int32_t>()[number<1>{}],
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset + sizeof(int32_t),
-                0);
+                coherence_flag);
 
             llvm_amdgcn_raw_buffer_atomic_add_i32(
                 src_thread_data.template get_as<int32_t>()[number<2>{}],
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset + 2 * sizeof(int32_t),
-                0);
+                coherence_flag);
 
             llvm_amdgcn_raw_buffer_atomic_add_i32(
                 src_thread_data.template get_as<int32_t>()[number<3>{}],
                 dst_wave_buffer_resource,
                 dst_thread_addr_offset,
                 dst_wave_addr_offset + 3 * sizeof(int32_t),
-                0);
+                coherence_flag);
         }
     }
 }
@@ -3096,7 +3104,7 @@ amd_tdm_load(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descriptor
     static constexpr auto I4 = number<4>{};
 
     auto tdm_desc_grp = descriptor.getResourceDescriptorGroup();
-    __builtin_amdgcn_tensor_load_to_lds(tdm_desc_grp.get(I0),
+    __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(tdm_desc_grp.get(I0)),
                                         tdm_desc_grp.get(I1),
                                         tdm_desc_grp.get(I2),
                                         tdm_desc_grp.get(I3),
@@ -3122,7 +3130,7 @@ amd_tdm_store(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descripto
     static constexpr auto I4 = number<4>{};
 
     auto tdm_desc_grp = descriptor.getResourceDescriptorGroup();
-    __builtin_amdgcn_tensor_store_from_lds(tdm_desc_grp.get(I0),
+    __builtin_amdgcn_tensor_store_from_lds(bit_cast<uint32x4_t>(tdm_desc_grp.get(I0)),
                                            tdm_desc_grp.get(I1),
                                            tdm_desc_grp.get(I2),
                                            tdm_desc_grp.get(I3),

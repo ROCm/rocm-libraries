@@ -38,6 +38,7 @@
 #include <miopen/simple_hash.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/stringutils.hpp>
+#include <miopen/stream_tracker.hpp>
 #include <miopen/target_properties.hpp>
 
 #include <cstdio>
@@ -93,6 +94,19 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     void SetStream(miopenAcceleratorQueue_t streamID) const;
     void SetStreamFromPool(int streamID) const;
     void ReserveExtraStreamsInPool(int cnt) const;
+
+    /// Creates a stream that belongs to the caller rather than to this Handle's
+    /// index-addressed stream pool.
+    StreamTracker::StreamPtr CreateExclusiveStream() const;
+
+    /// Redirects GetStream() on the calling thread to \p stream, overriding the
+    /// stream-pool index. Pass nullptr to restore the index-selected stream.
+    /// Only valid for work that never reaches rocBLAS or hipBLASLt, whose
+    /// handles remain bound to the pool stream and will throw while an
+    /// exclusive stream is set.
+    void SetExclusiveStream(miopenAcceleratorQueue_t stream) const;
+
+    StreamTracker& GetStreamTracker() const;
 
     void SetAllocator(miopenAllocatorFunction allocator,
                       miopenDeallocatorFunction deallocator,
@@ -182,6 +196,7 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     void Copy(ConstData_t src, Data_t dest, std::size_t size) const;
 
     Allocator::ManageDataPtr Create(std::size_t sz) const;
+    std::shared_ptr<ScratchAllocation> GetScratchBuffer(std::size_t sz) const;
     Allocator::ManageDataPtr&
     WriteTo(const void* data, Allocator::ManageDataPtr& ddata, std::size_t sz) const;
     void WriteTo(const void* data, Data_t ddata, std::size_t sz) const;
@@ -241,7 +256,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     {
         const auto& target = GetTargetProperties();
         const auto db_id   = target.DbId();
-        if(db_id == "gfx1100" || db_id == "gfx1102" || db_id == "gfx1201")
+        if(db_id == "gfx1100" || db_id == "gfx1102" || db_id == "gfx1151" || db_id == "gfx1200" ||
+           db_id == "gfx1201")
         {
             std::ostringstream ss;
             ss << db_id << std::hex << GetMaxHardwareComputeUnits();
@@ -326,6 +342,23 @@ private:
 };
 
 inline std::ostream& operator<<(std::ostream& os, const Handle& handle) { return handle.Print(os); }
+
+/// Returns the compute-unit count to use when selecting a *system* database by
+/// closest CU count. For most devices this is just the real CU count, but some
+/// ASICs ship no dedicated system DB and must borrow a sibling's tuning.
+///
+/// Low-CU gfx942 parts ship no dedicated system DB. The default closest-by-CU
+/// search would otherwise land them on a sibling whose tuning is a poorer match;
+/// redirect them to the higher-CU gfx942 system database instead.
+///
+/// This affects system-DB selection only; user DBs continue to use the device's
+/// own basename, so the device still reads/writes its own tuned data.
+inline int GetSysDbSelectionCu(const std::string& db_id, int real_cu_count)
+{
+    if(db_id == "gfx942" && real_cu_count <= 80)
+        return 304;
+    return real_cu_count;
+}
 
 struct AutoEnableProfiling
 {

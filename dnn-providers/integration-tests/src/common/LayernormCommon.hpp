@@ -17,16 +17,16 @@ struct LayernormTestCase
 {
     std::vector<int64_t> dims;
     size_t normalizedDim;
-    bool isTraining;
+    bool optionalTensors;
     unsigned int seed;
 
     LayernormTestCase(std::vector<int64_t>&& dimsLocal,
                       size_t normalizedDimLocal,
-                      bool isTrainingLocal,
+                      bool optionalTensorsLocal,
                       unsigned int seedLocal)
         : dims(std::move(dimsLocal))
         , normalizedDim(normalizedDimLocal)
-        , isTraining(isTrainingLocal)
+        , optionalTensors(optionalTensorsLocal)
         , seed(seedLocal)
     {
         if(dims.size() != 4 && dims.size() != 5)
@@ -47,7 +47,7 @@ struct LayernormTestCase
         ss << "(dims:";
         vecToStream(ss, tc.dims);
         ss << " normalizedDim:" << tc.normalizedDim;
-        ss << " phase:" << (tc.isTraining ? "TRAINING" : "INFERENCE");
+        ss << " optionalTensors:" << tc.optionalTensors;
         ss << " seed:" << tc.seed;
         ss << ")";
 
@@ -57,7 +57,7 @@ struct LayernormTestCase
 
 // 4D (N, C, H, W) shapes: normalization boundary swept across every axis on a
 // small tensor, plus a couple of larger, closer-to-production shapes.
-inline std::vector<LayernormTestCase> getLayernormFwd4DTestCases()
+inline std::vector<LayernormTestCase> getLayernorm4DTestCases()
 {
     const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
@@ -76,7 +76,7 @@ inline std::vector<LayernormTestCase> getLayernormFwd4DTestCases()
 
 // 5D (N, C, D, H, W) shapes: same axis sweep as the 4D cases, plus a couple of
 // volumetric (VoxNet-style) shapes.
-inline std::vector<LayernormTestCase> getLayernormFwd5DTestCases()
+inline std::vector<LayernormTestCase> getLayernorm5DTestCases()
 {
     const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
@@ -100,7 +100,7 @@ inline std::vector<LayernormTestCase> getLayernormFwd5DTestCases()
 // Larger, closer-to-production shapes reserved for the Full tier (imported from the MIOpen
 // layernorm suite). The heaviest batch-256/512 volumetric shapes live in a separate
 // getLayernormFwd5DLargeBatchTestCases() set below so they can be gated independently.
-inline std::vector<LayernormTestCase> getLayernormFwd4DFullTestCases()
+inline std::vector<LayernormTestCase> getLayernorm4DFullTestCases()
 {
     const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
@@ -110,7 +110,7 @@ inline std::vector<LayernormTestCase> getLayernormFwd4DFullTestCases()
     };
 }
 
-inline std::vector<LayernormTestCase> getLayernormFwd5DFullTestCases()
+inline std::vector<LayernormTestCase> getLayernorm5DFullTestCases()
 {
     const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
@@ -164,7 +164,7 @@ inline std::vector<LayernormTestCase> getLayernormFwd5DFullTestCases()
 // "Full5dLargeBatch" prefix and currently skipped via each engine's test-config TOML. They
 // add batch scale over the batch-32 {*,*,14,14,14}/{*,1,32,32,32} shapes already in the Full
 // set (no distinct code path). Drop the TOML skip once per-test tier filtering is fully wired.
-inline std::vector<LayernormTestCase> getLayernormFwd5DLargeBatchTestCases()
+inline std::vector<LayernormTestCase> getLayernorm5DLargeBatchTestCases()
 {
     const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 

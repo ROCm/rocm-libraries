@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -33,19 +34,15 @@ namespace
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 
-inline bool bindConflictingTokenValue(const MatchContext& /*context*/, BoundTokens& bound)
+inline bool rejectSecondCriterion(const MatchContext& /*context*/, const BoundTokens& /*bound*/)
 {
-    bound["test.bound_token"] = BOUND_TOKEN_VALUE + 1;
-    return true;
+    ++counters().graphCalls;
+    return false;
 }
 
-inline bool bindAgreeingTokenValue(const MatchContext& /*context*/, BoundTokens& bound)
-{
-    bound["test.bound_token"] = BOUND_TOKEN_VALUE;
-    return true;
-}
-
-inline bool rejectEveryKernel(const MatchContext& /*context*/, const KernelDefinition& /*kernel*/)
+inline bool rejectEveryKernel(const MatchContext& /*context*/,
+                              const BoundTokens& /*bound*/,
+                              const KernelDefinition& /*kernel*/)
 {
     ++counters().kernelCalls;
     return false;
@@ -70,13 +67,21 @@ TEST(TestKernelIngestorStateManager, KernelLevelMatcherPrunesTheCatalog)
 
 TEST(TestKernelIngestorStateManager, GraphLevelMatcherFailurePrunesTheWholePack)
 {
-    const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
-    const auto manager = makeStateManager();
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &rejectCriterion);
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
+
     const TestGraph graph(makeGraphId(2));
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
-    EXPECT_TRUE(manager->unsortedDefinitions(context).empty());
+    EXPECT_TRUE(manager.unsortedDefinitions(context).empty());
     EXPECT_EQ(counters().graphCalls, 1);
     EXPECT_EQ(counters().kernelCalls, 0);
 }
@@ -84,15 +89,26 @@ TEST(TestKernelIngestorStateManager, GraphLevelMatcherFailurePrunesTheWholePack)
 TEST(TestKernelIngestorStateManager, MatchesOncePerGraphAndDevice)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const auto manager = makeStateManager();
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
+
     const TestGraph graph(makeGraphId(3));
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
-    manager->unsortedDefinitions(context);
-    manager->unsortedDefinitions(context);
-    manager->unsortedDefinitions(context);
+    manager.unsortedDefinitions(context);
+    manager.unsortedDefinitions(context);
+    manager.unsortedDefinitions(context);
 
+    // The engine's graph match and its criterion each run once; the catalog cache serves
+    // the other two queries.
+    EXPECT_EQ(counters().graphMatchCalls, 1);
     EXPECT_EQ(counters().graphCalls, 1);
     EXPECT_EQ(counters().kernelCalls, 3);
 }
@@ -100,9 +116,9 @@ TEST(TestKernelIngestorStateManager, MatchesOncePerGraphAndDevice)
 TEST(TestKernelIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNotOncePerPack)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-
-    constexpr const char* UNSHARED_FAIL_SYMBOL = "test.cross_pack_binding_reuse.fail";
-    GraphMatcherRegistry::registerSymbol(UNSHARED_FAIL_SYMBOL, rejectGraph);
+    const auto shared = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+    const auto unsharedFail
+        = scopedGraphMatcher("test.cross_pack_criterion_reuse.fail", &rejectSecondCriterion);
     const auto unsharedFailMatcherId = testId(0x84);
 
     const KernelDescriptorPack first = makePack({GRAPH_MATCHER_ID, unsharedFailMatcherId});
@@ -112,28 +128,32 @@ TEST(TestKernelIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNot
 
     const StateManager manager(
         makeSchema(),
-        {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
-         {unsharedFailMatcherId, "always fails", MatchScope::GRAPH, UNSHARED_FAIL_SYMBOL},
+        {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph_criterion"},
+         {unsharedFailMatcherId,
+          "always fails",
+          MatchScope::GRAPH,
+          "test.cross_pack_criterion_reuse.fail"},
          {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
         makeTestDispatches(),
         {first, second},
-        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph");
 
     const TestGraph graph(makeGraphId(20));
     const auto properties = testDeviceProperties();
     const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
+    // The shared criterion is memoized by descriptor id, so two packs listing it cost one
+    // evaluation; the unshared one adds the second.
     EXPECT_EQ(counters().graphCalls, 2);
     ASSERT_EQ(catalog.entries.size(), 1U);
     EXPECT_EQ(catalog.entries.front().packId, second.id);
-    EXPECT_EQ(catalog.bound.count("test.bound_token"), 1U);
-
-    GraphMatcherRegistry::unregisterSymbol(UNSHARED_FAIL_SYMBOL);
 }
 
 TEST(TestKernelIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackListingIt)
 {
-    const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &rejectCriterion);
 
     auto first = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
     auto second = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
@@ -144,7 +164,8 @@ TEST(TestKernelIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackLi
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {first, second},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
 
     const TestGraph graph(makeGraphId(21));
     const auto properties = testDeviceProperties();
@@ -163,6 +184,7 @@ TEST(TestKernelIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackLi
 TEST(TestKernelIngestorStateManager, AdmitsTwoPacksSharingATupleUnderDisjointArch)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     auto first = makePack({GRAPH_MATCHER_ID}, {"gfx90a"});
     first.kernels = {makeKernel(testId(0x90), "kernel_gfx90a", 64, "FLOAT")};
@@ -174,7 +196,8 @@ TEST(TestKernelIngestorStateManager, AdmitsTwoPacksSharingATupleUnderDisjointArc
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {first, second},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
 
     const TestGraph graph(makeGraphId(22));
     // Distinct device ids as well as arch strings: the catalog cache is keyed by
@@ -201,6 +224,7 @@ TEST(TestKernelIngestorStateManager, AdmitsTwoPacksSharingATupleUnderDisjointArc
 TEST(TestKernelIngestorStateManager, AdmitsTwoKernelsOfOnePackSharingATupleUnderDisjointArch)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     auto pack = makePack({GRAPH_MATCHER_ID}, {"gfx90a", "gfx942"});
     auto portable = makeKernel(testId(0x90), "portable", 64, "FLOAT");
@@ -213,7 +237,8 @@ TEST(TestKernelIngestorStateManager, AdmitsTwoKernelsOfOnePackSharingATupleUnder
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {pack},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
 
     const TestGraph graph(makeGraphId(23));
     const auto definitionsFor = [&](int deviceId, const char* deviceArch) {
@@ -239,6 +264,7 @@ TEST(TestKernelIngestorStateManager, AdmitsTwoKernelsOfOnePackSharingATupleUnder
 TEST(TestKernelIngestorStateManager, RejectsTwoKernelsOfOnePackNarrowedToOverlappingArch)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     auto pack = makePack({GRAPH_MATCHER_ID}, {"gfx942", "gfx950"});
     auto broad = makeKernel(testId(0x90), "broad", 64, "FLOAT");
@@ -251,7 +277,8 @@ TEST(TestKernelIngestorStateManager, RejectsTwoKernelsOfOnePackNarrowedToOverlap
                               makeTestMatchers(),
                               makeTestDispatches(),
                               {pack},
-                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)),
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                              "test.graph"),
                  std::invalid_argument);
 }
 
@@ -261,6 +288,7 @@ TEST(TestKernelIngestorStateManager, RejectsTwoKernelsOfOnePackNarrowedToOverlap
 TEST(TestKernelIngestorStateManager, OffersAnUnstampedKernelEverywhereItsPackReaches)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     auto pack = makePack({GRAPH_MATCHER_ID}, {"gfx90a", "gfx942"});
     pack.kernels = {makeKernel(testId(0x90), "unstamped", 64, "FLOAT")};
@@ -269,7 +297,8 @@ TEST(TestKernelIngestorStateManager, OffersAnUnstampedKernelEverywhereItsPackRea
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {pack},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
 
     const TestGraph graph(makeGraphId(24));
     int deviceId = 0;
@@ -292,6 +321,7 @@ TEST(TestKernelIngestorStateManager, OffersAnUnstampedKernelEverywhereItsPackRea
 TEST(TestKernelIngestorStateManager, RejectsATupleSharedByAnArchIndependentAndAPerArchPack)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     auto anywhere = makePack({GRAPH_MATCHER_ID});
     anywhere.kernels = {makeKernel(testId(0x93), "kernel_anywhere", 64, "FLOAT")};
@@ -303,32 +333,26 @@ TEST(TestKernelIngestorStateManager, RejectsATupleSharedByAnArchIndependentAndAP
                               makeTestMatchers(),
                               makeTestDispatches(),
                               {anywhere, pinned},
-                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)),
+                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                              "test.graph"),
                  std::invalid_argument);
 }
 
-TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingPackKernels)
+TEST(TestKernelIngestorStateManager, APackIsPrunedWhenAnyOfItsCriteriaFails)
 {
-    // Pruned pack's matcher binds a token before a second fails and prunes it; the
-    // surviving pack lists neither matcher and must not see the binding.
-    constexpr const char* PASS_NO_BIND_SYMBOL = "test.pruned_bound_isolation.pass_no_bind";
-    constexpr const char* LEAK_THEN_PRUNE_SYMBOL = "test.pruned_bound_isolation.leak";
-    constexpr const char* ALWAYS_FAILS_SYMBOL = "test.pruned_bound_isolation.fail";
+    // A pack passes only if every criterion it lists passes: the first admits it, the
+    // second rejects, and the pack does not reach its kernels.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto passes = scopedGraphMatcher("test.conjunction.pass", &acceptCriterion);
+    const auto fails = scopedGraphMatcher("test.conjunction.fail", &rejectSecondCriterion);
 
-    const ScopedBlockSizeScore scorer;
-    GraphMatcherRegistry::registerSymbol(PASS_NO_BIND_SYMBOL, &acceptAnyGraph);
-    GraphMatcherRegistry::registerSymbol(LEAK_THEN_PRUNE_SYMBOL, &acceptGraph);
-    GraphMatcherRegistry::registerSymbol(ALWAYS_FAILS_SYMBOL, &rejectGraph);
-    counters().reset();
-
-    const auto passNoBindMatcherId = testId(0xA4);
-    const auto leakMatcherId = testId(0xA5);
+    const auto passMatcherId = testId(0xA4);
     const auto failMatcherId = testId(0xA6);
 
     KernelDescriptorPack survivingPack;
     survivingPack.id = testId(0xA0);
     survivingPack.name = "surviving pack";
-    survivingPack.matcherIds = {passNoBindMatcherId};
+    survivingPack.matcherIds = {passMatcherId};
     survivingPack.engineId = ENGINE_ID;
     survivingPack.dispatchId = DISPATCH_ID;
     survivingPack.kernels = {makeKernel(testId(0xA1), "surviving_kernel", 64, "FLOAT")};
@@ -336,19 +360,19 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
     KernelDescriptorPack prunedPack;
     prunedPack.id = testId(0xA2);
     prunedPack.name = "pruned pack";
-    prunedPack.matcherIds = {leakMatcherId, failMatcherId};
+    prunedPack.matcherIds = {passMatcherId, failMatcherId};
     prunedPack.engineId = ENGINE_ID;
     prunedPack.dispatchId = DISPATCH_ID;
     prunedPack.kernels = {makeKernel(testId(0xA3), "pruned_kernel", 128, "FLOAT")};
 
     const StateManager manager(
         makeSchema(),
-        {{passNoBindMatcherId, "passes, binds nothing", MatchScope::GRAPH, PASS_NO_BIND_SYMBOL},
-         {leakMatcherId, "passes, binds a token", MatchScope::GRAPH, LEAK_THEN_PRUNE_SYMBOL},
-         {failMatcherId, "always fails", MatchScope::GRAPH, ALWAYS_FAILS_SYMBOL}},
+        {{passMatcherId, "passes", MatchScope::GRAPH, "test.conjunction.pass"},
+         {failMatcherId, "always fails", MatchScope::GRAPH, "test.conjunction.fail"}},
         makeTestDispatches(),
         {survivingPack, prunedPack},
-        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph");
 
     const TestGraph graph(makeGraphId(50));
     const auto properties = testDeviceProperties();
@@ -356,121 +380,114 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
 
     ASSERT_EQ(catalog.entries.size(), 1U);
     EXPECT_EQ(catalog.entries.front().packId, survivingPack.id);
-
-    EXPECT_EQ(catalog.bound.count("test.bound_token"), 0U);
-
-    GraphMatcherRegistry::unregisterSymbol(PASS_NO_BIND_SYMBOL);
-    GraphMatcherRegistry::unregisterSymbol(LEAK_THEN_PRUNE_SYMBOL);
-    GraphMatcherRegistry::unregisterSymbol(ALWAYS_FAILS_SYMBOL);
 }
 
-TEST(TestKernelIngestorStateManager, TwoMatchersInOnePackBindingOneTokenDifferentlyThrows)
+TEST(TestKernelIngestorStateManager, EveryPackOfOneEngineSharesWhatTheGraphMatchBound)
 {
-    constexpr const char* CONFLICTING_SYMBOL = "test.bound_conflict.within_pack";
+    // Two packs, one engine: the engine's graph match runs once and both packs' kernels
+    // land in a catalog carrying its tokens.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    GraphMatcherRegistry::registerSymbol(CONFLICTING_SYMBOL, &bindConflictingTokenValue);
 
-    const auto conflictingMatcherId = testId(0xC0);
-
-    const KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, conflictingMatcherId});
-
-    const StateManager manager(makeSchema(),
-                               {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
-                                {conflictingMatcherId,
-                                 "binds a conflicting value",
-                                 MatchScope::GRAPH,
-                                 CONFLICTING_SYMBOL}},
-                               makeTestDispatches(),
-                               {pack},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
-
-    const TestGraph graph(makeGraphId(0x53));
-    const auto properties = testDeviceProperties();
-
-    try
-    {
-        manager.unsortedCatalog(MatchContext{graph, 0, properties});
-        ADD_FAILURE() << "expected a within-pack token conflict to be reported";
-    }
-    catch(const std::runtime_error& error)
-    {
-        const std::string message = error.what();
-        EXPECT_NE(message.find("binds a conflicting value"), std::string::npos);
-        EXPECT_NE(message.find("test.bound_token"), std::string::npos);
-    }
-
-    GraphMatcherRegistry::unregisterSymbol(CONFLICTING_SYMBOL);
-}
-
-TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToDifferentValuesThrows)
-{
-    constexpr const char* CONFLICTING_SYMBOL = "test.bound_conflict.conflicting";
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    GraphMatcherRegistry::registerSymbol(CONFLICTING_SYMBOL, &bindConflictingTokenValue);
-
-    const auto conflictingMatcherId = testId(0xB0);
-    const KernelDescriptorPack first = makePack({GRAPH_MATCHER_ID});
-    KernelDescriptorPack second = makePack({conflictingMatcherId});
-    second.id = testId(0xB1);
-    second.name = "the conflicting pack";
-    second.kernels = {makeKernel(testId(0xB2), "second_pack_kernel", 512, "FLOAT")};
-
-    const StateManager manager(makeSchema(),
-                               {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
-                                {conflictingMatcherId,
-                                 "binds a conflicting value",
-                                 MatchScope::GRAPH,
-                                 CONFLICTING_SYMBOL}},
-                               makeTestDispatches(),
-                               {first, second},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
-
-    const TestGraph graph(makeGraphId(51));
-    const auto properties = testDeviceProperties();
-
-    try
-    {
-        manager.unsortedCatalog(MatchContext{graph, 0, properties});
-        ADD_FAILURE() << "expected a cross-pack token conflict to be reported";
-    }
-    catch(const std::runtime_error& error)
-    {
-        const std::string message = error.what();
-        EXPECT_NE(message.find("the conflicting pack"), std::string::npos);
-        EXPECT_NE(message.find(toString(second.id)), std::string::npos);
-        EXPECT_NE(message.find("test.bound_token"), std::string::npos);
-    }
-
-    GraphMatcherRegistry::unregisterSymbol(CONFLICTING_SYMBOL);
-}
-
-TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToTheSameValueMergeCleanly)
-{
-    constexpr const char* AGREEING_SYMBOL = "test.bound_conflict.agreeing";
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    GraphMatcherRegistry::registerSymbol(AGREEING_SYMBOL, &bindAgreeingTokenValue);
-
-    const auto agreeingMatcherId = testId(0xB3);
-    const KernelDescriptorPack first = makePack({GRAPH_MATCHER_ID});
-    KernelDescriptorPack second = makePack({agreeingMatcherId});
+    auto first = makePack({});
+    KernelDescriptorPack second = makePack({});
     second.id = testId(0xB4);
     second.kernels = {makeKernel(testId(0xB5), "second_pack_kernel", 512, "FLOAT")};
 
     const StateManager manager(
         makeSchema(),
-        {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
-         {agreeingMatcherId, "binds the same value", MatchScope::GRAPH, AGREEING_SYMBOL}},
+        std::vector<MatchDescriptor>{
+            {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
         makeTestDispatches(),
         {first, second},
-        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph");
 
-    const TestGraph graph(makeGraphId(52));
+    const TestGraph graph(makeGraphId(22));
     const auto properties = testDeviceProperties();
-
     const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
-    EXPECT_EQ(tryGetBoundInt(catalog.bound, "test.bound_token"), BOUND_TOKEN_VALUE);
+    EXPECT_EQ(counters().graphMatchCalls, 1);
     EXPECT_EQ(catalog.entries.size(), 4U);
+    EXPECT_EQ(tryGetBoundInt(catalog.bound, "test.bound_token"), BOUND_TOKEN_VALUE);
+}
+
+TEST(TestKernelIngestorStateManager, AGraphTheMatchDeclinesEmptiesTheCatalogWithoutCriteria)
+{
+    // nullopt from the engine's graph match is the whole answer: no criterion and no
+    // kernel matcher runs, because there is nothing left to narrow.
+    const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
+
+    const TestGraph graph(makeGraphId(23));
+    const auto properties = testDeviceProperties();
+    const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
+
+    EXPECT_TRUE(catalog.entries.empty());
+    EXPECT_TRUE(catalog.bound.empty());
+    EXPECT_EQ(counters().graphMatchCalls, 1);
+    EXPECT_EQ(counters().graphCalls, 0);
+    EXPECT_EQ(counters().kernelCalls, 0);
+}
+
+TEST(TestKernelIngestorStateManager, AnEngineWithNoGraphMatchStillMatchesOnItsCriteria)
+{
+    // A graph_match is optional: an engine that declares none is admitted or declined by
+    // its criteria alone, and presents an empty token map to dispatch.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(24));
+    const auto properties = testDeviceProperties();
+    const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
+
+    EXPECT_EQ(catalog.entries.size(), 2U);
+    EXPECT_TRUE(catalog.bound.empty());
+    EXPECT_EQ(counters().graphMatchCalls, 0);
+    EXPECT_EQ(counters().graphCalls, 1);
+}
+
+TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredGraphMatchSymbol)
+{
+    // Same eager-resolution contract the matcher and dispatch symbols get: a misspelled
+    // graph_match excludes the engine at construction, not at the first query. And the
+    // failure names the engine, as the matcher and dispatch failures name their own
+    // descriptors -- graph_match has no descriptor of its own, so the caller-supplied
+    // description is the only thing that can point at the file to fix.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    try
+    {
+        const StateManager manager(
+            makeSchema(),
+            std::vector<MatchDescriptor>{
+                {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+            makeTestDispatches(),
+            {makePack({KERNEL_MATCHER_ID})},
+            std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+            "test.graph.not_registered",
+            "engine 'test:misspelled_graph_match'");
+        FAIL() << "expected an unresolved-symbol failure";
+    }
+    catch(const std::runtime_error& error)
+    {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("test.graph.not_registered"), std::string::npos) << message;
+        EXPECT_NE(message.find("test:misspelled_graph_match"), std::string::npos) << message;
+    }
 }
 
 TEST(TestKernelIngestorStateManager, MatchesSeparatelyPerDevice)
@@ -483,7 +500,7 @@ TEST(TestKernelIngestorStateManager, MatchesSeparatelyPerDevice)
     manager->unsortedDefinitions(MatchContext{graph, 0, properties});
     manager->unsortedDefinitions(MatchContext{graph, 1, properties});
 
-    EXPECT_EQ(counters().graphCalls, 2);
+    EXPECT_EQ(counters().graphMatchCalls, 2);
 }
 
 TEST(TestKernelIngestorStateManager, NoDeviceYieldsAnEmptyCatalogEvenWhenMatchersWouldAccept)
@@ -514,7 +531,7 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
 
     EXPECT_EQ(first.size(), 2U);
     EXPECT_EQ(second.size(), 2U);
-    EXPECT_EQ(counters().graphCalls, 2);
+    EXPECT_EQ(counters().graphMatchCalls, 2);
 }
 
 TEST(TestKernelIngestorStateManager, ServesACachedRankingWithoutRematching)
@@ -530,7 +547,7 @@ TEST(TestKernelIngestorStateManager, ServesACachedRankingWithoutRematching)
     static_cast<void>(manager->unsortedCatalog(context));
 
     EXPECT_TRUE(manager->sortedCatalog(context).isSorted);
-    EXPECT_EQ(counters().graphCalls, 1);
+    EXPECT_EQ(counters().graphMatchCalls, 1);
 }
 
 TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACatalogEntry)
@@ -545,12 +562,12 @@ TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACa
     const auto secondDefinitions
         = manager->unsortedDefinitions(MatchContext{second, 0, properties});
 
-    EXPECT_EQ(counters().graphCalls, 2);
+    EXPECT_EQ(counters().graphMatchCalls, 2);
     EXPECT_EQ(firstDefinitions.size(), 2U);
     EXPECT_EQ(secondDefinitions.size(), 2U);
 }
 
-TEST(TestKernelIngestorStateManager, CarriesWhatMatchingBoundThroughToDispatch)
+TEST(TestKernelIngestorStateManager, CarriesWhatTheGraphMatchBoundThroughToDispatch)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
@@ -573,12 +590,12 @@ TEST(TestKernelIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematc
     const MatchContext context{graph, 0, properties};
 
     static_cast<void>(manager->unsortedCatalog(context));
-    const auto afterMatching = counters().graphCalls;
+    const auto afterMatching = counters().graphMatchCalls;
 
     const auto secondRead = manager->unsortedCatalog(context).bound;
     const auto thirdRead = manager->sortedCatalog(context).bound;
 
-    EXPECT_EQ(counters().graphCalls, afterMatching);
+    EXPECT_EQ(counters().graphMatchCalls, afterMatching);
     EXPECT_EQ(tryGetBoundInt(secondRead, "test.bound_token"), BOUND_TOKEN_VALUE);
     EXPECT_EQ(tryGetBoundInt(thirdRead, "test.bound_token"), BOUND_TOKEN_VALUE);
 }
@@ -595,7 +612,7 @@ TEST(TestKernelIngestorStateManager, RematchesAfterCacheEviction)
     manager->unsortedDefinitions(MatchContext{second, 0, properties});
     manager->unsortedDefinitions(MatchContext{first, 0, properties});
 
-    EXPECT_EQ(counters().graphCalls, 3);
+    EXPECT_EQ(counters().graphMatchCalls, 3);
 }
 
 TEST(TestKernelIngestorStateManager, SortedDefinitionsAreRankedBestFirst)
@@ -624,7 +641,7 @@ TEST(TestKernelIngestorStateManager, RankingReusesTheAlreadyMatchedCatalog)
     manager->sortedDefinitions(context);
     manager->sortedDefinitions(context);
 
-    EXPECT_EQ(counters().graphCalls, 1);
+    EXPECT_EQ(counters().graphMatchCalls, 1);
     EXPECT_EQ(counters().kernelCalls, 3);
 }
 
@@ -693,6 +710,7 @@ TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredDisp
     // Descriptor and native halves agree on dispatch symbols by string with no
     // compile-time check; eager resolution must catch a misspelled one.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     try
     {
@@ -702,7 +720,8 @@ TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredDisp
             std::vector<DispatchDescriptor>{
                 {DISPATCH_ID, "misspelled dispatch", "test.dispatch.not_registered"}},
             std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
-            std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+            std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+            std::string{});
         FAIL() << "expected an unresolved-symbol failure";
     }
     catch(const std::runtime_error& error)
@@ -739,6 +758,7 @@ TEST(TestKernelIngestorStateManager, GetDispatchDetailsThrowsOnADanglingDispatch
 TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
     KernelDescriptor sparse;
@@ -751,7 +771,8 @@ TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {pack},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
 
     const TestGraph graph(makeGraphId(10));
     const auto properties = testDeviceProperties();
@@ -760,6 +781,145 @@ TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault
     ASSERT_EQ(definitions.size(), 1U);
     EXPECT_EQ(definitions.front().getIntMetadata(BLOCK_SIZE), 64);
     EXPECT_EQ(definitions.front().getStringMetadata(DTYPE), "FLOAT");
+}
+
+// The source-kind gate: KPACK indexes, the two kinds with no adapter are dropped, and a
+// drop costs only its own kernel.
+
+/// A hand-built pack reaches only this gate -- the loader's own is upstream of it -- so
+/// this is where a KPACK kernel built in memory proves it indexes like an embedded one.
+TEST(TestKernelIngestorStateManager, IndexesAKpackKernel)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptor kernel = makeKernel(testId(0x76), "kernel_kpack", 64, "FLOAT");
+    kernel.source = makeKpackSource();
+    pack.kernels = {kernel};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x76));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    const auto& source = definitions.front().source;
+    EXPECT_EQ(source.kind, KernelSourceKind::KPACK);
+    EXPECT_EQ(source.library, "kpack/hip_kernel_provider_gfx942.kpack");
+    EXPECT_EQ(source.tocKey, "test-toc-key");
+    EXPECT_EQ(source.symbol, "TestKernel");
+    EXPECT_EQ(source.sha256, std::string(64, 'a'));
+    EXPECT_EQ(definitions.front().name, "kernel_kpack");
+}
+
+/// Admitting KPACK must not admit the two kinds nothing can dispatch. They are dropped
+/// rather than thrown on, so the evidence is their absence from the catalog plus an ERROR
+/// naming each.
+TEST(TestKernelIngestorStateManager, RejectsAnUnadaptedSourceKind)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptor hsaco = makeKernel(testId(0x77), "kernel_hsaco", 64, "FLOAT");
+    hsaco.source.kind = KernelSourceKind::HSACO_FILE;
+    KernelDescriptor rocke = makeKernel(testId(0x78), "kernel_rocke", 256, "FLOAT");
+    rocke.source.kind = KernelSourceKind::ROCKE_BUILDER;
+    pack.kernels = {hsaco, rocke};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x77));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_TRUE(manager.unsortedDefinitions(MatchContext{graph, 0, properties}).empty());
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'kernel_hsaco'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'kernel_rocke'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "declares a source kind this build has no "
+                                          "adapter for"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// Failure granularity is the kernel, not the pack: an artifact this build cannot load
+/// must not cost the siblings it ships beside.
+TEST(TestKernelIngestorStateManager, DropsOnlyTheUnadaptedKernelAndKeepsItsPack)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptor unadapted = makeKernel(testId(0x79), "kernel_hsaco", 64, "FLOAT");
+    unadapted.source.kind = KernelSourceKind::HSACO_FILE;
+    pack.kernels = {unadapted, makeKernel(testId(0x7A), "kernel_sibling", 256, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x79));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().getIntMetadata(BLOCK_SIZE), 256);
+    EXPECT_EQ(definitions.front().name, "kernel_sibling");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'kernel_hsaco'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// `source.library` is relative, so a definition is only usable together with the
+/// directory of the descriptor that declared it. The state manager carries the anchor
+/// through unchanged; the loader is what fills it.
+TEST(TestKernelIngestorStateManager, CarriesTheOriginDirectoryIntoTheDefinition)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+    const std::filesystem::path origin("/descriptors/gfx942");
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptor kernel = makeKernel(testId(0x7B), "kernel_kpack", 64, "FLOAT");
+    kernel.source = makeKpackSource();
+    kernel.originDirectory = origin;
+    pack.kernels = {kernel};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x7B));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().originDirectory, origin);
 }
 
 struct StateManagerConstructionThrowCase
@@ -777,6 +937,7 @@ class TestKernelIngestorStateManagerConstructionThrows
 TEST_P(TestKernelIngestorStateManagerConstructionThrows, RejectsAtConstruction)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     try
     {
@@ -810,7 +971,8 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestMatchers(),
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{pack},
-                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
             }},
         StateManagerConstructionThrowCase{
             "RejectsAKernelSupplyingAFieldTheSchemaDoesNotDeclare",
@@ -829,7 +991,8 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestMatchers(),
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{pack},
-                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
             }},
         StateManagerConstructionThrowCase{
             "RejectsAKernelSupplyingAFieldOfTheWrongType",
@@ -847,7 +1010,8 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestMatchers(),
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{pack},
-                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
             }},
         StateManagerConstructionThrowCase{
             "RejectsAPackNamingAnUnknownMatcher",
@@ -858,7 +1022,8 @@ INSTANTIATE_TEST_SUITE_P(
                     std::vector<MatchDescriptor>{},
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{makePack({testId(0xFF)})},
-                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
             }},
         StateManagerConstructionThrowCase{
             "RejectsAPackNamingAnUnknownDispatchDescriptor",
@@ -869,7 +1034,8 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestMatchers(),
                     std::vector<DispatchDescriptor>{},
                     std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID})},
-                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
             }},
         StateManagerConstructionThrowCase{
             "RejectsTwoKernelsSharingAMetadataTuple",
@@ -882,7 +1048,8 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestMatchers(),
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{pack},
-                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
             }},
         // Overlapping lists need not be equal: a gfx942 device satisfies both, so the
         // tuple really is ambiguous. Plain string equality would let this construct.
@@ -900,7 +1067,8 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestMatchers(),
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{first, second},
-                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
             }},
         StateManagerConstructionThrowCase{
             "RejectsADuplicateMatchDescriptorId",
@@ -916,7 +1084,8 @@ INSTANTIATE_TEST_SUITE_P(
                     matchers,
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID})},
-                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
             }},
         StateManagerConstructionThrowCase{
             "RejectsADuplicateDispatchDescriptorId",
@@ -930,7 +1099,8 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestMatchers(),
                     dispatches,
                     std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID})},
-                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
             }},
         StateManagerConstructionThrowCase{"RejectsAMissingHeuristic",
                                           "requires a heuristic",
@@ -940,7 +1110,8 @@ INSTANTIATE_TEST_SUITE_P(
                                                   std::vector<MatchDescriptor>{},
                                                   std::vector<DispatchDescriptor>{},
                                                   std::vector<KernelDescriptorPack>{},
-                                                  nullptr);
+                                                  nullptr,
+                                                  std::string{});
                                           }}),
     [](const ::testing::TestParamInfo<StateManagerConstructionThrowCase>& info) {
         return info.param.name;
