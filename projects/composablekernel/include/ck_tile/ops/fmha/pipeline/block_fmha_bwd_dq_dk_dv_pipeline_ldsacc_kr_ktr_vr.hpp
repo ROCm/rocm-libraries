@@ -384,6 +384,26 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         auto q_lds_window =
             make_tile_window(q_lds, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {0, 0});
 
+#if CK_TILE_FMHA_BWD_PREFETCH_QDO
+        QDataType* q_lds_ptr_b = static_cast<QDataType*>(static_cast<void*>(
+            static_cast<char*>(smem_ptr) +
+            Policy::template GetQPrefetchSmemOffset<Problem>()));
+        auto q_lds_b = make_tensor_view<address_space_enum::lds>(
+            q_lds_ptr_b, Policy::template MakeQLdsBlockDescriptor<Problem>());
+        auto q_lds_window_b =
+            make_tile_window(q_lds_b, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {0, 0});
+        auto q_lds_read_window_b =
+            make_tile_window(q_lds_window_b.get_bottom_tensor_view(),
+                             make_tuple(number<kM0>{}, number<kK0>{}),
+                             q_lds_window_b.get_window_origin(),
+                             Policy::template MakeQRegSliceBlockDescriptor<Problem>());
+        auto qt_lds_read_window_b =
+            make_tile_window(q_lds_window_b.get_bottom_tensor_view(),
+                             make_tuple(number<kM0>{}, number<kQKHeaddim>{}),
+                             q_lds_window_b.get_window_origin(),
+                             Policy::template MakeQTRegSliceBlockDescriptor<Problem>());
+#endif
+
         auto q_lds_read_window =
             make_tile_window(q_lds_window.get_bottom_tensor_view(),
                              make_tuple(number<kM0>{}, number<kK0>{}),
@@ -417,6 +437,26 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         auto do_lds_window =
             make_tile_window(do_lds, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
+
+#if CK_TILE_FMHA_BWD_PREFETCH_QDO
+        OGradDataType* do_lds_ptr_b = static_cast<OGradDataType*>(static_cast<void*>(
+            static_cast<char*>(smem_ptr) +
+            Policy::template GetOGradPrefetchSmemOffset<Problem>()));
+        auto do_lds_b = make_tensor_view<address_space_enum::lds>(
+            do_lds_ptr_b, Policy::template MakeOGradLdsBlockDescriptor<Problem>());
+        auto do_lds_window_b =
+            make_tile_window(do_lds_b, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
+        auto do_lds_read_window_b =
+            make_tile_window(do_lds_window_b.get_bottom_tensor_view(),
+                             make_tuple(number<kM0>{}, number<kK2>{}),
+                             do_lds_window_b.get_window_origin(),
+                             Policy::template MakeOGradRegSliceBlockDescriptor<Problem>());
+        auto dot_lds_read_window_b =
+            make_tile_window(do_lds_window_b.get_bottom_tensor_view(),
+                             make_tuple(number<kM0>{}, number<kVHeaddim>{}),
+                             do_lds_window_b.get_window_origin(),
+                             Policy::template MakeOGradTRegSliceBlockDescriptor<Problem>());
+#endif
 
         auto do_lds_read_window =
             make_tile_window(do_lds_window.get_bottom_tensor_view(),
@@ -637,8 +677,36 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         __builtin_amdgcn_sched_barrier(0);
         // Hot loop
+#if CK_TILE_FMHA_BWD_PREFETCH_QDO
+        // false: the body reads the A boxes and refills B; true: the reverse.
+        bool phase = false;
+#endif
         while(i_total_loops < (num_total_loop - 1))
         {
+#if CK_TILE_FMHA_BWD_PREFETCH_QDO
+            auto& q_rd_cur   = phase ? q_lds_read_window_b   : q_lds_read_window;
+            auto& qt_rd_cur  = phase ? qt_lds_read_window_b  : qt_lds_read_window;
+            auto& do_rd_cur  = phase ? do_lds_read_window_b  : do_lds_read_window;
+            auto& dot_rd_cur = phase ? dot_lds_read_window_b : dot_lds_read_window;
+            auto& q_wr_dst   = phase ? q_lds_window          : q_lds_window_b;
+            auto& do_wr_dst  = phase ? do_lds_window         : do_lds_window_b;
+            auto& q_rd_dst   = phase ? q_lds_read_window     : q_lds_read_window_b;
+            auto& do_rd_dst  = phase ? do_lds_read_window    : do_lds_read_window_b;
+#else
+            auto& q_rd_cur   = q_lds_read_window;
+            auto& qt_rd_cur  = qt_lds_read_window;
+            auto& do_rd_cur  = do_lds_read_window;
+            auto& dot_rd_cur = dot_lds_read_window;
+            auto& q_wr_dst   = q_lds_window;
+            auto& do_wr_dst  = do_lds_window;
+            auto& q_rd_dst   = q_lds_read_window;
+            auto& do_rd_dst  = do_lds_read_window;
+#endif
+            // gemm_0/gemm_2 consume the register copies loaded at the end of the
+            // previous iteration, so these two selections have no direct user --
+            // they exist to keep the A/B mapping symmetric and readable.
+            ignore = q_rd_cur;
+            ignore = do_rd_cur;
             // STAGE 1, Q@K Gemm0
             auto s_acc = SPBlockTileType{};
 
@@ -650,7 +718,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
 
-            auto dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
+            auto dot_reg_tensor = load_tile_transpose(dot_rd_cur);
 
             HotLoopScheduler::template GemmStagedScheduler<0>();
             __builtin_amdgcn_sched_barrier(0);
@@ -772,7 +840,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 #endif
             }
 
-            auto qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
+            auto qt_reg_tensor = load_tile_transpose(qt_rd_cur);
 
             // STAGE 4, OGrad@V Gemm2
             auto dp_acc = SPGradBlockTileType{};
@@ -784,12 +852,12 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             block_sync_lds();
 
-            load_tile_tdm(tdm_config_q, q_lds_window, q_dram_window);
+            load_tile_tdm(tdm_config_q, q_wr_dst, q_dram_window);
             move_tile_window(q_dram_window, {kM0, 0});
 
             store_tile(lse_lds_write_window, lse_block_tile);
 
-            load_tile_tdm(tdm_config_do, do_lds_window, do_dram_window);
+            load_tile_tdm(tdm_config_do, do_wr_dst, do_dram_window);
             move_tile_window(do_dram_window, {kM0, 0});
 
             store_tile(d_lds_write_window, d_block_tile);
@@ -860,7 +928,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             s_wait_tensorcnt_barrier<0>();
 #endif
             auto ds_reg_tensor      = load_tile_transpose(ds_lds_read_window);
-            q_reg_tensor = load_tile(q_lds_read_window);
+            q_reg_tensor = load_tile(q_rd_dst);
             lse          = load_tile(lse_lds_read_window);
 
             HotLoopScheduler::template GemmStagedScheduler<3>();
@@ -881,7 +949,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             });
 
-            do_reg_tensor = load_tile(do_lds_read_window);
+            do_reg_tensor = load_tile(do_rd_dst);
             d             = load_tile(d_lds_read_window);
 
             HotLoopScheduler::template GemmStagedScheduler<4>();
@@ -907,6 +975,9 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             }
             move_tile_window(dq_dram_window, {kM0, 0});
 
+#if CK_TILE_FMHA_BWD_PREFETCH_QDO
+            phase = !phase;
+#endif
             i_total_loops += 1;
             seqlen_q_step += kM0;
         }
@@ -1024,7 +1095,14 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         Policy::template PTFromGemm0CToGemm1A<Problem, decltype(pt_reg_tensor), decltype(p_gemm)>(
             pt_reg_tensor, p_gemm);
-        auto dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
+#if CK_TILE_FMHA_BWD_PREFETCH_QDO
+        auto& dot_rd_tail = phase ? dot_lds_read_window_b : dot_lds_read_window;
+        auto& qt_rd_tail  = phase ? qt_lds_read_window_b  : qt_lds_read_window;
+#else
+        auto& dot_rd_tail = dot_lds_read_window;
+        auto& qt_rd_tail  = qt_lds_read_window;
+#endif
+        auto dot_reg_tensor = load_tile_transpose(dot_rd_tail);
         {
 #if CK_TILE_FMHA_BWD_DV_IN_REG
             gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
@@ -1039,7 +1117,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // STAGE 4, OGrad@V Gemm2
         auto dp_acc = SPGradBlockTileType{};
 
-        auto qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
+        auto qt_reg_tensor = load_tile_transpose(qt_rd_tail);
 
 #if CK_TILE_FMHA_BWD_V_NONRESIDENT
         auto v_reg_tensor = load_tile(v_lds_read_window);
