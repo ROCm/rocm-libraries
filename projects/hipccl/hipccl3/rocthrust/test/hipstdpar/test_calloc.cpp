@@ -69,8 +69,8 @@ int main()
     return EXIT_FAILURE;
   }
 
-  // A zero-sized request is not an allocation failure, so errno must be left
-  // alone whether or not a unique pointer comes back.
+  // A zero-sized request may return either nullptr or a unique pointer; the
+  // interposer must not manufacture ENOMEM solely because the size is zero.
   const std::pair<std::size_t, std::size_t> zero_sized[]{{0, 16}, {16, 0}};
   for (const auto& args : zero_sized)
   {
