@@ -526,14 +526,6 @@ if(CK_USE_FP8_ON_UNSUPPORTED_ARCH AND (SUPPORTED_GPU_TARGETS MATCHES "gfx90a" OR
     set(CK_USE_FP8_ON_UNSUPPORTED_ARCH "ON")
 endif()
 
-# LLVM is switching the AMDGPU f16 builtins from taking __fp16 to taking _Float16
-# (llvm/llvm-project#185446). Turn this ON when building with a compiler that carries the change.
-option(CK_USE_LLVM_BUILTIN_FP16 "Spell the AMDGPU f16 builtin operands _Float16 instead of __fp16" OFF)
-if(CK_USE_LLVM_BUILTIN_FP16)
-    add_compile_definitions(CK_USE_LLVM_BUILTIN_FP16=1 CK_TILE_USE_LLVM_BUILTIN_FP16=1)
-    message(STATUS "Enabling _Float16 AMDGPU f16 builtin signatures")
-endif()
-
 # CK config file to record supported datatypes, etc.
 configure_file(include/ck/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/ck/config.h)
 
