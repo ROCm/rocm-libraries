@@ -66,15 +66,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)
     #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out) \
-        __builtin_addc(a, b, carry_in, carry_out);
+        __builtin_addc(a, b, carry_in, carry_out)
 #else
-    #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out)                     \
-        (                                                                       \
-            [&]()                                                               \
-            {                                                                   \
-                unsigned int sum = a + b + carry_in;                            \
-                *carry_out       = (sum < a || (carry_in && sum <= b)) ? 1 : 0; \
-                return sum;                                                     \
+    #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out)                           \
+        (                                                                             \
+            [&]()                                                                     \
+            {                                                                         \
+                unsigned int sum = (a) + (b) + (carry_in);                            \
+                *carry_out       = (sum < (a) || ((carry_in) && sum <= (b))) ? 1 : 0; \
+                return sum;                                                           \
             }())
 #endif
 
