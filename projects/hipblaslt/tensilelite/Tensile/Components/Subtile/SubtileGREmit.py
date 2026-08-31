@@ -1304,9 +1304,9 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
   dst = writer.vgprPool.checkOut(1, tag="_tluWaveAxisGlobalOffset_%s" % tc)
   # Shared strips split by K across the fetching waves; whole-strip ownership
   # steps along the free dim by axis id.
-  _idOk = (_tluCoopWaveId(writer, kernel, module, tileInfo, dst) if wavesPerStrip > 1
+  idOk = (_tluCoopWaveId(writer, kernel, module, tileInfo, dst) if wavesPerStrip > 1
            else _tluWaveAxisId(writer, kernel, module, tc, dst))
-  if not _idOk:
+  if not idOk:
     # No free-dim step, but the other-axis waves may still be taking K slices of
     # the single strip this wave owns.
     writer.vgprPool.checkIn(dst)
@@ -1549,12 +1549,12 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   # within it by whole load-blocks (each takes a slice of the strip's
   # K rows) rather than interleaved within one block, so a wave still advances
   # m0 by its own single-wave block, not by the cooperative total.
-  _coopWaves = int(getattr(tileInfo, "grCoopWaves", 1))
-  if isTLU1 and _coopWaves > 1:
+  coopWaves = int(getattr(tileInfo, "grCoopWaves", 1))
+  if isTLU1 and coopWaves > 1:
     # TLU=1 only: loadRatioGR folds in every cooperating wave, so undo it to get
     # the bytes a single wave's own load block covers.  TLU=0 keeps the
     # cooperative stride, which is what its m0 walk expects.
-    subtileOffset = int(subtileOffset // _coopWaves)
+    subtileOffset = int(subtileOffset // coopWaves)
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
   padBytes = tluPadBytes(tileInfo)
   # Pad-aware LDS stride between subtile strips (M/N direction).
