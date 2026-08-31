@@ -82,6 +82,41 @@ TEST(TestIngestorKernelHeuristic, RanksHigherScoringKernelsFirst)
     EXPECT_EQ(ranked.front().kernelId, highId);
 }
 
+/// Scoring sees what the engine's graph match bound, so a heuristic can rank on graph
+/// facts and not only on `$kernel.*`. Ranking inverts on the token alone here: the
+/// kernels are otherwise identical.
+TEST(TestIngestorKernelHeuristic, ScoresFromTheTokensTheGraphMatchBound)
+{
+    constexpr const char* TOKEN_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.token_score";
+    ScoreRegistry::registerSymbol(
+        TOKEN_SCORE_SYMBOL,
+        +[](const MatchContext&, const BoundTokens& bound, const KernelDefinition& kernel) {
+            const auto preferred = tryGetBoundInt(bound, "test.preferred_block_size");
+            return preferred.has_value()
+                           && kernel.getIntMetadata(std::string(BLOCK_SIZE)) == *preferred
+                       ? 1.0
+                       : 0.0;
+        });
+
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    const auto smallId = testId(0x01);
+    const auto largeId = testId(0x02);
+    catalog.entries = {makeDefinition(smallId, 64), makeDefinition(largeId, 256)};
+    catalog.bound["test.preferred_block_size"] = int64_t{64};
+
+    const NativeKernelHeuristic heuristic(TOKEN_SCORE_SYMBOL);
+    const auto ranked = heuristic.rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, smallId);
+
+    ScoreRegistry::unregisterSymbol(TOKEN_SCORE_SYMBOL);
+}
+
 TEST(TestIngestorKernelHeuristic, BreaksScoreTiesOnPriority)
 {
     const ScopedConstantScore constantScore;
@@ -246,7 +281,7 @@ TEST(TestIngestorKernelHeuristic, TreatsInfiniteScoresAsOrdinaryExtremes)
 
     ScoreRegistry::registerSymbol(
         "hipdnn.kernel_ingestor.test.infinite_score",
-        +[](const KernelDefinition& kernel, const MatchContext&) -> double {
+        +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) -> double {
             return kernel.getIntMetadata(BLOCK_SIZE) == 4096
                        ? std::numeric_limits<double>::infinity()
                        : -std::numeric_limits<double>::infinity();
@@ -286,7 +321,7 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
-    EXPECT_EQ(heuristic->score(makeDefinition(testId(0x01), 128), context), 128.0);
+    EXPECT_EQ(heuristic->score(context, BoundTokens{}, makeDefinition(testId(0x01), 128)), 128.0);
 }
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicThrowsForAKindWithNoAdapter)
@@ -382,8 +417,8 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 
     const UnrankedKernelHeuristic heuristic;
 
-    EXPECT_EQ(heuristic.score(makeDefinition(testId(0x01), 64), context),
-              heuristic.score(makeDefinition(testId(0x02), 4096), context));
+    EXPECT_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64)),
+              heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096)));
 }
 
 } // namespace

@@ -141,6 +141,9 @@ struct FormatDef {
     int cycle = 0;  // 0 = not specified (inherit from parent or arch default)
     int latency = 0;
     int coIssueWindow = -1;  // -1 = not specified (inherit from parent); VALU co-issue window
+    // -1 = not specified (inherit from parent); end-anchored mask of window cycles no
+    // pipe can issue into (bit 0 = last cycle)
+    int blockedScale = -1;
     std::vector<std::string> flags;
 
     // Default operand field descriptions for instructions using this format
@@ -179,6 +182,9 @@ struct InstructionDef {
     int cycle = 0;       // 0 = not specified (inherit from format, then arch default)
     int latency = 0;
     int coIssueWindow = -1;  // -1 = not specified (inherit from format); VALU co-issue window
+    // -1 = not specified (inherit from format); end-anchored mask of window cycles no
+    // pipe can issue into (bit 0 = last cycle)
+    int blockedScale = -1;
     std::vector<CostOverrideEntry> costOverrides;        // modifier-keyed overrides
     std::vector<CoIssueOverrideEntry> coIssueOverrides;  // modifier-keyed co-issue overrides
     std::vector<OperandSpec> operands;                   // Operand specifications
@@ -283,6 +289,7 @@ class DefTParser {
         if (fmt.cycle == 0) fmt.cycle = p.cycle;
         if (fmt.latency == 0) fmt.latency = p.latency;
         if (fmt.coIssueWindow < 0) fmt.coIssueWindow = p.coIssueWindow;
+        if (fmt.blockedScale < 0) fmt.blockedScale = p.blockedScale;
         // Flags: parent first, then child (child adds MFMA etc.)
         fmt.flags = p.flags;
         fmt.flags.insert(fmt.flags.end(), it->second.flags.begin(), it->second.flags.end());
@@ -305,6 +312,7 @@ class DefTParser {
                 if (inst.cycle == 0) inst.cycle = arch_.defaultCycle;
                 if (inst.latency == 0) inst.latency = arch_.defaultLatency;
                 if (inst.coIssueWindow < 0) inst.coIssueWindow = 0;
+                if (inst.blockedScale < 0) inst.blockedScale = 0;
                 continue;
             }
 
@@ -341,6 +349,21 @@ class DefTParser {
             if (inst.coIssueWindow > 0xFFFF) {
                 std::cerr << "error: " << inst.mnemonic << ": .coissue value 0x" << std::hex
                           << inst.coIssueWindow << " exceeds uint16_t range\n";
+                return false;
+            }
+            if (inst.blockedScale < 0 && fmt.blockedScale >= 0)
+                inst.blockedScale = fmt.blockedScale;
+            if (inst.blockedScale < 0) inst.blockedScale = 0;
+            // The mask is anchored at the window end, so every set bit must fall inside
+            // the SHORTEST window this instruction can have -- .costOverride can shorten
+            // it per matrix format (e.g. 8 -> 4 for FP4xFP4).
+            int minLatency = inst.latency;
+            for (const auto& ov : inst.costOverrides) minLatency = std::min(minLatency, ov.latency);
+            if (minLatency < 16 && inst.blockedScale >= (1 << minLatency)) {
+                std::cerr << "error: " << inst.mnemonic << ": .blockedScale 0x" << std::hex
+                          << inst.blockedScale << std::dec
+                          << " sets a bit past the start of its shortest " << minLatency
+                          << "-cycle window\n";
                 return false;
             }
 
@@ -589,6 +612,7 @@ class DefTParser {
             parseFieldInt(block, ".maxOperands", fmt.maxOperands);
             parseFieldCost(block, ".cost", fmt.cycle, fmt.latency);
             parseFieldIntAuto(block, ".coissue", fmt.coIssueWindow);
+            parseFieldIntAuto(block, ".blockedScale", fmt.blockedScale);
             parseFieldEncoding(block, ".encoding", fmt.encoding);
             parseFieldFlags(block, ".flags", fmt.flags);
             parseFieldOperandFields(block, ".fields", fmt.fields);
@@ -760,6 +784,7 @@ class DefTParser {
                 // Parse per-entry optional fields (same helpers as DEF_T)
                 parseFieldCost(entryFields, ".cost", inst.cycle, inst.latency);
                 parseFieldIntAuto(entryFields, ".coissue", inst.coIssueWindow);
+                parseFieldIntAuto(entryFields, ".blockedScale", inst.blockedScale);
                 parseFieldCostOverrides(entryFields, inst.costOverrides);
                 parseFieldCoIssueOverrides(entryFields, inst.coIssueOverrides);
                 parseFieldOperandFields(entryFields, ".operand_fields", inst.operandFields);
@@ -898,6 +923,7 @@ class DefTParser {
             parseField(block, ".format", inst.format);
             parseFieldCost(block, ".cost", inst.cycle, inst.latency);
             parseFieldIntAuto(block, ".coissue", inst.coIssueWindow);
+            parseFieldIntAuto(block, ".blockedScale", inst.blockedScale);
             parseFieldCostOverrides(block, inst.costOverrides);
             parseFieldCoIssueOverrides(block, inst.coIssueOverrides);
             parseFieldFlags(block, ".flags", inst.flags);
@@ -1821,6 +1847,8 @@ static bool emitArchIsaFile(const std::string& arch,
             << inst.cycle << ", " << std::setw(4) << inst.latency << ", " << "0x" << std::hex
             << std::setfill('0') << std::setw(4)
             << (inst.coIssueWindow >= 0 ? inst.coIssueWindow : 0) << std::dec << std::setfill(' ')
+            << ", " << "0x" << std::hex << std::setfill('0') << std::setw(4)
+            << (inst.blockedScale >= 0 ? inst.blockedScale : 0) << std::dec << std::setfill(' ')
             << ", " << "\"" << inst.mnemonic << "\", " << "makeFlagSet({"
             << (flagStr.empty() ? "" : flagStr) << "}), " << microcodeToCpp(inst.finalMicrocode)
             << ", " << inst.finalEncoding << ", " << unitToCpp(inst.finalUnit) << ", " << "{} },\n";

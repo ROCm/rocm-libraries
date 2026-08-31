@@ -1,0 +1,60 @@
+/* ************************************************************************
+ * Copyright (C) @ROCALUTION_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc. All rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+#include <winver.h>
+
+#ifdef DEBUG
+#define VER_DEBUG VS_FF_DEBUG
+#else
+#define VER_DEBUG 0
+#endif
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     @rocalution_VERSION_MAJOR@,@rocalution_VERSION_MINOR@,@rocalution_VERSION_PATCH@,0
+PRODUCTVERSION  @rocalution_VERSION_MAJOR@,@rocalution_VERSION_MINOR@,@rocalution_VERSION_PATCH@,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       VER_DEBUG
+FILEOS          VOS__WINDOWS32
+FILETYPE        VFT_DLL
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Advanced Micro Devices, Inc."
+            VALUE "FileDescription",  "AMD rocALUTION - Sparse Linear Algebra Library for GPU Computing"
+            VALUE "FileVersion",      "@rocalution_VERSION_MAJOR@.@rocalution_VERSION_MINOR@.@rocalution_VERSION_PATCH@.0"
+            VALUE "InternalName",     "rocalution"
+            VALUE "LegalCopyright",   "Copyright (C) @ROCALUTION_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc."
+            VALUE "OriginalFilename", "rocalution.dll"
+            VALUE "ProductName",      "AMD ROCm rocALUTION @ROCALUTION_PRODUCT_VERSION_DISPLAY@"
+            VALUE "ProductVersion",   "@rocalution_VERSION_MAJOR@.@rocalution_VERSION_MINOR@.@rocalution_VERSION_PATCH@.0"
+            VALUE "Comments",         "Git commit: @rocalution_VERSION_COMMIT_ID@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
