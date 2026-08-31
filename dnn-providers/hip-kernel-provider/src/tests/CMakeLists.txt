@@ -138,9 +138,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # test_arch_content/, and that target is reachable only through ALL.
     # Building this binary by name -- what `ninja check` does -- otherwise runs them
     # against a directory that does not exist yet, and they skip rather than fail.
-    # Guarded for the same reason as the integration side: a root skips with a warning
-    # when hipcc is absent, and a hard dependency would make that fatal.
-    # One staging target per descriptor set now, not one shared owner.
+    # Each descriptor set has its own staging target. Name each one individually.
     foreach(_hkp_set hkp_packaging_unit_conv hkp_packaging_archive_fixture)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_tests ${_hkp_set})

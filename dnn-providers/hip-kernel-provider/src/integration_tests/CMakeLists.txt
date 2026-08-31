@@ -111,10 +111,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
     # The integration root is packed by three roots, and each stages under its own
     # packaging target. Name each one individually.
-    #
-    # Guarded rather than assumed: a root skips with a warning when hipcc is absent, and
-    # the suite is written to GTEST_SKIP in exactly that case. A hard dependency would
-    # turn a missing compiler into a configure error.
     foreach(_hkp_set hkp_packaging_integration_conv hkp_packaging_integration_pointwise
                      hkp_packaging_archive_fixture)
         if(TARGET ${_hkp_set})

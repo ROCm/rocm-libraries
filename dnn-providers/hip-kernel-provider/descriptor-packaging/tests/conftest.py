@@ -53,11 +53,11 @@ def rocm_kpack_dir():
 def hipcc():
     """The hipcc driver used for real --genco compilation.
 
-    Resolved from HKP_HIPCC (set by CMake) or PATH. A missing hipcc skips the
-    compile-dependent tests so a toolchain-less box is a no-op, symmetric to
-    rocke_available; HIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC (set in CI) turns the
-    miss into a hard failure so CI cannot silently skip. A real hipcc compile
-    error is not caught here — it surfaces from the pipeline as a failure.
+    Resolved from HKP_HIPCC (set by CMake) or PATH. The build also sets
+    HIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC, which makes a missing hipcc a hard
+    failure; a standalone pytest run without it skips instead. A real hipcc
+    compile error is not caught here — it surfaces from the pipeline as a
+    failure.
     """
     exe = os.environ.get("HKP_HIPCC")
     if not exe:

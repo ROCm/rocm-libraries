@@ -451,10 +451,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # tree, so a directory missing at install time means the build did not run to
     # completion, and saying so beats shipping a package with no descriptors in it.
     #
-    # hkp_packaging_product exists exactly when the production packer will write --
-    # source root set and a real directory, arches selected, hipcc found. Re-testing the
-    # source root here would emit the rule for configurations the packer skips, turning a
-    # supported build into an install-time failure.
+    # hkp_packaging_product exists exactly when the production packer will write -- the
+    # production source root is set and is a real directory. Re-testing the source root
+    # here would emit the rule for configurations the packer skips, turning a supported
+    # build into an install-time failure.
     if(TARGET hkp_packaging_product)
         install(DIRECTORY "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/"
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
