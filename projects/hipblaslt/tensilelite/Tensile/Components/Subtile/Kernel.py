@@ -77,6 +77,7 @@ from .SubtileGeometry import (
   ABLRGeometry,
   GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
   LRTag_1x1, LRTag_1x2, LRTag_TLU1,
+  GRCoopSpread, planGRCoopSpread,
   ABTilePair,
   CDTileGeometry,
   MXScaleInputGeometry,
@@ -494,60 +495,38 @@ class TileInfo:
       # Cooperative GR load counts (scheduler: vmcnt, loop trip count).
       # loadRatioGR uses the global GR tile size (subtileShape * subtileCount),
       # which is the full hardware granularity for one cooperative load round.
+      # Waves that COOPERATE ON THE FETCH -- distinct from grWavesPerStrip, which
+      # counts waves sharing a strip on read-back and picks the swizzle.  See
+      # planGRCoopSpread for how the group is chosen; TLU=0 fetches with every
+      # wave and does not slice.
       _isTLU1 = isinstance(getattr(gr_cfg, "tag", None), GRTag_TLU1)
-      # Waves that COOPERATE ON THE FETCH -- distinct from grWavesPerStrip,
-      # which counts waves sharing a strip on read-back and picks the swizzle.
-      # An operand depends on one axis only, so the other axis' waves need the
-      # bytes but need not fetch them; spreading the fetch covers the strip once
-      # instead of once per other-axis wave.  The group is grWavesPerStrip times
-      # those other waves: numWaves when axis-waves already share a strip,
-      # otherWaves when a wave owns whole ones (numWaves would under-fetch).
       _otherWaves = max(1, self.numWaves // self.waveGroupSize)
-      _coopWaves = self.grWavesPerStrip if _isTLU1 else self.numWaves
-      _winSplit = 1
-      if _isTLU1 and _otherWaves > 1:
-        _cand = self.grWavesPerStrip * _otherWaves
+      _numWin = int(self.localSubtileGrid[1])
+      if _isTLU1:
         _stripBytes = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
-        if self.grWavesPerStrip > 1:
-          if _cand > _coopWaves and _stripBytes % gr_cfg.bytesPerLoad(_cand) == 0:
-            _coopWaves = _cand
-        else:
-          # One K window holds _stripBytes/bytesPerLoad(1) blocks, so a larger
-          # fetch group cannot be absorbed by K
-          # slices alone -- bytesPerLoad(_cand) would exceed the strip and push
-          # loadRatioGR above 1, which the emitter cannot express.  Spread the
-          # leftover factor over the K windows instead: a window is just a
-          # coarser K slice, one whole strip column of the macro tile further on.
-          # Maximise the total spread (K slices x K windows), preferring slices
-          # so a config that already fits keeps the layout it has today.
-          _numWin = int(self.localSubtileGrid[1])
-          _best, _bestKey = (_coopWaves, 1), (_coopWaves, _coopWaves)
-          _c = 1
-          while _c <= _cand:
-            if _stripBytes % gr_cfg.bytesPerLoad(_c) == 0:
-              _w = 1
-              while _w <= _numWin and _c * _w <= _cand:
-                if _numWin % _w == 0 and (_c * _w, _c) > _bestKey:
-                  _bestKey, _best = (_c * _w, _c), (_c, _w)
-                _w *= 2
-            _c *= 2
-          _coopWaves, _winSplit = _best
+        _spread = planGRCoopSpread(wavesPerStrip=self.grWavesPerStrip,
+                                   otherWaves=_otherWaves,
+                                   stripBytes=_stripBytes,
+                                   numWindows=_numWin,
+                                   bytesPerLoad=gr_cfg.bytesPerLoad)
+      else:
+        _spread = GRCoopSpread(self.numWaves, 1)
+
       self.grOtherAxisWaves = _otherWaves
-      self.grCoopWaves = _coopWaves
+      self.grCoopWaves = _spread.coopWaves
       # K slices a strip is cut into so the other-axis waves stop refetching it.
       # >1 means a per-wave sub-strip offset is applied, which the XOR swizzle
       # cannot absorb -- SubtileTLUSwizzle keys off this to pick col_scatter.
-      self.grKSplit = max(1, _coopWaves // max(1, self.grWavesPerStrip)) if _isTLU1 else 1
+      self.grKSplit = max(1, _spread.coopWaves // max(1, self.grWavesPerStrip)) if _isTLU1 else 1
       # K windows the fetch group is additionally spread over.  A wave issues
       # only grWindowsPerWave of them and reaches its own set through a runtime
       # window offset applied to both the global and the LDS write address.
-      self.grKWindowSplit = _winSplit
-      self.grWindowsPerWave = max(1, int(self.localSubtileGrid[1]) // _winSplit)
-      _grLoadWaves = _coopWaves
+      self.grKWindowSplit = _spread.windowSplit
+      self.grWindowsPerWave = max(1, _numWin // _spread.windowSplit)
       # Effective wave count for GR cooperative-load math (numGRPerSubtile,
       # localGRGranularity): the waves whose loads tile one strip between them.
-      self.grLoadWaves = _grLoadWaves
-      _grBytesPerLoad      = gr_cfg.bytesPerLoad(_grLoadWaves)
+      self.grLoadWaves = _spread.coopWaves
+      _grBytesPerLoad      = gr_cfg.bytesPerLoad(self.grLoadWaves)
       _globalGRTileSize    = self.subtileSize * (int(self.subtileCount) if self.subtileCount else 1)
       self.loadRatioGR     = _grBytesPerLoad / _globalGRTileSize if _globalGRTileSize else 0
       self.numGRPerSubtile = int(math.ceil(1.0 / self.loadRatioGR)) if self.loadRatioGR else 0
