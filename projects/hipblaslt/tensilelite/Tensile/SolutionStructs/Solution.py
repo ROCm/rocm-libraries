@@ -222,6 +222,35 @@ def _subtilePerWaveMTiles(mtTiles, stack, wgSize):
   return max(1, padded // int(wgSize))
 
 
+# A TLU=1 fp4 strip is stackM * MatrixInstM * 0.5 bytes wide, so a 16-tile stack
+# fills one 128B cache line and a 2-tile stack uses only 16B of each line it
+# touches.  Taller is therefore better, up to a full line.
+_SUBTILE_STACK_SIZES = (16, 8, 4, 2)
+_SUBTILE_STACK_MIN = 2
+
+# Rounding the strip up to a taller stack fetches padding tiles that are written
+# to LDS and never read.  Past this ratio the wasted bandwidth outweighs the
+# cache-line gain (measured across the fp4 subtile benchmark suite).
+_SUBTILE_STACK_MAX_PAD_RATIO = 1.25
+
+
+def _subtileStackForTile(mtTiles):
+  """Free-dim MFMA-M tiles per LDS strip for one TLU=1 fp4 operand.
+
+  Prefers the tallest stack that divides the tile exactly, then takes a taller
+  power-of-two stack instead when its padding stays within the ratio cap.
+  """
+  mtTiles = int(mtTiles)
+  exact = next((s for s in _SUBTILE_STACK_SIZES if mtTiles % s == 0),
+               _SUBTILE_STACK_MIN)
+  if mtTiles <= 1:
+    return exact
+  roundedUp = min(max(_SUBTILE_STACK_SIZES), 1 << (mtTiles - 1).bit_length())
+  if roundedUp > exact and roundedUp <= mtTiles * _SUBTILE_STACK_MAX_PAD_RATIO:
+    return roundedUp
+  return exact
+
+
 def _validateSubtileGRKPartition(state, printRejectionReason):
   # TODO: TEMPORARY FIX. Reject gfx950 subtile solutions that hit the GR
   # K-partition bug (see _subtileGRKPartitionIsBuggy). Remove once
@@ -1153,28 +1182,9 @@ class Solution(collections.abc.Mapping):
             state[key] = max(state[key], 2)
             # fp4 only: 6-bit shares this geometry's 0.5 bpe but neither
             # bank-conflict layout covers it, so it falls to the reject below.
-            #
-            # The strip spans the macro-tile free dim, so one load covers as
-            # long a run as the tile allows.  Its height is MacroTile/instM
-            # rounded down to a power of two (the swizzles are defined on those)
-            # and capped at 16, where the run is a full 128B line.
             mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
             mtTiles = mtFree // state["MatrixInstM"]
-            stack = 2
-            for cand in (16, 8, 4):
-              if mtTiles % cand == 0:
-                stack = cand
-                break
-            # Prefer a power-of-two stack even when it wastes tiles.  A 2-tile
-            # stack makes the strip only 16B wide, so each of a load's 64 lanes
-            # touches a different cache line and uses 16B of it; a 16-tile stack
-            # widens the strip to a full 128B line.  The extra tiles are fetched
-            # into LDS and never read, so cap that waste at 25% -- measured on
-            # 5376x2048x2048: 14 tiles -> 16 costs 1.14x and gains 15%, while
-            # 12 -> 16 costs 1.33x and gains nothing.
-            rounded = min(16, 1 << (mtTiles - 1).bit_length()) if mtTiles > 1 else 2
-            if rounded > stack and rounded * 4 <= mtTiles * 5:
-              stack = rounded
+            stack = _subtileStackForTile(mtTiles)
 
             # A strip offers (blocks per strip) x (K windows) fetch slots.  With
             # fewer slots than waves in the group the surplus waves reissue a
