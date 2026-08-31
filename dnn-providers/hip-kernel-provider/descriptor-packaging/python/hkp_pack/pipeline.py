@@ -257,10 +257,9 @@ class _VariantJob:
     """One distinct variant the prewarm compiles, as a picklable record.
 
     Every field is a str or a plain dict so the record crosses a process
-    boundary without a custom reducer. `vk` is computed in the parent by
-    `_variant_key_for`; the worker never recomputes it. `hipcc` and `arch`
-    travel by value rather than through an environment variable or a module
-    global, keeping the worker a pure function of its argument.
+    boundary without a custom reducer. `hipcc` and `arch` travel by value
+    rather than through an environment variable or a module global, so the
+    worker is a pure function of its argument.
     """
 
     vk: str
@@ -286,8 +285,7 @@ def _selected_entries(doc, arch, ukd_by_id):
     serial walk cannot select different variant sets. `ukd_by_id` arrives as a
     parameter rather than being reached for through `flat`, which leaves the
     generator no way to enumerate a standalone UKD no KDP references: an orphan
-    is legal input the walk never compiles, and driving selection from
-    `kernelDescriptors` is what makes yielding one structurally impossible.
+    is legal input the walk never compiles.
     """
     if not arch_matches(doc, arch):
         return
@@ -306,9 +304,8 @@ def _prewarm_jobs(flat, source_root, arch):
     Selection comes from the same generator the walk consumes, so the job set
     equals the walk's set by construction rather than by a second reading of
     the same filters. Dedup is on the variant key and keeps first-seen order,
-    which is walk order: the pool compiles each distinct variant once, and a
-    failure reported in submission order names the variant the serial path
-    would have named.
+    which is walk order: the pool compiles each distinct variant once, in the
+    order the serial path would have reached them.
 
     A kind `_variant_key_for` declines to key is dropped here, leaving the walk
     to reach it and report whatever it produces.
@@ -394,10 +391,10 @@ def _pack_jobs():
     escape hatch for debugging a compile failure with a single clean traceback.
 
     A value that is not a non-negative integer is a hard error rather than a
-    silent fallback to the default: a typo that quietly restored 32 workers
-    would look like the knob was honoured. Negative values are rejected for the
-    same reason and not clamped -- clamping would land them on the serial path,
-    so `-4` would read as "compiled on 4 workers" and run on one.
+    silent fallback: a typo that quietly restored 32 workers would look like the
+    knob was honoured. Negatives are rejected rather than clamped for the same
+    reason -- clamping lands them on the serial path, so `-4` would read as
+    "compiled on 4 workers" and run on one.
 
     An environment variable rather than a CLI flag or a CMake cache variable
     because it reaches through the CMake custom command with no plumbing.
@@ -423,8 +420,8 @@ def _variant_key_for(ukd, rel_dir):
     `hip_variant_key` and `rocke_variant_key` are resolved as globals of this
     module on every call -- never through a function-local import, an alias
     bound at import time, or a recomputation inside a worker process. Each of
-    those shortcuts would bind the real function past any substitution made on
-    this module, so the prewarm and the walk could key one variant two ways.
+    those shortcuts binds the real function past any substitution made on this
+    module.
 
     A kind that carries no compilable source yields None rather than raising.
     The walk stays the sole reporter of whatever failure such a UKD produces:
@@ -476,8 +473,7 @@ def _prewarm_variants(
     # The pool is built here, per arch, and never kept in a module global.
     # Workers snapshot `sys.path` at process start, so a pool reused across
     # runs would freeze whichever path list existed when it was first built and
-    # break imports the parent has since arranged. It reads like an obvious
-    # optimisation, and it is not one.
+    # break imports the parent has since arranged.
     pool = ProcessPoolExecutor(max_workers=workers)
     results = []
     failure = None
@@ -497,8 +493,7 @@ def _prewarm_variants(
         # A worker that is killed rather than raising surfaces here, and
         # the exception is not an HkpPackError -- so unconverted it would
         # sail past run_pipeline's per-arch handler and discard every other
-        # arch's work. This is the one failure mode a single-process
-        # compile structurally cannot have.
+        # arch's work.
         raise HkpPackError(
             f"the variant compile pool for {arch} failed "
             f"({type(exc).__name__}: {exc}); a worker process died, "

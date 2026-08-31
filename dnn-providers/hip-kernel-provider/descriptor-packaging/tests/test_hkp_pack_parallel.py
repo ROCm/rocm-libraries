@@ -388,7 +388,6 @@ def corpus(tmp_path):
 
 
 def _entry_identity(entry_id, ukd_doc, sdesc):
-    """A yielded tuple reduced to the id of the UKD it selects."""
     if entry_id is None:
         assert sdesc is None, "an inline entry must yield no standalone descriptor"
         return ukd_doc["id"]
@@ -444,8 +443,8 @@ def test_prewarm_jobs_are_deduped_on_variant_key(corpus):
 def _arch_matches_call_sites():
     """`arch_matches` call counts in pipeline.py, keyed by enclosing function.
 
-    Parsed rather than counted as strings: this plan requires an explanatory
-    comment naming `arch_matches`, and a comment is not a call.
+    Parsed rather than counted as strings: an explanatory comment naming
+    `arch_matches` is not a call.
     """
     tree = ast.parse(inspect.getsource(pipeline))
     counts = {}
@@ -497,10 +496,8 @@ def test_pack_jobs_env_parsing(monkeypatch):
     with pytest.raises(HkpPackError, match="HKP_PACK_JOBS"):
         pipeline._pack_jobs()
 
-    # A negative is an integer, so it clears the parse and would otherwise be
-    # clamped onto the serial path -- reading as "4 workers" while running on
-    # one. Rejected rather than clamped, and pinned here because the silent
-    # form produces a correct pack and no signal at all.
+    # A negative clears the parse, so the rejection is pinned here: clamped
+    # onto the serial path it would produce a correct pack and no signal at all.
     monkeypatch.setenv("HKP_PACK_JOBS", "-4")
     with pytest.raises(HkpPackError, match="negative"):
         pipeline._pack_jobs()
@@ -542,22 +539,16 @@ def hsaco_corpus(tmp_path):
 def test_prewarm_skips_hsaco_kind(hsaco_corpus, tmp_path):
     """An hsaco UKD produces no job, and the walk stays the sole error reporter.
 
-    This pins *current* behaviour: `pipeline.py:183` reads `kernel_source.source`
-    before the kind dispatch and neither `hsaco` nor `kpack` carries one, so the
-    walk raises `KeyError` and the `unsupported kind` branch at
-    `pipeline.py:227-228` is unreachable for a validly-authored UKD of either
-    kind. That the `KeyError` escapes as itself rather than as an
-    `HkpPackError` is a pre-existing defect this test pins rather than fixes;
-    fixing it belongs with the walk's error contract, not with the prewarm.
+    This pins *current* behaviour: `_compile_ukd_variant` reads
+    `kernel_source.source` before the kind dispatch and neither `hsaco` nor
+    `kpack` carries one, so the walk raises `KeyError` and its `unsupported
+    kind` branch is unreachable for a validly-authored UKD of either kind. That
+    the `KeyError` escapes as itself rather than as an `HkpPackError` is a
+    pre-existing defect this test pins rather than fixes; fixing it belongs with
+    the walk's error contract, not with the prewarm.
 
-    The raise is asserted first on purpose. With the job-list assertion ahead of
-    it, a stub job list ends the test before the walk is ever exercised, which is
-    how the contradiction between this test and the code stayed hidden.
-
-    `_variant_key_for` returns None for a kind the prewarm cannot compile rather
-    than raising. Had it raised, the prewarm would become the reporter of the
-    failure the walk produces -- a different error context, a different
-    traceback, and the walk would no longer own its own error reporting.
+    The raise is asserted first on purpose: with the job-list assertion ahead of
+    it, a stub job list ends the test before the walk is ever exercised.
     """
     flat = load_flat_input(hsaco_corpus, log=_silent)
 
@@ -606,12 +597,6 @@ def _synthetic_job(corpus, block):
 @pytest.mark.quick
 def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
     """The pack stops on the first failure in walk order and cancels the rest.
-
-    Two properties, and the second is why fail-fast is not free. Naming has to
-    stay on submission order -- walk order, the variant the serial path would
-    have named -- so the pool is drained lazily and broken on rather than
-    scanned after the fact. Breaking on the first result to *complete* would be
-    simpler and would hand the choice of named variant to the scheduler.
 
     Only the first job fails, and every other one sleeps, so a pool that ran the
     queue to the end is distinguishable from one that abandoned it. The attempt
@@ -707,10 +692,9 @@ def test_worker_inherits_parent_sys_path():
 
     CPython propagates `sys.path` to children under both `spawn` and
     `forkserver`, so a worker can import `hkp_pack` and the rocKE platform
-    without a `PYTHONPATH` export. This test is the detector for that, not a
-    driver of any change: it is expected green from the first run.
+    without a `PYTHONPATH` export.
 
-    What it would catch is the constraint that rides on the finding. Workers
+    What it catches is the constraint that rides on that. Workers
     snapshot `sys.path` at process start, so the pool must be created after all
     parent-side path setup and must never be cached in a module global -- a
     reused pool would freeze a stale path list from whenever it was first built.
@@ -763,8 +747,7 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
     the first failure in submission order, which is walk order, so the parallel
     path names the variant the serial path would have named. How many others
     would have failed is deliberately not asserted, and the message carries no
-    count -- the pack stops at the first failure, so any count would describe
-    how far the pool happened to get rather than how many variants are broken.
+    count.
 
     No `PYTHONPATH` export: children inherit the parent's `sys.path` under both
     start methods, which `test_worker_inherits_parent_sys_path` is the detector
@@ -796,11 +779,10 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
 def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monkeypatch):
     """The worker returns its failure and never computes a key.
 
-    Returning rather than raising, because rocke and comgr exceptions are not
-    guaranteed picklable and an exception that cannot cross the process boundary
-    loses the diagnosis. Computing no key, because the parent already computed
-    it under whatever patches are in force; a key recomputed in the child would
-    bypass them and disagree with the walk.
+    Both halves are asserted because both are invisible from the parent: a
+    worker that raised instead of returning would lose an unpicklable
+    diagnosis, and one that recomputed `vk` would bypass the patches in force
+    when the parent computed it.
     """
     calls = []
 
