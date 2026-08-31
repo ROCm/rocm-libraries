@@ -1,9 +1,5 @@
-/*******************************************************************************
- *
- * Copyright © Advanced Micro Devices, Inc., or its affiliates.
- * SPDX-License-Identifier: MIT
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 // d_vector.hpp integration for the cgroup host-memory probe: proves hip_memory
 // delegates to cgroup_memory_probe.hpp on Linux. Live proc/mountinfo behaviour
