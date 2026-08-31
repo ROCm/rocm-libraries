@@ -14,6 +14,12 @@ else()
     set(ROCISA_STANDALONE OFF)
 endif()
 
+# rocISA's standalone build historically produces shared dependencies unless
+# the caller explicitly selects static libraries. Define the canonical option
+# before nested origami and stinkytofu inspect it so their defaults cannot make
+# the result depend on add_subdirectory order.
+option(BUILD_SHARED_LIBS "Build libraries as shared by default." ON)
+
 option(ROCISA_USE_STABLE_ABI
        "Build rocisa as a Python stable ABI extension (requires Python >= 3.12 and CMake >= 3.26)."
        OFF)
