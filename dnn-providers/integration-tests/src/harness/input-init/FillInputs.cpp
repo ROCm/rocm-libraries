@@ -27,10 +27,6 @@ FillResult
     case FillRecipe::Kind::FIXED:
         tensor.fillTensorWithValue(recipe.value);
         return FillResult::ok();
-    case FillRecipe::Kind::STRUCTURED:
-        return FillResult::unsupported("STRUCTURED fill not yet implemented");
-    case FillRecipe::Kind::DERIVED:
-        return FillResult::unsupported("DERIVED fill not yet implemented");
     default:
         return FillResult::unsupported("unknown FillRecipe kind");
     }
@@ -80,14 +76,6 @@ void setBatchnormTrainingInitDefaults(const hipdnn_flatbuffers_sdk::data_objects
     recipes.setDefault(a->prev_running_mean_tensor_uid(), FillRecipe::free(-0.1f, 0.1f));
     recipes.setDefault(a->prev_running_variance_tensor_uid(), FillRecipe::free(0.5f, 1.5f));
     recipes.setDefault(a->momentum_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
-
-    if(a->peer_stats_tensor_uid() != nullptr)
-    {
-        for(const int64_t uid : *a->peer_stats_tensor_uid())
-        {
-            recipes.setDefault(uid, FillRecipe::structured());
-        }
-    }
 }
 
 void setBatchnormBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -100,14 +88,6 @@ void setBatchnormBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects
     }
     recipes.setDefault(a->mean_tensor_uid(), FillRecipe::free(-0.1f, 0.1f));
     recipes.setDefault(a->inv_variance_tensor_uid(), FillRecipe::free(0.5f, 1.5f));
-
-    if(a->peer_stats_tensor_uid() != nullptr)
-    {
-        for(const int64_t uid : *a->peer_stats_tensor_uid())
-        {
-            recipes.setDefault(uid, FillRecipe::structured());
-        }
-    }
 }
 
 // ── LayerNorm ────────────────────────────────────────────────────────────────
@@ -131,8 +111,8 @@ void setLayernormBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects
     {
         return;
     }
-    recipes.setDefault(a->mean_tensor_uid(), FillRecipe::derived());
-    recipes.setDefault(a->inv_variance_tensor_uid(), FillRecipe::derived());
+    recipes.setDefault(a->mean_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
+    recipes.setDefault(a->inv_variance_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
     recipes.setDefault(a->epsilon_tensor_uid(), FillRecipe::fixed(1e-5f));
 }
 
@@ -157,7 +137,7 @@ void setRmsnormBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::
     {
         return;
     }
-    recipes.setDefault(a->inv_rms_tensor_uid(), FillRecipe::derived());
+    recipes.setDefault(a->inv_rms_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
 }
 
 // ── Block-scale quantization ─────────────────────────────────────────────────
@@ -170,13 +150,9 @@ void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_obje
     {
         return;
     }
-    // Fill the block scale with a small, positive, bounded range. STRUCTURED (a
-    // domain-aware fill) is the intended kind but is an unimplemented stub, which makes
-    // every block-scale-dequantize graph skip; FREE stands in for it. [0.5, 2.0] stays
-    // positive and modest so dequantized products remain within FP16 range, and is
-    // valid for any scale type (for the UE8M0 scales the MX tests use it discretizes to
-    // {0.5, 1.0, 2.0}). Restore FillRecipe::structured() once implemented (ALMIOPEN-2383).
-    // recipes.setDefault(a->scale_tensor_uid(), FillRecipe::structured());
+    // [0.5, 2.0]: UE8M0 scales have zero mantissa bits, so any value stored
+    // discretizes to a power of two ({0.5, 1.0, 2.0}), keeping dequantized
+    // products within FP16 range.
     recipes.setDefault(a->scale_tensor_uid(), FillRecipe::free(0.5f, 2.0f));
 }
 
@@ -192,21 +168,6 @@ void setSdpaForwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node
     }
 
     recipes.setDefault(a->scale_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
-
-    recipes.setDefault(a->descale_q_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->descale_k_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->descale_v_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->descale_s_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->scale_s_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->scale_o_tensor_uid(), FillRecipe::structured());
-
-    recipes.setDefault(a->seq_len_q_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->seq_len_kv_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->page_table_k_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->page_table_v_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->block_mask_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->seed_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->offset_tensor_uid(), FillRecipe::structured());
 }
 
 void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -222,13 +183,8 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->dropout_scale_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
     recipes.setDefault(a->dropout_scale_inv_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
 
-    recipes.setDefault(a->o_tensor_uid(), FillRecipe::derived());
-    recipes.setDefault(a->stats_tensor_uid(), FillRecipe::derived());
-
-    recipes.setDefault(a->seq_len_q_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->seq_len_kv_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->seed_tensor_uid(), FillRecipe::structured());
-    recipes.setDefault(a->offset_tensor_uid(), FillRecipe::structured());
+    recipes.setDefault(a->o_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
+    recipes.setDefault(a->stats_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
 }
 
 // ── Dispatch ─────────────────────────────────────────────────────────────────
@@ -283,6 +239,8 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
     case NA::ResampleFwdAttributes:
     case NA::BlockScaleQuantizeAttributes:
     case NA::CustomOpAttributes:
+    case NA::MoeGroupedMatmulAttributes:
+    case NA::MoeGroupedMatmulBwdAttributes:
     case NA::NONE:
         return true;
     default:

@@ -126,6 +126,11 @@ if(NOT BUILD_WITH_SPARSE)
   target_link_libraries(hipsolver PRIVATE $<$<PLATFORM_ID:Linux>:${CMAKE_DL_LIBS}>)
 endif()
 
+# Feature flags
+if(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(hipsolver PUBLIC HIPSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
+
 # Build hipsolver from source on AMD platform
 if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   # Find rocBLAS
