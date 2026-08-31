@@ -49,6 +49,7 @@ from codegen_common import (
     emit_quant_kernel_attr_launch,
     emit_quant_launch_prologue,
     emit_quant_launch_tail,
+    QUANT_LAUNCH_CALL_PLAIN,
     emit_quant_tile_dims,
     emit_quant_tile_shape,
     emit_single_kernel_include_footer,
@@ -290,9 +291,19 @@ class ABQuantKernelHeaderGenerator:
         )
         gemm_traits = emit_quant_gemm_traits("ABQuantGrouped", ns)
         launch_prologue = emit_quant_launch_prologue(splitk_k="WarpTileK")
+        # Old-TE's abquant instance builder launches every config through the plain
+        # make_kernel<kBlockPerCu> path (Attr=void); it has no kernel_attr overload.
+        # kernel_attr<false> selects a different kentry specialization with a distinct
+        # register allocation (VGPR 128 -> 132) that is materially slower on large
+        # compv3 tiles. Mirror Old-TE: plain launch for the non-eight_waves families,
+        # kernel_attr only for the eight_waves fast path.
         launch_tail = emit_quant_launch_tail(
             quant_type="ABQuantGrouped",
-            launch_call=emit_quant_kernel_attr_launch(str(spec.eight_waves).lower()),
+            launch_call=(
+                emit_quant_kernel_attr_launch("true")
+                if spec.eight_waves
+                else QUANT_LAUNCH_CALL_PLAIN
+            ),
         )
 
         return emit_generated_header_preamble(
