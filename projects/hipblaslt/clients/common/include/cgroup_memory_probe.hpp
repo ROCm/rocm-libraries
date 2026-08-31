@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,34 @@ namespace hipblaslt_client
         std::string superopts;
         bool        is_v2 = false;
     };
+
+    namespace detail
+    {
+        // Held in a non-template accessor so there is a single instance:
+        // for_each_nonempty_line is a template, so a function-local static there
+        // would be constructed once per instantiation.
+        inline std::regex const& line_delimiter()
+        {
+            static std::regex const pattern{"\n"};
+            return pattern;
+        }
+    } // namespace detail
+
+    // Calls fn for each line of content, dropping trailing carriage returns so
+    // CRLF input parses like LF, and skipping lines that are then empty.
+    template <typename Fn>
+    inline void for_each_nonempty_line(std::string const& content, Fn fn)
+    {
+        std::for_each(std::sregex_token_iterator(
+                          content.begin(), content.end(), detail::line_delimiter(), -1),
+                      std::sregex_token_iterator(),
+                      [&fn](std::string const& raw) {
+                          // npos + 1 == 0, so an all-CR line correctly truncates to empty.
+                          std::string const line = raw.substr(0, raw.find_last_not_of('\r') + 1);
+                          if(!line.empty())
+                              fn(line);
+                      });
+    }
 
     inline std::string unescape_mount_path(std::string path)
     {
@@ -49,16 +78,10 @@ namespace hipblaslt_client
 
     inline bool controller_list_has_memory(std::string const& list)
     {
-        for(size_t at = 0; at <= list.size();)
-        {
-            auto end = list.find(',', at);
-            if(end == std::string::npos)
-                end = list.size();
-            if(end > at && list.compare(at, end - at, "memory") == 0)
-                return true;
-            at = end + 1;
-        }
-        return false;
+        static std::regex const comma{","};
+        return std::any_of(std::sregex_token_iterator(list.begin(), list.end(), comma, -1),
+                           std::sregex_token_iterator(),
+                           [](std::string const& name) { return name == "memory"; });
     }
 
     inline bool mount_has_memory_controller(cgroup_mount const& mount)
@@ -71,79 +94,51 @@ namespace hipblaslt_client
         return controller_list_has_memory(base) || controller_list_has_memory(mount.superopts);
     }
 
+    // Each line is "<id>:<controllers>:<path>". The cgroup2 line has id 0 and an
+    // empty controller list; v1 controllers may be co-mounted and comma-joined,
+    // so match a whole token rather than a ":memory:" substring.
     inline cgroup_paths parse_proc_self_cgroup(std::string const& content)
     {
         cgroup_paths paths;
-        for(size_t at = 0; at <= content.size();)
-        {
-            auto end = content.find('\n', at);
-            if(end == std::string::npos)
-                end = content.size();
-            std::string entry = content.substr(at, end - at);
-            while(!entry.empty() && (entry.back() == '\n' || entry.back() == '\r'))
-                entry.pop_back();
-            if(!entry.empty())
-            {
-                if(entry.compare(0, 3, "0::") == 0)
-                    paths.v2 = entry.substr(3);
-                else
-                {
-                    // "<id>:<controllers>:<path>", where controllers may be co-mounted
-                    // and comma-joined, so match a whole token rather than ":memory:".
-                    auto ids = entry.find(':');
-                    auto sep = entry.find(':', ids == std::string::npos ? 0 : ids + 1);
-                    if(ids != std::string::npos && sep != std::string::npos)
-                    {
-                        std::string list = entry.substr(ids + 1, sep - ids - 1);
-                        for(size_t token_at = 0; token_at <= list.size();)
-                        {
-                            auto token_end = list.find(',', token_at);
-                            if(token_end == std::string::npos)
-                                token_end = list.size();
-                            if(list.compare(token_at, token_end - token_at, "memory") == 0)
-                            {
-                                paths.v1 = entry.substr(sep + 1);
-                                break;
-                            }
-                            token_at = token_end + 1;
-                        }
-                    }
-                }
-            }
-            at = end + 1;
-        }
+        for_each_nonempty_line(content, [&paths](std::string const& entry) {
+            auto const controllers_at = entry.find(':');
+            if(controllers_at == std::string::npos)
+                return;
+            auto const path_at = entry.find(':', controllers_at + 1);
+            if(path_at == std::string::npos)
+                return;
+
+            std::string const id = entry.substr(0, controllers_at);
+            std::string const controllers
+                = entry.substr(controllers_at + 1, path_at - controllers_at - 1);
+            std::string const path = entry.substr(path_at + 1);
+
+            if(id == "0" && controllers.empty())
+                paths.v2 = path;
+            else if(controller_list_has_memory(controllers))
+                paths.v1 = path;
+        });
         return paths;
     }
 
     inline std::vector<cgroup_mount> parse_mountinfo(std::string const& content)
     {
         std::vector<cgroup_mount> mounts;
-        for(size_t at = 0; at <= content.size();)
-        {
-            auto end = content.find('\n', at);
-            if(end == std::string::npos)
-                end = content.size();
-            std::string line = content.substr(at, end - at);
-            while(!line.empty() && (line.back() == '\n' || line.back() == '\r'))
-                line.pop_back();
-            at = end + 1;
-            if(line.empty())
-                continue;
-
-            auto sep = line.find(" - ");
+        for_each_nonempty_line(content, [&mounts](std::string const& line) {
+            auto const sep = line.find(" - ");
             if(sep == std::string::npos)
-                continue;
+                return;
 
-            std::string tail = line.substr(sep + 3);
-            auto            fstype_end = tail.find(' ');
+            std::string const tail       = line.substr(sep + 3);
+            auto const        fstype_end = tail.find(' ');
             if(fstype_end == std::string::npos)
-                continue;
-            std::string fstype = tail.substr(0, fstype_end);
+                return;
+            std::string const fstype = tail.substr(0, fstype_end);
             if(fstype != "cgroup" && fstype != "cgroup2")
-                continue;
+                return;
 
             unsigned mount_id, parent_id, major, minor;
-            char     root_raw[512]     = {};
+            char     root_raw[512]       = {};
             char     mountpoint_raw[512] = {};
             if(sscanf(line.c_str(),
                       "%u %u %u:%u %511s %511s",
@@ -154,7 +149,7 @@ namespace hipblaslt_client
                       root_raw,
                       mountpoint_raw)
                < 6)
-                continue;
+                return;
 
             cgroup_mount mount;
             mount.root       = unescape_mount_path(root_raw);
@@ -168,7 +163,7 @@ namespace hipblaslt_client
                     mount.superopts = tail.substr(super_start + 1);
             }
             mounts.push_back(std::move(mount));
-        }
+        });
         return mounts;
     }
 

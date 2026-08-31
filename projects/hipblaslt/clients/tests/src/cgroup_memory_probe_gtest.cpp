@@ -83,7 +83,12 @@ INSTANTIATE_TEST_SUITE_P(
                                 "/docker/abc"},
         ParseProcSelfCgroupCase{"empty", "", "", ""},
         ParseProcSelfCgroupCase{"malformed", "garbage\n", "", ""},
-        ParseProcSelfCgroupCase{"trailing_crlf", "0::/path\r\n", "/path", ""}),
+        ParseProcSelfCgroupCase{"trailing_crlf", "0::/path\r\n", "/path", ""},
+        // Only a trailing carriage return is stripped; one inside an entry is
+        // part of the path and must not truncate or drop the entry.
+        ParseProcSelfCgroupCase{"embedded_cr_in_v2_path", "0::/we\rird\n", "/we\rird", ""},
+        ParseProcSelfCgroupCase{
+            "embedded_cr_in_v1_path", "5:memory:/we\rird\n", "", "/we\rird"}),
     [](testing::TestParamInfo<ParseProcSelfCgroupCase> const& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
