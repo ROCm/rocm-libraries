@@ -23,12 +23,13 @@
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, GLOBALModifiers, replaceHolder, EXEC,\
-    VOP3PModifiers, ContinuousRegister, DSModifiers
+    VOP3PModifiers, ContinuousRegister, DSModifiers, MemTokenData
 from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, VLShiftLeftB32, SLoadB32, \
     SEndpgm, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
-    SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VSubU32, VLShiftRightB32, VMovB32, \
+    SXorB32, \
+    SWaitAlu, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VSubU32, VLShiftRightB32, VMovB32, \
     VReadfirstlaneB32, VCmpXEqU32, VCvtBF16toFP32, GlobalAtomicIncU32Saddr, BufferLoadB32, BufferStoreB32, \
     SAtomicInc, DSLoadB32, DSStoreB32, SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
@@ -43,6 +44,57 @@ from ..AsmAddressCalculation import AddrCalculation
 import abc
 
 from copy import deepcopy
+
+
+def _mailboxLds0Token(writer):
+    return MemTokenData([writer.states.memTokenLdsBuffer0])
+
+
+def _emitMailboxAddressAndWave0Skip(writer, module, vLocalAddress, skipLabel,
+                                    preventOverflow=True):
+    # Per-wave mailbox slot in LDS[0..124]: (Serial<<2) - (tid0<<2).
+    # tid0 is firstlane(Serial). Serial is written at kernel start.
+    sTid0 = writer.sgprPool.checkOut(1, "MailboxFirstTid", preventOverflow=preventOverflow)
+    sBase = writer.sgprPool.checkOut(1, "MailboxWaveBase", preventOverflow=preventOverflow)
+    module.add(VReadfirstlaneB32(dst=sgpr(sTid0), src=vgpr("Serial"),
+                                 comment="wave first thread id from Serial"))
+    module.add(VLShiftLeftB32(dst=vgpr(vLocalAddress), src=vgpr("Serial"), shiftHex=log2(4),
+                              comment="Serial * 4"))
+    # firstlane dest is an SGPR; wait before the wave-base SALU.
+    module.add(SNop(waitState=2, comment="wait after readfirstlane before SALU"))
+    module.add(SWaitAlu(va_sdst=0, comment="va_sdst: firstlane(Serial) ready for wave-base SALU"))
+    module.add(SLShiftLeftB32(dst=sgpr(sBase), src=sgpr(sTid0), shiftHex=log2(4),
+                              comment="wave base in bytes"))
+    module.add(VSubU32(dst=vgpr(vLocalAddress), src0=vgpr(vLocalAddress), src1=sgpr(sBase)))
+    writer.sgprPool.checkIn(sBase)
+    module.add(SCmpEQU32(src0=sgpr(sTid0), src1=0, comment="Check for wave 0"))
+    writer.sgprPool.checkIn(sTid0)
+    module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment="Skip work item"))
+
+
+def _emitWorkItemMailbox(writer, module, vLocalAddress, vWaveWorkItemIdx, skipLabel,
+                         sWorkItemIdx=None):
+    # Mailbox DS ops occupy LDS[0..124] (TDM buffer 0). Token them as LDS0
+    # so the scheduler places a publish fence between store and load, and a
+    # release before the next LDS0 write. WG barriers stay untokened.
+    mailboxToken = _mailboxLds0Token(writer)
+    storeInst = DSStoreB32(dstAddr=vgpr(vLocalAddress), src=vgpr(vWaveWorkItemIdx),
+                           ds=DSModifiers(offset=0))
+    storeInst.setMemToken(mailboxToken)
+    module.add(storeInst)
+    module.add(SWaitCnt(dscnt=0))
+    module.add(skipLabel)
+    module.add(SBarrier(comment="mailbox publish: wave 0 store visible"))
+    loadInst = DSLoadB32(dst=vgpr(vWaveWorkItemIdx), src=vgpr(vLocalAddress),
+                         ds=DSModifiers(offset=0))
+    loadInst.setMemToken(_mailboxLds0Token(writer))
+    module.add(loadInst)
+    module.add(SWaitCnt(dscnt=0))
+    if sWorkItemIdx is not None:
+        module.add(VReadfirstlaneB32(dst=sgpr(sWorkItemIdx), src=vgpr(vWaveWorkItemIdx),
+                                     comment="Read work item index from vgpr"))
+        module.add(SBarrier(comment="mailbox index visible to all waves"))
+
 
 class XCCMapping(Component):
     """
@@ -352,8 +404,6 @@ class StreamK(Component):
                                                       "SavedExec")
         execMovInst = SMovB32 if kernel["WavefrontSize"] == 32 else SMovB64
 
-        module.add(VMovB32(dst=vgpr(vWrapValue), src=sgpr(sWorkItemIdx),
-                           comment="Queue wrap threshold (atomic_inc src)"))
         module.add(VMovB32(dst=vgpr(vZeroOffset), src=0,
                            comment="Zero per-lane offset; queue base stays in saddr"))
         module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before dynamic queue atomic"))
@@ -361,6 +411,10 @@ class StreamK(Component):
                                src=EXEC(), comment="save exec mask"))
         module.add(VCmpXEqU32(dst=EXEC(), src0=vgpr("Serial"), src1=0,
                               comment="lane 0 fetches next work item"))
+        # Wrap VGPR is the atomic data operand; emit it immediately before
+        # the increment so va_vdst covers VALU to atomic.
+        module.add(VMovB32(dst=vgpr(vWrapValue), src=sgpr(sWorkItemIdx),
+                           comment="Queue wrap threshold (atomic_inc src)"))
         module.add(GlobalAtomicIncU32Saddr(dst=vgpr(vFetchedIdx),
                                       vaddr=vgpr(vZeroOffset),
                                       data=vgpr(vWrapValue),
@@ -694,11 +748,24 @@ class StreamK(Component):
         sMagicShift = writer.acquireStreamKConstSgpr(kernel, "MagicShiftItersPerTile")
         module.add(writer.readbackStreamKConst(kernel, sMagicNum, "MagicNumberItersPerTile"))
         module.add(writer.readbackStreamKConst(kernel, sMagicShift, "MagicShiftItersPerTile"))
-        # SK5: mode bit (30) already cleared at preLoop; keep magic add + shift.
+        # SK5: mode bit (30) is already cleared at preLoop. Mask magic add
+        # (bit 31) and the 5-bit shift into a temp. MagicShiftItersPerTile
+        # aliases SKTiles and must keep that overlay.
         if kernel["StreamK"] == 5:
-            module.add(SAndB32(dst=sgpr(sMagicShift), src0=sgpr(sMagicShift), src1=hex(0x8000001F),
-                               comment="SK5: keep magic add bit (31) + 5-bit shift, drop mode bit (30)"))
-        module.add(sMagicDiv2(sgpr(sTmp), sgpr(sTmp+1), sgpr("StreamKIter"), sgpr(sMagicNum), sgpr(sMagicShift), sgpr(sTmp+2)))
+            # PAP calls skTileIndex inside the OptNLL window, where the SGPR pool
+            # sits at its high-water mark. Let this scratch temp grow the pool
+            # (see _fetchWorkItemAndBroadcast) instead of tripping the
+            # preventOverflow guard and failing kernel generation outright.
+            sMaskedShift = writer.sgprPool.checkOut(1, "SK5MaskedMagicShift", preventOverflow=False)
+            module.add(SAndB32(dst=sgpr(sMaskedShift), src0=sgpr(sMagicShift), src1=hex(0x8000001F),
+                               comment="SK5: magic add bit (31) + 5-bit shift in temp, keep SKTiles overlay"))
+            sMagicShiftForDiv = sMaskedShift
+        else:
+            sMaskedShift = None
+            sMagicShiftForDiv = sMagicShift
+        module.add(sMagicDiv2(sgpr(sTmp), sgpr(sTmp+1), sgpr("StreamKIter"), sgpr(sMagicNum), sgpr(sMagicShiftForDiv), sgpr(sTmp+2)))
+        if sMaskedShift is not None:
+            writer.sgprPool.checkIn(sMaskedShift)
         writer.releaseStreamKConstSgpr(sMagicNum)
         writer.releaseStreamKConstSgpr(sMagicShift)
         # sTmp+1 = tile start, sTmp+2 = tile end
@@ -3514,28 +3581,13 @@ class StreamKDynamic(StreamK):
 
         # Local address for sharing work id
         vLocalAddress = writer.vgprPool.checkOut(1, "LocalAddress")
-        # TODO reorganize to reduce waits
-        module.add(VMovB32(dst=vgpr(vLocalAddress), src=vgpr("Serial"), comment="Move local address to vgpr"))
-        module.add(VLShiftLeftB32(dst=vgpr(vLocalAddress), src=vgpr(vLocalAddress), shiftHex=log2(4), comment="Scale by BPE"))
-        sFirstLane = writer.sgprPool.checkOut(1, "FirstLane", preventOverflow=preventOverflow)
-        module.add(SNop(waitState=4, comment="4 wait required between VALU op and readfirstlane using the value"))
-        module.add(VReadfirstlaneB32(dst=sgpr(sFirstLane), src=vgpr(vLocalAddress), comment="Read first lane of local address"))
-        module.add(SNop(waitState=2, comment="2 wait required between readfirstlane and VALU op using the value"))
-        module.add(VSubU32(dst=vgpr(vLocalAddress), src0=vgpr(vLocalAddress), src1=sgpr(sFirstLane)))
-        writer.sgprPool.checkIn(sFirstLane)
-
         # Only first wave reads next work item index. When PAP hoists this pop
         # into the NLL window the same helper is also emitted in graWorkGroup, so
         # PAP callers request a unique label to avoid a duplicate-symbol clash;
         # the graWorkGroup (non-PAP) path keeps the historical name.
         skSkipWorkItem = Label(writer.labels.getNameInc("SK_PAP_SkipWorkItem") if uniqueLabels else "SK_SkipWorkItem", "")
-        sWave = writer.sgprPool.checkOut(1, "Wave", preventOverflow=preventOverflow)
-        # module.add(SNop(waitState=4, comment="4 wait required between VALU op and readfirstlane using the value"))
-        module.add(VReadfirstlaneB32(dst=sgpr(sWave), src=vgpr("Serial"), comment="Wave 0 updates flags"))
-        # module.add(SNop(waitState=2, comment="2 wait required between VALU op and readfirstlane using the value"))
-        module.add(SCmpEQU32(src0=sgpr(sWave), src1=0, comment="Check for wave 0"))
-        module.add(SCBranchSCC0(labelName=skSkipWorkItem.getLabelName(), comment="Skip work item"))
-        writer.sgprPool.checkIn(sWave)
+        _emitMailboxAddressAndWave0Skip(writer, module, vLocalAddress, skSkipWorkItem,
+                                        preventOverflow=preventOverflow)
 
         # Per-arch dynamic-queue fast-mask constants: log2(numQueues) for the
         # StreamKIdx/queue divisions, log2(cache-line size) for the counter stride.
@@ -3618,18 +3670,8 @@ class StreamKDynamic(StreamK):
         # Share work item index with all waves
         vWaveWorkItemIdx = writer.vgprPool.checkOut(1, "WaveWorkItemIdx")
         module.add(VMovB32(dst=vgpr(vWaveWorkItemIdx), src=sgpr(sWorkItemIdx), comment="Move work item index to vgpr"))
-        module.add(DSStoreB32(dstAddr=vgpr(vLocalAddress), src=vgpr(vWaveWorkItemIdx), ds=DSModifiers(offset=0)))
-        module.add(SWaitCnt(dscnt=0))
-
-        module.add(skSkipWorkItem)
-        module.add(SBarrier())
-
-        module.add(DSLoadB32(dst=vgpr(vWaveWorkItemIdx), src=vgpr(vLocalAddress), ds=DSModifiers(offset=0)))
-        module.add(SWaitCnt(dscnt=0))
-        # module.add(SNop(waitState=4, comment="4 wait states required before reading vgpr by lane"))
-        module.add(VReadfirstlaneB32(dst=sgpr(sWorkItemIdx), src=vgpr(vWaveWorkItemIdx), comment="Read work item index from vgpr"))
-        # module.add(SNop(waitState=2, comment="2 wait states required before reading vgpr by lane"))
-        module.add(SBarrier())
+        _emitWorkItemMailbox(writer, module, vLocalAddress, vWaveWorkItemIdx, skSkipWorkItem,
+                             sWorkItemIdx=sWorkItemIdx)
 
         writer.vgprPool.checkIn(vLocalAddress)
         writer.vgprPool.checkIn(vWaveWorkItemIdx)
@@ -4050,10 +4092,21 @@ def _extract_hybrid_mode():
                        src0=sgpr("StreamKHybridMode"),
                        src1=hex(0x1),
                        comment="SK5: isolate mode bit -> StreamKHybridMode"))
-    module.add(SAndB32(dst=sgpr("MagicShiftItersPerTile"),
+    # Clear MagicShift bit 30 by XOR with (HybridMode << 30). HybridMode
+    # is the extracted mode, so the clear is RAW on extract. Restore
+    # HybridMode to 0/1 afterward.
+    module.add(SLShiftLeftB32(dst=sgpr("StreamKHybridMode"),
+                              src=sgpr("StreamKHybridMode"),
+                              shiftHex=hex(30),
+                              comment="SK5: mode bit back to bit 30 for XOR-clear"))
+    module.add(SXorB32(dst=sgpr("MagicShiftItersPerTile"),
                        src0=sgpr("MagicShiftItersPerTile"),
-                       src1=hex(0xBFFFFFFF),
-                       comment="SK5: clear bit 30; keep shift bits and magic add bit"))
+                       src1=sgpr("StreamKHybridMode"),
+                       comment="SK5: clear bit 30 via XOR of extracted mode"))
+    module.add(SLShiftRightB32(dst=sgpr("StreamKHybridMode"),
+                               src=sgpr("StreamKHybridMode"),
+                               shiftHex=hex(30),
+                               comment="SK5: restore HybridMode to 0/1"))
     return module
 
 class StreamKHybrid(StreamK):
@@ -4322,32 +4375,12 @@ class StreamKHybrid(StreamK):
         """
         module = Module("StreamK Hybrid fetchWorkItemAndBroadcast")
 
-        # Local address for sharing work id
+        # Local address for sharing work id. Wave-0 skip label already uses
+        # getNameInc, so emitting the pop twice per kernel never clashes.
         vLocalAddress = writer.vgprPool.checkOut(1, "LocalAddress")
-        module.add(VMovB32(dst=vgpr(vLocalAddress), src=vgpr("Serial"),
-                           comment="Move local address to vgpr"))
-        module.add(VLShiftLeftB32(dst=vgpr(vLocalAddress), src=vgpr(vLocalAddress),
-                                  shiftHex=log2(4), comment="Scale by BPE"))
-        sFirstLane = writer.sgprPool.checkOut(1, "FirstLane", preventOverflow=preventOverflow)
-        module.add(SNop(waitState=4,
-                        comment="4 wait required between VALU op and readfirstlane using the value"))
-        module.add(VReadfirstlaneB32(dst=sgpr(sFirstLane), src=vgpr(vLocalAddress),
-                                     comment="Read first lane of local address"))
-        module.add(SNop(waitState=2,
-                        comment="2 wait required between readfirstlane and VALU op using the value"))
-        module.add(VSubU32(dst=vgpr(vLocalAddress), src0=vgpr(vLocalAddress),
-                           src1=sgpr(sFirstLane)))
-        writer.sgprPool.checkIn(sFirstLane)
-
-        # Only first wave reads next work item index
         skSkipWorkItem = Label(writer.labels.getNameInc("SK_SkipWorkItem"), "")
-        sWave = writer.sgprPool.checkOut(1, "Wave", preventOverflow=preventOverflow)
-        module.add(VReadfirstlaneB32(dst=sgpr(sWave), src=vgpr("Serial"),
-                                     comment="Wave 0 updates flags"))
-        module.add(SCmpEQU32(src0=sgpr(sWave), src1=0, comment="Check for wave 0"))
-        module.add(SCBranchSCC0(labelName=skSkipWorkItem.getLabelName(),
-                                comment="Skip work item"))
-        writer.sgprPool.checkIn(sWave)
+        _emitMailboxAddressAndWave0Skip(writer, module, vLocalAddress, skSkipWorkItem,
+                                        preventOverflow=preventOverflow)
 
         # Per-arch dynamic-queue fast-mask constants: log2(numQueues) for the
         # StreamKIdx/queue divisions, log2(cache-line size) for the counter stride.
@@ -4457,19 +4490,8 @@ class StreamKHybrid(StreamK):
         vWaveWorkItemIdx = writer.vgprPool.checkOut(1, "WaveWorkItemIdx")
         module.add(VMovB32(dst=vgpr(vWaveWorkItemIdx), src=sgpr(sWorkItemIdx),
                            comment="Move work item index to vgpr"))
-        module.add(DSStoreB32(dstAddr=vgpr(vLocalAddress), src=vgpr(vWaveWorkItemIdx),
-                              ds=DSModifiers(offset=0)))
-        module.add(SWaitCnt(dscnt=0))
-
-        module.add(skSkipWorkItem)
-        module.add(SBarrier())
-
-        module.add(DSLoadB32(dst=vgpr(vWaveWorkItemIdx), src=vgpr(vLocalAddress),
-                             ds=DSModifiers(offset=0)))
-        module.add(SWaitCnt(dscnt=0))
-        module.add(VReadfirstlaneB32(dst=sgpr(sWorkItemIdx), src=vgpr(vWaveWorkItemIdx),
-                                     comment="Read work item index from vgpr"))
-        module.add(SBarrier())
+        _emitWorkItemMailbox(writer, module, vLocalAddress, vWaveWorkItemIdx, skSkipWorkItem,
+                             sWorkItemIdx=sWorkItemIdx)
 
         writer.vgprPool.checkIn(vLocalAddress)
         writer.vgprPool.checkIn(vWaveWorkItemIdx)

@@ -4878,11 +4878,7 @@ class KernelWriterAssembly(KernelWriter):
     moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
     moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
     # Load and apply batch offset for General Batched GEMM
-    # gfx1250: skip the batch-offset apply. The load references KernArgAddress
-    # after the UserArgs/grouped prologue has relocated it, so the fixed soffset
-    # reads the wrong kernarg word and corrupts the SRD. Fall back to the
-    # pre-offset wait-only path here until the base-relative fix lands.
-    if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
+    if not kernel["ProblemType"]["GroupedGemm"]:
       batchOffsetKernArgOffset = self.states.batchOffsetAKernArgOffset if tc == "A" else self.states.batchOffsetBKernArgOffset
       moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr(stmp, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%tc))
       moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
@@ -13701,9 +13697,7 @@ class KernelWriterAssembly(KernelWriter):
               # (not the GSU workspace), so the offset is correctly applied here. When GSU>1 the
               # routing branches to the strided/workspace path and skips this block; the PostGSU
               # conversion kernel applies the offset when it writes the final result to C/D.
-              # gfx1250: skip the batch-offset apply (see computeLoadSrd A/B note);
-              # the KernArgAddress-relative load is unsafe after prologue relocation.
-              if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
+              if not kernel["ProblemType"]["GroupedGemm"]:
                 batchOffsetKernArgOffset = self.states.batchOffsetCKernArgOffset if mat == "C" else self.states.batchOffsetDKernArgOffset
                 module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%mat))
                 module.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
@@ -13806,9 +13800,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SAddCU32(dst=sgpr(tmpsgpr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
     module.add(SLoadB64(dst=sgpr("SrdTD", 2), base=sgpr(tmpsgpr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
     # Load and apply batch offset for General Batched GEMM (dstD) as necessary.
-    # gfx1250: skip the batch-offset apply (see computeLoadSrd A/B note);
-    # the KernArgAddress-relative load is unsafe after prologue relocation.
-    if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
+    if not kernel["ProblemType"]["GroupedGemm"]:
       module.add(SLoadB64(dst=sgpr(tmpsgpr3, 2), base=sgpr("KernArgAddress", 2), soffset=hex(self.states.batchOffsetDKernArgOffset), comment="Load batchOffsetD from kernel args"))
       module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address and batchOffsetD Load"))
       module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpsgpr3+0), comment="Apply batchOffsetD to SrdTD (low)"))
