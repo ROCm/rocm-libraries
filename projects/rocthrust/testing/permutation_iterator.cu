@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/permutation_iterator.h>
@@ -48,7 +47,7 @@ void TestPermutationIteratorTraits()
 
   static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
 
-  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+  static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(_THRUST_STD::output_iterator<it, int>);
@@ -186,9 +185,9 @@ void TestPermutationIteratorReduce()
   T result2 = thrust::transform_reduce(
     thrust::make_permutation_iterator(source.begin(), indices.begin()),
     thrust::make_permutation_iterator(source.begin(), indices.begin()) + 4,
-    thrust::negate<T>(),
+    _THRUST_STD::negate<T>(),
     T(0),
-    thrust::plus<T>());
+    _THRUST_STD::plus<T>());
   ASSERT_EQUAL(result2, -19);
 };
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPermutationIteratorReduce);
@@ -295,7 +294,7 @@ void TestPermutationIteratorWithCountingIterator()
     thrust::transform(thrust::make_permutation_iterator(input, index),
                       thrust::make_permutation_iterator(input, index + 4),
                       output.begin(),
-                      ::internal::identity{});
+                      _THRUST_STD::identity{});
 
     Vector ref{0, 1, 2, 3};
     ASSERT_EQUAL(output, ref);

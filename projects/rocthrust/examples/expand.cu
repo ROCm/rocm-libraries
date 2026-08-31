@@ -44,7 +44,7 @@ OutputIterator expand(InputIterator1 first1, InputIterator1 last1, InputIterator
   // otherwise it falls back to ::std.
   using difference_type = typename _THRUST_STD::iterator_traits<InputIterator1>::difference_type;
 
-  difference_type input_size  = thrust::distance(first1, last1);
+  difference_type input_size  = _THRUST_STD::distance(first1, last1);
   difference_type output_size = thrust::reduce(first1, last1);
 
   // scan the counts to obtain output offsets for each input element
@@ -62,13 +62,13 @@ OutputIterator expand(InputIterator1 first1, InputIterator1 last1, InputIterator
 
   // compute max-scan over the output indices, filling in the holes
   thrust::inclusive_scan(
-    output_indices.begin(), output_indices.end(), output_indices.begin(), thrust::maximum<difference_type>());
+    output_indices.begin(), output_indices.end(), output_indices.begin(), _THRUST_LIBCXX::maximum<difference_type>());
 
   // gather input values according to index array (output = first2[output_indices])
   thrust::gather(output_indices.begin(), output_indices.end(), first2, output);
 
   // return output + output_size
-  thrust::advance(output, output_size);
+  _THRUST_STD::advance(output, output_size);
   return output;
 }
 

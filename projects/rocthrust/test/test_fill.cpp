@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -275,8 +275,8 @@ TYPED_TEST(FillTests, TestFillZipIterator)
   Vector v2(3, T(0));
   Vector v3(3, T(0));
 
-  thrust::fill(thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin(), v3.begin())),
-               thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end(), v3.end())),
+  thrust::fill(thrust::make_zip_iterator(v1.begin(), v2.begin(), v3.begin()),
+               thrust::make_zip_iterator(v1.end(), v2.end(), v3.end()),
                thrust::tuple<T, T, T>(4, 7, 13));
 
   Vector ref1{4, 4, 4};

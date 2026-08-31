@@ -34,8 +34,6 @@
 #include <thrust/execution_policy.h>
 #include <thrust/tabulate.h>
 
-#include "thrust/detail/raw_pointer_cast.h"
-
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -43,6 +41,8 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+
+#include "thrust/detail/raw_pointer_cast.h"
 
 template <class T>
 struct seg_size_t

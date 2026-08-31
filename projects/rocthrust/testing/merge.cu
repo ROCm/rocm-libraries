@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -143,8 +143,8 @@ void TestMergeDescending(size_t n)
   thrust::host_vector<T> h_a = unittest::random_integers<T>(n);
   thrust::host_vector<T> h_b = unittest::random_integers<T>(n);
 
-  thrust::stable_sort(h_a.begin(), h_a.end(), thrust::greater<T>());
-  thrust::stable_sort(h_b.begin(), h_b.end(), thrust::greater<T>());
+  thrust::stable_sort(h_a.begin(), h_a.end(), _THRUST_STD::greater<T>());
+  thrust::stable_sort(h_b.begin(), h_b.end(), _THRUST_STD::greater<T>());
 
   const thrust::device_vector<T> d_a = h_a;
   const thrust::device_vector<T> d_b = h_b;
@@ -153,9 +153,9 @@ void TestMergeDescending(size_t n)
   thrust::device_vector<T> d_result(d_a.size() + d_b.size());
 
   const auto h_end =
-    thrust::merge(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin(), thrust::greater<T>());
+    thrust::merge(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin(), _THRUST_STD::greater<T>());
   const auto d_end =
-    thrust::merge(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin(), thrust::greater<T>());
+    thrust::merge(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin(), _THRUST_STD::greater<T>());
 
   ASSERT_EQUAL(h_result, d_result);
   ASSERT_EQUAL(h_end == h_result.end(), true);

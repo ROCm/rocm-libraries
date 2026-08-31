@@ -64,7 +64,7 @@
 
 #  include <rocprim/config.hpp>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -1045,8 +1045,8 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> set_operations(
   using namespace thrust::system::hip_rocprim::temp_storage;
 
   using size_type     = thrust::detail::it_difference_t<KeysIt1>;
-  size_type num_keys1 = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
-  size_type num_keys2 = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
+  size_type num_keys1 = static_cast<size_type>(_THRUST_STD::distance(keys1_first, keys1_last));
+  size_type num_keys2 = static_cast<size_type>(_THRUST_STD::distance(keys2_first, keys2_last));
 
   if (num_keys1 + num_keys2 == 0)
   {

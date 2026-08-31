@@ -40,8 +40,6 @@
 #  include <thrust/iterator/permutation_iterator.h>
 #  include <thrust/system/cuda/detail/transform.h>
 
-#  include <cuda/std/__functional/identity.h>
-
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {
@@ -55,7 +53,7 @@ gather(execution_policy<Derived>& policy, MapIt map_first, MapIt map_last, Items
     thrust::make_permutation_iterator(items, map_first),
     thrust::make_permutation_iterator(items, map_last),
     result,
-    ::cuda::std::__identity{});
+    ::cuda::std::identity{});
 }
 
 template <class Derived, class MapIt, class StencilIt, class ItemsIt, class ResultIt, class Predicate>
@@ -74,7 +72,7 @@ ResultIt _CCCL_HOST_DEVICE gather_if(
     thrust::make_permutation_iterator(items, map_last),
     stencil,
     result,
-    ::cuda::std::__identity{},
+    ::cuda::std::identity{},
     predicate);
 }
 
@@ -82,7 +80,7 @@ template <class Derived, class MapIt, class StencilIt, class ItemsIt, class Resu
 ResultIt _CCCL_HOST_DEVICE gather_if(
   execution_policy<Derived>& policy, MapIt map_first, MapIt map_last, StencilIt stencil, ItemsIt items, ResultIt result)
 {
-  return cuda_cub::gather_if(policy, map_first, map_last, stencil, items, result, ::cuda::std::__identity{});
+  return cuda_cub::gather_if(policy, map_first, map_last, stencil, items, result, ::cuda::std::identity{});
 }
 
 } // namespace cuda_cub

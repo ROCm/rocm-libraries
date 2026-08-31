@@ -3,6 +3,29 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust *.*.* for ROCm *.*.* (CCCL 3.1 parity)
+
+### Added
+
+* Add `THRUST_DISABLE_BROKEN_GCC_VECTORIZER`
+* Add `thrust::reduce_into`.
+* Add `thrust::shuffle_iterator`.
+* Add `thrust::transform_n` and `thrust::transform_if_n`.
+
+### Changed
+
+* Replaced bad_alloc, cassert, cfloat, cmath, complex, cstddef, cstdint, cstring, initializer_list, limits, move and type_traits operators with `hip::std` operators.
+* Replaced `hip::std::__identity` with `hip::std::identity`.
+* Replaced ``_LIBCUDACXX_HIDE_FROM_ABI`` with ``_CCCL_API``.
+* Defined `THRUST_COMP_DEPR_IMPL` with `_CCCL_WARNING`.
+* Replaced `thrust::constant_iterator`, `thrust::make_discard_iterator`, `thrust::permutation_iterator`, `thrust::strided_iterator`, `thrust::tabulate_output_iterator` and `thrust::transform_output_iterator` with `hip::constant_iterator`, `hip::make_discard_iterator`, `hip::permutation_iterator`, `hip::strided_iterator`, `hip::tabulate_output_iterator` and `hip::transform_output_iterator` instead.
+
+### Removed
+
+* Deprecated `thrust::advance`, `thrust::bit_and`, `thrust::bit_or`, `thrust::bit_xor`, `thrust::distance`, `thrust::equal_to`, `thrust::greater`, `thrust::greater_equal`, `thrust::less`, `thrust::less_equal`, `thrust::logical_and`, `thrust::logical_not`, `thrust::logical_or`, `thrust::maximum`, `thrust::minimum`, `thrust::modulus`, `thrust::multiplies`, `thrust::negate`, `thrust::next`, `thrust::not_equal_to`, `thrust::not_fn`, `thrust::operator_name`, and `thrust::plus`. Use `hip::std::advance`, `hip::std::bit_and`, `hip::std::bit_or`, `hip::std::bit_xor`, `hip::std::distance`, `hip::std::equal_to`, `hip::std::greater`, `hip::std::greater_equal`, `hip::std::less`, `hip::std::less_equal`, `hip::std::logical_and`, `hip::std::logical_not`, `hip::std::logical_or`, `hip::maximum`, `hip::minimum`, `hip::modulus`, `hip::std::multiplies`, `hip::std::negate`, `hip::std::next`, `hip::std::not_equal_to`, `hip::std::not_fn`, `hip::std::operator_name` and `hip::std::plus` instead.
+* Deprecated `thrust::detail::::identity_`. Use `hip::std::type_identity` instead.
+* Removed `THRUST_NODISCARD`.
+
 ## rocThrust 5.0.0 for ROCm 10.0.0
 
 ### Added

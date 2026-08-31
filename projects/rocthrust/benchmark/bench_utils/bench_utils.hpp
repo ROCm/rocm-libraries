@@ -344,6 +344,17 @@ struct max_t
   }
 };
 
+template <class T>
+struct less_then_t
+{
+  T m_val;
+
+  [[nodiscard]] __device__ bool operator()(const T& val) const noexcept
+  {
+    return val < m_val;
+  }
+};
+
 struct bench_naming
 {
 public:

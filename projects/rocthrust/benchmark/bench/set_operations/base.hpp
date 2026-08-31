@@ -104,7 +104,7 @@ void run_benchmark(benchmark::State& state,
        input.cbegin() + elements_in_A,
        input.cend(),
        output.begin());
-  const std::size_t elements_in_AB = thrust::distance(output.begin(), result_ends);
+  const std::size_t elements_in_AB = _THRUST_STD::distance(output.begin(), result_ends);
 
   for (auto _ : state)
   {

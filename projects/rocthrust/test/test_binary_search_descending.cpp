@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -39,16 +39,16 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarLowerBoundDescendingSimple)
 
   Vector vec{8, 7, 5, 2, 0};
 
-  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::lower_bound(vec.begin(), vec.end(), T{0}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::lower_bound(vec.begin(), vec.end(), T{1}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::lower_bound(vec.begin(), vec.end(), T{2}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::lower_bound(vec.begin(), vec.end(), T{3}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::lower_bound(vec.begin(), vec.end(), T{4}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::lower_bound(vec.begin(), vec.end(), T{5}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::lower_bound(vec.begin(), vec.end(), T{6}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 1, thrust::lower_bound(vec.begin(), vec.end(), T{7}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::lower_bound(vec.begin(), vec.end(), T{8}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::lower_bound(vec.begin(), vec.end(), T{9}, thrust::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::lower_bound(vec.begin(), vec.end(), T{0}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::lower_bound(vec.begin(), vec.end(), T{1}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::lower_bound(vec.begin(), vec.end(), T{2}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::lower_bound(vec.begin(), vec.end(), T{3}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::lower_bound(vec.begin(), vec.end(), T{4}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::lower_bound(vec.begin(), vec.end(), T{5}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::lower_bound(vec.begin(), vec.end(), T{6}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 1, thrust::lower_bound(vec.begin(), vec.end(), T{7}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::lower_bound(vec.begin(), vec.end(), T{8}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::lower_bound(vec.begin(), vec.end(), T{9}, _THRUST_STD::greater<T>()));
 }
 
 TYPED_TEST(BinarySearchDescendingTests, TestScalarUpperBoundDescendingSimple)
@@ -60,16 +60,16 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarUpperBoundDescendingSimple)
 
   Vector vec{8, 7, 5, 2, 0};
 
-  ASSERT_EQ_QUIET(vec.begin() + 5, thrust::upper_bound(vec.begin(), vec.end(), T{0}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::upper_bound(vec.begin(), vec.end(), T{1}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::upper_bound(vec.begin(), vec.end(), T{2}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::upper_bound(vec.begin(), vec.end(), T{3}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::upper_bound(vec.begin(), vec.end(), T{4}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::upper_bound(vec.begin(), vec.end(), T{5}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::upper_bound(vec.begin(), vec.end(), T{6}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::upper_bound(vec.begin(), vec.end(), T{7}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 1, thrust::upper_bound(vec.begin(), vec.end(), T{8}, thrust::greater<T>()));
-  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::upper_bound(vec.begin(), vec.end(), T{9}, thrust::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 5, thrust::upper_bound(vec.begin(), vec.end(), T{0}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::upper_bound(vec.begin(), vec.end(), T{1}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::upper_bound(vec.begin(), vec.end(), T{2}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::upper_bound(vec.begin(), vec.end(), T{3}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::upper_bound(vec.begin(), vec.end(), T{4}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::upper_bound(vec.begin(), vec.end(), T{5}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::upper_bound(vec.begin(), vec.end(), T{6}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::upper_bound(vec.begin(), vec.end(), T{7}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 1, thrust::upper_bound(vec.begin(), vec.end(), T{8}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::upper_bound(vec.begin(), vec.end(), T{9}, _THRUST_STD::greater<T>()));
 }
 
 TYPED_TEST(BinarySearchDescendingTests, TestScalarBinarySearchDescendingSimple)
@@ -81,16 +81,16 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarBinarySearchDescendingSimple)
 
   Vector vec{8, 7, 5, 2, 0};
 
-  ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), T{0}, thrust::greater<T>()));
-  ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), T{1}, thrust::greater<T>()));
-  ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), T{2}, thrust::greater<T>()));
-  ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), T{3}, thrust::greater<T>()));
-  ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), T{4}, thrust::greater<T>()));
-  ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), T{5}, thrust::greater<T>()));
-  ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), T{6}, thrust::greater<T>()));
-  ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), T{7}, thrust::greater<T>()));
-  ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), T{8}, thrust::greater<T>()));
-  ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), T{9}, thrust::greater<T>()));
+  ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), T{0}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), T{1}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), T{2}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), T{3}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), T{4}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), T{5}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), T{6}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), T{7}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), T{8}, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), T{9}, _THRUST_STD::greater<T>()));
 }
 
 TYPED_TEST(BinarySearchDescendingTests, TestScalarEqualRangeDescendingSimple)
@@ -102,25 +102,25 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarEqualRangeDescendingSimple)
 
   Vector vec{8, 7, 5, 2, 0};
 
-  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::equal_range(vec.begin(), vec.end(), T{0}, thrust::greater<T>()).first);
-  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::equal_range(vec.begin(), vec.end(), T{1}, thrust::greater<T>()).first);
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{2}, thrust::greater<T>()).first);
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{3}, thrust::greater<T>()).first);
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{4}, thrust::greater<T>()).first);
-  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::equal_range(vec.begin(), vec.end(), T{5}, thrust::greater<T>()).first);
-  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::equal_range(vec.begin(), vec.end(), T{6}, thrust::greater<T>()).first);
-  ASSERT_EQ_QUIET(vec.begin() + 1, thrust::equal_range(vec.begin(), vec.end(), T{7}, thrust::greater<T>()).first);
-  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::equal_range(vec.begin(), vec.end(), T{8}, thrust::greater<T>()).first);
-  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::equal_range(vec.begin(), vec.end(), T{9}, thrust::greater<T>()).first);
+  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::equal_range(vec.begin(), vec.end(), T{0}, _THRUST_STD::greater<T>()).first);
+  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::equal_range(vec.begin(), vec.end(), T{1}, _THRUST_STD::greater<T>()).first);
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{2}, _THRUST_STD::greater<T>()).first);
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{3}, _THRUST_STD::greater<T>()).first);
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{4}, _THRUST_STD::greater<T>()).first);
+  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::equal_range(vec.begin(), vec.end(), T{5}, _THRUST_STD::greater<T>()).first);
+  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::equal_range(vec.begin(), vec.end(), T{6}, _THRUST_STD::greater<T>()).first);
+  ASSERT_EQ_QUIET(vec.begin() + 1, thrust::equal_range(vec.begin(), vec.end(), T{7}, _THRUST_STD::greater<T>()).first);
+  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::equal_range(vec.begin(), vec.end(), T{8}, _THRUST_STD::greater<T>()).first);
+  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::equal_range(vec.begin(), vec.end(), T{9}, _THRUST_STD::greater<T>()).first);
 
-  ASSERT_EQ_QUIET(vec.begin() + 5, thrust::equal_range(vec.begin(), vec.end(), T{0}, thrust::greater<T>()).second);
-  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::equal_range(vec.begin(), vec.end(), T{1}, thrust::greater<T>()).second);
-  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::equal_range(vec.begin(), vec.end(), T{2}, thrust::greater<T>()).second);
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{3}, thrust::greater<T>()).second);
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{4}, thrust::greater<T>()).second);
-  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{5}, thrust::greater<T>()).second);
-  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::equal_range(vec.begin(), vec.end(), T{6}, thrust::greater<T>()).second);
-  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::equal_range(vec.begin(), vec.end(), T{7}, thrust::greater<T>()).second);
-  ASSERT_EQ_QUIET(vec.begin() + 1, thrust::equal_range(vec.begin(), vec.end(), T{8}, thrust::greater<T>()).second);
-  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::equal_range(vec.begin(), vec.end(), T{9}, thrust::greater<T>()).second);
+  ASSERT_EQ_QUIET(vec.begin() + 5, thrust::equal_range(vec.begin(), vec.end(), T{0}, _THRUST_STD::greater<T>()).second);
+  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::equal_range(vec.begin(), vec.end(), T{1}, _THRUST_STD::greater<T>()).second);
+  ASSERT_EQ_QUIET(vec.begin() + 4, thrust::equal_range(vec.begin(), vec.end(), T{2}, _THRUST_STD::greater<T>()).second);
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{3}, _THRUST_STD::greater<T>()).second);
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{4}, _THRUST_STD::greater<T>()).second);
+  ASSERT_EQ_QUIET(vec.begin() + 3, thrust::equal_range(vec.begin(), vec.end(), T{5}, _THRUST_STD::greater<T>()).second);
+  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::equal_range(vec.begin(), vec.end(), T{6}, _THRUST_STD::greater<T>()).second);
+  ASSERT_EQ_QUIET(vec.begin() + 2, thrust::equal_range(vec.begin(), vec.end(), T{7}, _THRUST_STD::greater<T>()).second);
+  ASSERT_EQ_QUIET(vec.begin() + 1, thrust::equal_range(vec.begin(), vec.end(), T{8}, _THRUST_STD::greater<T>()).second);
+  ASSERT_EQ_QUIET(vec.begin() + 0, thrust::equal_range(vec.begin(), vec.end(), T{9}, _THRUST_STD::greater<T>()).second);
 }

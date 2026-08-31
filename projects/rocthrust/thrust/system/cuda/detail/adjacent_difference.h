@@ -53,9 +53,8 @@
 #  include <thrust/type_traits/is_contiguous_iterator.h>
 #  include <thrust/type_traits/unwrap_contiguous_iterator.h>
 
+#  include <cuda/std/cstdint>
 #  include <cuda/std/type_traits>
-
-#  include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -143,7 +142,7 @@ template <typename Derived, typename InputIt, typename OutputIt, typename Binary
 OutputIt THRUST_RUNTIME_FUNCTION
 adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryOp binary_op)
 {
-  const auto num_items     = static_cast<std::size_t>(thrust::distance(first, last));
+  const auto num_items     = static_cast<std::size_t>(_THRUST_STD::distance(first, last));
   std::size_t storage_size = 0;
   cudaStream_t stream      = cuda_cub::stream(policy);
 

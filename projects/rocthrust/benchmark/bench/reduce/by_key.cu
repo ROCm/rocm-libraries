@@ -93,7 +93,8 @@ void run_benchmark(
     state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
     return;
   }
-  const std::size_t unique_keys = thrust::distance(out_keys.begin(), thrust::unique(out_keys.begin(), out_keys.end()));
+  const std::size_t unique_keys =
+    _THRUST_STD::distance(out_keys.begin(), thrust::unique(out_keys.begin(), out_keys.end()));
   thrust::device_vector<ValueT> out_vals;
   try
   {

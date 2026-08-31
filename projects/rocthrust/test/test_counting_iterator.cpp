@@ -21,14 +21,17 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/sort.h>
 
+#include _THRUST_STD_INCLUDE(__algorithm_)
+#include _THRUST_STD_INCLUDE(iterator)
+#include _THRUST_STD_INCLUDE(type_traits)
+
+#include <complex>
 #include <cstdint>
+#include <numeric>
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
-
-#include _THRUST_STD_INCLUDE(iterator)
-#include _THRUST_STD_INCLUDE(type_traits)
 
 TESTS_DEFINE(CountingIteratorTests, NumericalTestsParams);
 
@@ -83,7 +86,7 @@ TEST(CountingIteratorTests, TestCountingIteratorTraits)
 
   static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
 
-  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+  static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(!_THRUST_STD::output_iterator<it, int>);
@@ -250,19 +253,19 @@ TEST(CountingIteratorTests, TestCountingIteratorDistance)
   thrust::counting_iterator<int> iter1(0);
   thrust::counting_iterator<int> iter2(5);
 
-  ASSERT_EQ(thrust::distance(iter1, iter2), 5);
+  ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 5);
 
   iter1++;
 
-  ASSERT_EQ(thrust::distance(iter1, iter2), 4);
+  ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 4);
 
   iter2 += 100;
 
-  ASSERT_EQ(thrust::distance(iter1, iter2), 104);
+  ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 104);
 
   iter2 += 1000;
 
-  ASSERT_EQ(thrust::distance(iter1, iter2), 1104);
+  ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 1104);
 }
 
 TEST(CountingIteratorTests, TestCountingIteratorUnsignedType)
@@ -328,6 +331,64 @@ TEST(CountingIteratorTests, TestCountingIteratorDifference)
   Iterator last = first + diff;
 
   ASSERT_EQ(diff, last - first);
+}
+
+TEST(CountingIteratorTests, TestCountingIteratorDynamicStride)
+{
+  auto iter = thrust::make_counting_iterator(0, 2);
+  static_assert(sizeof(iter) == 2 * sizeof(int));
+
+  ASSERT_EQ(*iter, 0);
+  iter++;
+  ASSERT_EQ(*iter, 2);
+  iter++;
+  iter++;
+  ASSERT_EQ(*iter, 6);
+  iter += 5;
+  ASSERT_EQ(*iter, 16);
+  iter -= 10;
+  ASSERT_EQ(*iter, -4);
+}
+
+TEST(CountingIteratorTests, TestCountingIteratorStaticStride)
+{
+  auto iter = thrust::make_counting_iterator<2>(0);
+  static_assert(sizeof(decltype(iter)) == sizeof(int));
+
+  ASSERT_EQ(*iter, 0);
+  iter++;
+  ASSERT_EQ(*iter, 2);
+  iter++;
+  iter++;
+  ASSERT_EQ(*iter, 6);
+  iter += 5;
+  ASSERT_EQ(*iter, 16);
+  iter -= 10;
+  ASSERT_EQ(*iter, -4);
+}
+
+TEST(CountingIteratorTests, TestCountingIteratorPointer)
+{
+  int arr[11];
+  std::iota(arr, arr + 11, 0);
+
+  auto iter = thrust::make_counting_iterator(&arr[2]);
+
+  ASSERT_EQ(*iter, &arr[2]);
+  ASSERT_EQ(**iter, 2);
+  iter++;
+  ASSERT_EQ(*iter, &arr[3]);
+  ASSERT_EQ(**iter, 3);
+  iter++;
+  iter++;
+  ASSERT_EQ(*iter, &arr[5]);
+  ASSERT_EQ(**iter, 5);
+  iter += 5;
+  ASSERT_EQ(*iter, &arr[10]);
+  ASSERT_EQ(**iter, 10);
+  iter -= 10;
+  ASSERT_EQ(*iter, &arr[0]);
+  ASSERT_EQ(**iter, 0);
 }
 
 THRUST_DIAG_POP
