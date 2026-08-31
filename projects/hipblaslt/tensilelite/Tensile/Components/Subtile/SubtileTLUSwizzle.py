@@ -199,7 +199,7 @@ def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
         # A shared strip rules out the XOR (see _sharedStrip), so every stack
         # falls here; the bank model reaches 1-way at 2, 4, 8 and 16 alike (the
         # XOR wins elsewhere only on VALU cost).
-        if stack not in (2, 4, 8, 16, 32):
+        if stack not in (2, 4, 8, 16):
             return None
     elif stack not in _COL_SCATTER_STACKS:
         return None
