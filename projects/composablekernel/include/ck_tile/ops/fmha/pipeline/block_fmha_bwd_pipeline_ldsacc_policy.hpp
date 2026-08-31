@@ -8,6 +8,10 @@
 
 namespace ck_tile {
 
+#ifndef CK_TILE_FMHA_BWD_PREFETCH_QDO
+#define CK_TILE_FMHA_BWD_PREFETCH_QDO 1
+#endif
+
 // Policy for the bwd pipeline that keeps the dK and dV accumulators in LDS
 // instead of registers.
 //
@@ -744,11 +748,32 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                           number<log2_floor(row_dwords) - 1>{});
     }
 
+    // Base of the second Q/dO pair, used when the pipeline double-buffers them.
+    // Appended past everything else so the existing layout is byte-identical.
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    CK_TILE_HOST_DEVICE static constexpr index_t GetQPrefetchSmemOffset()
     {
         return GetSmemSizeStaged<Problem>() + GetSmemSizeKGradAcc<Problem>() +
                GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetOGradPrefetchSmemOffset()
+    {
+        return GetQPrefetchSmemOffset<Problem>() + GetSmemSizeQ<Problem>();
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    {
+        constexpr index_t single = GetSmemSizeStaged<Problem>() +
+                                   GetSmemSizeKGradAcc<Problem>() +
+                                   GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
+#if CK_TILE_FMHA_BWD_PREFETCH_QDO
+        return single + GetSmemSizeQ<Problem>() + GetSmemSizeOGrad<Problem>();
+#else
+        return single;
+#endif
     }
 };
 
