@@ -38,9 +38,9 @@ IReferenceGraphExecutor& ReferenceExecutorPool::get(ReferenceExecutorType type)
 
 std::shared_ptr<IReferenceExecutors> sharedReferenceExecutors()
 {
-    static const std::shared_ptr<IReferenceExecutors> pool
+    static const std::shared_ptr<IReferenceExecutors> s_pool
         = std::make_shared<ReferenceExecutorPool>();
-    return pool;
+    return s_pool;
 }
 
 } // namespace hipdnn_integration_tests

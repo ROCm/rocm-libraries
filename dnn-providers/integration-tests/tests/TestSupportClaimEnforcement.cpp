@@ -164,7 +164,8 @@ protected:
         using ::testing::_;
         using ::testing::Return;
 
-        ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _)).WillByDefault(Return(observation));
+        ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
+            .WillByDefault(Return(std::move(observation)));
         testing_support::engineWrites(_mocks.engineRunner,
                                       &fixtures::writeOutput,
                                       engineSucceeds ? fixtures::K_OUTPUT_VALUE
@@ -271,7 +272,7 @@ TEST_F(TestSupportClaimEnforcement, EvaluatedSidecarWithNoVerdictsStillCountsAsQ
 
 // The per-graph check. The run-level guard only fires when nothing anywhere was
 // queried, so a partial gap needs its own signal.
-TEST_F(TestSupportClaimEnforcement, UnqueriedSidecarFailsTheTest)
+TEST_F(TestSupportClaimEnforcement, UnqueriedSidecarFailsTheRun)
 {
     ::testing::TestPartResultArray results;
     std::vector<CoverageUpdate> coverage;
@@ -332,7 +333,7 @@ TEST_F(TestSupportClaimEnforcement, ErroredQueryFailsBeforeReachingTheEngine)
 // a verification. Only reaching the depth the bundle declares can promote it.
 // ---------------------------------------------------------------------------
 
-TEST_F(TestSupportClaimEnforcement, AcceptedBecomesConfirmedWhenTheTestPasses)
+TEST_F(TestSupportClaimEnforcement, AcceptedBecomesConfirmedWhenTheRunPasses)
 {
     ::testing::TestPartResultArray results;
     std::vector<SupportResult> verdicts;
@@ -495,7 +496,7 @@ TEST_F(TestSupportClaimEnforcement, UnreachedEnforcementRungStaysAccepted)
 // Only the engine this test drove can be promoted. Another engine's claim was
 // decided from the same ranked list but never executed, so the run has no
 // evidence either way about it.
-TEST_F(TestSupportClaimEnforcement, OnlyTheEngineUnderTestIsPromoted)
+TEST_F(TestSupportClaimEnforcement, OnlyTheDrivenEngineIsPromoted)
 {
     ::testing::TestPartResultArray results;
     std::vector<SupportResult> verdicts;

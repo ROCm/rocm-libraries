@@ -26,7 +26,6 @@ using hipdnn_integration_tests::bundle::enginesAccept;
 using hipdnn_integration_tests::bundle::FailureOrigin;
 using hipdnn_integration_tests::bundle::finalizeClaims;
 using hipdnn_integration_tests::bundle::isFailure;
-using hipdnn_integration_tests::bundle::isResolved;
 using hipdnn_integration_tests::bundle::LoadedEngine;
 using hipdnn_integration_tests::bundle::observeSupport;
 using hipdnn_integration_tests::bundle::promoteAcceptedClaim;
@@ -668,7 +667,7 @@ TEST(TestSupportVerdict, EveryFailingVerdictReachesTheMessage)
 // input verdict comes back exactly once so the report cannot lose rows.
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportVerdict, FinalizePromotesOnlyTheEngineUnderTest)
+TEST(TestSupportVerdict, FinalizePromotesOnlyTheDrivenEngine)
 {
     const auto records = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED),
                                          verdict(SupportVerdict::CLAIM_ACCEPTED, OTHER_ENGINE)},

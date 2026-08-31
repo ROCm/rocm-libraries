@@ -18,7 +18,6 @@ using hipdnn_integration_tests::bundle::enginesAccept;
 using hipdnn_integration_tests::bundle::GraphSession;
 using hipdnn_integration_tests::bundle::isResolved;
 using hipdnn_integration_tests::bundle::LoadedEngine;
-using hipdnn_integration_tests::bundle::RankedEngines;
 
 // NOLINTBEGIN(readability-identifier-naming)
 

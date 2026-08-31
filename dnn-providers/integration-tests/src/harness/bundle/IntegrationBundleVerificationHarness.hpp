@@ -183,8 +183,9 @@ private:
                       const VerificationOutcome& outcome);
 
     // The only place a gtest disposition is issued. Called exactly once per test,
-    // last, because GTEST_SKIP() and FAIL() both return.
-    void reportOutcome(const VerificationOutcome& outcome);
+    // last, because GTEST_SKIP() and FAIL() both return. Static because the
+    // disposition is a pure function of the outcome.
+    static void reportOutcome(const VerificationOutcome& outcome);
 
     // Records the bundle as unverifiable and yields the skip outcome for TestBody()
     // to issue.

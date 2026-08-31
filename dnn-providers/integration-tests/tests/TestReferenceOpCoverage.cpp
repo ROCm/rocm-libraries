@@ -60,7 +60,7 @@ flatbuffers::DetachedBuffer buildBatchnormGraph()
 // The sets themselves
 // ---------------------------------------------------------------------------
 
-TEST(TestReferenceOpCoverage, CpuAndGpuSetsAreNonEmpty)
+TEST(TestReferenceOpCoverage, BothReferenceSetsAreNonEmpty)
 {
     EXPECT_FALSE(referenceSupportedOps(ReferenceExecutorType::CPU).empty());
     EXPECT_FALSE(referenceSupportedOps(ReferenceExecutorType::GPU).empty());
@@ -113,7 +113,7 @@ TEST(TestReferenceOpCoverage, CpuCoversBatchnormInference)
 
 // The GPU reference has no batchnorm plan builder, so bundles using it are absent
 // from the GPU validation suite rather than skipped inside it.
-TEST(TestReferenceOpCoverage, GpuDoesNotCoverBatchnormInference)
+TEST(TestReferenceOpCoverage, DeviceReferenceDoesNotCoverBatchnormInference)
 {
     const auto graph = buildBatchnormGraph();
     EXPECT_FALSE(referenceCoversGraph(ReferenceExecutorType::GPU, graph.data(), graph.size()));

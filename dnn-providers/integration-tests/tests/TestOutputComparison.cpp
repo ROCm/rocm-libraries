@@ -20,7 +20,6 @@ using hipdnn_integration_tests::bundle::compareTensor;
 using hipdnn_integration_tests::bundle::ComparisonTolerance;
 using hipdnn_integration_tests::bundle::OutputTensors;
 using hipdnn_integration_tests::bundle::tensorLabel;
-using hipdnn_integration_tests::bundle::TensorMismatch;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
