@@ -41,21 +41,6 @@
       },
       "priority": 0
     },
-    {
-      "version": "1.0",
-      "id": "c6e20a48-8b31-4d97-a052-9f4173e8b5c1",
-      "name": "pointwise_add.f16_block64",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "PointwiseAdd.cpp",
-        "entry_point": "PointwiseAdd"
-      },
-      "metadata": {
-        "block_size": 64,
-        "dtype": "HALF",
-        "operation": "ADD"
-      },
-      "priority": 0
-    }
+    "c6e20a48-8b31-4d97-a052-9f4173e8b5c1"
   ]
 }

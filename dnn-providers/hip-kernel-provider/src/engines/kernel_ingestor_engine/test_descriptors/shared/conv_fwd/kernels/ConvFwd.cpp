@@ -11,6 +11,8 @@
 
 #include <cstdint>
 
+#include <hip/hip_runtime.h>
+
 extern "C" __global__ void ConvFwd(const HIP_PLUGIN_CONV_TYPE* x,
                                    const HIP_PLUGIN_CONV_TYPE* w,
                                    HIP_PLUGIN_CONV_TYPE* y,
