@@ -1,2 +1,7 @@
 # Scratch diagnostic output from the migration pipeline (regenerated each run).
 .migration_reports/
+
+# Pre-#10162 name for integration-test-bundles/. Renamed; nothing should ever
+# be added back under the old name, but guard against accidental recreation
+# (e.g. a stale script or muscle-memory path) getting committed again.
+integration_test_bundles/
