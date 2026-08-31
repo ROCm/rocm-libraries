@@ -60,7 +60,7 @@ struct Flash2FwdParams
     // fastest depends on how many CTAs the shape produces relative to the CU
     // count, so launch geometry is a per-plan property, not a constant.
     // blockDim/qPerCta MUST match how the selected .co was compiled.
-    std::string variantTag = ""; // "" = legacy single-kernel object
+    std::string variantTag; // "" = legacy single-kernel object
     unsigned int blockDim = 64; // threads per CTA for the selected variant
     unsigned int qPerCta = 64; // query rows covered by one CTA
 
