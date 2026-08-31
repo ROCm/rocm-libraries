@@ -338,10 +338,12 @@ namespace TensileLite
         size_t selectedGrid       = 0;
         // available: getSKGridImpl return -- AFTER the tree-fixup-bounds fallback and
         // the ForceDPOnly cluster-multicast clamp, but BEFORE the workspace-DP
-        // fallback in solve(). Diagnostic intermediate.
+        // fallback in computeStreamKDecisions(). Diagnostic intermediate.
         size_t skGridPreFallback  = 0;
         // available: wired from sk.grid, the FINAL grid solve() launches with (after all
-        // fallbacks: fixed-grid override, tree-fixup-bounds, workspace-insufficient DP).
+        // fallbacks, in the order they are applied: fixedGrid, treeBounds,
+        // clusterDPMulticast, workspaceDP -- the same four names the report's
+        // "changedBy" ladder uses, which lists them latest-clamp-wins).
         size_t finalGrid          = 0;
         // available: the grid solve() initialises sk.grid from. finalGrid and skGrid
         // always hold the same value -- computeStreamKDecisions() sets both to its final

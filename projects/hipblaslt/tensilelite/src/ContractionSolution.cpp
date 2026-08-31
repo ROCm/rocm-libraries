@@ -5006,7 +5006,7 @@ namespace TensileLite
             // arithmetic: makeArgs() packs skTiles from exactly this call, so the
             // report cannot drift from the launch.
             AMDGPU const*            pAMDGPU   = dynamic_cast<AMDGPU const*>(&hardware);
-            const int                fullTiles = pAMDGPU ? pAMDGPU->skFullTiles : 0;
+            const int                fullTiles = pAMDGPU ? pAMDGPU->skFullTiles : 1;
             const StreamKStaticSplit split
                 = streamKStaticSplit(tiles, itersPerTile, grid, fullTiles, forceDPOnly);
             d.skTiles    = split.skTiles;
