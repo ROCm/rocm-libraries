@@ -132,7 +132,7 @@ jobs:
             --config-path ".github/repos-config.json"
 
   setup:
-    needs: [ci-env, configure, resolve_therock_ref]
+    needs: [ci-env, configure]
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/granular-artifact-reuse
     with:
       build_variant: "release"
