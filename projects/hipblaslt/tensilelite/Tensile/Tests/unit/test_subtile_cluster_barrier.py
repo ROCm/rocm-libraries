@@ -39,7 +39,7 @@ def _init_rocisa_gfx1250():
     ri.setKernel(isa, WAVESIZE_32)
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(autouse=True)
 def _rocisa_gfx1250():
     with preserve_rocisa_kernel_state():
         _init_rocisa_gfx1250()
