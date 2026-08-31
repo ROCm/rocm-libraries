@@ -1574,7 +1574,6 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
         }
 
-
         return PreservedAnalyses::none();
     }
 
