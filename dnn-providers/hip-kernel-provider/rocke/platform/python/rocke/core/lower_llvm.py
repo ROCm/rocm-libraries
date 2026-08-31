@@ -2782,23 +2782,35 @@ class _Lowerer:
         )
 
     def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
-        """Lower the packed-bf16 atomic add to its AMDGCN intrinsic.
+        """Lower the packed-bf16 atomic add via a generic ``atomicrmw fadd``
+        on a ``<2 x bfloat>``.
 
-        The intrinsic takes a base pointer (no GEP-inside-intrinsic
-        on this entry point) plus the 2-bf16 vector; we GEP into the
-        bf16 buffer first and pass the pre-offset pointer.
+        There is NO ``llvm.amdgcn.global.atomic.fadd.v2bf16`` intrinsic in
+        the shipping ROCm LLVM (only the image variant exists), so the prior
+        intrinsic-call lowering failed to compile. The AMDGPU backend selects
+        the native ``global_atomic_pk_add_bf16`` HW instruction from a generic
+        ``atomicrmw fadd <2 x bfloat>`` when the fine/remote-memory model
+        metadata is attached (same contract as the f32 path -- device-local
+        HBM). GEP into the bf16 buffer first (idx may be i64 after the wide
+        C-scatter address fix, so match its width).
         """
         ptr, idx, val = op.operands
-        self._needs_intrin["global.atomic.fadd.v2bf16"] = True
+        idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
         self._current().emit(
             f"  {gep} = getelementptr inbounds bfloat, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+            f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
+        )
+        ordering = op.attrs.get("ordering", "monotonic")
+        self._needs_fp_atomic_md = True
+        md = (
+            ", !amdgpu.no.fine.grained.memory !1"
+            ", !amdgpu.no.remote.memory !1"
+            ", !amdgpu.ignore.denormal.mode !1"
         )
         self._current().emit(
-            f"  {op.result.name} = call <2 x bfloat> "
-            f"@llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
-            f"ptr addrspace(1) {gep}, <2 x bfloat> {self._operand(val)})"
+            f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
+            f"<2 x bfloat> {self._operand(val)} {ordering}{md}"
         )
 
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
