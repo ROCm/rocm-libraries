@@ -4,7 +4,9 @@
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    ../src/harness/bundle/SupportClaimReport.cpp
     ../src/harness/bundle/SupportClaims.cpp
+    ../src/harness/bundle/SupportVerdict.cpp
     ../src/harness/input-init/FillInputs.cpp
     TestBundleMetadata.cpp
     TestSupportClaims.cpp
@@ -31,6 +33,9 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestToleranceResolver.cpp
     TestVerificationModePaths.cpp
     TestErrorPaths.cpp
+    TestLoadedEngineTable.cpp
+    TestSupportClaimReport.cpp
+    TestSupportVerdict.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
@@ -62,6 +67,8 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceConvolution.cpp
     gpu-ref/TestGpuFpReferenceSdpa.cpp
     gpu-ref/TestGpuFpReferenceDgrad.cpp
+    gpu-ref/TestGpuFpReferenceLayernormBwd.cpp
+    gpu-ref/TestGpuFpReferenceLayernormFwd.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
     gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp
