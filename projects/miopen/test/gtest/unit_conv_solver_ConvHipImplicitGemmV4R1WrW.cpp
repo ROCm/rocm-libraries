@@ -49,12 +49,20 @@ template <miopenDataType_t datatype>
 miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
     Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx103X;
-    auto p             = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
+    // gfx12 lacks v_mac_f32 (uses v_fmac_f32), so the FP32 path is blocked
+    // by GfxHasMissingFp32Intrinsics. FP16/BF16 use different asm and work.
+    if constexpr(datatype != miopenFloat)
+    {
+        supported_gpus = supported_gpus | Gpu::gfx120X;
+    }
+    auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
     p.Tunable(5);
     p.SetConvAttrFp16Alt(0);
     /// \todo 40.0f is too much. The solver needs to be checked.
     p.SetTolerance(Gpu::gfx908, miopenFloat, 40.0f);
     p.SetTolerance(Gpu::gfx90A, miopenFloat, 40.0f);
+    p.SetTolerance(Gpu::gfx120X, miopenHalf, 250.0f);
+    p.SetTolerance(Gpu::gfx120X, miopenBFloat16, 30.0f);
     return p;
 }
 
