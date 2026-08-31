@@ -183,25 +183,52 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
     )
 
-    # Test set 1: embedded_source + native descriptors. Copied, never packed -- an
-    # embedded_source descriptor names a kernel compiled into the plugin and JIT-compiled
-    # at load, and a native one names a C++ symbol, so neither has an arch dimension or
-    # anything for the packer to produce. Staged rather than read from the source tree so
-    # the build tree matches the install tree.
-    set(HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE "embedded_engine")
-    # Defined here, with the other path variables, and NOT beside the staging rule that
-    # writes it: add_subdirectory(src) runs before that rule, so a definition further down
-    # reaches the test subdirectories empty -- which resolves to no descriptor set at all
-    # and fails every test that needs one, with nothing in the build to say why.
-    set(HIPKERNELPROVIDER_EMBEDDED_ENGINE_BUILD_DIR
-        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE}")
-    # Test set 2: authored hip, rewritten to kpack by the packer. Wired in
-    # descriptor-packaging/cmake/HkpPackaging.cmake.
-    set(HIPKERNELPROVIDER_TEST_SET_PACKED_FIXTURE "packed-fixture")
-    set(HIPKERNELPROVIDER_PACKED_FIXTURE_SOURCE_DIR
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors/packed-fixture-source")
-    set(HIPKERNELPROVIDER_PACKED_FIXTURE_BUILD_DIR
-        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_PACKED_FIXTURE}")
+    # Two test descriptor roots, one per test binary. The unit root holds one copied
+    # subtree and one packed subtree. The integration root holds three packed subtrees.
+    # A copied subtree carries embedded_source and native descriptors: an embedded_source
+    # descriptor names a kernel compiled into a binary and JIT-compiled at load, and a
+    # native one names a C++ symbol, so neither has an arch dimension or anything for the
+    # packer to produce. A packed subtree is authored hip and rewritten to kpack by the
+    # packer, wired in descriptor-packaging/cmake/HkpPackaging.cmake. Both roots stage
+    # into the build tree rather than being read from the source tree, so the build tree
+    # matches the install tree.
+    set(HIPKERNELPROVIDER_TEST_SET_UNIT "unit")
+    set(HIPKERNELPROVIDER_TEST_SET_INTEGRATION "integration")
+    # Defined here, with the other path variables, and NOT beside the staging rules that
+    # write them: add_subdirectory(src) runs before those rules, so a definition further
+    # down reaches the test subdirectories empty -- which resolves to no descriptor set at
+    # all and fails every test that needs one, with nothing in the build to say why.
+    set(HIPKERNELPROVIDER_UNIT_BUILD_DIR
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}")
+    set(HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}")
+
+    set(_test_descriptor_source_root
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors")
+
+    # conv_fwd is authored once and packed into both roots.
+    set(HIPKERNELPROVIDER_SHARED_CONV_SOURCE_DIR
+        "${_test_descriptor_source_root}/shared/conv_fwd")
+    set(HIPKERNELPROVIDER_UNIT_CONV_BUILD_DIR
+        "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}/conv")
+    set(HIPKERNELPROVIDER_INTEGRATION_CONV_BUILD_DIR
+        "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}/conv")
+
+    # pointwise is authored once per dialect, and each dialect stages into its own root.
+    set(HIPKERNELPROVIDER_UNIT_POINTWISE_SOURCE_DIR
+        "${_test_descriptor_source_root}/unit/pointwise")
+    set(HIPKERNELPROVIDER_UNIT_POINTWISE_BUILD_DIR
+        "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}/pointwise")
+    set(HIPKERNELPROVIDER_INTEGRATION_POINTWISE_SOURCE_DIR
+        "${_test_descriptor_source_root}/integration/pointwise")
+    set(HIPKERNELPROVIDER_INTEGRATION_POINTWISE_BUILD_DIR
+        "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}/pointwise")
+
+    # The archive fixture carries its own engine identity and its own output folder.
+    set(HIPKERNELPROVIDER_ARCHIVE_FIXTURE_SOURCE_DIR
+        "${_test_descriptor_source_root}/integration/archive_fixture")
+    set(HIPKERNELPROVIDER_ARCHIVE_FIXTURE_BUILD_DIR
+        "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}/packed")
 
     # The offset a test binary walks from its own directory to reach the test descriptor
     # trees. Both trees hang off HIPDNN_PLUGIN_ROOTDIR and both binaries off
@@ -374,15 +401,11 @@ if(ENABLE_ASM_SDPA_ENGINE)
 endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # The embedded_engine test set. src/engines/kernel_ingestor_engine/descriptors/ is the
-    # PRODUCTION source root and holds no test content; these descriptors are development
-    # stand-ins for production integrations that do not exist yet, so they live under the
-    # sibling test_descriptors/ tree and stage into test_arch_content/.
-    set(HIPKERNELPROVIDER_EMBEDDED_ENGINE_SOURCE_DIR
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors/embedded_engine")
-
-    file(GLOB_RECURSE _embedded_engine_sources CONFIGURE_DEPENDS
-         "${HIPKERNELPROVIDER_EMBEDDED_ENGINE_SOURCE_DIR}/*")
+    # Stage the unit binary's pointwise subtree. Its descriptors are embedded_source, so
+    # the packer produces nothing for them and this rule copies the authored tree verbatim
+    # into test_arch_content/.
+    file(GLOB_RECURSE _unit_pointwise_sources CONFIGURE_DEPENDS
+         "${HIPKERNELPROVIDER_UNIT_POINTWISE_SOURCE_DIR}/*")
 
     # The destination is wiped before each copy so a descriptor deleted from the source
     # tree is retracted rather than orphaned: copy_directory writes what is there now but
@@ -391,11 +414,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_descriptor_stamp "${CMAKE_CURRENT_BINARY_DIR}/hip-kernel-provider-descriptors.stamp")
     add_custom_command(
         OUTPUT "${_descriptor_stamp}"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${HIPKERNELPROVIDER_EMBEDDED_ENGINE_BUILD_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${HIPKERNELPROVIDER_UNIT_POINTWISE_BUILD_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${HIPKERNELPROVIDER_EMBEDDED_ENGINE_SOURCE_DIR}" "${HIPKERNELPROVIDER_EMBEDDED_ENGINE_BUILD_DIR}"
+                "${HIPKERNELPROVIDER_UNIT_POINTWISE_SOURCE_DIR}" "${HIPKERNELPROVIDER_UNIT_POINTWISE_BUILD_DIR}"
         COMMAND ${CMAKE_COMMAND} -E touch "${_descriptor_stamp}"
-        DEPENDS ${_embedded_engine_sources}
+        DEPENDS ${_unit_pointwise_sources}
         COMMENT "Staging hip-kernel-provider descriptors"
         VERBATIM
     )
@@ -437,7 +460,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
     endif()
 
-    # The embedded_engine copy above is unconditional under this gate, so the test tree
+    # The unit pointwise copy above is unconditional under this gate, so the test tree
     # always has content to ship once the build has run.
     if(HIPKERNELPROVIDER_ENABLE_TESTS)
         install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/"

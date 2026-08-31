@@ -114,8 +114,9 @@ endfunction()
 #   kernel_source.kind, never per-folder, so one root feeds all producers into
 #   ONE kpack per arch.
 #
-#   OUT_ROOT is where the packer writes: one source folder, one output folder,
-#   wiped and filled by this root alone. No root may share a destination
+#   OUT_ROOT is where the packer writes: one output folder, wiped and filled by
+#   this invocation alone. No two invocations may share a destination. One
+#   source root may be invoked more than once, into different output roots.
 #   Installation is not wired here -- a root delivers into arch_content/ or
 #   test_arch_content/ in the build tree, and those two trees are installed
 #   wholesale by hip-kernel-provider/CMakeLists.txt.
@@ -631,15 +632,46 @@ assertion: an unloadable path silently falls through to the next candidate.")
             "packaging dormant (tests still run against the fixtures).")
     endif()
 
-    # Test descriptors
+    # Test descriptors. The conv_fwd source root is packed twice, once into each test
+    # root, so both test binaries see the same authored descriptors.
     hkp_wire_pack_target(
-        NAME testfixture
-        SOURCE_ROOT "${HIPKERNELPROVIDER_PACKED_FIXTURE_SOURCE_DIR}"
+        NAME unit_conv
+        SOURCE_ROOT "${HIPKERNELPROVIDER_SHARED_CONV_SOURCE_DIR}"
         ENABLE_ROCKE OFF
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${HIPKERNELPROVIDER_PACKED_FIXTURE_BUILD_DIR}"
+        OUT_ROOT "${HIPKERNELPROVIDER_UNIT_CONV_BUILD_DIR}"
+        REQUIRE_HIPCC OFF)
+
+    hkp_wire_pack_target(
+        NAME integration_conv
+        SOURCE_ROOT "${HIPKERNELPROVIDER_SHARED_CONV_SOURCE_DIR}"
+        ENABLE_ROCKE OFF
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_INTEGRATION_CONV_BUILD_DIR}"
+        REQUIRE_HIPCC OFF)
+
+    hkp_wire_pack_target(
+        NAME integration_pointwise
+        SOURCE_ROOT "${HIPKERNELPROVIDER_INTEGRATION_POINTWISE_SOURCE_DIR}"
+        ENABLE_ROCKE OFF
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_INTEGRATION_POINTWISE_BUILD_DIR}"
+        REQUIRE_HIPCC OFF)
+
+    hkp_wire_pack_target(
+        NAME archive_fixture
+        SOURCE_ROOT "${HIPKERNELPROVIDER_ARCHIVE_FIXTURE_SOURCE_DIR}"
+        ENABLE_ROCKE OFF
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_ARCHIVE_FIXTURE_BUILD_DIR}"
         REQUIRE_HIPCC OFF)
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}"
