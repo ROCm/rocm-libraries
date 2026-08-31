@@ -12,6 +12,10 @@
 
 namespace ck_tile {
 
+#ifndef CK_TILE_FMHA_BWD_SINK_TDM_WAIT
+#define CK_TILE_FMHA_BWD_SINK_TDM_WAIT 1
+#endif
+
 
 // PROBE: drop the remaining hand-written GemmStagedScheduler prescriptions
 // (<0>, <3>, <4>) and/or the sched_barrier that follows each, the same way A2
@@ -767,8 +771,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             move_tile_window(do_dram_window, {kM0, 0});
 
             store_tile(d_lds_write_window, d_block_tile);
+#if !CK_TILE_FMHA_BWD_SINK_TDM_WAIT
             // same as the prologue: Q/dO are on TENSORcnt now
             s_wait_tensorcnt_barrier<0>();
+#endif
 
             __builtin_amdgcn_sched_barrier(0);
             // STAGE 5, P^T(PGrad^T - D)
@@ -828,6 +834,9 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             block_sync_lds();
 
+#if CK_TILE_FMHA_BWD_SINK_TDM_WAIT
+            s_wait_tensorcnt_barrier<0>();
+#endif
             auto ds_reg_tensor      = load_tile_transpose(ds_lds_read_window);
             q_reg_tensor = load_tile(q_lds_read_window);
             lse          = load_tile(lse_lds_read_window);
