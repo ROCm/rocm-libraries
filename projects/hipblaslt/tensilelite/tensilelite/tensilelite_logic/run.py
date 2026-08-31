@@ -26,86 +26,39 @@
 import contextlib
 import functools
 import io
+import os
 import sys
 import threading
 import time
 import warnings
 
+from pathlib import Path
+from typing import Dict, FrozenSet, List, NamedTuple, Tuple
+
 import rocisa
 
-from pathlib import Path
-from typing import FrozenSet, List, Dict, NamedTuple, Tuple
+from tensilelite.Common import IsaInfo, IsaVersion, ParallelMap2, print1, print2, setVerbosity
+from tensilelite.Common.Architectures import SUPPORTED_ISA
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Common.GlobalParameters import assignGlobalParameters, defaultSolution
+from tensilelite.CustomYamlLoader import archMatch, load_logic_gfx_arch
+from tensilelite.LibraryIO import readYAML
+from tensilelite.Toolchain.Validators import validateToolchain
 
-
-from .parse_arguments import parseArguments, BUNDLED_KNOWN_BUGS
+from .handle_custom_kernel import handleCustomKernel, hasCustomKernel
 from .known_bugs import (
     KnownBugKey,
     is_known_bug,
+    load_bundled_known_bugs,
     load_known_bugs,
     normalize_logic_relative_path,
-    load_bundled_known_bugs,
 )
+from .parse_arguments import BUNDLED_KNOWN_BUGS, parseArguments
 from .valid_chip_id import _validateChipId
 from .ValidCorpusConsistency import check_corpus_invariants, report_corpus_invariant_violations
 from .valid_matrix_instruction import _validateMatrixInstruction
 from .valid_work_group import _validateWorkGroup
 from .valid_work_group_mapping_xcc import _validateWorkGroupMappingXCC, reset_reported_failures
-from .handle_custom_kernel import handleCustomKernel, hasCustomKernel
-
-
-from tensilelite.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
-from tensilelite.Common.Architectures import SUPPORTED_ISA
-from tensilelite.Common.Capabilities import makeIsaInfoMap
-from tensilelite.Common.GlobalParameters import assignGlobalParameters, defaultSolution
-from tensilelite.LibraryIO import readYAML
-from tensilelite.Toolchain.Validators import validateToolchain
-from tensilelite.CustomYamlLoader import load_logic_gfx_arch, archMatch
-
-
-import os
-
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
 
 
 class Check(NamedTuple):
