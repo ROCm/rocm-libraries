@@ -626,9 +626,28 @@ std::filesystem::path resolveLockHelperPath()
 }
 
 /// A LineStoreLockHelper child in flight, plus the read end of the pipe its stdout was
-/// redirected to.
+/// redirected to. Move-only and self-reaping: an ASSERT_* between spawn and the normal
+/// awaitChild()/awaitProbe() reap (e.g. "helper never armed") returns from the test with
+/// this object still alive, so the destructor kills and reaps unconditionally instead of
+/// leaving an orphan spinning on the barrier file for the rest of the CI job. reset() is
+/// idempotent so the normal reap path (which already closes/waits) leaves nothing for the
+/// destructor to redo.
 struct ChildProcess
 {
+    ChildProcess() = default;
+#if defined(_WIN32)
+    ChildProcess(HANDLE processHandle, HANDLE readPipeHandle)
+        : process(processHandle)
+        , readPipe(readPipeHandle)
+    {
+    }
+#else
+    ChildProcess(pid_t childPid, int readFdIn)
+        : pid(childPid)
+        , readFd(readFdIn)
+    {
+    }
+#endif
 #if defined(_WIN32)
     HANDLE process = nullptr;
     HANDLE readPipe = nullptr;
@@ -636,6 +655,72 @@ struct ChildProcess
     pid_t pid = -1;
     int readFd = -1;
 #endif
+
+    ChildProcess(const ChildProcess&) = delete;
+    ChildProcess& operator=(const ChildProcess&) = delete;
+
+    ChildProcess(ChildProcess&& other) noexcept
+    {
+        *this = std::move(other);
+    }
+
+    ChildProcess& operator=(ChildProcess&& other) noexcept
+    {
+        if(this != &other)
+        {
+            reset();
+#if defined(_WIN32)
+            process = other.process;
+            readPipe = other.readPipe;
+            other.process = nullptr;
+            other.readPipe = nullptr;
+#else
+            pid = other.pid;
+            readFd = other.readFd;
+            other.pid = -1;
+            other.readFd = -1;
+#endif
+        }
+        return *this;
+    }
+
+    ~ChildProcess()
+    {
+        reset();
+    }
+
+    /// Kills the child if still running, reaps it, and closes the pipe -- safe to call
+    /// more than once: a prior normal reap already nulled/invalidated these members.
+    void reset()
+    {
+#if defined(_WIN32)
+        if(process != nullptr)
+        {
+            ::TerminateProcess(process, 1);
+            ::WaitForSingleObject(process, INFINITE);
+            ::CloseHandle(process);
+            process = nullptr;
+        }
+        if(readPipe != nullptr)
+        {
+            ::CloseHandle(readPipe);
+            readPipe = nullptr;
+        }
+#else
+        if(pid > 0)
+        {
+            ::kill(pid, SIGKILL); // No-op (ESRCH) if the child already exited.
+            int status = 0;
+            ::waitpid(pid, &status, 0);
+            pid = -1;
+        }
+        if(readFd >= 0)
+        {
+            ::close(readFd);
+            readFd = -1;
+        }
+#endif
+    }
 };
 
 #if defined(_WIN32)
@@ -878,7 +963,9 @@ std::optional<int> awaitChild(ChildProcess& child,
         ::WaitForSingleObject(child.process, INFINITE);
     }
     ::CloseHandle(child.process);
+    child.process = nullptr;
     ::CloseHandle(child.readPipe);
+    child.readPipe = nullptr;
     return result;
 #else
     std::array<char, 256> buffer{};
@@ -914,6 +1001,7 @@ std::optional<int> awaitChild(ChildProcess& child,
         output.append(buffer.data(), static_cast<size_t>(count));
     }
     ::close(child.readFd);
+    child.readFd = -1;
 
     if(timedOut)
     {
@@ -922,6 +1010,7 @@ std::optional<int> awaitChild(ChildProcess& child,
 
     int childStatus = 0;
     ::waitpid(child.pid, &childStatus, 0);
+    child.pid = -1;
     if(timedOut || !WIFEXITED(childStatus))
     {
         return std::nullopt;
@@ -987,7 +1076,7 @@ TEST_F(TestLineStore, TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce)
                                   APPENDS_PER_PROCESS_ARG,
                                   barrierPath.string()});
         ASSERT_TRUE(child.has_value()) << "failed to spawn helper " << i;
-        children.push_back(*child);
+        children.push_back(std::move(*child));
     }
 
     constexpr auto ARM_TIMEOUT = std::chrono::seconds(30);
@@ -1066,6 +1155,7 @@ TEST_F(TestLineStore, AProcessHoldingTheExclusiveLockBlocksASecondProcessForAWhi
     ASSERT_TRUE(probe.has_value()) << "failed to spawn the probe helper";
     const auto armLine = readChildLine(*probe, std::chrono::seconds(30));
     ASSERT_TRUE(armLine.has_value()) << "probe helper never armed";
+    EXPECT_EQ(*armLine, "arm");
 
     constexpr auto HOLD_DURATION = std::chrono::milliseconds(300);
     std::this_thread::sleep_for(HOLD_DURATION);
@@ -1208,6 +1298,7 @@ TEST_F(TestLineStore, NestedReadAllLinesUnderAnExclusiveLockDoesNotReleaseIt)
     ASSERT_TRUE(probe.has_value()) << "failed to spawn the probe helper";
     const auto armLine = readChildLine(*probe, std::chrono::seconds(30));
     ASSERT_TRUE(armLine.has_value()) << "probe helper never armed";
+    EXPECT_EQ(*armLine, "arm");
 
     constexpr auto HOLD_DURATION = std::chrono::milliseconds(300);
     std::this_thread::sleep_for(HOLD_DURATION);
@@ -1252,6 +1343,7 @@ TEST_F(TestLineStore, DestroyingALockedShardReleasesTheLockAcrossProcesses)
     ASSERT_TRUE(probe.has_value()) << "failed to spawn the probe helper";
     const auto armLine = readChildLine(*probe, std::chrono::seconds(30));
     ASSERT_TRUE(armLine.has_value()) << "probe helper never armed";
+    EXPECT_EQ(*armLine, "arm");
 
     const auto elapsedMs = awaitProbe(*probe, std::chrono::seconds(30));
     ASSERT_TRUE(elapsedMs.has_value()) << "probe helper failed to report a timing";
@@ -1292,6 +1384,7 @@ TEST_F(TestLineStore, UnlockingAnUnlockedShardIsANoOpAcrossProcesses)
     ASSERT_TRUE(probe.has_value()) << "failed to spawn the probe helper";
     const auto armLine = readChildLine(*probe, std::chrono::seconds(30));
     ASSERT_TRUE(armLine.has_value()) << "probe helper never armed";
+    EXPECT_EQ(*armLine, "arm");
 
     constexpr auto HOLD_DURATION = std::chrono::milliseconds(300);
     std::this_thread::sleep_for(HOLD_DURATION);

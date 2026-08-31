@@ -33,7 +33,8 @@
 //
 // Exit codes: 0 on success; 1 for a usage error; 2-4 mirror LineStore's own failure
 // modes, letting the parent test distinguish "never got the lock" from "write/read
-// itself failed."
+// itself failed"; 5 if the barrier file never appeared within BARRIER_TIMEOUT (a backstop
+// against spinning forever if the parent that would otherwise kill this process is gone).
 
 #include <algorithm>
 #include <chrono>
@@ -130,9 +131,20 @@ int main(int argc, char** argv)
     std::fflush(stdout);
 
     // Spin until the parent creates the barrier file so every helper enters the loop
-    // together, regardless of how long process creation took for any of them.
+    // together, regardless of how long process creation took for any of them. Bounded:
+    // the parent's own ChildProcess RAII kills an orphaned helper on any early test
+    // failure, but a bounded self-timeout is a second, independent backstop against a
+    // helper spinning forever if the parent is itself killed (e.g. SIGKILL) before its
+    // destructors run.
+    constexpr auto BARRIER_TIMEOUT = std::chrono::seconds(60);
+    const auto barrierDeadline = std::chrono::steady_clock::now() + BARRIER_TIMEOUT;
     while(!std::filesystem::exists(barrierPath))
     {
+        if(std::chrono::steady_clock::now() >= barrierDeadline)
+        {
+            std::fprintf(stderr, "barrier file never appeared: %s\n", barrierPath.string().c_str());
+            return 5;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 

@@ -1179,7 +1179,7 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1223,7 +1223,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesTheMeasuredDefaultU
         record.push_back(rankedEntryFor(*kernel, time));
         time += 1.0;
     }
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     const auto knobs = builder.getCustomKnobs(0, graph);
 
@@ -1270,7 +1270,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1314,7 +1314,7 @@ TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffFallsBackT
         }
     }
     ASSERT_EQ(record.size(), 1U);
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1354,7 +1354,7 @@ TEST(TestIngestorGenericPlanBuilder, AWhollyStaleRecordFallsBackToNormalSelectio
         entry.packId = testId(0xEE);
         record.push_back(entry);
     }
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1406,7 +1406,7 @@ TEST(TestIngestorGenericPlanBuilder, APartiallyStaleRecordWithBenchmarkingOnTrig
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig
@@ -1462,7 +1462,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelFailsToPrepareFal
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1506,7 +1506,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
             record.push_back(rankedEntryFor(kernel, 0.1));
         }
     }
-    manager->recordWinner(winnerKeyFor(graph, otherDevice), record);
+    manager->recordWinner(winnerKeyFor(graph, otherDevice), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1551,7 +1551,8 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherGraphIsNotServed)
             record.push_back(rankedEntryFor(kernel, 0.1));
         }
     }
-    manager->recordWinner(winnerKeyFor(otherGraph, properties), record);
+    manager->recordWinner(
+        winnerKeyFor(otherGraph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1595,7 +1596,7 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
         }
     }
     ASSERT_EQ(narrow.size(), 1U);
-    manager->recordWinner(winnerKeyFor(graph, properties), narrow);
+    manager->recordWinner(winnerKeyFor(graph, properties), narrow, WinnerWriteCause::FRESH_MISS);
 
     // Now a WIDE run, unfiltered, with benchmarking on.
     flatbuffers::FlatBufferBuilder fbb;
@@ -1648,7 +1649,7 @@ TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRan
     std::stable_sort(ranking.begin(), ranking.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), ranking);
+    manager->recordWinner(winnerKeyFor(graph, properties), ranking, WinnerWriteCause::FRESH_MISS);
 
     // The post-priming plan: benchmarking still ON, exactly as autotune leaves it.
     flatbuffers::FlatBufferBuilder fbb;
@@ -2018,7 +2019,7 @@ TEST(TestIngestorGenericPlanBuilder,
         }
     }
     ASSERT_EQ(narrow.size(), 1U);
-    manager->recordWinner(winnerKeyFor(graph, properties), narrow);
+    manager->recordWinner(winnerKeyFor(graph, properties), narrow, WinnerWriteCause::FRESH_MISS);
 
     // Now a WIDE run, unfiltered, with benchmarking on, so sampling produces real
     // usable candidates and write-back actually fires.

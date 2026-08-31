@@ -241,23 +241,21 @@ public:
         return catalog;
     }
 
-    /// Records @p record under @p key, replacing any earlier ranking for it: a later
-    /// sweep measured the current candidate set, and the coverage gate only widens.
+    /// Records @p record under @p key. Whether an existing on-disk ranking for @p key is
+    /// kept or replaced depends on @p cause -- see the full rule below.
     ///
     /// Write-back: if this manager has an engine name, the record is also appended to
     /// the on-disk shard. Unlike the in-memory-only read-through path below, this holds
     /// the shard's own file lock across the whole read-then-append sequence as one
     /// critical section -- `_winnerCacheMutex` alone cannot serialize against a second
-    /// process sharing the file. @p cause selects the write-back rule: on a fresh miss
-    /// (the default, which keeps existing callers that prime an empty cache correct),
-    /// an existing on-disk entry for the key is adopted as-is and nothing is written; on
-    /// a coverage-triggered re-benchmark, the new ranking is always appended and
-    /// supersedes the old one under the reader's last-line-wins merge, even if the
-    /// ranking happens to be unchanged. Any disk failure degrades to in-memory-only,
-    /// keeping the measurement just taken, logged once per manager.
-    void recordWinner(const WinnerKey& key,
-                      const WinnerRecord& record,
-                      WinnerWriteCause cause = WinnerWriteCause::FRESH_MISS) const
+    /// process sharing the file. @p cause selects the write-back rule and is required,
+    /// not defaulted: an existing on-disk entry for the key is adopted as-is and nothing
+    /// is written on a fresh miss; on a coverage-triggered re-benchmark, the new ranking
+    /// is always appended and supersedes the old one under the reader's last-line-wins
+    /// merge, even if the ranking happens to be unchanged. Any disk failure degrades to
+    /// in-memory-only, keeping the measurement just taken, logged once per manager.
+    void
+        recordWinner(const WinnerKey& key, const WinnerRecord& record, WinnerWriteCause cause) const
     {
         if(record.empty())
         {
@@ -847,11 +845,13 @@ private:
         }
     }
 
-    /// Write-back: re-reads @p key's shard under its LineStore lock and appends
-    /// @p record unless the shard's current ranking for @p key already matches it, as
-    /// one critical section under the shard's own lock (mirrors
-    /// `LineStoreLockHelper.cpp`). The file lock rather than `_winnerCacheMutex`,
-    /// because the racing writer may be another process.
+    /// Write-back: re-reads @p key's shard under its LineStore lock, then applies
+    /// @p cause's rule, as one critical section under the shard's own lock (mirrors
+    /// `LineStoreLockHelper.cpp`). A fresh miss adopts any existing on-disk record for
+    /// @p key as-is and appends nothing; a coverage-triggered re-benchmark always appends
+    /// @p record, superseding the old entry under the reader's last-line-wins merge. The
+    /// file lock is used rather than `_winnerCacheMutex`, because the racing writer may
+    /// be another process.
     ///
     /// A record is never immutable: a shard may hold several lines for one key, and the
     /// reader resolves them last-line-wins (see `loadShardIfAbsent()`), so appending a
