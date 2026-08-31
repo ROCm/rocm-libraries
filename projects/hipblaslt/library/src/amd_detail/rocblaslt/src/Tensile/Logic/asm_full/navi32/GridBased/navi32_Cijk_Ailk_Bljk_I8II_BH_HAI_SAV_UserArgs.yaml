@@ -63,8 +63,8 @@
   TileAwareSelection: false
   TileB: 1
   TotalIndices: 4
-  TransposeA: False
-  TransposeB: False
+  TransposeA: false
+  TransposeB: false
   UseBeta: true
   UseBias: 0
   UseE: false
@@ -110,8 +110,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_UserArgs_MT128x48x32_MI16x16x1_SN_GRVWB4_LBSPPA2048_LBSPPB128_LPB32_MIWT2_3_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 128
@@ -289,8 +288,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_UserArgs_MT64x96x32_MI16x16x1_SN_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT2_3_NLCA1_SS1_TLDS1_WG32_4_1
     LSCA: 64
@@ -468,8 +466,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_UserArgs_MT48x192x32_MI16x16x1_SN_GRVWB16_LBSPPA768_LBSPPB128_LPB32_MIWT3_3_NLCA3_SS1_TLDS1_WG16_8_1
     LSCA: 16
@@ -527,7 +524,7 @@
     MatrixInstM: 16
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
-    MaxOccupancy: 40
+    MaxOccupancy: 6
     NoLdsWriteCode: false
     NoReject: false
     NoTailLoop: false
@@ -647,8 +644,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWB16_LBSPPA512_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_TLDS1_WG32_4_1
     LSCA: 32
@@ -706,7 +702,7 @@
     MatrixInstM: 16
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
-    MaxOccupancy: 40
+    MaxOccupancy: 11
     NoLdsWriteCode: false
     NoReject: false
     NoTailLoop: false
@@ -826,8 +822,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_UserArgs_MT64x48x64_MI16x16x1_SN_GRVWB8_LBSPPA1024_LBSPPB128_LPB32_MIWT1_3_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 64
@@ -1005,8 +1000,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_HAI_SAV_UserArgs_MT16x64x64_MI16x16x1_SN_GRVWB16_LBSPPA256_LBSPPB128_LPB32_MIWT1_1_NLCA1_SS1_TLDS1_WG16_8_1
     LSCA: 16
@@ -1064,7 +1058,7 @@
     MatrixInstM: 16
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
-    MaxOccupancy: 40
+    MaxOccupancy: 11
     NoLdsWriteCode: false
     NoReject: false
     NoTailLoop: false

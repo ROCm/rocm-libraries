@@ -40,12 +40,14 @@ def _init_rocisa(isa):
     return ri
 
 
-def _make_writer(ri):
+def _make_writer(ri, isa=(9, 5, 0)):
     """Minimal KernelWriterAssembly stub with rocisa caps wired into states."""
     kw = object.__new__(KernelWriterAssembly)
     kw.states = SimpleNamespace(
         archCaps=ri.getArchCaps(),
         regCaps=ri.getRegCaps(),
+        version=tuple(isa),
+        kernel={"WavefrontSize": 32 if isa[0] >= 10 else 64},
     )
     return kw
 
@@ -100,6 +102,87 @@ def test_get_vgpr_occupancy_uses_max_waves_per_simd(isa, expected_occupancy):
     kw = _make_writer(_init_rocisa(isa))
     occupancy = kw.getVgprOccupancy(numThreads=256, vgprs=1, doubleVgpr=False)
     assert occupancy == expected_occupancy
+
+
+# ---------------------------------------------------------------------------
+# Per-SIMD VGPR file (PhysicalMaxVgpr) drives occupancy — gfx11 fix + gfx1250 guard
+# ---------------------------------------------------------------------------
+
+def _stub_regcaps(kw, **overrides):
+    kw.states.regCaps = dict(kw.states.regCaps)
+    kw.states.regCaps.update(overrides)
+    return kw
+
+
+def test_getvgproccupancy_uses_physical_max_vgpr():
+    """doubleVgpr occupancy denominator is PhysicalMaxVgpr, not the flat 512.
+
+    Heavy wave32 kernel, 256 threads (mult = 256/(32*4) = 2), 200 vgprs: with a 1536
+    per-SIMD file occupancy is 1536 // (ceil(200/24)*24 * 2 = 432) = 3; the old 512 file
+    gave 512 // (ceil(200/8)*8 * 2 = 400) = 1.
+    """
+    kw = _make_writer(_init_rocisa((11, 0, 0)), (11, 0, 0))
+    _stub_regcaps(kw, PhysicalMaxVgpr=1536)
+    assert kw.getVgprOccupancy(numThreads=256, vgprs=200, doubleVgpr=True) == 3
+    _stub_regcaps(kw, PhysicalMaxVgpr=512)
+    assert kw.getVgprOccupancy(numThreads=256, vgprs=200, doubleVgpr=True) == 1
+
+
+def test_gfx11_vgpr_alloc_granularity_is_24():
+    """gfx11 1536-VGPR parts allocate at 24-VGPR granularity, not 8.
+
+    150 VGPRs, 256 threads (mult=2): gran 24 -> ceil(150/24)*24 = 168 -> 1536 // (168*2) = 4.
+    The old flat gran 8 gave ceil(150/8)*8 = 152 -> 1536 // (152*2) = 5.
+    """
+    kw = _make_writer(_init_rocisa((11, 0, 0)), (11, 0, 0))
+    _stub_regcaps(kw, PhysicalMaxVgpr=1536)
+    assert kw.getVgprOccupancy(numThreads=256, vgprs=150, doubleVgpr=True) == 4
+
+
+def test_getmaxregs_uses_physical_max_vgpr():
+    """getMaxRegsForOccupancy honours PhysicalMaxVgpr in the doubleVgpr branch."""
+    kw = _make_writer(_init_rocisa((11, 0, 0)), (11, 0, 0))
+    _stub_regcaps(kw, PhysicalMaxVgpr=1536)
+    _, occ = kw.getMaxRegsForOccupancy(256, 200, 64, 0, 0, doubleVgpr=True)
+    assert occ == 3
+
+
+def test_non_double_branch_uses_half_physical():
+    """Non-doubleVgpr (wave64) divides by PhysicalMaxVgpr//2 -- the single-file /
+    wave64 per-SIMD size (256 for gfx908, 768 for gfx1151)."""
+    kw = _make_writer(_init_rocisa((9, 0, 8)))
+    _stub_regcaps(kw, PhysicalMaxVgpr=512)  # gfx908: //2 = 256
+    # 256 // (ceil(64/4)*4 = 64) = 4
+    assert kw.getVgprOccupancy(numThreads=256, vgprs=64, doubleVgpr=False) == 4
+    _stub_regcaps(kw, PhysicalMaxVgpr=1536)  # gfx1151 wave64: //2 = 768, gran 12
+    # 768 // (ceil(64/12)*12 = 72) = 10 (capped by MaxWavesPerSimd=10)
+    assert kw.getVgprOccupancy(numThreads=256, vgprs=64, doubleVgpr=False) == 10
+
+
+def test_gfx1250_keeps_legacy_maxvgpr_occupancy():
+    """gfx1250 is guarded onto the legacy MaxVgpr*2 model (unchanged by this PR)."""
+    kw = _make_writer(_init_rocisa((12, 5, 0)), (12, 5, 0))  # MaxVgpr=1024
+    # legacy: totalVgprs = MaxVgpr*2 = 2048, gran 8 -> 2048 // (ceil(300/8)*8=304) = 6
+    # (the per-SIMD path would divide 1024 by gran-16 aligned 304 -> 3)
+    assert kw.getVgprOccupancy(numThreads=256, vgprs=300, doubleVgpr=True) == 6
+
+
+@pytest.mark.parametrize(
+    "isa,expected",
+    [
+        ((11, 0, 0), 1536),  # gfx1100
+        ((11, 0, 1), 1536),  # gfx1101
+        ((11, 5, 1), 1536),  # gfx1151
+        ((11, 5, 0), 1024),  # gfx1150
+        ((12, 5, 0), 1024),  # gfx1250
+        ((9, 5, 0), 512),    # gfx950 unchanged
+        ((9, 0, 8), 512),    # gfx908 unchanged
+    ],
+)
+def test_physical_max_vgpr_reg_caps(isa, expected):
+    """PhysicalMaxVgpr values from rocisa/hardware_caps.hpp."""
+    ri = _init_rocisa(isa)
+    assert ri.getRegCaps()["PhysicalMaxVgpr"] == expected
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +293,7 @@ def test_gfx11_1024_vgpr_parts(isa):
 )
 def test_lds_limited_occupancy_gfx950(lds_bytes, expected_occ):
     """getLdsLimitedOccupancy on gfx950 with 163840-byte device LDS."""
-    occ = KernelWriterAssembly.getLdsLimitedOccupancy(163840, lds_bytes)
+    occ = KernelWriterAssembly.getLdsLimitedOccupancy(163840, lds_bytes, 256)
     assert occ == expected_occ, (
         f"LDS={lds_bytes} B: expected {expected_occ} blocks/CU, got {occ}"
     )
@@ -339,7 +422,7 @@ def test_lds_limited_occupancy_matches_hip_oracle(desc, numRegs, staticLDS,
     2 — matching HIP — but the code-gen VGPR pool over-estimate produces stored occ=1.
     """
     device_lds = 163840  # gfx950 160 KB
-    lds_occ = KernelWriterAssembly.getLdsLimitedOccupancy(device_lds, staticLDS)
+    lds_occ = KernelWriterAssembly.getLdsLimitedOccupancy(device_lds, staticLDS, 256)
 
     if staticLDS > device_lds // 2:
         # LDS-limited: the LDS formula alone reproduces the HIP result.

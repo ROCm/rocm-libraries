@@ -234,11 +234,27 @@ class KernelWriterAssembly(KernelWriter):
     return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
 
   def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
-    multiplier = int(ceil(max(numThreads, 256) / 256.0)) # example: wg=512 multiplier=2, 1024=4
+    if self.states.version[0] == 12:
+      # TODO: gfx12 keeps the legacy wave64-based (256) multiplier for historic reasons; it should
+      # use the wave-size-aware divisor below (wavefront * 4 SIMDs = 128 for wave32) once gfx12
+      # occupancy has been benchmarked.
+      multiplier = int(ceil(max(numThreads, 256) / 256.0))
+    else:
+      # multiplier = the waves-per-SIMD that one workgroup occupies = numThreads / (wavefront * 4);
+      # 4 SIMDs per CU (CDNA) / WGP (RDNA).
+      simdWaves = self.states.kernel["WavefrontSize"] * 4
+      multiplier = int(ceil(numThreads / float(simdWaves)))
     maxOccupancy = self.states.archCaps["MaxWavesPerSimd"]//multiplier
 
-    vgprAllocateAligned = 4    if not doubleVgpr else 8
-    totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
+    if self.states.version[0] == 12 and self.states.version[1] == 5:
+      # gfx1250: keep the legacy MaxVgpr*2 occupancy model pending its own
+      # benchmarking.
+      totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
+      vgprAllocateAligned = 4 if not doubleVgpr else 8
+    else:
+      totalVgprs = self.states.regCaps["PhysicalMaxVgpr"]//2 if not doubleVgpr else self.states.regCaps["PhysicalMaxVgpr"]
+      # The per-SIMD VGPR file splits into 64 allocation blocks.
+      vgprAllocateAligned = totalVgprs // 64
     vgprsAligned = int(ceil(vgprs/vgprAllocateAligned))*vgprAllocateAligned
     vgprsAligned *= multiplier
 
@@ -252,9 +268,13 @@ class KernelWriterAssembly(KernelWriter):
 
   ########################################
   def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
+    """Max. number of workgroups that can run on the same CU (CDNA) or WGP (RDNA) due to occupancy limiters """
 
     deviceLdsSize = self.states.archCaps["DeviceLDS"]
-    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(deviceLdsSize, ldsSize)
+    # gfx11 (RDNA) shares a 128 KB LDS pool across the WGP (2x the 64 KB per-workgroup cap).
+    ldsPool = 2 * deviceLdsSize if self.states.version[0] == 11 else deviceLdsSize
+    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(
+        ldsPool, ldsSize, self.states.archCaps["LdsGranularity"])
 
     if not doubleVgpr:
       vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr)
@@ -288,14 +308,20 @@ class KernelWriterAssembly(KernelWriter):
     return lastVgprs, initOccupancy
 
   @staticmethod
-  def getLdsLimitedOccupancy(deviceLdsSize, ldsSize):
+  def getLdsLimitedOccupancy(deviceLdsSize, ldsSize, granularity):
+    """Max. number of workgroups that can run on the same CU (CDNA) or WGP (RDNA) due to LDS size
+
+    granularity is the archCaps["LdsGranularity"] allocation granule: a workgroup
+    occupies a whole number of granules, so the rounding can cost a workgroup at a
+    boundary.
+    """
     if ldsSize == 0:
       # No LDS usage: LDS is not the binding constraint.
       # Return a large sentinel so other limits (VGPR, wave cap) win in min().
-      return deviceLdsSize // 256
+      return deviceLdsSize // granularity
     # As ldsSize gets large, rounding might push us slightly higher than deviceLdsSize.
     # Clamp at deviceLdsSize
-    ldsSize = min(ldsSize + 255, deviceLdsSize) & 0xffffff00 # 256-byte granularity
+    ldsSize = min(ldsSize + granularity - 1, deviceLdsSize) & ~(granularity - 1)
 
     ldsLimitedOccupancy = deviceLdsSize//ldsSize
     return ldsLimitedOccupancy

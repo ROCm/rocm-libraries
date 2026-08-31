@@ -5394,7 +5394,9 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesReduction = state["MaxLDS"]
 
     # lds max occupancy
-    ldsSizeOccupancy = isaInfoMap[isa].archCaps["DeviceLDS"] // state["MaxOccupancy"]
+    # gfx11 shares one 128 KB LDS pool per WGP (2x DeviceLDS).
+    ldsPoolOccupancy = (2 if isa[0] == 11 else 1) * isaInfoMap[isa].archCaps["DeviceLDS"]
+    ldsSizeOccupancy = ldsPoolOccupancy // state["MaxOccupancy"]
     ldsNumBytesOccupancy = ldsSizeOccupancy
 
 
