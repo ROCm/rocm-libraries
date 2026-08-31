@@ -246,28 +246,60 @@ namespace hipblaslt_client
         return true;
     }
 
-    inline bool read_cgroup_size_file(std::string const& path, size_t& out)
+    inline bool read_cgroup_size_file(std::string const& path, size_t& out, bool log_errors = false)
     {
         size_t const unlimited = static_cast<size_t>(1) << 62;
 
         FILE* f = fopen(path.c_str(), "r");
         if(!f)
+        {
+            if(log_errors)
+            {
+                std::fprintf(stderr,
+                             "hipBLASLt cgroup probe: cannot read %s\n",
+                             path.c_str());
+            }
             return false;
+        }
         char token[64] = {};
-        bool ok        = fscanf(f, "%63s", token) == 1;
-        fclose(f);
+        bool ok        = std::fscanf(f, "%63s", token) == 1;
+        std::fclose(f);
         if(!ok)
+        {
+            if(log_errors)
+            {
+                std::fprintf(stderr,
+                             "hipBLASLt cgroup probe: empty or unreadable %s\n",
+                             path.c_str());
+            }
             return false;
-        return parse_cgroup_size_token(token, out, unlimited);
+        }
+        if(!parse_cgroup_size_token(token, out, unlimited))
+        {
+            if(log_errors)
+            {
+                std::fprintf(stderr,
+                             "hipBLASLt cgroup probe: malformed value '%s' in %s\n",
+                             token,
+                             path.c_str());
+            }
+            return false;
+        }
+        return true;
     }
 
     namespace detail
     {
         using read_size_fn = bool (*)(std::string const& path, size_t& out, void* ctx);
 
+        inline void log_probe_error(char const* message, std::string const& path)
+        {
+            std::fprintf(stderr, "hipBLASLt cgroup probe: %s %s\n", message, path.c_str());
+        }
+
         inline bool read_cgroup_size_file_ctx(std::string const& path, size_t& out, void*)
         {
-            return read_cgroup_size_file(path, out);
+            return read_cgroup_size_file(path, out, false);
         }
 
         inline bool read_fake_sysfs_ctx(std::string const& path, size_t& out, void* ctx)
@@ -283,17 +315,34 @@ namespace hipblaslt_client
         inline size_t cgroup_headroom(cgroup_paths const&               paths,
                                       std::vector<cgroup_mount> const&  mounts,
                                       read_size_fn                      read,
-                                      void*                             ctx)
+                                      void*                             ctx,
+                                      bool                              log_errors)
         {
             size_t const unlimited = static_cast<size_t>(1) << 62;
             size_t       available = std::numeric_limits<size_t>::max();
+            bool const   live_read = log_errors;
+
+            auto read_at = [&](std::string const& path, size_t& out, bool log_failure) -> bool {
+                if(live_read)
+                    return read_cgroup_size_file(path, out, log_failure);
+                return read(path, out, ctx);
+            };
 
             auto consider = [&](std::string const& dir, char const* limit, char const* usage) {
-                size_t cap = 0, used = 0;
-                if(!read(dir + "/" + limit, cap, ctx) || cap >= unlimited)
+                std::string const limit_path = dir + "/" + limit;
+                std::string const usage_path = dir + "/" + usage;
+                size_t              cap = 0, used = 0;
+                if(!read_at(limit_path, cap, true) || cap >= unlimited)
                     return;
-                if(!read(dir + "/" + usage, used, ctx))
+                if(!read_at(usage_path, used, false))
+                {
+                    if(log_errors)
+                    {
+                        log_probe_error("usage missing or malformed, assuming 0:",
+                                        usage_path);
+                    }
                     used = 0;
+                }
                 available = std::min(available, cap > used ? cap - used : static_cast<size_t>(0));
             };
 
@@ -319,10 +368,28 @@ namespace hipblaslt_client
             {
                 if(cgroup_mount const* mount = pick_cgroup_mount(mounts, true, paths.v2))
                 {
-                    walk_resolved(resolve_cgroup_directory(*mount, paths.v2),
-                                  mount->mountpoint,
-                                  "memory.max",
-                                  "memory.current");
+                    std::string const dir = resolve_cgroup_directory(*mount, paths.v2);
+                    if(dir.empty())
+                    {
+                        if(log_errors)
+                        {
+                            std::fprintf(stderr,
+                                         "hipBLASLt cgroup probe: cannot resolve cgroup2 path '%s'\n",
+                                         paths.v2.c_str());
+                        }
+                    }
+                    else
+                    {
+                        walk_resolved(
+                            dir, mount->mountpoint, "memory.max", "memory.current");
+                    }
+                }
+                else if(log_errors)
+                {
+                    std::fprintf(
+                        stderr,
+                        "hipBLASLt cgroup probe: no cgroup2 mount covers '%s'\n",
+                        paths.v2.c_str());
                 }
             }
 
@@ -330,10 +397,30 @@ namespace hipblaslt_client
             {
                 if(cgroup_mount const* mount = pick_cgroup_mount(mounts, false, paths.v1))
                 {
-                    walk_resolved(resolve_cgroup_directory(*mount, paths.v1),
-                                  mount->mountpoint,
-                                  "memory.limit_in_bytes",
-                                  "memory.usage_in_bytes");
+                    std::string const dir = resolve_cgroup_directory(*mount, paths.v1);
+                    if(dir.empty())
+                    {
+                        if(log_errors)
+                        {
+                            std::fprintf(stderr,
+                                         "hipBLASLt cgroup probe: cannot resolve cgroup v1 path '%s'\n",
+                                         paths.v1.c_str());
+                        }
+                    }
+                    else
+                    {
+                        walk_resolved(dir,
+                                      mount->mountpoint,
+                                      "memory.limit_in_bytes",
+                                      "memory.usage_in_bytes");
+                    }
+                }
+                else if(log_errors)
+                {
+                    std::fprintf(
+                        stderr,
+                        "hipBLASLt cgroup probe: no v1 memory mount covers '%s'\n",
+                        paths.v1.c_str());
                 }
             }
 
@@ -341,21 +428,25 @@ namespace hipblaslt_client
         }
     } // namespace detail
 
-    inline size_t cgroup_available_memory_from(cgroup_paths const&              paths,
-                                               std::string const&               mountinfo)
+    inline size_t cgroup_available_memory_from(cgroup_paths const& paths,
+                                               std::string const&  mountinfo)
     {
-        return detail::cgroup_headroom(
-            paths, parse_mountinfo(mountinfo), detail::read_cgroup_size_file_ctx, nullptr);
+        return detail::cgroup_headroom(paths,
+                                       parse_mountinfo(mountinfo),
+                                       detail::read_cgroup_size_file_ctx,
+                                       nullptr,
+                                       true);
     }
 
     inline size_t cgroup_available_memory_from(cgroup_paths const&                     paths,
-                                                 std::string const&                      mountinfo,
-                                                 std::map<std::string, std::string> const& fake_sysfs)
+                                               std::string const&                      mountinfo,
+                                               std::map<std::string, std::string> const& fake_sysfs)
     {
         return detail::cgroup_headroom(paths,
                                        parse_mountinfo(mountinfo),
                                        detail::read_fake_sysfs_ctx,
-                                       const_cast<void*>(static_cast<void const*>(&fake_sysfs)));
+                                       const_cast<void*>(static_cast<void const*>(&fake_sysfs)),
+                                       false);
     }
 
 #ifdef __linux__
