@@ -607,6 +607,20 @@ def build_deep(kind, arch, **kw):
     return _build
 
 
+def build_grouped_gemm_case(name, arch, m, n, k, e):
+    def _build():
+        from rocke.instances.gfx950.grouped_gemm import (
+            GroupedGemmSpec,
+            build_grouped_gemm,
+        )
+
+        spec = GroupedGemmSpec(M=m, N=n, K=k, E=e, name=name)
+        kernel, _bs, _tm, _tn = build_grouped_gemm(spec)
+        return kernel
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -1080,6 +1094,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1098,7 +1113,7 @@ def cases():
             tile_n=64,
             tile_k=32,
             pipeline="mem",
-            epilogue="default",
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1116,6 +1131,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1134,6 +1150,7 @@ def cases():
             tile_n=32,
             tile_k=16,
             split_k=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1151,6 +1168,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            dtype_d="fp32",
         ),
     )
     add(
@@ -1168,6 +1186,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            dtype_d="fp32",
         ),
     )
     # gfx90a wgrad mirrors the gfx942 MFMA path.
@@ -1186,6 +1205,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     # Grouped wgrad (grid-per-group, Gm=1) and group-merging (Gm=2). Guards the
@@ -1205,6 +1225,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1222,6 +1243,7 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=32,
+            epilogue="cshuffle",
         ),
     )
     # Grouped + cshuffle epilogue (MFMA): the LDS-staged store threads the
@@ -1244,8 +1266,8 @@ def cases():
             epilogue="cshuffle",
         ),
     )
-    # Grouped + split-K (MFMA): the group and the K-slice share block_id_z
-    # (z = groups*split_k) and the atomic epilogue folds group*kpg into k_out.
+    # Grouped + split-K + cshuffle (MFMA): the group and the K-slice share
+    # block_id_z (z = groups*split_k); cshuffle required for fp16 paired atomics.
     add(
         "conv_wgrad",
         "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4",
@@ -1262,6 +1284,7 @@ def cases():
             tile_n=64,
             tile_k=32,
             split_k=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1280,6 +1303,7 @@ def cases():
             tile_n=32,
             tile_k=16,
             split_k=4,
+            epilogue="cshuffle",
         ),
     )
     # gfx1250 WMMA grouped (wave32, 16x16x32 -- its only fp16/bf16 atom).
@@ -1298,6 +1322,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=32,
+            dtype_d="fp32",
         ),
     )
 
@@ -2132,6 +2157,18 @@ def cases():
         "attention_d256/gfx942/4warp_gqa",
         "gfx942",
         build_attention_d256_gfx942("gfx942"),
+    )
+
+    # Grouped GEMM: hand-authored dense grouped bf16 GEMM (gfx950 / CDNA4),
+    # production lever defaults. Python-lowered only (no C++ engine mirror), so
+    # this pins the Python emitter's IR; re-bless when its codegen changes.
+    add(
+        "grouped_gemm",
+        "grouped_gemm/gfx950/m8192n1024k512e64",
+        "gfx950",
+        build_grouped_gemm_case(
+            "irhash_grouped_gemm_950", "gfx950", 8192, 1024, 512, 64
+        ),
     )
     return out
 

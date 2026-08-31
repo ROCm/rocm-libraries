@@ -488,6 +488,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/MIOpenReduceCalculation.hpp
         kernels/MIOpenReduceExtreme.hpp
         kernels/bfloat16_dev.hpp
+        kernels/fp8_dev.hpp
         kernels/block_reduce.hpp
         kernels/conv_common.inc
         kernels/conv_sizes.inc
