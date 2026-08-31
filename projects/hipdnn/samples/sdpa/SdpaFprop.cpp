@@ -30,6 +30,8 @@ bool runSdpa(F&& f)
 {
     bool allPassed = true;
 
+    warnOnUnknownEngineName(f.handle, f.config);
+
     const std::vector<std::string> dtypes = {"fp32", "fp16", "bf16"};
     const std::vector<std::pair<std::string, TensorLayout>> layouts
         = {{"bhsd", TensorLayout::BHSD}, {"bshd", TensorLayout::BSHD}};

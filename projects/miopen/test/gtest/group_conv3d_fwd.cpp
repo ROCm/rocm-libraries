@@ -33,5 +33,8 @@ DEFINE_GROUP_CONV3D_TEST(float, FP32, Forward);
 DEFINE_GROUP_CONV3D_TEST(float, TF32, Forward);
 DEFINE_GROUP_CONV3D_TEST(half, FP16, Forward);
 DEFINE_GROUP_CONV3D_TEST(bfloat16, BFP16, Forward);
-/// \todo int8_t tests don't work. Need debugging
-// DEFINE_GROUP_CONV3D_TEST(int8_t, Forward);
+/// \todo Grouped INT8 forward convolution has no naive/reference kernel, so verification has
+/// nothing to compare the GPU result against and these tests cannot run. This is the same gap
+/// that forces the INT8 grouped-forward shapes to be excluded from the 3D AI-heuristic perf
+/// comparison. Keep the case visible (and disabled) here until a reference kernel exists.
+// DEFINE_GROUP_CONV3D_TEST(int8_t, I8, Forward);

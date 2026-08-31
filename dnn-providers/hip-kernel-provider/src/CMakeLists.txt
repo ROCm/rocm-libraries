@@ -60,8 +60,13 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_FLASH2=1)
     # Defect E fix: copy .co files to build tree so build-tree test runs work without
     # manual HIP_FLASH2_KERNEL_DIR export (mirrors asm_sdpa_engine pattern)
-    file(COPY
-        ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
+    # Copy every .co present, not just the legacy object: naming only the
+    # legacy one meant a build-tree ctest could never exercise a variant even
+    # when the install was correct (S. Reeder had to stage objects by hand to
+    # test the dispatcher at all).
+    file(GLOB _f2_build_cos
+         ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/*.co)
+    file(COPY ${_f2_build_cos}
         DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels)
     # Override HIP_FLASH2_KERNEL_DIR at test time to point to build tree
     set(HIP_FLASH2_KERNEL_DIR_BUILD "${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels"
@@ -80,11 +85,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         # descriptors; HIPDNN_DESCRIPTOR_INSTALL_DIR above is only its fallback.
         HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
     )
+
+    # The kpack kernel source adapter. Listed here rather than beside Kernel.cpp above
+    # because it does not compile without the ingestor: KpackArchive.cpp is the only
+    # translation unit in the provider that includes <rocm_kpack/kpack.h>.
+    target_sources(hip_kernel_provider_impl PRIVATE
+        compilation/KpackArchive.cpp
+        compilation/KpackKernelLoader.cpp
+        compilation/KpackProgram.cpp
+    )
+
+    # The object library gets rocm::rocm_kpack for its include directories; the two
+    # targets that actually link have to name it themselves, because they consume the
+    # objects via $<TARGET_OBJECTS:...>, which carries no link interface.
+    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
+    target_link_libraries(hip_kernel_provider_private PUBLIC rocm::rocm_kpack)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # See the note above hip_kernel_provider_impl: $<TARGET_OBJECTS:...> carries no link
+    # interface, so the plugin has to name the kpack reader itself.
+    target_link_libraries(hip_kernel_provider PRIVATE rocm::rocm_kpack)
+endif()
 
 if(NOT WIN32)
     target_link_libraries(hip_kernel_provider PRIVATE "-Xlinker --exclude-libs=ALL")
