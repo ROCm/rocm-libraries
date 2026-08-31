@@ -50,9 +50,6 @@ static const tensile_params_t& tparams(const config_t& config) {
 /* context_t constructor                                                                    */
 /* ---------------------------------------------------------------------------------------- */
 context_t::context_t(const problem_t& problem, const hardware_t& hardware, const config_t& config) {
-  // Extract parameters
-  const size_t NUM_XCD = hardware.NUM_XCD;
-  
   // Effective usable CU count. Decided once here and consumed across the model
   // (launch params, occupancy, cache/epilogue/reduction estimates). A non-zero
   // problem.num_cus caps the count; 0 falls back to the full hardware count.
@@ -842,7 +839,6 @@ double compute_cvt_overhead_x1(const problem_t& problem,
   const double num_mfma = 1.0 * N_MI;
   // Cycle scale per MI
   const double L_MI        = hardware.get_mi_latency(MI_M, MI_N, MI_K, problem.mi_dtype);
-  const double mfma_cycles = num_mfma * L_MI;
 
   // 2) Bytes (per K-slice), using ceil-div to whole bytes
   const double bytesA = wave_tile_m * MT_K * static_cast<double>(a_bytes);
@@ -1359,7 +1355,6 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
 
     const double a_l1_ft  = a_temporal ? a_iter : 0.0;
     const double b_l1_ft  = b_temporal ? b_iter : 0.0;
-    const double ab_l1_ft = a_l1_ft + b_l1_ft;
 
     if (single_stream && skinny_m && a_temporal) {
       if (hardware.l1_capacity > 0 && a_l1_ft <= static_cast<double>(hardware.l1_capacity)) {
@@ -2395,41 +2390,6 @@ double compute_tile_latency(const problem_t& problem,
   const double L_narrow_load = narrow_load_factor * static_cast<double>(k_iters)
                              * heuristic_defaults_t::NARROW_LOAD_ITER_PENALTY;
 
-  // GRVW load-issue efficiency penalty (batch==1 only).
-  //
-  // Measures whether each operand's actual GRVW is narrower than the natural
-  // width for its tile dimension.  The "natural" reference is the bytes a single
-  // wavefront lane spans across the coalesced load axis:
-  //   A K-coalesced (transA=T): natural = MT_K × a_bytes / WAVEFRONT_SIZE
-  //   A M-coalesced (transA=N): natural = MT_M × a_bytes / WAVEFRONT_SIZE
-  //   B N-coalesced (transB=N): natural = MT_N × b_bytes / WAVEFRONT_SIZE
-  //   B K-coalesced (transB=T): natural = MT_K × b_bytes / WAVEFRONT_SIZE
-  // Both are capped at the physical cache-line (16B, dwordx4 = fully coalesced).
-  //
-  // Normalising against tile width removes the MT_N inflation bias: a wider tile
-  // naturally has wider GRVW so neither tile is penalised relative to the other.
-  // Only penalises when the library chose a GRVW narrower than achievable.
-  // Gated to batch==1 (batched shapes already have batched_fill_ratio) and to
-  // grvw > 1 (struct default 1 = "unpopulated" sentinel).
-  constexpr double grvw_ref_bytes = 16.0;  // dwordx4 = hard ceiling
-  constexpr double wavefront_size  = static_cast<double>(heuristic_defaults_t::WAVEFRONT_SIZE);
-  const double mt_m_dd = static_cast<double>(std::max<size_t>(config.mt.m, 1));
-  const double mt_n_dd = static_cast<double>(std::max<size_t>(config.mt.n, 1));
-  const double natural_a = std::min(grvw_ref_bytes,
-      (a_k_coalesced ? mt_k_dd : mt_m_dd) * a_bytes_du / wavefront_size);
-  const double natural_b = std::min(grvw_ref_bytes,
-      (b_k_coalesced ? mt_k_dd : mt_n_dd) * b_bytes_du / wavefront_size);
-  const double grvw_a_bytes = static_cast<double>(config.grvw_a) * a_bytes_du;
-  const double grvw_b_bytes = static_cast<double>(config.grvw_b) * b_bytes_du;
-  const double grvw_eff_a = (problem.batch == 1 && config.grvw_a > 1 && natural_a > 0.0)
-      ? std::min(1.0, grvw_a_bytes / natural_a) : 1.0;
-  const double grvw_eff_b = (problem.batch == 1 && config.grvw_b > 1 && natural_b > 0.0)
-      ? std::min(1.0, grvw_b_bytes / natural_b) : 1.0;
-  const double grvw_penalty = (1.0 / std::max(grvw_eff_a, 1e-6) - 1.0)
-                             + (1.0 / std::max(grvw_eff_b, 1e-6) - 1.0);
-  const double L_grvw = grvw_penalty * static_cast<double>(k_iters)
-                      * heuristic_defaults_t::GRVW_ITER_PENALTY;
-
   // DepthU oversize penalties.  These charge extra fixed cost when MT_K is
   // poorly matched to the problem K, independent of the residual tail window
   // (the former "padding waste" term lived here too, but it only ever fired for
@@ -2530,7 +2490,7 @@ double compute_tile_latency(const problem_t& problem,
   // MainLoop subtotal.
   const double L_mainloop =
       L_main + L_ngll + L_nll + L_tail + L_pgr_stall + L_loop_overhead + L_du_waste
-      + L_narrow_load + L_grvw;
+      + L_narrow_load;
 
   // ---------------------------------------------------------------------------
   // 3. Epilogue (per-tile store; compute is already covered by NLL)
@@ -2618,8 +2578,6 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("L_mem_stream: " << L_mem_stream);
     OLOG_DEBUG("narrow_load_factor: " << narrow_load_factor);
     OLOG_DEBUG("L_narrow_load: " << L_narrow_load);
-    OLOG_DEBUG("grvw_eff_a: " << grvw_eff_a << " grvw_eff_b: " << grvw_eff_b);
-    OLOG_DEBUG("L_grvw: " << L_grvw);
     OLOG_DEBUG("L_compute_stream: " << L_compute_stream);
 
     OLOG_DEBUG("L_prologue: " << L_prologue);

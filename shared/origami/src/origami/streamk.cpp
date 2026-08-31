@@ -290,7 +290,6 @@ size_t grid_analytical(const problem_t& problem,
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
-  size_t K     = problem.size.k;
   size_t batch = problem.batch;
 
   size_t MT_M = config.mt.m;
