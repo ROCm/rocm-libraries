@@ -333,7 +333,7 @@ inline void registerBundleTests()
     std::vector<detail::LoadedBundle> bundles;
     bundles.reserve(discovered.size());
 
-    // Enforcement needs a named engine to adjudicate against, so a run without
+    // Enforcement needs a named engine to check against, so a run without
     // --test-engine has nothing to count; seeding the coverage counters anyway
     // would trip verifiedNothing() on a run that never intended to enforce.
     const std::optional<LoadedEngine> engineUnderTest = resolveEngineUnderTest();

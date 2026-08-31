@@ -116,7 +116,7 @@ protected:
         // Phase 1: read the claim facts before anything can cut the test short. This
         // has to sit above runComparison(): every mode has an early return that would
         // otherwise leave the graph's claims undecided while the run exited 0.
-        const auto observation = adjudicateClaims(session);
+        const auto observation = checkSupportClaims(session);
         recordClaimCoverage(observation);
 
         // Phase 2: run as far as this bundle asks for, unless a claim already failed.
@@ -150,7 +150,7 @@ protected:
 
     // Virtual so a deviceless harness can inject verdicts without writing a sidecar
     // for each one. The real implementation is a pure decision over the session.
-    virtual SupportObservation adjudicateClaims(const GraphSession& session);
+    virtual SupportObservation checkSupportClaims(const GraphSession& session);
 
     // Virtual so deviceless tests can observe the non-FULL routing decision without
     // reaching a real graph. The real implementation compiles plans.
@@ -167,8 +167,8 @@ protected:
         return _inputFillRecipes;
     }
 
-    // The single definition of "this graph's claims must be adjudicated": a sidecar
-    // exists, enforcement is on, and an engine was named to adjudicate against.
+    // The single definition of "this graph's claims must be checked": a sidecar
+    // exists, enforcement is on, and an engine was named to check against.
     // Checked in the same order everywhere so a deviceless harness with no injected
     // engine never reaches TestConfig.
     bool shouldEnforceClaims() const

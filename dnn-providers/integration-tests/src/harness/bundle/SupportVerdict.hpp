@@ -19,7 +19,7 @@
 namespace hipdnn_integration_tests::bundle
 {
 
-/// Outcome for one graph, adjudicated against the single engine under test.
+/// Outcome for one graph, decided against the single engine under test.
 ///
 /// One lane tests one engine, so the question is a two-bit decision: does the
 /// sidecar promise this engine for this (arch, platform[, case]), and is this engine

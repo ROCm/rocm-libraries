@@ -27,7 +27,7 @@ namespace hipdnn_integration_tests::bundle
 /// harness. Verifying an engine and verifying our own golden data are different
 /// jobs with different failure meanings, and folding the second into the first is
 /// what produced a "verification mode" that structurally never reached an engine —
-/// and therefore never adjudicated the claims the engine harness exists to enforce.
+/// and therefore never checked the claims the engine harness exists to enforce.
 ///
 /// **There is no skip path.** Registration only creates a test when the bundle has
 /// golden data *and* every node type is in this reference's required-op set

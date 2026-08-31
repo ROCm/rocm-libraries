@@ -402,7 +402,7 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        // Enforcement adjudicates a sidecar against a named engine. Without one there
+        // Enforcement checks a sidecar against a named engine. Without one there
         // is nothing to check, and silently degrading to "enforced nothing, exit 0"
         // is the exact failure --enforce-support-claims exists to prevent.
         if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
@@ -410,7 +410,7 @@ int main(int argc, char** argv) noexcept
         {
             std::cerr << "Error: --enforce-support-claims requires --test-engine; there is no "
                          "engine to\n"
-                         "       adjudicate sidecar claims against.\n";
+                         "       check sidecar claims against.\n";
             return 1;
         }
 

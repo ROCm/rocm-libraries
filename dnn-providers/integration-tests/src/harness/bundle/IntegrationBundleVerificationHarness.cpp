@@ -147,7 +147,7 @@ bool IntegrationBundleVerificationHarness::isEnforcingSupportClaims() const
 // ---- support claims --------------------------------------------------------
 
 SupportObservation
-    IntegrationBundleVerificationHarness::adjudicateClaims(const GraphSession& session)
+    IntegrationBundleVerificationHarness::checkSupportClaims(const GraphSession& session)
 {
     if(_bundle == nullptr || !shouldEnforceClaims())
     {

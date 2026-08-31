@@ -6,7 +6,7 @@
 // the engine has actually run the graph green.
 //
 // These drive the real TestBody() through a deviceless harness. The graph and the
-// claim verdicts are stubbed at the openGraph() and adjudicateClaims() seams — they
+// claim verdicts are stubbed at the openGraph() and checkSupportClaims() seams — they
 // exist precisely because the real ones need a handle — so the assertions cover the
 // routing and the two-phase commit, not the backend.
 
@@ -117,7 +117,7 @@ protected:
         return session;
     }
 
-    SupportObservation adjudicateClaims(const GraphSession&) override
+    SupportObservation checkSupportClaims(const GraphSession&) override
     {
         return _observation;
     }
@@ -548,7 +548,7 @@ TEST_F(TestSupportClaimEnforcement, UnreachedEnforcementRungStaysAccepted)
 // drive end to end.
 
 // Only the engine this test drove can be promoted. Another engine's claim was
-// adjudicated from the same ranked list but never executed, so the run has no
+// decided from the same ranked list but never executed, so the run has no
 // evidence either way about it.
 TEST_F(TestSupportClaimEnforcement, OnlyTheEngineUnderTestIsPromoted)
 {

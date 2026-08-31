@@ -4,7 +4,7 @@ A **support claim** is a promise, checked into git next to a bundle, that a name
 engine supports that graph on a given arch and platform. `--enforce-support-claims`
 turns a broken promise into a test failure instead of a silent skip.
 
-This document covers what a claim asserts, how one graph's claims are adjudicated,
+This document covers what a claim asserts, how one graph's claims are checked,
 and the lifecycle inside `TestBody()` that decides when a claim is checked and when
 it is published.
 
@@ -55,7 +55,7 @@ matches a `gfx90a` claim. `platform` is `linux` or `windows`.
 
 ## One lane, one engine
 
-Enforcement adjudicates the claim for **the single engine named by `--test-engine`**,
+Enforcement checks the claim for **the single engine named by `--test-engine`**,
 and nothing else. A sidecar claiming some other engine is that engine's lane's
 business: this run cannot execute it, so it has no basis to pass or fail it, and
 an engine with no lane at all is the static inventory's problem, not the harness's.
@@ -117,7 +117,7 @@ derived from it in one place each.
 
 ```mermaid
 graph TD
-  Z["openGraph()<br/>ONE from_binary + ONE ranked query"] --> A["adjudicateClaims(session)"]
+  Z["openGraph()<br/>ONE from_binary + ONE ranked query"] --> A["checkSupportClaims(session)"]
   A --> B{"sidecar read?"}
   B -->|yes| C["graphsQueried++"]
   B -->|no| D{"but a sidecar<br/>exists on disk?"}
@@ -158,10 +158,10 @@ are unit-testable on their own (`TestGraphSession`).
 
 ### Phase 1 — claims, above everything
 
-`adjudicateClaims(session)` hands `session.engines` to `observeSupport()` for the set
+`checkSupportClaims(session)` hands `session.engines` to `observeSupport()` for the set
 comparison and returns `{sidecar, results}`.
 
-It sits **above `runComparison()` on purpose.** Adjudication needs only the ranked
+It sits **above `runComparison()` on purpose.** The check needs only the ranked
 list — no inputs, no outputs, no golden data, no execution — so nothing in the
 comparison path is a prerequisite for it. Every early return inside
 `runComparison()` (build failure, no output tensors, inputs unavailable, non-`FULL`
@@ -171,7 +171,7 @@ exited 0.
 It returns an empty observation, touching nothing, when no engine was injected, no
 sidecar exists, or enforcement is off.
 
-Both `openGraph()` and `adjudicateClaims()` are virtual: the first needs a handle,
+Both `openGraph()` and `checkSupportClaims()` are virtual: the first needs a handle,
 the second is where a deviceless test injects verdicts without writing a sidecar per
 case. A harness that stubs the executor stubs `openGraph()` too, and says what it is
 simulating by setting `engines.accepted` — otherwise it would open a real graph just
@@ -319,7 +319,7 @@ cannot see.
 
 | Symptom | Cause |
 |---|---|
-| `--enforce-support-claims requires --test-engine` | No engine named; there is nothing to adjudicate claims against |
+| `--enforce-support-claims requires --test-engine` | No engine named; there is nothing to check claims against |
 | `support claims exist for X but were never queried` | A code path short-circuited above the query — a harness bug, not a data problem |
 | `FATAL: … not one of them was ever queried` | Claim-bearing graphs were discovered but none ran; usually the filter selected only graphs without claims |
 | `CLAIM_BROKEN … not in ranked list` | The engine dropped support for a graph the sidecar promises. Fix the engine, or update the sidecar |
