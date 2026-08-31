@@ -213,12 +213,8 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
         }
     }
 
-    const Flash2Selection sel = selectFlash2Config(params.batch,
-                                                   params.numHeadsQ,
-                                                   params.seqLenQ,
-                                                   params.headDim,
-                                                   params.causal,
-                                                   cuCount);
+    const Flash2Selection sel = selectFlash2Config(
+        params.batch, params.numHeadsQ, params.seqLenQ, params.headDim, params.causal, cuCount);
 
     // Split-K execution is not yet plumbed through execute() (it needs a second
     // merge launch plus a workspace pointer). Record the decision, run single
@@ -326,9 +322,8 @@ std::vector<data_objects::KnobT>
 // ---------------------------------------------------------------------------
 // extractParams (private helper) -- Finding 1 fix: restored missing body
 // ---------------------------------------------------------------------------
-Flash2FwdParams
-    HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
-                                           const flatbuffer_utilities::IGraph& opGraph)
+Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
+                                                       const flatbuffer_utilities::IGraph& opGraph)
 {
     Flash2FwdParams p{};
 
