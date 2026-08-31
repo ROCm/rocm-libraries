@@ -56,8 +56,14 @@ inline std::shared_ptr<IKernelHeuristic>
     case UhdAdapter::TREE_DATA:
     case UhdAdapter::TABLE:
         // Where NATIVE throws, a model degrades. An unregistered symbol is a build fact
-        // and the engine could never score; an unloadable model is a deployment fact, and
-        // RFC 0019 §5 wants the engine still selecting, by declared order.
+        // and the engine could never score, so there is nothing to fall back to.
+        //
+        // Reaching here with a *missing* artifact means no loader pre-flighted this
+        // descriptor -- DescriptorLoader drops that engine before the factory sees it.
+        // What is left is a file that exists and will not come up: a truncated download,
+        // a model built against a different schema, a features_hash disagreeing with the
+        // signature. Those are recoverable in the only sense that matters at plan build,
+        // so RFC 0019 §5 applies and the engine keeps selecting by declared order.
         if(auto heuristic = UhdKernelHeuristic::tryCreate(*descriptor, named))
         {
             return heuristic;

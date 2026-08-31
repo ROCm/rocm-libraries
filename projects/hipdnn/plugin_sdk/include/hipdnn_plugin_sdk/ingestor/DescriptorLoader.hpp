@@ -2251,24 +2251,30 @@ inline std::vector<DescriptorSet>
                                         << boundary.string() << "'; dropping it");
                 resolvable = false;
             }
-            // A missing artifact warns where an escaping one drops, and where an
-            // unregistered NATIVE symbol drops. The three are not alike: an unregistered
-            // symbol is a build fact, so the engine could never score; an escaping payload
-            // is a trust fact; a missing artifact is a deployment fact, and RFC 0019 §5
-            // requires that to degrade to declared order with the engine still in play.
+            // A missing artifact drops the engine, like the other two. All three mean the
+            // descriptor asked for something that is not there, and none of them is a
+            // state a correctly built tree can reach: an unregistered symbol is a build
+            // fact, an escaping path is a trust fact, and an absent artifact is a
+            // packaging fact -- hkp_pack raises on it, so a tree that reaches the runtime
+            // missing one was not built by the packer or was damaged after it was.
             //
-            // Logged at ERROR rather than WARN even so. The engine survives, but nothing
-            // about this is expected: it means packaging dropped a file the descriptor
-            // says it needs, and the visible symptom -- a heuristic that silently stops
-            // ranking -- is one a warning buried in a busy log will not explain.
+            // RFC 0019 §5 allows degrading to declared order instead, and that is what
+            // this used to do. It was the worse choice. An engine that quietly ranks by
+            // priority is indistinguishable from an engine that never had a model, so a
+            // dropped file surfaces as a performance regression nobody can attribute,
+            // months later, against a log line that scrolled past at startup. Dropping
+            // makes the packaging bug fail where it happened.
+            //
+            // The degrade path still exists for the case this cannot see: an artifact
+            // present but unloadable, which UhdKernelHeuristic::tryCreate turns into
+            // declared-order ranking rather than a throw.
             else if(!std::filesystem::exists(resolved))
             {
                 HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                         << set.engine.name << "' names model artifact '"
                                         << resolved.string()
-                                        << "', which is absent; the engine stays, but its "
-                                           "kernels will rank by priority, then descriptor "
-                                           "id, as though it shipped no heuristic");
+                                        << "', which is absent; dropping it");
+                resolvable = false;
             }
         }
 

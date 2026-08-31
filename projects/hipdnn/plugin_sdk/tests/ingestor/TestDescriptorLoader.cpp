@@ -1397,15 +1397,17 @@ TEST(TestDescriptorLoader, RejectsAMalformedDerivedEntry)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "derived"));
 }
 
-/// A missing artifact keeps the engine and says so loudly.
+/// A missing artifact drops the engine and says why.
 ///
-/// Deliberately not a drop: RFC 0019 §5 requires a heuristic that will not come up to
-/// degrade to declared order rather than fail the request, and an engine whose kernels
-/// still run unranked is more useful than no engine. But the symptom -- a heuristic that
-/// silently stops ranking -- is invisible from the outside, so the diagnostic is the only
-/// thing standing between a packaging bug and a quiet performance regression. It is
-/// asserted here for that reason, not for its wording.
-TEST(TestDescriptorLoader, KeepsAnEngineWhoseModelArtifactIsAbsentAndReportsIt)
+/// RFC 0019 §5 permits degrading to declared order instead, and this used to. Dropping
+/// is the deliberate choice: an engine that quietly ranks by priority is
+/// indistinguishable from one that never had a model, so the packaging bug that lost the
+/// file resurfaces months later as an unattributable performance regression. A dropped
+/// engine fails where the fault is.
+///
+/// The diagnostic is asserted for its content, not its wording -- it is the only thing
+/// telling an operator which file to go looking for.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseModelArtifactIsAbsentAndReportsIt)
 {
     const ScopedSymbols symbols;
     auto recorder
@@ -1413,10 +1415,7 @@ TEST(TestDescriptorLoader, KeepsAnEngineWhoseModelArtifactIsAbsentAndReportsIt)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_absent"));
     writeModelHeuristicSet(dir.path(), "test:model_absent", "never_packaged.bin");
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
-
-    ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.name, "test:model_absent");
+    EXPECT_TRUE(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).empty());
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "never_packaged.bin"));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "which is absent"));
 }
