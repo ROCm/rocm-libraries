@@ -114,6 +114,11 @@ struct WmmaReorderOutcome {
     unsigned prefetchAdded = 0;    ///< ds_loads newly cloned into the preheader
     unsigned prefetchRemoved = 0;  ///< preheader ds_loads deleted as no longer needed
 
+    /// ds_loads retargeted to a placeholder register because the new order
+    /// made their occupied-slot window collide with another value sharing the
+    /// same physical register. Left for register allocation to resolve.
+    unsigned conflictsVirtualized = 0;
+
     /// LDS byte distance between one iteration's ds_load and the next, derived
     /// from the preheader/body ds_load pairs the kernel already has.
     int iterOffsetDelta = 0;

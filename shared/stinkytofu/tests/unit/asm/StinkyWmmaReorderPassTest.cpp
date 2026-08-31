@@ -223,4 +223,68 @@ TEST_F(WmmaReorderPassTest, WrongLoopLabel_FindsNothing) {
     EXPECT_EQ(runPass(std::make_unique<ReverseOrderProvider>(), options), nullptr);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Register conflicts
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_F(WmmaReorderPassTest, OverlappingReuse_VirtualizesLoserOnSameRegister) {
+    // Two ds_loads double-buffer the shared B tile (v[60:68), the operand
+    // every addWmma() reads) within one iteration: loadB0 feeds wmma0/wmma1,
+    // loadB1 reuses the same register for wmma2/wmma3 -- the software pipeline
+    // already relies on program order to keep these apart, since a raw
+    // register-overlap scan can't otherwise tell the two values apart.
+    //
+    // A distance far larger than the body forces every load to the earliest
+    // safe slot (0), collapsing loadB0's and loadB1's occupied windows onto
+    // each other: the physical register can no longer hold both live ranges.
+    StinkyInstruction* loadB0 = addDsLoad(body, /*dest=*/60, /*offset=*/0);
+    wmma.push_back(addWmma(body, /*aBase=*/20, /*cBase=*/100));  // wmma0, reads loadB0
+    wmma.push_back(addWmma(body, /*aBase=*/28, /*cBase=*/108));  // wmma1, reads loadB0
+    StinkyInstruction* loadB1 = addDsLoad(body, /*dest=*/60, /*offset=*/64);
+    wmma.push_back(addWmma(body, /*aBase=*/36, /*cBase=*/116));  // wmma2, reads loadB1
+    wmma.push_back(addWmma(body, /*aBase=*/44, /*cBase=*/124));  // wmma3, reads loadB1
+
+    WmmaReorderOptions options;
+    options.prefetchDistance = 10;
+
+    const auto* res = runPass(
+        std::make_unique<ExplicitOrderProvider>(std::vector<unsigned>{0, 1, 2, 3}), options);
+    ASSERT_NE(res, nullptr);
+    ASSERT_TRUE(res->applied) << res->skipReason;
+    EXPECT_EQ(res->conflictsVirtualized, 1u);
+
+    // loadB0 (earlier producer) keeps the physical register; loadB1 (the
+    // later, colliding producer) is retargeted to a placeholder.
+    EXPECT_FALSE(loadB0->getDestReg(0).isVirtualReg());
+    EXPECT_TRUE(loadB1->getDestReg(0).isVirtualReg());
+    EXPECT_TRUE(loadB0->getDestReg(0).isRegister());
+    EXPECT_EQ(loadB0->getDestReg(0).reg.idx, 60u);
+
+    // wmma2/wmma3 (loadB1's own consumers) must have followed it to the
+    // virtual register; wmma0/wmma1 (loadB0's) must be untouched.
+    auto readsVirtual = [](const StinkyInstruction* w) {
+        for (size_t s = 0; s < w->getNumSrcRegs(); ++s)
+            if (w->getSrcReg(s).isVirtualReg()) return true;
+        return false;
+    };
+    EXPECT_FALSE(readsVirtual(wmma[0]));
+    EXPECT_FALSE(readsVirtual(wmma[1]));
+    EXPECT_TRUE(readsVirtual(wmma[2]));
+    EXPECT_TRUE(readsVirtual(wmma[3]));
+}
+
+TEST_F(WmmaReorderPassTest, DistinctRegisters_NeverVirtualized) {
+    // buildLoop()'s four A tiles each own a distinct RegGroup; nothing shares a
+    // register within the segment, so the conflict path must never trigger.
+    buildLoop();
+    WmmaReorderOptions options;
+    options.prefetchDistance = 2;
+
+    const auto* res = runPass(std::make_unique<ReverseOrderProvider>(), options);
+    ASSERT_NE(res, nullptr);
+    ASSERT_TRUE(res->applied) << res->skipReason;
+    EXPECT_EQ(res->conflictsVirtualized, 0u);
+    for (StinkyInstruction* inst : loads) EXPECT_FALSE(inst->getDestReg(0).isVirtualReg());
+}
+
 }  // namespace

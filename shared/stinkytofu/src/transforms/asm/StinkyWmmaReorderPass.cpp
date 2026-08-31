@@ -168,6 +168,16 @@ struct DsLoadPlan {
     unsigned slot = 0;                  ///< new position: issue just before wmma[slot]
     bool crossIter = false;             ///< issues for the *next* iteration
     StinkyInstruction* twin = nullptr;  ///< existing preheader copy, if any
+    std::vector<StinkyInstruction*> consumers;  ///< every wmma in `order` reading this load
+
+    // Original (pre-reorder) body index of this ds_load, and the exclusive end
+    // of the range of original indices it's allowed to claim as consumers. Only
+    // meaningful when more than one ds_load in the segment shares `dest`: a raw
+    // register-overlap scan can't otherwise tell two different values apart, so
+    // consumer attribution falls back to which producer actually fed which
+    // wmma in the body as it exists today.
+    size_t origIndex = 0;
+    size_t attribEnd = 0;
 };
 
 /// wmma slots needed to cover a ds_load's latency at the loop's wmma issue rate.
@@ -230,6 +240,8 @@ class WmmaReorder {
             return res;
         }
 
+        resolveRegisterConflicts(loads, order.size(), res);
+
         res.wmmaMoved = rewriteBody(*region.body, nodes, segBegin, segEnd, order, loads);
         res.dsLoadMoved = dsLoadMoved_;
         applyPreheaderEdits(region, loads, delta, crossOk, res);
@@ -242,6 +254,7 @@ class WmmaReorder {
     const IWmmaOrderProvider& mode_;
     const WmmaReorderOptions& options_;
     unsigned dsLoadMoved_ = 0;
+    unsigned nextVirtualIdx_ = 0;
 
     static bool isPermutationOf(const std::vector<StinkyInstruction*>& a,
                                 const std::vector<StinkyInstruction*>& b) {
@@ -286,29 +299,64 @@ class WmmaReorder {
 
     /// ds_loads in the window that feed a wmma, with their consumer ranks taken
     /// from the *new* order.
+    ///
+    /// When a RegGroup is written by more than one ds_load in the segment (the
+    /// kernel already double-buffers that register within one iteration), a
+    /// plain "does this wmma's operand overlap this load's dest" scan can't
+    /// tell the two values apart -- every wmma reading that register would
+    /// match every producer. Each producer's consumers are instead scoped to
+    /// the original-body range it actually owns: from its own position up to
+    /// (not including) the next same-RegGroup producer, or the segment end for
+    /// the last one. A RegGroup with only one producer gets the unrestricted
+    /// range it always had.
     static std::vector<DsLoadPlan> collectDsLoads(const std::vector<IRBase*>& nodes,
                                                   size_t segBegin, size_t segEnd,
                                                   const std::vector<StinkyInstruction*>& order) {
+        std::unordered_map<const StinkyInstruction*, size_t> origIndex;
         std::vector<DsLoadPlan> loads;
         for (size_t i = segBegin; i < segEnd; ++i) {
             auto* inst = dyn_cast<StinkyInstruction>(nodes[i]);
-            if (!inst || !isMovableDsLoad(*inst)) continue;
+            if (!inst) continue;
+            origIndex.emplace(inst, i);
+            if (!isMovableDsLoad(*inst)) continue;
 
             DsLoadPlan plan;
             plan.inst = inst;
             plan.dest = toRegGroup(inst->getDestReg(0));
             plan.firstConsumer = UINT_MAX;
+            plan.origIndex = i;
+            loads.push_back(std::move(plan));
+        }
 
+        std::map<RegGroup, std::vector<DsLoadPlan*>> byReg;
+        for (DsLoadPlan& plan : loads) byReg[plan.dest].push_back(&plan);
+        for (auto& [group, plans] : byReg) {
+            std::sort(plans.begin(), plans.end(), [](const DsLoadPlan* a, const DsLoadPlan* b) {
+                return a->origIndex < b->origIndex;
+            });
+            for (size_t i = 0; i < plans.size(); ++i)
+                plans[i]->attribEnd = (i + 1 < plans.size()) ? plans[i + 1]->origIndex : segEnd;
+        }
+
+        for (DsLoadPlan& plan : loads) {
             for (unsigned k = 0; k < order.size(); ++k) {
+                auto it = origIndex.find(order[k]);
+                if (it == origIndex.end()) continue;
+                if (it->second < plan.origIndex || it->second >= plan.attribEnd) continue;
+
                 bool reads = false;
                 for (size_t s = 0; s < order[k]->getNumSrcRegs() && !reads; ++s)
                     reads = regOverlapsGroup(order[k]->getSrcReg(s), plan.dest);
                 if (!reads) continue;
                 plan.firstConsumer = std::min(plan.firstConsumer, k);
                 plan.lastConsumer = std::max(plan.lastConsumer, k);
+                plan.consumers.push_back(order[k]);
             }
-            if (plan.firstConsumer != UINT_MAX) loads.push_back(plan);
         }
+
+        loads.erase(std::remove_if(loads.begin(), loads.end(),
+                                   [](const DsLoadPlan& p) { return p.firstConsumer == UINT_MAX; }),
+                    loads.end());
         return loads;
     }
 
@@ -398,6 +446,69 @@ class WmmaReorder {
             plan.crossIter = true;
         }
         return true;
+    }
+
+    /// The positions (in `order`, circularly — a slot past the end wraps to 0)
+    /// during which @p plan's value occupies its physical register: from the
+    /// slot it is written to the last slot that reads it.
+    static std::vector<bool> occupiedSlots(const DsLoadPlan& plan, size_t n) {
+        std::vector<bool> mask(n, false);
+        for (size_t i = plan.slot;; i = (i + 1) % n) {
+            mask[i] = true;
+            if (i == plan.lastConsumer) break;
+        }
+        return mask;
+    }
+
+    /// Retarget a ds_load whose slot lost the register to a fresh placeholder:
+    /// the def, every wmma already known to read it, and its preheader twin (if
+    /// any) all move to the same virtual register together. Final assignment to
+    /// a real physical register is left to register allocation.
+    void virtualize(DsLoadPlan& plan) {
+        const StinkyRegister v = StinkyRegister::Virtual(nextVirtualIdx_++, plan.dest.size);
+        plan.inst->setDestReg(0, v);
+        for (StinkyInstruction* consumer : plan.consumers) {
+            for (size_t s = 0; s < consumer->getNumSrcRegs(); ++s)
+                if (regOverlapsGroup(consumer->getSrcReg(s), plan.dest)) consumer->setSrcReg(s, v);
+        }
+        if (plan.twin) plan.twin->setDestReg(0, v);
+    }
+
+    /// A wmma order is free to place any two ds_loads in any relative order,
+    /// but it cannot invent extra physical registers: if two different loads
+    /// share a RegGroup (normal double-buffering) and the new order makes their
+    /// occupied-slot windows overlap, the physical register can no longer hold
+    /// both values. The earliest producer for that register (by slot, with
+    /// same-iteration producers preferred over ones wrapped from the previous
+    /// iteration) keeps the physical register; every later producer whose
+    /// window collides is virtualized instead of silently clobbering the
+    /// earlier value.
+    void resolveRegisterConflicts(std::vector<DsLoadPlan>& loads, size_t n,
+                                  WmmaReorderOutcome& res) {
+        std::map<RegGroup, std::vector<DsLoadPlan*>> byReg;
+        for (DsLoadPlan& plan : loads) byReg[plan.dest].push_back(&plan);
+
+        for (auto& [group, plans] : byReg) {
+            if (plans.size() < 2) continue;
+            std::sort(plans.begin(), plans.end(), [](const DsLoadPlan* a, const DsLoadPlan* b) {
+                if (a->crossIter != b->crossIter) return !a->crossIter;
+                if (a->slot != b->slot) return a->slot < b->slot;
+                return a->origIndex < b->origIndex;
+            });
+
+            std::vector<bool> reserved(n, false);
+            for (DsLoadPlan* plan : plans) {
+                std::vector<bool> mine = occupiedSlots(*plan, n);
+                bool conflict = false;
+                for (size_t i = 0; i < n && !conflict; ++i) conflict = mine[i] && reserved[i];
+                if (conflict) {
+                    virtualize(*plan);
+                    ++res.conflictsVirtualized;
+                } else {
+                    for (size_t i = 0; i < n; ++i) reserved[i] = reserved[i] || mine[i];
+                }
+            }
+        }
     }
 
     /// Splice the new sequence back into the body. Only the movable nodes change
@@ -515,7 +626,8 @@ class StinkyWmmaReorderPassImpl : public StinkyInstPass {
                               << " wmmaMoved=" << res.wmmaMoved
                               << " dsLoadMoved=" << res.dsLoadMoved << " prefetch+"
                               << res.prefetchAdded << "/-" << res.prefetchRemoved
-                              << " iterOffsetDelta=" << res.iterOffsetDelta;
+                              << " iterOffsetDelta=" << res.iterOffsetDelta
+                              << " conflictsVirtualized=" << res.conflictsVirtualized;
                 else
                     std::cerr << ": " << res.skipReason;
                 std::cerr << "\n";
