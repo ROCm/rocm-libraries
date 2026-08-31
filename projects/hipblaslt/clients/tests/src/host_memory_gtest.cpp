@@ -5,19 +5,20 @@
  *
  *******************************************************************************/
 
-// Linux integration smokes for cgroup-aware host memory probing in d_vector.hpp.
-// Parsing edge cases live in cgroup_memory_probe_gtest.cpp.
-// No GPU allocations: reads sysinfo and cgroup sysfs only.
+// d_vector.hpp integration for the cgroup host-memory probe: proves hip_memory
+// delegates to cgroup_memory_probe.hpp on Linux. Live proc/mountinfo behaviour
+// is covered in cgroup_memory_probe_gtest.cpp.
 
+#include "cgroup_memory_probe.hpp"
 #include "d_vector.hpp"
 
 #include <gtest/gtest.h>
 
 #include <limits>
+#include <sys/sysinfo.h>
 
 namespace
 {
-    // hip_memory's constructor is protected; a trivial subclass reaches the probe API.
     struct HostMemoryProbe : hip_memory
     {
         HostMemoryProbe()
@@ -29,36 +30,28 @@ namespace
     };
 } // namespace
 
-TEST(HostMemoryProbeSmoke, CgroupAvailableMemoryNonZero)
+TEST(HostMemoryProbeLive, CgroupDelegateMatchesLiveProbe)
 {
 #ifndef __linux__
-    GTEST_SKIP() << "Linux-only: cgroup probe reads /proc/self/cgroup and cgroupfs";
+    GTEST_SKIP() << "Linux-only: hip_memory delegates to cgroup_available_memory_live()";
 #else
-    EXPECT_GT(HostMemoryProbe::cgroup_available_memory(), 0u);
+    EXPECT_EQ(HostMemoryProbe::cgroup_available_memory(),
+              hipblaslt_client::cgroup_available_memory_live());
 #endif
 }
 
-TEST(HostMemoryProbeSmoke, GetAvailableHostMemoryNonZero)
+TEST(HostMemoryProbeLive, GetAvailableHostMemoryMinFreeramAndCgroup)
 {
 #ifndef __linux__
-    GTEST_SKIP() << "Linux-only: host memory probe uses sysinfo(2)";
+    GTEST_SKIP() << "Linux-only: get_available_host_memory uses sysinfo(2)";
 #else
-    HostMemoryProbe probe;
-    EXPECT_GT(probe.get_available_host_memory(), 0u);
-#endif
-}
+    struct sysinfo info {};
+    ASSERT_EQ(sysinfo(&info), 0);
 
-TEST(HostMemoryProbeSmoke, GetAvailableHostMemoryWithinCgroupBudget)
-{
-#ifndef __linux__
-    GTEST_SKIP() << "Linux-only: min(freeram, cgroup headroom) is Linux-specific";
-#else
     HostMemoryProbe probe;
     size_t const cgroup = probe.cgroup_available_memory();
     size_t const host   = probe.get_available_host_memory();
 
-    EXPECT_GT(host, 0u);
-    // get_available_host_memory() is min(freeram, cgroup_available_memory()).
-    EXPECT_LE(host, cgroup);
+    EXPECT_EQ(host, std::min(static_cast<size_t>(info.freeram), cgroup));
 #endif
 }
