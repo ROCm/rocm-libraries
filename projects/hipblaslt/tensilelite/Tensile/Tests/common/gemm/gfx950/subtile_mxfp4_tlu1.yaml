@@ -397,11 +397,13 @@ BenchmarkProblems:
       # fixed; the assert does not catch them, since 320 and 384 are both whole
       # multiples of the MXBlock 32 that ASEM is derived from.
       #
-      # The odd sizes are here to be *rejected* -- an odd extent on a contiguous
-      # dim leaves the leading stride on a half byte, and the geometry sets
-      # AssertFree0/1ElementMultiple.  Drop that assert and they come back
-      # FAILED rather than vanishing, so they hold the guard in place.  This is
-      # a data-path constraint, not a scale one.
+      # Odd M/N is out of reach here, not untested: two fp4 share a byte, so an
+      # odd extent on a contiguous dim leaves the leading stride on a half byte
+      # and the geometry raises AssertFree0/1ElementMultiple on whichever operand
+      # is TLU=1.  Such sizes only ever come back DID_NOT_SATISFY_ASSERTS, so
+      # they are covered in subtile_mxfp4.yaml instead, where the contiguous dim
+      # is K and the assert does not apply.  This is a data-path constraint, not
+      # a scale one.
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -435,7 +437,4 @@ BenchmarkProblems:
           - Exact: [200, 256, 1, 256]   # M edge
           - Exact: [256, 200, 1, 256]   # N edge
           - Exact: [200, 200, 1, 512]   # M and N edge together, two K windows
-          - Exact: [33, 256, 1, 256]    # odd M   -- rejected, see above
-          - Exact: [256, 65, 1, 256]    # odd N   -- rejected
-          - Exact: [33, 65, 1, 256]     # both odd -- rejected
 
