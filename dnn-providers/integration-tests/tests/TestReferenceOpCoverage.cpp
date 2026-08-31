@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -17,7 +18,9 @@
 #include "harness/bundle/ReferenceOpCoverage.hpp"
 
 using hipdnn_integration_tests::ReferenceExecutorType;
+using hipdnn_integration_tests::bundle::formatUncoveredOps;
 using hipdnn_integration_tests::bundle::graphNodeTypes;
+using hipdnn_integration_tests::bundle::K_UNREADABLE_GRAPH;
 using hipdnn_integration_tests::bundle::NodeAttributes;
 using hipdnn_integration_tests::bundle::referenceCoversGraph;
 using hipdnn_integration_tests::bundle::referenceSupportedOps;
@@ -85,8 +88,9 @@ TEST(TestReferenceOpCoverage, NodeTypesAreReadFromTheGraph)
     const auto graph = buildBatchnormGraph();
     const auto types = graphNodeTypes(graph.data(), graph.size());
 
-    ASSERT_EQ(types.size(), 1u);
-    EXPECT_EQ(*types.begin(), NodeAttributes::BatchnormInferenceAttributes);
+    ASSERT_TRUE(types.has_value());
+    ASSERT_EQ(types->size(), 1u);
+    EXPECT_EQ(*types->begin(), NodeAttributes::BatchnormInferenceAttributes);
 }
 
 // An unreadable buffer must not be treated as "covered by everything" — that would
@@ -95,9 +99,22 @@ TEST(TestReferenceOpCoverage, UnreadableGraphIsNotCovered)
 {
     const std::vector<uint8_t> garbage(64, 0xAB);
 
-    EXPECT_TRUE(graphNodeTypes(garbage.data(), garbage.size()).empty());
+    EXPECT_FALSE(graphNodeTypes(garbage.data(), garbage.size()).has_value());
     EXPECT_FALSE(referenceCoversGraph(ReferenceExecutorType::CPU, garbage.data(), garbage.size()));
     EXPECT_FALSE(referenceCoversGraph(ReferenceExecutorType::GPU, garbage.data(), garbage.size()));
+}
+
+// "Not covered" and "nothing is uncovered" must not both be true of one graph: the
+// registration log prints an exclusion count next to the ops responsible for it, so
+// an unreadable graph that named no ops would report a gap with no reason attached.
+TEST(TestReferenceOpCoverage, UnreadableGraphNamesItselfAsTheReason)
+{
+    const std::vector<uint8_t> garbage(64, 0xAB);
+
+    const auto uncovered
+        = uncoveredNodeTypes(ReferenceExecutorType::CPU, garbage.data(), garbage.size());
+    ASSERT_EQ(uncovered.size(), 1u);
+    EXPECT_EQ(uncovered.front(), K_UNREADABLE_GRAPH);
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +139,26 @@ TEST(TestReferenceOpCoverage, DeviceReferenceDoesNotCoverBatchnormInference)
         = uncoveredNodeTypes(ReferenceExecutorType::GPU, graph.data(), graph.size());
     ASSERT_EQ(uncovered.size(), 1u);
     EXPECT_EQ(uncovered.front(), "BatchnormInferenceAttributes");
+}
+
+// ---------------------------------------------------------------------------
+// Registration diagnostic
+//
+// The exclusion tally alone says a gap exists without saying which op to
+// implement to close it, which is what made uncoveredNodeTypes() dead code.
+// ---------------------------------------------------------------------------
+
+TEST(TestReferenceOpCoverage, NoExclusionsAddsNothingToTheSummary)
+{
+    EXPECT_EQ(formatUncoveredOps({}), "");
+}
+
+TEST(TestReferenceOpCoverage, ExcludedOpsAreNamedAndSeparated)
+{
+    EXPECT_EQ(formatUncoveredOps({"BatchnormInferenceAttributes"}),
+              " (BatchnormInferenceAttributes)");
+    EXPECT_EQ(formatUncoveredOps({"ReductionAttributes", "ConvolutionBwdDataAttributes"}),
+              " (ConvolutionBwdDataAttributes, ReductionAttributes)");
 }
 
 // NOLINTEND(readability-identifier-naming)

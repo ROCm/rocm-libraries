@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
 #include <variant>
 #include <vector>
@@ -218,6 +219,7 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
     size_t registered = 0;
     size_t noGolden = 0;
     size_t uncovered = 0;
+    std::set<std::string> uncoveredOps;
 
     for(const auto& bundle : bundles)
     {
@@ -230,6 +232,16 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
                referenceType, bundle.bundle->graphBuffer.data(), bundle.bundle->graphBuffer.size()))
         {
             uncovered++;
+            // Name the ops responsible, not just the tally. The op set is a
+            // commitment (see ReferenceOpCoverage.hpp): "7 bundles excluded" says a
+            // gap exists, "7 excluded: ConvolutionBwdData, Reduction" says which one
+            // to close.
+            for(auto& nodeType : uncoveredNodeTypes(referenceType,
+                                                    bundle.bundle->graphBuffer.data(),
+                                                    bundle.bundle->graphBuffer.size()))
+            {
+                uncoveredOps.insert(std::move(nodeType));
+            }
             continue;
         }
 
@@ -251,7 +263,8 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
 
     std::cerr << "Golden-data validation (" << label << "): " << registered
               << " bundle(s) registered, " << noGolden << " without golden data, " << uncovered
-              << " outside this reference's supported-op set\n";
+              << " outside this reference's supported-op set" << formatUncoveredOps(uncoveredOps)
+              << "\n";
 }
 
 } // namespace detail

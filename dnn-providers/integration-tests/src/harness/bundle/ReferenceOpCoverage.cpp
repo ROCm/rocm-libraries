@@ -3,6 +3,7 @@
 
 #include "harness/bundle/ReferenceOpCoverage.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -61,7 +62,7 @@ const std::set<NodeAttributes>& referenceSupportedOps(ReferenceExecutorType type
     }
 }
 
-std::set<NodeAttributes> graphNodeTypes(const void* graphBuffer, size_t size)
+std::optional<std::set<NodeAttributes>> graphNodeTypes(const void* graphBuffer, size_t size)
 {
     std::set<NodeAttributes> types;
     try
@@ -75,10 +76,10 @@ std::set<NodeAttributes> graphNodeTypes(const void* graphBuffer, size_t size)
     }
     catch(const std::exception&)
     {
-        // An unreadable graph is not "covered by every reference" — returning an
-        // empty set would make referenceCoversGraph() vacuously true and register a
-        // test for a bundle nobody can run.
-        return {};
+        // An unreadable graph is not "covered by every reference". Reporting an
+        // empty set would make referenceCoversGraph() vacuously true and register
+        // a test for a bundle nobody can run.
+        return std::nullopt;
     }
     return types;
 }
@@ -86,28 +87,29 @@ std::set<NodeAttributes> graphNodeTypes(const void* graphBuffer, size_t size)
 bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, size_t size)
 {
     const auto types = graphNodeTypes(graphBuffer, size);
-    if(types.empty())
+    if(!types.has_value() || types->empty())
     {
         return false;
     }
 
     const auto& supported = referenceSupportedOps(type);
-    for(const auto nodeType : types)
-    {
-        if(supported.count(nodeType) == 0)
-        {
-            return false;
-        }
-    }
-    return true;
+    return std::all_of(types->begin(), types->end(), [&supported](const auto nodeType) {
+        return supported.count(nodeType) != 0;
+    });
 }
 
 std::vector<std::string>
     uncoveredNodeTypes(ReferenceExecutorType type, const void* graphBuffer, size_t size)
 {
+    const auto types = graphNodeTypes(graphBuffer, size);
+    if(!types.has_value())
+    {
+        return {std::string(K_UNREADABLE_GRAPH)};
+    }
+
     std::vector<std::string> uncovered;
     const auto& supported = referenceSupportedOps(type);
-    for(const auto nodeType : graphNodeTypes(graphBuffer, size))
+    for(const auto nodeType : *types)
     {
         if(supported.count(nodeType) == 0)
         {
@@ -116,6 +118,25 @@ std::vector<std::string>
         }
     }
     return uncovered;
+}
+
+std::string formatUncoveredOps(const std::set<std::string>& uncoveredOps)
+{
+    if(uncoveredOps.empty())
+    {
+        return {};
+    }
+
+    std::string formatted = " (";
+    const char* separator = "";
+    for(const auto& op : uncoveredOps)
+    {
+        formatted += separator;
+        formatted += op;
+        separator = ", ";
+    }
+    formatted += ")";
+    return formatted;
 }
 
 } // namespace hipdnn_integration_tests::bundle

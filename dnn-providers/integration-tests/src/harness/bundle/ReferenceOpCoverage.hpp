@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -15,6 +17,10 @@ namespace hipdnn_integration_tests::bundle
 {
 
 using NodeAttributes = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+
+/// Stands in for the node list of a graph whose buffer failed verification, in the
+/// one place a node list is only ever printed.
+inline constexpr std::string_view K_UNREADABLE_GRAPH = "<unreadable graph>";
 
 /// The ops each reference executor is *required* to handle.
 ///
@@ -34,14 +40,31 @@ using NodeAttributes = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 /// cannot drift from the graph.
 const std::set<NodeAttributes>& referenceSupportedOps(ReferenceExecutorType type);
 
-/// Node types this graph uses. Empty if the buffer cannot be walked.
-std::set<NodeAttributes> graphNodeTypes(const void* graphBuffer, size_t size);
+/// Node types this graph uses, or nullopt when the buffer cannot be walked.
+///
+/// The two cases are distinct and callers must keep them apart: a graph with no
+/// nodes is covered by every reference, an unreadable one is covered by none. An
+/// empty set used to mean both, which made referenceCoversGraph() and
+/// uncoveredNodeTypes() disagree -- "not covered, but nothing is uncovered".
+std::optional<std::set<NodeAttributes>> graphNodeTypes(const void* graphBuffer, size_t size);
 
-/// True iff every node in the graph is inside `type`'s required-op set.
+/// True iff the graph is readable and every node in it is inside `type`'s
+/// required-op set.
 bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, size_t size);
 
 /// Human-readable node types the given reference does not cover, for diagnostics.
+///
+/// An unreadable graph yields a single sentinel entry rather than nothing, so a
+/// caller printing this never reports an exclusion with no reason attached.
 std::vector<std::string>
     uncoveredNodeTypes(ReferenceExecutorType type, const void* graphBuffer, size_t size);
+
+/// The parenthesised op list appended to the registration summary, or "" when the
+/// set is empty.
+///
+/// Split out from the summary line itself so it is testable without calling
+/// registerReferenceValidationTests(), which is inline and reaches
+/// sharedReferenceExecutors() -- the unit target deliberately does not link that.
+std::string formatUncoveredOps(const std::set<std::string>& uncoveredOps);
 
 } // namespace hipdnn_integration_tests::bundle
