@@ -108,8 +108,13 @@ BasicBlock::iterator iteratorOf(BasicBlock& bb, const IRBase* node) {
 
 /// Insertion point for a new preheader prefetch: after everything, but ahead of
 /// the block's branch so the CFG edge stays last.
+///
+/// getTerminator() returns null on an empty block (e.g. one whose only
+/// instructions were just erased by de-rotating every existing prefetch) --
+/// dyn_cast requires a non-null argument, so that case must be checked first.
 BasicBlock::iterator preheaderInsertPoint(BasicBlock& bb) {
-    auto* term = dyn_cast<StinkyInstruction>(bb.getTerminator());
+    IRBase* last = bb.getTerminator();
+    auto* term = last ? dyn_cast<StinkyInstruction>(last) : nullptr;
     if (term && term->is(InstFlag::IF_Branch)) return iteratorOf(bb, term);
     return bb.end();
 }
