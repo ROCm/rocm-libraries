@@ -399,10 +399,10 @@ def _validate_uhd(desc, source_root):
     """UHD: adapter is a closed enum, and an adapter that reads a model has to
     name one. Mirrors parseHeuristicDescriptor.
 
-    A missing model artifact is a hard error rather than a warning. The runtime
-    treats an absent one as a reason to degrade to declared order, so shipping a
-    UHD whose artifact never got packaged produces an engine that silently stops
-    using its model -- the failure mode this check exists to prevent.
+    A missing model artifact is a hard error. The runtime drops an engine whose
+    artifact is absent rather than shipping one that silently stops using its
+    model, so a UHD packed without its artifact costs the whole engine. Catching
+    it here reports it against the source tree, where the fix is.
     """
     where = f"UHD {desc.path.name}"
     _require(desc.doc, ["name", "adapter"], where)

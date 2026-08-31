@@ -238,11 +238,22 @@ TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
     EXPECT_EQ(minRanked.front().kernelId, testId(0x01)); // ... so it loses when minimising
 }
 
-TEST(TestIngestorUhdKernelHeuristic, AnAbsentArtifactDegradesToDeclaredOrder)
+/// An artifact that exists and will not load degrades to declared order.
+///
+/// This is the case the factory is left holding. A *missing* artifact never reaches
+/// here through a descriptor tree -- DescriptorLoader drops that engine before the
+/// factory is called -- so the reachable failure is a file that is present and unusable:
+/// a truncated download, or a model built against a different schema. RFC 0019 §5 keeps
+/// the engine selecting by declared order rather than failing the request.
+TEST(TestIngestorUhdKernelHeuristic, AnUnloadableArtifactDegradesToDeclaredOrder)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_absent");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_corrupt");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), "not_written.bin"));
+    // Not a GbdtModel buffer, and not empty either: an empty file could fail a size check
+    // before anything parsed it, which would exercise less than this claims to.
+    std::ofstream(dir.path() / "model.bin", std::ios::binary) << "not a flatbuffer at all";
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), "model.bin"));
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;

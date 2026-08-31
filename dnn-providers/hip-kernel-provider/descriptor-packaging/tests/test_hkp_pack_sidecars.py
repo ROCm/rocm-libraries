@@ -5,8 +5,8 @@
 Discovery globs `*.json`, so every other descriptor the packer handles is fully
 described by a file it already found. A `tree_data` UHD is the exception: its
 `tree_data.artifact` is a path to a model the runtime reads on every candidate
-score, and it has to reach the packed tree or the runtime loads the descriptor,
-fails to find the artifact, and silently degrades to declared order.
+score, and it has to reach the packed tree or the runtime finds the artifact
+missing and drops the engine.
 
 These cases pin the three things that can go wrong: the file is not resolved, it
 is resolved from the wrong place, or it is resolved and then not staged.
@@ -159,12 +159,12 @@ class TestResolution:
 
 class TestRejection:
     def test_missing_artifact_is_an_error_not_a_warning(self, tmp_path: Path):
-        """The runtime degrades silently on a missing artifact; the packer must not.
+        """A UHD packed without its artifact costs the whole engine at runtime.
 
-        DescriptorLoader logs an error and ranks by priority when the artifact
-        is absent, so a UHD that shipped without one produces an engine that
-        quietly stops using its model. Catching it at pack time is the only place
-        it is loud.
+        DescriptorLoader drops an engine whose model artifact is absent. Catching
+        it at pack time reports it against the source tree, where the missing file
+        can still be added, rather than on a customer's machine as an engine that
+        is simply not there.
         """
         root = tmp_path / "src"
         _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd("absent.bin"))
@@ -175,8 +175,8 @@ class TestRejection:
     def test_an_adapter_that_reads_a_model_must_name_one(self, tmp_path: Path):
         """A `tree_data` UHD with no body is a descriptor that can never score.
 
-        The runtime would take it as absent and degrade; the packer sees the
-        whole document and can say so.
+        The runtime would take it as absent and drop the engine; the packer sees
+        the whole document and can say so against the source tree.
         """
         root = tmp_path / "src"
         doc = _model_uhd("model.bin")
