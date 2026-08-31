@@ -106,6 +106,25 @@ namespace TensileLite
                 hipAMDGPU->analyticalHardware->arch);
         }
 
+        // Bytes the per-XCD work-queue counters occupy: one cache line each, so
+        // no two share a line. The kernel places them at the base of the
+        // AddressFlags buffer and starts the ready flags after them (StreamK.py
+        // _wsFlagsBaseOffset is this same product). 0 when the architecture
+        // cannot be determined.
+        inline size_t streamKQueueRegionBytes(Hardware const& hardware)
+        {
+            return streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
+        }
+
+        // True when the launch takes the dynamic work-queue path and so carries
+        // that region: SK4, and the SK4 sub-mode of SK5. `effectiveDynamic` is
+        // the resolved SK5 sub-mode and is ignored for every other value.
+        inline bool streamKUsesDynamicQueue(SizeMapping const& sizeMapping, bool effectiveDynamic)
+        {
+            return sizeMapping.streamK == 4
+                   || (sizeMapping.streamK == 5 && effectiveDynamic);
+        }
+
         // The dynamic-queue fetch / work stealing is only correct when the
         // device's runtime NUM_XCD is a power of two AND equals the baked
         // per-XCD queue count. Returns true (UNSUPPORTED) when the hardware is
@@ -3508,13 +3527,11 @@ namespace TensileLite
             // any kernel-arg packing or kernel launch. It is not, however,
             // output-free -- the helpers it calls can write TENSILE_DB diagnostics
             // to stderr (streamK5EffectiveDynamic's SK5 mode-selection note under
-            // 0x100000, getSKGridImpl's CU-occupancy note under
-            // printPropertyEvaluation). Neither is reachable on a guard-rejected
-            // launch as the code stands (the guard only fires on the dynamic-queue
-            // path, where the reduction is forced to tree without calling
-            // getSKReduction and getSKGridImpl takes its diagnostic-free
-            // branches), but a future edit that prints from those helpers would
-            // start emitting for solutions this guard goes on to reject.
+            // 0x100000, getSKGridImpl's CU-occupancy and flag-region-clamp notes
+            // under printPropertyEvaluation). The clamp note is reachable on a
+            // guard-rejected launch: it fires on the same dynamic-queue path the
+            // guard rejects. So a solution rejected below may already have
+            // printed one line under printPropertyEvaluation.
             skDecisions = computeStreamKDecisions(problem, hardware);
             // Defensive: dynamic-queue / work-stealing StreamK solutions are
             // excluded from selection on devices whose runtime XCD count is not
@@ -4012,18 +4029,11 @@ namespace TensileLite
                 {
                     size_t idealWorkspace = partialTileSize(skGrid);
                     // Reserve the per-XCD work-queue region for the dynamic-queue
-                    // path. Sized as (per-queue stride) * (baked per-XCD queue
-                    // count), both from origami: the stride is the L2 cache-line
-                    // size (get_default_cache_line_bytes, 128 B for gfx942/gfx950)
-                    // so each counter owns its line (no false sharing), and the
-                    // queue count is the per-arch XCD count (e.g. 8 for
-                    // gfx942/gfx950). This may slightly over-report on a device
-                    // that falls back to tree reduction (e.g. MI300A), which is
-                    // safe (never under-sized).
-                    if(sizeMapping.streamK == 4
-                       || (sizeMapping.streamK == 5 && effectiveDynamic))
-                        idealWorkspace
-                            += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
+                    // path. This may slightly over-report on a device that falls
+                    // back to tree reduction (e.g. MI300A), which is safe (never
+                    // under-sized).
+                    if(streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
+                        idealWorkspace += streamKQueueRegionBytes(hardware);
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
                     if(idealWorkspace <= problem.workspaceSize())
@@ -4666,6 +4676,30 @@ namespace TensileLite
                 *outTreeBoundsFallback = false;
             if(outClusterDPGridClamp)
                 *outClusterDPGridClamp = false;
+
+            // Both the grid choice below and the flag-region clamp at the end
+            // need the resolved StreamK 5 sub-mode, and resolving it is not
+            // free: streamK5EffectiveDynamic() can throw (TENSILE_ASSERT_EXC on
+            // a missing analytical hardware) and prints a debug line, so a
+            // second call would double-print and widen the throw surface.
+            // Resolve it at most once, and only when a caller that did not
+            // already hand one down actually asks. Returns false for every
+            // sizeMapping.streamK other than 5, where there is no sub-mode.
+            bool sk5DynamicKnown = false;
+            bool sk5DynamicValue = false;
+            auto sk5DynamicSubMode = [&]() -> bool {
+                if(self.sizeMapping.streamK != 5)
+                    return false;
+                if(!sk5DynamicKnown)
+                {
+                    sk5DynamicValue  = (sk5EffectiveDynamic != nullptr)
+                                           ? *sk5EffectiveDynamic
+                                           : self.streamK5EffectiveDynamic(problem, hardware);
+                    sk5DynamicKnown = true;
+                }
+                return sk5DynamicValue;
+            };
+
             size_t     skGrid    = tiles; // Fallback
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             if(streamKDP)
@@ -4694,12 +4728,7 @@ namespace TensileLite
             }
             else if(pAMDGPU->skDynamicGrid > 0)
             {
-                const bool sk5UsesSK4Grid
-                    = (self.sizeMapping.streamK == 5)
-                      && (sk5EffectiveDynamic != nullptr
-                              ? *sk5EffectiveDynamic
-                              : self.streamK5EffectiveDynamic(problem, hardware));
-                if(self.sizeMapping.streamK == 4 || sk5UsesSK4Grid)
+                if(self.sizeMapping.streamK == 4 || sk5DynamicSubMode())
                 {
                     // Limit workgroups per CU to 3
                     // TODO Verify this limit is best
@@ -4846,12 +4875,15 @@ namespace TensileLite
                     *outClusterDPGridClamp = true;
             }
 
-            // The flag region holds one int per Stream-K workgroup, indexed by
-            // CTA id ("flag offset based on CTA index" in StreamK.py), so a grid
-            // wider than the region would have workgroups writing past the end
-            // of their own block. Every caller reaches skGrid through here and
-            // this is the last write, so it is the one place the bound has to
-            // hold.
+            // The flag region holds one int per Stream-K workgroup. The static
+            // paths index it by CTA id ("flag offset based on CTA index" in
+            // StreamK.py); SK4 and the SK4 sub-path of SK5 index it by partial
+            // index instead ("flag offset based on partial index", StreamK.py
+            // ~1742 and ~4033) off a base that already skips the work-queue
+            // counters. Either way a grid wider than what that indexing reaches
+            // would have workgroups writing past the end of their own block.
+            // Every caller reaches skGrid through here and this is the last
+            // write, so it is the one place the bound has to hold.
             //
             // Only the launches that actually reach the flags are bounded:
             //
@@ -4870,24 +4902,48 @@ namespace TensileLite
             // region to overrun, and against the data-parallel fallbacks it
             // would do real harm: the tree-fixup bound sets skGrid = tiles
             // precisely to leave Stream-K behind, and cutting that back would
-            // return the launch to the K-split it was escaping. No current part
-            // reaches the bound on the paths that are checked; gfx950 has 256
-            // CUs and picks 224.
+            // return the launch to the K-split it was escaping. skGrid defaults
+            // to the CU count, well inside the bound on a 256-CU gfx950, but
+            // TENSILE_STREAMK_GRID_MULTIPLIER scales it with no cap of its own.
             const bool usesFlagRegion = self.sizeMapping.streamKAtomic == 0
                                         && self.sizeMapping.streamKForceDPOnly == 0
                                         && reductionStrat != origami::reduction_t::parallel
                                         && skGrid > 0 && (tiles % skGrid) != 0;
 
-            if(usesFlagRegion && skGrid > static_cast<size_t>(StreamKFlagElements))
+            // SK4 and the SK4 sub-path of SK5 start their flags after the
+            // per-XCD work-queue counters, so they index fewer entries than the
+            // region holds. The rest index from 0 and keep all of them;
+            // tightening every path would cost them grid they are entitled to.
+            size_t flagEntries = StreamKFlagElements;
+            // The && short-circuits, so a launch that never reaches the flags
+            // does not pay for resolving the SK5 sub-mode.
+            if(usesFlagRegion && streamKUsesDynamicQueue(self.sizeMapping, sk5DynamicSubMode()))
+            {
+                const size_t prefixEntries = streamKQueueRegionBytes(hardware) / sizeof(int);
+                // Subtracting is only safe while the prefix leaves entries
+                // behind. Neither way in is reachable today: an unknown arch
+                // reports a 0-byte prefix and is rejected before this by
+                // streamKDynamicQueueUnsupported, and no shipping part has a
+                // cache line * XCD product anywhere near StreamKFlagElements
+                // ints. Should one ever get here the full bound is kept, which
+                // is the unsafe direction -- it would hand back grid past the
+                // flags the kernel indexes -- so this guard is a placeholder
+                // for a real decision, not a safe fallback.
+                if(prefixEntries < flagEntries)
+                    flagEntries -= prefixEntries;
+            }
+
+            if(usesFlagRegion && skGrid > flagEntries)
             {
                 if(Debug::Instance().printPropertyEvaluation())
                 {
                     std::cerr << "TensileLite::DEBUG: kernel '" << self.kernelName
-                              << "' StreamK grid " << skGrid << " exceeds the "
-                              << StreamKFlagElements << "-entry flag region (tiles=" << tiles
-                              << "); clamping the grid to " << StreamKFlagElements << ".\n";
+                              << "' StreamK grid " << skGrid << " exceeds the " << flagEntries
+                              << " usable entries of the " << StreamKFlagElements
+                              << "-entry flag region (tiles=" << tiles
+                              << "); clamping the grid to " << flagEntries << ".\n";
                 }
-                skGrid = StreamKFlagElements;
+                skGrid = flagEntries;
             }
 
             return skGrid;
@@ -4991,9 +5047,8 @@ namespace TensileLite
         d.streamKDP            = streamKDP;
         d.forceDPOnly          = forceDPOnly;
 
-        const bool isDynamic
-            = (sizeMapping.streamK == 4) || (sizeMapping.streamK == 5 && effectiveDynamic);
-        d.isDynamic = isDynamic;
+        const bool isDynamic = streamKUsesDynamicQueue(sizeMapping, effectiveDynamic);
+        d.isDynamic          = isDynamic;
 
         d.numQueues           = streamKBakedQueueCount(hardware);
         d.givenWorkspaceBytes = problem.workspaceSize();
@@ -5011,8 +5066,7 @@ namespace TensileLite
             needPartials   = true;
             idealWorkspace = partialTileSize(grid);
             if(isDynamic)
-                idealWorkspace
-                    += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
+                idealWorkspace += streamKQueueRegionBytes(hardware);
             if(idealWorkspace > problem.workspaceSize())
             {
                 reduction                  = origami::reduction_t::tree;
