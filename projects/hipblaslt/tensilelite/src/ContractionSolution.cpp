@@ -5353,134 +5353,34 @@ namespace TensileLite
             }
 
             // If no option is specified, launch exactly cuCount worth of workgroups.
+            // The universal partial-tile guard below corrects this to tiles when
+            // cuCount causes CTAs to cross tile boundaries.
             else
             {
                 skGrid = cuCount;
             }
 
-            // Under uniform-summation-order + static two-tile packing, snap the chain output
-            // g0 onto an admissible uniform grid. F-star is never-upward
-            // (g0 > tiles). When g0 < tiles, snap up to tiles (all-full): mixed
-            // GridDividesTiles (tiles % g0 == 0) is two-tile DP+SK that gfx950
-            // does not store (workspace skipped, SK D rows stay poison). Must
-            // run before the magic-division guard below so that guard still
-            // validates the final grid (a snap after it can emit out-of-range
-            // itersPerWG). Same ABI predicate as checkUniformSummationOrder.
-            if(problem.getParams().uniformSummationOrder() && tiles > 0 && skGrid > 0)
+            // Correct skGrid if it would force CTAs to cross tile boundaries.
+            // Delegated to Origami so the logic is co-located with other SK grid decisions.
             {
-                const bool effectiveDynamic
-                    = (self.sizeMapping.streamK == 5)
-                      && (sk5EffectiveDynamic != nullptr
-                              ? *sk5EffectiveDynamic
-                              : self.streamK5EffectiveDynamic(problem, hardware));
-                const bool staticTwoTilePacking
-                    = (self.sizeMapping.streamK == 3)
-                      || (self.sizeMapping.streamK == 5 && !effectiveDynamic);
-                if(staticTwoTilePacking)
+                size_t skBatch = 1;
+                for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                    skBatch *= problem.batchSize(i);
+                size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
+                skGrid = origami::streamk::correct_sk_grid_for_partial_tiles(
+                    skGrid, tiles, itersPerTile, cuCount, skBatch);
+
+                // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
+                // If we exceed those bounds, fall back to DP.
+                if(reductionStrat == origami::reduction_t::tree)
                 {
-                    const size_t g0 = skGrid;
-                    // Same clamp as the packer / gate: K==0 yields I==0 otherwise.
-                    const size_t I
-                        = std::max(size_t{1}, problem.getItersPerTile(self.sizeMapping));
-                    // Matches origami::streamk MinItersPerCU (streamk.cpp).
-                    constexpr size_t MinItersPerCU = 8;
-                    const bool perTileExtraIters = self.internalArgsSupport.perTileExtraIters;
+                    size_t itersPerWG = tiles * itersPerTile / skGrid;
 
-                    // The flag-region bound is a constraint ON this selection, not
-                    // a correction applied after it. Every grid this snap can emit
-                    // for F >= 2 is tiles * F > tiles, so tiles % skGrid == tiles
-                    // != 0 and the flag clamp below would fire on exactly these
-                    // grids -- rewriting tiles * F to StreamKFlagElements, which is
-                    // not in general a multiple of tiles and so is refused by
-                    // checkUniformSummationOrder as a non-row-uniform static split.
-                    // Folding the bound in here instead means the search picks a
-                    // uniform grid that already satisfies it and the clamp becomes
-                    // a no-op, so the flag-region invariant is enforced exactly as
-                    // before and never has to rewrite a uniform grid.
-                    //
-                    // Conditioned on the same three predicates the clamp uses, so a
-                    // launch that never touches the flag region is not constrained
-                    // by its size. The clamp's fourth predicate (tiles % skGrid !=
-                    // 0) is implied for every F >= 2 candidate and so is omitted.
-                    // The all-full grid (F == 1, skGrid == tiles) satisfies
-                    // tiles % skGrid == 0, uses no flag region at all, and is
-                    // therefore admissible at any tile count -- which is what keeps
-                    // FStar = 1 a valid floor even when tiles itself exceeds the
-                    // bound.
-                    const bool flagRegionBinds
-                        = self.sizeMapping.streamKAtomic == 0
-                          && self.sizeMapping.streamKForceDPOnly == 0
-                          && reductionStrat != origami::reduction_t::parallel;
-
-                    if(g0 > tiles)
-                    {
-                        const size_t F0    = g0 / tiles;
-                        size_t       FStar = 1; // always admissible (all-full)
-                        for(size_t F = F0; F >= 2; --F)
-                        {
-                            // Tree all-partial without per-tile extras needs
-                            // F | I. Parallel extras are per PartialIdx and
-                            // tile-symmetric without that capability bit, so
-                            // skip the divisibility requirement for parallel.
-                            if(reductionStrat != origami::reduction_t::parallel
-                               && !perTileExtraIters && (I % F) != 0)
-                                continue;
-                            if((I / F) < MinItersPerCU)
-                                continue;
-                            // F==1 needs no partials; for F>=2 require workspace fit.
-                            if(self.partialTileSize(tiles * F) > problem.workspaceSize())
-                                continue;
-                            // Stay inside the flag region these grids will use.
-                            if(flagRegionBinds
-                               && (tiles * F) > static_cast<size_t>(StreamKFlagElements))
-                                continue;
-                            FStar = F;
-                            break;
-                        }
-                        skGrid = tiles * FStar;
-                    }
-                    else if(g0 < tiles)
+                    if(itersPerTile >= 65536 || itersPerWG >= 65536
+                       || (tiles * itersPerTile) >= 16777216)
                     {
                         skGrid = tiles;
                     }
-
-                    if(skGrid != g0
-                       && (pAMDGPU->skFixedGrid > 0 || pAMDGPU->skMaxCUs > 0
-                           || pAMDGPU->skGridMultiplier > 1))
-                    {
-                        warnStreamKUniformityGridSnapOnce(g0, skGrid);
-                    }
-                }
-            }
-
-            // Grid selected by the config/CU/override logic, captured before the
-            // "reset to tiles" tree-fixup-bounds fallback below.
-            //
-            // Captured AFTER the uniform-summation-order snap above, because that
-            // snap is grid SELECTION under uniform summation order -- it is how an
-            // admissible uniform grid is chosen -- and not one of the post-selection
-            // fallbacks the launch summary attributes with `changedBy`. Capturing
-            // ahead of it would report selected != final with changedBy = none,
-            // which is exactly the unattributed-rewrite misreport the out-params
-            // exist to prevent. The snap emits its own
-            // warnStreamKUniformityGridSnapOnce() note when it overrides an
-            // explicitly requested grid, so the override is still observable.
-            if(outSelectedGrid)
-                *outSelectedGrid = skGrid;
-
-            // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
-            // If we exceed those bounds, fall back to DP.
-            if(reductionStrat == origami::reduction_t::tree)
-            {
-                size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
-                size_t itersPerWG   = tiles * itersPerTile / skGrid;
-
-                if(itersPerTile >= 65536 || itersPerWG >= 65536
-                   || (tiles * itersPerTile) >= 16777216)
-                {
-                    skGrid = tiles;
-                    if(outTreeBoundsFallback)
-                        *outTreeBoundsFallback = true;
                 }
             }
 

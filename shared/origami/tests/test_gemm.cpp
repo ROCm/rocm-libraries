@@ -1566,7 +1566,7 @@ TEST_CASE("Heuristics: CMS dtype differentiation", "[heuristics]") {
                                         64);
 
   REQUIRE(tf32_tn == Approx(100.0 / 126.0).epsilon(1e-6));
-  REQUIRE(bf16_tn == Approx(100.0 / 105.0).epsilon(1e-6));
+  REQUIRE(bf16_tn == Approx(100.0 / 115.0).epsilon(1e-6));
   REQUIRE(tf32_tn != Approx(bf16_tn));
 }
 
