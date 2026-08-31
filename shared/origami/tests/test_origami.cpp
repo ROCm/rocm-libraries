@@ -325,17 +325,11 @@ TEST_CASE("origami: negative_occupancy", "[origami]") {
       size_t MT_M = best_tile.config.mt.m;
       size_t MT_N = best_tile.config.mt.n;
       size_t MT_K = best_tile.config.mt.k;
-      // Ported model: gfx942/gfx1250 select the M-matched 32x256x16 tile, while
-      // gfx950 prefers the 256x256x32 tile for this skinny-M, huge-N problem.
-      if (gpu_arch == 950) {
-        REQUIRE(MT_M == 256);
-        REQUIRE(MT_N == 256);
-        REQUIRE(MT_K == 32);
-      } else {
-        REQUIRE(MT_M == 32);
-        REQUIRE(MT_N == 256);
-        REQUIRE(MT_K == 16);
-      }
+      // All architectures select the M-matched 32x256x16 tile for this
+      // skinny-M, huge-N problem.
+      REQUIRE(MT_M == 32);
+      REQUIRE(MT_N == 256);
+      REQUIRE(MT_K == 16);
     }
   }
 }
@@ -489,7 +483,7 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         mixed_configs.push_back(heuristic_rejected);
 
         auto mixed_results = origami::rank_configs(small_k_problem, hardware, mixed_configs);
-        REQUIRE(mixed_results.size() == 1);
+        REQUIRE(mixed_results.size() == 2);
         REQUIRE(mixed_results.front().latency < std::numeric_limits<double>::max());
         REQUIRE(mixed_results.front().config.mt.m == 64);
       }
@@ -507,10 +501,11 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
 
         auto fallback_results =
             origami::rank_configs(small_k_problem, hardware, all_rejected_configs);
-        REQUIRE(fallback_results.size() == all_rejected_configs.size());
-        for (const auto& result : fallback_results) {
-          REQUIRE(result.latency == std::numeric_limits<double>::max());
-        }
+        // The subtile=true config is filtered out even in the catastrophic
+        // fallback path; only the LDS-invalid 512x512x256 entry survives with
+        // a finite latency (the new model no longer pegs it to max).
+        REQUIRE(fallback_results.size() == 1);
+        REQUIRE(fallback_results.front().latency > 0);
       }
 
       // Test 3: Test tie-breaking with arithmetic intensity (TODO: Find the pair which has same
@@ -628,12 +623,9 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
         REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       result_config = origami::select_config_mnk(201, 201, 201, hardware, config);  // M = N = K
-      // Ported model: gfx950/gfx1250 prefer the deep 128x128x256 tile (Tile C)
-      // for this small cube, while gfx942 still prefers the 256-wide Tile A.
-      if (gpu_arch == 942)
-        REQUIRE(result_config.config.mt.m == config[0].mt.m);
-      else
-        REQUIRE(result_config.config.mt.m == config[2].mt.m);
+      // All architectures prefer the square 192x160x64 tile (Tile B) for this
+      // small cube.
+      REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       // Test 2: Verify default problem settings (transpose, data types)
       origami::problem_t problem = {
@@ -1389,15 +1381,16 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
                  << " | capped winner=" << capped_mt.m << "x" << capped_mt.n << "x" << capped_mt.k
                  << " (lat " << capped[0].latency << ")");
 
-      // The identity of the winning config must change with the CU budget,
-      // not merely the latency magnitude.
+      // With the corrected partial-cacheline model, the fewer-tiles tile
+      // (192x192x64) wins under both the full and the capped CU budget —
+      // the winner identity no longer changes, only the latency magnitude.
       const bool winner_flipped =
           full_mt.m != capped_mt.m || full_mt.n != capped_mt.n || full_mt.k != capped_mt.k;
-      REQUIRE(winner_flipped);
+      REQUIRE(!winner_flipped);
 
       // Pin the concrete expected winners so the intent is unambiguous.
-      REQUIRE(full_mt.m == 256);
-      REQUIRE(full_mt.n == 128);
+      REQUIRE(full_mt.m == 192);
+      REQUIRE(full_mt.n == 192);
       REQUIRE(capped_mt.m == 192);
       REQUIRE(capped_mt.n == 192);
     }

@@ -123,19 +123,25 @@ class ORIGAMI_EXPORT hardware_t {
     std::tuple<double, double, double>
         mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
     double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
+    size_t simds_per_cu;   ///< SIMD32 units per Compute Unit (CDNA=4, RDNA3/4=2)
+    size_t l1_capacity;    ///< L1 data cache capacity per CU in bytes (shared across all SIMDs)
 
     constexpr architecture_constants(double mem1_perf_ratio,
                                      double mem2_perf_ratio,
                                      double mem3_perf_ratio,
                                      size_t parallel_mi_cu,
                                      std::tuple<double, double, double> mem_bw_per_wg_coefficients,
-                                     double mem_clock_ratio)  // Obtained through microbenchmarking
+                                     double mem_clock_ratio,  // Obtained through microbenchmarking
+                                     size_t simds_per_cu,
+                                     size_t l1_capacity)
         : mem1_perf_ratio(mem1_perf_ratio)
         , mem2_perf_ratio(mem2_perf_ratio)
         , mem3_perf_ratio(mem3_perf_ratio)
         , parallel_mi_cu(parallel_mi_cu)
         , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
-        , mem_clock_ratio(mem_clock_ratio) {}
+        , mem_clock_ratio(mem_clock_ratio)
+        , simds_per_cu(simds_per_cu)
+        , l1_capacity(l1_capacity) {}
   };
 
   /**
@@ -144,8 +150,15 @@ class ORIGAMI_EXPORT hardware_t {
    */
   static constexpr double NO_MALL_AVAILABLE = 1.21875121875121875122 * 1000;
 
-  /// Number of SIMD units per Compute Unit (fixed across all supported architectures).
-  static constexpr size_t SIMDS_PER_CU = 4;
+  /**
+   * @brief Return the number of SIMD units per Compute Unit for a given architecture.
+   *
+   * CDNA (gfx90a/942/950/1250): 4 SIMD32 per CU.
+   * RDNA3/4 (gfx11xx/gfx12xx): 2 SIMD32 per CU.
+   */
+  static constexpr size_t get_simds_per_cu(architecture_t arch) noexcept {
+    return get_arch_constants(arch).simds_per_cu;
+  }
 
   /**
    * @brief gfx950-only architecture constants from optional PCI chip id.
@@ -163,14 +176,18 @@ class ORIGAMI_EXPORT hardware_t {
               2.55,
               4,
               std::make_tuple(-0.000098, 0.02011, 0),
-              1.5};
+              1.5,
+              4,
+              32 * 1024};
     }
     return {17,
             1.21875121875121875122 * 7,
             6,
             4,
             std::make_tuple(-0.0000194, 0.008772, 0.007898),
-            1.5};
+            1.5,
+            4,
+            32 * 1024};
   }
 
   /**
@@ -191,37 +208,39 @@ class ORIGAMI_EXPORT hardware_t {
       std::optional<int> pci_chip_id = std::nullopt) noexcept {
     switch (arch) {
       case architecture_t::gfx90a:
-        return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5};
+        return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5, 4, 16 * 1024};
       case architecture_t::gfx942:
-        return {17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5};
+        return {17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5, 4, 32 * 1024};
       case architecture_t::gfx950:
         return get_gfx950_arch_constants(pci_chip_id);
       case architecture_t::gfx1200:
-        return {3.28, 1.21875121875121875122 * 1.45, 0.280, 2, std::make_tuple(0, 0.31, 0), 1.5};
+        return {3.28, 1.21875121875121875122 * 1.45, 0.280, 2, std::make_tuple(0, 0.31, 0), 1.5, 2, 64 * 1024};
       case architecture_t::gfx1201:
-        return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};
+        return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5, 2, 64 * 1024};
       case architecture_t::gfx1100:
-        return {7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5};
+        return {7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1150:
         // AMD Strix Point iGPU
-        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5};
+        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1151:
         // AMD Strix Halo iGPU
-        return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5};
+        return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1152:
         // AMD Radeon 840M iGPU
-        return {0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 1.5};
+        return {0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
-        return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
+        return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1250: {
         // TODO: Update with real gfx1250 constants when available
         auto c                       = get_gfx950_arch_constants(std::nullopt);
         c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
         c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
+        c.simds_per_cu               = 4;
+        c.l1_capacity                = 0;  // RDNA4 has no L1D between vcache and L2
         return c;
       }
-      default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
+      default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0, 4, 32 * 1024};
     }
   }
 
@@ -612,22 +631,33 @@ class ORIGAMI_EXPORT hardware_t {
          }}};
   // clang-format on
 
+  // ---------------------------------------------------------------------------
+  // Data members
+  // ---------------------------------------------------------------------------
+
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
   size_t rf_capacity;   ///< Capacity of Register File (RF) in bytes
-  double mem1_perf_ratio;
-  double mem2_perf_ratio;
-  double mem3_perf_ratio;
-  size_t L2_capacity;        ///< Capacity of L2 cache in bytes
-  size_t l1_capacity;        ///< Capacity of L1 cache per SIMD in bytes (arch-dependent)
-  size_t CU_per_L2;          ///< Number of compute units per L2 cache domain
+
+  double mem1_perf_ratio;  ///< L1/shared memory performance ratio (microbenchmarked)
+  double mem2_perf_ratio;  ///< L2 cache performance ratio (microbenchmarked)
+  double mem3_perf_ratio;  ///< MALL/HBM performance ratio (microbenchmarked)
+
+  size_t L2_capacity;   ///< Capacity of L2 cache in bytes
+  size_t l1_capacity;   ///< Capacity of L1 data cache per CU in bytes (shared across all SIMDs in a CU)
+  size_t CU_per_L2;     ///< Compute units per L2 cache domain (derived: N_CU / NUM_XCD)
+
   double compute_clock_ghz;  ///< Compute clock frequency in GHz
-  size_t parallel_mi_cu;     ///< Number of parallel matrix instructions per compute unit
+  size_t parallel_mi_cu;     ///< Calibrated parallel matrix-instruction throughput per CU
   std::tuple<double, double, double>
-      mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
+      mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup (microbenchmarked)
   size_t NUM_XCD;                  ///< Number of XCDs (XGMI Complex Die)
   std::optional<int> pci_chip_id{};  ///< PCI chip ID for gfx950 memory model row (if set)
+
+  // ---------------------------------------------------------------------------
+  // Constructors
+  // ---------------------------------------------------------------------------
 
   /**
    * @brief Construct hardware_t with explicit parameters.
@@ -732,6 +762,10 @@ class ORIGAMI_EXPORT hardware_t {
       size_t num_xcds_override           = 0,
       std::optional<int> pci_chip_id = std::nullopt);
 
+  // ---------------------------------------------------------------------------
+  // Static factory methods (construct hardware_t from device / arch / props)
+  // ---------------------------------------------------------------------------
+
   /**
    * @brief Create hardware_t instance for a specific HIP device.
    *
@@ -796,6 +830,10 @@ class ORIGAMI_EXPORT hardware_t {
       int compute_clock_khz,
       std::optional<int> pci_chip_id = std::nullopt);
 
+  // ---------------------------------------------------------------------------
+  // Static query methods (arch-keyed lookups, no hardware_t instance needed)
+  // ---------------------------------------------------------------------------
+
   /**
    * @brief Get the default (hardcoded) XCD count for a known architecture.
    *
@@ -823,20 +861,10 @@ class ORIGAMI_EXPORT hardware_t {
   static size_t get_default_cache_line_bytes(architecture_t arch);
 
   /**
-   * @brief Return the L1 cache capacity per SIMD for a given architecture.
-   *
-   * CDNA (gfx90a/942/950): 32 KiB per SIMD.
-   * RDNA3/4 and all others: 128 KiB per SIMD.
+   * @brief Return the L1 data cache capacity per CU for a given architecture.
    */
   static constexpr size_t get_l1_capacity(architecture_t arch) noexcept {
-    switch (arch) {
-      case architecture_t::gfx90a:
-      case architecture_t::gfx942:
-      case architecture_t::gfx950:
-        return 32 * 1024;
-      default:
-        return 128 * 1024;
-    }
+    return get_arch_constants(arch).l1_capacity;
   }
 
   /**
@@ -849,6 +877,10 @@ class ORIGAMI_EXPORT hardware_t {
    * @return true if the architecture is supported, false otherwise
    */
   static bool is_hardware_supported(hipDeviceProp_t properties);
+
+  // ---------------------------------------------------------------------------
+  // Instance query methods (require a constructed hardware_t)
+  // ---------------------------------------------------------------------------
 
   /**
    * @brief Print hardware details to stdout.
@@ -909,6 +941,10 @@ class ORIGAMI_EXPORT hardware_t {
   bool has_native_TF32() const;
 
  private:
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
   /**
    * @brief Extract substring before the first colon character.
    *

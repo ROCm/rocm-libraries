@@ -132,6 +132,10 @@ namespace TensileLite
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .stream_k                  = solution->sizeMapping.streamK,
                                 .index                     = local_index,
+                                .grvw_a                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.grvwA),
+                                .grvw_b                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.grvwB),
                                 .gwvw_d                    = static_cast<std::size_t>(
                                     solution->sizeMapping.gwvwD),
                                 .backend                   = origami::tensile_params_t{
