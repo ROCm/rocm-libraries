@@ -66,14 +66,19 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: ROCm/rocm-systems
-          # rocm-systems develop HEAD (2026-08-21). Bumped from 2ea54475 (2026-08-19)
-          # to pick up ~22 more rocjitsu commits incl. gfx1250 DS_LOAD_TR8_B64
-          # transpose/swmmac fixes, VOP+WMMA + block-scale wmma/mfma semantics, and
-          # B0 simulation revision. Pin must stay >= #9262 (0c7288aef8) which
-          # introduced the hsa_hotswap_rocjitsu CMake target the build script
-          # requires; all 3 build targets (rocjitsu_bin, rocjitsu_shared,
-          # hsa_hotswap_rocjitsu) verified present at this SHA.
-          ref: b4cf5bec82edede1b997fa7b1e0015a13de0235c
+          # rocm-systems develop HEAD (bumped 2026-08-30 from b4cf5bec8 / 2026-08-21).
+          # Picks up post-b4cf5be rocjitsu perf + correctness work targeting the
+          # gfx1250 tensilelite timeouts and scaled/MX regressions seen on b4cf5bec8:
+          #   perf  - native-SIMD f32 WMMA (#10710) + MFMA (#10702, #10706): speeds up
+          #           the slow StreamK/MX GEMM kernels that hit the 45-min timeout cap.
+          #   fix   - CDNA5 async-LDS / scaled-WMMA execution (#10575), packed-F32 +
+          #           matrix layouts (#10589), gfx1250 DS byte transpose routing
+          #           (#10707): scaled/MX correctness (the *ss / sk_mx*gemm_tdm regressions).
+          # Pin must stay >= #9262 (0c7288aef8) for the hsa_hotswap_rocjitsu CMake
+          # target; all 3 build targets (rocjitsu_bin, rocjitsu_shared,
+          # hsa_hotswap_rocjitsu) exist on develop - re-verify the rocjitsu build at
+          # this SHA before trusting results (384 commits ahead of the prior pin).
+          ref: 8a43c008e9090f47038ccac33adff130beb853f1
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
