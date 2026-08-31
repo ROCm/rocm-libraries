@@ -48,14 +48,11 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # test_drive<> framework disabled).  These did not actually launch CK kernels
     # during gfx942 testing but are kept skipped pending more extensive testing.
     list(APPEND SKIP_TESTS
-        conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp
         conv_hip_igemm_xdlops.cpp
         conv_igemm_mlir_xdlops_bwd_wrw.cpp
         conv_igemm_mlir_xdlops_fwd.cpp
         smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp
         smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16.cpp
-        smoke_solver_ConvCkIgemmFwdV6r1DlopsNchw.cpp
-        unit_conv_solver_ConvHipImplicitGemmBwdDataV1R1Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmBwdDataV4R1Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm.cpp
