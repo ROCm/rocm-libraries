@@ -92,7 +92,13 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     if(NOT TARGET roc::origami)
         set(_origami_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/origami")
         if(IS_DIRECTORY "${_origami_sibling}")
-            add_subdirectory("${_origami_sibling}" origami EXCLUDE_FROM_ALL)
+            # rocISA consumes origami as a private implementation dependency.
+            # Keep it static in the standalone wheel while allowing subsequent
+            # dependencies such as stinkytofu to honor rocISA's shared default.
+            block()
+                set(BUILD_SHARED_LIBS OFF)
+                add_subdirectory("${_origami_sibling}" origami EXCLUDE_FROM_ALL)
+            endblock()
         else()
             find_package(origami REQUIRED)
         endif()
