@@ -23,4 +23,6 @@ block(SCOPE_FOR VARIABLES)
     endif()
 endblock()
 
-include("${CMAKE_CURRENT_LIST_DIR}/hipblaslt_codegen.cmake")
+if(@HIPBLASLT_BUNDLE_PYTHON_DEPS@)
+    include("${CMAKE_CURRENT_LIST_DIR}/hipblaslt_codegen.cmake")
+endif()

@@ -72,9 +72,6 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
-cmake_dependent_option(HIPBLASLT_INSTALL_ROCISA
-       "Install the rocisa Python extension with hipBLASLt so downstream consumers (e.g. hipSPARSELt) can import it to run device-library codegen against the staged hipBLASLt package. Requires HIPBLASLT_BUNDLE_PYTHON_DEPS=ON, which is what builds the extension; forced OFF otherwise."
-       ${TENSILELITE_ENABLE_HOST} "HIPBLASLT_BUNDLE_PYTHON_DEPS" OFF)
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
 if(NOT HIPBLASLT_ENABLE_HOST
@@ -494,7 +491,7 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
+if(HIPBLASLT_BUNDLE_PYTHON_DEPS AND (HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST))
     install(
         FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_codegen.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
