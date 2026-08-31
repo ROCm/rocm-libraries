@@ -826,34 +826,20 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x128_fp8(self, op: Op) -> None:
-        """UNSCALED fp8 16x16x128 hero atom (L6), gfx950.
+        """Not implemented: use the combined f8f6f4 lowering instead.
 
-        gfx950 has no dense plain ``mfma.f32.16x16x128.fp8.fp8`` instruction;
-        the only dense wide-K f8 MFMA is the ``f8f6f4`` scaled instruction. We
-        reuse ``__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4`` with both
-        in-instruction scales pinned to the neutral E8M0 value 0 (2^0 == 1.0),
-        making it numerically a plain unscaled fp8 MFMA. This mirrors
-        ``lower_llvm._op_tile_mfma_f32_16x16x128_fp8`` exactly (same 9-arg form,
-        all six immargs 0: cbsz/blgp select fp8e4m3 for A/B, op_sel scale-byte
-        selectors 0, scale bytes 0).
-
-        A / B arrive as ``<32 x fp8e4m3>`` (== ``i8x32``, 32 f8 bytes per lane)
-        and are ``__builtin_memcpy``'d into the builtin's ``i32x8`` operand so
-        the raw bits transfer without relying on aliasing. Output is ``f32x4``.
+        This dense-fp8 entry point is a placeholder that should be superseded by
+        ``_op_tile_mfma_f32_16x16x128_fp4fp6f8``. Type-specific wrappers for fp4
+        and fp8 are intentionally omitted: the only underlying hardware
+        instruction is the combined ``f8f6f4`` form, so a single lowering keeps
+        the HIP path consistent with the existing
+        ``mfma_scale_f32_16x16x128_f8f6f4`` op.
         """
-        a, b, c = op.operands
-        nice = _name(op.result)
-        a_pk = f"{nice}_a_pk"
-        b_pk = f"{nice}_b_pk"
-        self._emit(
-            f"i32x8 {a_pk}; __builtin_memcpy(&{a_pk}, &{_name(a)}, sizeof({a_pk}));"
-        )
-        self._emit(
-            f"i32x8 {b_pk}; __builtin_memcpy(&{b_pk}, &{_name(b)}, sizeof({b_pk}));"
-        )
-        self._emit(
-            f"f32x4 {nice} = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4("
-            f"{a_pk}, {b_pk}, {_name(c)}, 0, 0, 0, 0, 0, 0);"
+        raise NotImplementedError(
+            "tile.mfma_f32_16x16x128_fp8: dense fp8 MFMA has no dedicated HIP "
+            "lowering; the hardware exposes only the combined K=128 f8f6f4 form. "
+            "Use tile.mfma_scale_f32_16x16x128_f8f6f4 (the fp4fp6f8 lowering) "
+            "instead."
         )
 
     def _op_vector_bitcast(self, op: Op) -> None:
@@ -1857,39 +1843,88 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
-        """HIP debug shim for P15 MX MFMA scaled.
+        """Lower P15 MX MFMA scaled via the hipcc builtin.
 
-        Hipcc 20 does not expose a builtin for the scaled MX MFMA;
-        emit an inline-asm stub that documents the shape so kernel
-        authors can read the HIP source to sanity-check the data
-        flow. Production runs go through the LLVM path which has
-        the real intrinsic.
+        ``__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4`` -- the same
+        builtin the unscaled fp8 hero
+        (:meth:`_op_tile_mfma_f32_16x16x128_fp8`) reuses with the scale
+        bytes pinned to 0 -- exposes the two in-instruction E8M0 scale
+        bytes as its 7th / 9th operands (verified: the 9-arg form
+        ``(a, b, c, 0, 0, 0, sa, 0, sb)`` assembles to
+        ``v_mfma_scale_f32_16x16x128_f8f6f4 ..., sa, sb``). Passing the
+        live ``a_scale`` / ``b_scale`` there mirrors the 11-arg LLVM
+        intrinsic form in
+        ``lower_llvm._op_tile_mfma_scale_f32_16x16x128_f8f6f4``
+        (cbsz / blgp / op_sel imms 0, scale bytes live).
+
+        A / B arrive as 32-byte mantissa vectors and are
+        ``__builtin_memcpy``'d into the builtin's ``i32x8`` operands so
+        the raw bits transfer without relying on aliasing. Output is
+        ``f32x4``.
         """
         a, b, c, a_scale, b_scale = op.operands
+        nice = _name(op.result)
+        a_pk = f"{nice}_a_pk"
+        b_pk = f"{nice}_b_pk"
         self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P15 MX MFMA stub:"
-            f" scale_a={_name(a_scale)} scale_b={_name(b_scale)}"
-            f" mantissa_a={_name(a)} mantissa_b={_name(b)}"
+            f"i32x8 {a_pk}; __builtin_memcpy(&{a_pk}, &{_name(a)}, sizeof({a_pk}));"
+        )
+        self._emit(
+            f"i32x8 {b_pk}; __builtin_memcpy(&{b_pk}, &{_name(b)}, sizeof({b_pk}));"
+        )
+        self._emit(
+            f"f32x4 {nice} = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4("
+            f"{a_pk}, {b_pk}, {_name(c)}, 0, 0, 0, {_name(a_scale)}, 0, "
+            f"{_name(b_scale)});"
         )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp4 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
+        """Not implemented: use the combined f8f6f4 lowering instead.
+
+        This dense-fp4 entry point is a placeholder that should be superseded by
+        ``_op_tile_mfma_f32_16x16x128_fp4fp6f8``. Type-specific wrappers for fp4
+        and fp8 are intentionally omitted: the only underlying hardware
+        instruction is the combined ``f8f6f4`` form, so a single lowering keeps
+        the HIP path consistent with the existing
+        ``mfma_scale_f32_16x16x128_f8f6f4`` op.
+        """
+        raise NotImplementedError(
+            "tile.mfma_f32_16x16x128_fp4: dense fp4 MFMA has no dedicated HIP "
+            "lowering; the hardware exposes only the combined K=128 f8f6f4 form. "
+            "Use tile.mfma_scale_f32_16x16x128_f8f6f4 (the fp4fp6f8 lowering) "
+            "instead."
         )
 
     def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp6 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
+        """Not implemented: use the combined f8f6f4 lowering instead.
+
+        This dense-fp6 entry point is a placeholder that should be superseded by
+        ``_op_tile_mfma_f32_16x16x128_fp4fp6f8``. Type-specific wrappers for fp4,
+        fp6, and fp8 are intentionally omitted: the only underlying hardware
+        instruction is the combined ``f8f6f4`` form, so a single lowering keeps
+        the HIP path consistent with the existing
+        ``mfma_scale_f32_16x16x128_f8f6f4`` op. Note that the K=96 shape is not a
+        valid MFMA shape on gfx950 or gfx1250; fp6 is contracted through the
+        K=128 f8f6f4 form.
+        """
+        raise NotImplementedError(
+            "tile.mfma_f32_16x16x96_fp6: dense fp6 MFMA has no dedicated HIP "
+            "lowering, and the K=96 shape is not valid on gfx950 or gfx1250; the "
+            "hardware exposes only the combined K=128 f8f6f4 form. Use "
+            "tile.mfma_scale_f32_16x16x128_f8f6f4 (the fp4fp6f8 lowering) instead."
         )
 
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
-        """HIP debug shim for the P13 register permutation."""
+        """HIP debug shim for the P13 register permutation.
+
+        Casts the first 8 cells of the ``<16 x f32>`` QK-MFMA accumulator
+        to the ``<8 x dtype>`` PV A-vector, matching the ``fptrunc`` chain
+        in ``lower_llvm._op_tile_register_p_from_qk_c``. The scalar cast
+        must name the *HIP* scalar type (``fp16`` / ``bf16``), not the raw
+        IR dtype name (``f16`` has no C typedef in the prologue).
+        """
         (qk_c,) = op.operands
-        target = op.attrs["target_dtype"]
+        target = _HIP_TYPE[op.attrs["target_dtype"]]
         res_t = _type_to_hip(op.result.type)
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")

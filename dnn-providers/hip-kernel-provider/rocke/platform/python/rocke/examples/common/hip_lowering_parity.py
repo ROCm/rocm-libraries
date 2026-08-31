@@ -275,6 +275,12 @@ def _micro_cases() -> List[Case]:
         return b.kernel
 
     def _mfma_hero() -> object:
+        # Dense unscaled fp8 MFMA -- HIP path REJECTS (expect="reject"). There
+        # is no dedicated dense fp8 builtin; the only wide-K fp8 hardware op is
+        # the combined ``f8f6f4`` form, exposed through the *scaled* builtin
+        # (see ``_mfma_scale_f8f6f4``). Rather than fold that to an unscaled op,
+        # the HIP lowerer declines and directs authors to
+        # ``mfma_scale_f32_16x16x128_f8f6f4``. The LLVM path is the faithful one.
         b = IRBuilder("micro_mfma_f32_16x16x128_fp8")
         A = b.param("A", PtrType(I32, "global"))
         B = b.param("B", PtrType(I32, "global"))
@@ -375,6 +381,127 @@ def _micro_cases() -> List[Case]:
         b.ret()
         return b.kernel
 
+    def _mfma_scale_f8f6f4() -> object:
+        # P15 MX MFMA *scaled* (``v_mfma_scale_f32_16x16x128_f8f6f4``). Both A/B
+        # arrive as 32-byte mantissa vectors (loaded as ``<8 x i32>``) plus two
+        # live i32 E8M0 scale bytes. The HIP path lowers this through the real
+        # ``__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4`` builtin -- the
+        # only wide-K f8f6f4 hardware op, and the one the dense fp4/fp6/fp8
+        # rejects point authors to -- so it is a faithful lowering, not a
+        # passthrough stub. gfx950-only.
+        b = IRBuilder("micro_mfma_scale_f8f6f4")
+        A = b.param("A", PtrType(I32, "global"))
+        B = b.param("B", PtrType(I32, "global"))
+        C = b.param("C", PtrType(F32, "global"))
+        S = b.param("S", PtrType(I32, "global"))
+        tid = b.thread_id_x()
+        a = b.global_load_vN(A, tid, I32, 8)
+        bb = b.global_load_vN(B, tid, I32, 8)
+        acc = b.global_load_vN(C, tid, F32, 4)
+        a_scale = b.global_load(S, tid, I32)
+        b_scale = b.global_load(S, tid, I32)
+        out = b.mfma_scale_f32_16x16x128_f8f6f4(a, bb, acc, a_scale, b_scale)
+        b.global_store_vN(C, tid, out, 4)
+        b.ret()
+        return b.kernel
+
+    def _mfma_fp4() -> object:
+        # P52 dense fp4 MFMA -- HIP path REJECTS (expect="reject"). There is no
+        # dedicated dense fp4 builtin; the only wide-K fp4 hardware op is the
+        # combined ``f8f6f4`` form, exposed through the *scaled* builtin (see
+        # ``_mfma_scale_f8f6f4``). Rather than emit a type-specific wrapper that
+        # would diverge from that op, the HIP lowerer declines and directs
+        # authors to ``mfma_scale_f32_16x16x128_f8f6f4``. The LLVM path is the
+        # faithful one. A/B built as the 8-byte packs the LLVM path consumes.
+        b = IRBuilder("micro_mfma_fp4")
+        A = b.param("A", PtrType(I32, "global"))
+        B = b.param("B", PtrType(I32, "global"))
+        C = b.param("C", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        a = b.global_load_vN(A, tid, I32, 2)
+        bb = b.global_load_vN(B, tid, I32, 2)
+        acc = b.global_load_vN(C, tid, F32, 4)
+        out = b.mfma_f32_16x16x128_fp4(a, bb, acc)
+        b.global_store_vN(C, tid, out, 4)
+        b.ret()
+        return b.kernel
+
+    def _mfma_fp6() -> object:
+        # P52 dense fp6 MFMA -- HIP path REJECTS (expect="reject"). There is no
+        # dedicated dense fp6 builtin, and the K=96 shape is not a valid MFMA
+        # shape on gfx950 or gfx1250; the only fp6 hardware op is the combined
+        # K=128 ``f8f6f4`` form, exposed through the *scaled* builtin (see
+        # ``_mfma_scale_f8f6f4``). Rather than emit a silently-different-K op,
+        # the HIP lowerer declines and directs authors to
+        # ``mfma_scale_f32_16x16x128_f8f6f4``. The LLVM path is the faithful one.
+        # A/B are built as the 12-byte ``<3 x i32>`` packs the LLVM path
+        # consumes (via <2 x i32> ++ scalar).
+        def _i32x3(ptr: object) -> object:
+            lo = b.global_load_vN(ptr, tid, I32, 2)  # <2 x i32>
+            hi = b.vec_bitcast(b.global_load(ptr, tid, I32), VectorType(I32, 1))
+            return b.vec_concat(lo, hi)  # <3 x i32>
+
+        b = IRBuilder("micro_mfma_fp6")
+        A = b.param("A", PtrType(I32, "global"))
+        B = b.param("B", PtrType(I32, "global"))
+        C = b.param("C", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        a = _i32x3(A)
+        bb = _i32x3(B)
+        acc = b.global_load_vN(C, tid, F32, 4)
+        out = b.mfma_f32_16x16x96_fp6(a, bb, acc)
+        b.global_store_vN(C, tid, out, 4)
+        b.ret()
+        return b.kernel
+
+    def _register_p_from_qk_c() -> object:
+        # P13 register permutation: cast the first 8 of 16 QK-MFMA f32 cells to
+        # a ``<8 x f16>`` PV-A vector. Uses the f16 target specifically to
+        # exercise the ``(fp16)`` scalar-cast spelling in the HIP shim (the raw
+        # IR name ``f16`` has no C typedef in the prologue).
+        from rocke.core.ir import F16  # noqa: PLC0415
+
+        b = IRBuilder("micro_register_p_from_qk_c")
+        A = b.param("A", PtrType(F32, "global"))
+        O = b.param("O", PtrType(F16, "global"))
+        tid = b.thread_id_x()
+        # QK accumulator is <16 x f32>; global_load_vN caps f32 at width 8, so
+        # load two halves and concat into the 16-wide fragment.
+        qk = b.vec_concat(
+            b.global_load_vN(A, tid, F32, 8), b.global_load_vN(A, tid, F32, 8)
+        )
+        pa = b.register_p_from_qk_c(qk, F16)
+        b.global_store_vN(O, tid, pa, 8)
+        b.ret()
+        return b.kernel
+
+    def _cooperative_global_store() -> object:
+        # P14 cooperative global store: per-lane ``<4 x f32>`` values scattered
+        # to per-lane ``<4 x i32>`` addresses. Faithful in both engines
+        # (per-lane scatter store).
+        b = IRBuilder("micro_cooperative_global_store")
+        O = b.param("O", PtrType(F32, "global"))
+        A = b.param("A", PtrType(I32, "global"))
+        V = b.param("V", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        addrs = b.global_load_vN(A, tid, I32, 4)
+        values = b.global_load_vN(V, tid, F32, 4)
+        b.cooperative_global_store(O, addrs, values)
+        b.ret()
+        return b.kernel
+
+    def _smem_store_distributed() -> object:
+        # P42 distributed LDS publish: write a per-lane ``<4 x f32>`` slice into
+        # consecutive LDS slots. Faithful in both engines (per-element store).
+        b = IRBuilder("micro_smem_store_distributed")
+        V = b.param("V", PtrType(F32, "global"))
+        tid = b.thread_id_x()
+        smem = b.smem_alloc(F32, [256], "lds")
+        values = b.global_load_vN(V, tid, F32, 4)
+        b.smem_store_distributed(smem, {}, values)
+        b.ret()
+        return b.kernel
+
     return [
         # -- P0: available on the default CDNA target --
         Case("micro.vector_max", "micro", _vector_max),
@@ -387,9 +514,37 @@ def _micro_cases() -> List[Case]:
         ),
         Case("micro.cvt_scalef32_fp8", "micro", lambda: _cvt_scalef32("fp8")),
         Case("micro.cvt_scalef32_bf8", "micro", lambda: _cvt_scalef32("bf8")),
-        Case("micro.mfma_f32_16x16x128_fp8", "micro", _mfma_hero, arch="gfx950"),
+        Case(
+            "micro.mfma_f32_16x16x128_fp8",
+            "micro",
+            _mfma_hero,
+            expect="reject",
+            arch="gfx950",
+        ),
         Case("micro.global_load_lds", "micro", _global_load_lds, arch="gfx950"),
         Case("micro.ds_read_tr_b8", "micro", _ds_read_tr_b8, arch="gfx950"),
+        # -- shim-parity micro-cases (the 6 reviewed HIP shims) --
+        Case("micro.mfma_scale_f8f6f4", "micro", _mfma_scale_f8f6f4, arch="gfx950"),
+        Case("micro.mfma_fp4", "micro", _mfma_fp4, expect="reject", arch="gfx950"),
+        Case("micro.mfma_fp6", "micro", _mfma_fp6, expect="reject", arch="gfx950"),
+        Case(
+            "micro.register_p_from_qk_c",
+            "micro",
+            _register_p_from_qk_c,
+            arch="gfx950",
+        ),
+        Case(
+            "micro.cooperative_global_store",
+            "micro",
+            _cooperative_global_store,
+            arch="gfx950",
+        ),
+        Case(
+            "micro.smem_store_distributed",
+            "micro",
+            _smem_store_distributed,
+            arch="gfx950",
+        ),
         # -- P1: arch-gated ops pinned to a supporting arch --
         Case(
             "micro.wmma_bf16",
