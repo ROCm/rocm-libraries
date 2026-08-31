@@ -4,8 +4,12 @@
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    ../src/harness/bundle/SupportClaimReport.cpp
+    ../src/harness/bundle/SupportClaims.cpp
+    ../src/harness/bundle/SupportVerdict.cpp
     ../src/harness/input-init/FillInputs.cpp
     TestBundleMetadata.cpp
+    TestSupportClaims.cpp
     TestGraphDescription.cpp
     TestNodeTypeToString.cpp
     TestPlatformUtils.cpp
@@ -18,6 +22,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuConvolutionFwdPlan.cpp
     TestGpuSdpaFwdSignatureKey.cpp
     TestGpuSdpaFwdPlan.cpp
+    TestGpuRMSNormSignatureKey.cpp
+    TestGpuRMSNormPlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
     TestVerificationPaths.cpp
@@ -27,6 +33,9 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestToleranceResolver.cpp
     TestVerificationModePaths.cpp
     TestErrorPaths.cpp
+    TestLoadedEngineTable.cpp
+    TestSupportClaimReport.cpp
+    TestSupportVerdict.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
@@ -66,6 +75,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuRefKernelCompiler.cpp
     gpu-ref/TestShallowDeviceOnlyMigratableMemory.cpp
     gpu-ref/TestShallowGpuTensor.cpp
+    gpu-ref/TestGpuFpReferenceCommon.cpp
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests
@@ -76,6 +86,7 @@ target_link_libraries(hipdnn_gpu_ref_tests
         GTest::gtest
         Threads::Threads
         hip::host
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
 )
 
 target_compile_options(hipdnn_gpu_ref_tests
@@ -84,3 +95,7 @@ target_compile_options(hipdnn_gpu_ref_tests
 clang_tidy_check(hipdnn_gpu_ref_tests)
 
 add_integration_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+if(USE_ROCRAND)
+    target_compile_definitions(hipdnn_gpu_ref_tests PRIVATE USE_ROCRAND)
+endif()

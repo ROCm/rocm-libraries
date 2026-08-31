@@ -26,6 +26,10 @@
 #endif
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <filesystem>
+
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -47,6 +51,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
         // HIP_MLOPS_ENGINE
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
             {HIP_MLOPS_ENGINE_ID,
+             HIP_MLOPS_ENGINE_NAME,
              [](const device::IDevicePropertyProvider& devicePropertyProvider)
                  -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
                  auto engine = std::make_unique<HipMlopsEngine>(HIP_MLOPS_ENGINE_ID);
@@ -72,6 +77,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
             // Complements ASM_SDPA_ENGINE: handles FP16 on gfx942/gfx950.
             // Performance: 78.98 TFLOPS MI325X, 71.27 TFLOPS MI300X (seq=4096 causal D=128).
             {HIP_FLASH2_ENGINE_ID,
+             HIP_FLASH2_ENGINE_NAME,
              [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
                  -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
                  auto engine = std::make_unique<hip_flash2_engine::HipFlash2Engine>();
@@ -83,6 +89,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
 #ifdef HIPDNN_ENGINE_ASM_SDPA
             // ASM_SDPA_ENGINE
             {ASM_SDPA_ENGINE_ID,
+             ASM_SDPA_ENGINE_NAME,
              [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
                  -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
                  auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
@@ -94,37 +101,43 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
         };
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-        // One ingestor engine per discovered descriptor set. A loop rather than a row
-        // per engine, so adding one costs no edit here.
-        for(auto& set : kernel_ingestor_engine::discoverDescriptorSets())
+        // One ingestor engine per discovered descriptor set, and a set is now a file on
+        // disk: adding an engine is an install, not an edit here.
+        for(const auto& set : kernel_ingestor_engine::discoverDescriptorSets())
         {
-            try
-            {
-                // Registered at enumeration, where a collision is catchable and can name
-                // the engine; the id is what hipDNN identifies it by.
-                const auto engineId = kernel_ingestor_engine::registerEngineName(set.engine.name);
-                definitions.push_back(
-                    {engineId,
-                     [set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
-                         -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+            // engineNameToId, not a provider-side registration: the loader already interned
+            // and registered this name, and a second registry over the same process-wide
+            // string_view map risks a dangling view.
+            const auto engineId = engineNameToId(set.engine.name);
+            definitions.push_back(
+                {engineId,
+                 // The same string the id was hashed from, so the two agree by
+                 // construction and hipDNN's load-time engineNameToId(name) == id check
+                 // cannot be what drops the engine.
+                 set.engine.name,
+                 // set aliases discoverDescriptorSets()'s memoized, process-lifetime vector.
+                 // Capture by reference: [set] would re-copy a DescriptorSet per engine.
+                 [&set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+                     -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+                     try
+                     {
                          // Device facts are resolved per call from the handle, not from
                          // the construction-time provider.
                          return hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
                              set, kernel_ingestor_engine::deviceResolver());
-                     }});
-            }
-            catch(const std::exception& error)
-            {
-                // Per set, not around the loop. This list is a function-local static's
-                // initializer: an escaping throw costs HIP_MLOPS and ASM_SDPA their rows
-                // and leaves the static uninitialized, so the next call rebuilds the
-                // whole vector and throws again. One bad set costs only itself.
-                HIPDNN_PLUGIN_LOG_ERROR("ingestor: descriptor set '"
-                                        << set.engine.name
-                                        << "' failed to register its engine name and is "
-                                           "excluded: "
-                                        << error.what());
-            }
+                     }
+                     catch(const std::exception& error)
+                     {
+                         // The loader validates each set, but its probe and this construction
+                         // are different objects, so that's convention, not a guarantee.
+                         // Return null: throwing here would cost HIP_MLOPS and ASM_SDPA too.
+                         HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
+                                                 << set.engine.name
+                                                 << "' failed to construct and is excluded: "
+                                                 << error.what());
+                         return nullptr;
+                     }
+                 }});
         }
 #endif
 
@@ -156,16 +169,36 @@ uint32_t Container::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint3
     return totalEngines;
 }
 
+hipdnnPluginStatus_t Container::getEngineName(int64_t engineId, const char** name)
+{
+    if(name == nullptr)
+    {
+        // hipDNN never passes null, so reaching this is a defect on the calling side.
+        return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+    }
+
+    for(const auto& engineDefinition : getEngineDefinitions())
+    {
+        if(engineDefinition.id == engineId)
+        {
+            *name = engineDefinition.name.c_str();
+            return HIPDNN_PLUGIN_STATUS_SUCCESS;
+        }
+    }
+
+    // The only penalty-free decline: any other failure status costs the engine.
+    return HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
+}
+
 Container::Container()
     : _devicePropertyProvider(std::make_unique<device::CurrentDevicePropertyProvider>())
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating Container");
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    // Every ingestor pack's native matchers, scorers, and dispatch handlers must be
-    // registered before any descriptor-backed engine below can resolve the symbols its
-    // UMDs, UHDs, and UDDs name. Safe to call on every Container construction: it
-    // registers exactly once per process (see SharedContainerManager).
+    // Must run before any descriptor-backed engine below can resolve its UMD/UHD/UDD
+    // symbols. Safe on every Container construction: registers exactly once per process
+    // (see SharedContainerManager).
     kernel_ingestor_engine::registerNativeIngestorSymbols();
 #endif
 
@@ -174,7 +207,13 @@ Container::Container()
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
-        _engineManager->addEngine(engineDefinition.createEngine(*_devicePropertyProvider));
+        // Null only when a descriptor-backed engine failed to construct (already logged).
+        // Its id stays advertised but never claims a graph -- indistinguishable from an
+        // engine that declines everything.
+        if(auto engine = engineDefinition.createEngine(*_devicePropertyProvider))
+        {
+            _engineManager->addEngine(std::move(engine), engineDefinition.name);
+        }
     }
 }
 

@@ -99,12 +99,24 @@ function(add_gtest TEST_NAME TEST_CPP)
   if(WIN32)
     target_compile_definitions(${TEST_NAME} PRIVATE NOMINMAX)
   endif()
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    # Tests that assert on logged/traced API names need to know which library
+    # layout they are running against: when MIOpen is built as a public wrapper
+    # over a private implementation, the public entry points are renamed with an
+    # _impl suffix and MIOPEN_LOG_FUNCTION runs inside the renamed definition,
+    # so the logged name carries that suffix.
+    target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
+  endif()
 
   add_dependencies(miopen-tests ${TEST_NAME})
   add_dependencies(miopen-check ${TEST_NAME})
 
   target_compile_options(${TEST_NAME} PRIVATE -Wno-global-constructors -Wno-undef)
   target_include_directories(${TEST_NAME} PRIVATE ../ ../../src/kernels)
+
+  if(MIOPEN_USE_HIPCONV)
+    target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_USE_HIPCONV=1)
+  endif()
 
   target_link_libraries(${TEST_NAME} miopen_gtest_common)
   if(MIOPEN_ENABLE_AI_KERNEL_TUNING)

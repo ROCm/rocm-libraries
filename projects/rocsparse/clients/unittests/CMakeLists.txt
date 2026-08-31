@@ -47,6 +47,7 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
   unit_test_enum_traits.cpp
   unit_test_indextype_utils.cpp
   unit_test_datatype_utils.cpp
+  unit_test_csrmv_adaptive_analysis.cpp
 )
 
 # Host-pure library translation units under test. These are compiled directly
@@ -126,6 +127,18 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
   unit_test_host_conversion_generic.cpp
   unit_test_host_conversion_sort.cpp
+  # --- Core/misc unit tests (level1, aux, generic, info, reordering) [AISPARSE-644]
+  # Distinct anchor (right after the conversion group) so this leaf does not
+  # conflict with sibling unit-test branches that append after
+  # rocsparse_unit_test_main or at the end of the level-2 group.
+  unit_test_device_level1.cpp
+  unit_test_primitives.cpp
+  unit_test_host_level1_generic.cpp
+  unit_test_host_level1_legacy.cpp
+  unit_test_host_auxiliary.cpp
+  unit_test_host_info.cpp
+  unit_test_host_generic.cpp
+  unit_test_host_reordering.cpp
   unit_test_internal_collectives_blockreduce.cpp
   unit_test_internal_collectives_warpreduce.cpp
   unit_test_internal_collectives_segmented.cpp
@@ -137,6 +150,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_host_precond_direct.cpp
   unit_test_internal_hostblocks_bitops.cpp
   unit_test_internal_hostblocks_csrmm_alg.cpp
+  #10152: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_extra_csrgemm.cpp
   unit_test_internal_hostblocks_indextype.cpp
   unit_test_internal_hostblocks_itilu0.cpp
   #10153: distinct anchor to avoid stacked-branch merge conflicts
@@ -151,6 +166,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collective_extras_elementwise.cpp
   unit_test_internal_collective_extras_nontemporal.cpp
   unit_test_internal_collective_extras_lower_bound.cpp
+  #10155: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_precond_itilu0.cpp
   unit_test_internal_collective_extras_insert.cpp
   unit_test_internal_primitives_host_extras.cpp
   # Host-path C-API coverage for previously-untested in-scope routines. These
@@ -158,13 +175,22 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # in librocsparse (already coverage-instrumented) is counted. They link
   # roc::rocsparse directly, so they need no compile-in library TUs.
   unit_test_internal_util_checkmatrix.cpp
+  #10149: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_conversion_bsr.cpp
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_extra_geam.cpp
   #10154: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
   unit_test_internal_level3_bsrmm.cpp
+  #10158: distinct anchor to avoid stacked-branch merge conflicts
+  unit_test_host_level3.cpp
   unit_test_internal_level2_extras.cpp
+  # --- Level 2 (SpMV/gebsrmv) public C-API host tests [AISPARSE-642] --------
+  # Distinct anchor (end of the level-2 group) so this leaf does not conflict
+  # with sibling unit-test branches that append after rocsparse_unit_test_main.
+  # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
+  unit_test_host_level2.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -252,6 +278,16 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
 # directly into this GPU test binary. They pull in rocprim, hence roc::rocprim
 # is added to the link libraries below. (No library source changes.)
 set(ROCSPARSE_UNIT_TEST_PRIMITIVE_SOURCES
+  # Primitive library TUs exercised by unit_test_primitives.cpp that are not
+  # already compiled into this target via ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
+  # above (exclusive_scan / segmented_radix_sort_keys / radix_sort_pairs are
+  # already present there; do not re-add them or the object is defined twice).
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_inclusive_scan.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_find_max.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_find_sum.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_run_length_encode.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_keys.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_pairs.cpp
 )
 
 add_executable(rocsparse-unit-test-device

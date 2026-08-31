@@ -25,7 +25,7 @@ function(add_ctypes_library TARGET_NAME SOURCE_FILE)
     
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
+        ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
     )
     
     target_link_libraries(${TARGET_NAME} PRIVATE
@@ -67,7 +67,7 @@ else()
     add_library(dispatcher_gemm_lib SHARED gemm_ctypes_lib.cpp)
     target_include_directories(dispatcher_gemm_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
+        ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
     )
     target_link_libraries(dispatcher_gemm_lib PRIVATE hip::device)
 endif()
@@ -161,7 +161,7 @@ file(GLOB CONV_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/conv_*.hpp"
 add_library(dispatcher_conv_lib SHARED conv_ctypes_lib.cpp)
 target_include_directories(dispatcher_conv_lib PRIVATE
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/dispatcher/include
+    ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
 )
 target_link_libraries(dispatcher_conv_lib PRIVATE hip::device)
 set_target_properties(dispatcher_conv_lib PROPERTIES
@@ -205,7 +205,7 @@ if(CONV_BWDW_KERNEL_HEADERS)
     add_library(dispatcher_conv_bwdw_lib SHARED conv_bwdw_ctypes_lib.cpp)
     target_include_directories(dispatcher_conv_bwdw_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
+        ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
     )
     target_link_libraries(dispatcher_conv_bwdw_lib PRIVATE hip::device)
     target_compile_options(dispatcher_conv_bwdw_lib PRIVATE
@@ -221,7 +221,7 @@ else()
     add_library(dispatcher_conv_bwdw_lib SHARED conv_bwdw_ctypes_lib.cpp)
     target_include_directories(dispatcher_conv_bwdw_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
+        ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
     )
     target_link_libraries(dispatcher_conv_bwdw_lib PRIVATE hip::device)
     set_target_properties(dispatcher_conv_bwdw_lib PROPERTIES
@@ -274,6 +274,98 @@ else()
         POSITION_INDEPENDENT_CODE ON
         CXX_STANDARD 17
     )
+endif()
+
+# =============================================================================
+# GroupedGemm RowColQuant ctypes Library
+# =============================================================================
+
+file(GLOB ROWCOLQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_rowcolquant_*.hpp")
+if(ROWCOLQUANT_GEMM_KERNEL_HEADERS)
+    list(LENGTH ROWCOLQUANT_GEMM_KERNEL_HEADERS _rowcolquant_header_count)
+    if(_rowcolquant_header_count GREATER 1)
+        message(WARNING
+            "Found ${_rowcolquant_header_count} RowColQuant GEMM kernel headers; "
+            "only the first will be compiled into dispatcher_grouped_gemm_rowcolquant_lib. "
+            "Run codegen with a single config or build per-kernel .so files via the Python path.")
+    endif()
+    list(GET ROWCOLQUANT_GEMM_KERNEL_HEADERS 0 ROWCOLQUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found RowColQuant GEMM kernel for ctypes lib: ${ROWCOLQUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_grouped_gemm_rowcolquant_lib
+        grouped_gemm_rowcolquant_ctypes_lib.cpp
+        KERNEL_HEADER ${ROWCOLQUANT_GEMM_KERNEL_HEADER}
+    )
+    if(NOT DEFINED CK_TILE_ROWCOLQUANT_GFX_ARCH OR CK_TILE_ROWCOLQUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _rowcolquant_gfx_arch)
+        else()
+            set(_rowcolquant_gfx_arch "gfx942")
+        endif()
+        set(CK_TILE_ROWCOLQUANT_GFX_ARCH "${_rowcolquant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built RowColQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+    endif()
+    message(STATUS "RowColQuant ctypes lib GFX_ARCH: ${CK_TILE_ROWCOLQUANT_GFX_ARCH}")
+
+    target_compile_definitions(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="${CK_TILE_ROWCOLQUANT_GFX_ARCH}"
+    )
+else()
+    message(WARNING
+        "No RowColQuant GEMM kernel header found in ${CMAKE_BINARY_DIR}/generated_kernels/. "
+        "dispatcher_grouped_gemm_rowcolquant_lib will NOT be built. "
+        "Run unified_grouped_gemm_rowcolquant_codegen.py --output-dir "
+        "${CMAKE_BINARY_DIR}/generated_kernels/ before configuring to enable this target.")
+    # Do not define the target: the source requires force-included symbols (SelectedKernel,
+    # ADataType, KERNEL_NAME, etc.) that only exist in the generated header. Without it
+    # the build fails at compile time, not load time, breaking any all-target build.
+endif()
+
+# =============================================================================
+# GroupedGemm TensorQuant ctypes Library
+# =============================================================================
+
+file(GLOB TENSORQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_tensorquant_*.hpp")
+if(TENSORQUANT_GEMM_KERNEL_HEADERS)
+    list(LENGTH TENSORQUANT_GEMM_KERNEL_HEADERS _tensorquant_header_count)
+    if(_tensorquant_header_count GREATER 1)
+        message(WARNING
+            "Found ${_tensorquant_header_count} TensorQuant GEMM kernel headers; "
+            "only the first will be compiled into dispatcher_grouped_gemm_tensorquant_lib. "
+            "Run codegen with a single config or build per-kernel .so files via the Python path.")
+    endif()
+    list(GET TENSORQUANT_GEMM_KERNEL_HEADERS 0 TENSORQUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found TensorQuant GEMM kernel for ctypes lib: ${TENSORQUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_grouped_gemm_tensorquant_lib
+        grouped_gemm_tensorquant_ctypes_lib.cpp
+        KERNEL_HEADER ${TENSORQUANT_GEMM_KERNEL_HEADER}
+    )
+    if(NOT DEFINED CK_TILE_TENSORQUANT_GFX_ARCH OR CK_TILE_TENSORQUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _tensorquant_gfx_arch)
+        else()
+            set(_tensorquant_gfx_arch "gfx942")
+        endif()
+        set(CK_TILE_TENSORQUANT_GFX_ARCH "${_tensorquant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built TensorQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+    endif()
+    message(STATUS "TensorQuant ctypes lib GFX_ARCH: ${CK_TILE_TENSORQUANT_GFX_ARCH}")
+
+    target_compile_definitions(dispatcher_grouped_gemm_tensorquant_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="${CK_TILE_TENSORQUANT_GFX_ARCH}"
+    )
+else()
+    message(WARNING
+        "No TensorQuant GEMM kernel header found in ${CMAKE_BINARY_DIR}/generated_kernels/. "
+        "dispatcher_grouped_gemm_tensorquant_lib will NOT be built. "
+        "Run unified_grouped_gemm_tensorquant_codegen.py --output-dir "
+        "${CMAKE_BINARY_DIR}/generated_kernels/ before configuring to enable this target.")
+    # Do not define the target: the source requires force-included symbols (SelectedKernel,
+    # ADataType, KERNEL_NAME, etc.) that only exist in the generated header. Without it
+    # the build fails at compile time, not load time, breaking any all-target build.
 endif()
 
 # =============================================================================
@@ -419,6 +511,53 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/batched_gemm_ctypes_lib.cpp)
     endif()
 endif()
 
+# --- Batched-Contraction Multi-ABD (registry-bypass, multi-tensor + multi-dim ABI) ---
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/batched_contraction_multi_abd_ctypes_lib.cpp)
+    file(GLOB CMA_KERNEL_HEADERS
+        "${CMAKE_BINARY_DIR}/generated_kernels/contraction_multi_abd_*.hpp")
+    if(CMA_KERNEL_HEADERS)
+        list(SORT CMA_KERNEL_HEADERS)
+        list(GET CMA_KERNEL_HEADERS 0 CMA_KERNEL_HEADER)
+        message(STATUS "Found batched-contraction-multi-abd kernel for ctypes lib: ${CMA_KERNEL_HEADER}")
+
+        # Resolve the GPU architecture for the CMake-driven build path.
+        # The Python bridge always passes -DGFX_ARCH=... explicitly via hipcc, so
+        # this only affects builds driven through CMake directly. Unlike the
+        # sibling libs, there is no hard-coded fallback arch: the arch must come
+        # from -DCK_TILE_CMA_GFX_ARCH or CMAKE_HIP_ARCHITECTURES, else we fail.
+        if(NOT DEFINED CK_TILE_CMA_GFX_ARCH OR CK_TILE_CMA_GFX_ARCH STREQUAL "")
+            if(CMAKE_HIP_ARCHITECTURES)
+                list(GET CMAKE_HIP_ARCHITECTURES 0 _cma_gfx_arch)
+            else()
+                # Do not guess: a wrong arch compiles cleanly and then mis-tunes
+                # or fails to load on the real device.
+                message(FATAL_ERROR
+                    "Cannot resolve a GPU architecture for "
+                    "dispatcher_batched_contraction_multi_abd_lib: neither "
+                    "CK_TILE_CMA_GFX_ARCH nor CMAKE_HIP_ARCHITECTURES is set. "
+                    "Pass -DCK_TILE_CMA_GFX_ARCH=<gfxNNN>.")
+            endif()
+            set(CK_TILE_CMA_GFX_ARCH "${_cma_gfx_arch}" CACHE STRING
+                "GPU architecture for dispatcher_batched_contraction_multi_abd_lib (CMake path)")
+        endif()
+        message(STATUS "Batched-Contraction Multi-ABD ctypes lib GFX_ARCH: ${CK_TILE_CMA_GFX_ARCH}")
+
+        add_ctypes_library(dispatcher_batched_contraction_multi_abd_lib
+            batched_contraction_multi_abd_ctypes_lib.cpp
+            KERNEL_HEADER ${CMA_KERNEL_HEADER}
+        )
+        target_compile_definitions(dispatcher_batched_contraction_multi_abd_lib PRIVATE
+            CK_TILE_SINGLE_KERNEL_INCLUDE
+            GFX_ARCH="${CK_TILE_CMA_GFX_ARCH}"
+        )
+    else()
+        message(STATUS
+            "No batched-contraction-multi-abd kernel found for ctypes lib - skipping "
+            "dispatcher_batched_contraction_multi_abd_lib (built at runtime by the Python "
+            "bridge once a kernel header exists)")
+    endif()
+endif()
+
 # --- Batched-Contraction (registry-bypass, force-included kernel) ------------
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/batched_contraction_ctypes_lib.cpp)
     file(GLOB BC_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/batched_contraction_*.hpp")
@@ -452,7 +591,7 @@ if(GEMM_KERNEL_HEADERS)
     
     target_include_directories(gpu_helper PRIVATE
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
+        ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
     )
     
     target_link_libraries(gpu_helper PRIVATE
