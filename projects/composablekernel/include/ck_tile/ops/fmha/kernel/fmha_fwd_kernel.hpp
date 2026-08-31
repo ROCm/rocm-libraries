@@ -149,11 +149,6 @@ struct FmhaFwdKernel
     static constexpr bool kSkipMinSeqlenQ   = FmhaPipeline::Problem::kSkipMinSeqlenQ;
     static constexpr bool kHasSink          = FmhaPipeline::kHasSink;
 
-    // GetSoftmaxScale() dereferences the descale pointers as plain floats, with no head index.
-    static_assert(!kHasSink || QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
-                      QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR,
-                  "softmax sink needs an indexed descale for this quantization granularity");
-
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
@@ -2455,11 +2450,6 @@ struct FmhaFwdKernel
                 FmhaPipeline::kM0 > 64 && FmhaPipeline::BlockFmhaShape::kQKHeaddim < 256;
             // divide problem
             const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
-            const float sink_value =
-                kargs.sink_ptr != nullptr
-                    ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) /
-                          GetSoftmaxScale(kargs)
-                    : -numeric<float>::infinity();
 
             const index_t i_m0 = i_tile_m * FmhaPipeline::kM0;
             const index_t i_n1 = i_tile_n * FmhaPipeline::kN1;
@@ -3224,6 +3214,11 @@ struct FmhaFwdKernel
                 else
                     return kargs.scale_s;
             }();
+            // Divide by the folded scale_s the pipeline re-applies, else descales do not cancel.
+            const float sink_value =
+                kargs.sink_ptr != nullptr
+                    ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / scale_s
+                    : -numeric<float>::infinity();
             auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
                 if constexpr(kPipelineName == "qr_tdm" && kBlockQScale)
                 {

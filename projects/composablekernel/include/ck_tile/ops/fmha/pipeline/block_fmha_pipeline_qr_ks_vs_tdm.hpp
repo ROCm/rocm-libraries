@@ -576,7 +576,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         do
         {
             [[maybe_unused]] const index_t kv_tile_start = kv_load_start + i_total_loops * kN0;
-            [[maybe_unused]] const index_t kv_last       = physical_seqlen_k_end - 1;
+            // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
+            [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
 
             block_sync_lds();
             // V uses load_tile_tdm (single-box plain LDS write). Both K and V
@@ -1266,7 +1267,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
             [[maybe_unused]] const index_t kv_tile_start = kv_load_start + i_total_loops * kN0;
-            [[maybe_unused]] const index_t kv_last       = physical_seqlen_k_end - 1;
+            // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
+            [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
 
             // move V tile windows
             block_sync_lds<k_lds_insts>();
