@@ -64,6 +64,7 @@ inline float toleranceForNodeAttributes(data::NodeAttributes attrType)
     case NA::PointwiseAttributes:
         return tol::pointwise::getTolerance<T>();
     case NA::LayernormAttributes:
+    case NA::LayernormBackwardAttributes:
         return tol::layernorm::getTolerance<T>();
     case NA::SdpaAttributes:
     case NA::SdpaBackwardAttributes:

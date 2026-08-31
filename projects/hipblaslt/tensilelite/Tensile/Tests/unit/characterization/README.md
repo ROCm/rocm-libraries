@@ -181,7 +181,9 @@ Raising the floors is the ratchet click: a deliberate, reviewed step, never auto
 time it is a genuine rise (new tests pushed coverage up, so you lock the gain in). A per-file drop is
 a signal to decide first. If a file lost coverage because a test is missing, that is a real
 regression; add the test rather than lowering its floor. Only when a drop is intentional (for
-example, code was removed) do you reset that file's floor as part of the same reviewed change.
+example, code was removed) do you reset that file's floor as part of the same reviewed change. The
+tool holds you to that: `update` raises floors on its own, but it will not lower one unless you name
+that file with `--allow-lower`.
 
 A floor-raising PR is a small, behavior-neutral maintenance change. It should touch only
 `coverage-baseline.json` (the per-file floors) and, when you also lift the whole-project floor,
@@ -193,26 +195,42 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
    tox -e coverage-unit    # writes coverage.json
    ```
 
-2. **Recompute the per-file floors.** Rewrite the baseline from that report:
+2. **Raise the per-file floors.** Ratchet the baseline against that report:
 
    ```bash
    python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json
    ```
 
-   This sets each file's floor to its current coverage (rounded to two decimals). The numbers
-   normally go up.
+   Each file's floor rises to its current coverage (rounded to two decimals), and a file with no
+   floor yet is pinned at its current number. Floors never move down here: if any file measured
+   lower, `update` writes nothing, names those files, and exits non-zero.
 
-3. **Review the baseline diff before you commit it.** Expect rises. If a file dropped, do not just
-   record the lower number: decide first (a missing test means add the test; an intentional code
-   removal means say so in the PR). The diff is the review artifact, so keep it readable.
+3. **Decide about any drop, then name it.** A refusal is the tool asking which of two situations you
+   are in. A missing test is a real regression, so add the test rather than lowering the floor. Only
+   when the drop is intentional (code was removed, say) do you lower that file, and you lower it by
+   naming it:
 
-4. **Optionally raise the whole-project floor.** If combined coverage has climbed with room to
+   ```bash
+   python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update \
+       --current coverage.json \
+       --allow-lower=Tensile/Components/Subtile/SubtileGREmit.py
+   ```
+
+   One `--allow-lower` per file, and it lowers only the files named. That is what keeps a run made
+   to move one floor from quietly resetting all the others to whatever the coverage run on disk
+   happened to measure.
+
+4. **Review the baseline diff before you commit it.** Expect rises, plus exactly the reductions you
+   named. The diff is the review artifact, so keep it readable, and say in the PR why each lowered
+   floor was accepted.
+
+5. **Optionally raise the whole-project floor.** If combined coverage has climbed with room to
    spare, bump `fail_under` in `pyproject.toml` toward the 80% target. Leave a small margin below the
    measured number (a point or two): the per-file `--tolerance` already absorbs run-to-run wobble for
    the per-file floors, but `fail_under` is an exact cutoff, so a floor set right at the current
    number can trip on normal noise.
 
-5. **Commit and open the PR.** Commit the `coverage-baseline.json` (and, if changed, `pyproject.toml`)
+6. **Commit and open the PR.** Commit the `coverage-baseline.json` (and, if changed, `pyproject.toml`)
    diff with a one-line rationale, for example "raise floors after landing the DataType tests". Never
    widen the tolerance or blank the baseline to go green.
 

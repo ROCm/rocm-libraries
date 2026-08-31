@@ -90,6 +90,9 @@ from ._conv_implicit_gemm_common import (  # noqa: F401 — re-exported for call
     _emit_mfma,
     _emit_smem_load,
     _ir_dtype,
+    build_wavelet_loaders,
+    compute_wavelet_epi_barriers,
+    emit_wavelet_kloop,
     make_a_descriptor,
 )
 
@@ -521,7 +524,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             return False, "pipeline='wavelet' requires num_load_waves >= 1"
         if family != "wmma":
             return False, (
-                f"pipeline='wavelet' is WMMA/gfx1250 only: on MFMA (CDNA) targets "
+                f"pipeline='wavelet' is WMMA/gfx1250 only: on MFMA targets "
                 f"the single-buffer LDS is overwritten each K iteration and load/math "
                 f"waves execute sequentially rather than truly concurrently."
             )
@@ -1128,32 +1131,16 @@ def build_implicit_gemm_conv(
         # exceed the tile dimensions, writing LDS at wrong addresses and
         # producing NaN outputs.
         if spec.pipeline == "wavelet":
-            _load_threads = spec.num_load_waves * spec.wave_size
-            _tile_vec_load = CoalescedTileLoader.choose_vec(
-                tile_rows=block_m,
-                tile_cols=block_k,
-                block_size=_load_threads,
-                max_vec=load_vec_a,
-            )
-            a_wavelet_loader = CoalescedTileLoader(
-                tile_rows=block_m,
-                tile_cols=block_k,
-                block_size=_load_threads,
-                load_vec=_tile_vec_load,
-                elem_dtype=ir_dtype_a,
-            )
-            _tile_vec_load_b = CoalescedTileLoader.choose_vec(
-                tile_rows=block_n,
-                tile_cols=block_k,
-                block_size=_load_threads,
-                max_vec=load_vec_b,
-            )
-            b_wavelet_loader = CoalescedTileLoader(
-                tile_rows=block_n,
-                tile_cols=block_k,
-                block_size=_load_threads,
-                load_vec=_tile_vec_load_b,
-                elem_dtype=ir_dtype_b,
+            a_wavelet_loader, b_wavelet_loader = build_wavelet_loaders(
+                num_load_waves=spec.num_load_waves,
+                wave_size=spec.wave_size,
+                block_m=block_m,
+                block_n=block_n,
+                block_k=block_k,
+                load_vec_a=load_vec_a,
+                load_vec_b=load_vec_b,
+                ir_dtype_a=ir_dtype_a,
+                ir_dtype_b=ir_dtype_b,
             )
         else:
             a_wavelet_loader = None
@@ -1237,28 +1224,6 @@ def build_implicit_gemm_conv(
             descriptor=b_descriptor,
             rsrc=b_rsrc,
         )
-
-    def wavelet_fetch(k_off: Value, load_tid: Value):
-        """Fetch one K-tile from DRAM into registers (no LDS write).
-
-        Returns ``(a_fetched, b_fetched)`` opaque token lists for
-        :func:`wavelet_store`.  The fetch is issued before barrier A so
-        the DRAM transfer overlaps the math-wave MFMA — the CK Tile
-        wavelet overlap pattern (PR #8009).
-        """
-        k_off_capture[0] = k_off
-        a_fetched = a_wavelet_loader.fetch(
-            b, tid=load_tid, descriptor=a_descriptor, rsrc=a_rsrc
-        )
-        b_fetched = b_wavelet_loader.fetch(
-            b, tid=load_tid, descriptor=b_descriptor, rsrc=b_rsrc
-        )
-        return a_fetched, b_fetched
-
-    def wavelet_store(a_fetched, b_fetched, A_dst: Value, B_dst: Value) -> None:
-        """Write registers fetched by :func:`wavelet_fetch` into LDS."""
-        a_wavelet_loader.store_fetched(b, smem_dst=A_dst, fetched=a_fetched)
-        b_wavelet_loader.store_fetched(b, smem_dst=B_dst, fetched=b_fetched)
 
     def emit_global_read(k_off: Value) -> tuple:
         """Issue only the global memory reads (buffer_load_vN) for one K tile.
@@ -1529,35 +1494,6 @@ def build_implicit_gemm_conv(
                 "not consult a_operand_override."
             )
 
-        # Number of barriers the epilogue emits — load branch must mirror these.
-        # Derived from CShuffleEpilogue.compute_barrier_count rather than a
-        # hand-maintained constant to prevent future drift.
-        # Wavelet uses war_barriers=2 (see _emit_cshuffle_epilogue).
-        _epi_barriers = 0
-        if spec.epilogue == "cshuffle":
-            _epi_barriers = CShuffleEpilogue.compute_barrier_count(
-                no_alias=spec.cshuffle_no_alias, war_barriers=2
-            )
-
-        n_math_warps = spec.warp_m * spec.warp_n
-        launch_block = spec.launch_block_size
-        b.kernel.attrs["max_workgroup_size"] = launch_block
-
-        c_nmath = b.const_i32(n_math_warps)
-        # warp_id is tid/wave_size — a VGPR value. LLVM treats cmp_lt on a VGPR
-        # as a divergent branch (v_cmpx → exec-masked), even though warp_id is
-        # wave-uniform in practice. Materialise it as a scalar via readfirstlane
-        # so the branch lowers to s_cmp + s_cbranch (uniform, provably legal
-        # barrier placement.
-        warp_id_s = b.readfirstlane(warp_id)
-        is_math = b.cmp_lt(warp_id_s, c_nmath)
-
-        K_iters = (p.K_gemm + block_k - 1) // block_k
-
-        # Normalised thread ID for load waves: subtract the math-thread
-        # offset so it falls in [0, num_load_waves * wave_size).
-        load_tid = b.sub(tid, b.const_i32(spec.block_size))
-
         if op.family == "mma":
             # The exec-mask MFMA wavelet path has an unfixable data race:
             # the math section reads a single-buffer LDS that the load section
@@ -1573,78 +1509,69 @@ def build_implicit_gemm_conv(
                 "overwritten each K iteration with no cross-section barriers). "
                 "Use is_valid_spec() to reject this combination before building."
             )
-        else:
-            # ----------------------------------------------------------------
-            # WMMA path: scf_if_else (gfx1250).
-            #
-            # gfx1250 has separate VMEM and WMMA issue slots, so load and math
-            # waves truly overlap without exec-mask interleaving. The LLVM br i1
-            # divergent branch is fine here — the hardware concurrency comes
-            # from the distinct issue queues, not from hardware scheduling at
-            # s_barrier. Keep scf_if_else to avoid changing the validated path.
-            # ----------------------------------------------------------------
-            with b.scf_if_else(is_math) as (math_ctx, load_ctx):
 
-                # ---- MATH WAVE branch ----
-                with math_ctx:
-                    current_accs = [v for _, v in accs]
+        # WMMA path: scf_if_else (gfx1250).
+        #
+        # gfx1250 has separate VMEM and WMMA issue slots, so load and math
+        # waves truly overlap without exec-mask interleaving. The LLVM br i1
+        # divergent branch is fine here — the hardware concurrency comes
+        # from the distinct issue queues, not from hardware scheduling at
+        # s_barrier. Keep scf_if_else to avoid changing the validated path.
+        n_math_warps = spec.warp_m * spec.warp_n
+        launch_block = spec.launch_block_size
+        b.kernel.attrs["max_workgroup_size"] = launch_block
 
-                    b.sync()  # barrier_0
+        _epi_barriers = compute_wavelet_epi_barriers(
+            spec.epilogue, spec.cshuffle_no_alias
+        )
 
-                    for it in range(K_iters - 1):
-                        k_off_capture[0] = b.const_i32(it * block_k)
-                        current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
-                        b.sync()  # barrier_A
-                        b.sync()  # barrier_B
+        def _fwd_wavelet_epilogue(final_accs_math):
+            if spec.epilogue == "cshuffle":
+                _emit_cshuffle_epilogue(b, spec, final_accs_math, grid, d_rsrc, op=op)
+            else:
+                _emit_direct_epilogue_wmma(
+                    b,
+                    spec,
+                    op,
+                    final_accs_math,
+                    warp_m_idx,
+                    warp_n_idx,
+                    lane,
+                    block_m_off_v,
+                    block_n_off_v,
+                    d_rsrc,
+                    c0,
+                )
 
-                    k_off_capture[0] = b.const_i32((K_iters - 1) * block_k)
-                    current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+        def _fwd_epilogue_with_acc_transform(accs_in):
+            _fwd_wavelet_epilogue(
+                _apply_accumulator_epilogue(b, spec.acc_epilogue, accs_in)
+            )
 
-                    final_accs_math = _apply_accumulator_epilogue(
-                        b, spec.acc_epilogue, current_accs
-                    )
-                    if spec.epilogue == "cshuffle":
-                        _emit_cshuffle_epilogue(
-                            b, spec, final_accs_math, grid, d_rsrc, op=op
-                        )
-                    elif op.family == "wmma":
-                        _emit_direct_epilogue_wmma(
-                            b,
-                            spec,
-                            op,
-                            final_accs_math,
-                            warp_m_idx,
-                            warp_n_idx,
-                            lane,
-                            block_m_off_v,
-                            block_n_off_v,
-                            d_rsrc,
-                            c0,
-                        )
-                    else:
-                        _emit_direct_epilogue(b, spec, final_accs_math, grid, d_rsrc)
-
-                # ---- LOAD WAVE branch ----
-                with load_ctx:
-                    a_regs, b_regs = wavelet_fetch(b.const_i32(0), load_tid)
-                    b.s_waitcnt(vmcnt=0)
-                    wavelet_store(a_regs, b_regs, A_smem, B_smem)
-                    b.s_waitcnt(lgkmcnt=0)
-                    b.sync()  # barrier_0
-
-                    for it in range(K_iters - 1):
-                        a_regs, b_regs = wavelet_fetch(
-                            b.const_i32((it + 1) * block_k), load_tid
-                        )
-                        b.sync()  # barrier_A
-                        b.s_waitcnt(vmcnt=0)
-                        wavelet_store(a_regs, b_regs, A_smem, B_smem)
-                        b.s_waitcnt(lgkmcnt=0)
-                        b.sync()  # barrier_B
-
-                    for _ in range(_epi_barriers):
-                        b.sync()
-
+        emit_wavelet_kloop(
+            b=b,
+            warp_id=warp_id,
+            tid=tid,
+            n_math_warps=n_math_warps,
+            math_block_size=spec.block_size,
+            K_iters=(p.K_gemm + block_k - 1) // block_k,
+            block_k=block_k,
+            k_lo=c0,
+            A_smem=A_smem,
+            B_smem=B_smem,
+            a_wavelet_loader=a_wavelet_loader,
+            b_wavelet_loader=b_wavelet_loader,
+            a_descriptor=a_descriptor,
+            b_descriptor=b_descriptor,
+            a_rsrc=a_rsrc,
+            b_rsrc=b_rsrc,
+            k_off_capture=k_off_capture,
+            accs=accs,
+            emit_mfma_phase=emit_mfma_phase,
+            emit_epilogue_fn=_fwd_epilogue_with_acc_transform,
+            epi_barriers=_epi_barriers,
+            k_lo_is_zero=True,
+        )
         return b.kernel
 
     if spec.unroll_k:

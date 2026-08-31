@@ -15,15 +15,11 @@
 name: TheRock Multi-Arch CI
 
 # TheRock ref: the resolve_therock_ref job picks one concrete ROCm/TheRock SHA
-# for the whole run. On pull_request events it pins to the tip of TheRock@main
-# as it existed at the PR branch's merge-base time, so the pin stays stable
-# while a PR is authored and only advances when the base branch is merged/
-# rebased in (see .github/scripts/resolve_therock_ref.py). Other events use the
-# live tip of main. The setup job checks that ref out and re-exports it as
-# needs.setup.outputs.ref; every downstream build/test/summary job consumes that
-# one SHA. The `uses: ROCm/TheRock/...@main` lines below are the
-# workflow-definition ref (Actions requires a literal there) and are
-# deliberately separate from the build-source `ref:` inputs.
+# for the whole run. The setup job checks out the pinned TheRock SHA and
+# re-exports it as needs.setup.outputs.ref. The `uses:
+# ROCm/TheRock/...@b45a060` lines below are the workflow-definition refs
+# (Actions requires a literal there), and the matching `ref:` inputs are the
+# build-source refs consumed by those reusable workflows.
 
 on:
   pull_request:
@@ -57,11 +53,22 @@ on:
         type: string
         default: ""
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
-      therock_ref_override:
-        type: string
-        default: ""
-        description: "Optional explicit TheRock ref (branch/tag/SHA) to build against. Empty resolves the ref per event (merge-base time for PRs, live tip of main otherwise)."
-
+      build_python_packages:
+        type: boolean
+        default: false
+        description: "Build ROCm Python packages"
+      build_pytorch:
+        type: boolean
+        default: false
+        description: "Build PyTorch wheels"
+      build_jax:
+        type: boolean
+        default: false
+        description: "Build JAX wheels"
+      build_native_linux:
+        type: boolean
+        default: false
+        description: "Build native Linux packages and run install tests"
 permissions:
   contents: read
   actions: read
@@ -126,35 +133,6 @@ jobs:
             --head-sha "${{ github.event.pull_request.head.sha }}" \
             --config-path ".github/repos-config.json"
 
-  resolve_therock_ref:
-    name: Resolve TheRock ref
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    outputs:
-      therock_ref: ${{ steps.resolve.outputs.therock_ref }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github
-          sparse-checkout-cone-mode: true
-
-      - name: Install dependencies
-        run: pip install requests
-
-      # Picks one concrete TheRock SHA for the whole run. See the header comment
-      # and .github/scripts/resolve_therock_ref.py for the policy. Uses the REST
-      # API only, so no deep clone of this repository is required.
-      - name: Resolve TheRock ref
-        id: resolve
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || '' }}
-        run: python .github/scripts/resolve_therock_ref.py
-
   setup:
     needs: [ci-env, configure, resolve_therock_ref]
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/granular-artifact-reuse
@@ -172,6 +150,10 @@ jobs:
       prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg') || '' }}
       # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
       baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
+      build_python_packages: ${{ inputs.build_python_packages || false }}
+      build_pytorch: ${{ inputs.build_pytorch || false }}
+      build_jax: ${{ inputs.build_jax || false }}
+      build_native_linux: ${{ inputs.build_native_linux || false }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
@@ -205,7 +187,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
     permissions:
       contents: read
       id-token: write
@@ -231,7 +213,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
     permissions:
       contents: read
       id-token: write
@@ -250,7 +232,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: ${{ needs.setup.outputs.ref }}
+          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
