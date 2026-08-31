@@ -64,7 +64,7 @@ namespace rocsparse
     {
         const T* alpha = nullptr;
         I        batch_index;
-        for(batch_index = hipBlockIdx_y; batch_index < batch_count; batch_index += hipBlockDim_y)
+        for(batch_index = hipBlockIdx_y; batch_index < batch_count; batch_index += hipGridDim_y)
         {
             if(batch_index < batch_count)
             {
