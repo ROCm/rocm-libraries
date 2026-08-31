@@ -106,8 +106,11 @@ function(add_gtest TEST_NAME TEST_CPP)
     # _impl suffix and MIOPEN_LOG_FUNCTION runs inside the renamed definition,
     # so the logged name carries that suffix.
     target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
-    # wrapper_routing.cpp includes the wrapper's internal routing seam header.
-    target_include_directories(${TEST_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/src/private)
+    # src/private is deliberately not on the include path: wrapper_routing.cpp is
+    # the only test that needs the routing header and reaches it by relative
+    # path. Adding it would also expose miopen_private_rename.h, which rewrites
+    # the public miopenFoo names to their _impl form -- a name collision waiting
+    # to happen in tests that have no business seeing it.
   endif()
 
   add_dependencies(miopen-tests ${TEST_NAME})
@@ -317,13 +320,18 @@ add_library(miopen_gtest_common STATIC ${SOURCES})
 target_include_directories(miopen_gtest_common PRIVATE ../ ../../src/kernels)
 target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOpen)
 
-# The routing seam (src/private/routing.cpp) is compiled into libMIOpen.so with
-# hidden visibility, so its symbols are not exported and cannot be linked from a
-# test. Compile it into the test-common library so wrapper_routing.cpp can test
-# the seam directly. Only built when the wrapper (and thus the seam) exists.
+# libMIOpen.so does not export the routing seam's symbols, so a test cannot link
+# against them. Compile the source in here instead.
+#
+# Each test executable therefore carries its own copy of the seam, with its own
+# GetForwardingMode() cache. These tests cover the seam's logic, not whether the
+# wrapper stubs actually consult it.
+#
+# No include directory is needed: routing.cpp includes its own header by relative
+# path, and adding src/private here would expose miopen_private_rename.h to every
+# test-common source.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   target_sources(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
-  target_include_directories(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private)
 endif()
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.

@@ -312,6 +312,113 @@ def test_provider_mirror_divergent_target_is_reported(capsys):
 
 
 # --------------------------------------------------------------------------
+# The dispatch seam
+#
+# A stub that never reaches MIOPEN_WRAPPER_DISPATCH silently loses the ability
+# to route to hipDNN, and no build catches it: the macro's assert needs the
+# macro to be present, and is compiled out under NDEBUG regardless.
+# --------------------------------------------------------------------------
+
+# miopenGetErrorString is the one exempt stub, so it belongs in every fixture:
+# an exemption for a stub the wrapper does not define is itself a finding.
+EXEMPT_STUB = """
+extern "C" const char* miopenGetErrorString(miopenStatus_t error)
+{
+    return miopenGetErrorString_impl(error);
+}
+"""
+
+
+def wrapper_source(*stubs: str) -> str:
+    return EXEMPT_STUB + "".join(stubs)
+
+
+def stub(name: str, body: str) -> str:
+    return f"""
+extern "C" miopenStatus_t {name}(miopenHandle_t* handle)
+{{
+{body}
+    return {name}_impl(handle);
+}}
+"""
+
+
+def dispatches_of(source: str) -> dict:
+    return abi.parse_wrapper(source)[2]
+
+
+def test_stubs_dispatching_under_their_own_name_pass(capsys):
+    source = wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);"),
+        stub("miopenDestroy", "    MIOPEN_WRAPPER_DISPATCH(miopenDestroy);"),
+    )
+    assert abi.check_wrapper_dispatch(dispatches_of(source))
+    out = capsys.readouterr().out
+    assert "PASS" in out
+    assert "2 routable wrapper stubs" in out
+    assert "1 exempt" in out
+
+
+def test_stub_without_the_macro_is_reported(capsys):
+    source = wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);"),
+        stub("miopenDestroy", ""),
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    assert "miopenDestroy has no MIOPEN_WRAPPER_DISPATCH" in capsys.readouterr().out
+
+
+def test_stub_dispatching_under_a_neighbours_name_is_reported(capsys):
+    source = wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);"),
+        stub("miopenDestroy", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);"),
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    out = capsys.readouterr().out
+    assert "miopenDestroy dispatches as miopenCreate" in out
+
+
+def test_repeated_macro_is_reported(capsys):
+    source = wrapper_source(
+        stub(
+            "miopenCreate",
+            "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);\n"
+            "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);",
+        )
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    assert "miopenCreate has 2 MIOPEN_WRAPPER_DISPATCH calls" in capsys.readouterr().out
+
+
+def test_a_commented_out_macro_does_not_count_as_present(capsys):
+    source = wrapper_source(
+        stub("miopenCreate", "    // MIOPEN_WRAPPER_DISPATCH(miopenCreate);")
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    assert "miopenCreate has no MIOPEN_WRAPPER_DISPATCH" in capsys.readouterr().out
+
+
+def test_exempt_stub_growing_the_macro_is_reported(capsys):
+    source = """
+extern "C" const char* miopenGetErrorString(miopenStatus_t error)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenGetErrorString);
+    return miopenGetErrorString_impl(error);
+}
+"""
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    out = capsys.readouterr().out
+    assert "miopenGetErrorString carries MIOPEN_WRAPPER_DISPATCH but is exempt" in out
+    assert "returns const char*" in out
+
+
+def test_exemption_for_a_stub_that_no_longer_exists_is_reported(capsys):
+    source = stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);")
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    assert "miopenGetErrorString is exempt" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
 # Reading a file a sparse checkout may not have materialized
 # --------------------------------------------------------------------------
 

@@ -889,8 +889,8 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
 
     # Public wrapper library. src/private/wrapper.cpp defines extern "C"
     # pass-through stubs for every MIOPEN_EXPORT entry point in <miopen/miopen.h>,
-    # each consulting the runtime dispatch seam (src/private/routing.cpp) and
-    # forwarding to its renamed _impl symbol in MIOpen_private. PUBLIC linkage
+    # each routing through src/private/routing.cpp to either hipDNN or its
+    # renamed _impl symbol in MIOpen_private. PUBLIC linkage
     # propagates the implementation's include directories and link interface to
     # consumers of the wrapper, so existing consumers (driver, tests, CK plugins)
     # that link MIOpen keep resolving MIOpen's internal C++ symbols against
