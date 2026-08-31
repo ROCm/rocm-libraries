@@ -1,16 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Tests that the three exception types route to the correct harness outcome:
-//
-//   EngineNotApplicableError        → SKIP  (engine doesn't support graph)
-//   generic std::exception (engine) → FAIL  (unexpected engine crash)
-//   ReferenceCapabilityError        → SKIP  (ref has no plan for this op)
-//   generic std::exception (ref)    → FAIL  (ref crash on supported op)
-//
-// Also tests the CpuReferenceGraphExecutorAdapter translation:
-//   CpuReferenceNotApplicableError  → ReferenceCapabilityError (case A)
-//   generic std::runtime_error      → propagates unchanged     (case C)
+// Exception-type routing: EngineNotApplicableError→SKIP,
+// ReferenceCapabilityError→SKIP, generic exception→FAIL.
 
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
@@ -229,9 +221,6 @@ protected:
     }
 };
 
-// ── Engine error paths ─────────────────────────────────────────────────────
-
-// EngineNotApplicableError → SKIP (engine doesn't support this graph)
 TEST_F(TestErrorPaths, EngineNotApplicableSkips)
 {
     ::testing::TestPartResultArray results;
@@ -246,7 +235,6 @@ TEST_F(TestErrorPaths, EngineNotApplicableSkips)
     EXPECT_FALSE(anyFailed(results));
 }
 
-// Generic engine crash → uncaught exception → test failure
 TEST_F(TestErrorPaths, EngineCrashFails)
 {
     auto bundle = loadBundle("eng_crash", /*includeGoldenOutput=*/true);
@@ -265,9 +253,6 @@ TEST_F(TestErrorPaths, EngineCrashFails)
         << "A generic engine exception must propagate, not be silently swallowed";
 }
 
-// ── Reference executor error paths (harness level) ─────────────────────────
-
-// ReferenceCapabilityError → capability miss → SKIP
 TEST_F(TestErrorPaths, RefCapabilityMissSkips)
 {
     ::testing::TestPartResultArray results;
@@ -284,7 +269,6 @@ TEST_F(TestErrorPaths, RefCapabilityMissSkips)
     EXPECT_FALSE(anyFailed(results));
 }
 
-// Generic ref crash → RUNTIME_ERROR → FAIL
 TEST_F(TestErrorPaths, RefCrashFails)
 {
     ::testing::TestPartResultArray results;
@@ -301,15 +285,10 @@ TEST_F(TestErrorPaths, RefCrashFails)
         << "A generic ref exception must route to RUNTIME_ERROR and FAIL the test";
 }
 
-// ── CpuReferenceGraphExecutorAdapter translation ──────────────────────────
-
-// CpuReferenceNotApplicableError → translated to ReferenceCapabilityError
 TEST_F(TestErrorPaths, AdapterTranslatesNotApplicableToCapabilityError)
 {
     const CpuReferenceGraphExecutorAdapter adapter;
 
-    // We can't call execute() with a real graph here, but we can verify
-    // the exception translation by checking the type hierarchy directly.
     hipdnn_test_sdk::utilities::CpuReferenceNotApplicableError notApplicable("stub");
     EXPECT_TRUE(dynamic_cast<const std::runtime_error*>(&notApplicable) != nullptr)
         << "CpuReferenceNotApplicableError must derive from std::runtime_error";
@@ -318,8 +297,6 @@ TEST_F(TestErrorPaths, AdapterTranslatesNotApplicableToCapabilityError)
     EXPECT_TRUE(dynamic_cast<const std::runtime_error*>(&capError) != nullptr)
         << "ReferenceCapabilityError must derive from std::runtime_error";
 
-    // Verify they are distinct types — a catch(CpuReferenceNotApplicableError) won't
-    // match ReferenceCapabilityError and vice versa.
     try
     {
         throw hipdnn_test_sdk::utilities::CpuReferenceNotApplicableError("test");
@@ -334,7 +311,6 @@ TEST_F(TestErrorPaths, AdapterTranslatesNotApplicableToCapabilityError)
     }
 }
 
-// Verify that a generic std::runtime_error is NOT caught as CpuReferenceNotApplicableError
 TEST_F(TestErrorPaths, GenericRuntimeErrorNotCaughtAsNotApplicable)
 {
     try

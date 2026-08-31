@@ -67,7 +67,6 @@ on:
         type: boolean
         default: false
         description: "Build native Linux packages and run install tests"
-
 permissions:
   contents: read
   actions: read
