@@ -184,8 +184,8 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+      # TESTING: Use granular-artifact-reuse branch for --artifacts flag support
+      ref: users/geomin12/granular-artifact-reuse
     permissions:
       contents: read
       id-token: write
@@ -210,8 +210,8 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+      # TESTING: Use granular-artifact-reuse branch for --artifacts flag support
+      ref: users/geomin12/granular-artifact-reuse
     permissions:
       contents: read
       id-token: write
@@ -231,8 +231,8 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+          # TESTING: Use granular-artifact-reuse branch
+          ref: users/geomin12/granular-artifact-reuse
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
