@@ -298,8 +298,11 @@ TEST_CASE("Origami streamk: correct_sk_grid_for_partial_tiles", "[streamk]") {
   // SK (224 WGs) was ~2× slower than DP (1728 WGs) due to L2 pollution.
   REQUIRE(correct(224, 1728, 1) == 1728);
 
-  // M=12 N=33554432 K=32 → tile 16x448x32: tiles=74899, ipt=1, tiles>>2*cu.
-  REQUIRE(correct(224, 74899, 1) == 74899);
+  // M=12 N=33554432 K=32 → tile 16x448x32: tiles=74899, ipt=1.
+  // tiles = 74899 = ~334 waves >> 32*cu upper cap → too large for DP;
+  // SK tile-streaming (sequential B) beats a 74899-WG DP grid.  Keep SK.
+  // Measured: forcing DP here is 1.4x slower (+462us) than SK.
+  REQUIRE(correct(224, 74899, 1) == 224);
 
   // tiles < 2*cu_count: keep SK (few tiles per WG, setup amortization helps).
   REQUIRE(correct(224, 400, 1) == 224);   // 400 < 2*224=448
