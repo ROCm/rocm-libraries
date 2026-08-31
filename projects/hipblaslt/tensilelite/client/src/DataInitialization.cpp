@@ -2077,12 +2077,8 @@ namespace TensileLite
                 constexpr size_t swizzleTileMN = 32; // 2 SIMDs * 16 lanes per wave for MN access
                 constexpr size_t tileK         = 256 / swizzleTileMN; // scale blocks per wave in K
 
-                // The swizzle wants K blocks in multiples of tileK and MN in
-                // multiples of swizzleTileMN. Which descriptor dimension holds
-                // which depends on the operand's layout: a K-contiguous operand
-                // is [K blocks, MN], a free-dim contiguous one (TLU=1) is the
-                // transpose of that. setMXScaleA/B pad both axes, so read the
-                // extents off the bound index rather than assuming an order.
+                // The scale tensor is [K blocks, MN] for a K-contiguous operand and
+                // the transpose of that for a free-dim contiguous one.
                 auto scaleDimsFor = [](TensorDescriptor const& scaleDesc, size_t boundIdx) {
                     auto const& s = scaleDesc.sizes();
                     // returns {K blocks, MN}
@@ -2134,9 +2130,6 @@ namespace TensileLite
                   auto         stride     = dataDesc.strides()[1];
                   size_t const batchCount = dataDesc.sizes().size() > 2 ? dataDesc.sizes()[2] : 1;
 
-                  // True when the operand is K-major, i.e. rows is the summation
-                  // axis. Matches the condition generateMXInput uses to decide the
-                  // scale grid; keep the two in step.
                   bool const kIsRows = (isMatrixA && transposed) || (!isMatrixA && !transposed);
 
                   auto& pristineData = m_vdata[dataTensorEnum].pristine[dataDesc.dataType()];
@@ -2216,11 +2209,8 @@ namespace TensileLite
                           = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
                       size_t const canonicalScaleElems = scaleDesc.totalAllocatedElements();
 
-                      // Both swizzles pad, so the staging buffer has to hold the
-                      // padded result rather than the canonical size. Derive the
-                      // extents off the bound index -- for a free-dim contiguous
-                      // operand rows is M/N, not K, and sizing as if it were K
-                      // under-allocated and let the swizzle write past the end.
+                      // Both swizzles pad, so the staging buffer holds the padded
+                      // result rather than the canonical size.
                       size_t const kExtentSw  = static_cast<size_t>(kIsRows ? rows : cols);
                       size_t const mnExtentSw = static_cast<size_t>(kIsRows ? cols : rows);
                       size_t const kBlocksSw
@@ -2237,14 +2227,15 @@ namespace TensileLite
                       }
                       else if(swizzleLayout == MXScaleLayout::GFX1250 && mxBlock > 0)
                       {
-                          // gfx1250 dimk pads the fast dim up to dimk = 128/mxBlock.
-                          // The scale tensor is allocated unpadded on gfx1250, so size
-                          // the staging buffer for the padded worst case.
+                          size_t const slowDim = static_cast<size_t>(cols);
+                          size_t const fastDim
+                              = static_cast<size_t>(rows) / static_cast<size_t>(mxBlock);
                           size_t const dimk = 128u / static_cast<size_t>(mxBlock);
                           size_t const paddedFast
-                              = (dimk == 0) ? kBlocksSw
-                                            : ((kBlocksSw + dimk - 1) / dimk) * dimk;
-                          size_t const totalPaddedElems = mnExtentSw * paddedFast * batchCount;
+                              = (dimk == 0) ? fastDim
+                                            : ((fastDim + dimk - 1) / dimk) * dimk;
+                          size_t const paddedElemsPerBatch = slowDim * paddedFast;
+                          size_t const totalPaddedElems    = paddedElemsPerBatch * batchCount;
                           if(totalPaddedElems > swizzledScaleElems)
                               swizzledScaleElems = totalPaddedElems;
                       }
