@@ -1165,12 +1165,13 @@ class Solution(collections.abc.Mapping):
               if mtTiles % cand == 0:
                 stack = cand
                 break
-            # A narrow stack pins m_chunk to 0, so one load spends every lane
-            # on a different K column: 64 lines, 16B from each.  Rounding the
-            # strip up buys a full-line run; the padding tiles reach LDS and are
-            # never read back.  Worth it only while the padding is cheap -- on
-            # 5376x2048x2048, 14 tiles pad for 1.14x and gain 15%, 12 tiles pad
-            # for 1.33x and gain nothing.
+            # Prefer a power-of-two stack even when it wastes tiles.  A 2-tile
+            # stack makes the strip only 16B wide, so each of a load's 64 lanes
+            # touches a different cache line and uses 16B of it; a 16-tile stack
+            # widens the strip to a full 128B line.  The extra tiles are fetched
+            # into LDS and never read, so cap that waste at 25% -- measured on
+            # 5376x2048x2048: 14 tiles -> 16 costs 1.14x and gains 15%, while
+            # 12 -> 16 costs 1.33x and gains nothing.
             rounded = min(16, 1 << (mtTiles - 1).bit_length()) if mtTiles > 1 else 2
             if rounded > stack and rounded * 4 <= mtTiles * 5:
               stack = rounded
@@ -5594,12 +5595,8 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "reject to reduce number of kernels")
 
     # GuaranteeNoPartial
-    # UseSubtileImpl drives its own global-read addressing and edge masking
-    # (see Components/Subtile), so the classic partial-load guarantees do not
-    # apply; treat loads as non-partial to skip the classic graShift path.
-    # This covers every subtile kernel, TN bf16 and fp8 included -- what stands
-    # behind it is the edge coverage in subtile_mxfp4_tlu1.yaml and
-    # subtile_mxfp4.yaml.
+    # UseSubtileImpl does its own edge masking (see Components/Subtile), so mark
+    # loads non-partial to skip the classic graShift path.
     if state["ProblemType"]["TLUA"] and not state["UseSubtileImpl"]:
       state["GuaranteeNoPartialA"] = state["AssertFree0ElementMultiple"]%state["GlobalReadVectorWidthA"]==0
     else:
