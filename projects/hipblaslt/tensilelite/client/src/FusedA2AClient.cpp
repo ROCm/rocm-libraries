@@ -4,6 +4,9 @@
 // Single-process multi-GPU orchestration for the fused GEMM.A2A kernel,
 // dispatched from main.cpp when the fused-gemm-a2a option is set.
 
+// TODO(AIHPBLAS-4534): fold this into the tensilelite-client path instead of
+// duplicating its reference and data-init machinery.
+
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
