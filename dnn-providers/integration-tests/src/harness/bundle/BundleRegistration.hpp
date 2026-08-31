@@ -16,9 +16,11 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "harness/ReferenceExecutorPool.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/BundleReferenceValidationHarness.hpp"
+#include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/ReferenceOpCoverage.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
@@ -193,7 +195,8 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
                                  locator = bundle.claimLocator,
                                  engineUnderTest]() -> ::testing::Test* {
                                     auto* test = new IntegrationBundleVerificationHarness(
-                                        /*requiresDevice=*/true, engineUnderTest);
+                                        productionDependencies(TensorPlacement::DEVICE),
+                                        engineUnderTest);
                                     test->setBundle(loaded, path, locator);
                                     return test;
                                 });
@@ -238,8 +241,8 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
             __FILE__,
             __LINE__,
             [loaded = bundle.bundle, path = bundle.jsonPath, referenceType]() -> ::testing::Test* {
-                auto* test = new BundleReferenceValidationHarness(referenceType,
-                                                                  /*requiresDevice=*/true);
+                auto* test = new BundleReferenceValidationHarness(
+                    referenceType, /*requiresDevice=*/true, sharedReferenceExecutors());
                 test->setBundle(loaded, path);
                 return test;
             });

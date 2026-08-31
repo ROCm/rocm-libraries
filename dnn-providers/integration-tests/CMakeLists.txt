@@ -154,9 +154,12 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
-    src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    src/harness/ReferenceExecutorPool.cpp
     src/harness/bundle/BundleReferenceValidationHarness.cpp
+    src/harness/bundle/FrontendGraphEngineRunner.cpp
     src/harness/bundle/GraphSession.cpp
+    src/harness/bundle/HarnessDependencies.cpp
+    src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     src/harness/bundle/OutputComparison.cpp
     src/harness/bundle/ReferenceOpCoverage.cpp
     src/harness/bundle/SupportClaimReport.cpp

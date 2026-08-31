@@ -7,11 +7,13 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "harness/IReferenceExecutors.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
@@ -36,9 +38,12 @@ namespace hipdnn_integration_tests::bundle
 class BundleReferenceValidationHarness : public ::testing::Test
 {
 public:
-    BundleReferenceValidationHarness(ReferenceExecutorType referenceType, bool requiresDevice)
+    BundleReferenceValidationHarness(ReferenceExecutorType referenceType,
+                                     bool requiresDevice,
+                                     std::shared_ptr<IReferenceExecutors> referenceExecutors)
         : _referenceType(referenceType)
         , _requiresDevice(requiresDevice)
+        , _referenceExecutors(std::move(referenceExecutors))
     {
     }
 
@@ -60,16 +65,18 @@ protected:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override;
 
-    // Seam so the deviceless unit tests can drive the body without a real executor.
-    virtual std::unique_ptr<IReferenceGraphExecutor> makeReferenceExecutor();
-
 private:
+    // Borrowed from the run's pool: the executors are reusable, so this harness
+    // does not build one per bundle.
+    IReferenceGraphExecutor& referenceExecutor();
+
     bool useDevice() const;
     OutputTensors allocateOutputs() const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs) const;
 
     ReferenceExecutorType _referenceType;
     bool _requiresDevice;
+    std::shared_ptr<IReferenceExecutors> _referenceExecutors;
     std::filesystem::path _bundlePath;
     std::shared_ptr<IntegrationTestBundle> _bundle;
 };

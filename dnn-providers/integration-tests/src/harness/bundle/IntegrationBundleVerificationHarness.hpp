@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -20,10 +21,10 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/BundleMetadata.hpp"
-#include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/GraphSession.hpp"
+#include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/OutputComparison.hpp"
@@ -50,16 +51,25 @@ std::unordered_map<int64_t, void*> buildVariantPack(
     bool useDevice);
 }
 
-// Fallback chain: golden → GPU ref → CPU ref → SKIP (RFC 0010 §4.4).
-// Inputs are read-only (shared); outputs are separate allocations per executor.
-//
-// TODO(ALMIOPEN-1969 follow-up): Unify graph-init with the non-golden harness.
+/// Runs one bundle against the engine under test and decides what that says.
+///
+/// Fallback chain: golden → GPU ref → CPU ref → SKIP (RFC 0010 §4.4). Inputs are
+/// read-only (shared); outputs are separate allocations per executor.
+///
+/// **This class has no virtual members.** Everything that needs a GPU, a handle, a
+/// loaded engine plugin, or process-wide state lives behind one of the four
+/// collaborators in HarnessDependencies, so a unit test constructs the real harness
+/// with mocks rather than subclassing it to stub methods out. What is left here is
+/// the part worth testing: which oracle to try, how far the run got, and what that
+/// means for the graph's support claim.
+///
+/// TODO(ALMIOPEN-1969 follow-up): Unify graph-init with the non-golden harness.
 class IntegrationBundleVerificationHarness : public ::testing::Test
 {
 public:
-    explicit IntegrationBundleVerificationHarness(bool requiresDevice,
+    explicit IntegrationBundleVerificationHarness(HarnessDependencies dependencies,
                                                   std::optional<LoadedEngine> engineUnderTest = {})
-        : _requiresDevice(requiresDevice)
+        : _deps(std::move(dependencies))
         , _engineUnderTest(std::move(engineUnderTest))
     {
     }
@@ -83,11 +93,14 @@ public:
         }
     }
 
-protected:
+    // Public rather than protected: the unit tests drive a real harness directly
+    // instead of subclassing it, so they need to call these. GTest calls them
+    // through the base class either way.
+    //
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
-        if(_requiresDevice)
+        if(_deps.policy.useDevice())
         {
             SKIP_IF_NO_DEVICES();
         }
@@ -99,7 +112,7 @@ protected:
 
         if(auto reason = checkTomlSkip(currentTestName()))
         {
-            GTEST_SKIP() << "[arch " << TestConfig::get().getCurrentArch() << "] " << *reason;
+            GTEST_SKIP() << "[arch " << _deps.policy.arch << "] " << *reason;
         }
 
         applyMetadataGuards();
@@ -145,53 +158,23 @@ protected:
         reportOutcome(outcome);
     }
 
-    virtual void executeGraphThroughEngine(GraphSession& session,
-                                           std::unordered_map<int64_t, void*>& variantPack);
-    virtual void runReferenceExecutor(ReferenceExecutorType type,
-                                      std::unordered_map<int64_t, void*>& variantPack);
-    virtual std::unique_ptr<IReferenceGraphExecutor>
-        makeReferenceExecutor(ReferenceExecutorType type);
-    virtual VerificationMode getVerificationMode() const;
-    virtual bool isEnforcingSupportClaims() const;
-    virtual void applyMetadataGuards() const;
-
-    // The one place a graph is built and the ranked list is asked for. Virtual
-    // because both need a handle: the deviceless unit harnesses return a session
-    // with a canned `engines` and no graph.
-    virtual GraphSession openGraph();
-
-    // Virtual so a deviceless harness can inject verdicts without writing a sidecar
-    // for each one. The real implementation is a pure decision over the session.
-    virtual SupportObservation checkSupportClaims(const GraphSession& session);
-
-    // Virtual so deviceless tests can observe the non-FULL routing decision without
-    // reaching a real graph. The real implementation compiles plans.
-    virtual VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& session);
-
-    // Protected so a stubbed enforceAtLevel() can exit the same way the real one
-    // does when it cannot verify: records the bundle as unverifiable and yields the
-    // skip outcome for TestBody() to issue.
-    VerificationOutcome unverifiable(const std::string& reason,
-                                     VerificationDepth reached = VerificationDepth::NOT_REACHED);
-
+    /// Exposed so a test can pin the fill recipes a bundle would otherwise carry in
+    /// its metadata.
     InputFillRecipes& inputFillRecipes()
     {
         return _inputFillRecipes;
     }
 
-    // The single definition of "this graph's claims must be checked": a sidecar
-    // exists, enforcement is on, and an engine was named to check against.
-    // Checked in the same order everywhere so a deviceless harness with no injected
-    // engine never reaches TestConfig.
-    bool shouldEnforceClaims() const
-    {
-        return _engineUnderTest.has_value() && !_claimLocator.sidecarPath.empty()
-               && std::filesystem::exists(_claimLocator.sidecarPath) && isEnforcingSupportClaims();
-    }
-
 private:
-    // Applies the coverage rules to the process-wide counters, and fails this test
-    // if a sidecar exists that the query somehow did not reach.
+    // The one place a graph is built and the ranked list is asked for.
+    GraphSession openGraph();
+
+    void applyMetadataGuards() const;
+
+    SupportObservation checkSupportClaims(const GraphSession& session);
+
+    // Applies the coverage rules to the run counters, and fails this test if a
+    // sidecar exists that the query somehow did not reach.
     void recordClaimCoverage(const SupportObservation& observation);
 
     // Publishes every verdict, promoting the engine-under-test's accepted claim by
@@ -203,18 +186,27 @@ private:
     // last, because GTEST_SKIP() and FAIL() both return.
     void reportOutcome(const VerificationOutcome& outcome);
 
+    // Records the bundle as unverifiable and yields the skip outcome for TestBody()
+    // to issue.
+    VerificationOutcome unverifiable(const std::string& reason,
+                                     VerificationDepth reached = VerificationDepth::NOT_REACHED);
+
+    // The single definition of "this graph's claims must be checked": a sidecar
+    // exists, enforcement is on, and an engine was named to check against. Checked
+    // in the same order everywhere so a harness with no injected engine never asks
+    // about the sidecar.
+    bool shouldEnforceClaims() const
+    {
+        return _engineUnderTest.has_value() && !_claimLocator.sidecarPath.empty()
+               && std::filesystem::exists(_claimLocator.sidecarPath)
+               && _deps.policy.enforceSupportClaims;
+    }
+
     VerificationDepth bundleRequiredDepth() const
     {
         return _bundle != nullptr ? requiredDepth(_bundle->metadata.enforcementLevel)
                                   : VerificationDepth::VERIFIED;
     }
-
-    bool _requiresDevice;
-    std::filesystem::path _bundlePath;
-    SupportClaimLocator _claimLocator;
-    std::shared_ptr<IntegrationTestBundle> _bundle;
-    InputFillRecipes _inputFillRecipes;
-    std::optional<LoadedEngine> _engineUnderTest;
 
     enum class RefStatus
     {
@@ -231,8 +223,8 @@ private:
     enum class EngineStatus
     {
         RAN, ///< the engine executed the graph; `outputs` holds what it wrote
-        DECLINED, ///< EngineNotApplicableError — the engine refused the graph
-        ERRORED, ///< the executor raised a fatal assertion, already on the record
+        DECLINED, ///< the engine refused the graph
+        ERRORED, ///< the engine broke while compiling or executing
     };
     struct EngineRunResult
     {
@@ -240,6 +232,10 @@ private:
         std::string message;
         OutputTensors outputs;
     };
+
+    // Verifies the bundle at the depth its enforcement_level asks for. Only
+    // APPLICABILITY and BUILDABLE come here; FULL takes the comparison path.
+    VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& session);
 
     VerificationOutcome runComparison(GraphSession& session);
     VerificationOutcome runGoldenMode(GraphSession& session);
@@ -280,6 +276,13 @@ private:
 
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);
+
+    HarnessDependencies _deps;
+    std::optional<LoadedEngine> _engineUnderTest;
+    std::filesystem::path _bundlePath;
+    SupportClaimLocator _claimLocator;
+    std::shared_ptr<IntegrationTestBundle> _bundle;
+    InputFillRecipes _inputFillRecipes;
 };
 
 } // namespace hipdnn_integration_tests::bundle

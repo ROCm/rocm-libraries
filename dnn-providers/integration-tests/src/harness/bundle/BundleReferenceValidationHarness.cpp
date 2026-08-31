@@ -10,28 +10,19 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 
-#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
+#include "harness/IReferenceExecutors.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/ReferenceOpCoverage.hpp"
-#include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
 
-std::unique_ptr<IReferenceGraphExecutor> BundleReferenceValidationHarness::makeReferenceExecutor()
+IReferenceGraphExecutor& BundleReferenceValidationHarness::referenceExecutor()
 {
-    switch(_referenceType)
-    {
-    case ReferenceExecutorType::CPU:
-        return std::make_unique<CpuReferenceGraphExecutorAdapter>();
-    case ReferenceExecutorType::GPU:
-        return std::make_unique<gpu_graph_executor::GpuReferenceGraphExecutor>();
-    default:
-        throw std::runtime_error("Unknown reference executor type");
-    }
+    return _referenceExecutors->get(_referenceType);
 }
 
 void BundleReferenceValidationHarness::SetUp()
@@ -85,22 +76,20 @@ void BundleReferenceValidationHarness::TestBody()
     auto referenceOutputs = allocateOutputs();
     auto variantPack = buildVariantPack(referenceOutputs);
 
-    auto executor = makeReferenceExecutor();
-    ASSERT_NE(executor, nullptr) << "reference executor factory returned nullptr";
+    IReferenceGraphExecutor& executor = referenceExecutor();
 
     // No skip path by design. This bundle's node types are all inside this
     // reference's required-op set (ReferenceOpCoverage.hpp), so an inapplicable or
     // throwing reference is a gap in the reference, not a property of the bundle.
     try
     {
-        ASSERT_TRUE(
-            executor->isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
+        ASSERT_TRUE(executor.isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
             << referenceLabel(_referenceType)
             << " is required to support this graph (its node types are in the reference's "
                "supported-op set) but reports it is not applicable: "
             << _bundlePath;
 
-        executor->execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
+        executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }
     catch(const ReferenceCapabilityError& e)
     {
