@@ -7050,9 +7050,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 
     if kernel["UseSubtileImpl"]:
-      # Geometry selection and the LDS region layout live in
-      # Components/Subtile/SubtileLdsLayout.py; this publishes
-      # ldsStartOffset{A,B,MXSA,MXSB}, ldsTotalSize and kernel["LdsNumBytes"].
       applyLdsLayout(self, kernel)
 
 
