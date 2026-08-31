@@ -476,7 +476,7 @@ class TileInfo:
       self.globalSubtileGrid = list(gr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
       self.globalSubtileGrid[0] = math.ceil(self.globalSubtileGrid[0])
       # Waves per GR strip along the free dim.  Normally 1: the GR strip is one
-      # wave's M extent, so each wave owns whole strips.  When the strip spans
+      # wave's M extent, so each wave owns whole strips.  With a tall stack the
       # GR strip spans several waves' extents, so localMMATileGrid[0] (per wave)
       # is smaller than subtileShape[0] and the plain ratio would floor to 0.
       # Those waves cooperate on one strip instead, splitting its K rows.

@@ -89,7 +89,7 @@ from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from Tensile.Common.DataType import DataType
-from Tensile.Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType
+from Tensile.Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk
 
@@ -8931,15 +8931,6 @@ class KernelWriterAssembly(KernelWriter):
     shiftK = Module("shiftK")
     m = (u) % (self.states.numVgprBuffer) # local to use for MACs
 
-    def dataTypeToMfmaInstTypePair(dataTypeA: DataType, dataTypeB: DataType, sourceSwap: bool) -> Tuple[InstType, InstType]:
-      miInTypeStrA  = dataTypeA.toNameAbbrev()
-      miInTypeStrB  = dataTypeB.toNameAbbrev()
-      miInTypeStr = miInTypeStrA + "_" + miInTypeStrB if miInTypeStrA != miInTypeStrB else miInTypeStrA
-      miInInstType = dataTypeNameAbbrevToInstType(miInTypeStr, sourceSwap) # v_mfma_[...xK]<InType>
-      miOutInstType = dataTypeNameAbbrevToInstType(dataTypeA.MIOutputTypeNameAbbrev()) # v_mfma_<OutType>..
-      return miInInstType, miOutInstType
-
-
     isgfx950 = kernel["ISA"][:2] == (9, 5)
     miInputTypeA     = kernel["ProblemType"]["F32XdlMathOp"] if kernel["EnableF32XdlMathOp"] else kernel["ProblemType"]["MacDataTypeA"]
     miInputTypeB     = kernel["ProblemType"]["F32XdlMathOp"] if kernel["EnableF32XdlMathOp"] else kernel["ProblemType"]["MacDataTypeB"]
@@ -8971,14 +8962,14 @@ class KernelWriterAssembly(KernelWriter):
     numMIInput       = max(numMIInputA, numMIInputB)
     numMIInUnroll    = max(numMIInputA//numTileInInstA, numMIInputB//numTileInInstB)
 
-    miInInstType, miOutInstType = dataTypeToMfmaInstTypePair(miInputTypeA, miInputTypeB, kernel["SourceSwap"])
-    neg_flag           = True if ((not is_mfma) and (miInInstType == InstType.INST_I8)) else False
-    miInInstType       = InstType.INST_U8 if ((not is_mfma) and miInInstType == InstType.INST_I8) else miInInstType
-    computeDataType    = kernel["ProblemType"]["ComputeDataType"]
-    # complex WMMA is emulated with real matrix ops, so the output inst type is the
-    # real base (f32/f64), not the complex abbrev (f32c/f64c) which has no InstType.
-    computeOutAbbrev   = computeDataType.MIOutputTypeNameAbbrev() if computeDataType.isComplex() else computeDataType.toNameAbbrev()
-    miOutInstType      = miOutInstType if (is_mfma or kernel["ProblemType"]["Sparse"]) else dataTypeNameAbbrevToInstType(computeOutAbbrev)
+    miInInstType, miOutInstType, neg_flag = matrixInstructionTypes(
+        miInputTypeA,
+        miInputTypeB,
+        kernel["ProblemType"]["ComputeDataType"],
+        kernel["SourceSwap"],
+        kernel["ProblemType"]["Sparse"],
+        is_mfma,
+    )
     miInScaleAInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSA"].toNameAbbrev())
     miInScaleBInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSB"].toNameAbbrev())
     numReadsIterCoalescedA = self.states.numReadsIterCoalescedA

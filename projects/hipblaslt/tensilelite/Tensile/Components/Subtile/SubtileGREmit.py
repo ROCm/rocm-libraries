@@ -1024,6 +1024,8 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
   cg = writer.vgprPool.checkOut(1, tag="_graColScatter_cg")
   bit = writer.vgprPool.checkOut(1, tag="_graColScatter_bit")
   # m_chunk: gather thread bits cs.mChunkThreadBits[j] -> m_chunk bit j.
+  # A stack of 2 has cBits == 0 (no m_chunk bits), so the loop below leaves mc
+  # untouched and this zero is the value that is used.
   module.add(VMovB32(dst=vgpr(mc), src=0, comment="%s: m_chunk = 0" % tc))
   for j, tb in enumerate(cs.mChunkThreadBits):
     module.add(VLShiftRightB32(dst=vgpr(bit), shiftHex=hex(tb), src=vgpr(laneId),
@@ -1038,7 +1040,7 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
       module.add(VOrB32(dst=vgpr(mc), src0=vgpr(mc), src1=vgpr(bit),
                  comment="%s: accumulate m_chunk" % tc))
   # col_group: gather thread bits cs.cgThreadBits[i] -> col_group bit i.
-  module.add(VMovB32(dst=vgpr(cg), src=0, comment="%s: col_group = 0" % tc))
+  # gBits (= 7 - log2(N)) is never 0, so i == 0 below always writes cg first.
   for i, tb in enumerate(cs.cgThreadBits):
     module.add(VLShiftRightB32(dst=vgpr(bit), shiftHex=hex(tb), src=vgpr(laneId),
                comment="%s: laneId >> %u" % (tc, tb)))
@@ -1542,8 +1544,8 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
 
   subtileOffset = int(math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize))
   # loadRatioGR folds in grLoadWaves, so subtileOffset is the bytes one
-  # *cooperative* load round covers.  When waves share a strip they are
-  # strip are separated by whole load-blocks (each takes a slice of the strip's
+  # *cooperative* load round covers.  Waves that share a strip are separated
+  # within it by whole load-blocks (each takes a slice of the strip's
   # K rows) rather than interleaved within one block, so a wave still advances
   # m0 by its own single-wave block, not by the cooperative total.
   _coopWaves = int(getattr(tileInfo, "grCoopWaves", 1))
@@ -1717,7 +1719,6 @@ def _grDTLInitBase_tlu(writer, kernel, module, tc, ti):
     # owning a contiguous run of DTL load-blocks (its share of the strip's K
     # rows).  numGRPerSubtile is already the per-wave load count, and one load
     # block occupies wavesize*loadWidth bytes plus the swizzle pad.
-    from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter
     _swz = selectTLUSwizzle(ti); _cs = selectTLUColScatter(ti)
     _pad = int(_cs.padBytes) if _cs else (int(_swz.padBytes) if _swz else 0)
     blkBytes = int(kernel["WavefrontSize"] * ti.gr.config.loadWidth + _pad)
@@ -2062,7 +2063,6 @@ def _grDTLAddKSlice(writer, kernel, module, tc, ti, dstVgpr):
   kSplit, winSplit, _, _ = _tluKWaveSlots(ti)
   if kSplit <= 1 and winSplit <= 1:
     return
-  from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter
   _swz = selectTLUSwizzle(ti); _cs = selectTLUColScatter(ti)
   _pad = int(_cs.padBytes) if _cs else (int(_swz.padBytes) if _swz else 0)
   blkBytes = int(kernel["WavefrontSize"] * ti.gr.config.loadWidth + _pad)
