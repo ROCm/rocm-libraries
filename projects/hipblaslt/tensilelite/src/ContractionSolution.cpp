@@ -739,10 +739,6 @@ namespace TensileLite
             = calculateAutoStaggerU(problem, hardware, sk.grid, autoWGM);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
-        if(pointerArrayBatch
-           && (sizeMapping.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1))
-            throw std::invalid_argument(
-                "pointer-array batching does not support MBSK or adaptive GSU");
         if(pointerArrayBatch && sizeMapping.streamK == 0 && gsu > 1
            && sizeMapping.globalAccumulation != 2)
             throw std::invalid_argument(
