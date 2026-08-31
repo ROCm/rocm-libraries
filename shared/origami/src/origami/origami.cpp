@@ -139,16 +139,12 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       wgmxccchunk = 0;
       wgmxcc      = 0;
       wgm         = 1;
-    }
-    // This gives a nice strided read pattern for batched GEMMs
-    else if (numMTs % numXCD == 0) {
-      wgmxccchunk = 0;
-      wgmxcc      = 0;
-      wgm         = 1;
     } else {
       wgmxccchunk = (numCUsPerXCD / numMTs) * numMTs;
       wgmxcc      = numXCD;
       wgm         = 1;
+      if (numMT_M > 1 && numMT_N > 1)
+        wgm = std::min(defaultWGM, static_cast<int32_t>(numMT_N));
     }
 
     if (sk_has_partial_tiles) wgmxccchunk = 0;

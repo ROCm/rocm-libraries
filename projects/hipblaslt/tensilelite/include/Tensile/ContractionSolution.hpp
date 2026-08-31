@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -200,6 +201,12 @@ namespace TensileLite
         std::array<int, 2> waveGroup;
     };
 
+    struct CustomKernel
+    {
+        std::string name;
+        bool        generated = false;
+    };
+
     struct StreamKSettings
     {
         origami::reduction_t reduction = origami::reduction_t::tree;
@@ -214,6 +221,78 @@ namespace TensileLite
     {
         size_t globalAccumulation = 0;
     };
+
+    /**
+     * The three numbers the static two-tile StreamK ABI packs, plus the
+     * leftover the kernel recomputes from them.
+     *
+     * StreamK=3 and the static sub-mode of StreamK=5 both pack SKItersPerWG,
+     * skGrid and skTiles, and the device derives everything else from those:
+     * a flat iteration space of tiles*itersPerTile, a data-parallel prefix of
+     * (tiles - skTiles) whole tiles, and a StreamK region cut into skGrid
+     * chunks. extraIters is the leftover skTiles*itersPerTile -
+     * SKItersPerWG*skGrid; workgroups below it get a chunk one iteration
+     * longer than the rest (StreamK.py skExtraIters).
+     */
+    struct StreamKStaticSplit
+    {
+        uint32_t skTiles      = 0;
+        uint32_t skItersPerWG = 0;
+        uint32_t extraIters   = 0;
+    };
+
+    /**
+     * Compute the static two-tile StreamK split.
+     *
+     * Single source of truth for arithmetic that used to be written out twice
+     * in ContractionSolution.cpp (the StreamK=3 packer and the StreamK=5 static
+     * packer) and is now also read by checkUniformSummationOrder(), which
+     * proves a property of exactly this split. A third copy would let the gate
+     * silently start proving a property of a split the kernel does not perform.
+     *
+     * @param tiles        Batch-inclusive tile count, getNumTiles(sizeMapping, 1).
+     * @param itersPerTile getItersPerTile(sizeMapping), clamped to at least 1.
+     * @param skGrid       Resolved StreamK grid. 0 yields an all-zero split.
+     * @param skFullTiles  AMDGPU::skFullTiles (TENSILE_STREAMK_FULL_TILES).
+     * @param forceDPOnly  SizeMapping::streamKForceDPOnly != 0.
+     */
+    TENSILELITEHOST_EXPORT StreamKStaticSplit streamKStaticSplit(
+        size_t tiles, size_t itersPerTile, size_t skGrid, int skFullTiles, bool forceDPOnly);
+
+    /**
+     * Whether every output tile of a static two-tile StreamK split is folded
+     * from the same ordered list of chunk lengths, and so is bitwise equal to
+     * every other tile fed identical inputs.
+     *
+     * This is the row-uniformity condition
+     * ContractionSolution::checkUniformSummationOrder() enforces for StreamK=3
+     * and StreamK=5-static. It is a property of the packed split alone, so it
+     * is insensitive to how tile indices map to (m-tile, n-tile) -- WGM,
+     * SpaceFillingAlgo and XCC swizzling do not enter into it.
+     *
+     * @param split        The split streamKStaticSplit() produced.
+     * @param tiles        The same batch-inclusive tile count fed to it.
+     * @param itersPerTile The same clamped iterations per tile fed to it.
+     */
+    TENSILELITEHOST_EXPORT bool streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
+                                                            size_t                    tiles,
+                                                            size_t itersPerTile);
+
+    /**
+     * Thrown when a launch requests uniform summation order but the resolved
+     * kernel configuration is not row-uniform. A distinct type so the rocblaslt
+     * host layer can map it to rocblaslt_status_invalid_value; a generic
+     * exception would be swallowed and reported as an internal error.
+     */
+    class UniformSummationOrderError : public std::runtime_error
+    {
+    public:
+        explicit UniformSummationOrderError(const std::string& what)
+            : std::runtime_error(what)
+        {
+        }
+    };
+
     /**
      * Represents a single kernel or set of kernels that can perform a single
      * tensor contraction.
@@ -393,6 +472,11 @@ namespace TensileLite
         // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
+        // Selection-time filter for uniform summation order. Permissive about
+        // facts that only exist at solve(); checkUniformSummationOrder() is
+        // authoritative. Wired into softwarePredicate().
+        bool                 uniformSummationOrderSupported(Problem const&  problem,
+                                                            Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -680,7 +764,8 @@ namespace TensileLite
         std::shared_ptr<Predicates::Predicate<Hardware>> hardwarePredicate
             = std::make_shared<Predicates::True<Hardware>>();
 
-        SizeMapping sizeMapping;
+        SizeMapping  sizeMapping;
+        CustomKernel customKernel;
 
         InternalArgsSupport internalArgsSupport;
 
@@ -717,6 +802,17 @@ namespace TensileLite
         origami::data_type_t getOrigamiDatatype(Problem const&  problem) const;
         AdaptiveGemmNTAB calculateAdaptiveGemmNTAB(Problem const&  problem,
                                                    Hardware const* hardware) const;
+
+    private:
+        bool handwrittenCustomKernel() const;
+
+        // Launch gate. Call once sk and resolvedGlobalAccumulation are final.
+        void checkUniformSummationOrder(Problem const&         problem,
+                                        Hardware const&        hardware,
+                                        StreamKSettings const& sk,
+                                        size_t                 resolvedGlobalAccumulation,
+                                        uint32_t               gsu,
+                                        void const*            synchronizer) const;
     };
 
     template <typename TAct>

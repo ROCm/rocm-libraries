@@ -208,6 +208,87 @@ TEST(rocfft_UnitTest, plan_description_reuse)
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
+TEST(rocfft_UnitTest, zero_length_or_batch)
+{
+    // check that plan creation does not proceed with a zero length or batch.
+
+    PROB_SKIP_UNITTEST();
+
+    try
+    {
+        const rocfft_transform_type transform_types[] = {rocfft_transform_type_complex_forward,
+                                                         rocfft_transform_type_complex_inverse,
+                                                         rocfft_transform_type_real_forward,
+                                                         rocfft_transform_type_real_inverse};
+
+        const struct
+        {
+            size_t rank;
+            size_t lengths[3];
+            size_t number_of_transforms;
+        } rejected[] = {{1, {0, 1, 1}, 1},
+                        {2, {0, 8, 1}, 1},
+                        {2, {8, 0, 1}, 1},
+                        {3, {0, 8, 8}, 1},
+                        {3, {8, 0, 8}, 1},
+                        {3, {8, 8, 0}, 1},
+                        {1, {8, 1, 1}, 0},
+                        {3, {8, 8, 8}, 0}};
+
+        for(const auto transform_type : transform_types)
+        {
+            for(const auto& [rank, lengths, number_of_transforms] : rejected)
+            {
+                rocfft_plan plan = nullptr;
+                EXPECT_EQ(rocfft_plan_create(&plan,
+                                             rocfft_placement_notinplace,
+                                             transform_type,
+                                             rocfft_precision_single,
+                                             rank,
+                                             lengths,
+                                             number_of_transforms,
+                                             nullptr),
+                          rocfft_status_invalid_arg_value)
+                    << "transform type " << transform_type << ", rank " << rank << ", batch "
+                    << number_of_transforms;
+                rocfft_plan_destroy(plan);
+            }
+        }
+
+        // a rank outside the documented 1 to 3 range is a dimension error, not a size one
+        size_t      length = 8;
+        rocfft_plan plan   = nullptr;
+        for(const size_t rank : {static_cast<size_t>(0), static_cast<size_t>(4)})
+        {
+            EXPECT_EQ(rocfft_plan_create(&plan,
+                                         rocfft_placement_notinplace,
+                                         rocfft_transform_type_complex_forward,
+                                         rocfft_precision_single,
+                                         rank,
+                                         &length,
+                                         1,
+                                         nullptr),
+                      rocfft_status_invalid_dimensions)
+                << "rank " << rank;
+            rocfft_plan_destroy(plan);
+        }
+
+        // a valid plan is still accepted
+        plan = nullptr;
+        ASSERT_EQ(rocfft_plan_create(&plan,
+                                     rocfft_placement_notinplace,
+                                     rocfft_transform_type_complex_forward,
+                                     rocfft_precision_single,
+                                     1,
+                                     &length,
+                                     1,
+                                     nullptr),
+                  rocfft_status_success);
+        ASSERT_EQ(rocfft_plan_destroy(plan), rocfft_status_success);
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
+
 TEST(rocfft_UnitTest, nonzero_offsets)
 {
     // check that plan creation does not proceed with non-zero offsets.
