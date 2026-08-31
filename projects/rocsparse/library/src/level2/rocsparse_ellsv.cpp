@@ -28,6 +28,7 @@
 #include "rocsparse_one.hpp"
 #include "rocsparse_utility.hpp"
 
+#include <limits>
 #include <string>
 
 namespace rocsparse
@@ -53,6 +54,34 @@ namespace rocsparse
                            descr,
                            (descr->storage_mode != rocsparse_storage_mode_sorted),
                            rocsparse_status_requires_sorted_storage);
+        return rocsparse_status_success;
+    }
+
+    rocsparse_status ellsv_buffer_size(rocsparse_handle            handle,
+                                       rocsparse_operation         trans,
+                                       rocsparse_const_spmat_descr A,
+                                       rocsparse_const_dnvec_descr x,
+                                       rocsparse_const_dnvec_descr y,
+                                       size_t*                     buffer_size)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        // Initialized to the maximum so that a quick return which forgets to assign
+        // shows up as an implausible size rather than as garbage.
+        size_t buffer_size_analysis = std::numeric_limits<size_t>::max();
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::ellsv_analysis_buffer_size(handle, trans, A, &buffer_size_analysis));
+
+        size_t buffer_size_solve = std::numeric_limits<size_t>::max();
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::ellsv_solve_buffer_size(handle, trans, A, x, y, &buffer_size_solve));
+
+        buffer_size[0] = rocsparse::max(buffer_size_analysis, buffer_size_solve);
+
+        // Keep the advertised size non-zero, so that the caller always has a buffer
+        // to hand back to the later stages.
+        buffer_size[0] = rocsparse::max(static_cast<size_t>(4), buffer_size[0]);
+
         return rocsparse_status_success;
     }
 

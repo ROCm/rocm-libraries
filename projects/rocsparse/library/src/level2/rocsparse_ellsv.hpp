@@ -37,6 +37,17 @@ namespace rocsparse
     // level-scheduling of the ELL matrix and stores the resulting row execution
     // order in the matrix info object; the compute stage then solves the system
     // directly on the ELL storage, without ever converting to CSR.
+
+    // Size of a single temporary buffer that serves every stage, for callers such
+    // as rocsparse_spsv that allocate once and hand the same buffer to both the
+    // analysis and the solve.
+    rocsparse_status ellsv_buffer_size(rocsparse_handle            handle,
+                                       rocsparse_operation         trans,
+                                       rocsparse_const_spmat_descr A,
+                                       rocsparse_const_dnvec_descr x,
+                                       rocsparse_const_dnvec_descr y,
+                                       size_t*                     buffer_size);
+
     rocsparse_status ellsv_analysis_buffer_size(rocsparse_handle            handle,
                                                 rocsparse_operation         trans,
                                                 rocsparse_const_spmat_descr A,
