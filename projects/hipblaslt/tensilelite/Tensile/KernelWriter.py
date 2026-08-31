@@ -51,6 +51,7 @@ from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
+from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -7048,122 +7049,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 
-    def selectGRSubtileShape(tc):
-      """Select GR subtile shape based on wave cooperation level.
-
-      The GR tile shape represents the effective coverage per GR load round.
-      When multiple waves cooperate on a single GR load (waves_coop >= 4),
-      the GR tile expands from (1,2) to (2,2) MMA tiles.
-
-      For A: waves_coop = numWaves / MIWaveGroup[0]
-      For B: waves_coop = numWaves / MIWaveGroup[1]
-
-      Wave config → GR shape:
-        1x4 WG: A=(2,2), B=(1,2)   — A has 4 cooperating waves
-        4x1 WG: A=(1,2), B=(2,2)   — B has 4 cooperating waves
-        2x2 WG: A=(1,2), B=(1,2)   — 2 cooperating waves each
-        1x1 WG: A=(1,2), B=(1,2)   — 1 wave each
-
-      LR subtile shape is always (1,2) regardless of wave config.
-      """
-      mi = kernel["MIWaveGroup"]
-      numWaves = mi[0] * mi[1]
-      wg_idx = 0 if tc == 'A' else 1
-      wg_m = mi[wg_idx]
-      waves_coop = numWaves // wg_m
-      return (2, 2) if waves_coop >= 4 else (1, 2)
-
-    def initSubTileInfo(tc):
-      tileMap = {
-        'A' : self.states.a,
-        'B' : self.states.b,
-        'D' : self.states.d,
-        'MXSA' : self.states.mxsa,
-        'MXSB' : self.states.mxsb,
-      }
-      matrixInfo = tileMap[tc]
-      if tc == 'D':
-        geometry = selectDGeometry(kernel)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-      elif tc in ('A', 'B'):
-        grShape = selectGRSubtileShape(tc)
-        matrixInfo.grSubtileShape = grShape
-        geometry = selectABGeometry(kernel, tc)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-      elif tc in ('MXSA', 'MXSB'):
-        geometry = selectMXScaleGeometry(kernel, tc)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-
-
     if kernel["UseSubtileImpl"]:
-      initSubTileInfo('A')
-      initSubTileInfo('B')
-      initSubTileInfo('D')
-
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0:
-        initSubTileInfo('MXSA')
-      if kernel["ProblemType"].get("MXBlockB", 0) > 0:
-        initSubTileInfo('MXSB')
-
-      self.ldsStartOffsetA = 0
-      aTileInfo = self.states.a.tileInfo
-      bTileInfo = self.states.b.tileInfo
-      numASubtiles = int(aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1])
-      numBSubtiles = int(bTileInfo.globalSubtileGrid[0] * bTileInfo.globalSubtileGrid[1])
-      # TDM-based solution use padding per row. Take that into account for size calculation.
-      mtA = kernel["MacroTile0"]
-      mtB = kernel["MacroTile1"]
-      padA = int(getattr(aTileInfo, "ldsRowPadBytes", 0)) * mtA
-      padB = int(getattr(bTileInfo, "ldsRowPadBytes", 0)) * mtB
-      # TLU=1 bank-conflict swizzle inserts pad bytes per subtile strip; fold it
-      # into the LDS footprint so adjacent strips don't overlap.
-      from Tensile.Components.Subtile.SubtileTLUSwizzle import swizzlePadPerStrip
-      swzPadA = swizzlePadPerStrip(aTileInfo) * numASubtiles
-      swzPadB = swizzlePadPerStrip(bTileInfo) * numBSubtiles
-      ldsRowBankSize = self.states.archCaps["LDSBankCount"] * self.states.archCaps["LDSBankWidth"]
-
-      def subtileRegionSize(ti, numSubtiles, rowPad, swzPad):
-        """Bytes reserved for one operand's subtile strips, including alignment.
-
-        The granularity is derived from *this* operand's subtileSize rather than
-        always from A's.  With an asymmetric tile -- e.g. the NT fp4 16x1 stack,
-        where A stacks 16 MFMA-M tiles per strip and B only 2 -- charging B the A
-        granularity rounds B's 2KB of strips up to A's 16KB.
-        """
-        raw = int(numSubtiles * ti.subtileSize + rowPad + swzPad)
-        # The region is measured in subtiles but filled by DTL writes covering
-        # loadRatioGR of them, so a subtile count that is not a multiple of that
-        # leaves a trailing partial group writing into the next operand.  Round
-        # to the write, not to a constant: a fixed 2 over-pads the common
-        # loadRatioGR <= 1 case and under-pads the wide wave groups, where the
-        # ratio reaches 4 or 8.  Floor at an LDS bank row so the bank-conflict
-        # swizzle maps the same way in B's region as in A's.
-        ratio = float(getattr(ti, "loadRatioGR", 0) or 0)
-        unit  = math.ceil(ratio) if ratio > 1 else 0
-        align = max(int(unit * ti.subtileSize), int(ldsRowBankSize))
-        return int(((raw + align - 1) // align) * align)
-
-      sizeA = subtileRegionSize(aTileInfo, numASubtiles, padA, swzPadA)
-      sizeB = subtileRegionSize(bTileInfo, numBSubtiles, padB, swzPadB)
-      self.ldsStartOffsetB = sizeA
-      sizeMXSA = 0
-      sizeMXSB = 0
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0 and kernel["ProblemType"].get("MXBlockB", 0) > 0:
-        mxsaTileInfo = self.states.mxsa.tileInfo
-        mxsbTileInfo = self.states.mxsb.tileInfo
-
-        # For Swizzled scale we use extra LDS space for now to allow wider DTL loads
-        numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
-        sizeMXSA = mxsaTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-        sizeMXSB = mxsbTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-        self.ldsStartOffsetMXSA = sizeA + sizeB
-        self.ldsStartOffsetMXSB = sizeA + sizeB + sizeMXSA
-
-      self.ldsTotalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
-
-      kernel["LdsNumBytes"] = max(1, int(self.ldsTotalSize * kernel["NumLdsBlk"]))
-      if kernel["LdsNumBytes"] > self.states.archCaps["DeviceLDS"]:
-        self.states.overflowedResources = 8
+      # Geometry selection and the LDS region layout live in
+      # Components/Subtile/SubtileLdsLayout.py; this publishes
+      # ldsStartOffset{A,B,MXSA,MXSB}, ldsTotalSize and kernel["LdsNumBytes"].
+      applyLdsLayout(self, kernel)
 
 
     #print(self.states.a.tileInfo.getLocalSubtileId(1,0))
