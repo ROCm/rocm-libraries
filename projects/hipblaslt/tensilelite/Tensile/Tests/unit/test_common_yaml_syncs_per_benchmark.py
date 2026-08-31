@@ -52,10 +52,6 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
         "benchmark timing coverage file under common/benchmark_runs",
     ),
     SyncsPerBenchmarkOptOut(
-        "common/benchmark_runs/f4_nt_gfx950.yaml",
-        "benchmark timing coverage file under common/benchmark_runs",
-    ),
-    SyncsPerBenchmarkOptOut(
         "common/benchmark_runs/fp16_tn_gfx11.yaml",
         "benchmark timing coverage file under common/benchmark_runs",
     ),
