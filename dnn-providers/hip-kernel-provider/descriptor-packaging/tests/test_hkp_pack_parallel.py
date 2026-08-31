@@ -497,6 +497,14 @@ def test_pack_jobs_env_parsing(monkeypatch):
     with pytest.raises(HkpPackError, match="HKP_PACK_JOBS"):
         pipeline._pack_jobs()
 
+    # A negative is an integer, so it clears the parse and would otherwise be
+    # clamped onto the serial path -- reading as "4 workers" while running on
+    # one. Rejected rather than clamped, and pinned here because the silent
+    # form produces a correct pack and no signal at all.
+    monkeypatch.setenv("HKP_PACK_JOBS", "-4")
+    with pytest.raises(HkpPackError, match="negative"):
+        pipeline._pack_jobs()
+
 
 _HSACO_SOURCE = "hsaco_kernel.cpp"
 
@@ -538,7 +546,9 @@ def test_prewarm_skips_hsaco_kind(hsaco_corpus, tmp_path):
     before the kind dispatch and neither `hsaco` nor `kpack` carries one, so the
     walk raises `KeyError` and the `unsupported kind` branch at
     `pipeline.py:227-228` is unreachable for a validly-authored UKD of either
-    kind -- a separate ticket tracks that the `KeyError` is not an `HkpPackError`.
+    kind. That the `KeyError` escapes as itself rather than as an
+    `HkpPackError` is a pre-existing defect this test pins rather than fixes;
+    fixing it belongs with the walk's error contract, not with the prewarm.
 
     The raise is asserted first on purpose. With the job-list assertion ahead of
     it, a stub job list ends the test before the walk is ever exercised, which is
@@ -572,27 +582,90 @@ def test_prewarm_skips_hsaco_kind(hsaco_corpus, tmp_path):
     assert [j.vk for j in jobs] == [sibling_vk]
 
 
-@pytest.mark.quick
-def test_first_failure_is_submission_order():
-    """The reported failure is the first among failures in submission order.
+def _synthetic_job(corpus, block):
+    """One prewarm job over a real corpus source, keyed by its build block.
 
-    Not first-completed and not lowest-key: submission order is walk order, so
-    this names the same variant the serial path would have named. `pool.map`
-    yields in submission order for exactly this reason; switching to
-    `as_completed` would make the reported variant depend on scheduling.
+    Distinct blocks give distinct variant keys and so distinct output names,
+    which is what lets a test fail exactly one job out of many. The key is
+    computed the way the walk computes it rather than invented, so the output
+    the producer writes is the one the caches are checked against.
     """
-    results = [
-        ("vk-0", "/inter/vk-0.co", "S0", None),
-        ("vk-1", None, None, "HkpPackError: module not importable"),
-        ("vk-2", "/inter/vk-2.co", "S2", None),
-        ("vk-3", None, None, "HkpPackError: compile failed"),
-    ]
-    outcome = pipeline._first_failure(results)
-    assert outcome is not None, "two of the four results carry an error"
-    first, failure_count = outcome
-    assert first[0] == "vk-1"
-    assert first[3] == "HkpPackError: module not importable"
-    assert failure_count == 2
+    ks = _hip_ks(_K1_SOURCE, "K1", block)
+    return pipeline._VariantJob(
+        vk=hip_variant_key(hip_source_relpath(Path("."), _K1_SOURCE), ks["build"]),
+        kind="hip",
+        ukd=_ukd(f"ukd-synthetic-{block}", ks),
+        rel_dir=".",
+        source_root=str(corpus),
+        out_dir="",
+        hipcc="",
+        arch=TARGET_ARCH,
+    )
+
+
+@pytest.mark.quick
+def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
+    """The pack stops on the first failure in walk order and cancels the rest.
+
+    Two properties, and the second is why fail-fast is not free. Naming has to
+    stay on submission order -- walk order, the variant the serial path would
+    have named -- so the pool is drained lazily and broken on rather than
+    scanned after the fact. Breaking on the first result to *complete* would be
+    simpler and would hand the choice of named variant to the scheduler.
+
+    Only the first job fails, and every other one sleeps, so a pool that ran the
+    queue to the end is distinguishable from one that abandoned it. The attempt
+    count is bounded rather than pinned: the executor dispatches a few jobs
+    beyond the running two before the parent observes the failure, so the exact
+    number depends on scheduling even though `< len(jobs)` does not.
+
+    The job list is synthesised rather than taken from the corpus, which yields
+    six. Six is below the executor's own dispatch depth -- workers plus queued
+    calls -- so every job reaches a worker before the first result is consumed
+    and cancellation has nothing left to cancel. The corpus is still what backs
+    the selection tests; here the subject is the pool, and a queue long enough
+    for the property to exist is part of the setup.
+    """
+    corpus = _write_corpus(tmp_path / "fail-fast", hip_only=True)
+    monkeypatch.setenv("HKP_PACK_JOBS", "2")
+
+    jobs = [_synthetic_job(corpus, 64 + i) for i in range(24)]
+    monkeypatch.setattr(pipeline, "_prewarm_jobs", lambda *_a, **_k: list(jobs))
+    flat = load_flat_input(corpus, log=_silent)
+
+    tally = tmp_path / "tally"
+    tally.mkdir()
+    hipcc = _stub_hipcc(tmp_path, fail_out=f"{jobs[0].vk}.co", delay=1.0, tally=tally)
+
+    variant_co = {}
+    variant_symbol = {}
+    with pytest.raises(HkpPackError) as excinfo:
+        pipeline._prewarm_variants(
+            flat,
+            corpus,
+            TARGET_ARCH,
+            hipcc,
+            tmp_path / "inter",
+            variant_co,
+            variant_symbol,
+            log=_silent,
+        )
+
+    message = str(excinfo.value)
+    assert f"variant '{jobs[0].vk}'" in message
+    assert TARGET_ARCH in message
+
+    attempts = len(list(tally.iterdir()))
+    assert attempts < len(jobs), (
+        f"every one of the {len(jobs)} jobs was attempted -- the queue was not "
+        "cancelled, so the pack is not failing fast"
+    )
+
+    # A half-filled cache is worse than an empty one: the walk skips a compile
+    # for any key it finds, so a surviving entry would suppress the compile of
+    # an artefact this run never produced.
+    assert variant_co == {}
+    assert variant_symbol == {}
 
 
 @pytest.mark.quick
@@ -684,14 +757,14 @@ def failing_corpus(tmp_path):
 
 @pytest.mark.quick
 def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
-    """A pool failure reports a count and names one variant, not N tracebacks.
+    """A pool failure names one variant, not N tracebacks.
 
-    The assertions are host-independent on purpose. How many jobs fail depends
-    on what the box has -- with no toolchain every rocke job fails in the child
-    -- so the count is matched as a number rather than pinned to one. Which
-    variant is named is not host-dependent and is asserted exactly: it is the
-    first failure in submission order, which is walk order, so the parallel
-    path names the variant the serial path would have named.
+    Which variant is named is not host-dependent and is asserted exactly: it is
+    the first failure in submission order, which is walk order, so the parallel
+    path names the variant the serial path would have named. How many others
+    would have failed is deliberately not asserted, and the message carries no
+    count -- the pack stops at the first failure, so any count would describe
+    how far the pool happened to get rather than how many variants are broken.
 
     No `PYTHONPATH` export: children inherit the parent's `sys.path` under both
     start methods, which `test_worker_inherits_parent_sys_path` is the detector
@@ -714,7 +787,7 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
         )
 
     message = str(excinfo.value)
-    assert re.search(rf"\d+ variant\(s\) failed to compile for {TARGET_ARCH}", message)
+    assert re.search(rf"variant '\S+' failed to compile for {TARGET_ARCH}", message)
     assert f"'{jobs[0].vk}'" in message
     assert "module not importable" in message
 
@@ -762,3 +835,126 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monke
     assert err.startswith("HkpPackError: ")
     assert "boom" in err
     assert calls == []
+
+
+_STUB_HIPCC_BODY = r"""
+import hashlib
+import os
+import sys
+import time
+
+FAIL_OUT = {fail_out!r}
+DELAY = {delay!r}
+TALLY = {tally!r}
+
+args = sys.argv[1:]
+oi = args.index("-o")
+out = args[oi + 1]
+
+# Recorded before the failure branch, so the tally counts attempts rather than
+# successes -- a fail-fast assertion needs to see the job that failed.
+if TALLY:
+    open(os.path.join(TALLY, os.path.basename(out)), "wb").close()
+
+if FAIL_OUT and os.path.basename(out) == FAIL_OUT:
+    sys.stderr.write("stub hipcc: refusing " + FAIL_OUT + chr(10))
+    sys.exit(2)
+
+if DELAY:
+    time.sleep(DELAY)
+
+seed = repr([a for i, a in enumerate(args) if i not in (oi, oi + 1)])
+with open(out, "wb") as fh:
+    fh.write(bytes([127]) + b"ELF" + hashlib.sha256(seed.encode()).digest())
+"""
+
+
+def _stub_hipcc(tmp_path, *, fail_out=None, delay=0.0, tally=None):
+    """Path to a hipcc stand-in that writes a .co and exits 0.
+
+    Lets the pool run to success on a box with no toolchain, which is what makes
+    the success path testable at all. The bytes are derived from every argument
+    except the output path, so two variants of one source differ in content and
+    a variant cannot pass by being confused with its sibling.
+
+    `fail_out` is matched against the output basename rather than the source, so
+    exactly one variant fails even where several share a source file -- the
+    fail-fast test needs the other jobs to survive long enough to be cancelled.
+    `delay` slows every other job so cancellation is observable rather than a
+    race, and `tally` collects one marker per attempt.
+
+    A launcher script rather than the interpreter directly, because the producer
+    invokes `hipcc` as argv[0] of a subprocess.
+    """
+    stub = tmp_path / "stub_hipcc.py"
+    stub.write_text(
+        _STUB_HIPCC_BODY.format(
+            fail_out=fail_out, delay=delay, tally=str(tally) if tally else None
+        ),
+        encoding="utf-8",
+    )
+    if sys.platform == "win32":
+        launcher = tmp_path / "stub_hipcc.bat"
+        launcher.write_text(
+            f'@echo off\r\n"{sys.executable}" "{stub}" %*\r\n', encoding="utf-8"
+        )
+    else:
+        launcher = tmp_path / "stub_hipcc.sh"
+        launcher.write_text(
+            f'#!/bin/sh\nexec "{sys.executable}" "{stub}" "$@"\n', encoding="utf-8"
+        )
+        launcher.chmod(0o755)
+    return launcher
+
+
+@pytest.mark.quick
+def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
+    """A pool that runs to success fills both caches, each with its own value.
+
+    The one test that exercises the pool's success path. Every other test in
+    this file stops short of it: the failure test raises before the unpack loop,
+    the hsaco test has a single job so no pool starts, and the rest call the
+    selection helpers directly. The inherited suite never starts a pool either
+    -- its packs are below the two-job threshold or patch the compile out -- so
+    without this, swapping the two cache assignments changes no test result.
+
+    `_prewarm_jobs` supplies the expected symbols. It is pinned independently by
+    the golden-sequence test, and reading the authored `entry` back out of the
+    jobs keeps this test from restating a vk-to-symbol table that the corpus
+    would silently outgrow.
+    """
+    corpus = _write_corpus(tmp_path / "hip-only", hip_only=True)
+    monkeypatch.setenv("HKP_PACK_JOBS", "2")
+
+    variant_co = {}
+    variant_symbol = {}
+    pipeline._prewarm_variants(
+        load_flat_input(corpus, log=_silent),
+        corpus,
+        TARGET_ARCH,
+        _stub_hipcc(tmp_path),
+        tmp_path / "inter",
+        variant_co,
+        variant_symbol,
+        log=_silent,
+    )
+
+    jobs = pipeline._prewarm_jobs(
+        load_flat_input(corpus, log=_silent), corpus, TARGET_ARCH
+    )
+    expected_symbol = {job.vk: job.ukd["kernel_source"]["entry"] for job in jobs}
+    assert len(expected_symbol) == HIP_ONLY_EXPECTED_CO_COUNT
+
+    # Asserted separately from the symbols so a swap of the two assignments
+    # fails on both dicts rather than on whichever is checked first.
+    assert set(variant_co) == set(expected_symbol)
+    for vk, co in variant_co.items():
+        assert isinstance(co, Path), f"{vk} cached a {type(co).__name__}, not a Path"
+        assert co.is_file(), f"{vk} cached a path that does not exist: {co}"
+        assert co.name == f"{vk}.co"
+
+    assert variant_symbol == expected_symbol
+
+    # Distinct sources and distinct build blocks must not collapse onto one
+    # artifact: equal bytes here would mean the key space, not the pool, is wrong.
+    assert len({co.read_bytes() for co in variant_co.values()}) == len(variant_co)

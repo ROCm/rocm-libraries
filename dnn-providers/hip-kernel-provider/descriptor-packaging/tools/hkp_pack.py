@@ -54,9 +54,13 @@ def _parse_args(argv):
             "                 failure then raises from the walk itself, with a "
             "single clean\n"
             "                 traceback and nothing else in flight. A value "
-            "that is not an\n"
-            "                 integer is an error, not a fallback to the "
-            "default."
+            "that is not a\n"
+            "                 non-negative integer is an error, not a "
+            "fallback to the\n"
+            "                 default. On any worker count the first variant "
+            "that fails to\n"
+            "                 compile stops the pack and the queued variants "
+            "are cancelled."
         ),
     )
     p.add_argument(

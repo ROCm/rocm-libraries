@@ -393,9 +393,11 @@ def _pack_jobs():
     starting a pool and the walk compiles every variant itself, which is the
     escape hatch for debugging a compile failure with a single clean traceback.
 
-    An unparseable value is a hard error rather than a silent fallback to the
-    default: a typo that quietly restored 32 workers would look like the knob
-    was honoured.
+    A value that is not a non-negative integer is a hard error rather than a
+    silent fallback to the default: a typo that quietly restored 32 workers
+    would look like the knob was honoured. Negative values are rejected for the
+    same reason and not clamped -- clamping would land them on the serial path,
+    so `-4` would read as "compiled on 4 workers" and run on one.
 
     An environment variable rather than a CLI flag or a CMake cache variable
     because it reaches through the CMake custom command with no plumbing.
@@ -404,9 +406,12 @@ def _pack_jobs():
     if env is None:
         return min(32, os.cpu_count() or 1)
     try:
-        return max(0, int(env))
+        jobs = int(env)
     except ValueError:
         raise HkpPackError(f"HKP_PACK_JOBS must be an integer, got '{env}'") from None
+    if jobs < 0:
+        raise HkpPackError(f"HKP_PACK_JOBS must not be negative, got {jobs}")
+    return jobs
 
 
 def _variant_key_for(ukd, rel_dir):
@@ -417,11 +422,9 @@ def _variant_key_for(ukd, rel_dir):
 
     `hip_variant_key` and `rocke_variant_key` are resolved as globals of this
     module on every call -- never through a function-local import, an alias
-    bound at import time, or a recomputation inside a worker process. Two
-    existing tests monkeypatch those names on this module to collapse every job
-    onto one key; any of those three shortcuts would look up the real function
-    instead, and the tests would silently exercise a different key space than
-    the walk.
+    bound at import time, or a recomputation inside a worker process. Each of
+    those shortcuts would bind the real function past any substitution made on
+    this module, so the prewarm and the walk could key one variant two ways.
 
     A kind that carries no compilable source yields None rather than raising.
     The walk stays the sole reporter of whatever failure such a UKD produces:
@@ -435,19 +438,6 @@ def _variant_key_for(ukd, rel_dir):
     if kind == "rocke":
         return rocke_variant_key(ks["source"], ks["builder"], ks["spec"])
     return None
-
-
-def _first_failure(results):
-    """First failing result in submission order, plus the failure count.
-
-    Returns `(result, count)`, or None when every result succeeded. Submission
-    order is walk order, so the named variant is the one the serial path would
-    have reported; first-completed order would make it depend on scheduling.
-    """
-    failures = [r for r in results if r[3] is not None]
-    if not failures:
-        return None
-    return failures[0], len(failures)
 
 
 def _prewarm_variants(
@@ -465,14 +455,16 @@ def _prewarm_variants(
     The walk then finds each key already present and skips the expensive call.
     Records, symbols and doc rewriting stay entirely the walk's: this only
     populates two dicts.
+
+    Fails fast, matching the serial path: the first failing variant in walk
+    order raises and the queued jobs are cancelled, so a broken builder costs
+    the jobs already in flight rather than the whole pack. Nothing is written
+    into either cache when that happens -- a partly-filled cache would let the
+    walk skip compiles whose artefacts were never produced.
     """
     jobs = [
         replace(job, out_dir=str(inter_arch_dir), hipcc=str(hipcc))
         for job in _prewarm_jobs(flat, source_root, arch)
-        # Defensive rather than load-bearing: the sole caller creates
-        # `variant_co` empty a few lines earlier, so nothing is filtered here
-        # today and there is no case to go looking for.
-        if job.vk not in variant_co
     ]
 
     workers = _pack_jobs()
@@ -486,32 +478,46 @@ def _prewarm_variants(
     # runs would freeze whichever path list existed when it was first built and
     # break imports the parent has since arranged. It reads like an obvious
     # optimisation, and it is not one.
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        try:
-            # `map` yields in submission order, which is what makes the
-            # reported failure deterministic and equal to the serial path's.
-            results = list(pool.map(_compile_one_variant, jobs, chunksize=1))
-        except HkpPackError:
-            raise
-        except Exception as exc:
-            # A worker that is killed rather than raising surfaces here, and
-            # the exception is not an HkpPackError -- so unconverted it would
-            # sail past run_pipeline's per-arch handler and discard every other
-            # arch's work. This is the one failure mode a single-process
-            # compile structurally cannot have.
-            raise HkpPackError(
-                f"the variant compile pool for {arch} failed "
-                f"({type(exc).__name__}: {exc}); a worker process died, "
-                "usually from memory exhaustion -- retry with a lower "
-                "HKP_PACK_JOBS"
-            ) from exc
-
-    outcome = _first_failure(results)
-    if outcome is not None:
-        first, failure_count = outcome
+    pool = ProcessPoolExecutor(max_workers=workers)
+    results = []
+    failure = None
+    try:
+        # Consumed lazily rather than collected with `list`, so the first
+        # failure stops the pack instead of riding out every remaining job.
+        # `map` yields in submission order, which is walk order, so the variant
+        # this stops on is the one the serial path would have named -- breaking
+        # on the first result to *complete* would hand that choice to the
+        # scheduler.
+        for result in pool.map(_compile_one_variant, jobs, chunksize=1):
+            if result[3] is not None:
+                failure = result
+                break
+            results.append(result)
+    except Exception as exc:
+        # A worker that is killed rather than raising surfaces here, and
+        # the exception is not an HkpPackError -- so unconverted it would
+        # sail past run_pipeline's per-arch handler and discard every other
+        # arch's work. This is the one failure mode a single-process
+        # compile structurally cannot have.
         raise HkpPackError(
-            f"{failure_count} variant(s) failed to compile for {arch}; "
-            f"first was '{first[0]}': {first[3]}"
+            f"the variant compile pool for {arch} failed "
+            f"({type(exc).__name__}: {exc}); a worker process died, "
+            "usually from memory exhaustion -- retry with a lower "
+            "HKP_PACK_JOBS"
+        ) from exc
+    finally:
+        # `cancel_futures` is the whole of fail-fast: `map` submits every job up
+        # front, so without it a plain shutdown would wait out the queue the
+        # break was meant to abandon. Jobs already running still finish, which
+        # bounds the waste at the worker count rather than the pack size.
+        pool.shutdown(wait=True, cancel_futures=True)
+
+    if failure is not None:
+        # One variant named, no failure count: the pack stops at the first
+        # failure, so any count would describe how far the pool happened to get
+        # rather than how many variants are broken.
+        raise HkpPackError(
+            f"variant '{failure[0]}' failed to compile for {arch}: {failure[3]}"
         )
 
     for vk, co_path, symbol, _err in results:
