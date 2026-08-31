@@ -484,18 +484,14 @@ SWIZZLE_LOAD_BYTES = 16
 def swizzleGeometry(solution, tc: str) -> dict:
     """Layout of the pre-swizzled (pre-tiled) tensor `tc` ("A" or "B").
 
-    The tensor is a sequence of swizzle blocks; a block is one wave's global load, of
-    MI_{M|N} rows each holding laneSize contiguous unroll elements.
+    A swizzle block is one wave's global load: MI_{M|N} rows of laneSize contiguous
+    unroll elements. gfx10/gfx11 WMMA replicate operands across the wave, so only
+    WavefrontSize/dupFactor lanes are distinct.
 
-    Lanes replicate across the wave on gfx10/gfx11 WMMA, so only WavefrontSize/dupFactor
-    lanes are distinct; dupFactor is 1 for MFMA and gfx12.
+    dtvLaneSize is what the DirectToVgpr emitter derives instead; it matches laneSize
+    only for wave64 MFMA. Callers must reject DirectToVgpr where the two disagree.
 
-    dtvLaneSize is what the DirectToVgpr emitter derives instead of laneSize. It equals
-    laneSize only for MFMA 16x16xK on wave64, which is every configuration gfx942 ships;
-    the emitter is not fixed here, so callers must reject DirectToVgpr where the two
-    disagree.
-
-    `solution` may be a partly derived state; only MIInputPerThread{tc}, MatrixInst{M,N,K},
+    `solution` may be partly derived: only MIInputPerThread{tc}, MatrixInst{M,N,K},
     WavefrontSize and ProblemType.DataType{tc} are read.
     """
     bpe       = int(solution["ProblemType"][f"DataType{tc}"].numBytes())
