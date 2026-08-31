@@ -11,7 +11,7 @@ rocBLAS documentation is available at
 
 ### Changed
 
-* On gfx950, Level 3 `gemm` and `gemm_ex` for single- and double-precision now default to the hipBLASLt backend instead of Tensile. Complex types on gfx950 still default to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
+* On gfx950, Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM, for single- and double-precision now default to the hipBLASLt backend instead of Tensile. Complex types on gfx950 still default to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
 
 ### Optimized
 
