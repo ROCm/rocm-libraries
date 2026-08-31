@@ -894,7 +894,6 @@ namespace rocsparse
             {
                 const int64_t                     batch_count = dnvec_descr_y->batch_count;
                 const rocsparse_diagonal_modifier modifier = sptrsv_descr->get_diagonal_modifier();
-                rocsparse_csrsv_info              csrsv_info = sptrsv_descr->get_csrsv_info();
 
                 switch(format)
                 {
@@ -906,7 +905,7 @@ namespace rocsparse
                                                       modifier,
                                                       alpha,
                                                       A,
-                                                      csrsv_info,
+                                                      sptrsv_descr->get_csrsv_info(),
                                                       static_cast<int64_t>(1),
                                                       dnvec_descr_x->const_values,
                                                       dnvec_descr_x->inc,
@@ -929,7 +928,7 @@ namespace rocsparse
                                                       modifier,
                                                       alpha,
                                                       A,
-                                                      csrsv_info,
+                                                      sptrsv_descr->get_csrsv_info(),
                                                       static_cast<int64_t>(1),
                                                       dnvec_descr_x->const_values,
                                                       dnvec_descr_x->inc,
