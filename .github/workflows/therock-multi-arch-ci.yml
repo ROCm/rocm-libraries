@@ -100,7 +100,7 @@ jobs:
       baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
     steps:
       - name: Checkout ci-env action
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/actions/ci-env
           sparse-checkout-cone-mode: true
@@ -120,13 +120,13 @@ jobs:
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
     steps:
       - name: Checkout repository config
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/repos-config.json
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/TheRock
           ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
@@ -149,7 +149,7 @@ jobs:
   setup:
     needs: [ci-gate, ci-env, configure]
     if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@55c642acf0fc232c5e1c2130590cbdfb41e3e358 # 2026-08-26
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
@@ -185,7 +185,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@55c642acf0fc232c5e1c2130590cbdfb41e3e358 # 2026-08-26
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -213,7 +213,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@55c642acf0fc232c5e1c2130590cbdfb41e3e358 # 2026-08-26
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -244,7 +244,7 @@ jobs:
     steps:
       - name: Checkout TheRock repository
         if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
