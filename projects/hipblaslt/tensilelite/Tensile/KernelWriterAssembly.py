@@ -10591,12 +10591,12 @@ class KernelWriterAssembly(KernelWriter):
         activeMask = "0xFFFFFFFF" if (waveSize == 32) else "0xFFFFFFFFFFFFFFFF"
         SMovBX     = SMovB32 if (waveSize == 32) else SMovB64
         module.add(SMovBX(dst=sgpr(fullExec,sgprCnt), src=activeMask, comment="to restore all threads active"))
-        bpeVgpr = self.vgprPool.checkOut(1, "bpeVgpr")
-        module.add(VMovB32(dst=vgpr(bpeVgpr), src=int(tP["bpeGR"]), comment="bpeGR"))
+        #bpeVgpr = self.vgprPool.checkOut(1, "bpeVgpr")
+        #module.add(VMovB32(dst=vgpr(bpeVgpr), src=int(tP["bpeGR"]), comment="bpeGR"))
 
         # can remove this?
-        zeroVgpr = self.vgprPool.checkOut(1,"zeroVgpr")
-        module.add(VMovB32(dst=vgpr(zeroVgpr), src=0, comment="zero"))
+        #zeroVgpr = self.vgprPool.checkOut(1,"zeroVgpr")
+        #module.add(VMovB32(dst=vgpr(zeroVgpr), src=0, comment="zero"))
 
     def globalReadGuardKBody(tP, optParams = None):
       if optParams != None:
@@ -11018,7 +11018,8 @@ class KernelWriterAssembly(KernelWriter):
                       dst=vgpr("GlobalReadAddr%s+%u+1"%(tP["tensorChar"], graIdx)), \
                       dst1=VCC(), \
                       src0=vgpr("GlobalReadAddr%s+%u+1"%(tP["tensorChar"], graIdx)), \
-                      src1=vgpr(zeroVgpr), \
+                      src1=0, \
+                      #src1=vgpr(zeroVgpr), \
                       src2=VCC(), comment="gra += 1 (upper)"))
 
                 # int8 byte:
@@ -11186,8 +11187,8 @@ class KernelWriterAssembly(KernelWriter):
     # BufferLoad=0 VGPRs are local to each call — always free them
     if not isTr and not kernel["BufferLoad"]:
       self.vgprPool.checkIn(maxAddrVgpr)
-      self.vgprPool.checkIn(bpeVgpr)
-      self.vgprPool.checkIn(zeroVgpr)
+      #self.vgprPool.checkIn(bpeVgpr)
+      #self.vgprPool.checkIn(zeroVgpr)
 
     if doTailOpt == 2:
       return module, loadCnt, vgprList, directToLdsLoads
