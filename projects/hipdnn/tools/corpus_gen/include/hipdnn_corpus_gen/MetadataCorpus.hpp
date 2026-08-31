@@ -4,6 +4,8 @@
 #pragma once
 
 #include <hipdnn_corpus_gen/GraphBuilderRegistry.hpp>
+#include <hipdnn_corpus_gen/GraphSize.hpp>
+#include <hipdnn_corpus_gen/OperationDirectory.hpp>
 #include <hipdnn_corpus_gen/ProblemSpace.hpp>
 
 #include <hipdnn_frontend.hpp>
@@ -49,47 +51,9 @@ struct MetadataOperationCorpus
 ///
 /// The one place a declaration meets a live engine. Everything upstream is data; everything
 /// downstream is a measurement.
-/// Total bytes the graph's tensors occupy, from the serialized graph itself.
 ///
-/// The benchmarking ceiling §4.3.2 describes: a problem whose tensors do not fit cannot be
-/// timed, so it cannot enter a corpus at any budget. Computed rather than declared, because it
-/// is a property of the device and the dtype rather than of the operation -- and because no
-/// per-dimension window can express it. Without it the search faithfully proposes convolutions
-/// that are applicable, enormous, and take minutes each; a corpus of eighty such problems does
-/// not finish.
-inline int64_t graphBytes(const GraphBytes& bytes)
-{
-    const auto* graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(bytes.data());
-    if(graph == nullptr || graph->tensors() == nullptr)
-    {
-        return 0;
-    }
-
-    int64_t total = 0;
-    for(const auto* tensor : *graph->tensors())
-    {
-        const auto* dims = tensor->dims();
-        if(dims == nullptr)
-        {
-            continue;
-        }
-        int64_t elements = 1;
-        for(const auto dim : *dims)
-        {
-            if(dim <= 0 || elements > std::numeric_limits<int64_t>::max() / dim)
-            {
-                return std::numeric_limits<int64_t>::max();
-            }
-            elements *= dim;
-        }
-        // Four bytes is an upper bound for every element type a corpus currently uses and an
-        // underestimate for none of them below fp64, which keeps this a ceiling rather than a
-        // guess that could let a too-large problem through.
-        total += elements * 4;
-    }
-    return total;
-}
-
+/// @p maxBytes is the benchmarking ceiling (see GraphSize.hpp): a problem whose tensors do not
+/// fit cannot be timed, so it cannot enter a corpus at any budget.
 inline ProblemOracle makeMetadataOracle(hipdnnHandle_t handle,
                                         int64_t engineId,
                                         const OperationMetadata& metadata,
@@ -170,65 +134,6 @@ inline ProblemOracle makeMetadataOracle(hipdnnHandle_t handle,
             return false;
         }
     };
-}
-
-/// Every `*.opmeta.json` in @p directory, parsed. Files that fail validation are reported
-/// rather than skipped: a declaration that does not load is a hole in the corpus.
-struct MetadataSet
-{
-    std::vector<std::pair<std::string, OperationMetadata>> operations;
-    std::vector<std::string> errors;
-};
-
-inline MetadataSet loadOperationDirectory(const std::filesystem::path& directory)
-{
-    MetadataSet set;
-    if(!std::filesystem::is_directory(directory))
-    {
-        set.errors.push_back("not a directory: " + directory.string());
-        return set;
-    }
-
-    // Sorted, so a corpus generated twice visits its operations in one order.
-    std::vector<std::filesystem::path> files;
-    for(const auto& entry : std::filesystem::directory_iterator(directory))
-    {
-        if(entry.path().extension() == ".json"
-           && entry.path().string().find(".opmeta.") != std::string::npos)
-        {
-            files.push_back(entry.path());
-        }
-    }
-    std::sort(files.begin(), files.end());
-
-    for(const auto& file : files)
-    {
-        std::ifstream stream(file);
-        if(!stream)
-        {
-            set.errors.push_back("cannot read " + file.string());
-            continue;
-        }
-
-        try
-        {
-            auto parsed = parseOperationMetadata(nlohmann::json::parse(stream));
-            if(!parsed.ok())
-            {
-                for(const auto& error : parsed.errors)
-                {
-                    set.errors.push_back(file.filename().string() + ": " + error);
-                }
-                continue;
-            }
-            set.operations.emplace_back(file.string(), std::move(*parsed.metadata));
-        }
-        catch(const std::exception& error)
-        {
-            set.errors.push_back(file.filename().string() + ": " + error.what());
-        }
-    }
-    return set;
 }
 
 /// @brief Generates the problem corpus for @p engineId across every declared operation.

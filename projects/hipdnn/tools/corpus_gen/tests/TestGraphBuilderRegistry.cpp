@@ -300,7 +300,7 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
 
     // ResNet50 conv1: 224x224x3 -> 112x112x64, 7x7 filter, stride 2, pad 3.
     const ProblemPoint conv1{{"N", int64_t{64}},        {"C", int64_t{3}},
-                             {"K", int64_t{64}},        {"H", int64_t{224}},
+                             {"K", int64_t{64}},        {"groups", int64_t{1}},   {"H", int64_t{224}},
                              {"W", int64_t{224}},       {"R", int64_t{7}},
                              {"S", int64_t{7}},         {"pad_h", int64_t{3}},
                              {"pad_w", int64_t{3}},     {"stride_h", int64_t{2}},
@@ -337,7 +337,7 @@ TEST(TestGraphBuilderRegistry, TheShippedMetadataCoversEveryDeclaredDtype)
     for(const auto& value : dtype->enumerable())
     {
         ProblemPoint point{{"N", int64_t{1}},         {"C", int64_t{2}},
-                           {"K", int64_t{2}},         {"H", int64_t{8}},
+                           {"K", int64_t{2}},         {"groups", int64_t{1}},   {"H", int64_t{8}},
                            {"W", int64_t{8}},         {"R", int64_t{3}},
                            {"S", int64_t{3}},         {"pad_h", int64_t{0}},
                            {"pad_w", int64_t{0}},     {"stride_h", int64_t{1}},
@@ -362,7 +362,7 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionAdmitsARealLayer)
     ASSERT_FALSE(parsed.metadata->constraints.empty());
 
     const ProblemPoint resnetLayer3{{"N", int64_t{64}},        {"C", int64_t{512}},
-                                    {"K", int64_t{512}},       {"H", int64_t{28}},
+                                    {"K", int64_t{512}},       {"groups", int64_t{1}},   {"H", int64_t{28}},
                                     {"W", int64_t{28}},        {"R", int64_t{3}},
                                     {"S", int64_t{3}},         {"pad_h", int64_t{0}},
                                     {"pad_w", int64_t{0}},     {"stride_h", int64_t{1}},

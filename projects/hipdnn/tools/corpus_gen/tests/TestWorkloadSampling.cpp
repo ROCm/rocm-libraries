@@ -146,6 +146,38 @@ TEST(TestWorkloadSampling, PerturbationKeepsChannelsAligned)
     }
 }
 
+TEST(TestWorkloadSampling, ADistinguishedSmallValueSurvivesAnAlignmentNeighbourhood)
+{
+    // C=3 is the three-channel image every vision network starts from. It is not a misaligned
+    // 8, and rounding it up to one deletes the stem layer from the 60% of the corpus that comes
+    // from perturbation -- quietly, because C=8 is a perfectly ordinary channel count.
+    const auto metadata = tinyConv();
+    std::mt19937_64 rng(41);
+
+    const ProblemPoint stem{{"C", int64_t{3}},  {"H", int64_t{224}}, {"W", int64_t{224}},
+                            {"R", int64_t{7}},  {"pad", int64_t{3}},
+                            {"dtype", std::string{"float32"}}};
+
+    for(int i = 0; i < 200; ++i)
+    {
+        const auto moved = detail::perturbWithinNeighbourhood(metadata, stem, rng);
+        EXPECT_EQ(at(moved, "C"), 3) << "the three-channel input did not survive perturbation";
+    }
+
+    // A value at or above the alignment still moves, and still lands on a multiple.
+    const ProblemPoint body{{"C", int64_t{64}}, {"H", int64_t{56}}, {"W", int64_t{56}},
+                            {"R", int64_t{3}},  {"pad", int64_t{1}},
+                            {"dtype", std::string{"float32"}}};
+    std::set<int64_t> seen;
+    for(int i = 0; i < 200; ++i)
+    {
+        const auto moved = detail::perturbWithinNeighbourhood(metadata, body, rng);
+        EXPECT_EQ(at(moved, "C") % 8, 0);
+        seen.insert(at(moved, "C"));
+    }
+    EXPECT_GT(seen.size(), 1U) << "aligned channels stopped moving";
+}
+
 TEST(TestWorkloadSampling, PerturbationActuallyMoves)
 {
     // A neighbourhood that returned the anchor every time would look like it was working and

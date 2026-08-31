@@ -212,9 +212,21 @@ inline int64_t perturbOne(const Parameter& parameter,
     }
     case Neighbourhood::Kind::MULTIPLE:
     {
-        // Aligned first: an anchor is usually already a multiple, but one that is not would
-        // otherwise carry its misalignment through every perturbation, and alignment is the
-        // property this kind exists to preserve.
+        // A value below the alignment is left alone. It is not a misaligned version of
+        // something -- it is a distinguished small value the alignment cannot express, and the
+        // motivating case is C=3. Rounding 3 up to 8 loses the three-channel input of every
+        // vision network's first layer, and it does so in the 60% of the corpus that comes
+        // from perturbation, so a ResNet stem survives only in the pure-archetype share.
+        // Measured before this: C=3 was 4.3% of a MIOpen conv corpus and 1.9% of a hipkernel
+        // one, against roughly a fifth of the archetypes declaring it.
+        if(base < hood.of)
+        {
+            return clampToRange(parameter, base);
+        }
+
+        // At or above the alignment, align first: an anchor is usually already a multiple, but
+        // one that is not would otherwise carry its misalignment through every perturbation,
+        // and alignment is the property this kind exists to preserve.
         const auto aligned
             = std::max(hood.of, static_cast<int64_t>(std::llround(static_cast<double>(base)
                                                                   / static_cast<double>(hood.of)))

@@ -13,6 +13,7 @@
  * so an operation is added by writing a file and an engine is characterised by being asked.
  */
 
+#include <hipdnn_corpus_gen/CorpusOutput.hpp>
 #include <hipdnn_corpus_gen/MetadataCorpus.hpp>
 
 #include <hipdnn_frontend.hpp>
@@ -35,6 +36,8 @@ namespace
 
 using hipdnn_corpus_gen::ExplorationRequest;
 using hipdnn_corpus_gen::ProblemPoint;
+using hipdnn_corpus_gen::asQueryArgument;
+using hipdnn_corpus_gen::asQueryColumns;
 
 struct Options
 {
@@ -172,73 +175,9 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
 /// Passed on the command line rather than left in an index for the harvest to join against.
 /// A timing whose parameters live in another file is a timing that can be joined to the wrong
 /// problem, and nothing in the row would show it.
-std::string asQueryArgument(const ProblemPoint& point)
-{
-    std::string text;
-    for(const auto& entry : point)
-    {
-        if(!text.empty())
-        {
-            text += ",";
-        }
-        text += entry.first + "=";
-        std::visit(
-            [&text](const auto& held) {
-                using Held = std::decay_t<decltype(held)>;
-                if constexpr(std::is_same_v<Held, std::string>)
-                {
-                    text += held;
-                }
-                else if constexpr(std::is_same_v<Held, bool>)
-                {
-                    text += held ? "true" : "false";
-                }
-                else
-                {
-                    text += std::to_string(held);
-                }
-            },
-            entry.second);
-    }
-    return text;
-}
 
 /// Renders a problem point as `q.*` columns, which is the half of a training row the corpus
 /// owns and the form RFC 0019.13 §7 requires.
-std::string asQueryColumns(const ProblemPoint& point, bool namesOnly)
-{
-    std::string text;
-    for(const auto& entry : point)
-    {
-        if(!text.empty())
-        {
-            text += ",";
-        }
-        if(namesOnly)
-        {
-            text += "q." + entry.first;
-            continue;
-        }
-        std::visit(
-            [&text](const auto& held) {
-                using Held = std::decay_t<decltype(held)>;
-                if constexpr(std::is_same_v<Held, std::string>)
-                {
-                    text += held;
-                }
-                else if constexpr(std::is_same_v<Held, bool>)
-                {
-                    text += held ? "true" : "false";
-                }
-                else
-                {
-                    text += std::to_string(held);
-                }
-            },
-            entry.second);
-    }
-    return text;
-}
 
 int runGenerator(const std::vector<std::string>& args)
 {

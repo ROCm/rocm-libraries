@@ -16,6 +16,14 @@
       "type": "int64",
       "description": "Output channels"
     },
+    "groups": {
+      "type": "int64",
+      "range": [
+        1,
+        null
+      ],
+      "description": "Convolution groups. Not a schema field: the frontend derives it as xDims[1] / wDims[1], so it is said by giving the filter C/groups input channels. groups == C is a depthwise convolution."
+    },
     "H": {
       "type": "int64",
       "description": "Input height"
@@ -186,7 +194,12 @@
         "kind": "expr",
         "value": [
           "$q.K",
-          "$q.C",
+          {
+            "/": [
+              "$q.C",
+              "$q.groups"
+            ]
+          },
           "$q.R",
           "$q.S"
         ]
@@ -403,6 +416,34 @@
           ]
         }
       ]
+    },
+    {
+      "==": [
+        {
+          "%": [
+            "$q.C",
+            "$q.groups"
+          ]
+        },
+        0
+      ]
+    },
+    {
+      "==": [
+        {
+          "%": [
+            "$q.K",
+            "$q.groups"
+          ]
+        },
+        0
+      ]
+    },
+    {
+      "<=": [
+        "$q.groups",
+        "$q.C"
+      ]
     }
   ],
   "archetypes": [
@@ -455,6 +496,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -520,6 +564,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -578,6 +625,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -640,6 +690,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -701,6 +754,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -761,6 +817,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -819,6 +878,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -882,6 +944,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -939,6 +1004,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -996,6 +1064,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1059,6 +1130,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1116,6 +1190,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1170,6 +1247,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1224,6 +1304,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1278,6 +1361,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1333,6 +1419,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1386,6 +1475,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1438,6 +1530,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1490,6 +1585,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1550,6 +1648,9 @@
         ],
         "dilation_w": [
           "$q.dilation_h"
+        ],
+        "groups": [
+          1
         ]
       }
     },
@@ -1579,6 +1680,255 @@
           128,
           256,
           512
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "groups": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "mobilenet_depthwise_3x3",
+      "note": "depthwise: one filter per input channel, so groups == C == K",
+      "values": {
+        "N": [
+          1,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128,
+          256
+        ],
+        "C": [
+          32,
+          64,
+          128,
+          256,
+          512,
+          1024
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          "$q.C"
+        ],
+        "H": [
+          112,
+          56,
+          28,
+          14,
+          7
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1,
+          2
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ]
+      }
+    },
+    {
+      "name": "mobilenet_depthwise_5x5",
+      "note": "the 5x5 depthwise EfficientNet uses",
+      "values": {
+        "N": [
+          1,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128,
+          256
+        ],
+        "C": [
+          64,
+          128,
+          256,
+          512
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          "$q.C"
+        ],
+        "H": [
+          56,
+          28,
+          14
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          5
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          2
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1,
+          2
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ]
+      }
+    },
+    {
+      "name": "resnext_grouped_3x3",
+      "note": "ResNeXt's cardinality-32 grouped convolution",
+      "values": {
+        "N": [
+          1,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128,
+          256
+        ],
+        "C": [
+          128,
+          256,
+          512,
+          1024
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          32
+        ],
+        "H": [
+          56,
+          28,
+          14,
+          7
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ]
+      }
+    },
+    {
+      "name": "grouped_3x3_c8",
+      "note": "an intermediate group count, as ShuffleNet-style blocks use",
+      "values": {
+        "N": [
+          1,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128,
+          256
+        ],
+        "C": [
+          128,
+          256,
+          512
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          8
+        ],
+        "H": [
+          56,
+          28,
+          14
         ],
         "W": [
           "$q.H"
@@ -1672,7 +2022,7 @@
     "neighbourhood": 0.6,
     "exploration": 0.2
   },
-  "// archetypes": "Correlated tuples from real networks (RFC 0019.13 \u00a712.2). Realism is a joint fact: C=3 is a real convolution beside K=64, a 7x7 filter and a 224x224 image, and meaningless beside K=905. Each archetype fixes one coherent geometry -- filter size, dilation and padding together -- and varies stride inside it, because padding is chosen to suit the filter and dilation while stride is chosen independently of both. Between them these cover stride 1/2/4/16, padding 0 through 5, and dilation 1 through 4.",
+  "// archetypes": "Correlated tuples from real networks (RFC 0019.13 \u00a712.2). Realism is a joint fact: C=3 is a real convolution beside K=64, a 7x7 filter and a 224x224 image, and meaningless beside K=905. Each archetype fixes one coherent geometry -- filter size, dilation and padding together -- and varies stride inside it, because padding is chosen to suit the filter and dilation while stride is chosen independently of both. Between them these cover stride 1/2/4/16, padding 0 through 5, dilation 1 through 4, and group counts from 1 through depthwise.",
   "// neighbourhood": "How a draw may drift and stay a layer. R, S, stride, padding and dilation are all deliberately absent: they form one coupled geometry, and moving any of them alone breaks the pairing the archetypes exist to record -- a 7x7 that drifts to 3x3 while pad stays 3, or a 16x16 patch projection whose stride falls to 1, is valid and is in no network. Coverage of those axes comes from declaring more geometries, not from perturbing one. W repeats the 1 ratio because most images are square and a uniform draw over {1, 1.33, 2} would say otherwise.",
   "// mixture": "Anchors alone memorise a handful of shapes; the wide net alone put 0.04% of ten thousand draws anywhere near a real layer. The exploration share is \u00a75.4's floor -- an engine still has to answer for problems nobody wrote down."
 }
