@@ -602,12 +602,24 @@ def _compile_abquant_kernel(
     # the toolchain-gated coerce flag). abquant's gfx950 EightWaves fast path
     # (192x256x128, 8-wave) additionally needs two -mllvm flags on top of the
     # base -- without them hipcc -O3 spills the EightWaves hot loop to scratch
-    # and the bridge runs ~3x slower than the byte-identical Old-TE kernel. They
-    # are passed via extra= so the base set stays in one place and cannot drift.
+    # and the bridge runs ~3x slower than the byte-identical Old-TE kernel.
+    #
+    # These two flags MUST stay gated to the EightWaves family. Old-TE's
+    # tile_engine abquant build ships only the 5 base flags for every config, so
+    # applying -greedy-reverse-local-assignment to the non-EightWaves families
+    # raises their VGPR usage (128 -> 136), drops a gfx950 occupancy tier, and
+    # makes large compv3 tiles ~64-74% slower than the byte-identical Old-TE
+    # kernel -- a pure build-flag asymmetry, not a real kernel difference. Gate
+    # them to EightWaves only so every other config is flag-identical to Old-TE.
+    is_eight_waves = "eightwaves" in hpp_path.name
     perf_flags = _te_perf_flags(
         hipcc,
-        extra=["-mllvm", "-enable-noalias-to-md-conversion=1",
-               "-mllvm", "-greedy-reverse-local-assignment=1"],
+        extra=(
+            ["-mllvm", "-enable-noalias-to-md-conversion=1",
+             "-mllvm", "-greedy-reverse-local-assignment=1"]
+            if is_eight_waves
+            else []
+        ),
     )
 
     compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",
