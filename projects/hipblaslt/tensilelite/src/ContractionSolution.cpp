@@ -3715,10 +3715,10 @@ namespace TensileLite
                 throw std::runtime_error(
                     "ContractionProblem has cEqualsD set, but pointers for c and d are not equal");
 
-            // The grouped path never resolves StreamK: generateSingleCallGroupedGemm()
-            // packs skGrid == 0 and reads sizeMapping.globalAccumulation directly,
-            // so those are the values the gate must see. Any StreamK solution
-            // reaching here therefore fails the grid divisibility check.
+            // The grouped path never resolves a StreamK grid, so the gate gets
+            // a default-constructed StreamKSettings whose grid is 0 - the
+            // rejection any StreamK solution reaching here fails on, and the
+            // guard that keeps the split arithmetic below from dividing by it.
             checkUniformSummationOrder(problems[idx],
                                        hardware,
                                        StreamKSettings{},
