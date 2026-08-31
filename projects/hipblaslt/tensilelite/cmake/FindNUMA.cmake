@@ -62,8 +62,8 @@ find_library(NUMA_LIBRARY
 
 find_path(NUMA_INCLUDE_DIR
     NAMES numa.h
-    HINTS "${ROCM_PATH}/include/rocm_sysdeps/include"
-    PATHS "${ROCM_PATH}/include/rocm_sysdeps/include")
+    HINTS "${ROCM_PATH}/lib/rocm_sysdeps/include"
+    PATHS "${ROCM_PATH}/lib/rocm_sysdeps/include")
 
 find_package_handle_standard_args(NUMA
     REQUIRED_VARS NUMA_LIBRARY NUMA_INCLUDE_DIR
