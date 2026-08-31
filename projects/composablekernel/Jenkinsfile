@@ -110,7 +110,6 @@ pipeline {
     }
     options {
         skipDefaultCheckout()
-        parallelsAlwaysFailFast()
     }
     parameters {
         booleanParam(
