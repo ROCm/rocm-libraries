@@ -60,19 +60,6 @@ namespace rocsparse
                                    rocsparse::trm_info_t*    info,
                                    rocsparse::pivot_info_t*  pivot_info,
                                    void*                     temp_buffer);
-
-    rocsparse_status gellsv_analysis(rocsparse_handle          handle,
-                                     int64_t                   m,
-                                     int64_t                   n,
-                                     const rocsparse_mat_descr descr,
-                                     rocsparse_indextype       ell_col_ind_indextype,
-                                     const void*               ell_col_ind,
-                                     int64_t                   ell_width,
-                                     rocsparse_index_base      idx_base,
-                                     rocsparse::trm_info_t*    info,
-                                     rocsparse::pivot_info_t*  pivot_info,
-                                     size_t                    buffer_size,
-                                     void*                     temp_buffer);
 }
 
 namespace rocsparse

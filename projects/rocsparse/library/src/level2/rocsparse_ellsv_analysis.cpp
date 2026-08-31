@@ -236,18 +236,18 @@ namespace rocsparse
                                                               temp_buffer);
     }
 
-    rocsparse_status gellsv_analysis(rocsparse_handle          handle,
-                                     int64_t                   m,
-                                     int64_t                   n,
-                                     const rocsparse_mat_descr descr,
-                                     rocsparse_indextype       ell_col_ind_indextype,
-                                     const void*               ell_col_ind,
-                                     int64_t                   ell_width,
-                                     rocsparse_index_base      idx_base,
-                                     rocsparse::trm_info_t*    info,
-                                     rocsparse::pivot_info_t*  pivot_info,
-                                     size_t                    buffer_size,
-                                     void*                     temp_buffer)
+    static rocsparse_status gellsv_analysis(rocsparse_handle          handle,
+                                            int64_t                   m,
+                                            int64_t                   n,
+                                            const rocsparse_mat_descr descr,
+                                            rocsparse_indextype       ell_col_ind_indextype,
+                                            const void*               ell_col_ind,
+                                            int64_t                   ell_width,
+                                            rocsparse_index_base      idx_base,
+                                            rocsparse::trm_info_t*    info,
+                                            rocsparse::pivot_info_t*  pivot_info,
+                                            size_t                    buffer_size,
+                                            void*                     temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -317,6 +317,62 @@ namespace rocsparse
 
         return rocsparse_status_success;
     }
+}
+
+rocsparse::trm_info_t* rocsparse::trm_data_t::create(rocsparse_handle          handle,
+                                                     rocsparse_operation       trans,
+                                                     int64_t                   m,
+                                                     int64_t                   n,
+                                                     const rocsparse_mat_descr descr,
+                                                     rocsparse_indextype  ell_col_ind_indextype,
+                                                     const void*          ell_col_ind,
+                                                     int64_t              ell_width,
+                                                     rocsparse_index_base idx_base,
+                                                     size_t               buffer_size,
+                                                     void*                temp_buffer)
+{
+    rocsparse::trm_info_t* trm_info = new rocsparse::trm_info_t();
+
+    THROW_IF_ROCSPARSE_ERROR(rocsparse::gellsv_analysis(handle,
+                                                        m,
+                                                        n,
+                                                        descr,
+                                                        ell_col_ind_indextype,
+                                                        ell_col_ind,
+                                                        ell_width,
+                                                        idx_base,
+                                                        trm_info,
+                                                        this,
+                                                        buffer_size,
+                                                        temp_buffer));
+    return trm_info;
+}
+
+rocsparse_status rocsparse::trm_data_t::recreate(rocsparse_handle          handle,
+                                                 rocsparse_operation       trans,
+                                                 int64_t                   m,
+                                                 int64_t                   n,
+                                                 const rocsparse_mat_descr descr,
+                                                 rocsparse_indextype       ell_col_ind_indextype,
+                                                 const void*               ell_col_ind,
+                                                 int64_t                   ell_width,
+                                                 rocsparse_index_base      idx_base,
+                                                 size_t                    buffer_size,
+                                                 void*                     temp_buffer)
+{
+    return this->recreate(trans,
+                          descr->fill_mode,
+                          handle,
+                          trans,
+                          m,
+                          n,
+                          descr,
+                          ell_col_ind_indextype,
+                          ell_col_ind,
+                          ell_width,
+                          idx_base,
+                          buffer_size,
+                          temp_buffer);
 }
 
 rocsparse_status rocsparse::ellsv_analysis_buffer_size(rocsparse_handle            handle,
