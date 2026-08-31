@@ -185,4 +185,67 @@ void GpuFpReferenceBatchnorm::launchFwdInf(const void* inputPtr,
     launchKernel(kernel.function(), localSize, gridSize, &args, sizeof(args));
 }
 
+void GpuFpReferenceBatchnorm::launchFwdInfWithVar(const void* inputPtr,
+                                                  const std::vector<int64_t>& inputDims,
+                                                  const std::vector<int64_t>& inputStrides,
+                                                  const void* scalePtr,
+                                                  const void* biasPtr,
+                                                  const void* estMeanPtr,
+                                                  const void* estVarPtr,
+                                                  void* outputPtr,
+                                                  double epsilon,
+                                                  std::vector<std::string>& defines)
+{
+    const int64_t n = inputDims[0];
+    const int64_t c = inputDims[1];
+    const int64_t nStride = inputStrides[0];
+    const int64_t cStride = inputStrides[1];
+    int64_t h = 0;
+    int64_t w = 0;
+    int64_t wStride = 0;
+    if(inputDims.size() == 3)
+    {
+        h = inputDims[2];
+        w = 1;
+        wStride = inputStrides[2];
+    }
+    else if(inputDims.size() == 4)
+    {
+        h = inputDims[2];
+        w = inputDims[3];
+        wStride = inputStrides[3];
+    }
+    else if(inputDims.size() == 5)
+    {
+        // For 5D, combine D*H*W into spatial dimension
+        auto d = inputDims[2];
+        h = d * inputDims[3];
+        w = inputDims[4];
+        wStride = inputStrides[4];
+    }
+    const int64_t inCstride = h * w;
+    const bool isLayoutNhwc = isChannelLastLayout(inputStrides);
+    auto [localSize, gridSize] = calculateGrid(c, inCstride, n, isLayoutNhwc);
+    defines.emplace_back(std::string("-DLOCAL_SIZE_X=") + std::to_string(localSize[0]));
+    defines.emplace_back(std::string("-DLOCAL_SIZE_Y=") + std::to_string(localSize[1]));
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    const auto& kernel
+        = compiler.getOrCompile("GpuRefBatchnormFwdInf.cpp", defines, "BatchnormFwdInfWithVarRef");
+    BatchnormFwdWithVarArgs args{};
+    args.input = inputPtr;
+    args.scale = scalePtr;
+    args.bias = biasPtr;
+    args.estMean = estMeanPtr;
+    args.estVar = estVarPtr;
+    args.output = outputPtr;
+    args.epsilon = epsilon;
+    args.c = static_cast<long long>(c);
+    args.hw = static_cast<long long>(inCstride);
+    args.batchSize = static_cast<long long>(n);
+    args.cStride = static_cast<long long>(cStride);
+    args.hwStride = static_cast<long long>(wStride);
+    args.batchStride = static_cast<long long>(nStride);
+    launchKernel(kernel.function(), localSize, gridSize, &args, sizeof(args));
+}
+
 } // namespace hipdnn_gpu_ref

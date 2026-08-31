@@ -3,12 +3,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <hipdnn-gpu-ref/ShallowGpuTensor.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn-gpu-ref/detail/HipRtcTypeName.hpp>
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-
-#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -95,6 +95,43 @@ public:
                      y.memory().deviceData(),
                      defines);
 
+        y.memory().markDeviceModified();
+    }
+
+    template <class XDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType,
+              class YDataType,
+              class ComputeDataType = MeanVarianceDataType>
+    static void fwdInferenceWithVariance(
+        hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+        hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+        hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& estimatedMean,
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& variance,
+        hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
+        double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON)
+    {
+        validateFwdInfInput<XDataType,
+                            ScaleBiasDataType,
+                            MeanVarianceDataType,
+                            YDataType,
+                            ComputeDataType>(x, scale, bias, estimatedMean, variance, y);
+        auto defines = detail::buildBatchnormFwdInfDefines<XDataType,
+                                                           ScaleBiasDataType,
+                                                           MeanVarianceDataType,
+                                                           YDataType,
+                                                           ComputeDataType>();
+        launchFwdInfWithVar(x.memory().deviceData(),
+                            x.dims(),
+                            x.strides(),
+                            scale.memory().deviceData(),
+                            bias.memory().deviceData(),
+                            estimatedMean.memory().deviceData(),
+                            variance.memory().deviceData(),
+                            y.memory().deviceData(),
+                            epsilon,
+                            defines);
         y.memory().markDeviceModified();
     }
 
@@ -309,6 +346,17 @@ private:
                              const void* invVarPtr,
                              void* outputPtr,
                              std::vector<std::string>& defines);
+
+    static void launchFwdInfWithVar(const void* inputPtr,
+                                    const std::vector<int64_t>& inputDims,
+                                    const std::vector<int64_t>& inputStrides,
+                                    const void* scalePtr,
+                                    const void* biasPtr,
+                                    const void* estMeanPtr,
+                                    const void* estVarPtr,
+                                    void* outputPtr,
+                                    double epsilon,
+                                    std::vector<std::string>& defines);
 };
 
 } // namespace hipdnn_gpu_ref

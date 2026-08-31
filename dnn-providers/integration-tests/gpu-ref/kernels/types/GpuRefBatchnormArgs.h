@@ -21,3 +21,20 @@ struct BatchnormFwdArgs
     long long hwStride;
     long long batchStride;
 };
+
+struct BatchnormFwdWithVarArgs
+{
+    const void* input;
+    const void* scale;
+    const void* bias;
+    const void* estMean;
+    const void* estVar;
+    void* output;
+    double epsilon;
+    long long c;
+    long long hw;
+    long long batchSize;
+    long long cStride;
+    long long hwStride;
+    long long batchStride;
+};
