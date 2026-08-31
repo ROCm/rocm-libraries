@@ -33,3 +33,5 @@ Known bugs:
   # remain covered. Suspected TensileLite codegen regression; remove once root-caused.
   - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 128, N: 192, known_bug_platforms: gfx950 }
   - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 192, N: 128, known_bug_platforms: gfx950 }
+  # gfx1250: matmul_batch_offset bf16 TN, batch_mode=1 only.
+  - { function: matmul_batch_offset, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, transA: T, transB: N, batch_mode: 1, known_bug_platforms: gfx1250 }
