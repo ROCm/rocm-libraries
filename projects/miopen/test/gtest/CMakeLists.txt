@@ -48,14 +48,11 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # test_drive<> framework disabled).  These did not actually launch CK kernels
     # during gfx942 testing but are kept skipped pending more extensive testing.
     list(APPEND SKIP_TESTS
-        conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp
         conv_hip_igemm_xdlops.cpp
         conv_igemm_mlir_xdlops_bwd_wrw.cpp
         conv_igemm_mlir_xdlops_fwd.cpp
         smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp
         smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16.cpp
-        smoke_solver_ConvCkIgemmFwdV6r1DlopsNchw.cpp
-        unit_conv_solver_ConvHipImplicitGemmBwdDataV1R1Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmBwdDataV4R1Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm.cpp
@@ -99,12 +96,24 @@ function(add_gtest TEST_NAME TEST_CPP)
   if(WIN32)
     target_compile_definitions(${TEST_NAME} PRIVATE NOMINMAX)
   endif()
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    # Tests that assert on logged/traced API names need to know which library
+    # layout they are running against: when MIOpen is built as a public wrapper
+    # over a private implementation, the public entry points are renamed with an
+    # _impl suffix and MIOPEN_LOG_FUNCTION runs inside the renamed definition,
+    # so the logged name carries that suffix.
+    target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
+  endif()
 
   add_dependencies(miopen-tests ${TEST_NAME})
   add_dependencies(miopen-check ${TEST_NAME})
 
   target_compile_options(${TEST_NAME} PRIVATE -Wno-global-constructors -Wno-undef)
   target_include_directories(${TEST_NAME} PRIVATE ../ ../../src/kernels)
+
+  if(MIOPEN_USE_HIPCONV)
+    target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_USE_HIPCONV=1)
+  endif()
 
   target_link_libraries(${TEST_NAME} miopen_gtest_common)
   if(MIOPEN_ENABLE_AI_KERNEL_TUNING)

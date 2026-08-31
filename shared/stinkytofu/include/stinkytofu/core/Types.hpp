@@ -81,6 +81,18 @@ struct PassFeatureConfig {
         int dsReadDrainLatency = 0;
         int dsReadThrottleLatency = 0;
         int dsReadPerWmma = INT_MAX;
+        int tensorLoadWmmaSpace = 0;
+        /// Max cycle-distance between two adjacent barrier groups for
+        /// StinkyMergeBarrierPass to merge them into a single multi-token
+        /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).
+        /// Internal tuning knob only — deliberately not surfaced as a module
+        /// option, so TensileLite cannot set it.
+        int mergeBarrierThreshold = 0;
+        /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
+        /// after the scheduler and plant SCC-clobbering handshakes around workgroup
+        /// barriers. Enables the scheduler's cluster-barrier SCC rule and the
+        /// CDNA5ReadyQueue paths that enforce it (see ReadyQueue::clusterBarrierEnabled).
+        bool clusterBarrier = false;
     };
 
     LoopConfig loopConfig;

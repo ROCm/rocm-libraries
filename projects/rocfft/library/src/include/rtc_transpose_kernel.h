@@ -28,10 +28,14 @@ struct RTCKernelTranspose : public RTCKernel
     RTCKernelTranspose(const std::string&                       kernel_name,
                        std::shared_future<hipModule_wrapper_t>& module,
                        dim3                                     gridDim,
-                       dim3                                     blockDim)
+                       dim3                                     blockDim,
+                       IndexType                                itype)
         : RTCKernel(kernel_name, module, gridDim, blockDim)
+        , itype(itype)
     {
     }
+
+    IndexType itype;
 
     static RTCKernel::RTCGenerator
         generate_from_node(const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype);

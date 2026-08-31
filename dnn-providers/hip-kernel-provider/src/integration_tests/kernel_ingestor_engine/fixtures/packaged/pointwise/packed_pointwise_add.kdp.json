@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "id": "5f6d34a1-9e02-4c7b-a385-1d90c47be268",
+  "name": "hipkernel:packed_pointwise_add",
+  "arch": [],
+  "matchers": [
+    "7a19c6e0-2d84-4b3f-91c7-05e6b8fa2d31",
+    "c3820f5b-71e6-4a49-8d10-b2f4970e6c58"
+  ],
+  "engine": "d1f4a2b6-0c73-4e58-9a21-6b8f3c05d7e4",
+  "dispatch": "4e73b0d8-6a91-4c25-bf03-8d52e1904a76",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "8b41c9d7-05f3-4e26-9c78-3a2e6b105f49",
+      "name": "packed_pointwise_add.f32_block64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "PointwiseAdd.cpp",
+        "entry": "PointwiseAdd",
+        "build": {
+          "defines": {
+            "HIP_PLUGIN_POINTWISE_TYPE": "float",
+            "HIP_PLUGIN_POINTWISE_BLOCK_SIZE": 64
+          }
+        }
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "FLOAT",
+        "operation": "ADD"
+      },
+      "priority": 0
+    },
+    "e70a52c8-1b64-4d9f-8027-c5931ae04b6d"
+  ]
+}

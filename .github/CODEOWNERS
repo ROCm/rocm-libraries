@@ -18,6 +18,42 @@
 /dnn-providers/fusilli-provider/                    @ROCm/fusilli-provider-reviewers
 /dnn-providers/integration-tests/                   @ROCm/dnn-providers-core
 /projects/composablekernel/                         @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv_*               @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv_*/**            @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv.*               @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv.*/**            @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convnd*              @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convnd*/**           @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv1d*              @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv1d*/**           @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv2d*              @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv2d*/**           @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv3d*              @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv3d*/**           @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convolution*         @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convolution*/**      @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convscale*           @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convscale*/**        @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convinvscale*        @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*convinvscale*/**     @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*2col*                @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*2col*/**             @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*column*              @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*column*/**           @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv                 @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*conv/**              @ROCm/ck-convolution @ROCm/ck-reviewers
+/projects/composablekernel/**/*mha*                 @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*mha*/**              @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*attention*           @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*attention*/**        @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*attn*                @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*attn*/**             @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*softmax_gemm*        @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*softmax_gemm*/**     @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*moe*                 @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*moe*/**              @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*topk*                @ROCm/ck-attention @ROCm/ck-reviewers
+/projects/composablekernel/**/*topk*/**             @ROCm/ck-attention @ROCm/ck-reviewers
 /projects/hipblas/                                  @ROCm/hipblas-reviewers
 /projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
 /projects/hipblaslt/                                @ROCm/hipblaslt-reviewers
@@ -99,6 +135,10 @@
 /projects/hipblaslt/**/.readthedocs.yaml            @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
 /projects/hipblaslt/docs/                           @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
 /projects/hipblaslt/library/include/                @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+
+# Internal engineering decision logs, not user-facing docs: skip the docs-reviewers group.
+/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/DECISIONS.md   @ROCm/hipblaslt-reviewers
+/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/adr/           @ROCm/hipblaslt-reviewers
 
 /projects/hipcub/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/hipcub/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
