@@ -54,6 +54,37 @@ __attribute__((noinline)) void* runtime_memalign(std::size_t alignment, std::siz
 {
   return memalign(alignment, size);
 }
+
+__attribute__((noinline)) void runtime_free(void* p)
+{
+  std::free(p);
+}
+
+__attribute__((noinline)) void* runtime_operator_new(std::size_t size)
+{
+  return ::operator new(size);
+}
+
+__attribute__((noinline)) void* runtime_operator_new_aligned(std::size_t size, std::size_t alignment)
+{
+  return ::operator new(size, std::align_val_t{alignment});
+}
+
+__attribute__((noinline)) void runtime_operator_delete(void* p) noexcept
+{
+  ::operator delete(p);
+}
+
+__attribute__((noinline)) void runtime_operator_delete_sized(void* p, std::size_t size) noexcept
+{
+  ::operator delete(p, size);
+}
+
+__attribute__((noinline)) void
+runtime_operator_delete_aligned_sized(void* p, std::size_t size, std::size_t alignment) noexcept
+{
+  ::operator delete(p, size, std::align_val_t{alignment});
+}
 } // namespace
 
 int main()
@@ -200,8 +231,33 @@ int main()
     }
     std::set_new_handler(previous_new_handler);
 
+    // operator new(0) must still return a distinct, deletable allocation.
+    auto zero_sized_new = runtime_operator_new(0);
+    if (!zero_sized_new)
+    {
+      return EXIT_FAILURE;
+    }
+    runtime_operator_delete(zero_sized_new);
+
+    // Exercise sized and aligned-sized deallocation explicitly so optimizer
+    // selection of a delete-expression overload cannot hide these paths.
+    auto sized_new = runtime_operator_new(42);
+    if (!sized_new)
+    {
+      return EXIT_FAILURE;
+    }
+    runtime_operator_delete_sized(sized_new, 42);
+
+    auto aligned_sized_new = runtime_operator_new_aligned(42, 64);
+    if (!aligned_sized_new || reinterpret_cast<std::uintptr_t>(aligned_sized_new) % 64 != 0)
+    {
+      return EXIT_FAILURE;
+    }
+    runtime_operator_delete_aligned_sized(aligned_sized_new, 42, 64);
+
     // free(nullptr) is required to be a no-op.
-    std::free(nullptr);
+    void* volatile null_pointer = nullptr;
+    runtime_free(null_pointer);
 
 #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__)
     // mmap reports failure with MAP_FAILED, not nullptr.
