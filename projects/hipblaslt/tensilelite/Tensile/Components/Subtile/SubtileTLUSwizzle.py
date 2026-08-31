@@ -209,6 +209,29 @@ def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
     return _buildColScatter(stack, instM, instK, float(tileInfo.bpe), waveSize)
 
 
+def tluPadBytes(tileInfo) -> int:
+    """Inter-load-block LDS pad this tile's layout inserts, or 0 for neither.
+
+    Both the XOR swizzle and the col_scatter layout separate consecutive DTL
+    load-blocks by a pad, and they are mutually exclusive, so every caller that
+    needs the pad is asking the same question of the same two selectors.
+    """
+    swz = selectTLUSwizzle(tileInfo)
+    cs = selectTLUColScatter(tileInfo)
+    if swz:
+        return int(swz.padBytes)
+    return int(cs.padBytes) if cs else 0
+
+
+def grLoadBlockBytes(waveSize: int, tileInfo) -> int:
+    """LDS bytes one wave's DTL load-block occupies, pad included.
+
+    A block is one wavesize-wide load at the tile's load width, plus the pad that
+    separates it from the next block.
+    """
+    return int(waveSize * tileInfo.gr.config.loadWidth + tluPadBytes(tileInfo))
+
+
 def swizzlePadPerStrip(tileInfo) -> int:
     """Extra LDS bytes a swizzled subtile strip occupies beyond subtileSize.
 
@@ -217,11 +240,9 @@ def swizzlePadPerStrip(tileInfo) -> int:
     Returns 0 when the stack has no swizzle.  GR write, LR read, and the LDS
     size computation must all fold this in so adjacent strips do not overlap.
     """
-    swz = selectTLUSwizzle(tileInfo)
-    cs = selectTLUColScatter(tileInfo)
-    if not swz and not cs:
+    padBytes = tluPadBytes(tileInfo)
+    if not padBytes:
         return 0
-    padBytes = int(swz.padBytes) if swz else int(cs.padBytes)
     # Block count is per-K-window, so derive it from instK and NOT from DepthU:
     # a strip spans exactly one MFMA K-window, and DepthU > instK just stacks
     # further K-windows as further strips (sId1 in the emit paths).
