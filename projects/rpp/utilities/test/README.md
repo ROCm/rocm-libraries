@@ -28,6 +28,19 @@ ctest                              # run via CTest (each case registered individ
 > [!NOTE]
 > Running tests via `ctest` ensures each unit is isolated to its own process. While this increases the runtime of the test suite significantly (due to per-unit setup overhead), it is preferred for isolating segfaults/GPU crashes to a single test case, rather than taking down other unit tests with it.
 
+## Output
+
+Console output comes from the suite's own reporter, which prints one line per test suite plus the
+detail of every failure. It replaces GTest's console printer only: `--gtest_list_tests` and
+`--gtest_output=xml:<path>` / `json:<path>` are unaffected, so IDE and CI integrations that read
+those work as they would against any GTest binary.
+
+```shell
+RPP_TEST_PLAIN_OUTPUT=1 ./rpp_tests   # stock GTest console output instead
+```
+
+Set `RPP_TEST_PLAIN_OUTPUT=1` for tooling that scrapes the `[ RUN      ]` / `[       OK ]` stream.
+
 ## Test names & filtering
 
 Every case has a structured, greppable name:

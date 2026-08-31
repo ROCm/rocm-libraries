@@ -23,14 +23,16 @@ SOFTWARE.
 */
 
 // Replaces gtest_main so the suite can install its own console reporter; every GTest
-// command-line flag still works.
+// command-line flag still works, and the reporter can be turned off entirely.
 
 #include <gtest/gtest.h>
+
+#include <cstdlib>
 
 #include "framework/reporter.hpp"
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
-    rpptest::install_concise_reporter();
+    if (std::getenv("RPP_TEST_PLAIN_OUTPUT") == nullptr) rpptest::install_concise_reporter();
     return RUN_ALL_TESTS();
 }
