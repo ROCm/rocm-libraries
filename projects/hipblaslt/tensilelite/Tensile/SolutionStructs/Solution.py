@@ -2583,7 +2583,16 @@ class Solution(collections.abc.Mapping):
     # FACTOR: a wave's MIWaveTile[0] M-tiles are stored as MIWaveTile[0]//T sub-groups of T tiles.
     # So T must divide MIWaveTile[0] and 2T must be a power of 2 (the transpose spans 2T lane blocks).
     # Auto-disable elsewhere so a stray yaml value cannot produce a broken kernel.
-    if state.get("WaveTransposeStore", 0):
+    if state.get("WaveTransposeStore", 0) == -1:
+      # plain-store baseline sentinel: valid only on the WaveContiguousOutput path (wave32, HPA,
+      # f8/bf16/fp16); otherwise fall back to 0 (normal store). No T divisibility check needed.
+      dtype   = state["ProblemType"]["DestDataType"]
+      dtypeOK = dtype.is8bitFloat() or dtype.isBFloat16() or dtype.isHalf()
+      if not (state["WaveContiguousOutput"] and not state["UseSubtileImpl"]
+              and state["WavefrontSize"] == 32 and dtypeOK
+              and state["ProblemType"]["HighPrecisionAccumulate"]):
+        state["WaveTransposeStore"] = 0
+    elif state.get("WaveTransposeStore", 0) > 0:
       dtype  = state["ProblemType"]["DestDataType"]
       dtypeOK = dtype.is8bitFloat() or dtype.isBFloat16() or dtype.isHalf()
       T = state["WaveTransposeStore"]

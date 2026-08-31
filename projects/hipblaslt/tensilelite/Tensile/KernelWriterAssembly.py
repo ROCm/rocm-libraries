@@ -16201,11 +16201,15 @@ class KernelWriterAssembly(KernelWriter):
       def _checkoutXposeScratch():
         T = kernel["WaveTransposeStore"]
         dwordsPerBlock = 2 * self.states.bpeCexternal
-        # gather[T*dwordsPerBlock] + sel[dwordsPerBlock] + srcIdx + gsel + vAddr + serialLo +
-        # waveId + vDelta (6 singles; vDelta holds the per-pass vaddr byte step).
-        cnt = T * dwordsPerBlock + dwordsPerBlock + 6
+        # gather[T*dwordsPerBlock] + sel[dwordsPerBlock] + 9 singles:
+        #   srcIdxBase (immutable pass-0 gather byte index, hoisted once per batch),
+        #   srcIdx     (per-trigger working copy, reset from srcIdxBase, advanced per pass),
+        #   gsel, vAddr (per-trigger working), serialLo, waveId (setup-transient), vDelta,
+        #   mBase, nBase (lane-invariant M-base / coord1-base, hoisted once per batch so each store
+        #   trigger only adds its sgM/tt1 residual).
+        cnt = T * dwordsPerBlock + dwordsPerBlock + 9
         return self.vgprPool.checkOutAligned(cnt, dwordsPerBlock, tag="globalWriteElements_xpose"), cnt
-      wantXpose = (kernel.get("WaveTransposeStore") and kernel.get("WaveContiguousOutput")
+      wantXpose = (kernel.get("WaveTransposeStore", 0) > 0 and kernel.get("WaveContiguousOutput")
                    and not kernel.get("UseSubtileImpl") and kernel["WavefrontSize"] == 32)
       if is16bitHPA:
         # For UseSubtileImpl, allocate 7 vgprs with 2-alignment (64-bit aligned) so

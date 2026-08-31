@@ -1756,7 +1756,8 @@ class GlobalWriteBatchWriter:
     # f8 wave32 partner-merge: merge lane l (M..M+7) with lane l^16 (M+8..M+15, same N) into one
     # buffer_store_b128. bpeCexternal==GSU1 excludes the GSU-MultipleBuffer workspace-f32 emission.
     waveContigF8Merge = (
-      self.kernel.get("WaveContiguousOutput")
+      self.kernel.get("WaveTransposeStore", 0) != -1  # -1 = plain-store baseline: suppress partner-merge
+      and self.kernel.get("WaveContiguousOutput")
       and not self.kernel.get("UseSubtileImpl")
       and not self.edge
       and self.kernel["WavefrontSize"] == 32
@@ -1770,7 +1771,7 @@ class GlobalWriteBatchWriter:
     # Same preconditions as partner-merge plus the WaveTransposeStore knob; supersedes partner-merge.
     destDtype = self.kernel["ProblemType"]["DestDataType"]
     waveContigXposeStore = (
-      bool(self.kernel.get("WaveTransposeStore"))
+      self.kernel.get("WaveTransposeStore", 0) > 0
       and self.kernel.get("WaveContiguousOutput")
       and not self.kernel.get("UseSubtileImpl")
       and not self.edge
@@ -1838,6 +1839,10 @@ class GlobalWriteBatchWriter:
     vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued + self.loadsGateIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
+    # Hoist the lane-invariant wave-transpose store setup ONCE per batch (before the element loop).
+    # Every store trigger below then only adds its sgM/tt1 residual — see _emitWaveTransposeSetup.
+    if waveContigXposeStore:
+      module.add(self._emitWaveTransposeSetup())
     for elementIdx in range(0, len(self.batchElements)):
       element = self.batchElements[elementIdx]
       addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
@@ -4029,6 +4034,107 @@ class GlobalWriteBatchWriter:
     module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
     return module
 
+  def _xposeSlots(self, T: int, dwordsPerBlock: int):
+    """Shared VGPR slot map for the wave-transpose store scratch (see _checkoutXposeScratch in KWA:
+    T*dwordsPerBlock gather + dwordsPerBlock sel + 9 singles). Both _emitWaveTransposeSetup (per batch)
+    and _emitWaveTransposeStore (per trigger) index the SAME region so the hoisted invariants persist."""
+    base = self.cvtVgprStruct.vgprXposeBase
+    single = base + T * dwordsPerBlock + dwordsPerBlock
+    return {
+      "gather":     base,                              # T*dwordsPerBlock dwords
+      "sel":        base + T * dwordsPerBlock,          # dwordsPerBlock dwords (store src)
+      "srcIdxBase": single + 0,                         # immutable pass-0 gather byte index (hoisted)
+      "srcIdx":     single + 1,                         # per-trigger working copy, advanced per pass
+      "gsel":       single + 2,                         # g = (L'>>1)&(T-1) (hoisted)
+      "vAddr":      single + 3,                         # per-trigger vaddr, advanced by delta each pass
+      "serial":     single + 4,                         # laneInWave = Serial&(ws-1) (setup transient)
+      "waveId":     single + 5,                         # waveId = Serial>>log2(ws) (setup transient)
+      "delta":      single + 6,                         # per-pass vaddr byte step (hoisted)
+      "mBase":      single + 7,                         # lane-invariant M-base (no sgM term) (hoisted)
+      "nBase":      single + 8,                         # lane-invariant coord1-base (no tt1 term) (hoisted)
+    }
+
+  def _emitWaveTransposeSetup(self):
+    """Emit the LANE-INVARIANT wave-transpose store setup ONCE per batch (before the element loop).
+    All quantities here are pure functions of Serial (laneInWave/waveId) and kernel constants, identical
+    across every store trigger in the batch. Each trigger's _emitWaveTransposeStore then only adds its
+    sgM (M-slice) / tt1 (N-tile) residual. Emitted addresses stay bit-identical to the pre-hoist form."""
+    module = Module("WaveTransposeSetup")
+    bpe  = self.parentWriter.states.bpeCexternal
+    dwordsPerBlock = 2 * bpe
+    T    = self.kernel["WaveTransposeStore"]
+    twoT = 2 * T
+    log2TwoT = int(log2(twoT))
+    assert twoT & (twoT - 1) == 0, "WaveTransposeStore requires 2T a power of 2"
+
+    s = self._xposeSlots(T, dwordsPerBlock)
+    gather      = s["gather"]
+    vSrcIdxBase = s["srcIdxBase"]
+    vGsel       = s["gsel"]
+    vSerial     = s["serial"]
+    vWaveId     = s["waveId"]
+    vDelta      = s["delta"]
+    vMBase      = s["mBase"]
+    vNBase      = s["nBase"]
+
+    strideD1J = "StrideD%s" % self.parentWriter.states.indexChars[self.kernel["PackedC1IndicesX"][0]]
+    ws    = self.kernel["WavefrontSize"]
+    miwg0 = self.kernel["MIWaveGroup"][0]
+    miwg1 = self.kernel["MIWaveGroup"][1]
+    matM  = self.kernel["MatrixInstM"]
+    matN  = self.kernel["MatrixInstN"]
+    tmpS  = self.tmpS01
+    colsPerPass = ws // twoT
+    nPasses = matN // colsPerPass
+
+    if miwg0 > 1 and (miwg0 & (miwg0 - 1)) != 0:
+      raise NotImplementedError("WaveTransposeStore needs power-of-2 MIWaveGroup[0]")
+
+    # CRITICAL: blk/N_local/srcLane/g are per-WAVE (lane 0..31), so use lane-in-wave = Serial&(ws-1),
+    # NOT the full thread id (0..127) — else waves >=1 miscompute M/N. waveId (Serial>>5) is separate.
+    module.addComment1("f8 wave-transpose SETUP (per batch): lane-in-wave + waveId (low bank)")
+    module.add(VAndB32(dst=vgpr(vSerial), src0=ws - 1, src1=vgpr("Serial"), comment="laneInWave = Serial & (ws-1)"))
+    module.add(VLShiftRightB32(dst=vgpr(vWaveId), shiftHex=int(log2(ws)), src=vgpr("Serial"), comment="waveId = Serial >> log2(ws)"))
+
+    # Group index g = (L'>>1)&(T-1) (which M-tile owns this lane's block); constant across passes.
+    module.add(VLShiftRightB32(dst=vgpr(vGsel), shiftHex=1, src=vgpr(vSerial), comment="L'>>1"))
+    module.add(VAndB32(dst=vgpr(vGsel), src0=T - 1, src1=vgpr(vGsel), comment="g = (L'>>1)&(T-1)"))
+
+    # N_local = L'>>log2(2T): pass-invariant part shared by srcLane and coord1. Held in vNBase (base,
+    # before the tt1*matN add which each trigger applies). gather+1 is free scratch here.
+    sTmp1 = gather + 1
+    module.add(VLShiftRightB32(dst=vgpr(vNBase), shiftHex=log2TwoT, src=vgpr(vSerial), comment="N_local = L'>>log2(2T)"))
+
+    # p=0 gather byte index base = (N_local + (blk&1)<<4) * 4 ; immutable, copied per trigger.
+    module.add(VAndB32(dst=vgpr(vSrcIdxBase), src0=1, src1=vgpr(vSerial), comment="blk&1 = Mhi"))
+    module.add(VLShiftLeftB32(dst=vgpr(vSrcIdxBase), shiftHex=4, src=vgpr(vSrcIdxBase), comment="Mhi<<4"))
+    module.add(VAddU32(dst=vgpr(vSrcIdxBase), src0=vgpr(vSrcIdxBase), src1=vgpr(vNBase), comment="srcLane(p=0) = N_local + Mhi<<4"))
+    module.add(VLShiftLeftB32(dst=vgpr(vSrcIdxBase), shiftHex=2, src=vgpr(vSrcIdxBase), comment="*4 byte index"))
+
+    # coord0 M-base = blk*8*bpe + wg0*MT0*bpe + waveId0*MIWaveTile0*matM*bpe (NO sgM term) -> vMBase.
+    module.add(VAndB32(dst=vgpr(vMBase), src0=twoT - 1, src1=vgpr(vSerial), comment="blk = L'&(2T-1)"))
+    module.add(VLShiftLeftB32(dst=vgpr(vMBase), shiftHex=int(log2(8 * bpe)), src=vgpr(vMBase), comment="M-block byte = blk*8*bpe"))
+    module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=self.kernel["MacroTile0"] * bpe, comment="wg0*MT0*bpe"))
+    module.add(VAddU32(dst=vgpr(vMBase), src0=vgpr(vMBase), src1=sgpr(tmpS), comment="mBase += wg0 M base"))
+    if miwg0 > 1:
+      module.add(VAndB32(dst=vgpr(sTmp1), src0=miwg0 - 1, src1=vgpr(vWaveId), comment="waveId0 = waveId & (miwg0-1)"))
+      module.add(SMovB32(dst=sgpr(tmpS), src=self.kernel["MIWaveTile"][0] * matM * bpe, comment="waveM stride*bpe"))
+      module.add(VMulLOU32(dst=vgpr(sTmp1), src0=vgpr(sTmp1), src1=sgpr(tmpS), comment="waveId0*strideM"))
+      module.add(VAddU32(dst=vgpr(vMBase), src0=vgpr(vMBase), src1=vgpr(sTmp1), comment="mBase += wave0 M off"))
+
+    # coord1 N-base = N_local + waveId1*MIWaveTile1*matN (NO tt1 term) -> vNBase (currently holds N_local).
+    if miwg1 > 1:
+      module.add(VLShiftRightB32(dst=vgpr(sTmp1), shiftHex=int(log2(miwg0)), src=vgpr(vWaveId), comment="waveId1 = waveId >> log2(miwg0)"))
+      module.add(SMovB32(dst=sgpr(tmpS), src=self.kernel["MIWaveTile"][1] * matN, comment="waveN stride"))
+      module.add(VMulLOU32(dst=vgpr(sTmp1), src0=vgpr(sTmp1), src1=sgpr(tmpS), comment="waveId1*strideN"))
+      module.add(VAddU32(dst=vgpr(vNBase), src0=vgpr(vNBase), src1=vgpr(sTmp1), comment="nBase = N_local + wave1 N off"))
+
+    # pass delta = colsPerPass * StrideD * bpe (constant vaddr byte step between passes).
+    if nPasses > 1:
+      module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr(strideD1J), src1=colsPerPass * bpe, comment="vaddr pass delta = colsPerPass*StrideD*bpe"))
+      module.add(VMovB32(dst=vgpr(vDelta), src=sgpr(tmpS), comment="hold pass delta"))
+    return module
+
   def _emitWaveTransposeStore(self, elementIdx: int, T: int, tt1: int, sgM: int = 0):
     """Barrier-free in-register block-lane-permutation store (order A: pack-then-permute).
 
@@ -4062,99 +4168,49 @@ class GlobalWriteBatchWriter:
     # only valid within this batch -> must snapshot, cannot recompute from startVgprValu for MI path).
     tileBase = [self.ss.elementSumIdx[elementIdx + j] for j in range(T)]
 
-    # Scratch region (low bank, from batch setup): gather buffer [T*dwordsPerBlock] + selected
-    # [dwordsPerBlock, store src: 2-align/b64 for f8, 4-align/b128 for bf16] + srcIdx(1) + gsel(1) +
-    # vAddr(1) + serialLo(1) + waveId(1) + vDelta(1) (per-pass vaddr byte step, held across the loop).
-    base    = self.cvtVgprStruct.vgprXposeBase
-    gather  = base                                 # T*dwordsPerBlock dwords
-    sel     = base + T * dwordsPerBlock             # dwordsPerBlock dwords
-    vSrcIdx = base + T * dwordsPerBlock + dwordsPerBlock
-    vGsel   = vSrcIdx + 1
-    vAddr   = vSrcIdx + 2                           # per-lane vaddr, HELD + advanced by vDelta each pass.
-    vSerial = vSrcIdx + 3                           # low-bank copy of LANE-IN-WAVE (Serial & (ws-1)).
-    vWaveId = vSrcIdx + 4                           # low-bank copy of waveId (Serial >> log2(ws)).
-    vDelta  = vSrcIdx + 5                           # vaddr byte step between passes = colsPerPass*StrideD*bpe.
-    # CRITICAL: blk/N_local/srcLane/g are per-WAVE (lane 0..31), so use lane-in-wave = Serial&(ws-1),
-    # NOT the full thread id (0..127) — else waves >=1 miscompute M/N. waveId (Serial>>5) is separate.
-    module.addComment1("f8 wave-transpose: lane-in-wave + waveId (low bank, avoid high-VGPR hazard)")
-    module.add(VAndB32(dst=vgpr(vSerial), src0=self.kernel["WavefrontSize"] - 1, src1=vgpr("Serial"), comment="laneInWave = Serial & (ws-1)"))
-    module.add(VLShiftRightB32(dst=vgpr(vWaveId), shiftHex=int(log2(self.kernel["WavefrontSize"])), src=vgpr("Serial"), comment="waveId = Serial >> log2(ws)"))
+    # Scratch slot map (shared with _emitWaveTransposeSetup; see _checkoutXposeScratch in KWA).
+    s = self._xposeSlots(T, dwordsPerBlock)
+    gather, sel = s["gather"], s["sel"]
+    vSrcIdxBase, vSrcIdx, vGsel = s["srcIdxBase"], s["srcIdx"], s["gsel"]
+    vAddr, vDelta = s["vAddr"], s["delta"]
+    vMBase, vNBase = s["mBase"], s["nBase"]
 
-    packedC1  = self.kernel["PackedC1IndicesX"]
-    indexChar = self.parentWriter.states.indexChars[packedC1[0]]
-    strideD1J = "StrideD%s" % indexChar
+    strideD1J = "StrideD%s" % self.parentWriter.states.indexChars[self.kernel["PackedC1IndicesX"][0]]
     ws    = self.kernel["WavefrontSize"]
-    miwg0 = self.kernel["MIWaveGroup"][0]
-    miwg1 = self.kernel["MIWaveGroup"][1]
     matM  = self.kernel["MatrixInstM"]
     matN  = self.kernel["MatrixInstN"]
-    wsLog2 = int(log2(ws))
     tmpS  = self.tmpS01
     colsPerPass = ws // twoT                        # e.g. 32/8 = 4 columns per store instruction
     # One trigger handles ONE N-tile (this tt1) = matN columns; MIWaveTile[1] N-tiles get separate
     # triggers (element[1]==0 fires once per tt1 group). So passes cover matN columns only.
     nPasses = matN // colsPerPass
 
-    if miwg0 > 1 and (miwg0 & (miwg0 - 1)) != 0:
-      raise NotImplementedError("WaveTransposeStore needs power-of-2 MIWaveGroup[0]")
+    # --- Per-trigger residual only. All lane-invariant setup (vSerial/vWaveId/vGsel/N_local/
+    # vSrcIdxBase/vMBase/vNBase/vDelta) was hoisted once per batch by _emitWaveTransposeSetup.
+    # Here we add just the sgM (M-slice) and tt1 (N-tile) offsets, then combine. ---
+    module.addComment1("f8 wave-transpose store #%d: residual (sgM=%d, tt1=%d)" % (elementIdx, sgM, tt1))
 
-    # Group index g = (L'>>1)&(T-1) (which M-tile owns this lane's block); constant across passes.
-    module.addComment1("f8 wave-transpose: g = (L'>>1)&%d (which M-tile)" % (T - 1))
-    module.add(VLShiftRightB32(dst=vgpr(vGsel), shiftHex=1, src=vgpr(vSerial), comment="L'>>1"))
-    module.add(VAndB32(dst=vgpr(vGsel), src0=T - 1, src1=vgpr(vGsel), comment="g = (L'>>1)&(T-1)"))
+    # reset the per-pass working gather index to its hoisted pass-0 base (advanced per pass below).
+    module.add(VMovB32(dst=vgpr(vSrcIdx), src=vgpr(vSrcIdxBase), comment="srcIdx = pass-0 base"))
 
-    # --- Pre-loop: compute the pass-INVARIANT gather index + vaddr base + pass delta ONCE. ---
-    # Adjacent passes advance the N column by colsPerPass, so BOTH the gather srcLane byte index and
-    # the store vaddr step by a constant (srcIdx += colsPerPass*4 ; vaddr += colsPerPass*StrideD*bpe).
-    # coord0 (M) is fully pass-invariant. Hoisting this out of the loop replaces ~15 address
-    # instructions/pass with 2 adds; the emitted addresses are bit-identical to the per-pass form.
-    # gather[] is not populated until the first ds_bpermute below, so borrow gather+0/+1 as scratch.
+    # coord0 (M): vAddr = mBase (+ sgM*T*matM*bpe M-slice offset).
+    if sgM > 0:  # sgM==0 (nSub==1, T==miwt0) -> vAddr == mBase (byte-identical to pre-subgroup path).
+      module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vMBase), src1=sgM * T * matM * bpe, comment="vAddr = mBase + sgM*T*matM*bpe"))
+    else:
+      module.add(VMovB32(dst=vgpr(vAddr), src=vgpr(vMBase), comment="vAddr = mBase"))
+
+    # coord1 (N): (nBase + tt1*matN) * StrideD * bpe, accumulated into vAddr. Uses gather+0 as scratch
+    # (gather[] is not populated until the first ds_bpermute below).
     sTmp0 = gather
-    sTmp1 = gather + 1
-    module.addComment1("f8 wave-transpose: hoist pass-invariant gather index + vaddr base + delta")
-
-    # N_local = L'>>log2(2T): the pass-invariant part shared by srcLane and coord1.
-    module.add(VLShiftRightB32(dst=vgpr(sTmp0), shiftHex=log2TwoT, src=vgpr(vSerial), comment="N_local = L'>>log2(2T)"))
-
-    # p=0 gather byte index = (N_local + (blk&1)<<4) * 4 ; held in vSrcIdx, advanced per pass.
-    module.add(VAndB32(dst=vgpr(vSrcIdx), src0=1, src1=vgpr(vSerial), comment="blk&1 = Mhi"))
-    module.add(VLShiftLeftB32(dst=vgpr(vSrcIdx), shiftHex=4, src=vgpr(vSrcIdx), comment="Mhi<<4"))
-    module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=vgpr(sTmp0), comment="srcLane(p=0) = N_local + Mhi<<4"))
-    module.add(VLShiftLeftB32(dst=vgpr(vSrcIdx), shiftHex=2, src=vgpr(vSrcIdx), comment="*4 byte index"))
-
-    # coord0 (M) = blk*8*bpe + sgM*(T*matM)*bpe + wg0*MT0*bpe + waveId0*MIWaveTile0*matM*bpe -> vAddr.
-    # Each sub-group covers T*matM (=16T) contiguous M rows; sgM shifts to this sub-group's M-slice.
-    module.add(VAndB32(dst=vgpr(vAddr), src0=twoT - 1, src1=vgpr(vSerial), comment="blk = L'&(2T-1)"))
-    module.add(VLShiftLeftB32(dst=vgpr(vAddr), shiftHex=int(log2(8 * bpe)), src=vgpr(vAddr), comment="M-block byte = blk*8*bpe"))
-    if sgM > 0:  # sgM==0 (nSub==1, T==miwt0) emits nothing -> byte-identical to the pre-subgroup path.
-      module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=sgM * T * matM * bpe, comment="+ sub-group M-slice offset = sgM*T*matM*bpe"))
-    module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=self.kernel["MacroTile0"] * bpe, comment="wg0*MT0*bpe"))
-    module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=sgpr(tmpS), comment="vaddr += wg0 M base"))
-    if miwg0 > 1:
-      module.add(VAndB32(dst=vgpr(sTmp1), src0=miwg0 - 1, src1=vgpr(vWaveId), comment="waveId0 = waveId & (miwg0-1)"))
-      module.add(SMovB32(dst=sgpr(tmpS), src=self.kernel["MIWaveTile"][0] * matM * bpe, comment="waveM stride*bpe"))
-      module.add(VMulLOU32(dst=vgpr(sTmp1), src0=vgpr(sTmp1), src1=sgpr(tmpS), comment="waveId0*strideM"))
-      module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(sTmp1), comment="vaddr += wave0 M off"))
-
-    # coord1 (N) for p=0 = N_local + tt1*matN + waveId1*MIWaveTile1*matN ; *StrideD ; *bpe -> += vAddr.
-    # (p*colsPerPass is handled by the per-pass vaddr delta, not here.) sTmp0 still holds N_local.
     nTileBase = tt1 * matN
     if nTileBase > 0:
-      module.add(VAddU32(dst=vgpr(sTmp0), src0=vgpr(sTmp0), src1=nTileBase, comment="coord1(p=0) += tt1*matN"))
-    if miwg1 > 1:
-      module.add(VLShiftRightB32(dst=vgpr(sTmp1), shiftHex=int(log2(miwg0)), src=vgpr(vWaveId), comment="waveId1 = waveId >> log2(miwg0)"))
-      module.add(SMovB32(dst=sgpr(tmpS), src=self.kernel["MIWaveTile"][1] * matN, comment="waveN stride"))
-      module.add(VMulLOU32(dst=vgpr(sTmp1), src0=vgpr(sTmp1), src1=sgpr(tmpS), comment="waveId1*strideN"))
-      module.add(VAddU32(dst=vgpr(sTmp0), src0=vgpr(sTmp0), src1=vgpr(sTmp1), comment="coord1 += wave1 N off"))
+      module.add(VAddU32(dst=vgpr(sTmp0), src0=vgpr(vNBase), src1=nTileBase, comment="coord1 = nBase + tt1*matN"))
+    else:
+      module.add(VMovB32(dst=vgpr(sTmp0), src=vgpr(vNBase), comment="coord1 = nBase"))
     module.add(VMulLOU32(dst=vgpr(sTmp0), src0=vgpr(sTmp0), src1=sgpr(strideD1J), comment="coord1 * StrideD"))
     if bpe > 1:
       module.add(VLShiftLeftB32(dst=vgpr(sTmp0), shiftHex=int(log2(bpe)), src=vgpr(sTmp0), comment="* bpe"))
     module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(sTmp0), comment="vaddr(p=0) = M_off + N_off"))
-
-    # pass delta = colsPerPass * StrideD * bpe (constant vaddr byte step between passes).
-    if nPasses > 1:
-      module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr(strideD1J), src1=colsPerPass * bpe, comment="vaddr pass delta = colsPerPass*StrideD*bpe"))
-      module.add(VMovB32(dst=vgpr(vDelta), src=sgpr(tmpS), comment="hold pass delta"))
 
     numStores = 0
     for p in range(nPasses):

@@ -845,7 +845,9 @@ validParameters = { # we need to make sure this matches develop
     # WaveTransposeStore: classic-LDSTr epilogue in-register wave-local block-lane-permutation store
     # for coalesced output (barrier-free StoreRemap alternative), for f8/bf16/fp16 dest (HPA, wave32).
     # 0=off. Value T = number of M-tiles combined per column group (natural T = MIWaveTile[0]).
-    "WaveTransposeStore": [0, 1, 2, 3, 4],
+    # -1 = plain-store baseline: keep WaveContiguousOutput layout but emit per-tile plain buffer_store
+    #      (NO wave-transpose merge AND NO f8 partner-merge) for scheduling comparison.
+    "WaveTransposeStore": [-1, 0, 1, 2, 3, 4],
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],
