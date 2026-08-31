@@ -10,13 +10,18 @@
 #include <map>
 #include <string>
 
+#ifdef __linux__
+#include <unistd.h>
+#endif
+
 using hipblaslt_client::cgroup_available_memory_from;
-using hipblaslt_client::cgroup_mount;
+using hipblaslt_client::cgroup_available_memory_live;
 using hipblaslt_client::cgroup_paths;
 using hipblaslt_client::parse_cgroup_size_token;
 using hipblaslt_client::parse_mountinfo;
 using hipblaslt_client::parse_proc_self_cgroup;
 using hipblaslt_client::pick_cgroup_mount;
+using hipblaslt_client::read_proc_file;
 using hipblaslt_client::resolve_cgroup_directory;
 
 namespace
@@ -281,3 +286,74 @@ TEST(CgroupHeadroomFrom, MinAcrossV1AndV2Walks)
     paths.v1 = "/docker/abc";
     EXPECT_EQ(headroom(paths, files), kGiB / 2);
 }
+
+// ---------------------------------------------------------------------------
+// live /proc integration (Linux only)
+// ---------------------------------------------------------------------------
+
+#ifndef __linux__
+
+TEST(CgroupProbeLiveIntegration, SkippedOnNonLinux)
+{
+    GTEST_SKIP() << "Live proc/mountinfo integration requires Linux";
+}
+
+#else
+
+TEST(CgroupProbeLiveIntegration, LiveMatchesFromUsingRealProcFiles)
+{
+    std::string const cgroup     = read_proc_file("/proc/self/cgroup");
+    std::string const mountinfo  = read_proc_file("/proc/self/mountinfo");
+    cgroup_paths const paths     = parse_proc_self_cgroup(cgroup);
+    size_t const       from_live = cgroup_available_memory_from(paths, mountinfo);
+
+    EXPECT_EQ(cgroup_available_memory_live(), from_live);
+}
+
+TEST(CgroupProbeLiveIntegration, ResolvedV2DirectoryHasMemoryFiles)
+{
+    cgroup_paths const paths = parse_proc_self_cgroup(read_proc_file("/proc/self/cgroup"));
+    if(paths.v2.empty())
+        GTEST_SKIP() << "Process has no cgroup v2 line";
+
+    auto const mounts = parse_mountinfo(read_proc_file("/proc/self/mountinfo"));
+    auto const* mount = pick_cgroup_mount(mounts, true, paths.v2);
+    if(!mount)
+        GTEST_SKIP() << "No cgroup2 mount covers " << paths.v2;
+
+    std::string const dir = resolve_cgroup_directory(*mount, paths.v2);
+    ASSERT_FALSE(dir.empty());
+    EXPECT_EQ(access((dir + "/memory.current").c_str(), R_OK), 0);
+    EXPECT_EQ(access((dir + "/memory.max").c_str(), R_OK), 0);
+}
+
+TEST(CgroupProbeLiveIntegration, ResolvedV1MemoryDirectoryHasLimitFiles)
+{
+    cgroup_paths const paths = parse_proc_self_cgroup(read_proc_file("/proc/self/cgroup"));
+    if(paths.v1.empty())
+        GTEST_SKIP() << "Process has no cgroup v1 memory line";
+
+    auto const mounts = parse_mountinfo(read_proc_file("/proc/self/mountinfo"));
+    auto const* mount = pick_cgroup_mount(mounts, false, paths.v1);
+    if(!mount)
+        GTEST_SKIP() << "No v1 memory mount covers " << paths.v1;
+
+    std::string const dir = resolve_cgroup_directory(*mount, paths.v1);
+    ASSERT_FALSE(dir.empty());
+    EXPECT_EQ(access((dir + "/memory.usage_in_bytes").c_str(), R_OK), 0);
+    EXPECT_EQ(access((dir + "/memory.limit_in_bytes").c_str(), R_OK), 0);
+}
+
+TEST(CgroupProbeLiveIntegration, HeadroomExplicitForFiniteVsUnlimited)
+{
+    cgroup_paths const paths     = parse_proc_self_cgroup(read_proc_file("/proc/self/cgroup"));
+    std::string const  mountinfo = read_proc_file("/proc/self/mountinfo");
+    size_t const       headroom  = cgroup_available_memory_from(paths, mountinfo);
+
+    if(headroom < std::numeric_limits<size_t>::max())
+        EXPECT_LT(cgroup_available_memory_live(), std::numeric_limits<size_t>::max());
+    else
+        EXPECT_EQ(cgroup_available_memory_live(), std::numeric_limits<size_t>::max());
+}
+
+#endif
