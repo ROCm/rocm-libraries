@@ -406,9 +406,7 @@ def _pack_jobs():
     try:
         return max(0, int(env))
     except ValueError:
-        raise HkpPackError(
-            f"HKP_PACK_JOBS must be an integer, got '{env}'"
-        ) from None
+        raise HkpPackError(f"HKP_PACK_JOBS must be an integer, got '{env}'") from None
 
 
 def _variant_key_for(ukd, rel_dir):
@@ -433,9 +431,7 @@ def _variant_key_for(ukd, rel_dir):
     ks = ukd["kernel_source"]
     kind = ks["kind"]
     if kind == "hip":
-        return hip_variant_key(
-            hip_source_relpath(rel_dir, ks["source"]), ks["build"]
-        )
+        return hip_variant_key(hip_source_relpath(rel_dir, ks["source"]), ks["build"])
     if kind == "rocke":
         return rocke_variant_key(ks["source"], ks["builder"], ks["spec"])
     return None

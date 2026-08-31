@@ -678,9 +678,7 @@ def failing_corpus(tmp_path):
         )
         for tile in (64, 128)
     ]
-    _write_json(
-        dest, "absent.kdp.json", _kdp("kdp-absent", [TARGET_ARCH], entries)
-    )
+    _write_json(dest, "absent.kdp.json", _kdp("kdp-absent", [TARGET_ARCH], entries))
     return dest
 
 
@@ -722,9 +720,7 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
 
 
 @pytest.mark.quick
-def test_compile_one_variant_returns_errors_and_computes_no_keys(
-    tmp_path, monkeypatch
-):
+def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monkeypatch):
     """The worker returns its failure and never computes a key.
 
     Returning rather than raising, because rocke and comgr exceptions are not
