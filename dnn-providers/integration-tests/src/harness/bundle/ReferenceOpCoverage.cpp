@@ -67,7 +67,7 @@ std::set<NodeAttributes> graphNodeTypes(const void* graphBuffer, size_t size)
     try
     {
         auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
-            const_cast<void*>(graphBuffer), size);
+            graphBuffer, size);
         for(uint32_t i = 0; i < graph.nodeCount(); ++i)
         {
             types.insert(graph.getNode(i).attributes_type());

@@ -414,6 +414,22 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        // Golden-data validation registers the reference harness and returns before
+        // registerBundles() ever runs, so no claim test exists to query a sidecar.
+        // Enforcement would then seed its coverage counters, find graphsQueried == 0,
+        // and exit 1 through verifiedNothing() -- whose diagnostic names three causes,
+        // none of them this one. Reject the combination here instead.
+        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
+           && hipdnn_integration_tests::TestConfig::get().hasGoldenDataValidationReference())
+        {
+            std::cerr << "Error: --enforce-support-claims and --validate-golden-data are mutually\n"
+                         "       exclusive. Golden-data validation loads no engine and registers "
+                         "no\n"
+                         "       claim tests, so there is nothing to check sidecar claims "
+                         "against.\n";
+            return 1;
+        }
+
         // Enumerated before any test records support data (see setEngineNames); the
         // vector keeps enumeration order for the table columns below.
         std::vector<std::string> loadedEngineNames;

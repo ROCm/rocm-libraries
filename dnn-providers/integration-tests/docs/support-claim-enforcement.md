@@ -171,11 +171,24 @@ exited 0.
 It returns an empty observation, touching nothing, when no engine was injected, no
 sidecar exists, or enforcement is off.
 
-Both `openGraph()` and `checkSupportClaims()` are virtual: the first needs a handle,
-the second is where a deviceless test injects verdicts without writing a sidecar per
-case. A harness that stubs the executor stubs `openGraph()` too, and says what it is
-simulating by setting `engines.accepted` — otherwise it would open a real graph just
-to be told nobody ranked it.
+Neither `openGraph()` nor `checkSupportClaims()` is virtual — **the harness has no
+virtual members at all.** Everything needing a GPU, a handle, a loaded plugin, or
+process-wide state sits behind one of the four collaborators a test injects through
+`HarnessDependencies`:
+
+| Collaborator | Stands in for |
+|---|---|
+| `IGraphEngineRunner` | `openGraph()` / `buildPlans()` / `execute()` — the frontend graph and the handle |
+| `IReferenceExecutors` | the CPU and GPU reference executors |
+| `ISupportClaimObserver` | reading the sidecar and comparing it against the ranked list |
+| `IVerificationReporter` | every verdict, coverage update and unverifiable reason the run publishes |
+
+So a deviceless suite constructs the **real** harness with gmock doubles
+(`mocks/MockX.hpp`, the convention the providers already use) plus a `HarnessPolicy`
+value, rather than subclassing it to stub methods out. A test that does not want a
+real graph opened returns a `GraphSession` from the mocked runner and says what it
+is simulating by setting `engines.accepted` — otherwise it would open a real graph
+just to be told nobody ranked it.
 
 ### Coverage accounting
 
@@ -325,6 +338,7 @@ cannot see.
 | `CLAIM_BROKEN … not in ranked list` | The engine dropped support for a graph the sidecar promises. Fix the engine, or update the sidecar |
 | `Engine 'X' is not loaded` | `--test-engine` named an engine this build does not have; startup exits 1 before any test runs |
 | `verification-mode 'golden-check' has been replaced` | Use `--validate-golden-data cpu\|gpu`, which runs the separate reference-validation suite |
+| `--enforce-support-claims and --validate-golden-data are mutually exclusive` | Golden-data validation registers the reference harness only, so no claim test exists to query a sidecar |
 
 ## Scope: two harnesses, never both
 
