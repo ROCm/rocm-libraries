@@ -237,9 +237,10 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
         DeviceProperties properties;
         properties.gcnArchName
             = deviceField->at(detail::WINNER_LINE_GCN_ARCH_NAME_FIELD).get<std::string>();
-        const auto warpSize = detail::readBoundedInt(*deviceField, detail::WINNER_LINE_WARP_SIZE_FIELD);
-        const auto multiProcessorCount = detail::readBoundedInt(
-            *deviceField, detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD);
+        const auto warpSize
+            = detail::readBoundedInt(*deviceField, detail::WINNER_LINE_WARP_SIZE_FIELD);
+        const auto multiProcessorCount
+            = detail::readBoundedInt(*deviceField, detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD);
         if(!warpSize.has_value() || !multiProcessorCount.has_value())
         {
             return std::nullopt;

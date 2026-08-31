@@ -45,6 +45,11 @@
 #include <string>
 #include <thread>
 
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 using hipdnn_data_sdk::utilities::appendLine;
 using hipdnn_data_sdk::utilities::LineStoreStatus;
 using hipdnn_data_sdk::utilities::lockLineStore;
@@ -54,6 +59,14 @@ using hipdnn_data_sdk::utilities::unlockLineStore;
 
 int main(int argc, char** argv)
 {
+#if defined(_WIN32)
+    // The CRT's default text mode rewrites every "\n" this helper prints to "\r\n" on
+    // its way through the pipe to the parent, which reads the raw bytes and sees a
+    // trailing '\r' the parent never asked for. Switch stdout to binary mode once,
+    // before the first print, so what this helper writes is what the parent reads.
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
     // Probe mode: "probe" <shard-path> <version> -- times a single lockLineStore() call.
     if(argc == 4 && std::string(argv[1]) == "probe")
     {

@@ -70,7 +70,8 @@ std::string uniqueToken()
 
 std::filesystem::path makeUniqueShardPath()
 {
-    return std::filesystem::temp_directory_path() / ("hipdnn_test_linestore_" + uniqueToken() + ".txt");
+    return std::filesystem::temp_directory_path()
+           / ("hipdnn_test_linestore_" + uniqueToken() + ".txt");
 }
 
 #if defined(_WIN32)
@@ -606,7 +607,8 @@ std::filesystem::path resolveLockHelperPath()
 {
 #if defined(_WIN32)
     std::array<wchar_t, MAX_PATH> buffer{};
-    const DWORD length = ::GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    const DWORD length
+        = ::GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
     if(length == 0 || length == buffer.size())
     {
         return {};
@@ -749,7 +751,8 @@ std::optional<ChildProcess> spawnHelper(const std::filesystem::path& helper,
 /// Reads until one whole '\n'-terminated line is available, or @p timeout elapses.
 /// Reads one byte at a time so a line's terminator is never consumed along with bytes
 /// belonging to a later message the child has not written yet.
-std::optional<std::string> readChildLine(ChildProcess& child, std::chrono::steady_clock::duration timeout)
+std::optional<std::string> readChildLine(ChildProcess& child,
+                                         std::chrono::steady_clock::duration timeout)
 {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     std::string line;
@@ -843,7 +846,11 @@ std::optional<int> awaitChild(ChildProcess& child,
         }
         std::array<char, 256> buffer{};
         DWORD readCount = 0;
-        if(!::ReadFile(child.readPipe, buffer.data(), static_cast<DWORD>(buffer.size()), &readCount, nullptr)
+        if(!::ReadFile(child.readPipe,
+                       buffer.data(),
+                       static_cast<DWORD>(buffer.size()),
+                       &readCount,
+                       nullptr)
            || readCount == 0)
         {
             break;
@@ -855,7 +862,8 @@ std::optional<int> awaitChild(ChildProcess& child,
     const DWORD remainingMs
         = timedOut || remaining.count() <= 0
               ? 0
-              : static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(remaining).count());
+              : static_cast<DWORD>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(remaining).count());
     const DWORD waitResult = ::WaitForSingleObject(child.process, remainingMs);
     std::optional<int> result;
     if(waitResult == WAIT_OBJECT_0)
@@ -926,7 +934,8 @@ std::optional<int> awaitChild(ChildProcess& child,
 /// successful exit whose drained stdout carries an "elapsedMs=<N>" line. Callers of a
 /// probe helper MUST already have consumed its leading "arm" line via readChildLine()
 /// before calling this.
-std::optional<long long> awaitProbe(ChildProcess& probe, std::chrono::steady_clock::duration timeout)
+std::optional<long long> awaitProbe(ChildProcess& probe,
+                                    std::chrono::steady_clock::duration timeout)
 {
     std::string output;
     const auto exitCode = awaitChild(probe, output, timeout);
@@ -958,7 +967,8 @@ TEST_F(TestLineStore, TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce)
     constexpr int APPENDS_PER_PROCESS = 40;
     constexpr const char* APPENDS_PER_PROCESS_ARG = "40";
 
-    const auto barrierPath = _shardPath.parent_path() / (_shardPath.filename().string() + ".barrier");
+    const auto barrierPath
+        = _shardPath.parent_path() / (_shardPath.filename().string() + ".barrier");
     std::error_code ignored;
     std::filesystem::remove(barrierPath, ignored);
 

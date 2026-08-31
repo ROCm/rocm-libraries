@@ -864,7 +864,8 @@ private:
     ///     when it was appended and on every disk failure, since write-back is
     ///     best-effort and the caller's own measurement is the right value to keep in
     ///     memory.
-    WinnerRecord writeBackToShard(const WinnerKey& key, WinnerRecord record, WinnerWriteCause cause) const
+    WinnerRecord
+        writeBackToShard(const WinnerKey& key, WinnerRecord record, WinnerWriteCause cause) const
     {
         if(_engineName.empty())
         {

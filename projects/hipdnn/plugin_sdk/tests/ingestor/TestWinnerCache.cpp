@@ -20,8 +20,8 @@
 #include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
-#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 #include "KernelIngestorTestFixtures.hpp"
+#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 
 namespace hipdnn_plugin_sdk::ingestor::testing
 {
@@ -870,11 +870,13 @@ TEST(TestIngestorWinnerCacheStateManager, ALineMissingTheFormatFieldIsSkipped)
     const auto path = winnerCacheShardPath("test:FormatFieldMissing", properties.gcnArchName);
     ASSERT_TRUE(std::filesystem::exists(path));
     {
-        auto malformed = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
+        auto malformed
+            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
         malformed.erase("v");
         std::ofstream out(path, std::ios::app);
         out << malformed.dump() << "\n";
-        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)), recordFor(0x33, 3.0))
+        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
+                                      recordFor(0x33, 3.0))
             << "\n";
     }
 
@@ -907,11 +909,13 @@ TEST(TestIngestorWinnerCacheStateManager, ALineWithAWrongFormatVersionIsSkipped)
     const auto path = winnerCacheShardPath("test:FormatFieldWrongVersion", properties.gcnArchName);
     ASSERT_TRUE(std::filesystem::exists(path));
     {
-        auto malformed = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
+        auto malformed
+            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
         malformed["v"] = 2;
         std::ofstream out(path, std::ios::app);
         out << malformed.dump() << "\n";
-        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)), recordFor(0x33, 3.0))
+        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
+                                      recordFor(0x33, 3.0))
             << "\n";
     }
 
@@ -943,11 +947,13 @@ TEST(TestIngestorWinnerCacheStateManager, ALineWithANonIntegerWarpSizeIsSkipped)
     const auto path = winnerCacheShardPath("test:WarpSizeNonInteger", properties.gcnArchName);
     ASSERT_TRUE(std::filesystem::exists(path));
     {
-        auto malformed = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
+        auto malformed
+            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
         malformed["device"]["warp_size"] = 64.5;
         std::ofstream out(path, std::ios::app);
         out << malformed.dump() << "\n";
-        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)), recordFor(0x33, 3.0))
+        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
+                                      recordFor(0x33, 3.0))
             << "\n";
     }
 
@@ -980,11 +986,13 @@ TEST(TestIngestorWinnerCacheStateManager, ALineWithAnOutOfRangeMultiProcessorCou
         = winnerCacheShardPath("test:MultiProcessorCountOutOfRange", properties.gcnArchName);
     ASSERT_TRUE(std::filesystem::exists(path));
     {
-        auto malformed = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
+        auto malformed
+            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
         malformed["device"]["multi_processor_count"] = 4294967296LL;
         std::ofstream out(path, std::ios::app);
         out << malformed.dump() << "\n";
-        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)), recordFor(0x33, 3.0))
+        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
+                                      recordFor(0x33, 3.0))
             << "\n";
     }
 
@@ -1292,7 +1300,8 @@ TEST(TestIngestorWinnerCacheStateManager, TwoLinesOneKeyComparesAgainstTheLastLi
         // A re-benchmark, forced to append even though a line for this key already
         // exists: the presence gate alone would otherwise adopt line 1 and never widen
         // the shard to two lines.
-        writer->recordWinner(key, secondRecord, WinnerWriteCause::COVERAGE_REBENCHMARK); // line 2: 0xB2
+        writer->recordWinner(
+            key, secondRecord, WinnerWriteCause::COVERAGE_REBENCHMARK); // line 2: 0xB2
     }
 
     // A third, fresh-miss write. The presence gate adopts unconditionally once ANY line
@@ -1389,7 +1398,8 @@ TEST(TestIngestorWinnerCacheStateManager, ACoverageRebenchmarkAppendsEvenWhenThe
     const auto properties = suffixedDeviceProperties();
     const auto key = keyFor(graph, properties);
 
-    const WinnerRecord record{entryFor(definitionFor(0xD1), 1.0), entryFor(definitionFor(0xD2), 2.0)};
+    const WinnerRecord record{entryFor(definitionFor(0xD1), 1.0),
+                              entryFor(definitionFor(0xD2), 2.0)};
 
     const auto manager = makeNamedStateManager("test:CoverageRebenchmarkUnchanged");
     manager->recordWinner(key, record);

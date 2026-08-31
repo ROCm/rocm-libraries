@@ -48,7 +48,8 @@ inline bool startsWithUserProfileToken(const std::wstring& path)
     return lowerPath.size() >= kUserProfileToken.size()
            && lowerPath.compare(0, kUserProfileToken.size(), kUserProfileToken) == 0
            && (lowerPath.size() == kUserProfileToken.size()
-               || path[kUserProfileToken.size()] == L'/' || path[kUserProfileToken.size()] == L'\\');
+               || path[kUserProfileToken.size()] == L'/'
+               || path[kUserProfileToken.size()] == L'\\');
 }
 } // namespace detail
 #endif

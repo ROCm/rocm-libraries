@@ -325,12 +325,13 @@ public:
         // append rather than adopt.
         const auto cause = record.has_value() ? WinnerWriteCause::COVERAGE_REBENCHMARK
                                               : WinnerWriteCause::FRESH_MISS;
-        executionContext.setPlan(makeBenchmarkPlan(
-            std::move(candidates),
-            handle,
-            [&stateManager = _stateManager, winnerKey, cause](const std::vector<RankedEntry>& ranking) {
-                stateManager.recordWinner(winnerKey, ranking, cause);
-            }));
+        executionContext.setPlan(
+            makeBenchmarkPlan(std::move(candidates),
+                              handle,
+                              [&stateManager = _stateManager, winnerKey, cause](
+                                  const std::vector<RankedEntry>& ranking) {
+                                  stateManager.recordWinner(winnerKey, ranking, cause);
+                              }));
     }
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>

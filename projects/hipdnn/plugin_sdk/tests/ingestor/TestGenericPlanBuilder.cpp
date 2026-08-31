@@ -36,9 +36,9 @@
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
-#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
+#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 
 /**
  * @file TestGenericPlanBuilder.cpp
