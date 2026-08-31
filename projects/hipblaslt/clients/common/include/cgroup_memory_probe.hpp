@@ -11,14 +11,65 @@
 #include <limits>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace hipblaslt_client
 {
     struct cgroup_paths
     {
-        std::string v2; // relative path under /sys/fs/cgroup
-        std::string v1; // relative path under /sys/fs/cgroup/memory
+        std::string v2; // relative path from /proc/self/cgroup (cgroup2)
+        std::string v1; // relative path from /proc/self/cgroup (v1 memory line)
     };
+
+    struct cgroup_mount
+    {
+        std::string mountpoint;
+        std::string root; // path inside the cgroup fs covered by this mount
+        std::string superopts;
+        bool        is_v2 = false;
+    };
+
+    inline std::string unescape_mount_path(std::string path)
+    {
+        for(size_t at = 0; at < path.size();)
+        {
+            if(at + 3 < path.size() && path[at] == '\\' && path[at + 1] == '0'
+               && path[at + 2] == '4' && path[at + 3] == '0')
+            {
+                path.replace(at, 4, " ");
+                ++at;
+            }
+            else
+            {
+                ++at;
+            }
+        }
+        return path;
+    }
+
+    inline bool controller_list_has_memory(std::string const& list)
+    {
+        for(size_t at = 0; at <= list.size();)
+        {
+            auto end = list.find(',', at);
+            if(end == std::string::npos)
+                end = list.size();
+            if(end > at && list.compare(at, end - at, "memory") == 0)
+                return true;
+            at = end + 1;
+        }
+        return false;
+    }
+
+    inline bool mount_has_memory_controller(cgroup_mount const& mount)
+    {
+        if(mount.is_v2)
+            return false;
+        auto slash = mount.mountpoint.rfind('/');
+        std::string base
+            = slash == std::string::npos ? mount.mountpoint : mount.mountpoint.substr(slash + 1);
+        return controller_list_has_memory(base) || controller_list_has_memory(mount.superopts);
+    }
 
     inline cgroup_paths parse_proc_self_cgroup(std::string const& content)
     {
@@ -64,6 +115,117 @@ namespace hipblaslt_client
         return paths;
     }
 
+    inline std::vector<cgroup_mount> parse_mountinfo(std::string const& content)
+    {
+        std::vector<cgroup_mount> mounts;
+        for(size_t at = 0; at <= content.size();)
+        {
+            auto end = content.find('\n', at);
+            if(end == std::string::npos)
+                end = content.size();
+            std::string line = content.substr(at, end - at);
+            while(!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+                line.pop_back();
+            at = end + 1;
+            if(line.empty())
+                continue;
+
+            auto sep = line.find(" - ");
+            if(sep == std::string::npos)
+                continue;
+
+            std::string tail = line.substr(sep + 3);
+            auto            fstype_end = tail.find(' ');
+            if(fstype_end == std::string::npos)
+                continue;
+            std::string fstype = tail.substr(0, fstype_end);
+            if(fstype != "cgroup" && fstype != "cgroup2")
+                continue;
+
+            unsigned mount_id, parent_id, major, minor;
+            char     root_raw[512]     = {};
+            char     mountpoint_raw[512] = {};
+            if(sscanf(line.c_str(),
+                      "%u %u %u:%u %511s %511s",
+                      &mount_id,
+                      &parent_id,
+                      &major,
+                      &minor,
+                      root_raw,
+                      mountpoint_raw)
+               < 6)
+                continue;
+
+            cgroup_mount mount;
+            mount.root       = unescape_mount_path(root_raw);
+            mount.mountpoint = unescape_mount_path(mountpoint_raw);
+            mount.is_v2      = (fstype == "cgroup2");
+            auto super_start = tail.find(' ', fstype_end + 1);
+            if(super_start != std::string::npos)
+            {
+                super_start = tail.find(' ', super_start + 1);
+                if(super_start != std::string::npos)
+                    mount.superopts = tail.substr(super_start + 1);
+            }
+            mounts.push_back(std::move(mount));
+        }
+        return mounts;
+    }
+
+    inline std::string normalize_cgroup_path(std::string path)
+    {
+        if(path.empty() || path.front() != '/')
+            path.insert(path.begin(), '/');
+        while(path.size() > 1 && path.back() == '/')
+            path.pop_back();
+        return path;
+    }
+
+    inline std::string resolve_cgroup_directory(cgroup_mount const& mount,
+                                              std::string           cgroup_rel)
+    {
+        if(cgroup_rel.empty())
+            return {};
+
+        std::string cgroup_path = normalize_cgroup_path(std::move(cgroup_rel));
+        std::string mount_root  = normalize_cgroup_path(mount.root);
+        if(mount_root == "/")
+            return mount.mountpoint + cgroup_path;
+
+        if(cgroup_path.size() < mount_root.size()
+           || cgroup_path.compare(0, mount_root.size(), mount_root) != 0)
+            return {};
+        if(cgroup_path.size() > mount_root.size() && cgroup_path[mount_root.size()] != '/')
+            return {};
+
+        std::string suffix = cgroup_path.substr(mount_root.size());
+        return mount.mountpoint + suffix;
+    }
+
+    inline cgroup_mount const* pick_cgroup_mount(std::vector<cgroup_mount> const& mounts,
+                                                 bool                             want_v2,
+                                                 std::string const&               cgroup_rel)
+    {
+        cgroup_mount const* best     = nullptr;
+        size_t              best_len = 0;
+        for(auto const& mount : mounts)
+        {
+            if(mount.is_v2 != want_v2)
+                continue;
+            if(!want_v2 && !mount_has_memory_controller(mount))
+                continue;
+            if(resolve_cgroup_directory(mount, cgroup_rel).empty())
+                continue;
+            size_t root_len = normalize_cgroup_path(mount.root).size();
+            if(!best || root_len >= best_len)
+            {
+                best     = &mount;
+                best_len = root_len;
+            }
+        }
+        return best;
+    }
+
     inline bool parse_cgroup_size_token(std::string const& token,
                                         size_t&            out,
                                         size_t             unlimited_sentinel)
@@ -73,8 +235,8 @@ namespace hipblaslt_client
             out = std::numeric_limits<size_t>::max();
             return true;
         }
-        char const*        cstr = token.c_str();
-        char*              end  = nullptr;
+        char const*        cstr  = token.c_str();
+        char*              end   = nullptr;
         unsigned long long value = strtoull(cstr, &end, 10);
         if(end == cstr)
             return false;
@@ -108,9 +270,7 @@ namespace hipblaslt_client
             return read_cgroup_size_file(path, out);
         }
 
-        inline bool read_fake_sysfs_ctx(std::string const&                       path,
-                                        size_t&                                  out,
-                                        void*                                    ctx)
+        inline bool read_fake_sysfs_ctx(std::string const& path, size_t& out, void* ctx)
         {
             size_t const unlimited = static_cast<size_t>(1) << 62;
             auto const&  fake      = *static_cast<std::map<std::string, std::string> const*>(ctx);
@@ -120,12 +280,13 @@ namespace hipblaslt_client
             return parse_cgroup_size_token(it->second, out, unlimited);
         }
 
-        inline size_t cgroup_headroom(cgroup_paths const& paths, read_size_fn read, void* ctx)
+        inline size_t cgroup_headroom(cgroup_paths const&               paths,
+                                      std::vector<cgroup_mount> const&  mounts,
+                                      read_size_fn                      read,
+                                      void*                             ctx)
         {
-            // A v1 limit reads as a huge sentinel rather than the word "max".
             size_t const unlimited = static_cast<size_t>(1) << 62;
-
-            size_t available = std::numeric_limits<size_t>::max();
+            size_t       available = std::numeric_limits<size_t>::max();
 
             auto consider = [&](std::string const& dir, char const* limit, char const* usage) {
                 size_t cap = 0, used = 0;
@@ -136,57 +297,85 @@ namespace hipblaslt_client
                 available = std::min(available, cap > used ? cap - used : static_cast<size_t>(0));
             };
 
-            // A MemoryMax may sit on any ancestor, so the effective allowance is the tightest.
-            auto walk = [&](std::string const& base,
-                            std::string const& rel,
-                            char const*        limit,
-                            char const*        usage) {
-                if(rel.empty())
+            auto walk_resolved = [&](std::string dir,
+                                     std::string const& mountpoint,
+                                     char const*        limit,
+                                     char const*        usage) {
+                if(dir.empty())
                     return;
-                std::string dir = base + rel;
                 for(;;)
                 {
                     consider(dir, limit, usage);
-                    if(dir.size() <= base.size())
+                    if(dir == mountpoint)
                         break;
                     auto slash = dir.rfind('/');
-                    if(slash == std::string::npos || slash < base.size())
+                    if(slash == std::string::npos || slash < mountpoint.size())
                         break;
                     dir.erase(slash);
                 }
             };
 
-            walk("/sys/fs/cgroup", paths.v2, "memory.max", "memory.current");
-            walk("/sys/fs/cgroup/memory", paths.v1, "memory.limit_in_bytes", "memory.usage_in_bytes");
+            if(!paths.v2.empty())
+            {
+                if(cgroup_mount const* mount = pick_cgroup_mount(mounts, true, paths.v2))
+                {
+                    walk_resolved(resolve_cgroup_directory(*mount, paths.v2),
+                                  mount->mountpoint,
+                                  "memory.max",
+                                  "memory.current");
+                }
+            }
+
+            if(!paths.v1.empty())
+            {
+                if(cgroup_mount const* mount = pick_cgroup_mount(mounts, false, paths.v1))
+                {
+                    walk_resolved(resolve_cgroup_directory(*mount, paths.v1),
+                                  mount->mountpoint,
+                                  "memory.limit_in_bytes",
+                                  "memory.usage_in_bytes");
+                }
+            }
+
             return available;
         }
     } // namespace detail
 
-    inline size_t cgroup_available_memory_from(cgroup_paths const& paths)
+    inline size_t cgroup_available_memory_from(cgroup_paths const&              paths,
+                                               std::string const&               mountinfo)
     {
-        return detail::cgroup_headroom(paths, detail::read_cgroup_size_file_ctx, nullptr);
+        return detail::cgroup_headroom(
+            paths, parse_mountinfo(mountinfo), detail::read_cgroup_size_file_ctx, nullptr);
     }
 
     inline size_t cgroup_available_memory_from(cgroup_paths const&                     paths,
-                                             std::map<std::string, std::string> const& fake_sysfs)
+                                                 std::string const&                      mountinfo,
+                                                 std::map<std::string, std::string> const& fake_sysfs)
     {
-        return detail::cgroup_headroom(
-            paths, detail::read_fake_sysfs_ctx, const_cast<void*>(static_cast<void const*>(&fake_sysfs)));
+        return detail::cgroup_headroom(paths,
+                                       parse_mountinfo(mountinfo),
+                                       detail::read_fake_sysfs_ctx,
+                                       const_cast<void*>(static_cast<void const*>(&fake_sysfs)));
     }
 
 #ifdef __linux__
-    inline size_t cgroup_available_memory_live()
+    inline std::string read_proc_file(char const* path)
     {
         std::string content;
-        if(FILE* f = fopen("/proc/self/cgroup", "r"))
+        if(FILE* f = fopen(path, "r"))
         {
             char line[512];
             while(fgets(line, sizeof(line), f))
                 content += line;
             fclose(f);
         }
+        return content;
+    }
 
-        return cgroup_available_memory_from(parse_proc_self_cgroup(content));
+    inline size_t cgroup_available_memory_live()
+    {
+        return cgroup_available_memory_from(parse_proc_self_cgroup(read_proc_file("/proc/self/cgroup")),
+                                            read_proc_file("/proc/self/mountinfo"));
     }
 #endif
 
