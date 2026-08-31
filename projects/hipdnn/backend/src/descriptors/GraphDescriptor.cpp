@@ -73,6 +73,23 @@ void GraphDescriptor::finalize()
     }
 }
 
+namespace
+{
+void throwIfTensorIsVirtualOrHasRaggedOffset(const std::string& location,
+                                             const TensorDescriptor& aux)
+{
+    THROW_IF_TRUE(aux.getData().virtual_,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "GraphDescriptor::" + location + ": ragged-offset aux UID "
+                      + std::to_string(aux.getData().uid) + " must not be virtual");
+    THROW_IF_TRUE(aux.getData().ragged_offset_tensor_uid.has_value(),
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "GraphDescriptor::" + location + ": ragged-offset aux UID "
+                      + std::to_string(aux.getData().uid)
+                      + " must not itself carry a ragged offset");
+}
+}
+
 std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     GraphDescriptor::buildGraphFromOperations() const
 {
@@ -115,15 +132,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
                       tensorDesc->getData()));
               if(const auto& aux = tensorDesc->getRaggedOffsetDesc())
               {
-                  THROW_IF_TRUE(aux->getData().virtual_,
-                                HIPDNN_STATUS_BAD_PARAM,
-                                "GraphDescriptor::buildGraphFromOperations: ragged-offset aux UID "
-                                    + std::to_string(aux->getData().uid) + " must not be virtual");
-                  THROW_IF_TRUE(aux->getData().ragged_offset_tensor_uid.has_value(),
-                                HIPDNN_STATUS_BAD_PARAM,
-                                "GraphDescriptor::buildGraphFromOperations: ragged-offset aux UID "
-                                    + std::to_string(aux->getData().uid)
-                                    + " must not itself carry a ragged offset");
+                  throwIfTensorIsVirtualOrHasRaggedOffset("buildGraphFromOperations", *aux);
                   collect(aux);
               }
           };
@@ -467,15 +476,7 @@ void relinkRaggedOffsets(
                           + " that is absent from the graph");
 
         const auto& aux = it->second;
-        THROW_IF_TRUE(aux->getData().virtual_,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "GraphDescriptor::deserializeGraph: ragged-offset aux UID "
-                          + std::to_string(raggedUid.value()) + " must not be virtual");
-        THROW_IF_TRUE(aux->getData().ragged_offset_tensor_uid.has_value(),
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "GraphDescriptor::deserializeGraph: ragged-offset aux UID "
-                          + std::to_string(raggedUid.value())
-                          + " must not itself carry a ragged offset");
+        throwIfTensorIsVirtualOrHasRaggedOffset("deserializeGraph", *aux);
 
         primary->setRaggedOffsetDesc(aux);
     }

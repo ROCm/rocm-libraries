@@ -368,6 +368,11 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedTensorListStableAcrossRe
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
 
+    const auto firstSig = raggedSignature(*first);
+    ASSERT_EQ(firstSig.size(), 4u);
+    EXPECT_EQ(firstSig.at(K_PW_TENSOR_IN0_UID), K_RAGGED_OFFSET_UID);
+    EXPECT_EQ(firstSig.at(K_PW_TENSOR_IN1_UID), K_RAGGED_OFFSET_UID);
+
     EXPECT_EQ(raggedSignature(*first), raggedSignature(*second))
         << "tensor UID set and ragged-offset links must be stable across reserialize.";
 }
