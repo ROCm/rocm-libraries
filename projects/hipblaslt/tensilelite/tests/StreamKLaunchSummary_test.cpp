@@ -16,6 +16,8 @@
 // and whether a partials workspace is reserved.
 
 #include <gtest/gtest.h>
+#include <cstdlib>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -127,6 +129,52 @@ namespace
         }
         return out;
     }
+
+    // Sets (or clears) TENSILE_DB for the lifetime of the object and refreshes the
+    // Debug singleton from it, restoring the PREVIOUS value -- not merely unsetting
+    // -- on scope exit. Debug::Instance() is a process-wide function-local static
+    // (see Singleton.hpp, LazySingleton), so an unrestored TENSILE_DB would leak
+    // into every later test in this binary; the destructor still runs when an
+    // ASSERT_* aborts the enclosing test, which a TearDown() could not be relied on
+    // to do for a scoped state change.
+    //
+    // reloadDebugBitsForTest() refreshes exactly TENSILE_DB, TENSILE_DB2 and
+    // TENSILE_STREAMK5_FORCE_MODE. It deliberately does NOT refresh
+    // TENSILE_STREAMK_DATA_PARALLEL, so nothing here can toggle that flag.
+    class ScopedTensileDb
+    {
+    public:
+        // value == nullptr means "unset TENSILE_DB", i.e. the shipped default.
+        explicit ScopedTensileDb(const char* value)
+        {
+            const char* prior = std::getenv("TENSILE_DB");
+            m_had             = (prior != nullptr);
+            if(m_had)
+                m_saved = prior; // copy BEFORE setenv invalidates the pointer
+
+            if(value)
+                setenv("TENSILE_DB", value, /*overwrite=*/1);
+            else
+                unsetenv("TENSILE_DB");
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+        ~ScopedTensileDb()
+        {
+            if(m_had)
+                setenv("TENSILE_DB", m_saved.c_str(), /*overwrite=*/1);
+            else
+                unsetenv("TENSILE_DB");
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+        ScopedTensileDb(ScopedTensileDb const&)            = delete;
+        ScopedTensileDb& operator=(ScopedTensileDb const&) = delete;
+
+    private:
+        bool        m_had = false;
+        std::string m_saved;
+    };
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -865,4 +913,459 @@ TEST(StreamKLaunchSummaryTest, ClusterDpClampWinsAttributionOverFixedGrid)
     // Both are still reported as having fired in the fallbacks section.
     EXPECT_NE(line.find("fixedGrid = yes"), std::string::npos);
     EXPECT_NE(line.find("clusterDPMulticast = yes"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// The parallel (split-K data-parallel) reduction path.
+//
+// Every other test in this file runs a tree-reduction launch. getSKReduction()
+// delegates to origami's select_reduction() whenever the device's skDynamicGrid is
+// k_split_aware (== 6, the AMDGPU default), and select_reduction returns parallel
+// only on the narrow band "tiles < cuCount && itersPerTile >= 64 &&
+// tiles <= cuCount/4". 256x4096x4096 with a 128x128x64 macro tile lands exactly
+// there on the 256-CU analytical mock: tiles = 2*32 = 64 == cuCount/4, and
+// itersPerTile = 4096/64 = 64. SK4 and SK5-dynamic are unconditionally tree, so
+// this has to be SK3.
+//
+// Parallel is the one reduction that reserves a partials workspace unconditionally
+// (the tree path only reserves when tiles % grid != 0). The snapshot sizes that
+// reservation with partialTileSize(finalGrid), while the caller-facing
+// requiredWorkspaceSize() sizes it with requiredWorkspaceSizeGsu(problem, hw,
+// grid/tiles) -- two different formulas for the same region. They agree here
+// because the parallel grid is an exact multiple of tiles (grid == tiles*skSplit
+// == 64*4), which makes requiredWorkspaceSizeGsu's tiles*gsu equal
+// partialTileSize's grid. They do NOT agree when the parallel grid comes back
+// equal to tiles; see the comment on StreamKDecisions::requiredWorkspaceBytes.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    solution.kernelName = "test_streamk_parallel";
+    initStreamKSolution(solution, 3); // SK3 static; SK4 is unconditionally tree
+
+    auto problem = makeGemmProblem(256, 4096, 4096);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    // TENSILE_STREAMK_DATA_PARALLEL is latched when Debug is constructed and is not
+    // among the variables reloadDebugBitsForTest() refreshes, so it can only be
+    // cleared before the process starts. Fail loudly rather than silently asserting
+    // something else if it is set.
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+        << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
+
+    auto d = solution.computeStreamKDecisions(problem, env.device);
+
+    // Anti-vacuity: the whole point of this test is the parallel branch.
+    ASSERT_EQ(d.reduction, origami::reduction_t::parallel)
+        << "scenario must actually select parallel reduction, otherwise every "
+           "assertion below is about the already-covered tree path";
+    // ...and it came from the real helper, not from a special case in the snapshot.
+    EXPECT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::parallel);
+
+    EXPECT_EQ(d.streamKMode, 3);
+    EXPECT_FALSE(d.isDynamic) << "isDynamic implies tree reduction";
+    EXPECT_EQ(d.tiles, 64u) << "256/128 * 4096/128 = 2 * 32";
+    EXPECT_EQ(problem.getItersPerTile(solution.sizeMapping), 64u)
+        << "4096/64; select_reduction needs itersPerTile >= 64";
+
+    // No clamp fires: selected == preFallback == final.
+    EXPECT_EQ(d.selectedGrid, 256u);
+    EXPECT_EQ(d.skGridPreFallback, 256u);
+    EXPECT_EQ(d.finalGrid, 256u);
+    EXPECT_EQ(d.skGrid, d.finalGrid);
+    EXPECT_EQ(solution.getSKGrid(problem, env.device, d.tiles, d.reduction), d.finalGrid);
+    EXPECT_FALSE(d.fixedGridUsed);
+    EXPECT_FALSE(d.treeBoundsFallbackFired) << "tree-bounds fixup is tree-reduction only";
+    EXPECT_FALSE(d.clusterDPGridClamped);
+    EXPECT_FALSE(d.workspaceDPFallbackFired);
+
+    // Parallel packing: skSplit = grid/tiles, and skTiles mirrors skSplit.
+    EXPECT_EQ(d.skSplit, 4u) << "grid/tiles = 256/64";
+    EXPECT_EQ(d.skTiles, d.skSplit) << "the parallel path packs skTiles = skSplit";
+    EXPECT_EQ(d.totalItems, d.tiles);
+    EXPECT_TRUE(d.partialsPresent);
+    EXPECT_FALSE(d.dpOnly);
+    EXPECT_FALSE(d.forceDPOnly);
+    EXPECT_FALSE(d.streamKDP);
+
+    // Parallel reduction always reserves partials, sized by the FINAL grid.
+    ASSERT_TRUE(d.workspaceAllocated)
+        << "parallel reduction must reserve a partials region, otherwise the sizing "
+           "checks below assert nothing";
+    EXPECT_EQ(d.requiredWorkspaceBytes, solution.partialTileSize(d.finalGrid));
+    EXPECT_EQ(d.requiredWorkspaceBytes, 16777216u) << "128*128*4 bytes * 256 work-groups";
+    EXPECT_EQ(d.idealWorkspaceBytes, d.requiredWorkspaceBytes) << "it fits, so nothing was trimmed";
+
+    // In this regime -- and only because finalGrid is an exact multiple of tiles --
+    // the two independent sizings land on the same byte count.
+    EXPECT_EQ(d.finalGrid, d.tiles * d.skSplit) << "why the two sizings coincide here";
+    EXPECT_GT(solution.requiredWorkspaceSize(problem, env.device), 0u);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), d.requiredWorkspaceBytes);
+
+    // The report names the reduction and attributes nothing to a fallback.
+    std::ostringstream os;
+    solution.printStreamKLaunchSummary(os, problem, d);
+    const std::string line = collapseSpaces(os.str());
+    EXPECT_NE(line.find("reduction = parallel(DP)"), std::string::npos);
+    EXPECT_NE(line.find("changedBy = none"), std::string::npos);
+    EXPECT_EQ(line.find("preFallback"), std::string::npos) << "nothing moved the grid";
+    EXPECT_NE(line.find("isDynamic = no"), std::string::npos);
+    EXPECT_NE(line.find("NA (work-queues not used)"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// The parallel branch's workspace-DP fallback.
+//
+// Same shape as the test above, but with no workspace at all. getSKReduction()
+// still says parallel -- it never looks at the workspace -- while the snapshot
+// demotes the launch to tree with grid = tiles because the partials region does
+// not fit. This is the parallel-side complement of WorkspaceDpFallbackFires
+// (which covers the tree / indivisible-tiles side), and it is also a second
+// demonstration that changedBy is about ATTRIBUTION rather than about the numbers
+// differing: with no workspace, origami's grid selection already returns tiles, so
+// selectedGrid == finalGrid while the fallback is still correctly credited.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionWorkspaceStarvedFallsBackToTree)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    solution.kernelName = "test_streamk_parallel_starved";
+    initStreamKSolution(solution, 3);
+
+    auto problem = makeGemmProblem(256, 4096, 4096);
+    problem.setWorkspaceSize(0); // no workspace at all
+
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+        << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
+
+    // Anti-vacuity: the pre-fallback reduction really is parallel. (getSKReduction
+    // is workspace-independent, so it reports what the snapshot started from.)
+    ASSERT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::parallel)
+        << "scenario must start from parallel reduction for the fallback to be the "
+           "parallel-path fallback";
+
+    auto d = solution.computeStreamKDecisions(problem, env.device);
+
+    EXPECT_EQ(d.reduction, origami::reduction_t::tree) << "the fallback demotes to tree";
+    EXPECT_TRUE(d.workspaceDPFallbackFired);
+    EXPECT_TRUE(d.dpOnly);
+    EXPECT_FALSE(d.forceDPOnly) << "runtime fallback, not the compile-time param";
+
+    EXPECT_EQ(d.tiles, 64u);
+    EXPECT_EQ(d.finalGrid, d.tiles) << "the DP fallback sets grid = tiles";
+    // With no workspace the grid selection already returns tiles, so the fallback is
+    // credited even though it did not move the number.
+    EXPECT_EQ(d.selectedGrid, d.tiles);
+    EXPECT_EQ(d.selectedGrid, d.finalGrid);
+
+    EXPECT_EQ(d.idealWorkspaceBytes, solution.partialTileSize(d.tiles))
+        << "the launch wanted a partials region sized by the parallel grid";
+    EXPECT_EQ(d.idealWorkspaceBytes, 4194304u);
+    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
+    EXPECT_FALSE(d.workspaceAllocated);
+    // Both sizings agree that nothing is reserved.
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), 0u);
+
+    std::ostringstream os;
+    solution.printStreamKLaunchSummary(os, problem, d);
+    const std::string line = collapseSpaces(os.str());
+    EXPECT_NE(line.find("changedBy = workspaceDP"), std::string::npos)
+        << "attribution is by which clamp produced the launch grid, not by whether "
+           "the number changed";
+    EXPECT_NE(line.find("source = workspaceDP(runtime)"), std::string::npos);
+    EXPECT_NE(line.find("reduction = tree"), std::string::npos);
+    EXPECT_EQ(line.find("preFallback"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// The launch summary is OFF unless TENSILE_DB bit 0x200000 is set.
+//
+// That the diagnostic is opt-in is the feature's central safety claim, so pin it
+// directly on the Debug accessor the production gate reads rather than inferring
+// it. Three states are checked: TENSILE_DB unset (the shipped default), the
+// summary bit, and the neighbouring StreamK mode-selection bit 0x100000 -- which
+// must NOT enable the summary.
+//
+// What this test cannot cover: the production gate is a call site inside
+// ContractionSolution::solve() ("if(Debug::Instance().printStreamKLaunchSummary())
+// printStreamKLaunchSummary(std::cerr, ...)"), and solve() needs real device input
+// pointers and passes a work-queue guard that throws on these mock devices, so a
+// host-only unit test cannot reach it. The two host-reachable halves of the claim
+// are asserted instead: the predicate the gate reads is false by default, and the
+// snapshot builder this suite drives writes nothing to stderr on its own.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, LaunchSummaryDebugBitIsOffByDefault)
+{
+    // Whatever TENSILE_DB the suite was launched with, the guards below must put it
+    // back. Compared against the ambient value rather than against false, so that
+    // running the whole suite under TENSILE_DB=0x200000 to eyeball the summaries
+    // does not fail this test.
+    const bool ambientSummaryBit = Debug::Instance().printStreamKLaunchSummary();
+
+    // (1) Unset -> off. The compile-time debug mask default is 0, so an unset
+    // TENSILE_DB leaves every debug bit clear.
+    {
+        ScopedTensileDb noDb(nullptr);
+        EXPECT_FALSE(Debug::Instance().printStreamKLaunchSummary())
+            << "the StreamK launch summary must be opt-in";
+    }
+
+    // (2) The documented bit turns it on.
+    {
+        ScopedTensileDb withBit("0x200000");
+        ASSERT_TRUE(Debug::Instance().printStreamKLaunchSummary())
+            << "TENSILE_DB=0x200000 must enable the launch summary; if this fails the "
+               "rest of the test proves nothing about the bit being distinct";
+    }
+
+    // (3) The neighbouring StreamK bit does NOT turn it on -- they are distinct
+    // opt-ins, so enabling mode-selection tracing does not also spam launch
+    // summaries.
+    {
+        ScopedTensileDb siblingBit("0x100000");
+        EXPECT_TRUE(Debug::Instance().printStreamKModeSelection());
+        EXPECT_FALSE(Debug::Instance().printStreamKLaunchSummary());
+    }
+
+    // (4) State is restored: the guards above must not leak the bit into later
+    // tests sharing this process-wide singleton.
+    EXPECT_EQ(Debug::Instance().printStreamKLaunchSummary(), ambientSummaryBit)
+        << "ScopedTensileDb must restore the prior TENSILE_DB value and reload";
+
+    // (5) Building the snapshot is silent -- nothing reaches stderr unless the
+    // caller explicitly prints.
+    {
+        ScopedTensileDb noDb(nullptr);
+
+        ContractionSolution solution;
+        initStreamKSolution(solution, 3);
+        auto problem = makeGemmProblem(4096, 4224, 512);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+        device.skDynamicGrid = 0;
+
+        std::ostringstream    captured;
+        std::streambuf* const savedCerr = std::cerr.rdbuf(captured.rdbuf());
+        auto                  d         = solution.computeStreamKDecisions(problem, device);
+        std::cerr.rdbuf(savedCerr);
+
+        EXPECT_TRUE(captured.str().empty())
+            << "computeStreamKDecisions() must not write to stderr; got: " << captured.str();
+
+        // ...and the printer is not self-gating: the bit gates the CALL SITE, so an
+        // explicit call still emits. That is what lets every other test in this file
+        // exercise the report with the bit clear.
+        std::ostringstream os;
+        solution.printStreamKLaunchSummary(os, problem, d);
+        EXPECT_NE(os.str().find("LAUNCH SUMMARY"), std::string::npos);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// changedBy == treeBounds, as the WINNER of the attribution.
+//
+// The tree fixup indexes with 24-bit divide/remainder arithmetic, so the grid
+// selection resets the grid to tiles when itersPerTile >= 65536, itersPerWG >=
+// 65536, or tiles*itersPerTile >= 2^24. Existing tests only ever assert that this
+// fallback did NOT fire; this one makes it the credited clamp.
+//
+// Shape: 1152x131072x131072 with a 128x128x64 macro tile.
+//   tiles              = ceil(1152/128) * ceil(131072/128) = 9 * 1024 = 9216
+//   itersPerTile       = ceil(131072/64)                              = 2048
+//   tiles*itersPerTile = 18874368 >= 16777216  -> bound tripped
+// (itersPerWG = 9216*2048/64 = 294912 also exceeds 65536; on a device with at most
+// 256 CUs the two bounds cannot be tripped independently, since tiles*itersPerTile
+// >= 2^24 forces itersPerWG >= 2^24/256 == 65536. itersPerTile itself stays under
+// 65536, which the test asserts, so the trigger is not that bound.)
+//
+// n == k == 131072 keeps ldb == n >= k, which the {k, n} B descriptor built by
+// makeGemmProblem with strides {1, ldb} requires.
+//
+// The clamp sets grid = tiles, so tiles % grid == 0 and the later workspace-DP
+// fallback cannot fire and steal the attribution -- asserted below rather than
+// assumed. A plain mock AMDGPU with skDynamicGrid = 0 is used so the pre-clamp grid
+// is exactly the CU count rather than a performance-model output.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, TreeBoundsFallbackWinsGridAttribution)
+{
+    ContractionSolution solution;
+    solution.kernelName = "test_streamk_tree_bounds";
+    initStreamKSolution(solution, 3);
+
+    auto problem = makeGemmProblem(1152, 131072, 131072);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
+
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+        << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
+
+    auto d = solution.computeStreamKDecisions(problem, device);
+
+    // The arithmetic that trips the bound, spelled out so that a shape change fails
+    // here with a legible message instead of silently un-tripping the fallback.
+    const size_t itersPerTile = problem.getItersPerTile(solution.sizeMapping);
+    ASSERT_EQ(d.tiles, 9216u) << "ceil(1152/128) * ceil(131072/128) = 9 * 1024";
+    ASSERT_EQ(itersPerTile, 2048u) << "ceil(131072/64)";
+    ASSERT_GE(d.tiles * itersPerTile, 16777216u) << "tiles*itersPerTile must reach 2^24";
+    EXPECT_LT(itersPerTile, 65536u) << "itersPerTile alone is not what trips it";
+
+    // Anti-vacuity: the fallback actually fired, and it is the credited one.
+    ASSERT_TRUE(d.treeBoundsFallbackFired) << "scenario must actually trip the tree-bounds fixup";
+    EXPECT_EQ(d.reduction, origami::reduction_t::tree) << "the fixup is tree-reduction only";
+    EXPECT_FALSE(d.fixedGridUsed);
+    EXPECT_FALSE(d.clusterDPGridClamped);
+    // The clamp sets grid = tiles, which makes tiles % grid == 0, which is exactly
+    // why the later workspace-DP fallback cannot fire and take the attribution.
+    ASSERT_EQ(d.tiles % d.finalGrid, 0u) << "clamped grid must divide tiles";
+    EXPECT_FALSE(d.workspaceDPFallbackFired)
+        << "grid == tiles leaves no partial tiles, so nothing to reserve";
+
+    // selected vs final: the clamp lives inside the grid selection, so the
+    // pre-fallback grid moved with it.
+    EXPECT_EQ(d.selectedGrid, static_cast<size_t>(_CPX_CU))
+        << "selection picks the CU-count grid before the fixup";
+    EXPECT_EQ(d.skGridPreFallback, d.tiles);
+    EXPECT_EQ(d.finalGrid, d.tiles);
+    EXPECT_NE(d.selectedGrid, d.finalGrid);
+    EXPECT_EQ(d.skGrid, d.finalGrid);
+    EXPECT_EQ(solution.getSKGrid(problem, device, d.tiles, d.reduction), d.finalGrid);
+
+    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
+    EXPECT_EQ(d.idealWorkspaceBytes, 0u);
+    EXPECT_FALSE(d.workspaceAllocated);
+    EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, device));
+
+    std::ostringstream os;
+    solution.printStreamKLaunchSummary(os, problem, d);
+    const std::string line = collapseSpaces(os.str());
+
+    EXPECT_NE(line.find("changedBy = treeBounds"), std::string::npos);
+    EXPECT_NE(line.find("treeBoundsFallback = yes"), std::string::npos);
+    // Unambiguous: no other clamp is credited or reported as fired.
+    EXPECT_NE(line.find("fixedGrid = no"), std::string::npos);
+    EXPECT_NE(line.find("workspaceDPFallback = no"), std::string::npos);
+    EXPECT_NE(line.find("clusterDPMulticast = no"), std::string::npos);
+    EXPECT_NE(line.find("selected = " + std::to_string(d.selectedGrid)), std::string::npos);
+    EXPECT_NE(line.find("final = " + std::to_string(d.tiles)), std::string::npos);
+    EXPECT_NE(line.find("preFallback = " + std::to_string(d.tiles)), std::string::npos);
+
+    // Complement: the identical shape with a small K leaves the grid alone, so the
+    // fallback is a property of the bound and not of the tile count.
+    ContractionSolution small;
+    small.kernelName = "test_streamk_tree_bounds_ok";
+    initStreamKSolution(small, 3);
+    auto smallProblem = makeGemmProblem(1152, 131072, 512);
+    smallProblem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto ds = small.computeStreamKDecisions(smallProblem, device);
+    EXPECT_LT(ds.tiles * smallProblem.getItersPerTile(small.sizeMapping), 16777216u);
+    EXPECT_FALSE(ds.treeBoundsFallbackFired);
+    EXPECT_EQ(ds.finalGrid, static_cast<size_t>(_CPX_CU));
+    EXPECT_EQ(ds.selectedGrid, ds.finalGrid);
+}
+
+// ---------------------------------------------------------------------------
+// changedBy == fixedGrid, as the WINNER of the attribution.
+//
+// fixedGridUsed is otherwise only exercised by
+// ClusterDpClampWinsAttributionOverFixedGrid, where the override deliberately
+// LOSES to a later clamp. Here it is the last clamp standing: SK3, skFixedGrid
+// set, clusterDim {1, 1, 1} (so no multicast clamp), K small enough that the tree
+// bounds are nowhere near, and skFixedGrid chosen to divide tiles so the
+// workspace-DP fallback has nothing to reserve and cannot steal the attribution.
+//
+// The subtlety this test exists to pin: the selected grid is captured AFTER the
+// skFixedGrid override is applied, so selectedGrid == finalGrid == 32 and the
+// printed "changedBy = fixedGrid" is NOT derived from selected != final. The
+// evidence that the override did something is that the launch grid is 32 rather
+// than the CU count the same solution and problem pick without it -- asserted via
+// the baseline run at the end.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
+{
+    ContractionSolution solution;
+    solution.kernelName = "test_streamk_fixed_grid";
+    initStreamKSolution(solution, 3); // clusterDim stays {1, 1, 1}
+
+    // 4096x4224 -> tiles = 32*33 = 1056, and 1056 % 32 == 0, so the fixed grid
+    // leaves no partial tiles. K=512 -> itersPerTile = 8, far below every tree bound.
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
+    device.skFixedGrid   = 32;
+
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+        << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
+
+    auto d = solution.computeStreamKDecisions(problem, device);
+
+    // Anti-vacuity: the override actually ran.
+    ASSERT_TRUE(d.fixedGridUsed) << "scenario must actually take the skFixedGrid override";
+    EXPECT_EQ(d.streamKMode, 3);
+    EXPECT_FALSE(d.isDynamic);
+    EXPECT_EQ(d.reduction, origami::reduction_t::tree);
+    EXPECT_EQ(d.tiles, 1056u);
+
+    // No later clamp supersedes it -- this is what makes fixedGrid the winner.
+    EXPECT_FALSE(d.treeBoundsFallbackFired);
+    EXPECT_FALSE(d.clusterDPGridClamped);
+    ASSERT_EQ(d.tiles % d.finalGrid, 0u)
+        << "the fixed grid must divide tiles, otherwise the workspace-DP fallback "
+           "would reserve partials and could steal the attribution";
+    EXPECT_FALSE(d.workspaceDPFallbackFired);
+    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
+    EXPECT_EQ(d.idealWorkspaceBytes, 0u);
+    EXPECT_FALSE(d.workspaceAllocated);
+    EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, device));
+    EXPECT_FALSE(d.dpOnly);
+
+    // The override is applied BEFORE the selected grid is captured, so "selected" is
+    // already the overridden value: changedBy is attribution, not a diff.
+    EXPECT_EQ(d.selectedGrid, 32u) << "selection reports the overridden grid";
+    EXPECT_EQ(d.skGridPreFallback, 32u);
+    EXPECT_EQ(d.finalGrid, 32u);
+    EXPECT_EQ(d.selectedGrid, d.finalGrid)
+        << "the fixed-grid override cannot make selected differ from final";
+    EXPECT_EQ(d.skGrid, d.finalGrid);
+    EXPECT_EQ(solution.getSKGrid(problem, device, d.tiles, d.reduction), 32u);
+
+    std::ostringstream os;
+    solution.printStreamKLaunchSummary(os, problem, d);
+    const std::string line = collapseSpaces(os.str());
+
+    EXPECT_NE(line.find("changedBy = fixedGrid"), std::string::npos);
+    EXPECT_NE(line.find("fixedGrid = yes"), std::string::npos);
+    EXPECT_NE(line.find("selected = 32"), std::string::npos);
+    EXPECT_NE(line.find("final = 32"), std::string::npos);
+    // preFallback is suppressed because no clamp inside the grid selection moved the
+    // grid away from what selection produced.
+    EXPECT_EQ(line.find("preFallback"), std::string::npos);
+    EXPECT_NE(line.find("treeBoundsFallback = no"), std::string::npos);
+    EXPECT_NE(line.find("workspaceDPFallback = no"), std::string::npos);
+    EXPECT_NE(line.find("clusterDPMulticast = no"), std::string::npos);
+
+    // Baseline: same solution and problem, no override. This is the evidence that 32
+    // came from skFixedGrid -- without it the launch uses the CU count.
+    ContractionSolution baseline;
+    baseline.kernelName = "test_streamk_no_fixed_grid";
+    initStreamKSolution(baseline, 3);
+    auto baseDevice          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    baseDevice.skDynamicGrid = 0; // skFixedGrid stays 0
+
+    auto db = baseline.computeStreamKDecisions(problem, baseDevice);
+    EXPECT_FALSE(db.fixedGridUsed);
+    EXPECT_EQ(db.selectedGrid, static_cast<size_t>(_CPX_CU));
+    EXPECT_EQ(db.finalGrid, static_cast<size_t>(_CPX_CU));
+    EXPECT_NE(db.finalGrid, d.finalGrid) << "the override is what produced grid 32";
+
+    std::ostringstream osb;
+    baseline.printStreamKLaunchSummary(osb, problem, db);
+    const std::string baseLine = collapseSpaces(osb.str());
+    EXPECT_NE(baseLine.find("changedBy = none"), std::string::npos);
+    EXPECT_NE(baseLine.find("fixedGrid = no"), std::string::npos);
 }

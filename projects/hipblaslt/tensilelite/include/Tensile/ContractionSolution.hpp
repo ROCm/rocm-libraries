@@ -397,11 +397,31 @@ namespace TensileLite
         //
         // WARNING: this is NOT ContractionSolution::requiredWorkspaceSize()'s return
         // value, even though the names are close. requiredWorkspaceSize() is the
-        // separate, caller-facing implementation of the same reserve-or-not rule (it
-        // is what the allocator sizes from) and it differs today: it always uses
-        // getSKReduction(), and for parallel reduction it sizes with
-        // requiredWorkspaceSizeGsu() rather than partialTileSize(). The two must stay
-        // consistent about WHETHER a workspace is needed -- change one, check the other.
+        // separate, caller-facing implementation of the reserve-or-not rule -- it is
+        // what the allocator sizes the workspace buffer from -- and it computes the
+        // answer differently: it always asks getSKReduction(), and for parallel
+        // reduction it sizes with requiredWorkspaceSizeGsu(problem, hardware,
+        // grid / tiles) instead of partialTileSize(grid).
+        //
+        // The two can therefore disagree about WHETHER a workspace is needed, not
+        // just about how many bytes. The case where they do is parallel reduction
+        // whose selected grid comes back equal to tiles: the k-split factor
+        // grid / tiles is then 1, and requiredWorkspaceSizeGsu() short-circuits to 0
+        // for a split of 1, while this field still reserves partialTileSize(tiles)
+        // because parallel reduction always needs a partials region. Concretely, a
+        // 256x4096x4096 SK3 launch with a 128x128x64 macro tile on a 256-CU device,
+        // handed a workspace between 4 MiB and 16 MiB, reports 4 MiB here and 0 from
+        // requiredWorkspaceSize().
+        //
+        // That divergence is an over-reservation of a buffer the caller already
+        // supplied, never an under-allocation, so it is benign in the real
+        // allocate-then-launch flow: the allocator sizes from
+        // requiredWorkspaceSize(), that size is what problem.workspaceSize() reports
+        // on the subsequent launch, and re-deriving this snapshot against it reaches
+        // a self-consistent fixed point (0 bytes -> workspace-DP fallback -> 0 bytes
+        // reserved). It only becomes visible when a caller hands in a workspace it
+        // sized some other way. Both implementations still encode the same intended
+        // rule -- change one, check the other.
         size_t requiredWorkspaceBytes = 0;
         // recomputed: partials(+work-queue) bytes wanted, before the fit check against
         // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
