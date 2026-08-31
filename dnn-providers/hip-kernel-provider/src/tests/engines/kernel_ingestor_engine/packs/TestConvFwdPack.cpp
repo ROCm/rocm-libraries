@@ -285,9 +285,9 @@ TEST(TestConvFwdScore, PrefersTheLargerBlockSize)
 // ---------------------------------------------------------------------------
 //
 // Every test above hand-builds KernelDefinitions via makeKernel() -- none of it loads
-// conv_fwd/*.json. Without this section, a broken shipped descriptor (wrong entry_point,
-// a missing kernel, a knob naming no KMD field) passes every unit test and only shows up
-// in the slow GPU suite.
+// conv_fwd/*.json. Without this section, a broken shipped descriptor (wrong symbol, a
+// missing kernel, a knob naming no KMD field) passes every unit test and only shows up in
+// the slow GPU suite.
 
 TEST(TestConvFwdPack, ShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes)
 {
@@ -301,7 +301,7 @@ TEST(TestConvFwdPack, ShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes)
         return std::any_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
             return std::get<int64_t>(kernel.metadata.at(std::string(BLOCK_SIZE_FIELD))) == blockSize
                    && std::get<std::string>(kernel.metadata.at(std::string(DTYPE_FIELD))) == dtype
-                   && kernel.source.entryPoint == "ConvFwd";
+                   && kernel.source.symbol == "ConvFwd";
         });
     };
 
@@ -420,11 +420,12 @@ TEST(TestConvFwdDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
 // Shipped descriptor set: source kind/file, behavior notes, operation metadata
 // ---------------------------------------------------------------------------
 
-/// Pins kernel_source.kind and source_file, the conv analogue of TestPointwisePacks.cpp's
-/// EveryKernelNamesItsPacksEmbeddedSource. Without it, a bad source kind or a misspelled
-/// source_file passes this whole fast suite -- prepare() only discovers it when the slow
-/// GPU integration test tries to compile it.
-TEST(TestConvFwdPack, PinsTheEmbeddedConvSource)
+/// Pins kernel_source.kind and the archive coordinates the packer wrote, the conv
+/// analogue of TestPointwisePacks.cpp's EveryKernelNamesItsPacksEmbeddedSource. Without
+/// it, a bad source kind, a dropped library reference or a misspelled symbol passes this
+/// whole fast suite -- prepare() only discovers it when the slow GPU integration test
+/// tries to load the archive.
+TEST(TestConvFwdPack, PinsThePackedConvSource)
 {
     const auto& set = loadedSet("hipkernel:ConvFwd");
 
@@ -432,10 +433,9 @@ TEST(TestConvFwdPack, PinsTheEmbeddedConvSource)
     ASSERT_FALSE(set.packs.front().kernels.empty());
     for(const auto& kernel : set.packs.front().kernels)
     {
-        EXPECT_EQ(kernel.source.kind,
-                  hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE);
-        EXPECT_EQ(kernel.source.sourceFile, "ConvFwd.cpp");
-        EXPECT_EQ(kernel.source.entryPoint, "ConvFwd");
+        EXPECT_EQ(kernel.source.kind, hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK);
+        EXPECT_FALSE(kernel.source.library.empty()) << kernel.name;
+        EXPECT_EQ(kernel.source.symbol, "ConvFwd");
     }
 }
 

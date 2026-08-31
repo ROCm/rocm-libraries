@@ -24,8 +24,11 @@
 
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/KernelCompileOptions.hpp"
+#include "compilation/KpackKernelLoader.hpp"
+#include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 
 /**
@@ -456,8 +459,12 @@ class ConvFwdDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDispat
 {
 public:
     /// @param kernelCompiler Must outlive this handler; both are process-lifetime.
-    explicit ConvFwdDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
+    /// @param kpackLoader Same must-outlive contract. Which of the two is consulted is
+    /// the selected kernel's source kind, decided in buildIngestorKernelCode.
+    ConvFwdDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
+                           const compilation::KpackKernelLoader& kpackLoader)
         : _kernelCompiler(kernelCompiler)
+        , _kpackLoader(kpackLoader)
     {
     }
 
@@ -498,9 +505,8 @@ public:
         options.add("HIP_PLUGIN_CONV_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_CONV_BLOCK_SIZE", blockSize);
 
-        // The only KernelSourceKind this dispatch handler knows how to load.
-        auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
-        auto runnableKernel = program->getKernel(kernel.source.entryPoint);
+        auto code
+            = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
 
         const auto p = h - r + 1;
         const auto q = width - s + 1;
@@ -511,11 +517,11 @@ public:
         const auto gridSize = static_cast<unsigned int>(
             (total + static_cast<int64_t>(blockSize) - 1) / static_cast<int64_t>(blockSize));
 
-        runnableKernel->setBlockSize(blockSize, 1, 1);
-        runnableKernel->setGridSize(gridSize, 1, 1);
+        code.kernel->setBlockSize(blockSize, 1, 1);
+        code.kernel->setGridSize(gridSize, 1, 1);
 
         return std::make_unique<PreparedConvFwd>(
-            std::move(program), std::move(runnableKernel), binding, n, c, h, width, k, r, s);
+            std::move(code.program), std::move(code.kernel), binding, n, c, h, width, k, r, s);
     }
 
     void launch(const Handle& handle,
@@ -549,15 +555,18 @@ public:
 
 private:
     const compilation::IKernelCompiler& _kernelCompiler;
+    const compilation::KpackKernelLoader& _kpackLoader;
 };
 
 /// This pack's dispatch handler, process-lifetime: the registry holds a non-owning
 /// pointer to it, but a provider's Container is created and destroyed per handle, so
-/// it (and the compiler it holds) must outlive every Container.
+/// it (and the compiler, loader and module cache it holds) must outlive every Container.
 const ConvFwdDispatchHandler& convFwdDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
-    static const ConvFwdDispatchHandler s_dispatchHandler(s_kernelCompiler);
+    static compilation::KpackModuleCache s_moduleCache;
+    static const compilation::KpackKernelLoader s_kpackLoader(s_moduleCache);
+    static const ConvFwdDispatchHandler s_dispatchHandler(s_kernelCompiler, s_kpackLoader);
     return s_dispatchHandler;
 }
 

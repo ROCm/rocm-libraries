@@ -77,8 +77,7 @@ std::vector<std::filesystem::path> packedArchShards()
 
     for(const auto& entry : std::filesystem::directory_iterator(root, ec))
     {
-        // A shard is a directory holding a kpack/ sibling; the flat per-engine descriptor
-        // folders staged from the source tree are not packer output and are not in scope.
+        // A shard is an arch directory holding a kpack/ child.
         std::error_code inner;
         if(entry.is_directory(inner)
            && std::filesystem::is_directory(entry.path() / "kpack", inner))
@@ -97,7 +96,16 @@ std::vector<std::filesystem::path> packedArchShards()
 /// source root unset. Once a shard exists everything below is an assertion: a staged tree
 /// that cannot be loaded is the defect this file exists to catch, never a reason to pass
 /// quietly.
+///
+/// A root that is not a directory fails. The probe below reads the children of one fixed
+/// level, so a tree the build lays out somewhere else answers "nothing was packed" and
+/// skips every case in this file.
 #define REQUIRE_PACKED_SHARDS(shards)                                                      \
+    std::error_code missingRoot;                                                           \
+    ASSERT_TRUE(std::filesystem::is_directory(archiveFixtureRoot(), missingRoot))          \
+        << "the archive fixture root " << archiveFixtureRoot()                             \
+        << " is not a directory. The staged tree sits elsewhere, or this binary holds a "  \
+           "stale offset to it.";                                                          \
     const auto shards = packedArchShards();                                                \
     if((shards).empty())                                                                   \
     {                                                                                      \

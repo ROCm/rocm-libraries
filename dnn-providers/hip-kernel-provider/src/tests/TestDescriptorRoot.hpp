@@ -7,6 +7,7 @@ SPDX-License-Identifier: MIT
 
 #include <filesystem>
 #include <stdexcept>
+#include <string>
 #include <system_error>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -47,6 +48,30 @@ inline std::filesystem::path descriptorSetRoot(const char* relativeSubdir)
     {
         return {};
     }
+}
+
+/// The reason @p root cannot serve as a descriptor root, or an empty string.
+///
+/// An absent or empty root gives a caller the same answer as a root holding nothing for
+/// this device: every case skips and the binary reports success. A test main() calls this
+/// and fails the process instead, so the two are told apart.
+inline std::string describeUnusableDescriptorRoot(const std::filesystem::path& root)
+{
+    std::error_code failed;
+    if(!std::filesystem::is_directory(root, failed))
+    {
+        return "the descriptor root '" + root.string() + "' is not a directory";
+    }
+
+    for(const auto& entry : std::filesystem::recursive_directory_iterator(root, failed))
+    {
+        if(entry.is_regular_file(failed) && entry.path().extension() == ".json")
+        {
+            return {};
+        }
+    }
+
+    return "the descriptor root '" + root.string() + "' holds no descriptor JSON";
 }
 
 #ifdef HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR

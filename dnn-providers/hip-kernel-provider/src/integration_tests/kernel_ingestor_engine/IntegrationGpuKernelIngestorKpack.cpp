@@ -40,13 +40,12 @@ using namespace hip_kernel_provider::test_utilities;
  * @file IntegrationGpuKernelIngestorKpack.cpp
  * @brief A kernel that was compiled and packed at build time, executed end to end through
  *        the public frontend API. Nothing here names a loader type or a build path: the
- *        descriptor set reaches the runtime because the packaging rule staged it beside
- *        the plugin, and the kernel binary reaches the device because the KPACK kernel
- *        source resolved its archive relative to the descriptor that declared it.
+ *        descriptor set reaches the runtime through the integration root main() publishes,
+ *        and the kernel binary reaches the device because the KPACK kernel source resolved
+ *        its archive relative to the descriptor that declared it.
  *
- * The suite deliberately sets no HIPDNN_DESCRIPTOR_DIR and its CTest registration carries
- * no ENVIRONMENT entry -- the module-relative walk from the loaded plugin is the thing
- * under test, and overriding it would test the override instead.
+ * The archive this suite damages is found by the binary-relative offset the packaging rule
+ * staged it to, so no absolute build path is compiled in.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -59,16 +58,11 @@ namespace
 /// it, so this name appears nowhere in src/engines.
 constexpr const char* PACKED_ENGINE_NAME = "hipkernel:pointwise_packed";
 
-/// The engine that ships with the provider. Its kernels are `embedded_source`, so it is
-/// reachable whatever state the packaged archive is in, and it claims the same single-node
-/// FLOAT add. That makes it the fallback ...SurvivesABrokenArchive requires to still serve.
+/// The engine the integration descriptor root stages beside the fixture. Its kernels read
+/// a different archive, so it is reachable whatever state the packaged fixture's archive is
+/// in, and it claims the same single-node FLOAT add. That makes it the fallback
+/// ...SurvivesABrokenArchive requires to still serve.
 constexpr const char* SHIPPED_POINTWISE_ENGINE_NAME = "hipkernel:Pointwise";
-
-/// Distinguishes the packaged FIXTURE's archive from every other root's in the shared
-/// descriptor tree. Each source root packs under its own archive group, so the group name
-/// is what names an archive to a particular root; this is the group the fixture root is
-/// wired with in HkpPackaging.cmake (HKP_GROUP_TESTFIXTURE).
-constexpr const char* PACKED_FIXTURE_ARCHIVE_STEM = "testfixture";
 
 /// Header-length garbage: long enough that the file exists and is readable, short enough
 /// that no table of contents can be parsed out of it.
@@ -434,21 +428,13 @@ protected:
             return;
         }
 
-        // The archive THIS fixture's engine reads, chosen by name rather than by taking
-        // the first of a sorted list. Every source root stages into one descriptor tree
-        // and is told apart by its archive group, so the tree holds one .kpack per root;
-        // `front()` picked whichever sorted first, which is the product archive, and
-        // corrupting that leaves the packaged fixture engine perfectly loadable while the
-        // assertions below wait for a failure that never comes.
-        const auto victim = std::find_if(
-            _archives.begin(), _archives.end(), [](const std::filesystem::path& archive) {
-                return archive.filename().string().find(PACKED_FIXTURE_ARCHIVE_STEM)
-                       != std::string::npos;
-            });
-        ASSERT_NE(victim, _archives.end())
-            << "no staged archive is named for the packaged fixture ('"
-            << PACKED_FIXTURE_ARCHIVE_STEM << "'), so there is nothing this suite can break "
-            << "that its own engine would read. Staged archives: " << [this] {
+        // The packed fixture root holds exactly one archive, and this suite breaks it. A
+        // second archive makes the choice ambiguous. Corrupting the wrong file leaves the
+        // fixture engine loadable, and the assertions below wait for a failure that never
+        // comes.
+        ASSERT_EQ(_archives.size(), 1U)
+            << "the packed fixture root must hold exactly one archive for this device. "
+            << "Staged archives: " << [this] {
                    std::string names;
                    for(const auto& archive : _archives)
                    {
@@ -456,7 +442,7 @@ protected:
                    }
                    return names;
                }();
-        _victim = *victim;
+        _victim = _archives.front();
 
         const auto backupRoot = backupRootPath();
         const auto backupName = _victim.filename().string() + PRISTINE_SUFFIX;
