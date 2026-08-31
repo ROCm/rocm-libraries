@@ -588,6 +588,7 @@ defaultBenchmarkCommonParameters = [
     # {"CustomKernel": [{"name": "", "args": [], "macrotile": [0,0,0], "threads": [0,0,0], "grid": [0,0,0]}]},
     {"NoReject": [False]},
     {"WaveTransposeStore": [0]},
+    {"WaveTransposeStorePipe": [2]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
     {"UseDualFMAC": [False]},
