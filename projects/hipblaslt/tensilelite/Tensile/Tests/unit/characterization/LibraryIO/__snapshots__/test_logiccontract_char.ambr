@@ -77,7 +77,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -327,7 +327,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -565,7 +565,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -818,7 +818,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -1088,7 +1088,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -1338,7 +1338,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -1602,7 +1602,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -1855,7 +1855,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -2108,7 +2108,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -2349,7 +2349,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -2602,7 +2602,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
@@ -2854,7 +2854,7 @@
       'MatrixInstruction': list([
       ]),
       'MaxLDS': -1,
-      'MaxOccupancy': 40,
+      'MaxOccupancy': 64,
       'MbskPrefetchMethod': -1,
       'MinGRIncPerMfma': -1,
       'NoReject': False,
