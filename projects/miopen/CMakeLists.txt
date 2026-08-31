@@ -289,6 +289,9 @@ option(MIOPEN_CK_UNBUNDLE_PER_ARCH
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
 message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
 
+option(MIOPEN_USE_HIPCONV "Enable MIOpen to use vendored hipconv convolution kernels" On)
+message(STATUS "Enable hipconv: ${MIOPEN_USE_HIPCONV}")
+
 set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU"))
 option(MIOPEN_USE_COMGR "Use comgr to build kernels instead of offline tools" ${MIOPEN_USE_COMGR_DEFAULT})
 
@@ -794,6 +797,8 @@ enable_clang_tidy(
         "\.hpp$"
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
+        # Clang 21 cannot pass AMDGCN builtins as arguments to the HIP header feature probe.
+        -D__builtin_amdgcn_is_invocable=__has_builtin
         -D__builtin_elementwise_exp10=__builtin_elementwise_exp
         -nogpulib
 )
@@ -827,6 +832,7 @@ enable_cppcheck(
         # Ignore initializer lists in the tests
         useInitializationList:*test/*.cpp
         *:*src/sqlite/*.cpp
+        *:*src/hipconv/*
         *:*.cl
         *:*src/kernels/*.h
         # These are HIP kernel files compiled at runtime with -D defines; cppcheck
