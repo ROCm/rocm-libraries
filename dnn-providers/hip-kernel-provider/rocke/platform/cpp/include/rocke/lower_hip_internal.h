@@ -165,6 +165,14 @@ const char* rocke_h_hip_scalar(const char* ir_scalar_name);
  * 8-entry map including f32/i32/i16/i8/fp8/bf8 (true, used by smem_store_vN). */
 const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map);
 
+/* Same map, but an element name outside it raises (mirroring Python
+ * _vec_prefix) instead of silently resolving to "f16x". Used by the handlers
+ * whose Python counterparts validate: the smem and global vN load/store ops. */
+const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
+                                       const char* ir_scalar_name,
+                                       bool full_map,
+                                       const char* op_desc);
+
 /* --------------------------------------------------------- literals / encode */
 
 /* Python _f32_literal(val): C++ float-literal text for a double, special-casing
