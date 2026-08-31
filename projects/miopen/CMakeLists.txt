@@ -361,7 +361,7 @@ add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPI
 # is left uninstrumented while host code stays instrumented. Gated on 'undefined' specifically,
 # so ASan-only builds keep their working device ASan.
 #
-# NB: -fno-gpu-sanitize is deliberately NOT used. On this toolchain it drops the user -I include
+# Note: -fno-gpu-sanitize is deliberately NOT used. On this toolchain it drops the user -I include
 # directories from the AMDGPU device compilation pass, so device-side '#include <miopen/...>'
 # then fails with "file not found". -Xarch_device scopes the flag to the device sub-compile
 # without that side effect.
