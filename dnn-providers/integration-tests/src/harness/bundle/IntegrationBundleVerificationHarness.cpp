@@ -190,17 +190,6 @@ void IntegrationBundleVerificationHarness::recordClaimCoverage(
     }
 }
 
-VerificationOutcome
-    IntegrationBundleVerificationHarness::runVerification(GraphSession& session,
-                                                          const SupportObservation& observation)
-{
-    if(auto blocked = claimBlocked(observation))
-    {
-        return *blocked;
-    }
-    return runComparison(session);
-}
-
 // The decision is finalizeClaims(); this only publishes what it returns. results is
 // only ever non-empty when an engine was injected, so there is no engine-less case
 // to handle here.

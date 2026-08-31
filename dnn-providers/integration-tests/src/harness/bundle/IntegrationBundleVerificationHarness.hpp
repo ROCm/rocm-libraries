@@ -119,14 +119,26 @@ protected:
         const auto observation = checkSupportClaims(session);
         recordClaimCoverage(observation);
 
-        // Phase 2: run as far as this bundle asks for, unless a claim already failed.
-        const VerificationOutcome outcome = runVerification(session, observation);
+        // Phase 2: either a claim already failed, or this bundle gets run.
+        VerificationOutcome outcome;
+        if(const auto blocked = claimBlocked(observation))
+        {
+            // A broken claim means the engine will not take the graph, so there is
+            // nothing to compare. Running anyway would execute nothing, leave the NaN
+            // sentinel outputs untouched, and pile a tensor diff on the real message.
+            outcome = *blocked;
+        }
+        else
+        {
+            outcome = runComparison(session);
 
-        // Kept as a live check because "the test did nothing and went green" is the
-        // failure this harness exists to catch.
-        const VerificationDepth required = bundleRequiredDepth();
-        EXPECT_FALSE(outcome.status == OutcomeStatus::PASSED && outcome.depth < required)
-            << "test passed without reaching " << toString(required) << " for " << _bundlePath;
+            // Kept as a live check because "the test did nothing and went green" is
+            // the failure this harness exists to catch. Only asked on this path: a
+            // blocked claim never reached the depth, and is already a failure.
+            const VerificationDepth required = bundleRequiredDepth();
+            EXPECT_FALSE(outcome.status == OutcomeStatus::PASSED && outcome.depth < required)
+                << "test passed without reaching " << toString(required) << " for " << _bundlePath;
+        }
 
         // Phase 3: one verdict, then one pass/fail/skip, both from the same outcome.
         commitClaims(observation.results, outcome);
@@ -181,12 +193,6 @@ private:
     // Applies the coverage rules to the process-wide counters, and fails this test
     // if a sidecar exists that the query somehow did not reach.
     void recordClaimCoverage(const SupportObservation& observation);
-
-    // Runs the comparison, unless a claim already failed. A broken claim means the
-    // engine will not take the graph, so the comparison has nothing to run and would
-    // only pile a sentinel-buffer diff on top of the real message.
-    VerificationOutcome runVerification(GraphSession& session,
-                                        const SupportObservation& observation);
 
     // Publishes every verdict, promoting the engine-under-test's accepted claim by
     // what the run actually achieved. Called exactly once per test.
