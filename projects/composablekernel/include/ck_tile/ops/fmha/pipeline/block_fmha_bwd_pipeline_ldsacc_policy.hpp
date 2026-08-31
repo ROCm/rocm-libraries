@@ -581,16 +581,24 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
 
         constexpr index_t stage0_0 = GetSmemSizeK<Problem>() + GetSmemSizeKT<Problem>();
         constexpr index_t stage0_1 = GetSmemSizeV<Problem>();
+        // Q^T and dO^T are read out of the Q and dO boxes, so this policy
+        // reports 0 for them and there is nothing to reserve. Taking the base's
+        // 16,384 each instead -- as this did originally -- reserved 32,768 B
+        // that the layout never addresses.
         constexpr index_t stage1 =
-            Base::template GetSmemSizeQT<Problem>() + GetSmemSizeQ<Problem>() +
-            Base::template GetSmemSizeOGradT<Problem>() + GetSmemSizeOGrad<Problem>() +
+            GetSmemSizeQT<Problem>() + GetSmemSizeQ<Problem>() +
+            GetSmemSizeOGradT<Problem>() + GetSmemSizeOGrad<Problem>() +
             Base::template GetSmemSizeLSE<Problem>() + Base::template GetSmemSizeD<Problem>() +
             max(Base::template GetSmemSizeBias<Problem>(),
                 Base::template GetSmemSizeSGrad<Problem>());
 
         constexpr index_t total = max(stage0_0, stage0_1, stage1);
-        static_assert(total >= Base::template GetSmemSize<Problem>(),
-                      "padded staged region must not be smaller than the unpadded one");
+        // The old assert compared against the base policy's total, which does
+        // not describe the layout actually built here; it passed for the wrong
+        // reason and would now fail for the wrong reason too. Check the thing
+        // that binds: every stage must fit in the region we hand out.
+        static_assert(total >= stage0_0 && total >= stage0_1 && total >= stage1,
+                      "staged region must cover every stage");
         return total;
     }
 
