@@ -323,10 +323,6 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
     ROCSPARSE_CHECKARG_POINTER(7, y);
     ROCSPARSE_CHECKARG_POINTER(8, ellsv_info);
 
-    // Batched solves are rejected below, which leaves alpha a single scalar whose
-    // stride is never read.
-    (void)alpha_stride;
-
     if(trans != rocsparse_operation_none)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
