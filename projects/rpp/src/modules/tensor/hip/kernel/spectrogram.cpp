@@ -120,7 +120,8 @@ __global__ void compute_magnitude_from_complex_hip_tensor(float2* srcPtr, uint s
         int dstIdx = id_z * dstStrideNH.x + id_y * dstStrideNH.y + id_x;
         dstPtr[dstIdx] = (power == 2) ? magnitudeSquare : sqrtf(magnitudeSquare);
     } else {
-        // Vertical path: use shared memory transpose for coalesced writes (FT layout: [numBins, numWindows])
+        // Vertical path: use shared memory transpose for coalesced writes (FT layout: [numBins,
+        // numWindows])
         __shared__ float magnitude_smem[16][16];  // 16x16 tile in shared memory
 
         // Load and compute magnitude in coalesced fashion
@@ -129,7 +130,8 @@ __global__ void compute_magnitude_from_complex_hip_tensor(float2* srcPtr, uint s
             int srcIdx = id_z * srcStride + id_y * numBins + id_x;
             float2 complexVal = srcPtr[srcIdx];
             float magnitudeSquare = (complexVal.x * complexVal.x) + (complexVal.y * complexVal.y);
-            magnitude_smem[hipThreadIdx_y][hipThreadIdx_x] = (power == 2) ? magnitudeSquare : sqrtf(magnitudeSquare);
+            magnitude_smem[hipThreadIdx_y][hipThreadIdx_x] =
+                (power == 2) ? magnitudeSquare : sqrtf(magnitudeSquare);
         } else {
             magnitude_smem[hipThreadIdx_y][hipThreadIdx_x] = 0.0f;
         }
@@ -303,8 +305,8 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                                                hipMemcpyHostToDevice, handle.GetStream()));
 
         // Compute the number of windows required for each input in the batch
-        Rpp32s* numWindowsTensor =
-            reinterpret_cast<Rpp32s*>(handle.GetInitHandle()->mem.mgpu.scratchBufferPinned.floatmem);
+        Rpp32s* numWindowsTensor = reinterpret_cast<Rpp32s*>(
+            handle.GetInitHandle()->mem.mgpu.scratchBufferPinned.floatmem);
         for (Rpp32u i = 0; i < dstDescPtr->n; i++)
             numWindowsTensor[i] =
                 get_num_windows(srcLengthTensor[i], windowLength, windowStep, centerWindows);
@@ -315,8 +317,9 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
 
         // Allocate window output buffer (after d_windowFn)
         Rpp32f* windowOutput = d_windowFn + windowLength;
-        RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
-            windowOutput, 0, windowOutputStride * dstDescPtr->n * sizeof(Rpp32f), handle.GetStream()));
+        RPP_HIP_RETURN_IF_ERROR(
+            hipMemsetAsync(windowOutput, 0, windowOutputStride * dstDescPtr->n * sizeof(Rpp32f),
+                           handle.GetStream()));
 
         // Compute the windowOutput for all samples in a batch. Each sample will be of shape
         // (numWindows, nfft)
