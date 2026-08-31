@@ -137,7 +137,7 @@
 
                                     {"VAdd3U32",
              "VAdd3U32",
-             2,
+             3,
              true,
              "Vector Arithmetic",
              true,
@@ -317,6 +317,16 @@
 
                                     {"VFmaPKF16",
              "VFmaPKF16",
+             3,
+             true,
+             "Vector Arithmetic",
+             true,
+             true,
+             false,
+             "IF_Commutative|IF_VALU"},
+
+                                    {"VFmaPKF32",
+             "VFmaPKF32",
              3,
              true,
              "Vector Arithmetic",
@@ -3498,6 +3508,16 @@
 
                                     {"SDcacheWb",
              "SDcacheWb",
+             0,
+             false,
+             "Memory Cache",
+             false,
+             false,
+             false,
+             "IF_HasSideEffect"},
+
+                                    {"STtraceData",
+             "STtraceData",
              0,
              false,
              "Memory Cache",

@@ -104,6 +104,9 @@ struct _rocblaslt_handle
     // non-zero, takes precedence over this handle-level value.
     int32_t sm_count_target = 0;
 
+    // Handle-level uniform-summation-order request. 0 off, 1 on; see hipblaslt.h.
+    int32_t uniform_summation_order = 0;
+
 #ifdef HIPBLASLT_USE_ROCROLLER
     void* rocroller_handle = nullptr;
     int   useRocRoller     = -1;
@@ -133,7 +136,7 @@ struct _rocblaslt_handle
  * content. It must be initialized using rocblaslt_matrix_layout_create()
  * and the retured handle must be passed
  * to all subsequent library function calls that involve the matrix.
- * It should be destroyed at the end using rocblaslt_matrix_layout_destory().
+ * It should be destroyed at the end using rocblaslt_matrix_layout_destroy().
  *******************************************************************************/
 struct _rocblaslt_matrix_layout
 {
@@ -152,6 +155,7 @@ struct _rocblaslt_matrix_layout
     hipDataType      type;
     int32_t          batch_count  = 1;
     int64_t          batch_stride = 0;
+    int64_t          batch_offset = 0;
     hipblasLtOrder_t order        = HIPBLASLT_ORDER_COL;
     // Batch Mode
     hipblasLtBatchMode_t batch_mode = HIPBLASLT_BATCH_MODE_STRIDED;    
@@ -218,6 +222,10 @@ struct _rocblaslt_matmul_desc
     // 1 = ON (force SK4 dynamic), 2 = AUTO (heuristic picks per launch).
     int32_t streamk_tile_scheduling_ext = 0;
 
+    // Uniform summation order. 0 inherits the handle request; 1 enables.
+    // See hipblaslt.h for the guarantee.
+    int32_t uniform_summation_order = 0;
+
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
     int32_t bias_stride = 0;
@@ -253,6 +261,7 @@ struct _rocblaslt_matmul_desc
         this->act1                    = src.act1;
         this->sm_count_target         = src.sm_count_target;
         this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
+        this->uniform_summation_order = src.uniform_summation_order;
         this->bias_stride             = src.bias_stride;
     }
 };
@@ -297,6 +306,23 @@ inline int32_t effective_sm_count_target(const _rocblaslt_handle*            han
         return desc->sm_count_target;
     if(handle)
         return handle->sm_count_target;
+    return 0;
+}
+
+// Resolve the effective uniform-summation-order request for a matmul launch
+// using first-on-wins precedence (C++ preference true, then desc==1, then
+// handle==1). 0 on desc/pref means inherit. There is no per-GEMM opt-out
+// when the handle is on.
+inline int32_t effective_uniform_summation_order(const _rocblaslt_handle*      handle,
+                                                 const _rocblaslt_matmul_desc* desc,
+                                                 bool                          pref_uso = false)
+{
+    if(pref_uso)
+        return 1;
+    if(desc && desc->uniform_summation_order)
+        return 1;
+    if(handle && handle->uniform_summation_order)
+        return 1;
     return 0;
 }
 

@@ -26,12 +26,12 @@ project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
 # (typically OFF) and the injected value is silently ignored, leaving the
 # feature compiled out despite the flag being set.
 # ----------------------------------------------------------------------------
-option(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM
+option(HIPBLASLTPROVIDER_ENABLE_MX_GEMM
     "Enable MX (microscaling) data-type support for GEMM" OFF
 )
-if(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM)
+if(HIPBLASLTPROVIDER_ENABLE_MX_GEMM)
     message(STATUS "hipblaslt-provider: MX GEMM support enabled")
-    add_compile_definitions(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM)
+    add_compile_definitions(HIPBLASLTPROVIDER_ENABLE_MX_GEMM)
 else()
     message(STATUS "hipblaslt-provider: MX GEMM support disabled")
 endif()
@@ -175,8 +175,8 @@ add_library(
     HipblasltUtils.cpp
     engines/plans/HipblasltMatmulPlan.cpp
     engines/plans/HipblasltMatmulPlanBuilder.cpp
-    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
-    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
     HipblasltMatmulDesc.cpp
     HipblasltMatrixLayout.cpp
     HipblasltMatrixTransformDesc.cpp
@@ -271,6 +271,12 @@ if(NOT HIPDNN_SKIP_TESTS)
 # Tests are defined with relative paths to work in the installed location.
 ]=]
         )
+        # On ASAN builds, HIPDNN_TEST_MIOPEN_CACHE_DIR is set (see Sanitizers.cmake) and the generated
+        # suites require the cache-clearing fixture; empty otherwise.
+        set(_miopen_cache_fixture "")
+        if(HIPDNN_TEST_MIOPEN_CACHE_DIR)
+            set(_miopen_cache_fixture hipdnn_clear_miopen_test_cache)
+        endif()
         # The GTest YAML applies to both test binaries; each call appends its category suites
         # (e.g. hipblaslt_plugin_tests_quick_suite, hipblaslt_plugin_integration_tests_quick_suite)
         # to the same install-time CTestTestfile.cmake. ENVIRONMENT forwards the CMake-side
@@ -283,6 +289,8 @@ if(NOT HIPDNN_SKIP_TESTS)
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            FIXTURES_REQUIRED ${_miopen_cache_fixture}
         )
         apply_test_category_labels(
             hipblaslt_plugin_integration_tests
@@ -290,6 +298,8 @@ if(NOT HIPDNN_SKIP_TESTS)
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            FIXTURES_REQUIRED ${_miopen_cache_fixture}
         )
     endif()
 
@@ -300,6 +310,8 @@ if(NOT HIPDNN_SKIP_TESTS)
             INSTALL_TEST_FILE "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
             TEST_NAME_PREFIX ${PROJECT_NAME}-external-integration
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            FIXTURES_REQUIRED ${_miopen_cache_fixture}
         )
     endif()
 
@@ -345,20 +357,18 @@ if(NOT HIPDNN_SKIP_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
     endif()
 
-    # For standalone builds we need to install the ctest files.
-    # When YAML-based categorization is active, install the generated install_CTestTestfile.cmake
-    # to bin/hipblaslt_plugin/ so TheRock CI's test_runner.py can drive `ctest -L quick`
-    # (etc.) from the artifact's install tree. Otherwise, fall back to the project's
-    # own install_provider_ctest_files() which emits an unlabeled CTestTestfile.cmake.
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        if(HIPBLASLTPROVIDER_CTEST_INSTALL_FILE)
-            install(FILES "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
-                    DESTINATION "${CMAKE_INSTALL_BINDIR}/hipblaslt_plugin"
-                    RENAME "CTestTestfile.cmake"
-            )
-        else()
-            install_provider_ctest_files("hipblaslt_plugin")
-        endif()
+    # Install the ctest files. When YAML-based categorization is active, install the
+    # generated install_CTestTestfile.cmake to bin/hipblaslt_plugin/ so TheRock CI's
+    # test_runner.py can drive `ctest -L quick` (etc.) from the artifact's install tree.
+    # Otherwise, fall back to the project's own install_provider_ctest_files() which
+    # emits an unlabeled CTestTestfile.cmake.
+    if(HIPBLASLTPROVIDER_CTEST_INSTALL_FILE)
+        install(FILES "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}/hipblaslt_plugin"
+                RENAME "CTestTestfile.cmake"
+        )
+    else()
+        install_provider_ctest_files("hipblaslt_plugin")
     endif()
 endif()
 

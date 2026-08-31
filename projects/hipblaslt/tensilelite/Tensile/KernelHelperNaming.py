@@ -52,17 +52,21 @@ def conversionKernelNames(solution):
     gsuList = [1]
   elif solution["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
     return
+  gateList = solution["ProblemType"]["GateResidualDataTypeList"] if solution["ProblemType"]["UseGateResidual"] else [None]
   for vw in loadVectorWidth:
     # for _ in gsuList: I don't think this does anything
     if solution["ProblemType"]["UseBias"]:
       typeList = solution["ProblemType"]["BiasDataTypeList"]
       if solution["ProblemType"]["Gradient"]:
       #  # If gradient + bias D, generates a normal GSU kernel for bias D = nullptr case
-        conversionKernelNames.append(KernelWriterConversion.kernelName(solution, vw))
+        for gtype in gateList:
+          conversionKernelNames.append(KernelWriterConversion.kernelName(solution, vw, gateType=gtype))
       for btype in typeList:
-        conversionKernelNames.append(KernelWriterConversion.kernelName(solution, vw, btype))
+        for gtype in gateList:
+          conversionKernelNames.append(KernelWriterConversion.kernelName(solution, vw, btype, gateType=gtype))
     else:
-      conversionKernelNames.append(KernelWriterConversion.kernelName(solution, vw))
+      for gtype in gateList:
+        conversionKernelNames.append(KernelWriterConversion.kernelName(solution, vw, gateType=gtype))
   return conversionKernelNames if conversionKernelNames else []
 
 
@@ -159,6 +163,15 @@ def initConversionKernelObjects(solution, isaInfoMap):
     gsuList = [1]
   elif solution["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" and solution["AdaptiveGemmGSUA"] == 0:
     return conversionKernelObjects
+  gateList = solution["ProblemType"]["GateResidualDataTypeList"] if solution["ProblemType"]["UseGateResidual"] else [None]
+  def appendConversionKernel(state, vw):
+    for gtype in gateList:
+      if len(gateList) > 1:
+        gstate = deepcopy(state)
+        gstate["ProblemType"]["GateResidualDataTypeList"] = [gtype]
+      else:
+        gstate = state
+      conversionKernelObjects.append(KernelWriterConversion(gstate, vw, isaInfoMap))
   for vw in loadVectorWidth:
     for globalSplitU in gsuList:
       unrollOnly = False if globalSplitU == internalParameters["GlobalSplitUPGR"] else True
@@ -176,7 +189,7 @@ def initConversionKernelObjects(solution, isaInfoMap):
           state["UnrollOnly"] = unrollOnly
           state["_GlobalAccumulation"] = solution["_GlobalAccumulation"]
           state["ActivationFused"] = solution["ActivationFused"]
-          conversionKernelObjects.append(KernelWriterConversion(state, vw, isaInfoMap))
+          appendConversionKernel(state, vw)
         for btype in typeList:
           state = {}
           state["ProblemType"] = deepcopy(solution["ProblemType"])
@@ -189,7 +202,7 @@ def initConversionKernelObjects(solution, isaInfoMap):
           state["UnrollOnly"] = unrollOnly
           state["_GlobalAccumulation"] = solution["_GlobalAccumulation"]
           state["ActivationFused"] = solution["ActivationFused"]
-          conversionKernelObjects.append(KernelWriterConversion(state, vw, isaInfoMap))
+          appendConversionKernel(state, vw)
       else:
         state = {}
         state["ProblemType"] = deepcopy(solution["ProblemType"])
@@ -200,7 +213,7 @@ def initConversionKernelObjects(solution, isaInfoMap):
         state["UnrollOnly"] = unrollOnly
         state["_GlobalAccumulation"] = solution["_GlobalAccumulation"]
         state["ActivationFused"] = solution["ActivationFused"]
-        conversionKernelObjects.append(KernelWriterConversion(state, vw, isaInfoMap))
+        appendConversionKernel(state, vw)
   return conversionKernelObjects
 
 

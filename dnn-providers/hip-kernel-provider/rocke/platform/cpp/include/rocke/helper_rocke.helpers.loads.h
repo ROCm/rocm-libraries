@@ -102,6 +102,11 @@ typedef struct rocke_coalesced_tile_loader
     int load_vec; /* halves per thread per chunk */
     bool use_buffer_rsrc; /* Python default True */
     int oob_sentinel; /* Python default (1 << 31) - 1 */
+    /* Python `vector_axis: str = "col"`. false = "col" (load_vec run along
+     * columns, the historical default); true = "row" (run along rows, then
+     * transpose-on-store into the row-major (M/N, K) LDS tile). See the Python
+     * docstring in helpers/loads.py. */
+    bool vector_axis_row;
     /* Python `inner_dim: Optional[int] = None`. Carried for field-parity;
      * inner_dim is consumer-side documentation only (the loader body never
      * reads it). has_inner_dim distinguishes None (false) from a set value. */
@@ -117,6 +122,12 @@ typedef struct rocke_coalesced_tile_loader
  * (pass 8 to match the Python default). */
 rocke_status_t rocke_coalesced_tile_loader_choose_vec(
     int tile_rows, int tile_cols, int block_size, int max_vec, int* out_vec);
+
+/* CoalescedTileLoader.choose_vec with the Python ``vector_axis`` argument.
+ * ``vector_axis_row`` true checks ``tile_rows % vec`` (the run lies along rows);
+ * false is identical to rocke_coalesced_tile_loader_choose_vec (columns). */
+rocke_status_t rocke_coalesced_tile_loader_choose_vec_axis(
+    int tile_rows, int tile_cols, int block_size, int max_vec, bool vector_axis_row, int* out_vec);
 
 /* CoalescedTileLoader.from_tile classmethod.
  *
@@ -159,6 +170,57 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
                                       void* descriptor_user,
                                       rocke_value_t* rsrc,
                                       rocke_value_t* ptr);
+
+/* Split load: staging slot for one (row, col, v) triple produced by
+ * rocke_coalesced_tile_loader_load_global and consumed by
+ * rocke_coalesced_tile_loader_store_lds.
+ * Mirrors the Python list of (row, col, v) tuples returned by load_global(). */
+typedef struct rocke_ctl_staged_vec
+{
+    rocke_value_t* row;
+    rocke_value_t* col;
+    rocke_value_t* v; /* loaded VGPR value (buffer_load_vN result) */
+} rocke_ctl_staged_vec_t;
+
+/* Maximum vecs_per_thread supported by the split-load helpers.
+ * Sized for the largest tile (256x128 / 8 / 256 threads = 16). */
+#define ROCKE_CTL_MAX_VECS_PER_THREAD 32
+
+/* Staging buffer: holds up to ROCKE_CTL_MAX_VECS_PER_THREAD staged vectors for
+ * one loader's load_global() call. */
+typedef struct rocke_ctl_staged
+{
+    rocke_ctl_staged_vec_t vecs[ROCKE_CTL_MAX_VECS_PER_THREAD];
+    int count;
+} rocke_ctl_staged_t;
+
+/* CoalescedTileLoader.load_global() -- emit only the buffer_load_vN ops.
+ *
+ * Issues the global memory reads into VGPR SSA values and stores them in
+ * `staged` (which the caller must allocate). The matching smem_store_vN
+ * ops are deferred to rocke_coalesced_tile_loader_store_lds(). This split is
+ * required by CK pipeline_basic where the global read for tile k+1 must be issued
+ * before the sync+mfma for tile k but the LDS write must come after.
+ *
+ * Mirrors Python CoalescedTileLoader.load_global() -> list[(row, col, v)]. */
+void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
+                                             const rocke_coalesced_tile_loader_t* self,
+                                             rocke_value_t* tid,
+                                             rocke_loads_descriptor_fn descriptor,
+                                             void* descriptor_user,
+                                             rocke_value_t* rsrc,
+                                             rocke_value_t* ptr,
+                                             rocke_ctl_staged_t* staged);
+
+/* CoalescedTileLoader.store_lds() -- emit the smem_store_vN ops.
+ *
+ * Consumes a `staged` buffer filled by rocke_coalesced_tile_loader_load_global()
+ * and emits the corresponding smem_store_vN instructions into `smem_dst`.
+ * Mirrors Python CoalescedTileLoader.store_lds(b, smem_dst, staged). */
+void rocke_coalesced_tile_loader_store_lds(rocke_ir_builder_t* b,
+                                           const rocke_coalesced_tile_loader_t* self,
+                                           rocke_value_t* smem_dst,
+                                           const rocke_ctl_staged_t* staged);
 
 /* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot

@@ -22,8 +22,10 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 
+#include <cstdint>
 #include <random>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -32,6 +34,9 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPassTestSupport.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -39,56 +44,32 @@ namespace {
 constexpr int kClusterBarrierId = -3;
 constexpr int kWorkgroupBarrierId = -1;
 constexpr const char* kSkipLabelPrefix = "label_skipCBPreSignal_";
-/// Prefix for the outer LoopCounterL-gated skip label. Distinct from
-/// `kSkipLabelPrefix` so it doubles as a signature of the outer gate.
 constexpr const char* kSkipLabelPrefixLCL = "label_skipCBPreSignal_LCL_";
-/// Prefix for Rule 4's drain-gated cluster-WAIT skip label (drain-iter gate).
-/// Used by `insertLoopCounterLGatedClusterBarrierWaitBefore` when Rule 4 runs
-/// in drain-gated mode (b) (i.e. when `kRule4ForceUngatedSignalMode` is off).
-constexpr const char* kSkipWaitLabelPrefixLCL = "label_skipCBWait_LCL_";
+constexpr const char* kDrainBypassLabelSuffix = "_skipCBWait";
 constexpr const char* kWaveIdxSymbol = "sgprWaveIdx";
 constexpr const char* kLoopCounterLSymbol = "sgprLoopCounterL";
 constexpr size_t kHashLen = 16;
-/// Exact label name emitted by Tensile after the GSU==1 early-return
-/// guard. Rule 1 anchors on the `LABEL` instruction with this name and
-/// emits the signal-only handshake immediately after it.
 constexpr const char* kGSU1LabelName = "label_GSU_1";
-/// Exact label name emitted by Tensile right before the unrolled
-/// summation loop opens. Rule 3 anchors here (both for the
-/// PrefetchLocalRead>0 backward scan that finds the workgroup sync
-/// `s_barrier_wait -1` and for the
-/// PrefetchLocalRead=0 fallback that inserts directly before the label).
-/// Internal labels inside the prefetch prologue (e.g. `label_skipPGR2_1`)
-/// do not match by exact-name comparison and are walked through.
-constexpr const char* kOpenLoopLLabelName = "label_openLoopL";
-/// Substring used to identify the Tensile comment that opens the tail-loop
-/// section. Matches the TEXTBLOCK `/* Tail Loop                       */`.
-/// Rule 5 (5a + 5b) uses this as its section anchor.
+constexpr const char* kOpenLoopLabelName = "label_openLoopL";
 constexpr const char* kTailLoopMarker = "Tail Loop";
 
-/// Master switch for Rule 3 (the LoopCounterL-gated signal at the LDS
-/// publication point before `label_openLoopL:`). Temporarily disabled while
-/// Rule 4 owns the per-load handshake emission.
-constexpr bool kRule3Enabled = false;
+/// Estimated cycles the Rule 3 signal is planted ahead of its paired wait.
+/// Set to 0 to co-locate the signal with the wait.
+constexpr int kRule3SignalLeadCycles = 500;
 
-/// Master switch for Rule 4's "mode (c)" -- the always-ungated signal
-/// handshake. When true, `insertClusterBarrierHandshakeBefore` emits a
-/// WaveIdx-gated `s_barrier_signal -3` followed by a bare `s_barrier_wait -3`
-/// for EVERY trigger; the cluster signal is never wrapped in an LCL skip
-/// branch (unlike inherited-SCC mode (a) or drain-gated mode (b)). When
-/// false, the original mode-selection logic stays in effect: inherited-SCC
-/// mode (a) for `liveLclCmp != nullptr`, drain-gated mode (b) otherwise.
-///
-/// Mode (c) still detects `liveLclCmp`: if SIA hoisted a loop-exit
-/// `s_cmp_eq LCL, imm` whose SCC a downstream `s_cbranch_scc0 LoopBeginL`
-/// consumes, the inner `s_cmp_eq_u32 s[sgprWaveIdx], 0` would clobber that
-/// SCC, so a clone of the cmp is re-emitted AFTER the bare wait to rebuild
-/// it for the loop-back branch.
-constexpr bool kRule4ForceUngatedSignalMode = true;
+/// Ceiling on how far ahead of its wait the signal may end up after climbing out of a live
+/// SCC range. The climb has to clear the whole range, so its cost is the length of that
+/// range, not a constant; past this ceiling it buys correctness at more overlap than it is
+/// worth. The anchor then drops below the range instead, which lands it closer than
+/// kRule3SignalLeadCycles rather than further away.
+constexpr int kRule3SignalMaxLeadCycles = 900;
 
-/// Returns a fresh 16-character alphanumeric identifier. The first call seeds
-/// from std::random_device; subsequent calls reuse the engine for low overhead
-/// while still producing collision-resistant IDs across all insertions.
+/// Segment edges one handshake may climb across when its own segment is too short to
+/// hold kRule3SignalLeadCycles. One hop reaches the previous segment of a pipelined loop
+/// body, which leaves exactly one signal in flight and so costs one compensating pair
+/// around the loop; more hops would need per-edge accounting for no extra overlap.
+constexpr int kMaxSegmentHops = 1;
+
 std::string makeRandomHash() {
     static thread_local std::mt19937_64 engine{std::random_device{}()};
     static constexpr char kAlphabet[] =
@@ -102,20 +83,12 @@ std::string makeRandomHash() {
     return out;
 }
 
-/// Build a symbolic SGPR reference (single dword) for emission as `s[<name>]`.
 StinkyRegister makeSymbolicSgpr(const std::string& symbolicName) {
     StinkyRegister reg(RegType::S, /*regIdx=*/0u, /*regNum=*/1u);
     reg.setSymbolicName(symbolicName);
     return reg;
 }
 
-/// Shared primitive for the three "is barrier with literal id" checks below.
-/// Matches either an `s_barrier_wait` (`wantSignal=false`) or an
-/// `s_barrier_signal` (`wantSignal=true`) whose first source operand is a
-/// LiteralInt equal to `id`. When `rejectMemToken` is true, also requires
-/// the instruction to have no MemTokenData modifier (used to keep the
-/// cluster-scope wait idempotency check independent of Tensile-emitted
-/// `wait_kmcnt`-style modifiers).
 bool isBarrierWithLiteralId(const StinkyInstruction& inst, bool wantSignal, int id,
                             bool rejectMemToken) {
     if (wantSignal ? !isBarrierSignal(inst) : !isBarrierWait(inst)) return false;
@@ -125,159 +98,147 @@ bool isBarrierWithLiteralId(const StinkyInstruction& inst, bool wantSignal, int 
            srcs[0].getLiteralInt() == id;
 }
 
-/// True if `inst` is a workgroup-scope barrier completion: `s_barrier_wait -1`.
-/// The cluster-scope (`-3`) wait we synthesize is intentionally excluded so the
-/// pass remains idempotent if re-run.
 bool isWorkgroupBarrierWait(const StinkyInstruction& inst) {
     return isBarrierWithLiteralId(inst, /*wantSignal=*/false, kWorkgroupBarrierId,
                                   /*rejectMemToken=*/false);
 }
 
-/// True if `inst` is a bare cluster-scope wait (`s_barrier_wait -3` with no
-/// MemTokenData). Used as an idempotency signature: the standalone wait we
-/// synthesize for Rule 2, the leading wait of any Rule-4 handshake, and any
-/// equivalent wait already present in the IR all match.
+bool isWorkgroupBarrierSignal(const StinkyInstruction& inst) {
+    return isBarrierWithLiteralId(inst, /*wantSignal=*/true, kWorkgroupBarrierId,
+                                  /*rejectMemToken=*/false);
+}
+
 bool isClusterBarrierWait(const StinkyInstruction& inst) {
     return isBarrierWithLiteralId(inst, /*wantSignal=*/false, kClusterBarrierId,
                                   /*rejectMemToken=*/true);
 }
 
-/// True if `inst` is `s_barrier_signal -3`. Mirror of `isClusterBarrierWait`
-/// used by Rule 3's anchor-mode (b) path for section-level idempotency.
 bool isClusterBarrierSignal(const StinkyInstruction& inst) {
     return isBarrierWithLiteralId(inst, /*wantSignal=*/true, kClusterBarrierId,
                                   /*rejectMemToken=*/false);
 }
 
-/// A segment boundary is either a label (control-flow entry point) or a
-/// branch instruction (control-flow exit point). Treating both as boundaries
-/// gives us per-CFG-basic-block segmentation even on Tensile's flat IR,
-/// which is important for unrolled loops where iter 1/2 and iter 2/2 sit in
-/// the same label segment but are separated by a conditional `s_cbranch`.
 bool isSegmentBoundary(const StinkyInstruction& inst) {
     return isLabel(inst) || isBranch(inst) || isCall(inst);
 }
 
-/// Walk backward from \p anchor (exclusive) toward \p segmentBegin (inclusive)
-/// to find the nearest preceding `s_barrier_wait -1`. Stops as soon as a
-/// segment boundary is crossed so the trigger always lives in the same
-/// segment as \p anchor. Used by Rule 4's per-`tensor_load_to_lds` scan to
-/// resolve each load's anchor wait.
-StinkyInstruction* findPrecedingWorkgroupBarrierWaitInSegment(BasicBlock::iterator segmentBegin,
-                                                              StinkyInstruction* anchor) {
+StinkyInstruction* findPrecedingWorkgroupBarrierSignalInSegment(BasicBlock::iterator segBegin,
+                                                                StinkyInstruction* anchor) {
     auto it = BasicBlock::iterator(anchor);
-    while (it != segmentBegin) {
+    while (it != segBegin) {
         --it;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
         if (isSegmentBoundary(*inst)) return nullptr;
-        if (isWorkgroupBarrierWait(*inst)) return inst;
+        if (isWorkgroupBarrierSignal(*inst)) return inst;
     }
     return nullptr;
 }
 
-/// Walk backward from \p anchor within the same basic block, looking
-/// for a "live" `s_cmp_eq_{u32,i32} s[sgprLoopCounterL], imm` whose SCC
-/// has NOT been consumed before \p anchor. Returns nullptr on BB start,
-/// label, branch, any SCC reader, or any other SCC writer.
+// SCC is written and read both through the descriptor flags and, once the DAG scheduler
+// has made the dependency explicit, as an ordinary operand. Check for both.
+bool writesScc(const StinkyInstruction& inst) {
+    if (inst.is(InstFlag::IF_ImplicitWriteSCC)) return true;
+    for (const auto& dst : inst.getDestRegs()) {
+        if (dst.isRegister() && dst.reg.type == RegType::SCC) return true;
+    }
+    return false;
+}
+
+bool readsScc(const StinkyInstruction& inst) {
+    if (inst.is(InstFlag::IF_ImplicitReadSCC)) return true;
+    for (const auto& src : inst.getSrcRegs()) {
+        if (src.isRegister() && src.reg.type == RegType::SCC) return true;
+    }
+    return false;
+}
+
+/// Is SCC live at the program point in front of \p at, i.e. does anything reachable from there
+/// read it before something rewrites it? Forward walk, backward question: the name says which
+/// point the answer is about, not which way the walk goes.
 ///
-/// Used by Rule 4 to detect whether SIA scheduling has hoisted the
-/// loop-exit cmp above the anchor (typical for `ScheduleIterAlg=4`).
-/// When present, the SCC is inherited for Rule 4's outer cbranch and a
-/// clone of the cmp is re-emitted between the inner and outer skip
-/// labels (see `insertRule4InheritedSccSignalBlockBefore`); when absent
-/// (e.g. `ScheduleIterAlg=0`, or the only upstream cmp has already been
-/// consumed by a body-skip cbranch), Rule 4's drain-gated mode (b) emits its
-/// own `s_cmp_le_i32` gate. (When `kRule4ForceUngatedSignalMode` is on, mode
-/// (c) ignores both paths and emits a WaveIdx-gated signal with no LCL gate,
-/// but still consults this result to restore SCC after the bare wait.)
+/// No CFG exists yet, so the walk resolves branches against the labels in the block and follows
+/// both edges. What it cannot see through -- an unresolvable target, a call -- reads as live,
+/// since only a `false` here is permission to clobber SCC. See docs/developer/cluster-barrier.md
+/// ("SCC").
+bool isSccLiveIn(StinkyInstruction* at) {
+    BasicBlock* parent = at->getParent();
+    if (parent == nullptr) return true;
+
+    // Built on the first branch the walk meets rather than up front, so the common case --
+    // an SCC access within a few instructions -- pays nothing for it.
+    std::unordered_map<std::string, StinkyInstruction*> labels;
+    bool labelsBuilt = false;
+    auto branchTarget = [&](const StinkyInstruction& branch) -> StinkyInstruction* {
+        const std::string target = getBranchTarget(branch);
+        if (target.empty()) return nullptr;
+        if (!labelsBuilt) {
+            labelsBuilt = true;
+            for (auto it = parent->begin(); it != parent->end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst == nullptr || !isLabel(*inst)) continue;
+                if (const auto* data = inst->getModifier<LabelData>())
+                    labels.emplace(data->label, inst);
+            }
+        }
+        auto found = labels.find(target);
+        return (found == labels.end()) ? nullptr : found->second;
+    };
+
+    std::vector<BasicBlock::iterator> paths{BasicBlock::iterator(at)};
+    std::unordered_set<const IRBase*> walked;
+    while (!paths.empty()) {
+        auto it = paths.back();
+        paths.pop_back();
+        for (; it != parent->end(); ++it) {
+            // A point already walked answers the same from here on, whichever path arrived.
+            // This is also what ends the walk around a back edge.
+            if (!walked.insert(it.getNodePtr()).second) break;
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr) continue;
+            if (readsScc(*inst)) return true;
+            if (writesScc(*inst)) break;
+            if (isCall(*inst)) return true;
+            if (isEndOfFunction(*inst)) break;
+            if (!isBranch(*inst)) continue;
+            StinkyInstruction* target = branchTarget(*inst);
+            if (target == nullptr) return true;
+            paths.push_back(BasicBlock::iterator(target));
+            // Nothing falls through an unconditional branch, so the code below it is not on
+            // this path at all.
+            if (isUnconditionalBranch(*inst)) break;
+        }
+    }
+    return false;
+}
+
+/// First spot below a live SCC range that the handshake may be planted at, or null when the
+/// range leaves none. What comes back is an anchor -- the instruction the handshake goes in
+/// *front* of -- which is the SCC clobber only when the clobber directly follows the range's
+/// last reader.
 ///
-/// Equality form only because the inherited SCC drives a SINGLE-iter
-/// skip of the cluster signal: only `s_cmp_eq LCL, imm` gives SCC=1 on
-/// exactly one LCL value. Relational forms (`le`/`lt`/`ge`/`gt`/`lg`)
-/// span multiple iters and would over-suppress.
-StinkyInstruction* findLiveLoopCounterLCmpUpstream(StinkyInstruction* anchor) {
-    BasicBlock* parent = anchor->getParent();
+/// The stops below are where the *signal* may not go, which is not where an SCC range ends, so
+/// they are deliberately not the stops isSccLiveIn uses. The one exception steps over the exit
+/// branch that holds a loop body's range open, whose fall-through is the side the wait is on.
+/// See docs/developer/cluster-barrier.md ("SCC").
+StinkyInstruction* findSccDeadAnchorBelow(StinkyInstruction* from, const IRBase* limit) {
+    BasicBlock* parent = from->getParent();
     if (parent == nullptr) return nullptr;
-    auto it = BasicBlock::iterator(anchor);
-    while (it != parent->begin()) {
-        --it;
+    for (auto it = BasicBlock::iterator(from); it != parent->end(); ++it) {
+        if (it.getNodePtr() == limit) return nullptr;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
-        if (isPseudoInst(inst)) continue;
-        if (isLabel(*inst)) return nullptr;
-        if (isUnconditionalBranch(*inst)) return nullptr;
-        if (isConditionalBranch(*inst) || inst->is(InstFlag::IF_ImplicitReadSCC)) {
+        if (isSegmentBoundary(*inst)) {
+            if (readsScc(*inst) && isConditionalBranch(*inst)) continue;
             return nullptr;
         }
-        if (inst->is(InstFlag::IF_ImplicitWriteSCC)) {
-            const auto uOp = inst->getUnifiedOpcode();
-            const bool isLclEqCmp32 = (uOp == GFX::s_cmp_eq_u32 || uOp == GFX::s_cmp_eq_i32);
-            if (!isLclEqCmp32) return nullptr;
-            const auto& srcs = inst->getSrcRegs();
-            if (srcs.empty()) return nullptr;
-            if (srcs[0].getSymbolicName() != kLoopCounterLSymbol) return nullptr;
-            return inst;
-        }
+        if (isClusterBarrierWait(*inst)) return nullptr;
+        if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
+        if (!isSccLiveIn(inst)) return inst;
     }
     return nullptr;
 }
 
-/// True if `inst` is an unconditional self-decrement of the loop counter:
-/// `s_sub_{u32,i32} s[sgprLoopCounterL], s[sgprLoopCounterL], <imm>`. The
-/// destination and first source must both be `s[sgprLoopCounterL]` and the
-/// second source must be a literal immediate. On a match, `*outImm` receives
-/// the decrement amount. `s_subrev_*` is intentionally rejected: its operand
-/// order (`dst = src1 - src0`) does not express `LCL -= imm`.
-bool isLoopCounterLSelfDecrement(const StinkyInstruction& inst, int* outImm) {
-    const auto uOp = inst.getUnifiedOpcode();
-    if (uOp != GFX::s_sub_u32 && uOp != GFX::s_sub_i32) return false;
-    const auto& dsts = inst.getDestRegs();
-    const auto& srcs = inst.getSrcRegs();
-    if (dsts.empty() || srcs.size() < 2) return false;
-    if (dsts[0].getSymbolicName() != kLoopCounterLSymbol) return false;
-    if (srcs[0].getSymbolicName() != kLoopCounterLSymbol) return false;
-    if (srcs[1].dataType != StinkyRegister::Type::LiteralInt) return false;
-    if (outImm != nullptr) *outImm = static_cast<int>(srcs[1].getLiteralInt());
-    return true;
-}
-
-/// Sum the immediate decrements that `s_sub_{u32,i32} s[sgprLoopCounterL],
-/// s[sgprLoopCounterL], <imm>` instructions apply to the loop counter between
-/// \p segmentBegin (inclusive) and \p anchor (exclusive), scanning backward
-/// and stopping at the first segment boundary (label / branch).
-///
-/// Rule 4's drain-gated mode (b) thresholds (`pgrValue` for the WAIT,
-/// `pgrValue+1` for the SIGNAL) are calibrated against the loop counter value
-/// at segment entry. Different `ScheduleIterAlg` settings may hoist the
-/// per-iteration `s_sub LCL, LCL, 1` ABOVE the workgroup-wait anchor, so the
-/// gate then reads an already-decremented LCL. To keep the gate firing on the
-/// identical absolute iteration regardless of where the decrement landed, mode
-/// (b) subtracts this sum from both thresholds. Decrements that remain BELOW
-/// the anchor (the default schedule) are not seen by the backward scan, so the
-/// sum is 0 and the thresholds are left untouched. (Not consulted when
-/// `kRule4ForceUngatedSignalMode` is on, i.e. mode (c).)
-int sumLoopCounterLDecrementsBeforeInSegment(BasicBlock::iterator segmentBegin,
-                                             StinkyInstruction* anchor) {
-    int total = 0;
-    auto it = BasicBlock::iterator(anchor);
-    while (it != segmentBegin) {
-        --it;
-        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst == nullptr) continue;
-        if (isPseudoInst(inst)) continue;
-        if (isSegmentBoundary(*inst)) break;
-        int imm = 0;
-        if (isLoopCounterLSelfDecrement(*inst, &imm)) total += imm;
-    }
-    return total;
-}
-
-/// Marker-bounded forward scan: walk from \p start (inclusive) up to
-/// \p endExclusive and return the first `tensor_load_to_lds` encountered, or
-/// nullptr. Does NOT stop at labels or branches -- Rule 5b's tail-loop search
-/// must cross the tail's own control-flow labels (e.g.
-/// `label_TailLoopBegin_L:`) to reach the tail's publication-point load.
 StinkyInstruction* findFirstTensorLoadBetween(BasicBlock::iterator start,
                                               BasicBlock::iterator endExclusive) {
     for (auto it = start; it != endExclusive; ++it) {
@@ -288,10 +249,6 @@ StinkyInstruction* findFirstTensorLoadBetween(BasicBlock::iterator start,
     return nullptr;
 }
 
-/// Marker-bounded backward scan: walk from \p anchor (exclusive) back toward
-/// \p boundary (exclusive) and return the nearest preceding
-/// `s_barrier_wait -1`, or nullptr. Same "no segment-boundary stopping"
-/// semantics as `findFirstTensorLoadBetween`. Used by Rule 5a.
 StinkyInstruction* findPrecedingWorkgroupBarrierWaitBetween(BasicBlock::iterator boundary,
                                                             StinkyInstruction* anchor) {
     auto it = BasicBlock::iterator(anchor);
@@ -304,11 +261,6 @@ StinkyInstruction* findPrecedingWorkgroupBarrierWaitBetween(BasicBlock::iterator
     return nullptr;
 }
 
-/// Walk forward from `anchor` (exclusive) skipping over non-`StinkyInstruction`
-/// IR (e.g. `AsmDirective`) and pseudo instructions (LABEL / PHI / FENCE).
-/// Returns the first real `StinkyInstruction*` encountered, or nullptr if the
-/// rest of the basic block contains no real instruction. Used as the primitive
-/// for forward-direction idempotency checks.
 StinkyInstruction* firstRealInstAfter(StinkyInstruction* anchor) {
     BasicBlock* parent = anchor->getParent();
     if (parent == nullptr) return nullptr;
@@ -320,15 +272,6 @@ StinkyInstruction* firstRealInstAfter(StinkyInstruction* anchor) {
     return nullptr;
 }
 
-/// Emit the wave-gated signal block (cmp + branch + signal + skip-label) so
-/// that only wave 0 issues the cluster-scope `s_barrier_signal -3`. All new
-/// instructions are inserted before `anchor` (or appended when nullptr).
-///
-/// Shared by:
-///   - Rule 4: emits a leading `s_barrier_wait -3` and then calls this helper.
-///   - Rule 5a: calls this helper alone (no preceding wait, no LCL gate).
-///   - Rules 1 / 3: wrap this helper in an outer LoopCounterL gate (see
-///     `insertLoopCounterLGatedClusterBarrierSignalBefore`).
 void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
                                           GfxArchID archId) {
     const std::string labelName = kSkipLabelPrefix + makeRandomHash();
@@ -354,28 +297,12 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
     signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
 
     static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     StinkyInstruction* lblInst = irBuilder.create(&labelMCID, anchor);
     lblInst->addModifier<LabelData>(LabelData{labelName, /*alignment=*/1});
 }
 
-/// Emit a workgroup-scope sync pair (`s_barrier_signal -1` followed by
-/// `s_barrier_wait -1`) immediately before `anchor`. Always invoked
-/// indirectly via `insertLoopCounterLGatedClusterBarrierSignalBefore`
-/// when its `workgroupSyncWaitComment` parameter is non-null, so the
-/// emitted pair always lands between the outer LCL skip-branch and the
-/// inner WaveIdx gate. Used by:
-///   - Rule 1: workgroup pair gates the post-GSU==1 cluster signal so
-///     all waves reach the join before any wave publishes (comment:
-///     `"sync workgroup before cluster signal"`).
-///   - Rule 3's PrefetchLocalRead=0 anchor-mode (b): when the backward scan from
-///     `label_openLoopL:` finds no `s_barrier_wait -1` before crossing
-///     the prefetch boundary, we synthesize the LDS publication point
-///     here (comment: `"workgroup sync"`) so the cluster signal
-///     that immediately follows still sits at a valid LDS-coherence
-///     point.
-void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId,
-                                      const char* waitComment) {
+void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId) {
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
     const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
     assert(signalDesc && waitDesc &&
@@ -386,377 +313,570 @@ void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, G
 
     StinkyInstruction* waitInst = irBuilder.create(waitDesc, anchor);
     waitInst->addSrcReg(StinkyRegister(kWorkgroupBarrierId));
-    waitInst->addModifier<CommentData>(CommentData{waitComment});
+    waitInst->addModifier<CommentData>(CommentData{"sync workgroup before cluster signal"});
 }
 
-/// Wrap a signal-only handshake in an outer `s[sgprLoopCounterL] <cmp> <imm>`
-/// gate (the cbranch is always `s_cbranch_scc1`, so it skips the inner
-/// block when the compare sets SCC1). Final shape (all inserted before
-/// `anchor`):
-///
-///     <cmpUOp> s[sgprLoopCounterL], <skipWhenScc1Imm>     // outer LCL gate
-///     s_cbranch_scc1 label_skipCBPreSignal_LCL_<H2>       // skip when SCC1
-///     s_cmp_eq_u32 s[sgprWaveIdx], 0                       // inner wave gate
-///     s_cbranch_scc0 label_skipCBPreSignal_<H1>
-///     s_barrier_signal -3
-///   label_skipCBPreSignal_<H1>:                            // inner skip label
-///   label_skipCBPreSignal_LCL_<H2>:                        // outer skip label
-///
-/// Both skip labels share a target IR position (whatever sits at
-/// `anchor`), so the outer cbranch effectively bypasses the entire inner
-/// block.
-///
-/// When \p workgroupSyncWaitComment is non-null, an
-/// `s_barrier_signal -1` / `s_barrier_wait -1` workgroup-scope pair is
-/// emitted between the outer LCL skip-branch and the inner WaveIdx
-/// gate, with the wait carrying the supplied comment text. This
-/// guarantees that on the non-skipped path every wave in the workgroup
-/// has reached this point before the (first) wave issues the cluster
-/// signal -- preventing a fast wave from publishing the cluster
-/// handshake while siblings are still doing per-wave teardown above
-/// the anchor. The pair sits INSIDE the LCL skip region (so it is
-/// bypassed on the skip path together with the cluster signal -- which
-/// is desirable: on the skip path Tensile's own loop-entry guard also
-/// bypasses the loop body, so neither the LDS publication nor the
-/// cluster handshake is needed there), giving:
-///     <cmpUOp> s[sgprLoopCounterL], <skipWhenScc1Imm>
-///     s_cbranch_scc1 label_skipCBPreSignal_LCL_<H2>
-///     s_barrier_signal -1                                  // workgroup signal
-///     s_barrier_wait -1                                    // <workgroupSyncWaitComment>
-///     s_cmp_eq_u32 s[sgprWaveIdx], 0
-///     s_cbranch_scc0 label_skipCBPreSignal_<H1>
-///     s_barrier_signal -3
-///   label_skipCBPreSignal_<H1>:
-///   label_skipCBPreSignal_LCL_<H2>:
-///
-/// Instantiations used today (where `pgr = PrefetchGlobalRead` from module options):
-///   - Rule 1: `s_cmp_eq_u32` / imm=0       (skip when LCL == 0;
-///             workgroupSyncWaitComment = "sync workgroup before
-///             cluster signal" -- the post-GSU==1 join needs the
-///             workgroup to be in lockstep before the cluster signal
-///             fires)
-///   - Rule 3 (call site present but currently gated off by
-///             `kRule3Enabled`): `s_cmp_le_u32` / imm=pgr  (skip when
-///             LCL <= pgr; the
-///             same gate is used by both Rule 3 anchor modes -- existing
-///             workgroup wait (mode a) or synthesized (mode b) -- so
-///             cluster signal/wait pairing stays balanced when the
-///             unrolled loop body is bypassed. Mode (b) passes
-///             workgroupSyncWaitComment = "workgroup sync" to
-///             synthesize the LDS publication point inside the LCL
-///             skip region; mode (a) passes nullptr because the wait
-///             already exists in the IR.)
-///   - Rule 4: uses this helper only in its drain-gated fallback mode (b)
-///             (when `kRule4ForceUngatedSignalMode` is off): `s_cmp_le_i32`
-///             / imm=pgr+1 (minus any LCL pre-decrement), so the SIGNAL is
-///             skipped one drain stage earlier than the paired WAIT (gated
-///             at imm=pgr via
-///             `insertLoopCounterLGatedClusterBarrierWaitBefore`). The
-///             active mode (c) and the inherited-SCC mode (a) do NOT use
-///             this helper: mode (c) emits via
-///             `insertClusterBarrierSignalOnlyBefore` (WaveIdx-gated, no
-///             LoopCounterL gate) and mode (a) via
-///             `insertRule4InheritedSccSignalBlockBefore`. See
-///             `insertClusterBarrierHandshakeBefore`.
-void insertLoopCounterLGatedClusterBarrierSignalBefore(
-    IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId, GFX cmpUOp, int skipWhenScc1Imm,
-    const std::string& cmpComment, const std::string& branchComment,
-    const char* workgroupSyncWaitComment = nullptr) {
+void insertRule1ClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
+                                           GfxArchID archId) {
     const std::string lclLabelName = std::string(kSkipLabelPrefixLCL) + makeRandomHash();
 
-    const HwInstDesc* cmpDesc = getMCIDByUOp(cmpUOp, archId);
+    const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
     const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc1, archId);
     assert(cmpDesc && brDesc && "LoopCounterL gate opcodes are not supported on this architecture");
 
     StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, anchor);
     cmpInst->addSrcReg(makeSymbolicSgpr(kLoopCounterLSymbol));
-    cmpInst->addSrcReg(StinkyRegister(skipWhenScc1Imm));
-    cmpInst->addModifier<CommentData>(CommentData{cmpComment});
+    cmpInst->addSrcReg(StinkyRegister(0));
+    cmpInst->addModifier<CommentData>(CommentData{"gate: only signal when LoopCounterL != 0"});
 
     StinkyInstruction* brInst = irBuilder.create(brDesc, anchor);
     brInst->addSrcReg(StinkyRegister(lclLabelName));
     brInst->addModifier<LabelData>(LabelData{lclLabelName});
-    brInst->addModifier<CommentData>(CommentData{branchComment});
+    brInst->addModifier<CommentData>(CommentData{"skip cluster barrier when LoopCounterL == 0"});
 
-    if (workgroupSyncWaitComment != nullptr) {
-        insertWorkgroupBarrierSyncBefore(anchor, irBuilder, archId, workgroupSyncWaitComment);
-    }
-
+    insertWorkgroupBarrierSyncBefore(anchor, irBuilder, archId);
     insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
 
     static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     StinkyInstruction* lclLblInst = irBuilder.create(&labelMCID, anchor);
     lclLblInst->addModifier<LabelData>(LabelData{lclLabelName, /*alignment=*/1});
 }
 
-/// Rule 4's "inherited SCC" emission: the outer `s_cbranch_scc1`
-/// consumes SCC from an upstream live `s_cmp_eq LCL, imm` (`liveLclCmp`)
-/// that SIA hoisted above this anchor -- no fresh gate cmp is emitted
-/// (it would clobber the SCC the downstream cbranch still needs). A
-/// clone of `liveLclCmp` is then re-emitted between the inner and outer
-/// skip labels to rebuild SCC for that downstream cbranch. Emitted
-/// shape:
-///
-///     s_cbranch_scc1 label_skipCBPreSignal_LCL_<H2> // SCC inherited
-///     s_cmp_eq_u32 s[sgprWaveIdx], 0                // inner wave gate
-///     s_cbranch_scc0 label_skipCBPreSignal_<H1>
-///     s_barrier_signal -3
-///   label_skipCBPreSignal_<H1>:
-///     <clone of liveLclCmp>                          // restore SCC
-///   label_skipCBPreSignal_LCL_<H2>:
-///
-/// The restore sits between the inner and outer labels so the LCL-skip
-/// path bypasses it (its inherited SCC=1 is already what the downstream
-/// cbranch expects), while both wave paths (fall-through and wave-skip)
-/// land at or past the inner label and re-evaluate the cmp.
-void insertRule4InheritedSccSignalBlockBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                              GfxArchID archId, StinkyInstruction* liveLclCmp) {
-    const std::string innerLabel = std::string(kSkipLabelPrefix) + makeRandomHash();
-    const std::string outerLabel = std::string(kSkipLabelPrefixLCL) + makeRandomHash();
-
-    const HwInstDesc* brSccDesc1 = getMCIDByUOp(GFX::s_cbranch_scc1, archId);
-    const HwInstDesc* cmpEqU32Desc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
-    const HwInstDesc* brSccDesc0 = getMCIDByUOp(GFX::s_cbranch_scc0, archId);
-    const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
-    assert(brSccDesc1 && cmpEqU32Desc && brSccDesc0 && signalDesc &&
-           "Rule 4 cluster-barrier opcodes are not supported on this architecture");
-
-    StinkyInstruction* outerBr = irBuilder.create(brSccDesc1, anchor);
-    outerBr->addSrcReg(StinkyRegister(outerLabel));
-    outerBr->addModifier<LabelData>(LabelData{outerLabel});
-    outerBr->addModifier<CommentData>(
-        CommentData{"skip cluster barrier (SCC inherited from upstream LCL cmp)"});
-
-    StinkyInstruction* innerCmp = irBuilder.create(cmpEqU32Desc, anchor);
-    innerCmp->addSrcReg(makeSymbolicSgpr(kWaveIdxSymbol));
-    innerCmp->addSrcReg(StinkyRegister(0));
-    innerCmp->addModifier<CommentData>(CommentData{"Check for waveID 0"});
-
-    StinkyInstruction* innerBr = irBuilder.create(brSccDesc0, anchor);
-    innerBr->addSrcReg(StinkyRegister(innerLabel));
-    innerBr->addModifier<LabelData>(LabelData{innerLabel});
-    innerBr->addModifier<CommentData>(CommentData{"Execute cluster barrier signal for waveID 0"});
-
-    StinkyInstruction* signalInst = irBuilder.create(signalDesc, anchor);
-    signalInst->addSrcReg(StinkyRegister(kClusterBarrierId));
-    signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
-
-    static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
-
-    StinkyInstruction* innerLbl = irBuilder.create(&labelMCID, anchor);
-    innerLbl->addModifier<LabelData>(LabelData{innerLabel, /*alignment=*/1});
-
-    const HwInstDesc* restoreDesc = liveLclCmp->getHwInstDesc();
-    StinkyInstruction* restoreInst = irBuilder.create(restoreDesc, anchor);
-    for (const auto& src : liveLclCmp->getSrcRegs()) restoreInst->addSrcReg(src);
-    restoreInst->addModifier<CommentData>(
-        CommentData{"restore SCC for downstream cbranch (Rule 4 inherit)"});
-
-    StinkyInstruction* outerLbl = irBuilder.create(&labelMCID, anchor);
-    outerLbl->addModifier<LabelData>(LabelData{outerLabel, /*alignment=*/1});
-}
-
-/// Wrap a cluster-barrier WAIT in an outer `s[sgprLoopCounterL] <cmp> <imm>`
-/// gate so the wait is skipped (branched over) when the compare sets SCC1.
-/// Unlike the signal helper there is NO inner WaveIdx gate -- every wave
-/// executes (or skips) the wait in lockstep. Final shape (all before
-/// `anchor`):
-///
-///     <cmpUOp> s[sgprLoopCounterL], <skipWhenScc1Imm>
-///     s_cbranch_scc1 label_skipCBWait_LCL_<H>
-///     s_barrier_wait -3
-///   label_skipCBWait_LCL_<H>:
-///
-/// Used by Rule 4's drain-gated mode (b) (when `kRule4ForceUngatedSignalMode`
-/// is off) to skip the cluster wait on the drain iterations.
-void insertLoopCounterLGatedClusterBarrierWaitBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                                     GfxArchID archId, GFX cmpUOp,
-                                                     int skipWhenScc1Imm,
-                                                     const std::string& cmpComment,
-                                                     const std::string& branchComment) {
-    const std::string lclLabelName = std::string(kSkipWaitLabelPrefixLCL) + makeRandomHash();
-
-    const HwInstDesc* cmpDesc = getMCIDByUOp(cmpUOp, archId);
-    const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc1, archId);
+void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBuilder& irBuilder,
+                                    GfxArchID archId) {
     const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
-    assert(cmpDesc && brDesc && waitDesc &&
-           "Cluster-barrier wait gate opcodes are not supported on this architecture");
-
-    StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, anchor);
-    cmpInst->addSrcReg(makeSymbolicSgpr(kLoopCounterLSymbol));
-    cmpInst->addSrcReg(StinkyRegister(skipWhenScc1Imm));
-    cmpInst->addModifier<CommentData>(CommentData{cmpComment});
-
-    StinkyInstruction* brInst = irBuilder.create(brDesc, anchor);
-    brInst->addSrcReg(StinkyRegister(lclLabelName));
-    brInst->addModifier<LabelData>(LabelData{lclLabelName});
-    brInst->addModifier<CommentData>(CommentData{branchComment});
-
+    assert(waitDesc && "Cluster-barrier wait opcode is not supported on this architecture");
     StinkyInstruction* waitInst = irBuilder.create(waitDesc, anchor);
     waitInst->addSrcReg(StinkyRegister(kClusterBarrierId));
-    waitInst->addModifier<CommentData>(CommentData{"cluster barrier wait"});
-
-    static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
-    StinkyInstruction* lclLblInst = irBuilder.create(&labelMCID, anchor);
-    lclLblInst->addModifier<LabelData>(LabelData{lclLabelName, /*alignment=*/1});
+    waitInst->addModifier<CommentData>(CommentData{comment});
 }
 
-/// Forward declaration: defined further down (Rule 2 / Rule 5b helper).
-/// Rule 4's handshake now also emits a bare trailing `s_barrier_wait -3`
-/// via this helper, so it must be visible before that call site.
-void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBuilder& irBuilder,
-                                    GfxArchID archId);
-
-/// Emit Rule 4's cluster-barrier handshake before `anchor` (the iterator
-/// position right after the load's anchoring `s_barrier_wait -1`).
-///
-/// Mode (c) -- always-ungated signal (active when `kRule4ForceUngatedSignalMode`
-/// is true): emit a WaveIdx-gated `s_barrier_signal -3` then a bare
-/// `s_barrier_wait -3` for every trigger -- the signal is never wrapped in an
-/// LCL skip branch. It still detects `liveLclCmp`; when present, a clone of the
-/// upstream cmp is re-emitted AFTER the bare wait to restore the SCC the
-/// downstream `s_cbranch_scc0 LoopBeginL` consumes. It returns before the mode
-/// (a)/(b) selection below, so those paths are left untouched.
-///
-/// When the mode (c) switch is false, two emission modes are selected by the
-/// caller via `findLiveLoopCounterLCmpUpstream`:
-///
-///   (a) `liveLclCmp != nullptr` -- SIA=4 inherited-SCC path. Tensile hoisted
-///       the loop-exit `s_cmp_eq_i32 LCL, imm` above this anchor and a
-///       downstream `s_cbranch_scc0 LoopBeginL` consumes its SCC. Emit an
-///       ungated leading `s_barrier_wait -3` followed by the inherited-SCC
-///       signal block (the signal is single-iter skipped via the inherited
-///       SCC; a clone of the upstream cmp is re-emitted between the inner and
-///       outer skip labels to restore SCC). Emitting fresh relational gates
-///       here would clobber the live SCC, so this mode is left as-is.
-///
-///   (b) `liveLclCmp == nullptr` -- drain-gated path. The paired
-///       `tensor_load_to_lds` is disabled (TDM enable dword = 0) on the last
-///       PGR iterations (`LCL <= pgrValue`), so the handshake is unnecessary
-///       there. Because the ping-pong pairing is offset (each wait consumes the
-///       PREVIOUS signal), dropping a drain wait would orphan the last real
-///       signal. We therefore use ASYMMETRIC gates: skip the WAIT at
-///       `LCL <= pgrValue` and the SIGNAL one stage earlier at
-///       `LCL <= pgrValue+1`. Both thresholds drop by \p lclPreDecrement so the
-///       gate keys off the same absolute iteration even when the schedule
-///       decremented LCL before the anchor.
-///
-/// \p pgrValue and \p lclPreDecrement are consulted by mode (b) only.
-void insertClusterBarrierHandshakeBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId,
-                                         int pgrValue, StinkyInstruction* liveLclCmp,
-                                         int lclPreDecrement) {
-    if (kRule4ForceUngatedSignalMode) {
-        // Mode (c): always-ungated signal. Emit the WaveIdx-gated
-        // `s_barrier_signal -3` then a bare `s_barrier_wait -3` for every
-        // trigger -- the cluster signal is NEVER wrapped in an LCL skip
-        // branch (unlike mode (a)). We still detect `liveLclCmp`: if SIA
-        // hoisted a loop-exit `s_cmp_eq LCL, imm` whose SCC a downstream
-        // `s_cbranch_scc0 LoopBeginL` consumes, the WaveIdx `s_cmp_eq_u32`
-        // above clobbers that SCC, so a clone of the cmp is re-emitted
-        // AFTER the bare wait (which has no SCC side effect) to rebuild it.
-        insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
-        insertClusterBarrierWaitBefore(anchor, "cluster barrier wait", irBuilder, archId);
-        if (liveLclCmp != nullptr) {
-            const HwInstDesc* restoreDesc = liveLclCmp->getHwInstDesc();
-            StinkyInstruction* restoreInst = irBuilder.create(restoreDesc, anchor);
-            for (const auto& src : liveLclCmp->getSrcRegs()) restoreInst->addSrcReg(src);
-            restoreInst->addModifier<CommentData>(
-                CommentData{"restore SCC for downstream cbranch (Rule 4 mode c)"});
-        }
-        return;
-    }
-    if (liveLclCmp != nullptr) {
-        // Mode (a) inherited-SCC: ungated leading wait + a single-iter
-        // inherited signal skip.
-        const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
-        assert(waitDesc && "Cluster-barrier wait opcode is not supported on this architecture");
-        StinkyInstruction* waitInst = irBuilder.create(waitDesc, anchor);
-        waitInst->addSrcReg(StinkyRegister(kClusterBarrierId));
-        waitInst->addModifier<CommentData>(CommentData{"cluster barrier wait"});
-        insertRule4InheritedSccSignalBlockBefore(anchor, irBuilder, archId, liveLclCmp);
-        return;
-    }
-
-    // Mode (b) drain-gated: gate the WAIT at `LCL <= pgr` (drain iters, load
-    // disabled) and the SIGNAL at `LCL <= pgr+1` (one stage earlier so the
-    // trailing leftover signal is dropped too). Both thresholds drop by
-    // `lclPreDecrement` so the gate keys off the same absolute iteration even
-    // when the schedule decremented LCL before the anchor.
-    const int waitImm = pgrValue - lclPreDecrement;
-    const std::string waitImmStr = std::to_string(waitImm);
-    insertLoopCounterLGatedClusterBarrierWaitBefore(
-        anchor, irBuilder, archId,
-        /*cmpUOp=*/GFX::s_cmp_le_i32,
-        /*skipWhenScc1Imm=*/waitImm,
-        /*cmpComment=*/"drain iter? LoopCounter <= " + waitImmStr,
-        /*branchComment=*/"skip cluster wait when LoopCounterL <= " + waitImmStr);
-
-    const int sigImm = pgrValue + 1 - lclPreDecrement;
-    const std::string sigImmStr = std::to_string(sigImm);
-    insertLoopCounterLGatedClusterBarrierSignalBefore(
-        anchor, irBuilder, archId,
-        /*cmpUOp=*/GFX::s_cmp_le_i32,
-        /*skipWhenScc1Imm=*/sigImm,
-        /*cmpComment=*/"LoopCounter <= " + sigImmStr + "?",
-        /*branchComment=*/"skip cluster barrier when LoopCounterL <= " + sigImmStr);
+/// WaveIdx-gated cluster signal at \p signalAnchor, then wait at \p waitAnchor (the trigger).
+void insertRule3HandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor, AsmIRBuilder& irBuilder,
+                                GfxArchID archId) {
+    insertClusterBarrierSignalOnlyBefore(signalAnchor, irBuilder, archId);
+    insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
 }
 
-/// True if `inst` is a `LABEL` pseudo whose `LabelData.label` matches `name`
-/// exactly. Anchors:
-///   - Rule 1: `kGSU1LabelName` (`label_GSU_1:`)
-///   - Rule 3 anchor mode (b): `kOpenLoopLLabelName` (`label_openLoopL:`)
-/// Internal control-flow labels (e.g. `label_skipPGR2_1`) do not match by
-/// exact-name comparison and are scanned through.
+/// Emit `s_wait_tensorcnt 0` immediately before \p anchor (the instruction
+/// right after a cooperative `tensor_load_to_lds` group). Under PGR>=2 the
+/// cooperative load is async and produced by a PEER wave, so the consumer's own
+/// tensor counter cannot order it. Draining right after the load issues makes
+/// the broadcast coherent before the back edge, so the publishing workgroup
+/// barrier at the next loop head orders it for the consuming waves. Matches
+/// PGR1's per-iteration drain.
+void insertProducerTensorDrainBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId) {
+    const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_wait_tensorcnt, archId);
+    assert(waitDesc && "s_wait_tensorcnt opcode is not supported on this architecture");
+    StinkyInstruction* w = irBuilder.create(waitDesc, anchor);
+    w->addSrcReg(StinkyRegister(0));
+    SWaitTensorCntData d;
+    d.tlcnt = 0;
+    w->addModifier<SWaitTensorCntData>(d);
+    w->addModifier<CommentData>(
+        CommentData{"retire cooperative tensor_load_to_lds before back-edge (PGR>=2 coherence)"});
+}
+
 bool isLabelNamed(const StinkyInstruction& inst, const char* name) {
     if (!isLabel(inst)) return false;
     const auto* labelData = inst.getModifier<LabelData>();
     return labelData != nullptr && labelData->label == name;
 }
 
-/// True if `ir` is a TEXTBLOCK directive whose value contains `marker` as a
-/// substring. Anchor:
-///   - Rule 5 (5a / 5b): `kTailLoopMarker` (`/* Tail Loop ... */`)
-/// TEXTBLOCK directives are erased at region extraction, so rules using
-/// this predicate self-disable at region scope.
+bool isKernelLabelForPreLoopClimb(const StinkyInstruction& inst) {
+    if (!isLabel(inst)) return false;
+    const auto* labelData = inst.getModifier<LabelData>();
+    if (labelData == nullptr) return true;
+    return labelData->label.find("skipCB") == std::string::npos;
+}
+
 bool isTextblockContaining(IRBase* ir, const char* marker) {
     auto* directive = dyn_cast<AsmDirective>(ir);
     return directive != nullptr && directive->kind == AsmDirectiveKind::TEXTBLOCK &&
            directive->value.find(marker) != std::string::npos;
 }
 
-/// Idempotency check used by Rules 1, 3, 4, and 5a. Examines the first real
-/// successor of `anchor` (via `firstRealInstAfter`) and accepts any of:
-///   - `s_barrier_wait -3` (Rule 2 / Tensile-emitted full handshake)
-///   - `s_cmp_eq_u32 s[sgprWaveIdx], 0` (Rule 5a signal-only AND Rule 4's
-///     current emission, whose first instruction is this WaveIdx gate)
-///   - `s_cmp_eq_u32 s[sgprLoopCounterL], <imm>` (Rule 1's `LCL == 0` gate)
-///   - `s_cmp_le_u32 s[sgprLoopCounterL], <imm>` (Rule 3's `LCL <= pgr` gate)
-///   - `s_cmp_le_i32 s[sgprLoopCounterL], <imm>` (Rule 4 drain-gated mode (b) gate)
-///   - `s_cmp_eq_i32 s[sgprLoopCounterL], <imm>` (Rule 4 inherited-SCC clone)
-/// The imm operand is not checked, only the symbolic name, so the predicate
-/// is independent of the configured PrefetchGlobalRead value. In any of these cases the
-/// anchor is already followed by a cluster-barrier emission and we must
-/// not duplicate it.
 bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
     StinkyInstruction* next = firstRealInstAfter(anchor);
     if (next == nullptr) return false;
     if (isClusterBarrierWait(*next)) return true;
-    const auto uOp = next->getUnifiedOpcode();
-    if (uOp == GFX::s_cmp_eq_u32 || uOp == GFX::s_cmp_le_u32 || uOp == GFX::s_cmp_eq_i32 ||
-        uOp == GFX::s_cmp_le_i32) {
-        const auto& srcs = next->getSrcRegs();
-        if (srcs.empty()) return false;
-        const std::string& sym = srcs[0].getSymbolicName();
-        if (sym == kWaveIdxSymbol || sym == kLoopCounterLSymbol) return true;
+    if (next->getUnifiedOpcode() != GFX::s_cmp_eq_u32) return false;
+    const auto& srcs = next->getSrcRegs();
+    if (srcs.empty()) return false;
+    const std::string& sym = srcs[0].getSymbolicName();
+    return sym == kWaveIdxSymbol || sym == kLoopCounterLSymbol;
+}
+
+/// Forward scan from ``wgSignal`` for its paired ``s_barrier_wait -1`` and return
+/// the first real instruction after that wait.
+IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor) {
+    BasicBlock* parent = wgSignal->getParent();
+    if (parent == nullptr) return defaultAnchor;
+    for (auto it = std::next(BasicBlock::iterator(wgSignal)); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr || isPseudoInst(inst)) continue;
+        if (isWorkgroupBarrierSignal(*inst)) break;
+        if (!isWorkgroupBarrierWait(*inst)) continue;
+        for (auto after = std::next(it); after != parent->end(); ++after) {
+            auto* next = dyn_cast<StinkyInstruction>(after.getNodePtr());
+            if (next == nullptr || isPseudoInst(next)) continue;
+            return next;
+        }
+        break;
+    }
+    return defaultAnchor;
+}
+
+/// Forward scan from ``afterWait`` for the next workgroup barrier handshake
+/// (signal then wait).  Returns the first real instruction after that wait, or
+/// ``defaultAnchor`` when the pair is missing or incomplete.
+IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor) {
+    BasicBlock* parent = afterWait->getParent();
+    if (parent == nullptr) return defaultAnchor;
+    for (auto it = std::next(BasicBlock::iterator(afterWait)); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr || isPseudoInst(inst)) continue;
+        if (!isWorkgroupBarrierSignal(*inst)) continue;
+        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+    }
+    return defaultAnchor;
+}
+
+/// The two below bound the segment holding \p pos as a half-open range, the way begin() and
+/// end() do: a boundary belongs to neither of the segments it separates, so the first
+/// instruction of one is just past the boundary above it, and the boundary below is one past
+/// the last.
+///
+/// First instruction of the segment holding \p pos.
+BasicBlock::iterator segmentBegin(BasicBlock::iterator pos, BasicBlock::iterator bbBegin) {
+    auto it = pos;
+    while (it != bbBegin) {
+        --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) return std::next(it);
+    }
+    return bbBegin;
+}
+
+/// The boundary that closes the segment holding \p pos, i.e. one past its last instruction.
+/// Used as the forward limit for SCC queries about an anchor that climbed into an earlier
+/// segment, where the wait anchor sits above rather than below.
+const IRBase* segmentEnd(BasicBlock::iterator pos, BasicBlock::iterator bbEnd) {
+    for (auto it = pos; it != bbEnd; ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) return it.getNodePtr();
+    }
+    return nullptr;
+}
+
+/// The branch that closes a loop on \p labelInst: a branch back up to it from below.
+/// A backward walk leaving a loop head has to follow this edge rather than the textual
+/// one, because the textual predecessor is the preheader and runs only on the first trip.
+StinkyInstruction* findLatchBranchFor(StinkyInstruction* labelInst) {
+    BasicBlock* parent = labelInst->getParent();
+    const auto* labelData = labelInst->getModifier<LabelData>();
+    if (parent == nullptr || labelData == nullptr) return nullptr;
+    for (auto it = std::next(BasicBlock::iterator(labelInst)); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr || !isBranch(*inst)) continue;
+        if (getBranchTarget(*inst) == labelData->label) return inst;
+    }
+    return nullptr;
+}
+
+/// Innermost loop head enclosing \p inst: a label whose latch branch sits below \p inst.
+/// Hoisting is confined to such a region, because the compensating pair this pass emits
+/// only balances a signal that a loop carries from one trip into the next.
+StinkyInstruction* findEnclosingLoopHead(StinkyInstruction* inst) {
+    BasicBlock* parent = inst->getParent();
+    if (parent == nullptr) return nullptr;
+    auto it = BasicBlock::iterator(inst);
+    while (it != parent->begin()) {
+        --it;
+        auto* cand = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (cand == nullptr || !isLabel(*cand)) continue;
+        StinkyInstruction* latch = findLatchBranchFor(cand);
+        if (latch == nullptr) continue;
+        for (auto fwd = BasicBlock::iterator(inst); fwd != parent->end(); ++fwd) {
+            if (fwd.getNodePtr() == latch) return cand;
+        }
+    }
+    return nullptr;
+}
+
+/// Whether \p inst is the compare that opens a loop's skip shortcut, i.e.
+/// ``s_cmp_eq_u32 sgprLoopCounterL, <imm>``.
+bool isLoopCounterEqCompare(const StinkyInstruction& inst) {
+    if (inst.getUnifiedOpcode() != GFX::s_cmp_eq_u32) return false;
+    const auto& srcs = inst.getSrcRegs();
+    return !srcs.empty() && srcs[0].getSymbolicName() == kLoopCounterLSymbol;
+}
+
+/// Where the paths rejoin below a loop that is left by falling off its latch.
+///
+/// Such a loop has no escape branch to read a label off, and the label sitting just under the
+/// latch is not the answer either: the run-up carries a shortcut for the trip counts that
+/// never enter the loop at all, and it jumps clean over that label. What every path does
+/// reach is the shortcut's own target.
+///
+/// The shortcut is the first ``s_cmp_eq_u32 sgprLoopCounterL`` below ``label_openLoopL``
+/// together with the branch that reads it. Its target speaks for the whole loop only if two
+/// things hold, and both are checked here: it lies below the latch, so it names a spot
+/// outside the loop rather than one within it; and nothing between the latch and it hands
+/// control elsewhere, so whatever falls off the latch arrives there as well.
+std::string findLoopSkipShortcutLabel(StinkyInstruction* loopHead, StinkyInstruction* latch) {
+    BasicBlock* parent = loopHead->getParent();
+    if (parent == nullptr || latch == nullptr) return {};
+
+    StinkyInstruction* openLabel = nullptr;
+    auto up = BasicBlock::iterator(loopHead);
+    while (up != parent->begin()) {
+        --up;
+        auto* inst = dyn_cast<StinkyInstruction>(up.getNodePtr());
+        if (inst != nullptr && isLabelNamed(*inst, kOpenLoopLabelName)) {
+            openLabel = inst;
+            break;
+        }
+    }
+    if (openLabel == nullptr) return {};
+
+    std::string target;
+    bool sawCompare = false;
+    for (auto it = std::next(BasicBlock::iterator(openLabel));
+         it != parent->end() && it.getNodePtr() != loopHead; ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (!sawCompare) {
+            sawCompare = isLoopCounterEqCompare(*inst);
+            continue;
+        }
+        // Whatever drinks what the compare wrote, and nothing past it: a shortcut is that
+        // compare and its own branch, so anything else reading SCC first means there is none.
+        if (!readsScc(*inst)) continue;
+        if (isBranch(*inst)) target = getBranchTarget(*inst);
+        break;
+    }
+    if (target.empty()) return {};
+
+    for (auto it = std::next(BasicBlock::iterator(latch)); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isLabelNamed(*inst, target.c_str())) return target;
+        if (isUnconditionalBranch(*inst) || isCall(*inst)) break;
+    }
+    return {};
+}
+
+/// Label the loop's escape branches jump to, i.e. where control lands when the body is
+/// abandoned. Read before this pass inserts anything, so the only branches between the head
+/// and the latch are the loop's own exits.
+///
+/// A body that holds no such branch is not a loop without a way out; it is one whose way out
+/// is spelled by nothing at all, and the skip shortcut above the head is what names it.
+std::string findLoopExitLabelName(StinkyInstruction* loopHead) {
+    BasicBlock* parent = loopHead->getParent();
+    StinkyInstruction* latch = findLatchBranchFor(loopHead);
+    const auto* headData = loopHead->getModifier<LabelData>();
+    if (parent == nullptr || latch == nullptr || headData == nullptr) return {};
+    for (auto it = BasicBlock::iterator(loopHead); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isBranch(*inst) && inst != latch) {
+            const std::string target = getBranchTarget(*inst);
+            if (!target.empty() && target != headData->label) return target;
+        }
+        if (inst == latch) break;
+    }
+    return findLoopSkipShortcutLabel(loopHead, latch);
+}
+
+struct Rule3SignalAnchor {
+    IRBase* anchor = nullptr;
+    /// Segment edges crossed to reach `anchor`. Non-zero means the signal no longer shares a
+    /// segment with its wait, so some edge out of the loop now carries a token.
+    int hops = 0;
+    /// True when one of those edges was the back edge. The signal then feeds the *next*
+    /// trip's wait, which leaves the first trip with nobody to feed it.
+    bool crossedLoopHead = false;
+    /// Filled only for unit-test entry: a spot the climb nominated outside the wait's segment
+    /// with no hop counted, as it stood before the SCC correction moved it.
+    IRBase* outOfSegmentNomination = nullptr;
+};
+
+/// Whether \p anchor came to rest in the wait's own segment after all.
+bool rule3AnchorInWaitSegment(IRBase* anchor, IRBase* defaultAnchor, BasicBlock::iterator segBegin,
+                              StinkyInstruction* referenceAnchor) {
+    if (anchor == defaultAnchor) return true;
+    for (auto it = segBegin; it != BasicBlock::iterator(referenceAnchor); ++it) {
+        if (it.getNodePtr() == anchor) return true;
     }
     return false;
 }
 
-/// Function-wide scan: returns the first `tensor_load_to_lds` encountered
-/// when walking every BB in order, or nullptr if the function has none.
+Rule3SignalAnchor rule3ReportAnchor(IRBase* anchor, IRBase* defaultAnchor, int hops,
+                                    bool crossedLoopHead, IRBase* outOfSegmentNomination,
+                                    BasicBlock::iterator segBegin,
+                                    StinkyInstruction* referenceAnchor) {
+    Rule3SignalAnchor result;
+    if (anchor == defaultAnchor) {
+        result = {defaultAnchor, 0, false};
+    } else if (rule3AnchorInWaitSegment(anchor, defaultAnchor, segBegin, referenceAnchor)) {
+        result = {anchor, 0, false};
+    } else if (hops <= 0) {
+        // Leaving the wait's segment is what a hop is, so an anchor outside it with none
+        // counted is the climb disagreeing with itself rather than a shape to fall back from.
+        // Every crossing goes through the one boundary arm that increments, so this says that
+        // arm is still the only way out.
+        STINKY_UNREACHABLE("Rule 3 signal anchor: out of segment with no hop counted");
+    } else {
+        result = {anchor, hops, crossedLoopHead};
+    }
+    result.outOfSegmentNomination = outOfSegmentNomination;
+    return result;
+}
+
+/// Whether \p loopHead 's preheader has a spot for a compensating signal. Defined next to the
+/// climb that looks for that spot; the scan below needs the answer before it crosses a back
+/// edge, which is the only thing that makes the compensation necessary.
+bool preheaderCanTakeCompensatingSignal(StinkyInstruction* loopHead);
+
+/// Walk backward from the wait for cycle lead. \p maxHops 0 = in-segment only
+/// (kRule3CrossLoop false); 1 = one segment hop allowed (kRule3CrossLoop true).
+Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
+    StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
+    const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
+    int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors, int maxHops,
+    StinkyInstruction* loopHead) {
+    if (leadCycles <= 0) return {defaultAnchor, 0};
+    auto refIt = cycleMap.find(referenceAnchor);
+    if (refIt == cycleMap.end()) return {defaultAnchor, 0};
+    BasicBlock* parent = referenceAnchor->getParent();
+    if (parent == nullptr) return {defaultAnchor, 0};
+    const auto bbBegin = parent->begin();
+
+    // The lead is accumulated from per-instruction costs rather than compared against an
+    // absolute cycle position, because a hop across a back edge lands in a segment that is
+    // textually below the wait and so carries larger absolute cycles.
+    int64_t accum = 0;
+    int64_t prevCycle = static_cast<int64_t>(refIt->second);
+    int hops = 0;
+    bool crossedLoopHead = false;
+    auto curSegBegin = segBegin;
+
+    // The handshake opens with `s_cmp_eq_u32 sgprWaveIdx, 0` and is planted in front of
+    // whatever this scan returns, so the anchor may only land where SCC holds nothing
+    // live. `sccLive` is maintained backwards to describe the point in front of the
+    // instruction being looked at, and once the cycle lead is met the scan keeps climbing
+    // until that point is clear -- which, for a lead that falls inside a def..reader
+    // range, means coming to rest in front of the def. The boundary returns below still
+    // win: a cluster wait or a prior handshake's barrier cannot be crossed just to find a
+    // better spot, and neither can a segment edge once the hop budget is spent.
+    //
+    // `sccLive` is a running fold of the same recurrence over the one path the climb walks,
+    // seeded from isSccLiveIn at the wait so the climb need not rescan at every step. Being
+    // path-local is the point: it follows the latch across the back edge. It is not the last
+    // word either -- every return goes through clearScc, which asks isSccLiveIn again. A
+    // boundary stop is judged on placement alone, and on purpose: see curSegBeginSccLive.
+    bool sccLive = isSccLiveIn(referenceAnchor);
+    bool targetMet = false;
+    StinkyInstruction* leadPoint = nullptr;
+    IRBase* outOfSegmentNomination = nullptr;
+
+    // SCC queries about the anchor scan forward towards the wait, so the wait bounds them --
+    // an anchor may not be corrected past the very spot it is leading. Only the back edge
+    // puts the anchor textually below its wait; the segment's closing boundary takes over as
+    // the limit there, since the wait is no longer ahead of the anchor to be found.
+    auto sccLimit = [&](StinkyInstruction* anchorInst) -> const IRBase* {
+        if (!crossedLoopHead) return referenceAnchor;
+        return segmentEnd(BasicBlock::iterator(anchorInst), parent->end());
+    };
+
+    // Nothing below the range to correct to. Giving up the lead and co-locating with the
+    // wait is still an answer -- that spot is where the handshake goes anyway -- so the
+    // search only runs out of answers once SCC holds something live there too.
+    auto resolveSccDeadBelow = [&](StinkyInstruction* from, const IRBase* limit) -> IRBase* {
+        StinkyInstruction* below = findSccDeadAnchorBelow(from, limit);
+        if (below != nullptr) return static_cast<IRBase*>(below);
+        if (!isSccLiveIn(referenceAnchor)) return defaultAnchor;
+        STINKY_UNREACHABLE("Rule 3 signal anchor: SCC live at the wait");
+    };
+
+    // A climb that ends up further than maxLeadCycles from the wait has cleared a range too
+    // long to be worth it. Fall the other way instead: down from the lead point to the first
+    // spot below the range, which is nearer the wait than the lead asked for.
+    // A boundary-forced anchor is a lower bound -- the scan may not go above it -- so when
+    // it lands inside a live range the only legal correction is to drop below the range.
+    // Failing that the whole segment from the def down to the wait is live and there is no
+    // safe spot at all; the caller's default (co-locating with the wait) is then no worse
+    // than anything else this pass could pick.
+    auto clearScc = [&](IRBase* anchor) -> IRBase* {
+        if (anchor == defaultAnchor) return anchor;
+        auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+        if (anchorInst == nullptr || !isSccLiveIn(anchorInst)) return anchor;
+        return resolveSccDeadBelow(anchorInst, sccLimit(anchorInst));
+    };
+
+    // maxLeadCycles is a ceiling on the answer, not just on the climb, so every way out of
+    // the scan comes through here: a spot that far ahead of the wait has cleared a range too
+    // long to be worth it, however the scan came to pick it. A boundary or a hard stop is a
+    // reason not to climb further, which is not the same as a reason to accept whatever the
+    // climb is standing on.
+    //
+    // The way back is the same one an overlong upward climb takes: down from the lead point,
+    // which is the last spot known to be within the ceiling, to the first SCC-dead spot below
+    // it. That lands nearer the wait than the lead asked for and, since the lead point is
+    // always below the stop that sent us here, it cannot climb back over that stop.
+    auto settle = [&](IRBase* climbed, int64_t totalAccum) -> IRBase* {
+        if (leadPoint == nullptr || climbed == leadPoint) return climbed;
+        if (totalAccum <= maxLeadCycles) return climbed;
+        return resolveSccDeadBelow(leadPoint, sccLimit(leadPoint));
+    };
+
+    // Whether the anchor came to rest in the wait's own segment after all. Both corrections
+    // above walk back down, and the boundary they step over on the way is one the climb had
+    // already counted.
+    auto inWaitSegment = [&](IRBase* anchor) -> bool {
+        for (auto it = segBegin; it != BasicBlock::iterator(referenceAnchor); ++it) {
+            if (it.getNodePtr() == anchor) return true;
+        }
+        return false;
+    };
+
+    // The nomination the assert in rule3ReportAnchor cannot see: it reads the anchor that
+    // comes back, and clearScc may already have walked one that was out of segment back into
+    // it. Recorded for the unit-test entry, so a climb that nominates out of segment with no
+    // hop counted is caught even when the correction hides it.
+    auto clearSccNote = [&](IRBase* anchor) -> IRBase* {
+        if (anchor != defaultAnchor && !inWaitSegment(anchor) && hops <= 0)
+            outOfSegmentNomination = anchor;
+        return clearScc(anchor);
+    };
+
+    // The hop count is what buys the loop its compensation, so it has to describe the anchor
+    // that comes back rather than the climb that looked for it. A scan that climbed over an
+    // edge and then dropped back below it crossed nothing in the end and must not be billed
+    // for it -- neither when it gave up at the caller's default, which is the wait's own
+    // spot, nor when it settled anywhere else the wait can reach without a branch.
+    auto report = [&](IRBase* anchor) -> Rule3SignalAnchor {
+        return rule3ReportAnchor(anchor, defaultAnchor, hops, crossedLoopHead,
+                                 outOfSegmentNomination, segBegin, referenceAnchor);
+    };
+
+    // Lead met but SCC still live on the climb path: scan down from the first lead point
+    // toward the wait instead of crossing into the preheader.
+    auto downwardFromLeadMet = [&]() -> Rule3SignalAnchor {
+        if (leadPoint == nullptr) return report(clearSccNote(defaultAnchor));
+        return report(clearSccNote(resolveSccDeadBelow(leadPoint, referenceAnchor)));
+    };
+
+    // The spot a boundary-forced anchor takes is the first instruction below that boundary,
+    // i.e. the start of the segment the climb is standing in. Whether that spot is legal is
+    // a question about the code below it, not about the boundary just stepped over: a
+    // conditional exit reads SCC by construction, so the carried flag is set at every one of
+    // them and would send every settled climb back down for nothing.
+    auto curSegBeginSccLive = [&]() -> bool {
+        for (auto probe = curSegBegin; probe != parent->end(); ++probe) {
+            auto* probeInst = dyn_cast<StinkyInstruction>(probe.getNodePtr());
+            if (probeInst != nullptr) return isSccLiveIn(probeInst);
+        }
+        return false;
+    };
+
+    // Two program points end the climb outright, with no say for the lead or the hop budget:
+    // a cluster barrier wait, which this signal may not be lifted over because the pairing is
+    // what the wait is for, and a prior handshake's trigger, whose own barrier has to stay
+    // above this signal. Neither is a segment boundary, so they are asked about first and the
+    // spot they hand back is the same either way -- below the workgroup barrier that follows
+    // them, which is where the group is gathered again.
+    auto hardStopAnchor = [&](StinkyInstruction* inst) -> IRBase* {
+        if (isClusterBarrierWait(*inst))
+            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
+        if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0)
+            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+        return nullptr;
+    };
+
+    auto it = BasicBlock::iterator(referenceAnchor);
+    while (it != bbBegin) {
+        --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+
+        // live-before(inst) = reads(inst) | (live-after(inst) & !writes(inst)), for every
+        // instruction the climb steps over -- boundaries included. What holds a loop-exit
+        // predicate open is the branch that closes the segment, so a climb that took the
+        // boundaries as read would walk straight into the range it has to stay out of.
+        sccLive = readsScc(*inst) || (sccLive && !writesScc(*inst));
+
+        if (IRBase* stop = hardStopAnchor(inst)) return report(clearSccNote(settle(stop, accum)));
+        if (isSegmentBoundary(*inst)) {
+            // A climb holding its lead comes to rest below the boundary rather than spending
+            // a hop on more of it: at the segment start, or -- when a live range covers that
+            // spot -- back down from the lead point. The loop head is such a stop even with
+            // hops to spare, since the only way past it is the latch.
+            const bool atLoopHead = (loopHead != nullptr && inst == loopHead);
+            // Stops at a segment boundary once maxHops is exhausted (0 when
+            // kRule3CrossLoop false); a call or an unconditional branch is never crossed.
+            const bool mustStop = hops >= maxHops || isCall(*inst) || isUnconditionalBranch(*inst);
+            if (targetMet && (atLoopHead || mustStop)) {
+                if (curSegBeginSccLive()) return downwardFromLeadMet();
+                return report(clearSccNote(settle(curSegBegin.getNodePtr(), accum)));
+            }
+            if (mustStop) return report(clearSccNote(settle(curSegBegin.getNodePtr(), accum)));
+            if (isLabel(*inst)) {
+                // Leaving a loop head textually would land in the preheader, which runs
+                // once; follow the latch so the signal lands on the path that repeats.
+                StinkyInstruction* latch = findLatchBranchFor(inst);
+                // Crossing is what hands the signal to the next trip, so it is only payable
+                // while the preheader has somewhere to put the first trip's own signal. A
+                // preheader that has not -- a live SCC range covering the whole run-up, say --
+                // makes the crossing unaffordable rather than merely unhelpful, and the climb
+                // comes to rest below the head as if the hops had run out.
+                if (latch == nullptr || !preheaderCanTakeCompensatingSignal(loopHead))
+                    return report(clearSccNote(settle(curSegBegin.getNodePtr(), accum)));
+                it = BasicBlock::iterator(latch);
+                // The latch is landed on rather than stepped over, so its own read of the
+                // loop condition has to be folded in by hand. Carrying the flag across the
+                // jump by hand is also what puts it on the path the loop runs rather than the
+                // one the text reads, which is the whole of what it knows that clearScc does
+                // not.
+                sccLive = readsScc(*latch) || (sccLive && !writesScc(*latch));
+                auto latchCycle = cycleMap.find(latch);
+                if (latchCycle != cycleMap.end())
+                    prevCycle = static_cast<int64_t>(latchCycle->second);
+                crossedLoopHead = true;
+            }
+            ++hops;
+            curSegBegin = segmentBegin(it, bbBegin);
+            continue;
+        }
+        if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
+
+        auto cycleIt = cycleMap.find(inst);
+        if (cycleIt != cycleMap.end()) {
+            const int64_t cyc = static_cast<int64_t>(cycleIt->second);
+            if (cyc <= prevCycle) accum += prevCycle - cyc;
+            prevCycle = cyc;
+            if (accum >= leadCycles) {
+                if (!targetMet) leadPoint = inst;
+                targetMet = true;
+            }
+        }
+        if (targetMet && sccLive && accum >= maxLeadCycles) return downwardFromLeadMet();
+        // clearScc has the last word even here. `sccLive` is carried along the one path the
+        // climb took, while clearScc reads the range off the code below the anchor, so it
+        // also covers a reader the climb never walked past.
+        if (targetMet && !sccLive) {
+            if (inst != defaultAnchor && !inWaitSegment(inst) && hops <= 0)
+                outOfSegmentNomination = inst;
+            return report(clearSccNote(settle(inst, accum)));
+        }
+    }
+    // Running out of block can leave the anchor inside a range that starts above it.
+    return report(clearSccNote(settle(curSegBegin.getNodePtr(), accum)));
+}
+
 StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
     for (BasicBlock& bb : func) {
         for (auto it = bb.begin(); it != bb.end(); ++it) {
@@ -768,10 +888,59 @@ StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
     return nullptr;
 }
 
-/// Idempotency guard for Rule 2: walk backward from `anchor` past pseudo
-/// instructions (LABEL / PHI / FENCE) and non-`StinkyInstruction` IR. If
-/// the first real predecessor is a cluster-scope wait, the load is already
-/// gated and we must not emit a duplicate.
+/// Any counter drain the wait-cnt pass may have parked ahead of an anchor.
+/// `s_wait_tensorcnt` carries IF_WaitTensorCnt, disjoint from IF_WaitCnt, so
+/// `isWaitCnt()` alone misses it -- and it is the drain that matters most here.
+/// Same idiom as WaitAwareScheduleRepairPass and StinkyRemoveWaitCntPass.
+bool isAnyCounterDrain(const StinkyInstruction& inst) {
+    return isWaitCnt(inst) || inst.is(InstFlag::IF_WaitTensorCnt);
+}
+
+/// Hoist a cluster-wait insertion point above the run of wait-cnt instructions
+/// immediately preceding \p anchor.
+///
+/// StinkyWaitCntInsertionPass runs before this pass and anchors its counter
+/// drains on the very instructions this pass targets (barriers and
+/// tensor_loads), so the slot right before the anchor is typically already
+/// occupied by `s_wait_tensorcnt` / `s_wait_dscnt` / ... Inserting the cluster
+/// wait there would emit
+///
+///     s_wait_tensorcnt N
+///     s_barrier_wait -3
+///
+/// Both orders are correct. The inverted one measured materially slower, which
+/// is the whole justification for this hoist -- the mechanism is NOT
+/// established. Both instructions are blocking waits on independent conditions
+/// (a per-wave local counter; peer arrival at the barrier), and two such waits
+/// commute, so no timing argument offered so far survives scrutiny. Treat this
+/// as measurement-driven until someone explains it.
+///
+/// Only a contiguous run of drains ending at \p anchor is skipped: anything
+/// else between a drain and the anchor stops the walk and leaves the cluster
+/// wait below that drain. A layout that separates the two would need a
+/// different strategy than this one.
+///
+/// Wait-cnt instructions never write SCC, so hoisting past them cannot move a
+/// cluster wait into or out of a live SCC range.
+IRBase* hoistAboveLeadingWaitCnts(StinkyInstruction* anchor) {
+    BasicBlock* parent = anchor->getParent();
+    if (parent == nullptr) return anchor;
+    IRBase* hoisted = anchor;
+    auto it = BasicBlock::iterator(anchor);
+    while (it != parent->begin()) {
+        --it;
+        auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (prev == nullptr) continue;
+        if (isPseudoInst(prev)) continue;
+        if (!isAnyCounterDrain(*prev)) break;
+        hoisted = prev;
+    }
+    return hoisted;
+}
+
+/// Idempotency check for the cluster wait. Skips the same wait-cnt run that
+/// hoistAboveLeadingWaitCnts walks over, so a re-run recognizes a handshake
+/// this pass already planted above those waits and does not duplicate it.
 bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
     BasicBlock* parent = anchor->getParent();
     if (parent == nullptr) return false;
@@ -781,33 +950,281 @@ bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
         auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (prev == nullptr) continue;
         if (isPseudoInst(prev)) continue;
+        if (isAnyCounterDrain(*prev)) continue;
         return isClusterBarrierWait(*prev);
     }
     return false;
 }
 
-/// Insert a single `s_barrier_wait -3` (with the given `comment`)
-/// immediately before `anchor`. Pass `anchor=nullptr` to append. The
-/// comment text varies by rule:
-///   - Rule 2 uses `"cluster_barrier wait"` (matches the spelling that
-///     already appears at the kernel's first tensor_load in reference asm)
-///   - Rule 5b uses `"cluster barrier wait"`.
-/// (Used by Rule 2 and Rule 5b.)
-void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBuilder& irBuilder,
-                                    GfxArchID archId) {
-    const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
-    assert(waitDesc && "Cluster-barrier wait opcode is not supported on this architecture");
-    StinkyInstruction* waitInst = irBuilder.create(waitDesc, anchor);
-    waitInst->addSrcReg(StinkyRegister(kClusterBarrierId));
-    waitInst->addModifier<CommentData>(CommentData{comment});
+struct PreLoopSignalAnchor {
+    IRBase* anchor = nullptr;
+    /// True when the climb found no workgroup barrier to sit behind. Only wave 0 issues the
+    /// signal, so one has to be planted to hold the rest of the group until it does.
+    bool needsWorkgroupBarrier = true;
+};
+
+/// First real instruction below \p behind, or \p limit when nothing but pseudo instructions
+/// stands between the two. Places the signal as close behind \p behind as it can get without
+/// dropping into the loop.
+IRBase* anchorJustBelow(StinkyInstruction* behind, StinkyInstruction* limit) {
+    BasicBlock* parent = behind->getParent();
+    if (parent == nullptr) return limit;
+    for (auto it = std::next(BasicBlock::iterator(behind)); it != parent->end(); ++it) {
+        // Node by node rather than instruction by instruction: \p limit is a label, and a
+        // scan that skipped over labels would never see it.
+        if (it.getNodePtr() == limit) break;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr || isPseudoInst(inst)) continue;
+        return inst;
+    }
+    return limit;
+}
+
+/// Where the compensating signal goes in the preheader (`kRule3CrossLoop` only).
+///
+/// Climb from the loop head upward and stop below the first thing the signal may not be
+/// lifted over: ``s_barrier_wait -1``, ``s_barrier_wait -3``, ``label_*``, or
+/// ``tensor_load_to_lds``. Everything the climb steps over ends up ahead of the signal,
+/// which is why the nearest one wins -- sitting behind a further one would announce this
+/// workgroup ready with the work in between still to do.
+///
+/// Only ``s_barrier_wait -1`` proves the group has gathered, so that is the one stop the
+/// signal can take as it is. Behind anything else the pass brings a workgroup barrier pair
+/// of its own, and the signal goes below the wait of that pair, so either way the signal
+/// ends up below a ``s_barrier_wait -1``.
+///
+/// A ``s_barrier_wait -3`` matters for a second reason: it drinks a cluster token, so a
+/// signal placed above one would be swallowed there instead of surviving into the loop for
+/// the first trip's wait, which is the whole point of the compensation.
+///
+/// A null anchor means the preheader has no spot at all, and is the scan's reason not to cross
+/// the back edge in the first place rather than something to recover from afterwards.
+PreLoopSignalAnchor findPreLoopSignalAnchor(StinkyInstruction* loopHead) {
+    BasicBlock* parent = (loopHead != nullptr) ? loopHead->getParent() : nullptr;
+    if (parent == nullptr) return {};
+
+    auto it = BasicBlock::iterator(loopHead);
+    while (it != parent->begin()) {
+        --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+
+        StinkyInstruction* behind = nullptr;
+        bool needsWorkgroupBarrier = true;
+        if (!isPseudoInst(inst) && isWorkgroupBarrierWait(*inst)) {
+            behind = inst;
+            needsWorkgroupBarrier = false;
+        } else if (isKernelLabelForPreLoopClimb(*inst)) {
+            behind = inst;
+        } else if (!isPseudoInst(inst) && (isClusterBarrierWait(*inst) || isTensorLoad(*inst))) {
+            behind = inst;
+        } else {
+            continue;
+        }
+
+        IRBase* anchor = anchorJustBelow(behind, loopHead);
+        if (anchor == nullptr) anchor = loopHead;
+
+        auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+        if (anchorInst == nullptr || !isSccLiveIn(anchorInst)) {
+            return {anchor, needsWorkgroupBarrier};
+        }
+        StinkyInstruction* dead = findSccDeadAnchorBelow(anchorInst, loopHead);
+        if (dead == nullptr) return {};
+        return {dead, needsWorkgroupBarrier};
+    }
+    return {};
+}
+
+bool preheaderCanTakeCompensatingSignal(StinkyInstruction* loopHead) {
+    return findPreLoopSignalAnchor(loopHead).anchor != nullptr;
+}
+
+/// Plant `s_branch <label>` in front of \p anchor.
+void insertBranchBefore(IRBase* anchor, const std::string& label, AsmIRBuilder& irBuilder,
+                        GfxArchID archId) {
+    const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_branch, archId);
+    assert(brDesc && "Unconditional branch opcode is not supported on this architecture");
+    StinkyInstruction* brInst = irBuilder.create(brDesc, anchor);
+    brInst->addSrcReg(StinkyRegister(label));
+    brInst->addModifier<LabelData>(LabelData{label});
+    brInst->addModifier<CommentData>(CommentData{"nothing in flight: skip the drain wait"});
+}
+
+/// Point \p branch at \p newLabel. The target is spelled twice -- as the modifier the
+/// printer reads and as the literal operand -- so both have to move.
+void retargetBranch(StinkyInstruction& branch, const std::string& newLabel) {
+    if (auto* labelData = branch.getModifier<LabelData>()) labelData->label = newLabel;
+    const auto& srcs = branch.getSrcRegs();
+    for (std::size_t i = 0; i < srcs.size(); ++i) {
+        if (srcs[i].dataType != StinkyRegister::Type::LiteralString) continue;
+        branch.setSrcReg(i, StinkyRegister(newLabel));
+        break;
+    }
+}
+
+/// kRule3CrossLoop true only. Balance tokens left outstanding by a hoisted loop (see md).
+///
+/// A handshake that climbed out of its segment leaves its signal above some edge, and every
+/// path that leaves the loop below that signal carries a token out with it. Two things are
+/// then missing. When the climb crossed the back edge the signal feeds the *next* trip, so
+/// the first trip needs one of its own: that is \p pre, a spot found by climbing the
+/// preheader, and it is null when nothing crossed the back edge. And whichever paths do
+/// carry a token out need a wait to swallow it, which goes just below the loop's exit label
+/// where they all land.
+///
+/// Which paths those are is not the same question as which paths exist. A loop can be
+/// hoisted and still let some edges out empty-handed -- the zero-trip guard never entered the
+/// body at all, and an exit that sits just below a wait leaves with nothing outstanding.
+/// Sending those through the drain would block them on a token nobody posted, so they are
+/// routed past it instead.
+bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string& exitLabelName,
+                                 const PreLoopSignalAnchor& pre, BasicBlock& preLoopBlock,
+                                 Function& func, GfxArchID archId) {
+    if (exitLabelName.empty() || loopHead == nullptr) return false;
+
+    // The exit label may be an instruction inside a block or the header of the block that
+    // opens at it, depending on where the CFG was last cut; both spell the same point.
+    BasicBlock* exitBlock = nullptr;
+    IRBase* waitAnchor = nullptr;
+    StinkyInstruction* exitLabelInst = nullptr;
+    for (BasicBlock& block : func) {
+        for (auto it = block.begin(); it != block.end(); ++it) {
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr || !isLabel(*inst)) continue;
+            const auto* labelData = inst->getModifier<LabelData>();
+            if (labelData == nullptr || labelData->label != exitLabelName) continue;
+            if (StinkyInstruction* after = firstRealInstAfter(inst)) {
+                exitBlock = &block;
+                waitAnchor = after;
+                exitLabelInst = inst;
+            }
+            break;
+        }
+        if (waitAnchor != nullptr) break;
+    }
+    if (waitAnchor == nullptr) {
+        for (BasicBlock& block : func) {
+            if (block.getLabel() != exitLabelName) continue;
+            for (auto it = block.begin(); it != block.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst == nullptr || isPseudoInst(inst)) continue;
+                exitBlock = &block;
+                waitAnchor = inst;
+                break;
+            }
+            break;
+        }
+    }
+    if (waitAnchor == nullptr) return false;
+
+    // A branch to the exit label has to skip the drain wait exactly when no cluster token is
+    // in flight where it stands -- when the last cluster instruction on the way there was a
+    // wait rather than a signal. Signals and waits strictly alternate, so that state is one
+    // bit and a single top-to-bottom sweep settles every branch. The back edge needs no
+    // special treatment: the latch is reached with a token in flight, which is also how the
+    // preheader arrives at the loop head, so the sweep describes every trip.
+    //
+    // The sweep opens where the loop's own accounting does: at the preheader signal, which
+    // is the first token this loop is answerable for, or at the loop head when there is no
+    // such signal because nothing crossed the back edge. Everything above that point leaves
+    // for the exit empty-handed. That is not just an assumption about how far the counting
+    // has got -- an edge above the preheader signal never entered the body, so there is
+    // nothing of this loop's for it to be carrying. The trip-count gate around the Rule 1
+    // signal is why reading the state off the text alone would get this wrong: the guard that
+    // jumps to the exit fires on the same condition that skips that signal, so the token the
+    // text shows in flight was never posted on the path that leaves.
+    //
+    // One edge into the exit is spelled by no instruction at all: the body simply runs off
+    // its end into the label. It is counted here with the rest, because whether it carries a
+    // token is exactly as answerable as for a branch and the answer is just as binding.
+    std::vector<StinkyInstruction*> bypassBranches;
+    bool anyEdgeCarriesToken = false;
+    bool fallsThroughToExit = false;
+    bool fallThroughCarriesToken = false;
+    {
+        const IRBase* sweepBegin = (pre.anchor != nullptr) ? pre.anchor : loopHead;
+        bool inFlight = false;
+        bool countingStarted = false;
+        StinkyInstruction* prevReal = nullptr;
+        for (BasicBlock& block : func) {
+            for (auto it = block.begin(); it != block.end(); ++it) {
+                if (it.getNodePtr() == sweepBegin) {
+                    countingStarted = true;
+                    // The preheader signal is planted in front of its anchor and so is
+                    // already outstanding here; arriving at the loop head instead means
+                    // reaching it with nothing.
+                    inFlight = (pre.anchor != nullptr);
+                }
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst == nullptr) continue;
+                if (countingStarted) {
+                    if (isClusterBarrierSignal(*inst))
+                        inFlight = true;
+                    else if (isClusterBarrierWait(*inst))
+                        inFlight = false;
+                }
+                if (inst == exitLabelInst && prevReal != nullptr &&
+                    !isUnconditionalBranch(*prevReal) && !isCall(*prevReal)) {
+                    fallsThroughToExit = true;
+                    fallThroughCarriesToken = inFlight;
+                    if (inFlight) anyEdgeCarriesToken = true;
+                }
+                // A label is a place, not a step: what falls into the exit is the last thing
+                // that actually ran before it.
+                if (!isPseudoInst(inst)) prevReal = inst;
+                if (!isBranch(*inst) || getBranchTarget(*inst) != exitLabelName) continue;
+                if (inFlight)
+                    anyEdgeCarriesToken = true;
+                else
+                    bypassBranches.push_back(inst);
+            }
+        }
+    }
+
+    // Hoisting inside the body does not by itself strand a token at the exit: a signal that
+    // climbed over a plain boundary with no edge out below it leaves every way out of the
+    // loop exactly as it found it. Nothing to drain then, and so nothing to route around a
+    // drain either.
+    if (!anyEdgeCarriesToken) return false;
+
+    AsmIRBuilder exitBuilder(*exitBlock, archId);
+    insertClusterBarrierWaitBefore(waitAnchor, "drain loop-carried cluster signal", exitBuilder,
+                                   archId);
+    const bool fallThroughNeedsBypass = fallsThroughToExit && !fallThroughCarriesToken;
+    if (!bypassBranches.empty() || fallThroughNeedsBypass) {
+        // Named after the exit it sits just below, so the two read as a pair. That name
+        // carries the label prefix already.
+        const std::string bypassLabel = exitLabelName + kDrainBypassLabelSuffix;
+        static const HwInstDesc labelMCID{
+            GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        StinkyInstruction* bypassLbl = exitBuilder.create(&labelMCID, waitAnchor);
+        bypassLbl->addModifier<LabelData>(LabelData{bypassLabel, /*alignment=*/1});
+        for (StinkyInstruction* branch : bypassBranches) retargetBranch(*branch, bypassLabel);
+        // A branch can be sent past the drain by rewriting where it already goes. The
+        // fall-through goes nowhere -- it is the absence of a jump -- so the only way to route
+        // it is to give it one.
+        if (fallThroughNeedsBypass) {
+            insertBranchBefore(exitLabelInst, bypassLabel, exitBuilder, archId);
+        }
+    }
+
+    if (pre.anchor != nullptr) {
+        AsmIRBuilder entryBuilder(preLoopBlock, archId);
+        if (pre.needsWorkgroupBarrier) {
+            insertWorkgroupBarrierSyncBefore(pre.anchor, entryBuilder, archId);
+        }
+        insertClusterBarrierSignalOnlyBefore(pre.anchor, entryBuilder, archId);
+    }
+    return true;
 }
 
 class InsertClusterBarrierPassImpl : public Pass {
    public:
     static char ID;
 
-    InsertClusterBarrierPassImpl(bool isKernelScope, int pgrValue, int plrValue)
-        : isKernelScope_(isKernelScope), pgrValue_(pgrValue), plrValue_(plrValue) {}
+    InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue)
+        : streamKMulticast_(streamKMulticast), pgrValue_(pgrValue) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -821,234 +1238,173 @@ class InsertClusterBarrierPassImpl : public Pass {
         const auto& arch = passCtx.getGemmTileConfig().arch;
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
-        // Rule 4: for each `tensor_load_to_lds`, plant a cluster-barrier
-        // handshake immediately after the nearest preceding
-        // `s_barrier_wait -1` (the LDS publication point). The handshake is a
-        // WaveIdx-gated `s_barrier_signal -3` followed by a bare
-        // `s_barrier_wait -3` (no LoopCounterL gate). Triggers are
-        // deduplicated by identity, so multiple loads sharing the same
-        // anchor wait yield exactly one handshake; the backward scan stays
-        // within the load's segment to avoid crossing a CFG edge.
-        //
-        // Tensile lowers everything into one entry basic block with
-        // inline label pseudos and branches instead of a real CFG.
-        // Labels (entry boundaries) and branches (exit boundaries) both
-        // act as segment delimiters so the backward scan from a load
-        // never crosses them. This gives the desired per-iteration
-        // coverage for ExpandPointerSwap unrolled loops -- iter 1/2 and
-        // iter 2/2 sit under a single `label_LoopBeginL` but are split
-        // by the odd-exit `s_cbranch`, so their loads anchor on
-        // distinct waits and each receive their own handshake.
+        const std::unordered_map<const StinkyInstruction*, uint32_t> cycleMap =
+            (kRule3SignalLeadCycles > 0) ? computeEstimatedCyclesPerInstruction(func, passCtx)
+                                         : std::unordered_map<const StinkyInstruction*, uint32_t>{};
+
+        // The rules go in the order they are numbered. Each one decides where to put things by
+        // reading what is already in the way -- which signal is above, which wait stands
+        // between a barrier and its load -- so anything planted out of turn is invisible to
+        // the rule that should have seen it, and gets hoisted over or counted twice.
         for (BasicBlock& bb : func) {
-            // Tuple: (trigger workgroup wait, anchor iterator next to it,
-            //         live upstream LCL cmp at trigger or nullptr, cumulative
-            //         LCL pre-decrement before the trigger). The third and
-            //         fourth elements are captured at scan time -- i.e.
-            //         against the pre-mutation IR -- so a later `pending`
-            //         entry's emission cannot influence an earlier one's SCC
-            //         analysis or decrement count.
-            std::vector<
-                std::tuple<StinkyInstruction*, BasicBlock::iterator, StinkyInstruction*, int>>
-                pending;
-            std::unordered_set<StinkyInstruction*> seenTriggers;
-
-            auto segBegin = bb.begin();
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (inst == nullptr) continue;
-                if (isSegmentBoundary(*inst)) {
-                    // Labels and branches both end the current segment;
-                    // the boundary instruction itself belongs to neither
-                    // side, and the new segment begins right after it.
-                    segBegin = std::next(it);
-                    continue;
-                }
-                if (!isTensorLoad(*inst)) continue;
-
-                StinkyInstruction* trigger =
-                    findPrecedingWorkgroupBarrierWaitInSegment(segBegin, inst);
-                if (trigger == nullptr) continue;
-                // Dedup: multiple loads can share the same anchor wait;
-                // only the first one queues an emission.
-                if (!seenTriggers.insert(trigger).second) continue;
-                if (isFollowedByClusterBarrierHandshakeOrSignal(trigger)) continue;
-
-                // Defer the actual mutation until after the scan finishes
-                // so we don't invalidate `it`. Capture the live upstream
-                // LCL cmp NOW (against the original IR) so each Rule-4 site
-                // is analyzed independently from any sibling sites that
-                // will be mutated later in the same BB sweep.
-                StinkyInstruction* liveLclCmp = findLiveLoopCounterLCmpUpstream(trigger);
-                // Count any `s_sub LCL, LCL, imm` the schedule hoisted above
-                // the anchor so the drain-gated mode (b) thresholds can be
-                // compensated. (Unused when mode (c) is active.)
-                const int lclPreDecrement =
-                    sumLoopCounterLDecrementsBeforeInSegment(segBegin, trigger);
-                pending.emplace_back(trigger, std::next(BasicBlock::iterator(trigger)), liveLclCmp,
-                                     lclPreDecrement);
-            }
-
-            // Rule 1: signal-only handshake immediately AFTER each
-            // `label_GSU_1:` label (emitted by Tensile after the GSU==1
-            // early-return guard). The label is a `StinkyInstruction`
-            // pseudo, so unlike a TEXTBLOCK it survives region extraction
-            // - idempotency (`isFollowedByClusterBarrierHandshakeOrSignal`)
-            // handles re-entry across scopes.
-            //
-            // The emitted sequence wraps the inner WaveIdx-gated cluster
-            // signal in an outer `LoopCounterL == 0` skip-branch AND
-            // plants a workgroup-scope sync (`s_barrier_signal -1` /
-            // `s_barrier_wait -1`) between the two gates. The workgroup
-            // pair guarantees every wave in the workgroup has reached
-            // the post-GSU==1 join before the first wave publishes the
-            // cluster signal, so a fast wave cannot race ahead while
-            // its siblings are still doing per-wave teardown above the
-            // label.
-            //
-            // Anchor for emission is the iterator AFTER the label, so the
-            // new sequence lands between the label and its successor.
             std::vector<IRBase*> gsu1Anchors;
             for (auto it = bb.begin(); it != bb.end(); ++it) {
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
                 if (inst == nullptr) continue;
                 if (!isLabelNamed(*inst, kGSU1LabelName)) continue;
-                if (isFollowedByClusterBarrierHandshakeOrSignal(inst)) {
-                    continue;
-                }
+                if (isFollowedByClusterBarrierHandshakeOrSignal(inst)) continue;
                 auto nextIt = std::next(it);
-                IRBase* anchor = (nextIt != bb.end()) ? nextIt.getNodePtr() : nullptr;
-                gsu1Anchors.push_back(anchor);
+                gsu1Anchors.push_back((nextIt != bb.end()) ? nextIt.getNodePtr() : nullptr);
             }
+            if (gsu1Anchors.empty()) continue;
+            AsmIRBuilder irBuilder(bb, archId);
+            for (IRBase* anchor : gsu1Anchors) {
+                insertRule1ClusterBarrierSignalBefore(anchor, irBuilder, archId);
+            }
+        }
 
-            // Rule 3: LoopCounterL-gated signal-only handshake at the
-            // LDS publication point that precedes `label_openLoopL:`.
-            // Currently disabled via `kRule3Enabled` (the detection block
-            // below is gated off); the description is retained for when it
-            // is re-enabled.
-            // The gate is `LCL <= pgrValue_` skip (matches Tensile's own
-            // `s_cmp_le_u32 LCL, pgrValue / s_cbranch_scc1 LoopEndL` entry
-            // guard, so the cluster signal is suppressed on the exact
-            // same control-flow paths where the corresponding
-            // `s_barrier_wait -3` inside the unrolled loop body is
-            // skipped -- keeping `signal -3` / `wait -3` paired
-            // everywhere).
-            //
-            // Anchor selection (backward scan from `label_openLoopL:`):
-            //   (a) `s_barrier_wait -1` -- publication point already
-            //       exists (typical for PrefetchLocalRead > 0 schedules). Anchor at
-            //       the successor of that wait. No new workgroup sync
-            //       is synthesized. The scan stops if a
-            //       `tensor_load_to_lds` is reached first: that
-            //       instruction marks the prefetch section, before any
-            //       workgroup sync could sit, so an earlier workgroup
-            //       wait (if one existed) would be unrelated and must
-            //       not be re-used as the publication point.
-            //   (b) No `s_barrier_wait -1` between the prefetch tail
-            //       and `label_openLoopL:` (typical for PrefetchLocalRead == 0
-            //       schedules where the prologue has no local-read
-            //       preamble barrier). Only act when `plrValue_ == 0`;
-            //       anchor at the label and synthesize an
-            //       `s_barrier_signal -1` / `s_barrier_wait -1` pair
-            //       INSIDE the LCL skip region (between the outer LCL
-            //       skip-branch and the inner WaveIdx gate) by passing
-            //       `workgroupSyncWaitComment = "workgroup sync"`
-            //       to the LCL-gated helper. The pair therefore sits
-            //       on the same control-flow path as the cluster
-            //       signal: it is bypassed together with the signal on
-            //       the `LCL <= pgrValue` skip path, which mirrors
-            //       Tensile's own loop-entry guard (the unrolled loop
-            //       body -- and hence the LDS reads -- is also bypassed
-            //       there, so no LDS publication is needed).
-            //
-            // Internal control-flow labels inside the prefetch prologue
-            // (e.g. `label_skipPGR2_*`) do not match `label_openLoopL`
-            // by exact-name comparison and are walked through.
-            //
-            // The label/instruction-based anchor does not depend on
-            // TEXTBLOCK directives (and so survives
-            // `ScopeAdaptor::moveIRToBlock`, which erases them), so this
-            // rule keeps working under the single kernel-scope run that
-            // `Gfx1250Backend::buildGfx1250Pipeline` performs when
-            // `moduleOptions.ClusterBarrier == true`.
-            // Idempotency:
-            //   - Section-level: the backward scan also flags whether a
-            //     cluster-scope signal/wait already sits in the
-            //     section. If so (e.g. a prior pass run already emitted
-            //     Rule 3), Rule 3 self-disables.
-            //   - Anchor-level (mode a): skip if the existing workgroup
-            //     wait is already followed by a cluster handshake, or
-            //     if Rule 4 has already queued the same wait as a
-            //     trigger (Rule 4 emits the full wait+signal handshake
-            //     and supersedes Rule 3 at the same anchor).
-            BasicBlock::iterator setupNewTileAnchorIt = bb.end();
-            bool setupNewTileNeedsWorkgroupSync = false;
-            StinkyInstruction* setupNewTileExistingWait = nullptr;
-            if (kRule3Enabled) {
-                StinkyInstruction* openLoopLLabel = nullptr;
+        // Rule 2: one cluster wait immediately before the run-up's first tensor load, pairing
+        // Rule 1's prologue arrive. Only skip when that load is already directly preceded by a
+        // cluster wait; a wait on a different CFG path above (e.g. StreamK zero-iter skip) does
+        // not count.
+        StinkyInstruction* firstTL = findFirstTensorLoadInFunc(func);
+        if (firstTL != nullptr && !isImmediatelyPrecededByClusterBarrierWait(firstTL)) {
+            BasicBlock* parent = firstTL->getParent();
+            AsmIRBuilder irBuilder(*parent, archId);
+            insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(firstTL),
+                                           "cluster_barrier wait", irBuilder, archId);
+        }
+
+        for (BasicBlock& bb : func) {
+            // Collect every trigger in the block before any search runs. A scan that climbs
+            // across a back edge walks into handshakes that come later in program order, and
+            // it may only stop at their barriers if it already knows they are there.
+            struct TriggerSite {
+                StinkyInstruction* trigger = nullptr;
+                BasicBlock::iterator segBegin;
+                // Where the cluster wait lands once hoisted over the drains the
+                // wait-cnt pass parked on this trigger, and the same spot as an
+                // instruction for the cycle-lead measurement.
+                IRBase* waitAnchor = nullptr;
+                StinkyInstruction* waitAnchorInst = nullptr;
+            };
+            std::vector<TriggerSite> triggers;
+            std::unordered_set<StinkyInstruction*> seenTriggers;
+            // Anchors (instruction right after each cooperative tensor_load
+            // group) for the producer-side drain; see
+            // insertProducerTensorDrainBefore.
+            std::vector<IRBase*> producerDrainAnchors;
+
+            {
+                auto segBegin = bb.begin();
                 for (auto it = bb.begin(); it != bb.end(); ++it) {
                     auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                    if (inst != nullptr && isLabelNamed(*inst, kOpenLoopLLabelName)) {
-                        openLoopLLabel = inst;
-                        break;
+                    if (inst == nullptr) continue;
+                    if (isSegmentBoundary(*inst)) {
+                        segBegin = std::next(it);
+                        continue;
                     }
-                }
-                if (openLoopLLabel != nullptr) {
-                    bool sectionAlreadyHasClusterBarrier = false;
-                    StinkyInstruction* foundWait = nullptr;
-                    auto it = BasicBlock::iterator(openLoopLLabel);
-                    while (it != bb.begin()) {
-                        --it;
-                        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                        if (inst == nullptr) continue;
-                        if (isTensorLoad(*inst)) break;
-                        if (isClusterBarrierWait(*inst) || isClusterBarrierSignal(*inst)) {
-                            sectionAlreadyHasClusterBarrier = true;
-                        }
-                        if (isWorkgroupBarrierWait(*inst)) {
-                            foundWait = inst;
+                    if (!isTensorLoad(*inst)) continue;
+
+                    StinkyInstruction* trigger =
+                        findPrecedingWorkgroupBarrierSignalInSegment(segBegin, inst);
+                    if (trigger == nullptr) continue;
+                    if (!seenTriggers.insert(trigger).second) continue;
+                    if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
+
+                    // Rule 3 speaks for the loop body and nowhere else. Outside a loop there
+                    // is no next trip to hand a token to and no exit to compensate at, and the
+                    // run-up's own load is Rule 2's business.
+                    if (findEnclosingLoopHead(trigger) == nullptr) continue;
+
+                    // Emit the cluster wait above the drains the wait-cnt pass
+                    // already anchored on this workgroup signal.
+                    IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
+                    auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
+                    triggers.push_back({trigger, segBegin, waitAnchor,
+                                        (hoistedInst != nullptr) ? hoistedInst : trigger});
+
+                    // Record the instruction right after this cooperative
+                    // tensor_load group so a producer-side tensor drain can be
+                    // planted there (retire the load before the back edge / next
+                    // publishing barrier). Advance past any immediately-following
+                    // tensor_load(s) so the drain covers the whole group (e.g. the
+                    // A/B operand load plus its MX-scale load) rather than landing
+                    // between them.
+                    if (streamKMulticast_ && pgrValue_ >= 2) {
+                        auto postIt = std::next(it);
+                        while (postIt != bb.end()) {
+                            auto* pinst = dyn_cast<StinkyInstruction>(postIt.getNodePtr());
+                            if (pinst != nullptr && isTensorLoad(*pinst)) {
+                                ++postIt;
+                                continue;
+                            }
                             break;
                         }
+                        producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
+                                                                            : nullptr);
                     }
-                    if (!sectionAlreadyHasClusterBarrier) {
-                        if (foundWait != nullptr) {
-                            setupNewTileExistingWait = foundWait;
-                            setupNewTileAnchorIt = std::next(BasicBlock::iterator(foundWait));
-                        } else if (plrValue_ == 0) {
-                            setupNewTileAnchorIt = BasicBlock::iterator(openLoopLLabel);
-                            setupNewTileNeedsWorkgroupSync = true;
-                        }
-                    }
-                }
-            }
-            if (setupNewTileExistingWait != nullptr) {
-                bool conflictsWithRule4 = false;
-                for (const auto& [trigger, _next, _live, _dec] : pending) {
-                    if (trigger == setupNewTileExistingWait) {
-                        conflictsWithRule4 = true;
-                        break;
-                    }
-                }
-                if (conflictsWithRule4 ||
-                    isFollowedByClusterBarrierHandshakeOrSignal(setupNewTileExistingWait)) {
-                    setupNewTileAnchorIt = bb.end();
                 }
             }
 
-            // Rule 5 -- tail-loop cluster handshake (paired, kernel scope
-            // effectively). Two emission sites because the workgroup wait
-            // and the tail load are in different label/branch-delimited
-            // segments; collapsing them would force the cluster to
-            // serialize across the tail TDM-reset code that sits between.
-            //   - 5a inserts a signal-only handshake (no LoopCounterL
-            //     gate) immediately AFTER the nearest preceding
-            //     `s_barrier_wait -1` of the tail load (searching
-            //     backward from the load, stopping at the marker).
-            //   - 5b inserts a bare `s_barrier_wait -3` immediately
-            //     BEFORE the first `tensor_load_to_lds` that follows the
-            //     `/* Tail Loop */` TEXTBLOCK marker.
-            // Region-scope invocations never observe the marker
-            // (`ScopeAdaptor::moveIRToBlock` erases TEXTBLOCK directives),
-            // so the rule self-disables there.
+            std::unordered_set<StinkyInstruction*> priorWaitAnchors;
+            for (const TriggerSite& site : triggers) {
+                priorWaitAnchors.insert(site.trigger);
+            }
+
+            struct LoopCompensation {
+                StinkyInstruction* head = nullptr;
+                std::string exitLabel;
+                PreLoopSignalAnchor preLoopSignal;
+            };
+            std::vector<std::tuple<StinkyInstruction*, IRBase*, IRBase*>> pending;
+            std::vector<LoopCompensation> hoistedLoops;
+            std::unordered_map<StinkyInstruction*, size_t> hoistedHeads;
+            for (const TriggerSite& site : triggers) {
+                StinkyInstruction* trigger = site.trigger;
+                const BasicBlock::iterator tSegBegin = site.segBegin;
+                // What a signal that leaves its segment costs is a wait on whichever edges out
+                // of the loop end up carrying it, and that is settled edge by edge below. So
+                // each handshake decides on its own whether the lead is worth crossing for,
+                // and a loop whose segments disagree is no harder to balance than one where
+                // they all hoist.
+                StinkyInstruction* head = findEnclosingLoopHead(trigger);
+                // kRule3CrossLoop false: maxHops=0, climb stays in-segment. true: one hop.
+                const int maxSegmentHops = cluster_barrier::kRule3CrossLoop ? kMaxSegmentHops : 0;
+                // Measure the lead from where the wait actually lands, not from the trigger,
+                // so the hoist does not eat into the guaranteed signal->wait distance.
+                Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
+                    site.waitAnchorInst, tSegBegin, /*defaultAnchor=*/site.waitAnchor, cycleMap,
+                    kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors,
+                    maxSegmentHops, head);
+                // Read the exit label and climb the preheader now: once the handshakes go
+                // in, the body is full of this pass's own skip branches and barriers, and
+                // neither the loop's real exit nor an unspoken-for stretch of preheader is
+                // easy to tell apart from them.
+                if (found.hops > 0) {  // kRule3CrossLoop true only: cross-segment compensation
+                    const auto [slot, isNew] = hoistedHeads.emplace(head, hoistedLoops.size());
+                    if (isNew) hoistedLoops.push_back({head, findLoopExitLabelName(head), {}});
+                    // Only a signal that crossed the back edge feeds the next trip instead of
+                    // its own, so only that leaves the first trip with nothing to wait on and
+                    // asks for a signal in the preheader.
+                    LoopCompensation& comp = hoistedLoops[slot->second];
+                    if (found.crossedLoopHead && comp.preLoopSignal.anchor == nullptr) {
+                        comp.preLoopSignal = findPreLoopSignalAnchor(head);
+                        // Crossing the back edge and posting a signal in the preheader are one
+                        // decision, not two: the crossing is what hands this signal to the next
+                        // trip, and the preheader signal is what the first trip waits on
+                        // instead. Which is why the scan asks the same question before it
+                        // crosses, and stays inside the loop when the preheader has no spot --
+                        // so a crossing that arrives here has one waiting for it.
+                        if (comp.preLoopSignal.anchor == nullptr)
+                            STINKY_UNREACHABLE(
+                                "Rule 3 signal anchor: crossed the back edge with no preheader "
+                                "spot for the compensating signal");
+                    }
+                }
+                pending.emplace_back(trigger, found.anchor, site.waitAnchor);
+            }
+
             StinkyInstruction* tailTL = nullptr;
             StinkyInstruction* tailWait = nullptr;
             BasicBlock::iterator tailWaitNextIt = bb.end();
@@ -1070,83 +1426,50 @@ class InsertClusterBarrierPassImpl : public Pass {
                     }
                 }
             }
-            // Rule 5b idempotency (skip if already preceded by a cluster wait).
             if (tailTL != nullptr && isImmediatelyPrecededByClusterBarrierWait(tailTL)) {
                 tailTL = nullptr;
             }
-            // Rule 5a idempotency (skip if already followed by a cluster handshake)
-            // and Rule-4 collision guard (defer to Rule 4 if it already targets
-            // the same wait).
             if (tailWait != nullptr) {
-                bool conflictsWithRule4 = false;
-                for (const auto& [trigger, _next, _live, _dec] : pending) {
-                    if (trigger == tailWait) {
-                        conflictsWithRule4 = true;
+                StinkyInstruction* tailPairedSignal =
+                    findPrecedingWorkgroupBarrierSignalInSegment(bb.begin(), tailWait);
+                bool conflictsWithRule3 = false;
+                for (const auto& [trigger, _sig, _wait] : pending) {
+                    if (tailPairedSignal != nullptr && trigger == tailPairedSignal) {
+                        conflictsWithRule3 = true;
                         break;
                     }
                 }
-                if (conflictsWithRule4 || isFollowedByClusterBarrierHandshakeOrSignal(tailWait)) {
+                if (conflictsWithRule3 || isFollowedByClusterBarrierHandshakeOrSignal(tailWait)) {
                     tailWait = nullptr;
                 }
             }
 
-            const bool setupNewTileEnabled = (setupNewTileAnchorIt != bb.end());
-            if (pending.empty() && gsu1Anchors.empty() && !setupNewTileEnabled &&
-                tailTL == nullptr && tailWait == nullptr)
-                continue;
+            if (pending.empty() && tailTL == nullptr && tailWait == nullptr) continue;
+
             AsmIRBuilder irBuilder(bb, archId);
-            for (const auto& [trigger, nextIt, liveLclCmp, lclPreDecrement] : pending) {
-                IRBase* anchor = (nextIt != bb.end()) ? nextIt.getNodePtr() : nullptr;
-                insertClusterBarrierHandshakeBefore(anchor, irBuilder, archId, pgrValue_,
-                                                    liveLclCmp, lclPreDecrement);
-                (void)trigger;  // queued for ordering only; insertion uses `anchor`
+            for (const auto& [trigger, signalAnchor, waitAnchor] : pending) {
+                insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
+                (void)trigger;
             }
-            for (IRBase* anchor : gsu1Anchors) {
-                insertLoopCounterLGatedClusterBarrierSignalBefore(
-                    anchor, irBuilder, archId,
-                    /*cmpUOp=*/GFX::s_cmp_eq_u32,
-                    /*skipWhenScc1Imm=*/0,
-                    /*cmpComment=*/"gate: only signal when LoopCounterL != 0",
-                    /*branchComment=*/"skip cluster barrier when LoopCounterL == 0",
-                    /*workgroupSyncWaitComment=*/"sync workgroup before cluster signal");
+            // kRule3CrossLoop true only: drain / skipCBWait for hoisted loops.
+            for (const LoopCompensation& comp : hoistedLoops) {
+                emitLoopCarriedCompensation(comp.head, comp.exitLabel, comp.preLoopSignal, bb, func,
+                                            archId);
             }
-            if (setupNewTileEnabled) {
-                IRBase* anchor = setupNewTileAnchorIt.getNodePtr();
-                const std::string immStr = std::to_string(pgrValue_);
-                insertLoopCounterLGatedClusterBarrierSignalBefore(
-                    anchor, irBuilder, archId,
-                    /*cmpUOp=*/GFX::s_cmp_le_u32,
-                    /*skipWhenScc1Imm=*/pgrValue_,
-                    /*cmpComment=*/"LoopCounter <= " + immStr + "?",
-                    /*branchComment=*/"skip cluster barrier when LoopCounterL <= " + immStr,
-                    /*workgroupSyncWaitComment=*/
-                    setupNewTileNeedsWorkgroupSync ? "workgroup sync" : nullptr);
+            // Producer-side drain right after each cooperative tensor_load
+            // group (retire the async cooperative load before the back-edge so
+            // the next loop-head barrier publishes it coherently).
+            for (IRBase* postAnchor : producerDrainAnchors) {
+                insertProducerTensorDrainBefore(postAnchor, irBuilder, archId);
             }
-            // Rule 5a -- signal-only after the tail loop's preceding workgroup wait.
             if (tailWait != nullptr) {
                 IRBase* anchor =
                     (tailWaitNextIt != bb.end()) ? tailWaitNextIt.getNodePtr() : nullptr;
                 insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
             }
-            // Rule 5b -- bare cluster wait immediately before the tail load.
             if (tailTL != nullptr) {
-                insertClusterBarrierWaitBefore(tailTL, "cluster barrier wait", irBuilder, archId);
-            }
-        }
-
-        // Rule 2 (kernel scope only): a single `s_barrier_wait -3` planted
-        // immediately before the first `tensor_load_to_lds` of the whole
-        // function. Region-scope invocations skip this rule because their
-        // notion of "first tensor_load" is the region's local first, not
-        // the kernel's. Idempotency: skip when the load is already gated
-        // by a cluster-scope wait (whether ours, Rule 4's, or one already
-        // present in the source IR).
-        if (isKernelScope_) {
-            StinkyInstruction* firstTL = findFirstTensorLoadInFunc(func);
-            if (firstTL != nullptr && !isImmediatelyPrecededByClusterBarrierWait(firstTL)) {
-                BasicBlock* parent = firstTL->getParent();
-                AsmIRBuilder irBuilder(*parent, archId);
-                insertClusterBarrierWaitBefore(firstTL, "cluster_barrier wait", irBuilder, archId);
+                insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(tailTL),
+                                               "cluster barrier wait", irBuilder, archId);
             }
         }
 
@@ -1154,18 +1477,33 @@ class InsertClusterBarrierPassImpl : public Pass {
     }
 
    private:
-    const bool isKernelScope_;
-    const int pgrValue_;
-    const int plrValue_;
+    const bool streamKMulticast_ = false;
+    const int pgrValue_ = 1;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
 
 }  // namespace
 
-std::unique_ptr<Pass> createInsertClusterBarrierPass(bool isKernelScope, int pgrValue,
-                                                     int plrValue) {
-    return std::make_unique<InsertClusterBarrierPassImpl>(isKernelScope, pgrValue, plrValue);
+std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue) {
+    return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue);
 }
+
+namespace cluster_barrier {
+namespace test {
+
+Rule3SignalAnchorResult findRule3SignalAnchorByCycleLeadForUnitTest(
+    StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
+    const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
+    int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors, int maxHops,
+    StinkyInstruction* loopHead) {
+    const Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
+        referenceAnchor, segBegin, defaultAnchor, cycleMap, leadCycles, maxLeadCycles,
+        priorWaitAnchors, maxHops, loopHead);
+    return {found.anchor, found.hops, found.crossedLoopHead, found.outOfSegmentNomination};
+}
+
+}  // namespace test
+}  // namespace cluster_barrier
 
 }  // namespace stinkytofu

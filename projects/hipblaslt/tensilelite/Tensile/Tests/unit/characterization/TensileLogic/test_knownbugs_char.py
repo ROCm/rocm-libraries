@@ -67,13 +67,13 @@ def test_normalize_logic_relative_path(name, raw, snapshot):
 
 def test_is_known_bug_hit_and_miss(snapshot):
     # Build the known set explicitly to pin is_known_bug independently of the
-    # YAML loader.
-    known = frozenset({(normalize_logic_relative_path(Path("foo/bar.yaml")), 3)})
+    # YAML loader. Keys are (path, solution_name).
+    known = frozenset({(normalize_logic_relative_path(Path("foo/bar.yaml")), "NameA")})
     result = {
-        "hit_same": is_known_bug(known, Path("foo/bar.yaml"), 3),
-        "hit_str_index": is_known_bug(known, Path("foo/bar.yaml"), "3"),
-        "miss_index": is_known_bug(known, Path("foo/bar.yaml"), 4),
-        "miss_path": is_known_bug(known, Path("foo/other.yaml"), 3),
+        "hit": is_known_bug(known, Path("foo/bar.yaml"), "NameA"),
+        "miss_name": is_known_bug(known, Path("foo/bar.yaml"), "NameB"),
+        "miss_none": is_known_bug(known, Path("foo/bar.yaml"), None),
+        "miss_path": is_known_bug(known, Path("foo/other.yaml"), "NameA"),
     }
     assert result == snapshot
 
@@ -112,10 +112,10 @@ def test_load_roundtrip_multi(tmp_path, snapshot):
     p.write_text(
         "skips:\n"
         "  - path: foo/bar.yaml\n"
-        "    solution_index: 3\n"
+        "    solution_name: NameA\n"
         "    ticket: ROCM-9999\n"
         "  - path: baz/qux.yaml\n"
-        "    solution_index: 12\n",
+        "    solution_name: NameB\n",
         encoding="utf-8",
     )
     assert _sorted(load_known_bugs(p)) == snapshot
@@ -140,35 +140,35 @@ def test_load_entry_not_mapping_raises(tmp_path):
 
 
 def test_load_entry_missing_path_raises(tmp_path):
-    # Entry without a "path" key (L90-91).
+    # Entry without a "path" key.
     p = tmp_path / "nopath.yaml"
-    p.write_text("skips:\n  - solution_index: 1\n", encoding="utf-8")
+    p.write_text("skips:\n  - solution_name: NameA\n", encoding="utf-8")
     with pytest.raises(ValueError, match="requires string 'path'"):
         load_known_bugs(p)
 
 
 def test_load_entry_empty_path_raises(tmp_path):
-    # Entry with an empty "path" string (falsy) (L90-91).
+    # Entry with an empty "path" string (falsy).
     p = tmp_path / "emptypath.yaml"
-    p.write_text("skips:\n  - path: ''\n    solution_index: 1\n", encoding="utf-8")
+    p.write_text("skips:\n  - path: ''\n    solution_name: NameA\n", encoding="utf-8")
     with pytest.raises(ValueError, match="requires string 'path'"):
         load_known_bugs(p)
 
 
-def test_load_entry_missing_solution_index_raises(tmp_path):
-    # Entry with a path but no solution_index (L95-96).
-    p = tmp_path / "noidx.yaml"
+def test_load_entry_missing_solution_name_raises(tmp_path):
+    # Entry with a path but no solution_name.
+    p = tmp_path / "noname.yaml"
     p.write_text("skips:\n  - path: foo/bar.yaml\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="requires integer 'solution_index'"):
+    with pytest.raises(ValueError, match="requires string 'solution_name'"):
         load_known_bugs(p)
 
 
-def test_load_entry_non_int_solution_index_raises(tmp_path):
-    # solution_index present but not an int (L99-100).
-    p = tmp_path / "stridx.yaml"
+def test_load_entry_non_string_solution_name_raises(tmp_path):
+    # solution_name present but not a string.
+    p = tmp_path / "intname.yaml"
     p.write_text(
-        "skips:\n  - path: foo/bar.yaml\n    solution_index: three\n",
+        "skips:\n  - path: foo/bar.yaml\n    solution_name: 123\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="solution_index must be int"):
+    with pytest.raises(ValueError, match="requires string 'solution_name'"):
         load_known_bugs(p)

@@ -1,16 +1,12 @@
 # Insert Cluster Barrier Pass
 
-`createInsertClusterBarrierPass` builds a pass that inserts cluster-barrier
-instructions at five well-defined rules covering the main and tail loops. This
-document describes each rule, the emitted code shapes, and the pass parameters.
+`createInsertClusterBarrierPass` inserts cluster-barrier handshakes at four rules
+covering the main and tail loops.
 
 The pass is created via:
 
 ```cpp
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
-    bool isKernelScope = true,
-    int  pgrValue      = 1,
-    int  plrValue      = 1);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass();
 ```
 
 ## Overview
@@ -25,7 +21,7 @@ The cluster handshake uses signal/wait pairs at two scopes:
 
 `<HASH>` in the emitted labels is a fresh 16-character alphanumeric identifier
 generated per insertion. Only the first wave (`WaveIdx == 0`) executes the
-signal; the other waves fall through to the label.
+cluster signal; the other waves fall through to the label.
 
 **Idempotency:** each rule has its own skip check, so re-running the pass is a
 no-op when the handshake is already present.
@@ -35,9 +31,8 @@ no-op when the handshake is already present.
 ## Rule 1 -- Post-GSU==1 signal-only
 
 Signal-only (no leading cluster wait), emitted immediately **after** each
-`label_GSU_1:` label (Tensile's post-`GSU==1`-guard label), wrapped in an outer
-`LoopCounterL != 0` gate so the cluster-barrier signal only fires on non-zero
-iterations.
+`label_GSU_1:` label, wrapped in an outer `LoopCounterL != 0` gate so the
+cluster-barrier signal only fires on non-zero iterations.
 
 A workgroup-scope `s_barrier_signal -1` / `s_barrier_wait -1` pair sits **inside**
 the outer LCL skip region (and **before** the inner `WaveIdx` gate) so every wave
@@ -47,8 +42,8 @@ cluster signal:
 ```asm
     s_cmp_eq_u32 s[sgprLoopCounterL], 0
     s_cbranch_scc1 label_skipCBPreSignal_LCL_<HASH_OUTER>
-    s_barrier_signal -1                                          // workgroup signal
-    s_barrier_wait -1                                            // workgroup wait
+    s_barrier_signal -1
+    s_barrier_wait -1
     s_cmp_eq_u32 s[sgprWaveIdx], 0
     s_cbranch_scc0 label_skipCBPreSignal_<HASH_INNER>
     s_barrier_signal -3
@@ -58,185 +53,279 @@ cluster signal:
 
 ---
 
-## Rule 2 -- First kernel load wait (kernel scope only)
+## Rule 2 -- First kernel load wait
 
 A single `s_barrier_wait -3` immediately before the first `tensor_load_to_lds`
-of the whole kernel.
+of the whole kernel, above any wait-cnt drains that precede it (see
+[Drain hoisting](#drain-hoisting)).
 
 ---
 
-## Rule 3 -- LDS-publication handshake (currently disabled)
+## Rule 3 -- Loop-body cluster handshake
 
-> Rule 3 is currently disabled via the `kRule3Enabled` master switch in the
-> `.cpp`. The description below is retained for when it is re-enabled.
+Rule 3 applies only to **`tensor_load_to_lds` inside a loop**. For each qualifying
+load whose segment contains a preceding workgroup `s_barrier_signal -1` (the
+**trigger**), the pass emits a full handshake independent of Rules 1 and 2:
 
-A LoopCounterL-gated signal-only handshake at the LDS publication point that
-precedes `label_openLoopL:`. It has the same shape as Rule 1 but with the outer
-gate set to `s_cmp_le_u32 s[sgprLoopCounterL], pgrValue` (the `cbranch` skips the
-signal when there are too few iterations left, so the producer is not needed).
+- **Rule 3(a)** -- WaveIdx-gated `s_barrier_signal -3` at the signal anchor.
+- **Rule 3(b)** -- bare `s_barrier_wait -3` immediately before the trigger.
 
-The gate mirrors Tensile's own `s_cmp_le_u32 LCL, pgrValue` /
-`s_cbranch_scc1 LoopEndL` loop-entry guard, so the cluster signal is suppressed
-on the exact same control-flow paths where the corresponding `s_barrier_wait -3`
-inside the unrolled loop body is skipped -- keeping `signal -3` / `wait -3`
-paired everywhere.
+Multiple loads sharing the same workgroup signal receive one handshake.
 
-### Two anchor modes (backward scan from `label_openLoopL:`)
+### Anchor resolution
 
-**(a) Publication point already exists** (typical for PrefetchLocalRead > 0 schedules)
+1. The **wait anchor** (Rule 3(b)) is the workgroup `s_barrier_signal -1`.
+2. The **signal anchor** (Rule 3(a)) is found by walking backward from the wait
+   anchor until it stands `kRule3SignalLeadCycles` estimated cycles ahead of it,
+   somewhere the handshake may legally go. The lead is a target, not a cap: a spot
+   inside a live SCC range is not one the walk may take, so it keeps climbing, and
+   `kRule3SignalMaxLeadCycles` is what bounds the answer. Past that ceiling it
+   turns around and sinks back towards the wait instead.
 
-An `s_barrier_wait -1` is already present. Anchor at the successor of that wait;
-no new workgroup sync is synthesized. The scan stops as soon as a
-`tensor_load_to_lds` is reached: that instruction marks the prefetch section,
-before any workgroup sync could sit, so an earlier workgroup wait would be
-unrelated. Defers to Rule 4 if the same wait would also be a Rule-4 trigger.
+   It stops outright at a preceding handshake or at any `s_barrier_wait -3`, so
+   cluster phases never overlap, and at a call or an unconditional branch. With
+   `kRule3CrossLoop` false every label and branch stops it too, which confines it
+   to the wait's own segment.
 
-**(b) No publication point** (typical for PrefetchLocalRead == 0 schedules)
+When cycle estimates are unavailable, the signal co-locates with the wait.
 
-No `s_barrier_wait -1` between the prefetch tail and `label_openLoopL:` (the
-prologue has no local-read preamble barrier). Only active when `plrValue == 0`;
-anchor at the label and synthesize an `s_barrier_signal -1` / `s_barrier_wait -1`
-pair **inside** the LCL skip region (between the outer LCL skip-branch and the
-inner `WaveIdx` gate) so the workgroup sync sits on the same control-flow path as
-the cluster signal -- both are bypassed together on the `LCL <= pgrValue` skip
-path (matching Tensile's loop-entry guard: when the unrolled loop body is
-skipped, the LDS reads inside it are skipped too, so no LDS publication is
-needed). Emitted shape immediately **before** the `label_openLoopL:` label:
+Cross-segment hoisting and loop-carried compensation are gated by the compile-time
+switch `cluster_barrier::kRule3CrossLoop` in
+`InsertClusterBarrierPass.hpp` (default **false**). See
+[`kRule3CrossLoop`](#krule3crossloop) below.
+
+### SCC
+
+The signal block opens with `s_cmp_eq_u32 s[sgprWaveIdx], 0`, so wherever it
+lands it destroys the SCC value standing there. Nothing puts that value back;
+the anchor search is what keeps the block out of a live range in the first
+place, and it may give up lead to do so — climbing to a spot in front of the
+def, or sinking below the range towards the wait. A range the loop closes
+across its back edge counts too, which is why the climb carries a liveness flag
+of its own alongside the forward scan the placement check runs.
+
+#### Liveness without a CFG — `isSccLiveIn`
+
+`isSccLiveIn(at)` answers "is SCC live at the point in front of `at`". Liveness
+is a property of the code that *follows* a point, so the walk runs forward while
+the answer describes where it started — the name says which point it is about,
+not which way the walk goes. Both the backward anchor climb and the downward
+correction ask it about the spot they are standing on, which is where the
+handshake's `s_cmp_eq_u32` would land.
+
+This pass runs before `CFGBuilderPass`, on one flat block holding the whole
+kernel with its labels and branches still inline, so reading the block top to
+bottom describes the fall-through and nothing else. That is not good enough for
+SCC, whose consumer is typically a branch — the reader is frequently *not* on
+the fall-through, and the code below an unconditional branch may not be
+reachable at all. The flat layout is also the way out: every branch target is a
+label in the same block, so the walk resolves each branch and follows both of
+its edges. It is a worklist over instruction positions, with a `walked` set that
+both merges joins and terminates back edges, and a label index built lazily on
+the first branch so the common case (an SCC access within a few instructions)
+pays nothing for it.
+
+Only a `false` grants permission to clobber SCC, so anything the walk cannot see
+through reads as live. Two things are left:
+
+| Encountered | Answer |
+|---|---|
+| Reads SCC | live |
+| Rewrites SCC | dead — nothing past it wants the old value |
+| Call | **live** — the callee may use SCC as scratch |
+| Branch with no matching label in the block | **live** — target unknown |
+| Branch with a matching label | follow both edges (fall-through only if conditional) |
+| `s_endpgm`, or the end of the block | dead — no successor block to run |
+
+The last row is why the end of the block is not an unknown: with branches
+followed, running out of instructions is a genuine path end rather than an
+artifact of having strolled past a branch. `s_endpgm` is stopped at explicitly
+for the same reason — it ends that path, and the code textually below it belongs
+to some other one.
+
+#### Placement stops vs. liveness stops
+
+`findSccDeadAnchorBelow` and `isSccLiveIn` stop at different things, on purpose,
+because they answer different questions. The first is a *placement* search
+("where may this signal go?"); the second is a *dataflow* question ("does
+anything read SCC from here?").
+
+| | `findSccDeadAnchorBelow` | `isSccLiveIn` |
+|---|---|---|
+| The wait being led (`limit`) | stops — a signal below its own wait is not a handshake | reads through — a value consumed below the wait is live above it |
+| `s_barrier_wait -3` | stops — the signal would lose its token there | reads through — a barrier neither reads nor writes SCC |
+| Segment boundary | stops, except the SCC-reading exit branch that holds the range open | reads through, following the branch |
+
+Each stop rule is load-bearing in its own walk and would be wrong in the other.
+A range that reaches the wait is the shape that leaves the placement walk with
+nothing to return; the caller then aborts rather than clobber (`Rule 3 signal
+anchor: SCC live at the wait`).
+
+What `findSccDeadAnchorBelow` returns is an *anchor* — the instruction the
+handshake is planted in front of, as everywhere else in this pass — not the
+instruction that clobbers SCC, though the two often coincide. A range is held
+open by its last reader, so the first dead point is directly below that reader:
+the clobber when the clobber is what directly follows, and just the next
+instruction along otherwise.
+
+### Drain hoisting
+
+`StinkyWaitCntInsertionPass` runs before this pass and anchors its counter
+drains on the same instructions the cluster waits target, so the slot right
+before an anchor is usually already occupied by an `s_wait_tensorcnt` (or
+another `s_wait_*cnt`). Every cluster wait -- Rules 2, 3(b) and 4(b) -- is
+therefore emitted **above** that run of drains:
 
 ```asm
-    s_cmp_le_u32 s[sgprLoopCounterL], <pgrValue>          // outer LCL gate
-    s_cbranch_scc1 label_skipCBPreSignal_LCL_<HASH_OUTER> // skip when LCL <= pgr
-    s_barrier_signal -1                                  // workgroup signal
-    s_barrier_wait -1                                    // workgroup sync
-    s_cmp_eq_u32 s[sgprWaveIdx], 0                        // inner wave gate
-    s_cbranch_scc0 label_skipCBPreSignal_<HASH_INNER>
-    s_barrier_signal -3
-  label_skipCBPreSignal_<HASH_INNER>:
-  label_skipCBPreSignal_LCL_<HASH_OUTER>:
+    s_barrier_wait -3
+    s_wait_tensorcnt N
+    s_barrier_signal -1
 ```
 
-Internal control-flow labels inside the prefetch prologue (e.g.
-`label_skipPGR2_*`) do not match `label_openLoopL` by exact-name comparison and
-are walked through.
+Both orders are correct; the inverted one measured materially slower, and that
+measurement is the entire justification. **The mechanism is not established.**
+Both instructions block on independent conditions -- a per-wave local counter,
+and peer arrival at the barrier -- and two such waits commute, so the obvious
+"the drain overlaps the barrier latency" argument does not actually hold.
 
-**Section-level idempotency:** the backward scan also flags whether a
-cluster-scope signal/wait already sits in the section; if so (e.g. a prior pass
-run already emitted Rule 3), Rule 3 self-disables. Unlike a `TEXTBLOCK` anchor,
-the label/instruction-based scan survives `ScopeAdaptor::moveIRToBlock`, so Rule
-3 keeps working whenever `Gfx1250Backend::buildGfx1250Pipeline` runs this pass at
-kernel scope when `moduleOptions.ClusterBarrier == true`.
+Wait-cnt instructions never write SCC, so hoisting past them cannot move a
+cluster wait into or out of a live SCC range.
 
----
-
-## Rule 4 -- Cluster handshake before loop loads
-
-A cluster handshake after each workgroup-scope wait that precedes a
-`tensor_load_to_lds`. For every load in a label-/branch-delimited segment, the
-pass walks backward to the nearest preceding `s_barrier_wait -1`; triggers are
-deduplicated by identity so multiple loads sharing the same anchor wait yield
-exactly one handshake.
-
-The emission is selected by the `kRule4ForceUngatedSignalMode` master switch in
-the `.cpp` (default **on** = mode (c)):
-
-**(c) always-ungated mode** (active) -- for every trigger emit a `WaveIdx`-gated
-`s_barrier_signal -3` **then** a bare `s_barrier_wait -3`; the cluster signal is
-**never** wrapped in an LCL skip branch. `findLiveLoopCounterLCmpUpstream` is
-still consulted: if SIA hoisted a live loop-exit `s_cmp_eq LCL, imm` whose SCC a
-downstream `s_cbranch_scc0 LoopBeginL` consumes, a clone of it is re-emitted
-**after** the bare wait (which has no SCC side effect) to restore that SCC.
-
-When the switch is **off**, two fallback modes are selected by
-`findLiveLoopCounterLCmpUpstream`:
-
-**(a) inherited-SCC mode** -- when SIA (typically `ScheduleIterAlg=4`) hoists the
-loop-exit `s_cmp_eq_{u32,i32} LCL, imm` above the anchor, a downstream `cbranch`
-still consumes its SCC. Emit an ungated leading `s_barrier_wait -3` **first**,
-then the inherited-SCC signal block (the signal is single-iter skipped via the
-inherited SCC; a clone of the upstream cmp is re-emitted between the inner and
-outer skip labels to rebuild SCC for that downstream cbranch).
-
-**(b) drain-gated mode** -- when no such upstream cmp is live, gate the handshake
-with ASYMMETRIC LCL thresholds: skip the WAIT at `LCL <= pgrValue` and the SIGNAL
-one stage earlier at `LCL <= pgrValue+1` (both lowered by any hoisted LCL
-pre-decrement). The drain iterations -- where the paired `tensor_load_to_lds` is
-disabled -- drop the handshake while keeping `signal -3` / `wait -3` balanced.
-
-Shape (mode (c); the `<clone of upstream LCL cmp>` line is emitted only when a
-live upstream cmp exists):
+### Emitted shape (separated anchors)
 
 ```asm
-    s_cmp_eq_u32 s[sgprWaveIdx], 0                               // inner wave gate
-    s_cbranch_scc0 label_skipCBPreSignal_<HASH_INNER>
+    s_cmp_eq_u32 s[sgprWaveIdx], 0
+    s_cbranch_scc0 label_skipCBPreSignal_<HASH>
     s_barrier_signal -3
-  label_skipCBPreSignal_<HASH_INNER>:
-    s_barrier_wait -3                                            // bare cluster wait
-    <clone of upstream LCL cmp>                                  // restore SCC (if any)
+  label_skipCBPreSignal_<HASH>:
+    ...
+    s_barrier_wait -3
+    <wait-cnt drains hoisted below the cluster wait>
+    s_barrier_signal -1
+    s_barrier_wait -1
+    tensor_load_to_lds ...
 ```
 
 ---
 
-## Rule 5 -- Tail-loop cluster handshake (kernel scope only, paired)
+## Rule 4 -- Tail-loop cluster handshake (paired)
 
-Anchors on the first `tensor_load_to_lds` that follows the `/* Tail Loop */`
-`TEXTBLOCK` marker. The wait and signal are emitted at two distinct sites because
-the load and the preceding workgroup wait sit in different label/branch-delimited
-segments (the tail TDM-reset block between them is not synchronization-critical,
-so collapsing both into a single site would unnecessarily serialize the cluster).
+Two emission sites because the workgroup wait and the tail load sit in different
+label/branch-delimited segments:
 
-- **5a** -- signal-only handshake (no LoopCounterL gate) immediately **after** the
-  workgroup-scope wait (`s_barrier_wait -1`) that precedes the tail load (searched
-  backward from the load, bounded by the `/* Tail Loop */` marker). Defers to Rule
-  4 if that wait is already a Rule-4 trigger.
-- **5b** -- a single `s_barrier_wait -3` immediately **before** the tail
-  `tensor_load` itself.
+- **Rule 4(a)** -- signal-only handshake immediately **after** the nearest
+  preceding `s_barrier_wait -1` of the tail load.
+- **Rule 4(b)** -- bare `s_barrier_wait -3` immediately **before** the first
+  `tensor_load_to_lds` after the `/* Tail Loop */` TEXTBLOCK marker.
 
-Each half has its own idempotency check so re-runs are no-ops.
+Rule 4(a) is skipped when Rule 3 already targets the same workgroup signal.
+Region-scope invocations never observe the TEXTBLOCK marker, so Rule 4
+self-disables there.
 
 ---
 
-## Parameters
+## kRule3CrossLoop
 
-### `isKernelScope` (default `true`)
+Compile-time switch in `cluster_barrier::kRule3CrossLoop`
+(`include/stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp`). Rebuild
+rocisa after changing it. It gates **Rule 3 cross-loop hoisting** and the
+scheduler **live-out SCC lead ceiling** in `StinkyDAGSchedulerPass`.
 
-Must be `true` for the GFX1250 backend pipeline (whole-kernel insertion). When
-`false`, the pass is intended for region-scoped invocation via
-`createKernelToRegionsPassAdaptor` (not used by the backend today). Rule 2 only
-fires when this is `true` because the "first `tensor_load` of the whole kernel"
-anchor is meaningful only at kernel scope.
+### Shared behavior (true and false)
 
-### `pgrValue` (default `1`, i.e. PrefetchGlobalRead=1)
+With cluster barrier enabled:
 
-Tensile's `PrefetchGlobalRead` setting. It is consulted only by Rule 4's
-drain-gated fallback mode (b) (the `LCL <= pgrValue` / `LCL <= pgrValue+1`
-thresholds), i.e. when `kRule4ForceUngatedSignalMode` is off. The active mode (c)
-does not use it, and Rule 3 (whose `LoopCounterL <= pgrValue` gate would also use
-it) is disabled via `kRule3Enabled`. It is retained in the signature both for
-mode (b)'s drain gate and so the Rule 3 gate can be reinstated without an API
-change.
+- Rules 1, 2, and 4 are unchanged.
+- Rule 3 still inserts signal/wait handshakes for each qualifying load segment.
+- Rule 3 still walks backward from the wait for cycle lead and SCC clearance.
+- `StinkyDAGSchedulerPass::applyClusterBarrierSccRule` still **pins** live-out
+  SCC defs (loop counter compares) **after** every cluster barrier wait in the
+  region — the compare may not issue before the last wait completes.
 
-### `plrValue` (default `1`)
+### `kRule3CrossLoop == false` (default)
 
-Tensile's `PrefetchLocalRead` setting. It only takes effect while Rule 3 is
-enabled (see `kRule3Enabled`), where it selects Rule 3's anchor mode (b): when
-`plrValue == 0` and the backward scan from `label_openLoopL:` finds no
-`s_barrier_wait -1` before reaching the prefetch boundary (`tensor_load_to_lds`),
-the rule synthesizes the missing publication point (workgroup
-`s_barrier_signal -1` / `s_barrier_wait -1`) followed by the same
-`LCL <= pgrValue` gated cluster signal as anchor mode (a). Any non-zero value
-disables mode (b) (default).
+**InsertClusterBarrierPass**
+
+- `maxSegmentHops = 0`: the Rule 3 climb cannot leave the wait's segment.
+- Signals stay **in-segment**, paired near their waits.
+- No **loop-wrap** at the latch: the climb stops at the loop head rather than
+  following the back edge.
+- No **preheader signal**, **loop-exit drain wait**, or **`skipCBWait`**
+  bypass labels (`emitLoopCarriedCompensation` is never called).
+
+**StinkyDAGSchedulerPass**
+
+- Live-out SCC defs get barrier-pin edges only.
+- `DAGNode::earliestClock` stays `INT_MIN`.
+- Once the pin frees the compare, the scheduler may issue it immediately — often
+  far from the latch branch that reads SCC.
+
+**Typical assembly:** signal and wait remain close in the loop body; loop exit
+has no `drain loop-carried cluster signal` wait.
+
+### `kRule3CrossLoop == true` (opt-in)
+
+**InsertClusterBarrierPass**
+
+- `maxSegmentHops = kMaxSegmentHops` (1): Rule 3 may cross **one** segment
+  boundary per climb.
+- When the climb reaches the loop head short of the lead target, it **follows the
+  latch** (`findLatchBranchFor`) rather than leaving the loop textually into the
+  preheader, and keeps accumulating from there — so the lead is the sum of the
+  two parts (wait→head and latch→anchor). It only crosses while the preheader
+  has a spot for the compensating signal
+  (`preheaderCanTakeCompensatingSignal`); otherwise it comes to rest below the
+  head as if the hops had run out.
+- When `found.hops > 0`, **loop-carried compensation** runs via
+  `emitLoopCarriedCompensation`:
+  - Optional **preheader signal** when the climb crossed the back edge.
+    `findPreLoopSignalAnchor` climbs from the loop head and comes to rest below the
+    nearest `s_barrier_wait -1`, `s_barrier_wait -3`, kernel `label_*`, or
+    `tensor_load_to_lds` (pass `skipCB*` labels are skipped). A cluster wait stops
+    it for a second reason: that wait drinks a token, so a signal planted above one
+    never reaches the first trip. Signal-only after a workgroup wait — the one stop
+    that already proves the group has gathered — and workgroup barrier + signal
+    after anything else. The anchor slides down to the first SCC-dead spot when SCC
+    is live where it landed, and a preheader offering no spot at all is why the
+    climb declines to cross the back edge in the first place.
+  - **Drain wait** at loop exit: `s_barrier_wait -3` with comment
+    `drain loop-carried cluster signal`.
+  - **`label_*_skipCBWait`** on paths that leave the loop with no token in
+    flight (zero-trip guards, exits below a wait, etc.).
+
+**StinkyDAGSchedulerPass**
+
+- In addition to barrier pins, live-out SCC defs get
+  `earliestClock = regionCycles - kLiveOutSccDefLeadCycles` (50 cycles).
+- The compare is held near the latch branch instead of issuing immediately after
+  the last barrier wait.
+
+**Typical assembly:** signals appear earlier in the loop body (hoisted from
+waits); loop latch may compare `counterL==0` before the back-edge branch; loop
+exit has drain wait + skip path.
+
+### Code map
+
+| Location | false | true |
+|----------|-------|------|
+| `maxSegmentHops` in Rule 3 | 0 | 1 |
+| Segment-boundary climb | stops at boundary | may cross one hop |
+| Latch follow at the loop head | not reached | wraps when the climb is short of the lead |
+| `if (found.hops > 0)` block | skipped | preheader + hoistedLoops |
+| `emitLoopCarriedCompensation` | not called | drain / skipCBWait |
+| Live-out SCC `earliestClock` | not set | ≤50 cycles from region end |
+
+### Tests
+
+- `InsertClusterBarrierPassTest` / `DAGSchedulerPassTest`: cross-loop cases use
+  `IF_RULE3_CROSS_LOOP`, so they are omitted from the binary while
+  `STINKY_KRULE3_CROSS_LOOP` is 0. Cases that need the switch off stay in the binary
+  and `GTEST_SKIP` themselves when it is 1. Covering the pass therefore means
+  building and running both settings.
 
 ---
 
-## Analysis invalidation
+## Source files
 
-This pass mutates the CFG (new branches and a new label), so dependent CFG /
-dominance analyses are invalidated.
-
----
-
-## See Also
-
-- [Architecture Overview](architecture.md) -- system architecture and pass pipeline
 - `src/transforms/asm/InsertClusterBarrierPass.cpp` -- implementation
 - `include/stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp` -- public API

@@ -5,17 +5,23 @@
 # number of attempts. This mirrors clicking "Re-run failed jobs" in the web UI:
 # `gh run rerun --failed` calls the same rerun-failed-jobs API, so each retry
 # lands on a fresh runner and is recorded as a new attempt on the SAME run
-# (prior attempts stay visible in the run's attempt history).
+# (prior attempts stay visible in the run's attempt history). That API only
+# re-runs jobs whose own conclusion is 'failure'; a job that was individually
+# cancelled is left alone even if other jobs in the same run failed.
 #
 # The retry loop is self-capping: `workflow_run` fires whenever an attempt of
 # the watched run completes, so a failed attempt N triggers this workflow with
 # run_attempt == N, which re-runs and produces attempt N+1, and so on until the
-# run_attempt cap below is reached.
+# per-workflow run_attempt cap below is reached.
 #
-# Motivation: most nightly failures are infrastructure flakes (no GPU assigned,
-# an overloaded/wedged machine, or a network blip during artifact fetch) rather
-# than real test regressions. Those clear on a fresh runner, which a same-runner
-# step retry cannot provide.
+# Motivation: most failures in these workflows are infrastructure flakes (no
+# GPU assigned, an overloaded/wedged machine, or a network blip during
+# artifact fetch) rather than real test regressions. Those clear on a fresh
+# runner, which a same-runner step retry cannot provide. The nightlies get a
+# higher cap since they run once a day and have no human watching in real
+# time; `TheRock CI` (per-PR) gets only a single auto-retry so a genuine
+# regression still surfaces quickly instead of being masked by repeated
+# reruns, and so flaky infra doesn't multiply runner usage on every PR push.
 #
 # NOTE: `workflow_run` always uses the copy of this file on the repository's
 # default branch, and only fires for runs there. It has no effect from a PR
@@ -28,6 +34,7 @@ on:
     workflows:
       - "TheRock CI Nightly"
       - "TheRock Multi-Arch Nightly CI"
+      - "TheRock CI"
     types:
       - completed
 
@@ -41,13 +48,19 @@ jobs:
     name: Rerun failed jobs
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # Only genuine failures under the attempt cap. run_attempt < 4 allows up to
-    # 4 total attempts (the original run plus 3 auto-retries). 'cancelled'
+    # Only genuine failures under a per-workflow attempt cap. 'cancelled'
     # (concurrency / superseded runs) and 'startup_failure' are intentionally
     # excluded so we never retry work that was deliberately abandoned.
+    # - Nightlies: run_attempt < 4 allows up to 4 total attempts (the original
+    #   run plus 3 auto-retries).
+    # - Per-PR `TheRock CI`: run_attempt < 2 allows only 1 auto-retry (2 total
+    #   attempts), since it runs on every push and a human is already watching.
     if: >-
       github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.run_attempt < 4
+      (
+        (github.event.workflow_run.name == 'TheRock CI' && github.event.workflow_run.run_attempt < 2) ||
+        (github.event.workflow_run.name != 'TheRock CI' && github.event.workflow_run.run_attempt < 4)
+      )
     env:
       GH_TOKEN: ${{ github.token }}
       RUN_ID: ${{ github.event.workflow_run.id }}

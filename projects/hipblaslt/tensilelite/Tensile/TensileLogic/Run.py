@@ -23,11 +23,15 @@
 ################################################################################
 
 
+import contextlib
 import functools
+import io
 import sys
 import threading
 import time
 import warnings
+
+import rocisa
 
 from pathlib import Path
 from typing import FrozenSet, List, Dict, NamedTuple, Tuple
@@ -36,11 +40,17 @@ from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, se
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, defaultSolution
+from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
 from Tensile.LibraryIO import readYAML
 from Tensile.Toolchain.Validators import validateToolchain
 
 from .ParseArguments import parseArguments
-from .KnownBugs import KnownBugKey, is_known_bug, load_known_bugs
+from .KnownBugs import (
+    KnownBugKey,
+    is_known_bug,
+    load_known_bugs,
+    normalize_logic_relative_path,
+)
 from .ValidChipId import _validateChipId
 from .ValidMatrixInstruction import _validateMatrixInstruction
 from .ValidWorkGroup import _validateWorkGroup
@@ -59,7 +69,8 @@ def _runChecks(
     check: Check,
     known_bugs: FrozenSet[KnownBugKey],
     files: List[Path],
-) -> Tuple[int, int, int, int]:
+    rocIsaData=None,
+) -> Tuple[int, int, int, int, int]:
     """
     Run checks on the given logic files.
 
@@ -68,15 +79,28 @@ def _runChecks(
         isaInfoMap: Map of IsaVersion to IsaInfo.
         check: Object containing flags for checking.
         files: List of logic files to check.
+        rocIsaData: Capabilities snapshot from the parent's rocIsa singleton, or
+            None to leave this process's singleton as it is.
 
     Returns:
-        Tuple of (keep, total, known_bug_skips, chip_id_failures) where keep is
-        the number of unrejected solutions, total is the total number of
-        solutions parsed, known_bug_skips counts solutions accepted via the
-        known-bugs list only, and chip_id_failures is the number of files that
-        failed chip-ID validation (independent of per-solution accounting).
+        Tuple of (keep, total, known_bug_skips, chip_id_failures, stale_known_bugs)
+        where keep is the number of unrejected solutions, total is the total
+        number of solutions parsed, known_bug_skips counts solutions accepted via
+        the known-bugs list that still fail validation, chip_id_failures is the
+        number of files that failed chip-ID validation (independent of
+        per-solution accounting), and stale_known_bugs counts known-bugs entries
+        whose solution now passes validation (a landed fix; the entry can be
+        removed).
     """
+    # ParallelMap2 hands a worker globalParameters and nothing else, so the rocIsa
+    # singleton in this process has never been init'd and every capability lookup
+    # would read a default. Validators that ask the assembly backend what a solution
+    # emits need the parent's capabilities to answer the same way the emitter will.
+    if rocIsaData is not None:
+        rocisa.rocIsa.getInstance().setData(rocIsaData)
+
     keep, total, known_bug_skips, chip_id_failures = 0, 0, 0, 0
+    stale_known_bugs = 0
     for file in files:
         if "Experimental" in file.parts:
             continue
@@ -130,12 +154,34 @@ def _runChecks(
                 continue
 
             s["ProblemType"] = problemType
-            sol_index = int(s.get("SolutionIndex", list_idx))
+            sol_name = s.get("SolutionNameMin")
 
-            if known_bugs and is_known_bug(known_bugs, rel, sol_index):
+            if known_bugs and is_known_bug(known_bugs, rel, sol_name):
+                # Re-validate documented known bugs so a landed fix is detected
+                # rather than silently skipped forever. A still-failing known bug
+                # is expected, so suppress the validators' own error output; only
+                # a now-passing solution is worth surfacing. XCC gets report=False
+                # so this expected re-failure does not bump its per-file dedup
+                # counter and swallow a later *real* XCC failure's message.
+                with contextlib.redirect_stdout(io.StringIO()):
+                    now_valid = all(
+                        [
+                            _validateMatrixInstruction(s, isaInfoMap, rel),
+                            _validateWorkGroup(s, rel),
+                            _validateWorkGroupMappingXCC(s, rel, report=False),
+                        ]
+                    )
                 keep += 1
                 total += 1
-                known_bug_skips += 1
+                if now_valid:
+                    stale_known_bugs += 1
+                    print(
+                        "WARNING: known-bugs entry no longer fails validation: "
+                        f"{normalize_logic_relative_path(rel)} :: {sol_name} "
+                        "-- fix confirmed; remove this entry from the known-bugs YAML."
+                    )
+                else:
+                    known_bug_skips += 1
                 continue
             if all(
                 [
@@ -147,7 +193,7 @@ def _runChecks(
                 keep += 1
             total += 1
 
-    return keep, total, known_bug_skips, chip_id_failures
+    return keep, total, known_bug_skips, chip_id_failures, stale_known_bugs
 
 
 def _setup():
@@ -174,6 +220,13 @@ def _setup():
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)
+
+    archs = args.Architecture.split(";")
+    if "all" not in archs:
+        files = [f for f in files if archMatch(load_logic_gfx_arch(f), archs)]
+        if len(files) == 0:
+            print1(f"No files found in {logicPath} for architectures: {', '.join(archs)}")
+            exit(1)
     print2(f"Found {len(files)} files")
 
     isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, str(cxxCompiler))
@@ -222,10 +275,14 @@ def main():
         files[i : i + batchSize] for i in range(0, len(files), batchSize)
     )
 
-    fn = functools.partial(_runChecks, logicPath, isaInfoMap, check, known_bugs)
+    fn = functools.partial(
+        _runChecks, logicPath, isaInfoMap, check, known_bugs,
+        rocIsaData=rocisa.rocIsa.getInstance().getData(),
+    )
     keep, total = 0, 0
     known_bug_skips = 0
     chip_id_failures = 0
+    stale_known_bugs = 0
 
     # Show periodic progress when in quiet mode (no per-file output)
     progress_stop = threading.Event()
@@ -239,11 +296,12 @@ def main():
     try:
         results = ParallelMap2(fn, batches, multiArg=False, procs=jobs, return_as="list")
 
-        for _keep, _total, _kb, _cid in results:
+        for _keep, _total, _kb, _cid, _stale in results:
             keep += _keep
             total += _total
             known_bug_skips += _kb
             chip_id_failures += _cid
+            stale_known_bugs += _stale
     finally:
         progress_stop.set()
         if progress_thread is not None:
@@ -257,6 +315,12 @@ def main():
         print(f"Known-bugs skip  {known_bug_skips} solutions (see --known-bugs YAML)")
     if chip_id_failures > 0:
         print(f"Chip-ID failures  {chip_id_failures} files")
+    if stale_known_bugs > 0:
+        print(
+            f"Stale known-bugs  {stale_known_bugs} entries now pass validation "
+            "(remove them from the known-bugs YAML)"
+        )
 
-    if rejects > 0 or chip_id_failures > 0:
+    strict_stale = getattr(args, "StrictKnownBugs", False) and stale_known_bugs > 0
+    if rejects > 0 or chip_id_failures > 0 or strict_stale:
         exit(1)
