@@ -11,6 +11,7 @@ copies it verbatim into a tree that has never seen this file.
 import ast
 import concurrent.futures
 import inspect
+import itertools
 import json
 import os
 import re
@@ -427,6 +428,19 @@ def test_selected_entries_matches_golden_sequence(corpus):
 
 
 @pytest.mark.quick
+def test_selected_entries_matches_golden_sequence_hip_only(tmp_path):
+    """The same sequence over the hip-only corpus the pool tests are built on.
+
+    The pool tests all run on `hip_only=True` so they need no rocKE toolchain,
+    which means the corpus they select from is not the one the sequence above
+    pins. Dropping the two rocke cases must remove exactly those entries and
+    disturb the order of nothing else.
+    """
+    corpus = _write_corpus(tmp_path / "hip-only-golden", hip_only=True)
+    assert _observed_sequence(corpus) == HIP_ONLY_GOLDEN_SEQUENCE
+
+
+@pytest.mark.quick
 def test_prewarm_jobs_are_deduped_on_variant_key(corpus):
     """The pool never compiles one variant twice.
 
@@ -486,11 +500,22 @@ def test_arch_matches_call_sites_are_pinned():
 
 @pytest.mark.quick
 def test_pack_jobs_env_parsing(monkeypatch):
+    # Pinned to a fixed budget rather than the runner's core count: restating
+    # `min(32, _cpu_budget())` asserts nothing, and a runner with 32 or fewer
+    # visible CPUs never exercises the cap.
     monkeypatch.delenv("HKP_PACK_JOBS", raising=False)
-    assert pipeline._pack_jobs() == min(32, os.cpu_count() or 1)
+    monkeypatch.setattr(pipeline, "_cpu_budget", lambda: 200)
+    assert pipeline._pack_jobs() == 32
+    monkeypatch.setattr(pipeline, "_cpu_budget", lambda: 6)
+    assert pipeline._pack_jobs() == 6
 
     monkeypatch.setenv("HKP_PACK_JOBS", "1")
     assert pipeline._pack_jobs() == 1
+
+    # An explicit value outruns the budget on purpose: oversubscribing is the
+    # caller's call, and silently reducing it would make the knob a suggestion.
+    monkeypatch.setenv("HKP_PACK_JOBS", "64")
+    assert pipeline._pack_jobs() == 64
 
     monkeypatch.setenv("HKP_PACK_JOBS", "lots")
     with pytest.raises(HkpPackError, match="HKP_PACK_JOBS"):
@@ -499,8 +524,136 @@ def test_pack_jobs_env_parsing(monkeypatch):
     # A negative clears the parse, so the rejection is pinned here: clamped
     # onto the serial path it would produce a correct pack and no signal at all.
     monkeypatch.setenv("HKP_PACK_JOBS", "-4")
-    with pytest.raises(HkpPackError, match="negative"):
+    with pytest.raises(HkpPackError, match="1 or greater"):
         pipeline._pack_jobs()
+
+    # Zero is rejected rather than read as serial, because `0` means "auto"
+    # elsewhere in this repository and a caller who writes it here means that.
+    monkeypatch.setenv("HKP_PACK_JOBS", "0")
+    with pytest.raises(HkpPackError, match="1 or greater"):
+        pipeline._pack_jobs()
+
+
+@pytest.mark.quick
+def test_cpu_budget_takes_the_narrowest_limit(monkeypatch):
+    """The budget is the smallest limit in force, not the host core count.
+
+    The failure defended against is silent and container-only: the pack still
+    succeeds, just several times slower than a correctly sized pool, which no
+    assertion about output can catch.
+    """
+    monkeypatch.setattr(os, "cpu_count", lambda: 384)
+    monkeypatch.setattr(pipeline, "_cgroup_v2_cpu_quota", lambda: None)
+    # Absent before 3.13, so `raising=False` installs it rather than patching
+    # it -- otherwise this branch is skipped on exactly those interpreters.
+    monkeypatch.setattr(os, "process_cpu_count", lambda: 8, raising=False)
+    assert pipeline._cpu_budget() == 8
+
+    # A cgroup quota is invisible to every CPU-count API, so it has to be able
+    # to win on its own.
+    monkeypatch.setattr(pipeline, "_cgroup_v2_cpu_quota", lambda: 4)
+    assert pipeline._cpu_budget() == 4
+
+    # Without `process_cpu_count` the affinity mask carries the platforms that
+    # have one, and the host count is the last resort for the ones that do not.
+    monkeypatch.delattr(os, "process_cpu_count", raising=False)
+    monkeypatch.setattr(pipeline, "_cgroup_v2_cpu_quota", lambda: None)
+    if hasattr(os, "sched_getaffinity"):
+        monkeypatch.setattr(os, "sched_getaffinity", lambda _pid: set(range(12)))
+        assert pipeline._cpu_budget() == 12
+    else:
+        assert pipeline._cpu_budget() == 384
+
+
+def _fake_cgroup(monkeypatch, tmp_path, own, limits):
+    """Stand up a cgroup tree: `own` is this process's cgroup, `limits` maps a
+    cgroup-relative directory to the `cpu.max` text written there."""
+    root = tmp_path / "cgroup"
+    (root / own).mkdir(parents=True, exist_ok=True)
+    for rel, text in limits.items():
+        node = root / rel if rel else root
+        node.mkdir(parents=True, exist_ok=True)
+        (node / "cpu.max").write_text(text, encoding="utf-8")
+
+    proc = tmp_path / "proc-self-cgroup"
+    proc.write_text(f"0::/{own}\n", encoding="utf-8")
+
+    mapping = {"/sys/fs/cgroup": root, "/proc/self/cgroup": proc}
+    monkeypatch.setattr(pipeline, "Path", lambda p: mapping.get(str(p), Path(p)))
+
+
+@pytest.mark.quick
+def test_cgroup_quota_reads_whole_cpus(tmp_path, monkeypatch):
+    """`cpu.max` parses to whole CPUs, and `max` means no limit.
+
+    Parsed here rather than trusted because the real files are read from fixed
+    paths that do not exist on Windows and are unlimited on most Linux hosts,
+    so the parsing is never exercised by simply running the suite.
+    """
+
+    trees = itertools.count()
+
+    def _quota(own, limits):
+        # A fresh tree per case, so a stale `cpu.max` cannot answer for the next.
+        _fake_cgroup(monkeypatch, tmp_path / f"case{next(trees)}", own, limits)
+        return pipeline._cgroup_v2_cpu_quota()
+
+    assert _quota("", {"": "800000 100000"}) == 8
+    assert _quota("", {"": "max 100000"}) is None
+    # A fractional allocation floors to zero CPUs, which would disable the pool
+    # entirely; one worker is the smallest honest answer.
+    assert _quota("", {"": "50000 100000"}) == 1
+    assert _quota("", {"": "garbage"}) is None
+
+
+@pytest.mark.quick
+def test_cgroup_quota_walks_up_from_the_process_cgroup(tmp_path, monkeypatch):
+    """A limit on an ancestor cgroup counts, not just one at the root.
+
+    Where the limit sits depends on the cgroup namespace. Docker and Kubernetes
+    give one, so the limit is at the root; Slurm and a systemd login session do
+    not, and the root then has no `cpu.max` whatsoever. Measured on a real
+    cgroup-v2 login node: the process sat in
+    `/user.slice/user-N.slice/session-N.scope` and only those three levels
+    carried the file. Reading the root alone reports every such host as
+    unlimited, which is the case this pins.
+    """
+    scope = "user.slice/user-1.slice/session-9.scope"
+
+    trees = itertools.count()
+
+    def _quota(own, limits):
+        # A fresh tree per case, so a stale `cpu.max` cannot answer for the next.
+        _fake_cgroup(monkeypatch, tmp_path / f"case{next(trees)}", own, limits)
+        return pipeline._cgroup_v2_cpu_quota()
+
+    # The nested-scope shape, with nothing at the root at all.
+    assert _quota(scope, {scope: "400000 100000"}) == 4
+
+    # The tightest limit in the chain governs, wherever it sits.
+    assert _quota(scope, {scope: "1600000 100000", "user.slice": "400000 100000"}) == 4
+    assert _quota(scope, {scope: "400000 100000", "user.slice": "1600000 100000"}) == 4
+
+    # An unlimited ancestor does not mask a limited descendant.
+    assert _quota(scope, {scope: "400000 100000", "user.slice": "max 100000"}) == 4
+
+    # Unlimited the whole way up is genuinely unlimited.
+    assert _quota(scope, {scope: "max 100000", "": "max 100000"}) is None
+
+
+@pytest.mark.quick
+def test_cgroup_quota_is_none_without_a_v2_cgroup(tmp_path, monkeypatch):
+    """A cgroup-v1-only host has no `0::` line, and reports no limit."""
+    proc = tmp_path / "proc-self-cgroup"
+    proc.write_text("3:cpu,cpuacct:/some/slice\n1:name=systemd:/\n", encoding="utf-8")
+    root = tmp_path / "cgroup"
+    root.mkdir()
+    (root / "cpu.max").write_text("800000 100000", encoding="utf-8")
+
+    mapping = {"/sys/fs/cgroup": root, "/proc/self/cgroup": proc}
+    monkeypatch.setattr(pipeline, "Path", lambda p: mapping.get(str(p), Path(p)))
+
+    assert pipeline._cgroup_v2_cpu_quota() is None
 
 
 _HSACO_SOURCE = "hsaco_kernel.cpp"
@@ -598,18 +751,21 @@ def _synthetic_job(corpus, block):
 def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
     """The pack stops on the first failure in walk order and cancels the rest.
 
-    Only the first job fails, and every other one sleeps, so a pool that ran the
+    Exactly one job fails, and every other one sleeps, so a pool that ran the
     queue to the end is distinguishable from one that abandoned it. The attempt
     count is bounded rather than pinned: the executor dispatches a few jobs
     beyond the running two before the parent observes the failure, so the exact
     number depends on scheduling even though `< len(jobs)` does not.
 
+    The failing job is deliberately not the first. With `jobs[0]` failing, no
+    job ever succeeds, so the empty-cache assertions below hold by construction
+    and would survive the caches being filled on the failure path.
+
     The job list is synthesised rather than taken from the corpus, which yields
-    six. Six is below the executor's own dispatch depth -- workers plus queued
-    calls -- so every job reaches a worker before the first result is consumed
-    and cancellation has nothing left to cancel. The corpus is still what backs
-    the selection tests; here the subject is the pool, and a queue long enough
-    for the property to exist is part of the setup.
+    six -- below the executor's own dispatch depth, so every job would reach a
+    worker before the first result is consumed and cancellation would have
+    nothing left to cancel. A queue long enough for the property to exist is
+    part of the setup.
     """
     corpus = _write_corpus(tmp_path / "fail-fast", hip_only=True)
     monkeypatch.setenv("HKP_PACK_JOBS", "2")
@@ -620,7 +776,8 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
 
     tally = tmp_path / "tally"
     tally.mkdir()
-    hipcc = _stub_hipcc(tmp_path, fail_out=f"{jobs[0].vk}.co", delay=1.0, tally=tally)
+    failing = jobs[3]
+    hipcc = _stub_hipcc(tmp_path, fail_out=f"{failing.vk}.co", delay=1.0, tally=tally)
 
     variant_co = {}
     variant_symbol = {}
@@ -636,8 +793,11 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
             log=_silent,
         )
 
+    # Named by UKD id, which a reader can look up in the descriptors. The vk is
+    # not asserted absent: the producer's stderr is quoted in the detail, and
+    # the stub names the output file it refused, which is vk-derived.
     message = str(excinfo.value)
-    assert f"variant '{jobs[0].vk}'" in message
+    assert f"variant '{failing.ukd['id']}'" in message
     assert TARGET_ARCH in message
 
     attempts = len(list(tally.iterdir()))
@@ -647,8 +807,9 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
     )
 
     # A half-filled cache is worse than an empty one: the walk skips a compile
-    # for any key it finds, so a surviving entry would suppress the compile of
-    # an artefact this run never produced.
+    # for any key it finds, so a surviving entry suppresses the compile of an
+    # artefact this run never produced. Three jobs succeed before the failure,
+    # so there is something for a leak to leave behind.
     assert variant_co == {}
     assert variant_symbol == {}
 
@@ -694,10 +855,11 @@ def test_worker_inherits_parent_sys_path():
     `forkserver`, so a worker can import `hkp_pack` and the rocKE platform
     without a `PYTHONPATH` export.
 
-    What it catches is the constraint that rides on that. Workers
-    snapshot `sys.path` at process start, so the pool must be created after all
-    parent-side path setup and must never be cached in a module global -- a
-    reused pool would freeze a stale path list from whenever it was first built.
+    A probe of the interpreter rather than of this package -- no change to
+    `pipeline.py` can fail it. Should a future interpreter stop propagating
+    `sys.path`, every rocKE variant fails to import in its worker, and this
+    says why. The related constraint it does not check, that the pool must be
+    built after parent-side path setup, is documented at the construction site.
     """
     expected = _conftest_inserted_paths()
     assert expected, "conftest inserts at least the hkp_pack package root"
@@ -771,7 +933,7 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
 
     message = str(excinfo.value)
     assert re.search(rf"variant '\S+' failed to compile for {TARGET_ARCH}", message)
-    assert f"'{jobs[0].vk}'" in message
+    assert f"'{jobs[0].ukd['id']}'" in message
     assert "module not importable" in message
 
 
@@ -940,3 +1102,75 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
     # Distinct sources and distinct build blocks must not collapse onto one
     # artifact: equal bytes here would mean the key space, not the pool, is wrong.
     assert len({co.read_bytes() for co in variant_co.values()}) == len(variant_co)
+
+
+def _staged_tree(corpus, out_dir):
+    """Every staged file under `out_dir`, keyed by path relative to it."""
+    pipeline.compile_intermediate(
+        load_flat_input(corpus, log=_silent),
+        corpus,
+        TARGET_ARCH,
+        _stub_hipcc(out_dir.parent),
+        out_dir,
+        log=_silent,
+    )
+    return {
+        p.relative_to(out_dir).as_posix(): p.read_bytes()
+        for p in sorted(out_dir.rglob("*"))
+        if p.is_file()
+    }
+
+
+@pytest.mark.quick
+def test_serial_and_parallel_stage_identical_trees(tmp_path, monkeypatch):
+    """Serial and parallel packs stage byte-identical trees.
+
+    Asserted over the whole staged tree rather than the two caches, because the
+    caches are the mechanism and the tree is the product. A prewarm writing its
+    artefacts somewhere the walk does not read would leave both caches looking
+    correct, and every other test here passing, while the tree diverged.
+    """
+    corpus = _write_corpus(tmp_path / "equiv", hip_only=True)
+
+    monkeypatch.setenv("HKP_PACK_JOBS", "1")
+    serial = _staged_tree(corpus, tmp_path / "inter-serial")
+    monkeypatch.setenv("HKP_PACK_JOBS", "4")
+    parallel = _staged_tree(corpus, tmp_path / "inter-parallel")
+
+    # Pinned against the corpus so a staging change that silently drops files
+    # cannot make two empty trees compare equal.
+    assert len(serial) == HIP_ONLY_EXPECTED_CO_COUNT + HIP_ONLY_EXPECTED_KDP_JSON_COUNT
+    assert serial == parallel
+
+
+@pytest.mark.quick
+def test_pack_jobs_one_starts_no_pool(tmp_path, monkeypatch):
+    """`HKP_PACK_JOBS=1` returns before any pool is constructed.
+
+    The documented escape hatch, and the only path with a serial traceback.
+    Relaxing the guard to `workers < 1` would start a one-worker pool that
+    still packs correctly, so no assertion on the output can catch it -- the
+    pool's absence is the property, so it is asserted directly.
+    """
+    corpus = _write_corpus(tmp_path / "serial", hip_only=True)
+    monkeypatch.setenv("HKP_PACK_JOBS", "1")
+
+    def _no_pool(*_args, **_kwargs):
+        raise AssertionError("HKP_PACK_JOBS=1 built a process pool")
+
+    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _no_pool)
+
+    variant_co = {}
+    pipeline._prewarm_variants(
+        load_flat_input(corpus, log=_silent),
+        corpus,
+        TARGET_ARCH,
+        _stub_hipcc(tmp_path),
+        tmp_path / "inter",
+        variant_co,
+        {},
+        log=_silent,
+    )
+
+    # The walk, not the prewarm, compiles everything on this path.
+    assert variant_co == {}

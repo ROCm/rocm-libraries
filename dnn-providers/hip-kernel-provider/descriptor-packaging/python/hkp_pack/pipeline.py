@@ -366,7 +366,7 @@ def _compile_one_variant(job):
             # The hip symbol is authored, not captured from the artifact, which
             # is why it is read here rather than returned by the producer.
             symbol = ks["entry"]
-        else:
+        elif job.kind == "rocke":
             co_path, symbol = compile_rocke_variant(
                 ks["source"],
                 ks["builder"],
@@ -374,40 +374,136 @@ def _compile_one_variant(job):
                 job.arch,
                 job.out_dir,
             )
+        else:
+            # Unreachable while `_variant_key_for` keys only these two kinds. A
+            # raise rather than a fall-through, because a third keyable kind
+            # added there would otherwise compile as rocke and yield a plausible
+            # artefact from the wrong producer.
+            raise HkpPackError(
+                f"no variant compiler for kernel source kind '{job.kind}'"
+            )
     except Exception as exc:
         return job.vk, None, None, f"{type(exc).__name__}: {exc}"
     return job.vk, str(co_path), symbol, None
 
 
+def _cgroup_v2_cpu_quota():
+    """Whole CPUs allowed by cgroup v2, or None when unlimited or absent.
+
+    Read from the filesystem because no Python API reports it. A container
+    given `--cpus=8` keeps a full affinity mask and is throttled instead, so
+    this is the only source that sees the limit at all.
+
+    Walked from this process's own cgroup up to the root, taking the tightest
+    limit, because where the limit sits depends on whether a cgroup namespace
+    is in play. Docker and Kubernetes give one, so the container's own cgroup
+    appears as the root and `/sys/fs/cgroup/cpu.max` carries the limit. Slurm
+    and a plain systemd login session do not, so the process sits in a nested
+    scope and the root has no `cpu.max` at all -- reading only the root would
+    report "unlimited" for every limited job on such a host.
+    """
+    root = Path("/sys/fs/cgroup")
+    try:
+        # The v2 line is `0::<path>`; a v1-only host has no such line.
+        rel = next(
+            line[3:].strip().lstrip("/")
+            for line in Path("/proc/self/cgroup").read_text().splitlines()
+            if line.startswith("0::")
+        )
+    except (OSError, StopIteration):
+        return None
+
+    quotas = []
+    node = root.joinpath(rel) if rel else root
+    while True:
+        quotas.append(_read_cpu_max(node / "cpu.max"))
+        if node == root or node.parent == node:
+            break
+        node = node.parent
+
+    quotas = [q for q in quotas if q]
+    return min(quotas) if quotas else None
+
+
+def _read_cpu_max(path):
+    """Whole CPUs from one `cpu.max` file, or None when unlimited or absent."""
+    try:
+        quota, period = path.read_text().split()
+    except (OSError, ValueError):
+        return None
+    if quota == "max":
+        return None
+    try:
+        # Floors to at least one: a sub-CPU allocation would otherwise disable
+        # the pool entirely.
+        return max(1, int(quota) // int(period))
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
+def _cpu_budget():
+    """CPUs this process may actually use, rather than the host's core count.
+
+    `os.cpu_count()` reports the machine, but a pack under Docker, Kubernetes
+    or Slurm is usually given a slice of it, and one worker per host core
+    oversubscribes that slice badly. Each source below sees a limit the others
+    cannot, so the smallest wins.
+    """
+    limits = [_cgroup_v2_cpu_quota()]
+
+    process_cpu_count = getattr(os, "process_cpu_count", None)
+    if process_cpu_count is not None:
+        # 3.13+, and honours the affinity mask on every platform that has one.
+        limits.append(process_cpu_count())
+    elif hasattr(os, "sched_getaffinity"):
+        # Linux only, so it cannot be the only affinity source -- this packer
+        # runs on Windows too, where the host count below is all there is.
+        limits.append(len(os.sched_getaffinity(0)))
+
+    limits = [limit for limit in limits if limit]
+    return min(limits) if limits else (os.cpu_count() or 1)
+
+
 def _pack_jobs():
     """Worker count for the prewarm, from `HKP_PACK_JOBS`.
 
-    Unset means `min(32, os.cpu_count() or 1)`. The cap is memory, not cores:
-    each worker holds a full rocke+comgr import, so a 384-core host would
-    exhaust memory long before it ran out of cores.
+    Unset means `min(32, _cpu_budget())`. The cap is per-worker startup, not
+    memory: a worker costs roughly 250 ms to stand up its rocke+comgr import,
+    so past a few dozen the next worker costs more than the compile work it
+    takes on. Measured on gfx942, a 1672-variant pack bottoms out near 48
+    workers -- 19.5 s against 402 s serial -- and by 128 is back to its
+    16-worker time, while peaking at 2.2 GiB throughout.
 
-    `HKP_PACK_JOBS=1` forces serial execution -- the prewarm returns without
-    starting a pool and the walk compiles every variant itself, which is the
-    escape hatch for debugging a compile failure with a single clean traceback.
+    32 is a compromise, not an optimum: the turnover moves with pack size, and
+    the same host wants about 12 workers for 200 variants and 48 for 1672.
+    Overshooting costs far more than undershooting -- 200 variants take 6.8 s
+    on 12 workers and 16.9 s on 32 -- so the constant sits below the large-pack
+    optimum deliberately.
 
-    A value that is not a non-negative integer is a hard error rather than a
-    silent fallback: a typo that quietly restored 32 workers would look like the
-    knob was honoured. Negatives are rejected rather than clamped for the same
-    reason -- clamping lands them on the serial path, so `-4` would read as
-    "compiled on 4 workers" and run on one.
+    `HKP_PACK_JOBS=1` forces serial execution: the prewarm returns without a
+    pool and the walk compiles every variant itself, which is the escape hatch
+    for debugging a compile failure with a single clean traceback.
+
+    Anything that is not an integer of 1 or more is a hard error, including `0`
+    and negatives. Neither is clamped, because clamping lands them on the serial
+    path: `-4` would read as "compiled on 4 workers" and run on one, and `0`
+    means "auto" elsewhere in this repository while it would mean "serial" here.
+
+    An explicit value is never reduced to `_cpu_budget()` -- choosing to
+    oversubscribe is the caller's call to make.
 
     An environment variable rather than a CLI flag or a CMake cache variable
     because it reaches through the CMake custom command with no plumbing.
     """
     env = os.environ.get("HKP_PACK_JOBS")
     if env is None:
-        return min(32, os.cpu_count() or 1)
+        return min(32, _cpu_budget())
     try:
         jobs = int(env)
     except ValueError:
         raise HkpPackError(f"HKP_PACK_JOBS must be an integer, got '{env}'") from None
-    if jobs < 0:
-        raise HkpPackError(f"HKP_PACK_JOBS must not be negative, got {jobs}")
+    if jobs < 1:
+        raise HkpPackError(f"HKP_PACK_JOBS must be 1 or greater, got {jobs}")
     return jobs
 
 
@@ -496,23 +592,28 @@ def _prewarm_variants(
         # arch's work.
         raise HkpPackError(
             f"the variant compile pool for {arch} failed "
-            f"({type(exc).__name__}: {exc}); a worker process died, "
-            "usually from memory exhaustion -- retry with a lower "
-            "HKP_PACK_JOBS"
+            f"({type(exc).__name__}: {exc}); a worker process died -- an OOM "
+            "kill, a crash inside the toolchain, or an interrupt. Retrying "
+            "with a lower HKP_PACK_JOBS addresses the first of those"
         ) from exc
     finally:
-        # `cancel_futures` is the whole of fail-fast: `map` submits every job up
-        # front, so without it a plain shutdown would wait out the queue the
-        # break was meant to abandon. Jobs already running still finish, which
-        # bounds the waste at the worker count rather than the pack size.
+        # `map` submits every job up front, so the queue outlives the break.
+        # Finalising its result generator already cancels the pending futures;
+        # `cancel_futures` restates that next to the `wait` it qualifies. Jobs
+        # already running finish either way, bounding the waste at the worker
+        # count rather than the pack size.
         pool.shutdown(wait=True, cancel_futures=True)
 
     if failure is not None:
         # One variant named, no failure count: the pack stops at the first
-        # failure, so any count would describe how far the pool happened to get
-        # rather than how many variants are broken.
+        # failure, so a count would describe how far the pool happened to get
+        # rather than how many variants are broken. Named by UKD id, which is
+        # what a reader can look up in the descriptors; the content-hash key is
+        # not.
+        named = next((job.ukd.get("id") for job in jobs if job.vk == failure[0]), None)
         raise HkpPackError(
-            f"variant '{failure[0]}' failed to compile for {arch}: {failure[3]}"
+            f"variant '{named or failure[0]}' failed to compile for {arch}: "
+            f"{failure[3]}"
         )
 
     for vk, co_path, symbol, _err in results:
