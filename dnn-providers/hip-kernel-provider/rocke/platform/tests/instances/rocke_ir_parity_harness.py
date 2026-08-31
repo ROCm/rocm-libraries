@@ -573,6 +573,20 @@ def build_deep(kind, arch, **kw):
     return _build
 
 
+def build_grouped_gemm_case(name, arch, m, n, k, e):
+    def _build():
+        from rocke.instances.gfx950.grouped_gemm import (
+            GroupedGemmSpec,
+            build_grouped_gemm,
+        )
+
+        spec = GroupedGemmSpec(M=m, N=n, K=k, E=e, name=name)
+        kernel, _bs, _tm, _tn = build_grouped_gemm(spec)
+        return kernel
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -1027,6 +1041,10 @@ def cases():
     # wgrad2: 1x1 conv (N2 H16 W16 C32 K32, no filter spatial).
     wgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
     wgrad2 = (2, 16, 16, 32, 32, 1, 1, 1, 1, 0, 0, 1, 1)
+    # wgrad_g4: grouped 3x3 conv (N1 H8 W8 C64 K64 Y3 X3, groups=4 -> cpg=kpg=16).
+    # 14th tuple element sets ConvProblem.groups. Exercises the grouped
+    # (grid-per-group) dW IR.
+    wgrad_g4 = (1, 8, 8, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 4)
     add(
         "conv_wgrad",
         "conv_wgrad/gfx942/n1h8c16k32r3",
@@ -1042,6 +1060,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1060,7 +1079,7 @@ def cases():
             tile_n=64,
             tile_k=32,
             pipeline="mem",
-            epilogue="default",
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1078,6 +1097,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1096,6 +1116,7 @@ def cases():
             tile_n=32,
             tile_k=16,
             split_k=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1113,6 +1134,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            dtype_d="fp32",
         ),
     )
     add(
@@ -1130,6 +1152,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            dtype_d="fp32",
         ),
     )
     # gfx90a wgrad mirrors the gfx942 MFMA path.
@@ -1148,6 +1171,124 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
+        ),
+    )
+    # Grouped wgrad (grid-per-group, Gm=1) and group-merging (Gm=2). Guards the
+    # block-diagonal dW IR against silent drift. MFMA-only, so gfx942/gfx950.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_g4",
+            "gfx942",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            epilogue="cshuffle",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            epilogue="cshuffle",
+        ),
+    )
+    # Grouped + cshuffle epilogue (MFMA): the LDS-staged store threads the
+    # per-group k_out fold (group*kpg) and derives its store-vec from cpg.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_cshuffle",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_cshuffle",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            epilogue="cshuffle",
+        ),
+    )
+    # Grouped + split-K + cshuffle (MFMA): the group and the K-slice share
+    # block_id_z (z = groups*split_k); cshuffle required for fp16 paired atomics.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_spk4",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            split_k=4,
+            epilogue="cshuffle",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c64k64r3_g4_spk4",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_g4_spk4",
+            "gfx942",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            split_k=4,
+            epilogue="cshuffle",
+        ),
+    )
+    # gfx1250 WMMA grouped (wave32, 16x16x32 -- its only fp16/bf16 atom).
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1250/n1h8c64k64r3_g4",
+        "gfx1250",
+        build_conv_wgrad(
+            "irhash_wgrad_1250_g4",
+            "gfx1250",
+            wgrad_g4,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            dtype_d="fp32",
         ),
     )
 
@@ -1158,6 +1299,11 @@ def cases():
     # ConvProblem positional args: (N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW)
     dgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)  # stride=1
     dgrad2 = (2, 16, 16, 32, 32, 3, 3, 2, 2, 1, 1, 1, 1)  # stride=2, 4 sub-GEMMs
+    # Grouped dgrad (14th tuple element = ConvProblem.groups). C=K=64, groups=4
+    # -> cpg=kpg=16; grid-per-group on blockIdx.y (byte-identical to groups=1
+    # for the ungrouped path).
+    dgrad_g4 = (1, 8, 8, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 4)  # stride=1 grouped
+    dgrad_g4_s2 = (1, 8, 8, 64, 64, 3, 3, 2, 2, 1, 1, 1, 1, 4)  # stride=2 grouped tilde
     add(
         "conv_dgrad",
         "conv_dgrad/gfx942/n1h8c16k32r3_s1",
@@ -1260,6 +1406,94 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=64,
+        ),
+    )
+    # Grouped dgrad (groups=4, cpg=kpg=16) -- grid-per-group on blockIdx.y.
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx942/n1h8c64k64r3_g4",
+        "gfx942",
+        build_dgrad(
+            "irhash_dgrad_942_g4_s1",
+            "gfx942",
+            dgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=8,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx942/n1h8c64k64r3_g4_s2",
+        "gfx942",
+        build_dgrad(
+            "irhash_dgrad_942_g4_s2",
+            "gfx942",
+            dgrad_g4_s2,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n1h8c64k64r3_g4",
+        "gfx950",
+        build_dgrad(
+            "irhash_dgrad_950_g4_s1",
+            "gfx950",
+            dgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    # gfx1151 WMMA grouped (wave32, 16x16x16) -- stride=1 only.
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx1151/n1h8c64k64r3_g4",
+        "gfx1151",
+        build_dgrad(
+            "irhash_dgrad_1151_g4_s1",
+            "gfx1151",
+            dgrad_g4,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    # gfx1250 WMMA grouped (wave32, 16x16x32 -- its only fp16/bf16 atom).
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx1250/n1h8c64k64r3_g4",
+        "gfx1250",
+        build_dgrad(
+            "irhash_dgrad_1250_g4_s1",
+            "gfx1250",
+            dgrad_g4,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
         ),
     )
 
@@ -1806,6 +2040,18 @@ def cases():
         "attention_d256/gfx942/4warp_gqa",
         "gfx942",
         build_attention_d256_gfx942("gfx942"),
+    )
+
+    # Grouped GEMM: hand-authored dense grouped bf16 GEMM (gfx950 / CDNA4),
+    # production lever defaults. Python-lowered only (no C++ engine mirror), so
+    # this pins the Python emitter's IR; re-bless when its codegen changes.
+    add(
+        "grouped_gemm",
+        "grouped_gemm/gfx950/m8192n1024k512e64",
+        "gfx950",
+        build_grouped_gemm_case(
+            "irhash_grouped_gemm_950", "gfx950", 8192, 1024, 512, 64
+        ),
     )
     return out
 
