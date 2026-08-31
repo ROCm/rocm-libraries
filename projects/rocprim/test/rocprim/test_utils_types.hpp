@@ -335,7 +335,13 @@ inline std::string type_tag()
         return "CustomHuge1024Int";
     else if constexpr(std::is_same_v<T, common::custom_type<long long, long long, true>>)
         return "CustomInt64x2";
+    // custom_type<uint64_t,...> resolves to unsigned long on LP64 (Linux) and to
+    // unsigned long long on LLP64 (Windows); both must yield the same name.
     else if constexpr(std::is_same_v<T, common::custom_type<unsigned long, unsigned long, true>>)
+        return "CustomUint64x2";
+    else if constexpr(std::is_same_v<
+                          T,
+                          common::custom_type<unsigned long long, unsigned long long, true>>)
         return "CustomUint64x2";
 #if ROCPRIM_HAS_INT128_SUPPORT
     else if constexpr(std::is_same_v<T, rocprim::uint128_t>) return "Uint128";
