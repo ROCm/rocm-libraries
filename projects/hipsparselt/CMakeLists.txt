@@ -176,7 +176,7 @@ if(HIPSPARSELT_ENABLE_HIP)
     endif()
 
     find_package(hipblaslt CONFIG QUIET)
-    if(hipblaslt_FOUND)
+    if(hipblaslt_FOUND AND COMMAND create_device_library)
         message(STATUS "hipSPARSELt uses support from the installed hipBLASLt package.")
     else()
         if(NOT EXISTS "${HIPBLASLT_TENSILELITE_PATH}/CMakeLists.txt")
@@ -186,35 +186,43 @@ if(HIPSPARSELT_ENABLE_HIP)
         endif()
 
         message(STATUS
-            "hipBLASLt package not found; building its source-tree support libraries for hipSPARSELt.")
+            "Installed hipBLASLt codegen support not found; building only the required source-tree support for hipSPARSELt.")
         include("${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt/cmake/hipblaslt_codegen.cmake")
         find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
-        if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
-            set(HIPBLASLT_ENABLE_YAML ON)
-            find_package(LLVM REQUIRED)
-        else()
-            set(HIPBLASLT_ENABLE_YAML OFF)
-            find_package(msgpack-cxx CONFIG)
-            if(msgpack-cxx_FOUND)
-                set(hipblaslt_msgpack_target msgpack-cxx)
-            else()
-                find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
-                set(hipblaslt_msgpack_target msgpackc-cxx)
-            endif()
-        endif()
         set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON)
         set(HIPBLASLT_PYTHON_DEPS _rocisa)
-        set(TENSILELITE_ENABLE_HOST ON)
-        set(TENSILELITE_ENABLE_CLIENT OFF)
-        set(TENSILELITE_BUILD_TESTING OFF)
         block()
             set(BUILD_SHARED_LIBS OFF)
             set(BUILD_TESTING OFF)
-            add_subdirectory(
-                "${HIPBLASLT_TENSILELITE_PATH}"
-                "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/tensilelite"
-                EXCLUDE_FROM_ALL
-            )
+            if(TARGET roc::tensilelite-host)
+                add_subdirectory(
+                    "${HIPBLASLT_TENSILELITE_PATH}/rocisa"
+                    "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/rocisa"
+                    EXCLUDE_FROM_ALL
+                )
+            else()
+                if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
+                    set(HIPBLASLT_ENABLE_YAML ON)
+                    find_package(LLVM REQUIRED)
+                else()
+                    set(HIPBLASLT_ENABLE_YAML OFF)
+                    find_package(msgpack-cxx CONFIG)
+                    if(msgpack-cxx_FOUND)
+                        set(hipblaslt_msgpack_target msgpack-cxx)
+                    else()
+                        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+                        set(hipblaslt_msgpack_target msgpackc-cxx)
+                    endif()
+                endif()
+                set(TENSILELITE_ENABLE_HOST ON)
+                set(TENSILELITE_ENABLE_CLIENT OFF)
+                set(TENSILELITE_BUILD_TESTING OFF)
+                add_subdirectory(
+                    "${HIPBLASLT_TENSILELITE_PATH}"
+                    "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/tensilelite"
+                    EXCLUDE_FROM_ALL
+                )
+            endif()
         endblock()
     endif()
 
