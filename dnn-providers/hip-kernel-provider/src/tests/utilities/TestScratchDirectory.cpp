@@ -7,8 +7,6 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
-
 #include "tests/utilities/ScratchDirectory.hpp"
 
 /**
@@ -22,7 +20,6 @@ namespace
 {
 
 using hipdnn_test_sdk::utilities::ScopedDirectory;
-using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
 
 constexpr const char* SCRATCH_LABEL = "scratchsuite";
 
@@ -33,27 +30,6 @@ constexpr const char* SCRATCH_LABEL = "scratchsuite";
     EXPECT_NE(separator, std::string::npos) << name;
     return std::stoul(name.substr(separator + 1));
 }
-
-/// Points every variable temp_directory_path() consults at one place. Windows reads TMP
-/// then TEMP; libstdc++ reads TMPDIR, TMP, TEMP, TEMPDIR. Setting all four means the test
-/// does not depend on which of them the standard library happens to prefer.
-class ScopedTempDirOverride
-{
-public:
-    explicit ScopedTempDirOverride(const std::string& value)
-        : _tmpdir("TMPDIR", value)
-        , _tmp("TMP", value)
-        , _temp("TEMP", value)
-        , _tempdir("TEMPDIR", value)
-    {
-    }
-
-private:
-    ScopedEnvironmentVariableSetter _tmpdir;
-    ScopedEnvironmentVariableSetter _tmp;
-    ScopedEnvironmentVariableSetter _temp;
-    ScopedEnvironmentVariableSetter _tempdir;
-};
 
 TEST(TestScratchDirectory, WalksPastANameSomethingElseAlreadyHoldsAndLeavesItIntact)
 {
@@ -97,6 +73,8 @@ TEST(TestScratchDirectory, NamesTheDirectoryAfterItsLabelAndACounter)
     EXPECT_TRUE(std::filesystem::is_directory(claimed.path()));
 }
 
+// The base is named directly rather than pointed at through TMP/TEMP/TMPDIR: an override the
+// platform ignores would leave this claiming under the real temp dir. See ScratchDirectory.hpp.
 TEST(TestScratchDirectory, ReportsAnUnusableTempDirectoryRatherThanNameExhaustion)
 {
     const ScopedDirectory real = claimScratchDirectory(SCRATCH_LABEL);
@@ -104,8 +82,8 @@ TEST(TestScratchDirectory, ReportsAnUnusableTempDirectoryRatherThanNameExhaustio
     ASSERT_FALSE(std::filesystem::exists(absent));
 
     // With the two catches ordered the other way round, this reports as name exhaustion.
-    const ScopedTempDirOverride override(absent.string());
-    EXPECT_THROW((void)claimScratchDirectory(SCRATCH_LABEL), std::filesystem::filesystem_error);
+    EXPECT_THROW((void)claimScratchDirectoryUnder(absent, SCRATCH_LABEL),
+                 std::filesystem::filesystem_error);
 }
 
 } // namespace
