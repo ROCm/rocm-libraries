@@ -694,14 +694,13 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
     EXPECT_GT(ws, 0u) << "Dynamic mode with partial tiles must request workspace";
 
-    // The workspace must be at least partialTileSize; the per-XCD work-queue
-    // region (cacheLineBytes * numXCD = 128 * 8 = 1024 B on gfx942/gfx950) is
-    // included by both query and launch so they agree.
+    // The workspace must cover the partial tiles. Query and launch agree
+    // because both size it from partialTileSize(grid).
     EXPECT_GE(ws, env.solution.partialTileSize(grid))
         << "Workspace must cover at least partialTileSize(grid)";
 }
 
-TEST(StreamK5WorkspaceRegressionTest, StaticModeOmitsQueueRegion)
+TEST(StreamK5WorkspaceRegressionTest, StaticModeWorkspaceIsPartialTilesOnly)
 {
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
@@ -720,8 +719,8 @@ TEST(StreamK5WorkspaceRegressionTest, StaticModeOmitsQueueRegion)
 
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
 
-    // Static (SK3) path does not use the work-queue, so workspace
-    // should be exactly partialTileSize — no per-XCD work-queue region.
+    // The static (SK3) path sizes the workspace from the partial tiles alone,
+    // so it must come out exactly partialTileSize(staticGrid).
     EXPECT_EQ(ws, env.solution.partialTileSize(grid))
         << "OFF workspace must equal partialTileSize(staticGrid)";
 }
@@ -947,8 +946,9 @@ TEST(StreamKDynamicQueueXcdGateTest, MissingAnalyticalHardwareIsUnsupported)
     // Unknown hardware (null analyticalHardware -> unknown NUM_XCD / baked
     // queue count == 0) must be treated as UNSUPPORTED so the dynamic-queue
     // solution is excluded from selection and a non-dynamic-queue solution
-    // serves the GEMM, rather than staying selectable while the per-XCD counter
-    // workspace is sized with an unknown (0) queue count (under-allocation).
+    // serves the GEMM, rather than staying selectable while the flag-region
+    // clamp in getSKGrid computes its work-queue prefix from an unknown (0)
+    // queue count and so leaves the grid bounded by the whole region.
     hip::HipAMDGPU noAnalytical;
     noAnalytical.processor     = AMDGPU::Processor::gfx942;
     noAnalytical.deviceName    = "test-gfx942-no-analytical";

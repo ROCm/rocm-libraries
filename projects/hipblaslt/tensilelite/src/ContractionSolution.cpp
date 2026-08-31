@@ -95,7 +95,7 @@ namespace TensileLite
         // the codegen mirrors via rocisa archCaps["CacheLineBytes"]
         // (StreamK.py _wsQueueConstants). Host (origami) and codegen (archCaps)
         // strides are two mirrors of the one origami cache-line size, so the
-        // workspace the host reserves matches the layout the kernel addresses.
+        // flag region the host sizes matches the layout the kernel addresses.
         // Returns 0 when the architecture cannot be determined.
         inline size_t streamKPerQueueStrideBytes(Hardware const& hardware)
         {
@@ -133,10 +133,13 @@ namespace TensileLite
         // NUM_XCD != baked (e.g. MI300A's 6 XCDs, or a 4-XCD partition of an
         // 8-XCD gfx942). Unknown hardware is treated as UNSUPPORTED: the
         // dynamic-queue solution is then excluded from selection and a
-        // non-dynamic-queue solution serves the GEMM, rather than staying
-        // selectable while the per-XCD counter workspace is sized with an
-        // unknown (0) queue count (which would under-allocate). Kept isolated
-        // here so it stays trivially unit-testable (see CuCount_test.cpp).
+        // non-dynamic-queue solution serves the GEMM. That exclusion is what
+        // keeps the flag-region clamp in getSKGrid honest -- it subtracts the
+        // work-queue prefix from the grid bound, and on unknown hardware that
+        // prefix comes back 0, so the clamp would silently fall through to the
+        // full StreamKFlagElements bound and hand the launch grid past the
+        // flags its kernel actually indexes. Kept isolated here so it stays
+        // trivially unit-testable (see CuCount_test.cpp).
         inline bool streamKDynamicQueueUnsupported(Hardware const& hardware)
         {
             auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
@@ -3548,16 +3551,18 @@ namespace TensileLite
             if(dynamicQueuePath && streamKDynamicQueueUnsupported(hardware))
             {
                 warnStreamKDynamicQueueUnsupportedOnce(hardware);
-                // Fail EARLY -- before workspace sizing / kernel-arg packing --
+                // Fail EARLY -- before grid resolution / kernel-arg packing --
                 // when NUM_XCD is unknown (baked queue count == 0, e.g. missing
-                // analyticalHardware). Sizing the per-XCD counter region with a
-                // 0 queue count would under-allocate the workspace the kernel
-                // writes; reject with an actionable message instead.
+                // analyticalHardware). The kernel puts one counter per XCD at
+                // the base of the flag region and starts its ready flags after
+                // them, so an unknown queue count leaves getSKGrid unable to
+                // tell how many flags are actually left to index; reject with
+                // an actionable message instead.
                 if(streamKBakedQueueCount(hardware) == 0)
                     throw std::runtime_error(
                         "hipBLASLt Error: StreamK dynamic-queue (work-stealing) requires a known "
-                        "NUM_XCD (analyticalHardware unavailable); refusing to size the per-XCD "
-                        "counter workspace with an unknown queue count. "
+                        "NUM_XCD (analyticalHardware unavailable); refusing to bound the StreamK "
+                        "grid against a flag region whose per-XCD counter prefix is unknown. "
                         "Select a non-work-stealing solution instead.");
                 throw std::runtime_error(
                     "hipBLASLt Error: StreamK dynamic-queue (work-stealing) solution selected on a "
@@ -4027,13 +4032,10 @@ namespace TensileLite
                 }
                 else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP && !forceDPOnly))
                 {
+                    // The workspace holds the partial tiles only. The per-XCD
+                    // work-queue counters live at the base of the flag buffer
+                    // (AddressFlags), not here, so they need no room in it.
                     size_t idealWorkspace = partialTileSize(skGrid);
-                    // Reserve the per-XCD work-queue region for the dynamic-queue
-                    // path. This may slightly over-report on a device that falls
-                    // back to tree reduction (e.g. MI300A), which is safe (never
-                    // under-sized).
-                    if(streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
-                        idealWorkspace += streamKQueueRegionBytes(hardware);
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
                     if(idealWorkspace <= problem.workspaceSize())
@@ -5063,10 +5065,11 @@ namespace TensileLite
            && (reduction == origami::reduction_t::parallel
                || (tiles % grid != 0 && !streamKDP && !forceDPOnly)))
         {
-            needPartials   = true;
+            needPartials = true;
+            // The workspace holds the partial tiles only. The per-XCD work-queue
+            // counters live at the base of the flag buffer (AddressFlags), not
+            // here, so they need no room in it.
             idealWorkspace = partialTileSize(grid);
-            if(isDynamic)
-                idealWorkspace += streamKQueueRegionBytes(hardware);
             if(idealWorkspace > problem.workspaceSize())
             {
                 reduction                  = origami::reduction_t::tree;
