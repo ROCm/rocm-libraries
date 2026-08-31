@@ -39,13 +39,7 @@ protected:
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
-
-        auto path
-            = std::filesystem::temp_directory_path()
-              / ("vmode_test_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        _scopedDir.emplace(scratch::makeDir("vmode_test_"));
         _tempDir = _scopedDir->path();
     }
 
@@ -64,11 +58,7 @@ protected:
         IntegrationBundleVerificationHarness harness(
             _mocks.dependencies(testing_support::hostPolicy(mode)));
         harness.setBundle(std::move(bundle), "vmode-test-bundle");
-
-        const ::testing::ScopedFakeTestPartResultReporter reporter(
-            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
-        harness.SetUp();
-        harness.TestBody();
+        testing_support::driveHarness(harness, results);
     }
 
     void useMatchingEngine()

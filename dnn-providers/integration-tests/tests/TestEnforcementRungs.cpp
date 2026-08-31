@@ -55,13 +55,7 @@ protected:
     void SetUp() override
     {
         ensureTestConfigInitialized();
-
-        const auto path
-            = std::filesystem::temp_directory_path()
-              / ("enforcement_rungs_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        _scopedDir.emplace(scratch::makeDir("enforcement_rungs_"));
         _tempDir = _scopedDir->path();
     }
 
@@ -73,17 +67,6 @@ protected:
         auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
         bundle->metadata.enforcementLevel = level;
         return bundle;
-    }
-
-    // Runs the real SetUp()/TestBody() through a fake reporter, exactly as the
-    // deviceless harness suites already do.
-    static void drive(IntegrationBundleVerificationHarness& harness,
-                      ::testing::TestPartResultArray* results)
-    {
-        const ::testing::ScopedFakeTestPartResultReporter reporter(
-            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
-        harness.SetUp();
-        harness.TestBody();
     }
 };
 
@@ -106,7 +89,7 @@ TEST_F(TestEnforcementRungs, ApplicabilityRungPassesWithoutCompilingPlans)
     harness.setBundle(bundleAt(EnforcementLevel::APPLICABILITY), _tempDir / "Bundle");
 
     ::testing::TestPartResultArray results;
-    drive(harness, &results);
+    driveHarness(harness, &results);
 
     EXPECT_FALSE(anyFailed(results));
     EXPECT_FALSE(anySkipped(results));
@@ -128,7 +111,7 @@ TEST_F(TestEnforcementRungs, ApplicabilityRungIsUnverifiableWhenTheEngineDecline
     harness.setBundle(bundleAt(EnforcementLevel::APPLICABILITY), _tempDir / "Bundle");
 
     ::testing::TestPartResultArray results;
-    drive(harness, &results);
+    driveHarness(harness, &results);
 
     EXPECT_FALSE(anyFailed(results));
     EXPECT_TRUE(anySkipped(results));
@@ -153,7 +136,7 @@ TEST_F(TestEnforcementRungs, BuildableRungCompilesPlansExactlyOnce)
     harness.setBundle(bundleAt(EnforcementLevel::BUILDABLE), _tempDir / "Bundle");
 
     ::testing::TestPartResultArray results;
-    drive(harness, &results);
+    driveHarness(harness, &results);
 
     EXPECT_FALSE(anyFailed(results));
     EXPECT_FALSE(anySkipped(results));
@@ -170,7 +153,7 @@ TEST_F(TestEnforcementRungs, BuildableRungFailureIsBlamedOnTheEngine)
     harness.setBundle(bundleAt(EnforcementLevel::BUILDABLE), _tempDir / "Bundle");
 
     ::testing::TestPartResultArray results;
-    drive(harness, &results);
+    driveHarness(harness, &results);
 
     EXPECT_TRUE(anyFailed(results));
     const std::string messages = allMessages(results);
@@ -195,7 +178,7 @@ TEST_F(TestEnforcementRungs, BuildableRungDeclineIsUnverifiableNotAFailure)
     harness.setBundle(bundleAt(EnforcementLevel::BUILDABLE), _tempDir / "Bundle");
 
     ::testing::TestPartResultArray results;
-    drive(harness, &results);
+    driveHarness(harness, &results);
 
     EXPECT_FALSE(anyFailed(results));
     EXPECT_TRUE(anySkipped(results));
@@ -219,7 +202,7 @@ TEST_F(TestEnforcementRungs, EnforcementRungWithoutAnEngineIsUnverifiable)
     harness.setBundle(bundleAt(EnforcementLevel::BUILDABLE), _tempDir / "Bundle");
 
     ::testing::TestPartResultArray results;
-    drive(harness, &results);
+    driveHarness(harness, &results);
 
     EXPECT_FALSE(anyFailed(results));
     EXPECT_TRUE(anySkipped(results));
@@ -245,7 +228,7 @@ TEST_F(TestEnforcementRungs, EngineDeclineDuringExecuteSkips)
     harness.setBundle(bundleAt(EnforcementLevel::FULL), _tempDir / "Bundle");
 
     ::testing::TestPartResultArray results;
-    drive(harness, &results);
+    driveHarness(harness, &results);
 
     EXPECT_FALSE(anyFailed(results));
     EXPECT_TRUE(anySkipped(results));
@@ -262,7 +245,7 @@ TEST_F(TestEnforcementRungs, EngineFailureDuringExecuteReportsTheEngineMessage)
     harness.setBundle(bundleAt(EnforcementLevel::FULL), _tempDir / "Bundle");
 
     ::testing::TestPartResultArray results;
-    drive(harness, &results);
+    driveHarness(harness, &results);
 
     EXPECT_TRUE(anyFailed(results));
     EXPECT_NE(allMessages(results).find("frontend said no"), std::string::npos);

@@ -11,8 +11,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "ScratchDirectory.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
+#include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "mocks/MockGraphEngineRunner.hpp"
 #include "mocks/MockReferenceExecutors.hpp"
 #include "mocks/MockSupportClaimObserver.hpp"
@@ -219,6 +221,30 @@ inline std::string allMessages(const ::testing::TestPartResultArray& results)
         joined += "\n";
     }
     return joined;
+}
+
+/// Runs one harness the way GTest's own runner would, capturing every disposition
+/// it issues into `results`.
+///
+/// The skip guard is the whole point. `Test::Run()` checks IsSkipped() after SetUp()
+/// and does not call TestBody() when it is set, so a driver that always calls
+/// TestBody() diverges from production the moment a metadata guard or a TOML skip
+/// fires in SetUp(). Four suites each wrote this block out; only one had the guard.
+///
+/// Bundle and locator wiring stays with the caller: the suites disagree on what to
+/// set up (some pass a locator, some tag metadata, some build the harness from a
+/// mode), and folding those differences into one signature buys nothing. This owns
+/// only the part they must agree on.
+inline void driveHarness(IntegrationBundleVerificationHarness& harness,
+                         ::testing::TestPartResultArray* results)
+{
+    const ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
+    harness.SetUp();
+    if(!anySkipped(*results))
+    {
+        harness.TestBody();
+    }
 }
 
 } // namespace hipdnn_integration_tests::bundle::testing_support

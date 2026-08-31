@@ -43,13 +43,7 @@ protected:
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
-
-        auto path
-            = std::filesystem::temp_directory_path()
-              / ("err_path_test_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        _scopedDir.emplace(scratch::makeDir("err_path_test_"));
         _tempDir = _scopedDir->path();
     }
 
@@ -60,9 +54,7 @@ protected:
         return fixtures::loadBundle(_tempDir, name, includeGoldenOutput);
     }
 
-    /// Builds the real harness on top of `mocks`, drives it through one bundle, and
-    /// captures every gtest disposition it issues. TestBody() is skipped when
-    /// SetUp() itself skipped, matching how the real GTest runner drives a test.
+    /// Builds the real harness on top of `mocks` and drives it through one bundle.
     static void runCapturing(testing_support::HarnessMocks& mocks,
                              std::shared_ptr<IntegrationTestBundle> bundle,
                              VerificationMode mode,
@@ -71,14 +63,7 @@ protected:
         IntegrationBundleVerificationHarness harness(
             mocks.dependencies(testing_support::hostPolicy(mode)));
         harness.setBundle(std::move(bundle), "err-path-test-bundle");
-
-        const ::testing::ScopedFakeTestPartResultReporter reporter(
-            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
-        harness.SetUp();
-        if(!testing_support::anySkipped(*results))
-        {
-            harness.TestBody();
-        }
+        testing_support::driveHarness(harness, results);
     }
 };
 

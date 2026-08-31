@@ -14,6 +14,7 @@
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
+#include "ScratchDirectory.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
@@ -75,12 +76,7 @@ RankedEngines ranked(ErrorCode status, std::vector<int64_t> ids, std::string mes
 
 ScopedDirectory makeScopedTestDir(const std::string& prefix)
 {
-    auto path
-        = std::filesystem::temp_directory_path()
-          / (prefix + "_"
-             + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-    std::filesystem::remove_all(path);
-    return {path};
+    return hipdnn_integration_tests::scratch::makeDir(prefix + "_");
 }
 
 // Single-graph sidecar claiming `engines` for (arch, platform).

@@ -39,13 +39,7 @@ protected:
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
-
-        auto path
-            = std::filesystem::temp_directory_path()
-              / ("golden_harness_test_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        _scopedDir.emplace(scratch::makeDir("golden_harness_test_"));
         _tempDir = _scopedDir->path();
     }
 
