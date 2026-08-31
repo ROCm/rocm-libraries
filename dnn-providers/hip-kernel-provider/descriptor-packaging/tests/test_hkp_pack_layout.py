@@ -763,7 +763,7 @@ def test_kpack_folder_rejected_only_at_the_arch_root(tmp_path, empty_arch_fixtur
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 RUNTIME_FIXTURE = (
     Path(__file__).resolve().parent.parent.parent
-    / "src/engines/kernel_ingestor_engine/test_descriptors/packed-fixture-source"
+    / "src/engines/kernel_ingestor_engine/test_descriptors/integration/archive_fixture"
 )
 
 
@@ -806,8 +806,8 @@ def test_example_tree_ids_are_uuids():
 def test_example_tree_field_shape_matches_the_runtime_fixture():
     """Per descriptor type, carry the fields the runtime fixture carries.
 
-    `packed-fixture-source/` is the tree the C++ integration test actually loads and
-    dispatches, so it is the authority on shape. Comparing against it catches an
+    `integration/archive_fixture/` is the tree the C++ integration test actually loads
+    and dispatches, so it is the authority on shape. Comparing against it catches an
     invented field set -- the failure that shipped here once already, where UDD
     had `grid`/`block`/`args` instead of `dispatch_symbol` and UMD had
     `criteria`/`nodes` instead of `match_symbol`.
@@ -1093,9 +1093,13 @@ def test_example_tree_metadata_matches_its_kmd_schema():
 def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
     """Ids must be unique against every tree that could share a catalog.
 
-    The example, the runtime fixture, and the in-tree ingestor set can all be
-    loaded into one process. A duplicate id across them is a load-time rejection
-    that would look like a bug in whichever tree loaded second.
+    The example tree and any in-tree ingestor set can be loaded into one
+    process. A duplicate id across them is a load-time rejection that would look
+    like a bug in whichever tree loaded second.
+
+    Each ingestor set is compared against the example only. The two pointwise
+    sets share ids with each other by design: one engine, two dialects, two
+    discovery roots that never merge.
     """
 
     def ids(root):
@@ -1115,11 +1119,19 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
     assert len(example) == len(
         list(_descriptor_files(EXAMPLE_ROOT))
     ), "the example tree has duplicate ids within itself"
-    for other in (
-        provider
-        / "src/engines/kernel_ingestor_engine/test_descriptors/packed-fixture-source",
-        provider
-        / "src/engines/kernel_ingestor_engine/test_descriptors/embedded_engine",
-    ):
+    descriptors = provider / "src/engines/kernel_ingestor_engine/test_descriptors"
+    others = [
+        descriptors / "shared/conv_fwd",
+        descriptors / "unit/pointwise",
+        descriptors / "integration/pointwise",
+        descriptors / "integration/archive_fixture",
+    ]
+    assert any(
+        ids(other) for other in others
+    ), f"no ingestor descriptor ids found under {descriptors}"
+    for other in others:
         clash = example & ids(other)
-        assert not clash, f"example ids collide with {other.name}: {sorted(clash)}"
+        assert not clash, (
+            f"example ids collide with "
+            f"{other.relative_to(descriptors).as_posix()}: {sorted(clash)}"
+        )
