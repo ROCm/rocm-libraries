@@ -223,7 +223,7 @@ class ScanTileState
     friend struct detail::ScanTileStateConverter<ScanTileState>;
 
 private:
-    using NativeT = rocprim::detail::lookback_scan_state<T, true, SINGLE_WORD>;
+    using NativeT = rocprim::detail::lookback_scan_state<T, true, 0, SINGLE_WORD>;
     NativeT internal;
 
 public:
