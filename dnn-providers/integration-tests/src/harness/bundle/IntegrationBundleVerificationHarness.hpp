@@ -39,17 +39,8 @@ namespace hipdnn_integration_tests::bundle
 // OutputTensors and ExpectedTensorLookup come from OutputComparison.hpp, which owns
 // the comparison this harness drives.
 
-namespace detail
-{
-std::unordered_map<int64_t, void*> buildVariantPack(
-    TensorMap& inputs,
-    OutputTensors& outputs,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorAttributes,
-    const std::vector<int64_t>& outputTensorUids,
-    bool useDevice);
-}
+// detail::buildVariantPack() lives in VariantPackBuilder.hpp -- both harnesses use
+// it, so it is not this one's to own.
 
 /// Runs one bundle against the engine under test and decides what that says.
 ///
@@ -63,7 +54,8 @@ std::unordered_map<int64_t, void*> buildVariantPack(
 /// the part worth testing: which oracle to try, how far the run got, and what that
 /// means for the graph's support claim.
 ///
-/// TODO(ALMIOPEN-1969 follow-up): Unify graph-init with the non-golden harness.
+/// Graph initialisation is still duplicated between this harness and
+/// BundleReferenceValidationHarness; unifying the two is future work.
 class IntegrationBundleVerificationHarness : public ::testing::Test
 {
 public:

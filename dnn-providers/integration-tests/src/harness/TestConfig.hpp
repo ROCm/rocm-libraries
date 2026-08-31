@@ -83,8 +83,10 @@ inline VerificationMode parseVerificationMode(std::string value)
     if(value == "golden-check")
     {
         throw std::runtime_error(
-            "verification-mode 'golden-check' has been replaced by --validate-golden-data "
-            "(cpu|gpu), which runs a separate reference-validation suite");
+            "verification-mode 'golden-check' has been retired. Validating golden data "
+            "against a reference is no longer a mode of the engine harness -- run the "
+            "hipdnn_golden_data_tests binary instead, and unset "
+            "HIPDNN_TEST_VERIFICATION_MODE");
     }
     throw std::runtime_error("Invalid verification mode '" + value
                              + "'; expected 'auto', 'golden', 'gpu', or 'cpu'");
@@ -137,7 +139,6 @@ struct TestConfigOptions
     std::optional<VerificationMode> verificationMode;
     std::optional<std::filesystem::path> captureDir;
     bool enforceSupportClaims = false;
-    std::optional<ReferenceExecutorType> goldenDataValidationReference;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -220,7 +221,6 @@ public:
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
         instance._captureDir = std::move(opts.captureDir);
         instance._enforceSupportClaims = opts.enforceSupportClaims;
-        instance._goldenDataValidationReference = opts.goldenDataValidationReference;
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -298,27 +298,6 @@ public:
             throw std::runtime_error("getEngineId() called but --test-engine was not provided");
         }
         return hipdnn_data_sdk::utilities::engineNameToId(_engineName.value());
-    }
-
-    // Which reference to validate golden data against, when --validate-golden-data
-    // was given. Selects the reference-validation harness instead of the engine
-    // harness; the two never run in the same process.
-    bool hasGoldenDataValidationReference() const
-    {
-        throwIfNotInitialized();
-        return _goldenDataValidationReference.has_value();
-    }
-
-    ReferenceExecutorType getGoldenDataValidationReference() const
-    {
-        throwIfNotInitialized();
-        if(!_goldenDataValidationReference.has_value())
-        {
-            throw std::runtime_error(
-                "getGoldenDataValidationReference() called but --validate-golden-data was "
-                "not provided");
-        }
-        return *_goldenDataValidationReference;
     }
 
     // Get tolerance mode (always DEFAULT since only one mode exists)
@@ -470,7 +449,6 @@ private:
     bool _skipGraphValidation = false;
     bool _allowBundles = false;
     bool _enforceSupportClaims = false;
-    std::optional<ReferenceExecutorType> _goldenDataValidationReference;
     bool _initialized = false;
 };
 

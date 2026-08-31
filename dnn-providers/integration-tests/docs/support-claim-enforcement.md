@@ -317,10 +317,11 @@ cannot see.
 ## Running it
 
 ```bash
-# Validate checked-in golden data against the CPU reference — no engine, no claims
-./bin/hipdnn_integration_tests \
-    --validate-golden-data cpu \
-    --gtest_filter='quick_*'
+# Validate checked-in golden data against both references — no engine, no claims
+./bin/hipdnn_golden_data_tests --gtest_filter='quick_*'
+
+# Just the CPU reference, which needs no GPU at all
+./bin/hipdnn_golden_data_tests --reference cpu
 
 # Enforce claims for one engine over the quick tier
 ./bin/hipdnn_integration_tests \
@@ -330,6 +331,9 @@ cannot see.
     --gtest_filter='quick_*'
 ```
 
+> Golden `.bin` blobs are DVC-managed. A tree that has not run `dvc pull` in
+> `integration-test-bundles/` registers zero validation tests and says so.
+
 | Symptom | Cause |
 |---|---|
 | `--enforce-support-claims requires --test-engine` | No engine named; there is nothing to check claims against |
@@ -337,10 +341,10 @@ cannot see.
 | `FATAL: … not one of them was ever queried` | Claim-bearing graphs were discovered but none ran; usually the filter selected only graphs without claims |
 | `CLAIM_BROKEN … not in ranked list` | The engine dropped support for a graph the sidecar promises. Fix the engine, or update the sidecar |
 | `Engine 'X' is not loaded` | `--test-engine` named an engine this build does not have; startup exits 1 before any test runs |
-| `verification-mode 'golden-check' has been replaced` | Use `--validate-golden-data cpu\|gpu`, which runs the separate reference-validation suite |
-| `--enforce-support-claims and --validate-golden-data are mutually exclusive` | Golden-data validation registers the reference harness only, so no claim test exists to query a sidecar |
+| `verification-mode 'golden-check' has been retired` | Run the `hipdnn_golden_data_tests` binary instead, and unset `HIPDNN_TEST_VERIFICATION_MODE` |
+| `No golden-data validation tests ran` | Golden `.bin` blobs are not pulled, so no bundle qualified |
 
-## Scope: two harnesses, never both
+## Scope: two harnesses, never both — and now two binaries
 
 A run either verifies an engine or validates our own golden data. They are separate
 harnesses because they are separate jobs with different failure meanings, and
@@ -348,15 +352,28 @@ folding the second into the first is what produced a "verification mode" that
 structurally never reached an engine — and therefore never enforced the claims the
 engine harness exists to enforce.
 
+They now live in **separate binaries**, so the separation is a property of the link
+rather than of a flag. `hipdnn_golden_data_tests` does not compile
+`FrontendGraphEngineRunner.cpp` or `HarnessDependencies.cpp`, loads no plugin, and
+creates no `hipdnnHandle_t`: there is no configuration in which a golden-data run
+can become an engine run.
+
 | | `IntegrationBundleVerificationHarness` | `BundleReferenceValidationHarness` |
 |---|---|---|
-| selected by | default | `--validate-golden-data cpu\|gpu` |
+| binary | `hipdnn_integration_tests` | `hipdnn_golden_data_tests` |
+| selected by | default | that binary; `--reference cpu\|gpu\|both` narrows it |
 | verifies | the engine under test | our checked-in golden `.bin` data |
 | engine involved | yes | **no** |
 | support claims | queried and enforced | **not linked in** |
 | verification modes | `auto` / `golden` / `gpu` / `cpu` | n/a |
 | skip path | yes (no oracle, engine declines, TOML skip) | **none** |
+| device | yes | GPU reference only; the CPU one is host-only |
+| ctest registration | per provider, via `add_external_integration_test_target()` | once, via `add_integration_test_target()` |
 | suite name | `{tier}_{Op}_{Topology}` | `…_CpuRef` / `…_GpuRef` |
+
+Registering the golden-data binary once rather than per provider is the point: no
+engine is involved, so running it in each provider's lane repeated identical work
+and gave three lanes a chance to disagree about our own data.
 
 The reference harness has no skip path because registration is the gate: a test is
 created only when the bundle has golden data **and** every node type in its graph
@@ -369,14 +386,37 @@ counts are printed at registration so the gap is visible rather than silent:
 ```text
 Golden-data validation (CpuRef): 12 bundle(s) registered, 40 without golden data,
     7 outside this reference's supported-op set
+    (BatchnormInferenceAttributes, ReductionAttributes)
 ```
 
 Adding an op to a reference's set is a commitment: every bundle using it becomes a
 test that must pass.
 
 Claims apply to **bundle tests only**. The C++ graph tests under
-`src/integration-tests/` carry no sidecars and are not enforced; wiring that up is
-tracked separately (ALMIOPEN-2480).
+`src/integration-tests/` carry no sidecars and are not enforced yet; extending
+enforcement to them is future work.
+
+## Who owns what
+
+The pieces this harness is assembled from, and the one question each answers.
+
+| Type | Owns |
+|---|---|
+| `IntegrationBundleVerificationHarness` | The lifecycle: one graph, claims, comparison, commit, report. Decides nothing itself that a collaborator can decide. |
+| `HarnessDependencies` | The four collaborators plus a `HarnessPolicy`, handed to the harness at construction. The only place production wiring is chosen. |
+| `HarnessPolicy` | The run's settings as a value — mode, placement, arch, platform, VRAM, whether claims are enforced. |
+| `IGraphEngineRunner` / `FrontendGraphEngineRunner` | Everything that needs the frontend `Graph` and a handle: open, compile plans, execute. The only production type that touches either. |
+| `GraphSession` / `RankedEngines` | What one `from_binary` plus one ranked query produced. `enginesAccept()` turns it into the single applicability answer everything else reads. |
+| `IReferenceExecutors` / `ReferenceExecutorPool` | The CPU and GPU reference executors, built once per run rather than once per bundle. |
+| `ReferenceOpCoverage` | Which ops a reference is *required* to handle, and which ops in a graph it does not cover. |
+| `OutputComparison` | Whether two sets of output tensors agree, and the formatted diff when they do not. No gtest state. |
+| `VerificationOutcome` | What the run achieved: status, depth reached, who is at fault, and the text to print. |
+| `SupportVerdict` | The claim verdict, from the sidecar and the ranked list. `promoteAcceptedClaim()` is the only place an accepted claim becomes confirmed. |
+| `ISupportClaimObserver` | Reading a sidecar and comparing it against the ranked list. |
+| `IVerificationReporter` | Every verdict, coverage update and unverifiable reason the run publishes. |
+| `SupportClaimReport` | The end-of-run summary and the coverage counters behind it. |
+| `BundleReferenceValidationHarness` | The other job entirely: our golden data vs a reference. No engine, no claims, no skip path. |
+| `BundleRegistration` | Discovery and eager load, then one of two registration entry points — engine tests or golden-data tests. |
 
 ## See Also
 

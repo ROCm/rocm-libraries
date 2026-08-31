@@ -235,17 +235,26 @@ that were compiled into the binary.
 
 ### Validating golden data itself
 
-`--validate-golden-data cpu|gpu` runs a **separate suite** that recomputes each
+The `hipdnn_golden_data_tests` binary runs a **separate suite** that recomputes each
 bundle's outputs with a reference executor and compares them against the checked-in
 golden `.bin` data. No engine is loaded and no support claims are involved — it
 validates our data, not a provider. Suites are named `…_CpuRef` / `…_GpuRef`.
 
+It validates against both references by default; `--reference cpu|gpu|both` narrows
+that. The CPU reference is host-only and needs no GPU; the GPU one skips without a
+device.
+
 It has no skip path: a test is registered only when the bundle has golden data and
 every node type in its graph is in that reference's required-op set, so a reference
 that cannot run the graph is a failure. Bundles outside the set are absent from the
-suite and the counts are printed at registration.
+suite, and the counts — plus the ops responsible — are printed at registration.
 
-This replaces the former `--verification-mode=golden-check`.
+Golden `.bin` blobs are DVC-managed, so a tree that has not run `dvc pull` in
+`integration-test-bundles/` registers nothing and says so.
+
+This replaces the former `--verification-mode=golden-check`, and the
+`--validate-golden-data` flag that briefly stood in for it: golden-data validation
+is its own binary, not a mode of the engine harness.
 
 ### Support claims
 

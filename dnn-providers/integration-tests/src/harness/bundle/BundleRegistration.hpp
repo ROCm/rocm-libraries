@@ -253,8 +253,13 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
             __FILE__,
             __LINE__,
             [loaded = bundle.bundle, path = bundle.jsonPath, referenceType]() -> ::testing::Test* {
+                // Only the GPU reference touches a device. Passing true for the CPU
+                // lane made SetUp() run SKIP_IF_NO_DEVICES() on work that reads and
+                // writes host memory, so CPU golden-data validation silently skipped
+                // on any runner without a GPU.
+                const bool requiresDevice = referenceType == ReferenceExecutorType::GPU;
                 auto* test = new BundleReferenceValidationHarness(
-                    referenceType, /*requiresDevice=*/true, sharedReferenceExecutors());
+                    referenceType, requiresDevice, sharedReferenceExecutors());
                 test->setBundle(loaded, path);
                 return test;
             });
@@ -302,11 +307,20 @@ inline std::optional<LoadedEngine> resolveEngineUnderTest()
     return std::nullopt;
 }
 
-inline void registerBundleTests()
+namespace detail
+{
+
+// Discovery plus the eager load, shared by both entry points below. Returns
+// nullopt when there is nothing to register; the reason is already on stderr.
+//
+// `countClaimCoverage` seeds the support-claim counters as bundles load. Only the
+// engine binary enforces claims, so the golden-data binary passes false rather
+// than seeding counters no one will ever satisfy.
+inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool countClaimCoverage)
 {
     if(!TestConfig::get().allowBundles())
     {
-        return;
+        return std::nullopt;
     }
 
     auto dataDir = resolveDataDir();
@@ -314,7 +328,7 @@ inline void registerBundleTests()
     {
         std::cerr << "WARNING: Bundle tests are enabled but the data directory does not exist: "
                   << dataDir << "\n";
-        return;
+        return std::nullopt;
     }
 
     std::vector<DiscoveredBundle> discovered;
@@ -332,7 +346,7 @@ inline void registerBundleTests()
     {
         std::cerr << "WARNING: Bundle tests are enabled but no bundles were found in " << dataDir
                   << "\n";
-        return;
+        return std::nullopt;
     }
 
     // Load all bundles eagerly, once, at registration time. A bundle that
@@ -346,26 +360,20 @@ inline void registerBundleTests()
     // original behavior: logged and skipped, no test registered. A bundle
     // whose .bin blobs are absent loads with tensors == nullopt; its test
     // registers normally and the harness SKIPs it at run time.
-    std::vector<detail::LoadedBundle> bundles;
+    std::vector<LoadedBundle> bundles;
     bundles.reserve(discovered.size());
-
-    // Enforcement needs a named engine to check against, so a run without
-    // --test-engine has nothing to count; seeding the coverage counters anyway
-    // would trip verifiedNothing() on a run that never intended to enforce.
-    const std::optional<LoadedEngine> engineUnderTest = resolveEngineUnderTest();
-    const bool enforcing = TestConfig::get().enforceSupportClaims() && engineUnderTest.has_value();
 
     for(const auto& disc : discovered)
     {
-        auto outcome = detail::classifyBundle(disc);
+        auto outcome = classifyBundle(disc);
 
-        if(auto* failed = std::get_if<detail::FailedLoad>(&outcome))
+        if(auto* failed = std::get_if<FailedLoad>(&outcome))
         {
             HIPDNN_PLUGIN_LOG_ERROR(failed->message);
-            detail::registerFailedBundleLoad(failed->suiteName, failed->testName, failed->message);
+            registerFailedBundleLoad(failed->suiteName, failed->testName, failed->message);
             continue;
         }
-        if(auto* skipped = std::get_if<detail::SkippedLoad>(&outcome))
+        if(auto* skipped = std::get_if<SkippedLoad>(&outcome))
         {
             HIPDNN_PLUGIN_LOG_ERROR(skipped->message);
             continue;
@@ -374,36 +382,66 @@ inline void registerBundleTests()
         // Counted only for bundles that actually register a test. A bundle that
         // failed to load can never be queried, so counting its sidecar would make
         // the coverage guard fire on a gap it cannot close.
-        if(enforcing)
+        if(countClaimCoverage)
         {
             supportClaimCoverage().graphsFound++;
-            if(std::filesystem::exists(detail::sidecarPathFor(disc)))
+            if(std::filesystem::exists(sidecarPathFor(disc)))
             {
                 supportClaimCoverage().graphsWithClaims++;
             }
         }
 
-        bundles.push_back(std::move(std::get<detail::LoadedBundle>(outcome)));
+        bundles.push_back(std::move(std::get<LoadedBundle>(outcome)));
     }
 
     if(bundles.empty())
     {
         std::cerr << "WARNING: No bundles could be loaded from " << dataDir << "\n";
-        return;
+        return std::nullopt;
     }
 
-    // Two harnesses, never both: verifying an engine and validating our own golden
-    // data are different jobs, and a run is doing one or the other.
-    if(TestConfig::get().hasGoldenDataValidationReference())
+    return bundles;
+}
+
+} // namespace detail
+
+/// Registers the engine-verification suite: one test per bundle, driven against
+/// the engine named by --test-engine.
+inline void registerBundleTests()
+{
+    // Enforcement needs a named engine to check against, so a run without
+    // --test-engine has nothing to count; seeding the coverage counters anyway
+    // would trip verifiedNothing() on a run that never intended to enforce.
+    const std::optional<LoadedEngine> engineUnderTest = resolveEngineUnderTest();
+    const bool enforcing = TestConfig::get().enforceSupportClaims() && engineUnderTest.has_value();
+
+    auto bundles = detail::discoverAndLoadBundles(enforcing);
+    if(!bundles.has_value())
     {
-        detail::registerReferenceValidationTests(
-            bundles, TestConfig::get().getGoldenDataValidationReference());
         return;
     }
 
-    detail::registerBundles(bundles, engineUnderTest);
+    detail::registerBundles(*bundles, engineUnderTest);
 
-    HIPDNN_PLUGIN_LOG_INFO("Registered " << bundles.size() << " bundle test(s)");
+    HIPDNN_PLUGIN_LOG_INFO("Registered " << bundles->size() << " bundle test(s)");
+}
+
+/// Registers the golden-data validation suite for one reference executor.
+///
+/// Two harnesses, never both: verifying an engine and validating our own golden
+/// data are different jobs, so they live in different binaries. This one is the
+/// entry point for hipdnn_golden_data_tests, which loads no plugin and creates no
+/// handle -- see the binary's main() for why that separation is structural rather
+/// than a flag.
+inline void registerGoldenDataValidationTests(ReferenceExecutorType referenceType)
+{
+    auto bundles = detail::discoverAndLoadBundles(/*countClaimCoverage=*/false);
+    if(!bundles.has_value())
+    {
+        return;
+    }
+
+    detail::registerReferenceValidationTests(*bundles, referenceType);
 }
 
 } // namespace hipdnn_integration_tests::bundle

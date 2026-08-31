@@ -16,6 +16,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/SupportClaimReport.cpp
     ../src/harness/bundle/SupportClaims.cpp
     ../src/harness/bundle/SupportVerdict.cpp
+    ../src/harness/bundle/VariantPackBuilder.cpp
     ../src/harness/input-init/FillInputs.cpp
     TestBundleMetadata.cpp
     TestSupportClaims.cpp

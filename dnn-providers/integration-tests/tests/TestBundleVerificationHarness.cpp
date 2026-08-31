@@ -21,6 +21,7 @@
 #include "HarnessTestSupport.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 

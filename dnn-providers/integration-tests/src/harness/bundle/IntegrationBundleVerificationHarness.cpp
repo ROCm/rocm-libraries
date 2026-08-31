@@ -23,6 +23,7 @@
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/input-init/FillInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
@@ -414,45 +415,6 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 }
 
 // ---- engine + reference runs -----------------------------------------------
-
-// Sentinel-filled (NaN) so unwritten outputs are caught by allClose.
-namespace detail
-{
-std::unordered_map<int64_t, void*> buildVariantPack(
-    TensorMap& inputs,
-    OutputTensors& outputs,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorAttributes,
-    const std::vector<int64_t>& outputTensorUids,
-    bool useDevice)
-{
-    std::unordered_map<int64_t, void*> variantPack;
-    const std::set<int64_t> outputUids(outputTensorUids.begin(), outputTensorUids.end());
-
-    for(auto& [uid, tensor] : inputs)
-    {
-        if(outputUids.count(uid) != 0)
-        {
-            continue;
-        }
-
-        const auto attrIt = tensorAttributes.find(uid);
-        const bool isRuntimePassByValue
-            = attrIt != tensorAttributes.end() && attrIt->second->is_runtime_pass_by_value();
-        variantPack[uid] = hipdnn_test_sdk::utilities::selectVariantPackPointer(
-            *tensor, useDevice, isRuntimePassByValue);
-    }
-
-    for(auto& [uid, tensor] : outputs)
-    {
-        variantPack[uid] = hipdnn_test_sdk::utilities::selectVariantPackPointer(
-            *tensor, useDevice, /*isRuntimePassByValue=*/false);
-    }
-
-    return variantPack;
-}
-}
 
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs() const
 {

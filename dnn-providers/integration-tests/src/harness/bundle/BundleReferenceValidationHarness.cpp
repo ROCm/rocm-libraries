@@ -15,6 +15,7 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/ReferenceOpCoverage.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle

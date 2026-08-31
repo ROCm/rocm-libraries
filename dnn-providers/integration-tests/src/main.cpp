@@ -144,11 +144,6 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--capture-bundles")
             .help("Capture C++ graph tests as JSON bundles into the given directory. "
                   "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
-        parser.add_argument("--validate-golden-data")
-            .help("Validate checked-in golden data against a reference executor "
-                  "('cpu' or 'gpu') instead of verifying an engine. Runs a separate "
-                  "suite: no engine is loaded and no support claims are enforced. "
-                  "Replaces the former --verification-mode=golden-check.");
         parser.add_argument("--enforce-support-claims")
             .default_value(false)
             .implicit_value(true)
@@ -253,30 +248,6 @@ int main(int argc, char** argv) noexcept
             }
         }
 
-        // Parse --validate-golden-data (case-insensitive); selects the
-        // reference-validation harness instead of the engine harness.
-        std::optional<hipdnn_integration_tests::ReferenceExecutorType> goldenDataValidationRef;
-        if(parser.is_used("--validate-golden-data"))
-        {
-            auto val = parser.get<std::string>("--validate-golden-data");
-            std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c) {
-                return static_cast<char>(std::tolower(c));
-            });
-            if(val == "gpu")
-            {
-                goldenDataValidationRef = hipdnn_integration_tests::ReferenceExecutorType::GPU;
-            }
-            else if(val == "cpu")
-            {
-                goldenDataValidationRef = hipdnn_integration_tests::ReferenceExecutorType::CPU;
-            }
-            else
-            {
-                std::cerr << "Error: --validate-golden-data must be 'cpu' or 'gpu'\n";
-                return 1;
-            }
-        }
-
         // Parse --capture-bundles argument
         std::optional<std::filesystem::path> captureDir;
         if(parser.is_used("--capture-bundles"))
@@ -331,7 +302,6 @@ int main(int argc, char** argv) noexcept
         opts.verificationMode = verificationMode;
         opts.captureDir = std::move(captureDir);
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
-        opts.goldenDataValidationReference = goldenDataValidationRef;
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
@@ -411,22 +381,6 @@ int main(int argc, char** argv) noexcept
             std::cerr << "Error: --enforce-support-claims requires --test-engine; there is no "
                          "engine to\n"
                          "       check sidecar claims against.\n";
-            return 1;
-        }
-
-        // Golden-data validation registers the reference harness and returns before
-        // registerBundles() ever runs, so no claim test exists to query a sidecar.
-        // Enforcement would then seed its coverage counters, find graphsQueried == 0,
-        // and exit 1 through verifiedNothing() -- whose diagnostic names three causes,
-        // none of them this one. Reject the combination here instead.
-        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
-           && hipdnn_integration_tests::TestConfig::get().hasGoldenDataValidationReference())
-        {
-            std::cerr << "Error: --enforce-support-claims and --validate-golden-data are mutually\n"
-                         "       exclusive. Golden-data validation loads no engine and registers "
-                         "no\n"
-                         "       claim tests, so there is nothing to check sidecar claims "
-                         "against.\n";
             return 1;
         }
 
