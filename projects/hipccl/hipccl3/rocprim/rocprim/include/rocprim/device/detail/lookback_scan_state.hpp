@@ -120,8 +120,8 @@ constexpr const int MAX_PAYLOAD_SIZE = ROCPRIM_MAX_ATOMIC_SIZE - 1;
 /// \tparam PreferredAlignment [optional] Align the state flags to this number of bytes
 template<class T,
          bool   UseSleep           = false,
-         bool   IsSmall            = (sizeof(T) <= MAX_PAYLOAD_SIZE),
-         size_t PreferredAlignment = 0>
+         size_t PreferredAlignment = 0,
+         bool   IsSmall            = (sizeof(T) <= MAX_PAYLOAD_SIZE)>
 struct lookback_scan_state;
 
 /// Reduce lanes `0-valid_items` and return the result in lane 0.
@@ -219,7 +219,7 @@ T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
 
 // Packed flag and prefix value are loaded/stored in one atomic operation.
 template<class T, bool UseSleep, size_t PreferredAlignment>
-struct lookback_scan_state<T, UseSleep, /* IsSmall = */ true, PreferredAlignment>
+struct lookback_scan_state<T, UseSleep, PreferredAlignment, /* IsSmall = */ true>
 {
 public:
     // Type used for flag/flag of block prefix
@@ -516,7 +516,7 @@ private:
 // Flag, partial and final prefixes are stored in separate arrays.
 // Consistency ensured by memory fences between flag and prefixes load/store operations.
 template<class T, bool UseSleep, size_t PreferredAlignment>
-struct lookback_scan_state<T, UseSleep, /* IsSmall = */ false, PreferredAlignment>
+struct lookback_scan_state<T, UseSleep, PreferredAlignment, /* IsSmall = */ false>
 {
 
 public:

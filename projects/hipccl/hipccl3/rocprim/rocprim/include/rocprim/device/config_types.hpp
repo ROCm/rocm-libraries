@@ -571,6 +571,21 @@ struct comp_targets
     {
         (f(Ts{}), ...);
     }
+
+    template<typename F>
+    static constexpr hipError_t select(target selected, F f)
+    {
+        auto result = hipErrorUnknown;
+        for_each(
+            [&](auto t)
+            {
+                if(target{t} == selected)
+                {
+                    result = f(t);
+                }
+            });
+        return result;
+    }
 };
 
 constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknown)
@@ -822,6 +837,88 @@ hipError_t execute_launch_plan(
     const auto launch_plan = make_launch_plan<Config, ConfigSelector, LaunchSelector>(t, kernel);
     launch_plan.launch(grid_size, block_size, shmem, stream);
     return hipGetLastError();
+}
+
+template<class Config, class Target>
+struct launch_manager
+{
+    template<class ConfigSelector,
+             template<class, class, class> class LaunchSelector = default_config_static_selector,
+             class Kernel>
+    launch_plan<Kernel> make_launch_plan(Kernel kernel) const
+    {
+        return {trampoline_kernel<Config, ConfigSelector, Kernel, Target, LaunchSelector>, kernel};
+    }
+
+    template<class ConfigSelector,
+             template<class, class, class> class LaunchSelector = default_config_static_selector,
+             class Kernel>
+    hipError_t execute_launch_plan(
+        Kernel kernel, dim3 grid_size, dim3 block_size, size_t shmem, hipStream_t stream) const
+    {
+        const auto launch_plan = make_launch_plan<ConfigSelector, LaunchSelector>(kernel);
+        launch_plan.launch(grid_size, block_size, shmem, stream);
+        return hipGetLastError();
+    }
+};
+
+template<class Config, class Targets, class Visitor>
+hipError_t visit_config(const hipStream_t stream, Visitor visitor)
+{
+    // The hardware target that is attached on this stream.
+    const target target_current = target(stream);
+
+    // The target that most closely resembles our current hardware target.
+    // This target will be the one useed to select the config.
+    const target config_target = most_common_config<Targets>(target_current);
+
+    // Convert 'config_target' to constexpr by unrolling 'Targets' and selecting the one that matches.
+    return Targets::select(
+        config_target,
+        [&](auto selected_config_target)
+        {
+            // This is an instance of 'comp_target', which is only interesting as a type.
+            using SelectedConfigTarget = decltype(selected_config_target);
+
+            using Launcher = launch_manager<Config, SelectedConfigTarget>;
+
+            // Extract the targeted wavefront of this config. It may be a fallback config
+            // with unknown wavefront size.
+            constexpr arch::wavefront::target selected_config_wavefront
+                = get_wavefront_size(SelectedConfigTarget::g);
+
+            // Check if we have matched with a tuned config.
+            if constexpr(selected_config_wavefront != arch::wavefront::target::dynamic)
+            {
+                // We have to convert the wavefront target to a compile time type s.t. we can consume it in a constexpr manner.
+                return visitor(
+                    Launcher{},
+                    Config{},
+                    SelectedConfigTarget{},
+                    std::integral_constant<arch::wavefront::target, selected_config_wavefront>{});
+            }
+            else
+            {
+                // The fallback config may be either wavefront target size. We must therefore emit both branches if we want
+                // to consume the wavefront size as a compile time constant.
+                using wavefront_variants = constexpr_value_variant<arch::wavefront::target,
+                                                                   arch::wavefront::target::size64,
+                                                                   arch::wavefront::target::size32>;
+                const auto dynamic_wavefront_target
+                    = wavefront_variants::create(target_current.warp_size == ROCPRIM_WARP_SIZE_64
+                                                     ? arch::wavefront::target::size64
+                                                     : arch::wavefront::target::size32);
+                return std::visit(
+                    [&](auto wavefront_target)
+                    {
+                        return visitor(Launcher{},
+                                       Config{},
+                                       SelectedConfigTarget{},
+                                       wavefront_target);
+                    },
+                    dynamic_wavefront_target);
+            }
+        });
 }
 
 } // end namespace detail
