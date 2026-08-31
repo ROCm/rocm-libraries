@@ -103,6 +103,9 @@ struct PassFeatureConfig {
         /// barriers. Enables the scheduler's cluster-barrier SCC rule and the
         /// CDNA5ReadyQueue paths that enforce it (see ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
+        /// Mirrors moduleOptions.EnableESM2TrackValuVsrc. The mode2 WAR gate only
+        /// recovers waits va_vsrc tracking creates, so it is inert when false.
+        bool enableESM2TrackValuVsrc = false;
     };
 
     LoopConfig loopConfig;
