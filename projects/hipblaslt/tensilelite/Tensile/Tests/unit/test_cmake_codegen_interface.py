@@ -110,3 +110,36 @@ def test_create_device_library_preserves_runtime_library_path(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "/existing/runtime/path" in (tmp_path / "build" / "build.ninja").read_text()
+
+
+def test_create_device_library_applies_host_asan_without_device_asan(tmp_path):
+    sanitizer_runtime = tmp_path / "libclang_rt.asan-x86_64.so"
+    sanitizer_runtime.touch()
+    compiler = tmp_path / "clang++"
+    compiler.write_text(
+        f"#!/bin/sh\necho '\"{sanitizer_runtime.as_posix()}\"' >&2\n",
+        encoding="utf-8",
+    )
+    compiler.chmod(0o755)
+
+    result = _configure(
+        tmp_path,
+        f'set(CMAKE_CXX_COMPILER "{compiler.as_posix()}")\n'
+        "create_device_library(\n"
+        f'  CODEGEN_ROOT "{TENSILELITE_ROOT.as_posix()}"\n'
+        f'  LOGIC_PATH "{(TENSILELITE_ROOT / "Tensile" / "Tests" / "unit").as_posix()}"\n'
+        f'  OUTPUT_DIR "{(tmp_path / "output").as_posix()}"\n'
+        f'  PYTHON_EXECUTABLE "{Path(sys.executable).as_posix()}"\n'
+        f'  CXX_COMPILER "{compiler.as_posix()}"\n'
+        "  ARCHES gfx950\n"
+        "  HOST_ASAN\n"
+        "  ASAN OFF\n"
+        ")",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    build_ninja = (tmp_path / "build" / "build.ninja").read_text()
+    assert f"LD_PRELOAD={sanitizer_runtime.as_posix()}" in build_ninja, (
+        result.stdout + result.stderr + build_ninja
+    )
+    assert "ASAN_OPTIONS=" in build_ninja
+    assert "--address-sanitizer" not in build_ninja

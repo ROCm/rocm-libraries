@@ -48,6 +48,19 @@ if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
 
+# The Python process imports host libraries such as _rocisa, so it must use the
+# host sanitizer runtime selected by either a standalone hipBLASLt build or its
+# parent build. Keep this separate from the ASAN argument below, which controls
+# instrumentation of generated device code.
+set(_codegen_host_sanitizer_args "")
+if(HIPBLASLT_ENABLE_ASAN
+        OR THEROCK_SANITIZER STREQUAL "ASAN"
+        OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    list(APPEND _codegen_host_sanitizer_args HOST_ASAN)
+elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
+    list(APPEND _codegen_host_sanitizer_args HOST_TSAN)
+endif()
+
 # gfx1250's two ASIC revisions (v0/v1) need different tuned kernels; the runtime
 # picks library/gfx1250/ (v1) vs library/gfx1250v0/ by asicRevision. The default
 # builds both (v1 here, v0 by the second command below); HIPBLASLT_ASIC_REVISION
@@ -82,6 +95,7 @@ create_device_library(
     OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
     JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
     LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
+    ${_codegen_host_sanitizer_args}
     ASAN "${HIPBLASLT_ENABLE_ASAN}"
     YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}"
     NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"
@@ -116,6 +130,7 @@ if(_build_gfx1250v0)
         OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
         JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
         LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
+        ${_codegen_host_sanitizer_args}
         ASAN "${HIPBLASLT_ENABLE_ASAN}"
         YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}"
         NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"

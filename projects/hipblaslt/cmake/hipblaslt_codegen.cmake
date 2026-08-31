@@ -30,7 +30,7 @@ function(hipblaslt_make_python_command out_command)
     endif()
     set(_sanitizer_options "")
     set(_sanitizer_lib_dirs "")
-    if(_sanitizer_flag)
+    if(NOT "${_sanitizer_flag}" STREQUAL "")
         hipblaslt_detect_sanitizer_runtime(_sanitizer_options _sanitizer_lib_dirs ${_sanitizer_flag})
     endif()
 
@@ -131,7 +131,7 @@ function(hipblaslt_detect_sanitizer_runtime out_options out_lib_dirs)
 endfunction()
 
 function(create_device_library)
-    set(_opts "")
+    set(_opts HOST_ASAN HOST_TSAN)
     set(_one
         TARGET LOGIC_PATH OUTPUT_DIR CODEGEN_ROOT PYTHON_EXECUTABLE CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER
         ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL LAZY_LOAD ASM_COMMENTS KEEP_BUILD_TMP ASM_DEBUG
@@ -140,7 +140,7 @@ function(create_device_library)
     cmake_parse_arguments(_cdl "${_opts}" "${_one}" "${_multi}" ${ARGN})
 
     if(_cdl_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "create_device_library: unexpected arguments: ${_cdl_UNPARSED_ARGUMENTS} (permitted single-value keywords: TARGET, LOGIC_PATH, OUTPUT_DIR, CODEGEN_ROOT, PYTHON_EXECUTABLE, CXX_COMPILER, OFFLOAD_BUNDLER, JOBS, LOGIC_FILTER, ASAN, YAML_FORMAT, NO_COMPRESS, EXPERIMENTAL, LAZY_LOAD, ASM_COMMENTS, KEEP_BUILD_TMP, ASM_DEBUG, REQUIRE_GFX1250V0_OVERLAY; multi-value keyword: ARCHES)")
+        message(FATAL_ERROR "create_device_library: unexpected arguments: ${_cdl_UNPARSED_ARGUMENTS} (permitted options: HOST_ASAN, HOST_TSAN; single-value keywords: TARGET, LOGIC_PATH, OUTPUT_DIR, CODEGEN_ROOT, PYTHON_EXECUTABLE, CXX_COMPILER, OFFLOAD_BUNDLER, JOBS, LOGIC_FILTER, ASAN, YAML_FORMAT, NO_COMPRESS, EXPERIMENTAL, LAZY_LOAD, ASM_COMMENTS, KEEP_BUILD_TMP, ASM_DEBUG, REQUIRE_GFX1250V0_OVERLAY; multi-value keyword: ARCHES)")
     endif()
     if(NOT _cdl_LOGIC_PATH)
         message(FATAL_ERROR "create_device_library: LOGIC_PATH is required")
@@ -183,6 +183,9 @@ function(create_device_library)
     if(NOT _cdl_CXX_COMPILER)
         set(_cdl_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
     endif()
+    if(_cdl_HOST_ASAN AND _cdl_HOST_TSAN)
+        message(FATAL_ERROR "create_device_library: HOST_ASAN and HOST_TSAN are mutually exclusive")
+    endif()
     if(NOT DEFINED _cdl_YAML_FORMAT)
         set(_cdl_YAML_FORMAT OFF)
     endif()
@@ -213,8 +216,10 @@ function(create_device_library)
     list(APPEND _tool_bin_dirs "${_cxx_bindir}")
 
     set(_python_flags "")
-    if(_cdl_ASAN)
+    if(_cdl_HOST_ASAN)
         list(APPEND _python_flags ASAN)
+    elseif(_cdl_HOST_TSAN)
+        list(APPEND _python_flags TSAN)
     endif()
     hipblaslt_make_python_command(_python_command
         PYTHON_EXECUTABLE "${_cdl_PYTHON_EXECUTABLE}"
