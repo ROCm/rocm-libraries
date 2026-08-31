@@ -39,7 +39,8 @@ from .SubtileGeometry import (
     GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleGRLDSSwap
-from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter, stripStrideBytes
+from .SubtileTLUSwizzle import (selectTLUSwizzle, selectTLUColScatter, stripStrideBytes,
+                                tluPadBytes, grLoadBlockBytes)
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
@@ -1555,11 +1556,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
     # cooperative stride, which is what its m0 walk expects.
     subtileOffset = int(subtileOffset // _coopWaves)
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
-  swz = selectTLUSwizzle(tileInfo)
-  csc = selectTLUColScatter(tileInfo)
-  # Both the XOR swizzle and the col_scatter layout insert padBytes between
-  # consecutive DTL load-blocks; pick whichever applies (mutually exclusive).
-  padBytes = swz.padBytes if swz else (csc.padBytes if csc else 0)
+  padBytes = tluPadBytes(tileInfo)
   # Pad-aware LDS stride between subtile strips (M/N direction).
   stripStride = stripStrideBytes(tileInfo) if isTLU1 else int(tileInfo.subtileSize)
   # K-window (sId1) global-address advance for TLU=1.
@@ -1719,9 +1716,7 @@ def _grDTLInitBase_tlu(writer, kernel, module, tc, ti):
     # owning a contiguous run of DTL load-blocks (its share of the strip's K
     # rows).  numGRPerSubtile is already the per-wave load count, and one load
     # block occupies wavesize*loadWidth bytes plus the swizzle pad.
-    _swz = selectTLUSwizzle(ti); _cs = selectTLUColScatter(ti)
-    _pad = int(_cs.padBytes) if _cs else (int(_swz.padBytes) if _swz else 0)
-    blkBytes = int(kernel["WavefrontSize"] * ti.gr.config.loadWidth + _pad)
+    blkBytes = grLoadBlockBytes(kernel["WavefrontSize"], ti)
     perWaveBytes = int(ti.numGRPerSubtile * blkBytes)
   else:
     perWaveBytes = int(localSub0 * stripStride)
@@ -2063,9 +2058,7 @@ def _grDTLAddKSlice(writer, kernel, module, tc, ti, dstVgpr):
   kSplit, winSplit, _, _ = _tluKWaveSlots(ti)
   if kSplit <= 1 and winSplit <= 1:
     return
-  _swz = selectTLUSwizzle(ti); _cs = selectTLUColScatter(ti)
-  _pad = int(_cs.padBytes) if _cs else (int(_swz.padBytes) if _swz else 0)
-  blkBytes = int(kernel["WavefrontSize"] * ti.gr.config.loadWidth + _pad)
+  blkBytes = grLoadBlockBytes(kernel["WavefrontSize"], ti)
   sliceBytes = int(ti.numGRPerSubtile * blkBytes)
   # A K window sits one whole strip column of the macro tile further into LDS
   # (the same term emitSingleBufferLoad applies statically for sId1 > 0).
