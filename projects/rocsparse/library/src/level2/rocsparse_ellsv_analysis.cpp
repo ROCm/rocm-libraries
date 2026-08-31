@@ -29,7 +29,6 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_ellsv.hpp"
 #include "rocsparse_ellsv_info.hpp"
-#include "rocsparse_enum_utils.hpp"
 #include "rocsparse_mat_info.hpp"
 #include "rocsparse_primitives.hpp"
 #include "rocsparse_spmat_descr.hpp"
@@ -39,22 +38,6 @@
 
 namespace rocsparse
 {
-    // The info object caches one analysis per fill mode; only the non-transposed
-    // ones are ever populated. This discards them, so that the next analysis
-    // starts from scratch.
-    static void ellsv_clear_trm_infos(rocsparse_ellsv_info ei)
-    {
-        for(const rocsparse_fill_mode fm : rocsparse::all_rocsparse_fill_mode)
-        {
-            rocsparse::trm_info_t* trm_info = ei->get(rocsparse_operation_none, fm);
-            if(trm_info != nullptr)
-            {
-                delete trm_info;
-                ei->set(rocsparse_operation_none, fm, nullptr);
-            }
-        }
-    }
-
     // Whether a cached analysis can be reused for the matrix A, that is, whether
     // it was built from a matrix with the same sparsity pattern layout.
     static bool ellsv_trm_info_matches(const rocsparse::trm_info_t* trm_info,
@@ -69,30 +52,6 @@ namespace rocsparse
         // valid whatever the values are.
         return trm_info->get_m() == A->rows && trm_info->get_index_indextype() == A->col_type
                && trm_info->get_descr() == A->descr;
-    }
-
-    // An info object is attached to the matrix info rather than to the matrix, so
-    // it survives a matrix being destroyed and a new one created in its place.
-    // Analysing A is only allowed to keep what it already holds if every cached
-    // analysis was built from a matrix A still matches; otherwise the caller is
-    // reusing the info object for an unrelated matrix and the cache is stale.
-    static bool ellsv_info_matrix_matches(rocsparse_ellsv_info ei, rocsparse_const_spmat_descr A)
-    {
-        if(ei == nullptr)
-        {
-            return true;
-        }
-
-        for(const rocsparse_fill_mode fm : rocsparse::all_rocsparse_fill_mode)
-        {
-            const rocsparse::trm_info_t* trm_info = ei->get(rocsparse_operation_none, fm);
-            if(trm_info != nullptr && !rocsparse::ellsv_trm_info_matches(trm_info, A))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     template <uint32_t WF_SIZE, bool SLEEP, typename I>
@@ -455,11 +414,6 @@ rocsparse_status rocsparse::ellsv_analysis(rocsparse_handle            handle,
     }
 
     rocsparse_ellsv_info ei = p_ellsv_info[0];
-    if(ei != nullptr && !rocsparse::ellsv_info_matrix_matches(ei, A))
-    {
-        rocsparse::ellsv_clear_trm_infos(ei);
-    }
-
     if(ei == nullptr)
     {
         ei              = new _rocsparse_ellsv_info();
