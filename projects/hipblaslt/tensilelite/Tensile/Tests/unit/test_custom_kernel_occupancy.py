@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 # The coverage tox env runs `pytest -m unit Tensile/Tests/unit`; without this
 # explicit declaration the file is silently deselected and reports 0% coverage.
@@ -470,17 +471,19 @@ class TestGetSourceFileStringCustomKernelPath:
         """
         from rocisa import rocIsa
 
-        asm_path = shutil.which("amdclang++") or "/usr/bin/amdclang++"
-        if not os.path.exists(asm_path):
-            pytest.skip(f"amdclang++ not found at {asm_path}; cannot init rocisa")
+        with preserve_rocisa_kernel_state():
+            asm_path = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+            if not os.path.exists(asm_path):
+                pytest.skip(f"amdclang++ not found at {asm_path}; cannot init rocisa")
 
-        ti = rocIsa.getInstance()
-        ti.init(self._ISA, asm_path)
-        ti.setKernel(self._ISA, self._WAVEFRONT_SIZE)
+            ti = rocIsa.getInstance()
+            ti.init(self._ISA, asm_path)
+            ti.setKernel(self._ISA, self._WAVEFRONT_SIZE)
 
-        assert ti.getRegCaps().get("MaxVgpr") is not None, (
-            "rocisa singleton not properly initialized; getRegCaps() returned empty dict"
-        )
+            assert ti.getRegCaps().get("MaxVgpr") is not None, (
+                "rocisa singleton not properly initialized; getRegCaps() returned empty dict"
+            )
+            yield
 
     def _make_kernel(self):
         """Construct a kernel object matching the production custom-kernel dict."""

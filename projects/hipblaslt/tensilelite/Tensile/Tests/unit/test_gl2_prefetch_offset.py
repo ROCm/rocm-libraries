@@ -82,9 +82,16 @@ from gpu_test_helpers import (  # noqa: E402
     GFX_TARGET,
     run_on_gpu,
     init_rocisa,
+    preserve_rocisa_kernel_state,
     assemble_kernel,
     _scan_register_indices,
 )
+
+
+@pytest.fixture(autouse=True)
+def _preserve_rocisa_state():
+    with preserve_rocisa_kernel_state():
+        yield
 
 # ---------------------------------------------------------------------------
 # GPU target (this test is gfx1250-only)

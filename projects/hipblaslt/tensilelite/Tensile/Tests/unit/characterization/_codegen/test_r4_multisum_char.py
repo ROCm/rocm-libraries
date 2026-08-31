@@ -42,8 +42,15 @@ a real ``RegisterPool`` for SGPR allocation (required by ``allocTmpSgpr``).
 import shutil
 
 import pytest
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _preserve_rocisa_state():
+    with preserve_rocisa_kernel_state():
+        yield
 
 # ---------------------------------------------------------------------------
 # Helpers

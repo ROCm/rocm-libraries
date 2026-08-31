@@ -27,8 +27,15 @@ Target ranges for measurement: 170-233, 388-461, 442-588.
 import shutil
 
 import pytest
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _preserve_rocisa_state():
+    with preserve_rocisa_kernel_state():
+        yield
 
 
 # ---------------------------------------------------------------------------

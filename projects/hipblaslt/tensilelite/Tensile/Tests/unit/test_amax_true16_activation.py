@@ -41,8 +41,15 @@ from gpu_test_helpers import init_rocisa  # noqa: E402
 
 from Tensile.Common.Architectures import gfxToIsa  # noqa: E402
 from Tensile.Common.DataType import DataType  # noqa: E402
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state  # noqa: E402
 
 import AMaxGenerator  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _preserve_rocisa_state():
+    with preserve_rocisa_kernel_state():
+        yield
 
 
 # gfx11 family covered by the NoSDWA arch cap (checkInList(isaVersion[0], {11, 12})).

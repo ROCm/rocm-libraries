@@ -20,6 +20,13 @@ pytestmark = pytest.mark.unit
 
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from rocisa import rocIsa
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+
+
+@pytest.fixture(autouse=True)
+def _preserve_rocisa_state():
+    with preserve_rocisa_kernel_state():
+        yield
 
 
 # ---------------------------------------------------------------------------

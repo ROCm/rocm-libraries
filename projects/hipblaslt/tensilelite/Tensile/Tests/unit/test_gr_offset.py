@@ -27,6 +27,7 @@ from gpu_test_helpers import (
     assemble_and_run,
     generate_kernel_asm,
     generate_load_params,
+    preserve_rocisa_kernel_state,
     requires_gpu,
 )
 
@@ -34,6 +35,12 @@ from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment
 from rocisa.code import Module, TextBlock
 from rocisa.container import sgpr
 from rocisa.instruction import SMovB32, SMovB64, SWaitCnt
+
+
+@pytest.fixture(autouse=True)
+def _preserve_rocisa_state():
+    with preserve_rocisa_kernel_state():
+        yield
 
 
 # ---------------------------------------------------------------------------
