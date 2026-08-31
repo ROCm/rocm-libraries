@@ -65,6 +65,26 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    ```
    Add `-DROCM_PATH=<path>` when a ROCm path is resolved or provided. On Windows also add `-DCMAKE_PROGRAM_PATH=<clang-path>` and `-DGPU_TARGETS=<arch>`.
 
+   **Use the preset.** It carries the `rocm-clang.cmake` toolchain and the component
+   list. Hand-rolling `-DCMAKE_CXX_COMPILER=...` and `-DROCM_LIBS_ENABLE_COMPONENTS=...`
+   instead is the common way to lose half an hour: without the toolchain the host
+   compiler falls back to system GCC, and the build then fails with dozens of `-Werror`
+   diagnostics (`-Wshadow`, `-Wparentheses`, unrecognised `-Wno-error=` flags) in files
+   you never touched, which reads as broken source rather than a wrong compiler.
+
+   **Generic-kernel-ingestor / rocKE builds** need flags no preset sets, because they
+   are off by default:
+
+   | Flag | Default | Needed when |
+   |---|---|---|
+   | `HIPDNN_ENABLE_KERNEL_INGESTOR` | OFF | Any descriptor-backed engine. Also gates `hipdnn_validate_descriptors`, which is why that binary is usually absent. |
+   | `HIPDNN_ENABLE_SDPA` | OFF | Any attention graph. This is the **frontend**: with it off the SDPA API is `#ifdef`-compiled out and plans silently DECLINE. Must be ON for both the SDK and the provider. |
+   | `ENABLE_ASM_SDPA_ENGINE` | ON | Turn **OFF** to stop the incumbent ASM engine winning attention graphs when you are testing a new one. |
+   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | rocKE kernels. |
+   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | unset | The authored descriptor tree `hkp_pack` packs. Unset means the production packaging path stays dormant and ships nothing, silently. |
+   | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`. |
+   | `Python3_EXECUTABLE` | system | Must itself import `msgpack` and `zstandard` — the packager *runs* this interpreter. Distinct from the flag above, which only locates the package. The failure names `/usr/bin/python3`, not the variable you set, so point it at a venv holding all three. |
+
 7. Build with output redirected to a log:
    ```bash
    cmake --build <build-dir> > <log> 2>&1

@@ -167,3 +167,49 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
             "HIPDNN_AITER_ASM_DIR=${_install_asm_dir}"
     )
 endif()
+
+# Register the gfx942 dense-attention ingestor engine's own gpu-reference target.
+#
+# Bundles are discovered once and run against whichever engine WINS the graph, so
+# without an engine-pinned target this engine can sit entirely unexercised while the
+# suite reports green -- it competes with ASM_SDPA_ENGINE for the same SDPA_FWD node.
+# The BSHD bundles this integration adds are the ones no other engine can serve, but
+# nothing in the suite guarantees THIS engine is the one that served them.
+#
+# Gated on the flags that actually PRODUCE the engine, not merely on the op being
+# enabled: the descriptors exist only when the ingestor is on AND the rocKE producer
+# ran over a production source root. Without that conjunction the engine never
+# registers and every pinned case FAILS rather than skipping.
+#
+# --test-engine matches against the loaded engines' `engineName`. The provider's
+# Container::getEngineName now answers for descriptor-registered engines too (#11336),
+# filling the name from the UED's own `name` field -- so this pin resolves and the target
+# runs the cases against THIS engine rather than whichever one wins the graph.
+#
+# Do NOT "fix" a failure here by dropping ENGINE_NAME or pinning a different engine: the
+# whole point is that an unpinned run can report green while a different engine served
+# every case.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        # Exactly as the UED spells it.
+        ENGINE_NAME hipkernel:Gfx942AttentionDense
+        INSTALL_SUBDIR hip_kernel_provider
+        # Computes the reference live, which is what makes the golden-free BSHD bundles
+        # checkable. The GPU reference accepts these graphs: they are dense and
+        # stride-based, with no paging, varlen, ragged, stats, dropout or fp8 descale.
+        REFERENCE_EXECUTOR gpu
+        # The bshd bundles only, quick AND standard. The suite name is the bundle's
+        # own path (quick_SdpaFwd_bshd_bf16_hd128_causal_batch_Small.Small), NOT the
+        # Smoke/<Fixture>.Correctness/* shape a C++ INSTANTIATE_TEST_SUITE_P produces --
+        # verified against --gtest_list_tests. Every other SdpaFwd case is BHSD and this
+        # engine correctly declines it, so those are EXPECTED TO SKIP under this pin:
+        # --test-engine pins exactly one engine and a case belonging to another pack
+        # reports not-applicable.
+        GTEST_FILTER
+            *_SdpaFwd_bshd_*.*
+    )
+endif()

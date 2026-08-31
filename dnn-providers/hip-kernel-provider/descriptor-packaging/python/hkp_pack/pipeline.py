@@ -1,7 +1,9 @@
 import copy
 import hashlib
 import json
+import os
 import shutil
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -158,6 +160,97 @@ def _ukd_extra(ukd):
     }
 
 
+def _pack_jobs():
+    """Worker count for the rocke prewarm. 0/1 disables it.
+
+    Defaults to the CPU count capped at 32 -- comgr is memory-hungry and the
+    return is flat past that. HKP_PACK_JOBS overrides, and HKP_PACK_JOBS=1 is
+    the escape hatch back to the pure-serial path when a compile error needs a
+    clean traceback.
+    """
+    env = os.environ.get("HKP_PACK_JOBS")
+    if env:
+        try:
+            return max(0, int(env))
+        except ValueError:
+            raise HkpPackError(f"HKP_PACK_JOBS must be an integer, got '{env}'")
+    return min(32, os.cpu_count() or 1)
+
+
+def _compile_one_rocke(job):
+    """Top-level so it is picklable. Returns (vk, co_path, symbol) or an error."""
+    vk, source, builder, spec, arch, out_dir = job
+    try:
+        co_path, symbol = compile_rocke_variant(source, builder, spec, arch, out_dir)
+        return (vk, str(co_path), symbol, None)
+    except Exception as exc:  # surfaced verbatim in the parent
+        return (vk, None, None, f"{type(exc).__name__}: {exc}")
+
+
+def _prewarm_rocke_variants(
+    flat, arch, inter_arch_dir, variant_co, variant_symbol, log
+):
+    """Compile every distinct rocke variant for arch in parallel, into the caches.
+
+    Purely a cache fill. `_compile_ukd_variant` still runs serially afterwards and
+    still owns every decision -- it just finds `vk` already present and skips the
+    expensive call. That keeps one code path for correctness (dedup keys, symbol
+    capture, error text) and makes this an optimisation that cannot change output:
+    a variant this misses is simply compiled serially, as before.
+
+    Each variant is an independent `rocke build -> comgr lower -> write .co`, keyed
+    by a content hash of (source, builder, spec), so workers never contend and the
+    written filenames cannot collide.
+    """
+    jobs = {}
+    for kdp in flat.kdps():
+        if not arch_matches(kdp.doc, arch):
+            continue
+        for entry in kdp.doc["kernelDescriptors"]:
+            if isinstance(entry, str):
+                continue
+            ks = entry.get("kernel_source") or {}
+            if ks.get("kind") != "rocke":
+                continue
+            vk = rocke_variant_key(ks["source"], ks["builder"], ks["spec"])
+            if vk in jobs or vk in variant_co:
+                continue
+            jobs[vk] = (
+                vk,
+                ks["source"],
+                ks["builder"],
+                ks["spec"],
+                arch,
+                inter_arch_dir,
+            )
+
+    workers = _pack_jobs()
+    if len(jobs) < 2 or workers < 2:
+        return
+    workers = min(workers, len(jobs))
+    log(
+        f"hkp_pack: compiling {len(jobs)} rocke variants for {arch} on {workers} workers"
+    )
+    failures = []
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        for vk, co_path, symbol, err in pool.map(
+            _compile_one_rocke, jobs.values(), chunksize=1
+        ):
+            if err is not None:
+                failures.append((vk, err))
+                continue
+            variant_co[vk] = Path(co_path)
+            variant_symbol[vk] = symbol
+    if failures:
+        # Re-raise the first, with the count: the serial pass would stop at the
+        # first bad variant too, and a wall of parallel tracebacks hides it.
+        vk, err = failures[0]
+        raise HkpPackError(
+            f"{len(failures)} rocke variant(s) failed to compile for {arch}; "
+            f"first was '{vk}': {err}"
+        )
+
+
 def _compile_ukd_variant(
     ukd,
     where,
@@ -269,6 +362,11 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
     arch_kdps = []
     standalone_ukds = {}
     ukd_by_id = flat.ukd_by_id()
+
+    # Fill the variant caches in parallel before the serial walk below. Pure
+    # optimisation: the walk still decides everything, and simply finds the
+    # expensive results already computed.
+    _prewarm_rocke_variants(flat, arch, inter_arch_dir, variant_co, variant_symbol, log)
 
     for kdp in flat.kdps():
         doc = kdp.doc
