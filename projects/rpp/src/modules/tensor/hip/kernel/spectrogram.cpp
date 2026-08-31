@@ -317,9 +317,9 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
 
         // Allocate window output buffer (after d_windowFn)
         Rpp32f* windowOutput = d_windowFn + windowLength;
-        RPP_HIP_RETURN_IF_ERROR(
-            hipMemsetAsync(windowOutput, 0, windowOutputStride * dstDescPtr->n * sizeof(Rpp32f),
-                           handle.GetStream()));
+        RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(windowOutput, 0,
+                                               windowOutputStride * dstDescPtr->n * sizeof(Rpp32f),
+                                               handle.GetStream()));
 
         // Compute the windowOutput for all samples in a batch. Each sample will be of shape
         // (numWindows, nfft)
@@ -338,7 +338,8 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         HIP_CHECK_LAUNCH_RETURN();
 
         // Allocate complex output buffer for rocFFT (after windowOutput)
-        float2* fftOutput = reinterpret_cast<float2*>(windowOutput + dstDescPtr->n * windowOutputStride);
+        float2* fftOutput =
+            reinterpret_cast<float2*>(windowOutput + dstDescPtr->n * windowOutputStride);
         Rpp32u fftOutputStride = maxNumWindows * numBins;
 
         // Get or create cached rocFFT plan for this (nfft, totalWindows) combination
@@ -346,8 +347,7 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         rocfft_plan plan = nullptr;
         rocfft_plan_description desc = nullptr;
         RppStatus status = get_rocfft_plan(handle, nfft, totalWindows, &plan, &desc);
-        if (status != RPP_SUCCESS)
-            return status;
+        if (status != RPP_SUCCESS) return status;
 
         // Get work buffer size
         size_t workBufferSize = 0;
@@ -360,12 +360,14 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         if (workBufferSize > 0) {
             if (rocfft_execution_info_create(&execInfo) != rocfft_status_success ||
                 hipMalloc(&workBuffer, workBufferSize) != hipSuccess ||
-                rocfft_execution_info_set_work_buffer(execInfo, workBuffer, workBufferSize) != rocfft_status_success) {
+                rocfft_execution_info_set_work_buffer(execInfo, workBuffer, workBufferSize) !=
+                    rocfft_status_success) {
                 if (workBuffer) (void)hipFree(workBuffer);
                 if (execInfo) rocfft_execution_info_destroy(execInfo);
                 return RPP_ERROR_NOT_ENOUGH_MEMORY;  // rocFFT work buffer allocation failed
             }
-            if (rocfft_execution_info_set_stream(execInfo, handle.GetStream()) != rocfft_status_success) {
+            if (rocfft_execution_info_set_stream(execInfo, handle.GetStream()) !=
+                rocfft_status_success) {
                 if (workBuffer) (void)hipFree(workBuffer);
                 rocfft_execution_info_destroy(execInfo);
                 return RPP_ERROR_HIP_RUNTIME;  // rocFFT stream configuration failed
@@ -388,9 +390,9 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
-                           handle.GetStream(), fftOutput, fftOutputStride,
-                           dstPtr, make_uint2(dstDescPtr->strides.nStride, maxNumWindows),
-                           numWindowsTensor, make_int2(numBins, power), vertical);
+                           handle.GetStream(), fftOutput, fftOutputStride, dstPtr,
+                           make_uint2(dstDescPtr->strides.nStride, maxNumWindows), numWindowsTensor,
+                           make_int2(numBins, power), vertical);
         HIP_CHECK_LAUNCH_RETURN();
 
         // Clean up temporary rocFFT resources (plan is cached and reused)
