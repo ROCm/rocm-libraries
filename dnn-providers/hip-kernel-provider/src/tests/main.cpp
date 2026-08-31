@@ -23,7 +23,7 @@ int main(int argc, char** argv)
     // dispatch cases benchmark, and benchmarking writes a shard through to disk.
     const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir("hip-kernel-provider-unit");
 
-#ifdef HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE_RELDIR
+#ifdef HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR
     // Point this binary at the descriptors staged beside it. The engine implementation is
     // linked in statically here, so its module-relative lookup measures from this
     // executable and would otherwise fall through to the install prefix, which a build
@@ -36,7 +36,7 @@ int main(int argc, char** argv)
        hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR").empty())
     {
         const auto descriptors = hip_kernel_provider::testing::descriptorSetRoot(
-            HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE_RELDIR);
+            HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR);
         if(std::filesystem::is_directory(descriptors, notFound))
         {
             hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR",

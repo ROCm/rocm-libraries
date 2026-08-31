@@ -56,7 +56,7 @@ using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog;
 using hipdnn_plugin_sdk::ingestor::resolveDescriptorSets;
 
-using hip_kernel_provider::testing::packedFixtureRoot;
+using hip_kernel_provider::testing::archiveFixtureRoot;
 
 /// Every per-arch shard this build produced.
 ///
@@ -69,7 +69,7 @@ std::vector<std::filesystem::path> packedArchShards()
     std::vector<std::filesystem::path> shards;
 
     std::error_code ec;
-    const std::filesystem::path& root = packedFixtureRoot();
+    const std::filesystem::path& root = archiveFixtureRoot();
     if(!std::filesystem::is_directory(root, ec))
     {
         return shards;
@@ -101,7 +101,7 @@ std::vector<std::filesystem::path> packedArchShards()
     const auto shards = packedArchShards();                                                \
     if((shards).empty())                                                                   \
     {                                                                                      \
-        GTEST_SKIP() << "no packed arch shard under " << packedFixtureRoot()               \
+        GTEST_SKIP() << "no packed arch shard under " << archiveFixtureRoot()              \
                      << " -- the packaging rule did not run. Configure with "              \
                         "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON, a discoverable hipcc, and a " \
                         "HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT.";                       \

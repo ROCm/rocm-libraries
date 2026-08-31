@@ -49,12 +49,12 @@ inline std::filesystem::path descriptorSetRoot(const char* relativeSubdir)
     }
 }
 
-#ifdef HIPKERNELPROVIDER_TEST_SET_PACKED_FIXTURE_RELDIR
-/// The packed-fixture set, holding one subdirectory per packed arch.
-inline const std::filesystem::path& packedFixtureRoot()
+#ifdef HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR
+/// The archive fixture set, holding one subdirectory per packed arch.
+inline const std::filesystem::path& archiveFixtureRoot()
 {
     static const std::filesystem::path root
-        = descriptorSetRoot(HIPKERNELPROVIDER_TEST_SET_PACKED_FIXTURE_RELDIR);
+        = descriptorSetRoot(HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR);
     return root;
 }
 #endif

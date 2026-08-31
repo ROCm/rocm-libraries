@@ -101,7 +101,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # into asserting a path the provider never builds.
     #
     # One define per descriptor set. A single define cannot serve both: the discovery set
-    # and the packed-fixture root are different folders.
+    # and the archive fixture root are different folders.
     #
     # Binary-relative, never an absolute build path. The offset holds in the build tree and
     # the install tree alike, so these cases read the descriptors beside whichever copy of
@@ -109,13 +109,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # installed run would otherwise find nothing, enumerate nothing, and pass.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
-        HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE}"
-        HIPKERNELPROVIDER_TEST_SET_PACKED_FIXTURE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_PACKED_FIXTURE}")
+        HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
+        HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/packed")
 
     # The kpack adapter's tests. Gated with the sources they exercise, and kept together
     # here -- including the dispatch one, which sits under engines/ -- so all three sit
     # between the two defines they read. Those are
-    # HIPKERNELPROVIDER_TEST_SET_PACKED_FIXTURE_RELDIR above, under which the device cases
+    # HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR above, under which the device cases
     # find the archive this build packed for the local arch, and HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE
     # below, which the parse-level cases open because they need a real container rather
     # than a matching device.
@@ -141,7 +141,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # Guarded for the same reason as the integration side: a root skips with a warning
     # when hipcc is absent, and a hard dependency would make that fatal.
     # One staging target per descriptor set now, not one shared owner.
-    foreach(_hkp_set hkp_packaging_testfixture)
+    foreach(_hkp_set hkp_packaging_unit_conv hkp_packaging_archive_fixture)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_tests ${_hkp_set})
         endif()

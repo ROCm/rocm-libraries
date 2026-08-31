@@ -83,17 +83,7 @@ endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
-        # TAG RESTORE-KPACK-INTEGRATION-TEST -- grep this tag for every site to restore.
-        # IntegrationGpuKernelIngestorKpack.cpp is commented out, not deleted: its two cases
-        # need the packed-fixture descriptor set, while every other case in this binary needs
-        # the embedded-engine set. Descriptor discovery is memoised per process
-        # (KernelIngestorEngine.cpp discoverDescriptorSets), so one executable can resolve
-        # exactly one set -- this is the only file in the repository that asks for a second.
-        # The source is kept because the coverage it carries is wanted back: the full chain
-        # from authored hip descriptors through the packer to on-device execution verified
-        # against a CPU reference. Restoring it needs a descriptor arrangement that does not
-        # ask this binary for two sets, not simply re-adding the line.
-        # kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
+        kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
     )
     # This target links only the SDKs, not hip_kernel_provider_private, so it does not
     # inherit the provider's gate and needs the definition set directly.
@@ -105,40 +95,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # the offset holds in the install tree too, so no machine-specific path is compiled in
     # or reaches the CTest files.
     target_compile_definitions(hip_kernel_provider_integration_tests
-        PRIVATE HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE}"
+        PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
     )
     # The shared descriptor-root resolver lives with the unit tests
     target_include_directories(hip_kernel_provider_integration_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../tests
     )
-    # TAG RESTORE-KPACK-INTEGRATION-TEST
-    # Commented out with the source above -- this define has no other consumer. Restore both
-    # together.
-    #
     # The relative layout only, never an absolute build path: the kpack suite locates the
     # staged tree by walking from the loaded plugin exactly as the loader does, and needs
     # the same spelling of the subdirectory the provider compiled in. An absolute path
     # here would be baked into the installed test binary as well, naming a build tree it
     # cannot see.
-    # target_compile_definitions(hip_kernel_provider_integration_tests
-    #     PRIVATE HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
-    # )
-    # TAG RESTORE-KPACK-INTEGRATION-TEST
-    # The packed-fixture set is consumed only by the commented-out suite above; this
-    # dependency is what that suite needs to find its archive. One packaging target per
-    # descriptor set, so each set is named individually.
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/packed"
+    )
+    # The integration root is packed by three roots, and each stages under its own
+    # packaging target. Name each one individually.
     #
     # Guarded rather than assumed: a root skips with a warning when hipcc is absent, and
     # the suite is written to GTEST_SKIP in exactly that case. A hard dependency would
     # turn a missing compiler into a configure error.
-    foreach(_hkp_set hkp_packaging_testfixture)
+    foreach(_hkp_set hkp_packaging_integration_conv hkp_packaging_integration_pointwise
+                     hkp_packaging_archive_fixture)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_integration_tests ${_hkp_set})
         endif()
     endforeach()
-    if(TARGET hip_kernel_provider_descriptors)
-        add_dependencies(hip_kernel_provider_integration_tests hip_kernel_provider_descriptors)
-    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)

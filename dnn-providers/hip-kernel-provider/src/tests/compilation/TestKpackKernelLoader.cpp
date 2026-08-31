@@ -33,12 +33,12 @@ using hipdnn_test_sdk::utilities::ScopedDirectory;
 /// "bin/hiptest#0". Used rather than a hand-forged file so the reader under test is
 /// the pinned reader meeting an archive it actually accepts. The parse-level cases
 /// need a real *container*, not a matching *device*; the device cases read this
-/// build's own packed archive -- see packedFixtureRoot().
+/// build's own packed archive -- see archiveFixtureRoot().
 constexpr const char* REAL_ARCHIVE = HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE;
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 
-using hip_kernel_provider::testing::packedFixtureRoot;
+using hip_kernel_provider::testing::archiveFixtureRoot;
 
 /// The two descriptors the packaged pointwise fixture stages, one per block size. Their
 /// archive and toc_key are read out of the built files rather than written here: a copy
@@ -76,7 +76,7 @@ void findPackagedDirectory(std::string& arch, std::filesystem::path& directory)
     const std::string reported = properties.gcnArchName;
     arch = reported.substr(0, reported.find(':'));
 
-    const std::filesystem::path candidate = packedFixtureRoot() / arch;
+    const std::filesystem::path candidate = archiveFixtureRoot() / arch;
     directory = std::filesystem::is_directory(candidate) ? candidate : std::filesystem::path{};
 }
 
@@ -257,7 +257,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingSymbol)
     if(packaged.empty())
     {
         GTEST_SKIP() << "nothing was packaged for this device (" << arch
-                     << "): " << packedFixtureRoot() / arch
+                     << "): " << archiveFixtureRoot() / arch
                      << " does not exist. Environmental -- the build packs per arch and this "
                         "device is outside GPU_TARGETS.";
     }
@@ -304,7 +304,7 @@ TEST_F(TestKpackKernelLoader, TwoSymbolsResolveAgainstOneModule)
     if(packaged.empty())
     {
         GTEST_SKIP() << "nothing was packaged for this device (" << arch
-                     << "): " << packedFixtureRoot() / arch
+                     << "): " << archiveFixtureRoot() / arch
                      << " does not exist. Environmental -- the build packs per arch and this "
                         "device is outside GPU_TARGETS.";
     }

@@ -68,7 +68,7 @@ using hip_kernel_provider::kernel_ingestor_engine::testing::matchesGraph;
 using hip_kernel_provider::kernel_ingestor_engine::testing::POINTWISE_ADD;
 using hip_kernel_provider::kernel_ingestor_engine::testing::testDeviceProperties;
 
-using hip_kernel_provider::testing::packedFixtureRoot;
+using hip_kernel_provider::testing::archiveFixtureRoot;
 
 /// The packaged descriptor the [GPU] case takes its archive and toc_key from. Read out of
 /// the built file rather than written here: a copy would silently decouple this test
@@ -107,7 +107,7 @@ void findPackagedDirectory(hipDeviceProp_t& properties,
     const std::string reported = properties.gcnArchName;
     arch = reported.substr(0, reported.find(':'));
 
-    const std::filesystem::path candidate = packedFixtureRoot() / arch;
+    const std::filesystem::path candidate = archiveFixtureRoot() / arch;
     directory = std::filesystem::is_directory(candidate) ? candidate : std::filesystem::path{};
 }
 
@@ -453,7 +453,7 @@ TEST(TestPointwiseKpackDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
     if(packaged.empty())
     {
         GTEST_SKIP() << "nothing was packaged for this device (" << arch
-                     << "): " << packedFixtureRoot() / arch
+                     << "): " << archiveFixtureRoot() / arch
                      << " does not exist. Environmental -- the build packs per arch and this "
                         "device is outside GPU_TARGETS.";
     }

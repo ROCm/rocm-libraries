@@ -25,7 +25,7 @@ int main(int argc, char** argv)
     const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir(
         "hip-kernel-provider-integration");
 
-#ifdef HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE_RELDIR
+#ifdef HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR
     // Point this binary at the one descriptor set its cases resolve (override default
     // if not already set in env).
     // Can be set only once per test process.
@@ -33,7 +33,7 @@ int main(int argc, char** argv)
        hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR").empty())
     {
         const auto descriptors = hip_kernel_provider::testing::descriptorSetRoot(
-            HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE_RELDIR);
+            HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR);
         if(std::filesystem::is_directory(descriptors, notFound))
         {
             hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR",
