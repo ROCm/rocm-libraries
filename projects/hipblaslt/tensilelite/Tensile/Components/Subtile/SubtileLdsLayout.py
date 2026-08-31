@@ -20,58 +20,85 @@ makes it testable in isolation and keeps it next to the geometry
 """
 
 import math
-from dataclasses import dataclass
-from typing import Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Tuple
 
+from ...Common import roundUpToNearestMultiple
 from .Kernel import TileInfo, selectABGeometry, selectDGeometry, selectMXScaleGeometry
 from .SubtileTLUSwizzle import swizzlePadPerStrip
 
+# A GR load round covers one MMA tile in M and two in K; when four or more waves
+# cooperate on that round it widens to two tiles in M.  LR is always the base
+# shape regardless of wave config.
+_GR_SUBTILE_SHAPE_BASE = (1, 2)
+_GR_SUBTILE_SHAPE_WIDE = (2, 2)
+_GR_WAVES_TO_WIDEN = 4
+
+# states.overflowedResources code meaning "the LDS layout exceeds the device".
+_LDS_OVERFLOW_RESOURCE_CODE = 8
+
+_AB_OPERANDS = ('A', 'B')
+_MX_SCALE_OPERANDS = ('MXSA', 'MXSB')
+
+
+def mxBlockOf(kernel: dict, tc: str) -> int:
+  """MXBlock size for operand 'A'/'B' (0 when that operand carries no scales)."""
+  return kernel["ProblemType"].get("MXBlock%s" % tc, 0)
+
+
+def hasMXScales(kernel: dict) -> bool:
+  """True when *both* operands carry MX scales.
+
+  The scale regions are sized as a pair, so a kernel with scales on one side
+  only gets no scale region here.  `initSubtileInfos` still builds a TileInfo
+  per scaled operand independently, which is the looser condition.
+  """
+  return all(mxBlockOf(kernel, tc) > 0 for tc in _AB_OPERANDS)
+
 
 def selectGRSubtileShape(kernel: dict, tc: str) -> Tuple[int, int]:
-  """Select GR subtile shape based on wave cooperation level.
+  """GR subtile shape for one operand, from how many waves share its load.
 
-  The GR tile shape represents the effective coverage per GR load round.
-  When multiple waves cooperate on a single GR load (waves_coop >= 4),
-  the GR tile expands from (1,2) to (2,2) MMA tiles.
-
-  For A: waves_coop = numWaves / MIWaveGroup[0]
-  For B: waves_coop = numWaves / MIWaveGroup[1]
-
-  Wave config → GR shape:
-    1x4 WG: A=(2,2), B=(1,2)   — A has 4 cooperating waves
-    4x1 WG: A=(1,2), B=(2,2)   — B has 4 cooperating waves
-    2x2 WG: A=(1,2), B=(1,2)   — 2 cooperating waves each
-    1x1 WG: A=(1,2), B=(1,2)   — 1 wave each
-
-  LR subtile shape is always (1,2) regardless of wave config.
+  The waves cooperating on an operand are the ones spanning the *other* free
+  dimension: a 1x4 wave group has 4 waves sharing A's load and 1 sharing B's.
   """
-  mi = kernel["MIWaveGroup"]
-  numWaves = mi[0] * mi[1]
-  wg_idx = 0 if tc == 'A' else 1
-  wg_m = mi[wg_idx]
-  waves_coop = numWaves // wg_m
-  return (2, 2) if waves_coop >= 4 else (1, 2)
+  waveGroup = kernel["MIWaveGroup"]
+  numWaves = waveGroup[0] * waveGroup[1]
+  wavesInFreeDim = waveGroup[0 if tc == 'A' else 1]
+  wavesCooperating = numWaves // wavesInFreeDim
+  return (_GR_SUBTILE_SHAPE_WIDE if wavesCooperating >= _GR_WAVES_TO_WIDEN
+          else _GR_SUBTILE_SHAPE_BASE)
 
 
-def initSubtileInfo(writer, kernel: dict, tc: str):
-  """Build the TileInfo for one operand and attach it to the writer's state."""
-  tileMap = {
+def matrixInfoOf(writer, tc: str):
+  """The writer's per-operand state slot ('A' -> states.a, 'MXSA' -> states.mxsa)."""
+  slots = {
     'A'    : writer.states.a,
     'B'    : writer.states.b,
     'D'    : writer.states.d,
     'MXSA' : writer.states.mxsa,
     'MXSB' : writer.states.mxsb,
   }
-  matrixInfo = tileMap[tc]
+  if tc not in slots:
+    raise ValueError("unknown subtile operand %r" % tc)
+  return slots[tc]
+
+
+def tileInfoOf(writer, tc: str):
+  """The TileInfo built for one operand by `initSubtileInfo`."""
+  return matrixInfoOf(writer, tc).tileInfo
+
+
+def initSubtileInfo(writer, kernel: dict, tc: str):
+  """Build the TileInfo for one operand and attach it to the writer's state."""
+  matrixInfo = matrixInfoOf(writer, tc)
   if tc == 'D':
     geometry = selectDGeometry(kernel)
-  elif tc in ('A', 'B'):
+  elif tc in _AB_OPERANDS:
     matrixInfo.grSubtileShape = selectGRSubtileShape(kernel, tc)
     geometry = selectABGeometry(kernel, tc)
-  elif tc in ('MXSA', 'MXSB'):
-    geometry = selectMXScaleGeometry(kernel, tc)
   else:
-    raise ValueError("unknown subtile operand %r" % tc)
+    geometry = selectMXScaleGeometry(kernel, tc)
   matrixInfo.tileInfo = TileInfo(geometry, tc, writer, kernel)
 
 
@@ -79,77 +106,89 @@ def initSubtileInfos(writer, kernel: dict):
   """Build TileInfos for every operand this kernel uses."""
   for tc in ('A', 'B', 'D'):
     initSubtileInfo(writer, kernel, tc)
-  if kernel["ProblemType"].get("MXBlockA", 0) > 0:
-    initSubtileInfo(writer, kernel, 'MXSA')
-  if kernel["ProblemType"].get("MXBlockB", 0) > 0:
-    initSubtileInfo(writer, kernel, 'MXSB')
+  for tc in _AB_OPERANDS:
+    if mxBlockOf(kernel, tc) > 0:
+      initSubtileInfo(writer, kernel, 'MXS%s' % tc)
+
+
+def _stripBytes(tileInfo, macroTile: int) -> int:
+  """Payload of one operand: its subtile strips plus the pads written between them."""
+  numStrips = int(tileInfo.globalSubtileGrid[0] * tileInfo.globalSubtileGrid[1])
+  tdmRowPad = int(tileInfo.ldsRowPadBytes) * macroTile
+  swizzlePad = swizzlePadPerStrip(tileInfo) * numStrips
+  return int(numStrips * tileInfo.subtileSize) + tdmRowPad + swizzlePad
+
+
+def _writeGroupBytes(tileInfo) -> int:
+  """Bytes one DTL write group covers, or 0 when a write cannot span subtiles.
+
+  A region is measured in subtiles but filled by write groups, so a trailing
+  partial group would spill into the next operand unless the region is a whole
+  number of groups.  At most one subtile per write there is nothing to round.
+  """
+  subtilesPerWrite = tileInfo.loadRatioGR
+  if subtilesPerWrite <= 1:
+    return 0
+  return int(math.ceil(subtilesPerWrite) * tileInfo.subtileSize)
 
 
 def subtileRegionSize(tileInfo, macroTile: int, ldsRowBankSize: int) -> int:
   """Bytes reserved for one operand's subtile strips, including alignment.
 
-  The payload is the operand's strips plus the padding the emitters insert into
-  the LDS image: the TDM per-row pad, and the TLU=1 bank-conflict swizzle's
-  per-strip pad (without which adjacent strips overlap).
-
-  The alignment granularity is derived from *this* operand's subtileSize rather
-  than always from A's.  With an asymmetric tile -- e.g. the NT fp4 16x1 stack,
-  where A stacks 16 MFMA-M tiles per strip and B only 2 -- charging B the A
-  granularity rounds B's 2KB of strips up to A's 16KB.
+  Sized from *this* operand's subtileSize: with an asymmetric tile -- the NT fp4
+  16x1 stack, where A stacks 16 MFMA-M tiles per strip and B only 2 -- charging
+  B the A granularity would round B's 2KB of strips up to A's 16KB.
   """
-  numSubtiles = int(tileInfo.globalSubtileGrid[0] * tileInfo.globalSubtileGrid[1])
-  rowPad = int(tileInfo.ldsRowPadBytes) * macroTile
-  swzPad = swizzlePadPerStrip(tileInfo) * numSubtiles
-  raw = int(numSubtiles * tileInfo.subtileSize + rowPad + swzPad)
+  # Floor at an LDS bank row so the bank-conflict swizzle maps the same way in
+  # B's region as it does in A's.
+  alignment = max(_writeGroupBytes(tileInfo), int(ldsRowBankSize))
+  return roundUpToNearestMultiple(_stripBytes(tileInfo, macroTile), alignment)
 
-  # The region is measured in subtiles but filled by DTL writes covering
-  # loadRatioGR of them, so a subtile count that is not a multiple of that
-  # leaves a trailing partial group writing into the next operand.  Round to
-  # the write, not to a constant: a fixed 2 over-pads the common
-  # loadRatioGR <= 1 case and under-pads the wide wave groups, where the ratio
-  # reaches 4 or 8.  Floor at an LDS bank row so the bank-conflict swizzle maps
-  # the same way in B's region as in A's.
-  # A ratio <= 1 means one write covers at most one subtile, so the subtile
-  # boundary is already a write boundary and only the bank-row floor applies.
-  ratio = tileInfo.loadRatioGR
-  writeUnit = int(math.ceil(ratio) * tileInfo.subtileSize) if ratio > 1 else 0
-  align = max(writeUnit, int(ldsRowBankSize))
-  return int(((raw + align - 1) // align) * align)
+
+def _mxScaleRegionSize(tileInfo, kernel: dict) -> int:
+  """Bytes reserved for one MX scale operand.
+
+  Swizzled scale takes more LDS than the scales strictly need, so that the DTL
+  loads feeding it can stay wide.
+  """
+  numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
+  return tileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
 
 
 @dataclass
 class SubtileLdsLayout:
-  """Start offsets and total size of the subtile LDS regions, in bytes."""
-  offsetA: int    = 0
-  offsetB: int    = 0
-  offsetMXSA: int = -1
-  offsetMXSB: int = -1
-  totalSize: int  = 0
+  """Start offset of each operand's LDS region, and the total they occupy."""
+  offsets: Dict[str, int] = field(default_factory=dict)
+  totalSize: int = 0
+
+  def offsetOf(self, tc: str, default: int = -1) -> int:
+    return self.offsets.get(tc, default)
+
+
+def _packRegions(sizes: List[Tuple[str, int]]) -> SubtileLdsLayout:
+  """Place each region at the next free byte, in order."""
+  layout = SubtileLdsLayout()
+  for tc, size in sizes:
+    layout.offsets[tc] = layout.totalSize
+    layout.totalSize += size
+  return layout
 
 
 def computeLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
   """Lay out A, B and (when present) the MX scale regions in LDS."""
   archCaps = writer.states.archCaps
   ldsRowBankSize = archCaps["LDSBankCount"] * archCaps["LDSBankWidth"]
+  macroTiles = {'A': kernel["MacroTile0"], 'B': kernel["MacroTile1"]}
 
-  sizeA = subtileRegionSize(writer.states.a.tileInfo, kernel["MacroTile0"], ldsRowBankSize)
-  sizeB = subtileRegionSize(writer.states.b.tileInfo, kernel["MacroTile1"], ldsRowBankSize)
-
-  layout = SubtileLdsLayout(offsetA=0, offsetB=sizeA)
-  sizeMXSA = sizeMXSB = 0
-  if kernel["ProblemType"].get("MXBlockA", 0) > 0 and kernel["ProblemType"].get("MXBlockB", 0) > 0:
-    # For swizzled scale we use extra LDS space for now to allow wider DTL loads.
-    numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
-    sizeMXSA = writer.states.mxsa.tileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-    sizeMXSB = writer.states.mxsb.tileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-    layout.offsetMXSA = sizeA + sizeB
-    layout.offsetMXSB = sizeA + sizeB + sizeMXSA
-
-  layout.totalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
-  return layout
+  sizes = [(tc, subtileRegionSize(tileInfoOf(writer, tc), macroTiles[tc], ldsRowBankSize))
+           for tc in _AB_OPERANDS]
+  if hasMXScales(kernel):
+    sizes += [(tc, _mxScaleRegionSize(tileInfoOf(writer, tc), kernel))
+              for tc in _MX_SCALE_OPERANDS]
+  return _packRegions(sizes)
 
 
-def applyLdsLayout(writer, kernel: dict):
+def applyLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
   """Build the subtile TileInfos, lay out LDS, and publish the result.
 
   Sets ``kernel["LdsNumBytes"]`` and flags an LDS overflow on the writer when
@@ -158,14 +197,11 @@ def applyLdsLayout(writer, kernel: dict):
   initSubtileInfos(writer, kernel)
 
   layout = computeLdsLayout(writer, kernel)
-  writer.ldsStartOffsetA    = layout.offsetA
-  writer.ldsStartOffsetB    = layout.offsetB
-  if layout.offsetMXSA >= 0:
-    writer.ldsStartOffsetMXSA = layout.offsetMXSA
-    writer.ldsStartOffsetMXSB = layout.offsetMXSB
-  writer.ldsTotalSize       = layout.totalSize
+  for tc, offset in layout.offsets.items():
+    setattr(writer, "ldsStartOffset%s" % tc, offset)
+  writer.ldsTotalSize = layout.totalSize
 
   kernel["LdsNumBytes"] = max(1, int(layout.totalSize * kernel["NumLdsBlk"]))
   if kernel["LdsNumBytes"] > writer.states.archCaps["DeviceLDS"]:
-    writer.states.overflowedResources = 8
+    writer.states.overflowedResources = _LDS_OVERFLOW_RESOURCE_CODE
   return layout
