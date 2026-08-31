@@ -28,6 +28,8 @@ SOFTWARE.
 #include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
+#include <cstddef>
+#include <initializer_list>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -128,6 +130,20 @@ inline std::string config_name(const TestConfig& c) {
 // The default shape for images.
 inline constexpr Size kDefaultSize{2, 36, 48};
 
+// Shapes for reaching a kernel's scalar tail, which kDefaultSize never does: 48 is a multiple of
+// both SIMD widths (16 px for U8/I8, 8 px for F32/F16) at full and at partial ROI, and its row
+// padding leaves the maximum 8 px of slack. Ops opt in individually; the tail geometry is
+// per-kernel.
+
+// 55 % 16 == 55 % 8 == 7; partial ROI 27 leaves a different remainder. 1 px of row slack.
+inline constexpr Size kTailWidthSize{2, 36, 55};
+
+// 13 < 16: all tail, no vector, for U8/I8. h = 45 is two HIP y-blocks plus 13 rows.
+inline constexpr Size kSubVectorSize{1, 45, 13};
+
+// Nothing to vectorise. Full ROI only -- the w/2, h/2 rule makes the partial window empty here.
+inline constexpr Size kUnitSize{1, 1, 1};
+
 // Cartesian product of the requested axes with every available backend. Pass the
 // dtype/layout/roi/size sets an op supports; HIP is only present when the suite was built
 // with the HIP backend (see available_backends()). Most ops take the default single size.
@@ -159,6 +175,17 @@ inline std::vector<TestConfig> make_configs(const std::vector<DType>& dtypes,
     convs.reserve(layouts.size());
     for (Layout l : layouts) convs.push_back({l, l});
     return make_configs(dtypes, convs, rois, sizes);
+}
+
+// Joins config sets, so an op can grid its extra shapes over a narrower slice of the other axes.
+inline std::vector<TestConfig> concat_configs(
+    std::initializer_list<std::vector<TestConfig>> sets) {
+    std::vector<TestConfig> configs;
+    std::size_t total = 0;
+    for (const auto& s : sets) total += s.size();
+    configs.reserve(total);
+    for (const auto& s : sets) configs.insert(configs.end(), s.begin(), s.end());
+    return configs;
 }
 
 // GTest name generator: turns each TestConfig into its filterable label.
