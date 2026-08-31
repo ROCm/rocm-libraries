@@ -97,7 +97,7 @@ Tests:
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2,4]
 
 - name: sptrsv_file
@@ -118,7 +118,7 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general]
   filename: [nos5,
              nos7]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [3,17]
   batch_count_A: [1]
 
@@ -141,7 +141,7 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general]
   filename: [nos5,
              nos7]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [3,4,17,96, 256, 1024]
   batch_count_A: [1]
 
@@ -162,7 +162,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_triangular]
   filename: [nos5]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2, 4]
   batch_count_A: [0, 1]
 
@@ -184,7 +184,7 @@ Tests:
   matrix_type: [rocsparse_matrix_type_triangular]
   filename: [rma10,
              nos5]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2, 3, 4, 17, 25]
   batch_count_A: [0, 1]
 
@@ -204,7 +204,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
   filename: [mplate]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2]
 
 - name: sptrsv_file
@@ -223,7 +223,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
   filename: [mc2depi]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [4]
   batch_count_A: [1]
 
@@ -244,7 +244,7 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general]
   filename: [mplate,
              mc2depi]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [4, 5, 8]
   batch_count_A: [0, 1]
 
@@ -262,7 +262,7 @@ Tests:
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [3, 31]
   batch_count_A: [0, 1]
 
@@ -284,7 +284,7 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general]
   filename: [nos2,
              nos6]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [19]
   batch_count_A: [0, 1]
 
@@ -304,7 +304,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
   filename: [nos2]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [7]
   batch_count_A: [1]
 
@@ -324,7 +324,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
   filename: [nos2]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [7, 19]
   batch_count_A: [0, 1]
 
@@ -342,7 +342,7 @@ Tests:
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2]
 
 - name: sptrsv
@@ -359,7 +359,7 @@ Tests:
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2]
 
 - name: sptrsv_file
@@ -382,7 +382,7 @@ Tests:
              amazon0312,
              sme3Dc,
              shipsec1]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2]
 
 - name: sptrsv_file
@@ -401,7 +401,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
   filename: [Chevron4]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2, 3]
   batch_count_A: [0, 1]
 
@@ -420,7 +420,7 @@ Tests:
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   graph_test: true
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2]
 
 

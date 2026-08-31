@@ -396,10 +396,11 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
 
             // Generate data
             std::vector<key_value> input(size);
+            const std::vector<T> values = test_utils::get_random_data<T>(size, 1, 100, seed_value);
             for (size_t i = 0; i < size; i++)
             {
                 input[i].key = (int)i;
-                input[i].value = test_utils::get_random_data<T>(1, 1, 100, seed_value)[0];
+                input[i].value = values[i];
             }
 
             common::device_ptr<key_value> d_input(input);

@@ -1,0 +1,74 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+      Activation: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1, 8, 8,  2, 2 ]
+        - DepthU: [16,32]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LDSTrInst: [False]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LdsPadMetadata: [0]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [0]
+        - PrefetchLocalRead: [0,1,2]
+        - PrefetchGlobalRead: [0,1,2]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - 1LDSBuffer: [0]
+        - TDMInst: [0]
+        - VectorWidthA: [1]
+        - SourceSwap: [False]
+        - DirectToVgprSparseMetadata: [False]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - WavefrontSize: [64]
+        - AssertFree0ElementMultiple: [1]
+        - AssertFree1ElementMultiple: [1]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 64]
+          - Exact: [16, 16, 1, 128]

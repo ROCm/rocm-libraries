@@ -35,10 +35,11 @@
 #include "detail/device_histogram.hpp"
 #include "device_histogram_config.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+#ifndef DOXYGEN_DOCUMENTATION_BUILD // Do not document
 
 namespace detail
 {
@@ -553,6 +554,8 @@ inline hipError_t histogram_range_impl(void*          temporary_storage,
 }
 
 } // namespace detail
+
+#endif // DOXYGEN_DOCUMENTATION_BUILD
 
 /// \brief Computes a histogram from a sequence of samples using equal-width bins.
 ///
@@ -1429,9 +1432,9 @@ inline hipError_t multi_histogram_range(void*          temporary_storage,
                                                                           debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_HISTOGRAM_HPP_

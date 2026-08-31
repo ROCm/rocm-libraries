@@ -34,6 +34,14 @@
 #include <iostream>
 #include <rocblaslt.h>
 
+namespace
+{
+    bool uniformSummationOrderEnabled(hipblasLtHandle_t handle, bool pref)
+    {
+        return pref || (handle && static_cast<rocblaslt_handle>(handle)->uniform_summation_order);
+    }
+}
+
 namespace hipblaslt_ext
 {
     static_assert(sizeof(hipblasLtMatmulHeuristicResult_t) == sizeof(rocblaslt_matmul_heuristic_result),
@@ -43,8 +51,9 @@ namespace hipblaslt_ext
     class GemmPreference::GemmPreferenceImpl
     {
     public:
-        size_t workspace_bytes         = 0;
-        bool   dyn_persistent_tile_ext = false;
+        size_t                           workspace_bytes          = 0;
+        hipblasLtStreamKTileSchedulingMode_t streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
+        bool                             uniform_summation_order  = false;
     };
 
     GemmPreference::GemmPreference()
@@ -78,14 +87,34 @@ namespace hipblaslt_ext
         return pimpl->workspace_bytes;
     }
 
-    void GemmPreference::setDynPersistentTileEnabled(bool enabled)
+    void GemmPreference::setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode)
     {
-        pimpl->dyn_persistent_tile_ext = enabled;
+        switch(mode)
+        {
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF:
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_ON:
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO:
+            pimpl->streamk_tile_scheduling_mode = mode;
+            break;
+        default:
+            pimpl->streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
+            break;
+        }
     }
 
-    bool GemmPreference::getDynPersistentTileEnabled() const
+    hipblasLtStreamKTileSchedulingMode_t GemmPreference::getStreamKTileSchedulingMode() const
     {
-        return pimpl->dyn_persistent_tile_ext;
+        return pimpl->streamk_tile_scheduling_mode;
+    }
+
+    void GemmPreference::setUniformSummationOrder(bool value)
+    {
+        pimpl->uniform_summation_order = value;
+    }
+
+    bool GemmPreference::getUniformSummationOrder() const
+    {
+        return pimpl->uniform_summation_order;
     }
 
     class GemmProblemType::GemmProblemTypeImpl
@@ -773,6 +802,9 @@ namespace hipblaslt_ext
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
+        m_streamk_tile_scheduling_mode
+            = static_cast<int32_t>(pref.pimpl->streamk_tile_scheduling_mode);
+        m_uniform_summation_order = pref.pimpl->uniform_summation_order;
         auto gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         auto results
             = reinterpret_cast<std::vector<rocblaslt_matmul_heuristic_result>*>(&heuristicResults);
@@ -782,6 +814,8 @@ namespace hipblaslt_ext
                                              gemmType,
                                              m_data,
                                              pref.pimpl->workspace_bytes,
+                                             m_streamk_tile_scheduling_mode,
+                                             uniformSummationOrderEnabled(m_handle, m_uniform_summation_order),
                                              requestedAlgoCount,
                                              *results));
         rocblaslt::Debug::Instance().markerStop();
@@ -794,6 +828,9 @@ namespace hipblaslt_ext
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtIsAlgoSupportedCpp");
         auto                    gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
+        applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
+        applyUniformSummationOrder(
+            m_data, gemmType, uniformSummationOrderEnabled(m_handle, m_uniform_summation_order));
         auto                    rocalgo  = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
         rocblaslt::RocTuningV2* tuning   = nullptr;
         auto                    status = RocBlasLtStatusToHIPStatus(rocblaslt_is_algo_supported_cpp(
@@ -813,6 +850,9 @@ namespace hipblaslt_ext
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtIsAlgoSupportedTuningV2Cpp");
         auto gemmType  = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
+        applyStreamKTileSchedulingMode(m_data, gemmType, m_streamk_tile_scheduling_mode);
+        applyUniformSummationOrder(
+            m_data, gemmType, uniformSummationOrderEnabled(m_handle, m_uniform_summation_order));
         auto rocalgo   = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
         auto roctuning = reinterpret_cast<rocblaslt::RocTuningV2*>(tuning.pimpl.get());
         auto status

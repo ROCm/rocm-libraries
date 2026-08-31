@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_gels.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -43,6 +44,7 @@ rocblas_status rocsolver_gels_strided_batched_impl(rocblas_handle handle,
                                                    const rocblas_stride strideB,
                                                    rocblas_int* info,
                                                    const rocblas_int batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("gels_strided_batched", "--trans", trans, "-m", m, "-n", n, "--nrhs", nrhs,
                         "--lda", lda, "--strideA", strideA, "--ldb", ldb, "--strideB", strideB,
@@ -102,6 +104,10 @@ rocblas_status rocsolver_gels_strided_batched_impl(rocblas_handle handle,
         handle, trans, m, n, nrhs, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, info,
         batch_count, (T*)scalars, (T*)work_x_temp, (T*)workArr_temp_arr, (T*)diag_trfac_invA,
         (T**)trfact_workTrmm_invA_arr, (T*)ipiv_savedB, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,10 @@ if( WIN32 )
 else()
   set( CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH
     "Install path prefix, prepended onto install directories" )
+endif()
+
+if( NOT DEFINED ROCM_LIBRARIES_ROOT )
+  set( ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." )
 endif()
 
 # This has to be initialized before the project() command appears
@@ -78,6 +82,7 @@ set(DEFAULT_GPUS
   gfx906
   gfx908
   gfx90a
+  gfx90c
   gfx942
   gfx950
   gfx1030
@@ -124,7 +129,7 @@ string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
 
 # nvc++ doesn't understand warning flags
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
-  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare -Wno-unknown-pragmas)
+  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare -Wno-deprecated-declarations -Wno-unknown-pragmas)
   if( WERROR )
     set( WARNING_FLAGS ${WARNING_FLAGS} -Werror )
   endif()
@@ -178,7 +183,7 @@ message(STATUS "BUILD_WITH_COMPILER = " ${BUILD_WITH_COMPILER})
 # Version
 set ( HIPFFT_VERSION_MAJOR "1" )
 set ( HIPFFT_VERSION_MINOR "0" )
-set ( HIPFFT_VERSION_PATCH "24" )
+set ( HIPFFT_VERSION_PATCH "26" )
 set ( VERSION_STRING "${HIPFFT_VERSION_MAJOR}.${HIPFFT_VERSION_MINOR}.${HIPFFT_VERSION_PATCH}" )
 set( hipfft_SOVERSION 0.1 )
 set( hipfftw_SOVERSION 0.1 )
@@ -223,6 +228,7 @@ if( BUILD_CLIENTS_BENCH OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS )
     set( HIPRAND_DEP hiprand )
   endif()
   if(BUILD_CLIENTS_TESTS)
+    enable_testing()
     rocm_package_setup_client_component(
       tests
       DEPENDS

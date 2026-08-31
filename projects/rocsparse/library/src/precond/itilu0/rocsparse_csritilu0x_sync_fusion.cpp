@@ -26,8 +26,13 @@
 #include "../conversion/rocsparse_identity.hpp"
 #include "common.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_csritilu0_driver.hpp"
 #include "rocsparse_csritilu0x_driver.hpp"
 #include <iomanip>
+
+// The sync_split_fusion algorithm is deprecated and no longer exercised by the
+// test suite; exclude its implementation from coverage reporting.
+// LCOV_EXCL_START
 
 namespace rocsparse
 {
@@ -625,7 +630,7 @@ namespace rocsparse
 }
 
 template <>
-struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
+struct rocsparse::csritilu0x_driver_t<deprecated_rocsparse_itilu0_alg_sync_split_fusion>
 {
     static constexpr int BLOCKSIZE = 1024;
 
@@ -813,7 +818,7 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
                                     const I* __restrict__ lptr_begin_,
                                     const I* __restrict__ lptr_end_,
                                     const J* __restrict__ lind_,
-                                    T* __restrict__ lval_,
+                                    T*                   lval_,
                                     rocsparse_index_base lbase_,
                                     rocsparse_diag_type  udiag_type_,
                                     rocsparse_direction  udir_,
@@ -822,10 +827,10 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
                                     const I* __restrict__ uptr_end_,
                                     const J* __restrict__ uind_,
 
-                                    T* __restrict__ uval_,
+                                    T*                   uval_,
                                     rocsparse_index_base ubase_,
-                                    T* __restrict__ dval_,
-                                    size_t buffer_size_,
+                                    T*                   dval_,
+                                    size_t               buffer_size_,
                                     void* __restrict__ buffer_)
         {
             hipStream_t stream = handle_->stream;
@@ -881,18 +886,18 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
             rocsparse::itilu0x_layout_t<T, I, J> layout_next;
             layout_next.init(m_, ldiag_type_, lnnz_, udiag_type_, unnz_, buffer);
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 layout_next.dval, dval_, sizeof(T) * m_, hipMemcpyDeviceToDevice, handle_->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(layout_next.uval,
-                                               uval_,
-                                               sizeof(T) * unnz_,
-                                               hipMemcpyDeviceToDevice,
-                                               handle_->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(layout_next.lval,
-                                               lval_,
-                                               sizeof(T) * lnnz_,
-                                               hipMemcpyDeviceToDevice,
-                                               handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(layout_next.uval,
+                                                         uval_,
+                                                         sizeof(T) * unnz_,
+                                                         hipMemcpyDeviceToDevice,
+                                                         handle_->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(layout_next.lval,
+                                                         lval_,
+                                                         sizeof(T) * lnnz_,
+                                                         hipMemcpyDeviceToDevice,
+                                                         handle_->stream));
 
             //
             // Loop over.
@@ -973,17 +978,17 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
                 {
                     if(p_nrm_corr != nullptr)
                     {
-                        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+                        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                             p_nrm_corr, 0, sizeof(floating_data_t<T>), handle_->stream));
                     }
                     if(p_nrm_residual != nullptr)
                     {
-                        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+                        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                             p_nrm_residual, 0, sizeof(floating_data_t<T>), handle_->stream));
                     }
 
                     RETURN_IF_HIP_ERROR(
-                        hipMemsetAsync(p_local_iter, 0, sizeof(J), handle_->stream));
+                        rocsparse_hipMemsetAsync(p_local_iter, 0, sizeof(J), handle_->stream));
 
                     rocsparse::kernel_dispatch<BLOCKSIZE, T, I, J>(m_,
                                                                    mean,
@@ -1027,11 +1032,11 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
                     J local_niter = 0;
                     if(stopping_criteria || verbose)
                     {
-                        RETURN_IF_HIP_ERROR(hipMemcpyAsync(&local_niter,
-                                                           p_local_iter,
-                                                           sizeof(J),
-                                                           hipMemcpyDeviceToHost,
-                                                           handle_->stream));
+                        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&local_niter,
+                                                                     p_local_iter,
+                                                                     sizeof(J),
+                                                                     hipMemcpyDeviceToHost,
+                                                                     handle_->stream));
                     }
 
                     //
@@ -1041,11 +1046,11 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
                     {
                         if(convergence_history)
                         {
-                            RETURN_IF_HIP_ERROR(hipMemcpyAsync(log_mxcorr + iter,
-                                                               p_nrm_corr,
-                                                               sizeof(floating_data_t<T>),
-                                                               hipMemcpyDeviceToDevice,
-                                                               handle_->stream));
+                            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(log_mxcorr + iter,
+                                                                         p_nrm_corr,
+                                                                         sizeof(floating_data_t<T>),
+                                                                         hipMemcpyDeviceToDevice,
+                                                                         handle_->stream));
                         }
                     }
 
@@ -1053,15 +1058,15 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
                     {
                         if(convergence_history)
                         {
-                            RETURN_IF_HIP_ERROR(hipMemcpyAsync(log_mxresidual + iter,
-                                                               p_nrm_residual,
-                                                               sizeof(floating_data_t<T>),
-                                                               hipMemcpyDeviceToDevice,
-                                                               handle_->stream));
+                            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(log_mxresidual + iter,
+                                                                         p_nrm_residual,
+                                                                         sizeof(floating_data_t<T>),
+                                                                         hipMemcpyDeviceToDevice,
+                                                                         handle_->stream));
                         }
                     }
 
-                    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
                     floating_data_t<T> nrm_corr     = static_cast<floating_data_t<T>>(0);
                     floating_data_t<T> nrm_residual = static_cast<floating_data_t<T>>(0);
                     floating_data_t<T> nrm_indicator;
@@ -1069,23 +1074,23 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
                     {
                         if(compute_nrm_corr)
                         {
-                            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&nrm_corr,
-                                                               p_nrm_corr,
-                                                               sizeof(floating_data_t<T>),
-                                                               hipMemcpyDeviceToHost,
-                                                               handle_->stream));
+                            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&nrm_corr,
+                                                                         p_nrm_corr,
+                                                                         sizeof(floating_data_t<T>),
+                                                                         hipMemcpyDeviceToHost,
+                                                                         handle_->stream));
                         }
 
                         if(compute_nrm_residual)
                         {
-                            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&nrm_residual,
-                                                               p_nrm_residual,
-                                                               sizeof(floating_data_t<T>),
-                                                               hipMemcpyDeviceToHost,
-                                                               handle_->stream));
+                            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&nrm_residual,
+                                                                         p_nrm_residual,
+                                                                         sizeof(floating_data_t<T>),
+                                                                         hipMemcpyDeviceToHost,
+                                                                         handle_->stream));
                         }
 
-                        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle_->stream));
+                        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
 
                         if(compute_nrm_residual && compute_nrm_corr)
                         {
@@ -1182,7 +1187,7 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
 
             RETURN_IF_HIP_ERROR(
                 rocsparse::on_device(p_iter, (converged) ? nmaxiter_ : (&nmaxiter), stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
             return rocsparse_status_success;
         }
     };
@@ -1190,7 +1195,7 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
 
 #define INSTANTIATE(T, I, J)                        \
     template struct rocsparse::csritilu0x_driver_t< \
-        rocsparse_itilu0_alg_sync_split_fusion>::compute<T, I, J>
+        deprecated_rocsparse_itilu0_alg_sync_split_fusion>::compute<T, I, J>
 
 INSTANTIATE(float, rocsparse_int, rocsparse_int);
 INSTANTIATE(double, rocsparse_int, rocsparse_int);
@@ -1199,11 +1204,11 @@ INSTANTIATE(rocsparse_double_complex, rocsparse_int, rocsparse_int);
 
 #undef INSTANTIATE
 
-#define INSTANTIATE(I, J)                                          \
-    template struct rocsparse::csritilu0x_driver_t<                \
-        rocsparse_itilu0_alg_sync_split_fusion>::preprocess<I, J>; \
-    template struct rocsparse::csritilu0x_driver_t<                \
-        rocsparse_itilu0_alg_sync_split_fusion>::buffer_size<I, J>
+#define INSTANTIATE(I, J)                                                     \
+    template struct rocsparse::csritilu0x_driver_t<                           \
+        deprecated_rocsparse_itilu0_alg_sync_split_fusion>::preprocess<I, J>; \
+    template struct rocsparse::csritilu0x_driver_t<                           \
+        deprecated_rocsparse_itilu0_alg_sync_split_fusion>::buffer_size<I, J>
 
 INSTANTIATE(rocsparse_int, rocsparse_int);
 
@@ -1211,9 +1216,11 @@ INSTANTIATE(rocsparse_int, rocsparse_int);
 
 #define INSTANTIATE(T, J)                           \
     template struct rocsparse::csritilu0x_driver_t< \
-        rocsparse_itilu0_alg_sync_split_fusion>::history<T, J>
+        deprecated_rocsparse_itilu0_alg_sync_split_fusion>::history<T, J>
 
 INSTANTIATE(float, rocsparse_int);
 INSTANTIATE(double, rocsparse_int);
 
 #undef INSTANTIATE
+
+// LCOV_EXCL_STOP

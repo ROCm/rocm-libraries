@@ -29,6 +29,7 @@ see artifact_helpers.py.
 """
 
 import os
+import re
 
 import pytest
 import yaml
@@ -37,6 +38,9 @@ from Tensile.Common.DataType import DataType
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 
+# Safe either way; bandit's B506 check only recognises the SafeLoader/CSafeLoader spelling,
+# so the call sites using this name carry a bare nosec marker. Never spell that marker out
+# with its leading hash here, or bandit parses this comment too (SEC-00404).
 try:
     DEFAULT_YAML_LOADER = yaml.CSafeLoader
 except AttributeError:
@@ -91,6 +95,8 @@ def configMarks(filepath, rootDir, availableArchs):
      - Root directory name.  This separates tests into pre_checkin, nightly, etc.
      - Expected failures. Include 'xfail' in the name of the YAML file.
      - Anything in yaml["TestParameters"]["marks"]
+     - Architecture from GlobalParameters.Architecture (e.g. gfx1250)
+     - Architecture from filename (e.g. bf16_gfx1250.yaml -> gfx1250)
      - validate / validateAll - whether the test validates (all?) results.
      - Data type(s) used in the YAML
      - Problem type(s) used in the YAML
@@ -100,7 +106,10 @@ def configMarks(filepath, rootDir, availableArchs):
     components = relpath.split(os.path.sep)
 
     # First part of directory - nightly, pre-checkin, etc.
-    marks = list([markNamed(component) for component in components[:-1]])
+    # Skip underscore-prefixed path components (e.g. characterization's _codegen
+    # fixture dir): pytest rejects marks starting with "_", and such dirs hold
+    # library logic YAMLs that are filtered out below by the not-dict guard anyway.
+    marks = list([markNamed(c) for c in components[:-1] if not c.startswith("_")])
 
     if 'xfail' in relpath or 'wip' in relpath:
         marks.append(pytest.mark.xfail)
@@ -109,14 +118,29 @@ def configMarks(filepath, rootDir, availableArchs):
 
     try:
         with open(filepath) as f:
-            doc = yaml.load(f, DEFAULT_YAML_LOADER)
+            doc = yaml.load(f, DEFAULT_YAML_LOADER)  # nosec B506
     except yaml.parser.ParserError:
         marks.append(pytest.mark.syntax_error)
         return marks
 
+    # A Tensile config is a mapping (GlobalParameters/BenchmarkProblems/...).
+    # Top-level sequences are library logic YAMLs (e.g. characterization data
+    # files), which are not standalone Tensile.py configs. Signal the caller to
+    # skip them rather than crashing on doc["BenchmarkProblems"].
+    if not isinstance(doc, dict):
+        return None
+
     if "TestParameters" in doc:
         if "marks" in doc["TestParameters"]:
             marks += [markNamed(m) for m in doc["TestParameters"]["marks"]]
+
+    arch_val = doc.get("GlobalParameters", {}).get("Architecture")
+    if arch_val and markNamed(arch_val) not in marks:
+        marks.append(markNamed(arch_val))
+
+    arch_in_name = re.search(r'(gfx\d+)', components[-1])
+    if arch_in_name and markNamed(arch_in_name.group(1)) not in marks:
+        marks.append(markNamed(arch_in_name.group(1)))
 
     # Architecture specific xfail marks
     for arch in availableArchs:
@@ -126,6 +150,23 @@ def configMarks(filepath, rootDir, availableArchs):
         ArchSkip = "skip-%s" % arch
         if markNamed(ArchSkip) in marks:
             marks.append(pytest.mark.skip)
+
+    # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
+    rocisa_backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+    if rocisa_backend == "stinkytofu" and markNamed("skip-stinkytofu") in marks:
+        marks.append(pytest.mark.skip(reason="Not yet supported in stinkytofu backend"))
+
+    # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
+    # fails under FFM emulation only. Turn it into an xfail only when running 
+    # under FFM — keyed on the emulator's HSA_MODEL_MEMFILE backing plus the 
+    # gfx1250 arch — so it never fires on HW or on other emulators/arches, 
+    # where the test must still run.
+    if (
+        os.environ.get("HSA_MODEL_MEMFILE")
+        and "gfx1250" in availableArchs
+        and markNamed("ffm_fail") in marks
+    ):
+        marks.append(pytest.mark.xfail)
 
     validate = True
     validateAll = False
@@ -218,6 +259,9 @@ def findConfigs(rootDir=None, availableArchs=None):
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:
                     marks = configMarks(filepath, rootDir, availableArchs)
+                    if marks is None:
+                        # Not a Tensile config (e.g. a library logic YAML); skip.
+                        continue
 
                     # Conditionally xfail icache_flush.yaml on rocm 7.1 due to ROCm bug.
                     if filename == "icache_flush.yaml" and rocm_version and rocm_version.startswith("7.1"):

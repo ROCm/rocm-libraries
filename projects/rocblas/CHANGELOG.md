@@ -3,11 +3,56 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## rocBLAS 5.5.0
+## rocBLAS 5.7.0
+
+### Optimized
+
+* Improved the performance of Level 3 `gemm` for the problem sizes where `m == 1` or `n == 1` and `batch_count == 1` by using `gemv` kernels, previously applied only in `gemm_ex`. On gfx11 the per-precision heuristics guarding this path are also bypassed, except for the `1x1` case.
+* Improved the performance of Level 2 `gemv` non-transposed (`TransA == N`) for the problem sizes where `m` is small and `n` is large by splitting the reduction across the grid, as the transposed case already does.
 
 ### Added
+
+* Level 3 grouped batched GEMM functions `rocblas_sgemm_grouped_batched`, `rocblas_dgemm_grouped_batched`, and `rocblas_gemm_grouped_batched_ex` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
+
+### Resolved issues
+
+* Fix out-of-bounds workspace access in Level 3 batched and strided-batched `syrk` and `herk` on gfx90a and gfx942 with `batch_count` greater than 65536, `k` of at least 500, and `n` below an internal per-architecture threshold, where the GEMM-only path advanced its workspace pointer cumulatively on each pass of the batch sweep and so wrote past the end of the workspace. This could corrupt memory past a workspace supplied through `rocblas_set_workspace` or, when the device memory pool was sized to the requirement reported by a size query, fault or return incorrect results. The ILP64 (`_64`) forms were unaffected.
+* Fix incorrect results from Level 1 `dot` and `dotc` batched and strided-batched forms, including their `_ex` forms, when `batch_count` is greater than 65535. Every batch item at index 65535 and beyond reduced an empty range and returned zero. The ILP64 (`_64`) forms were unaffected, as they chunk the batch dimension below that limit.
+
+## rocBLAS 5.6.0
+
+### Added
+
+* Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched `symv`, `hemv`, `sbmv`, and `spmv` via `rocblas_set_batch_alpha_stride` and `rocblas_set_batch_beta_stride` (device pointer mode).
+* Per-batch `alpha` support for Level 2 batched and strided-batched `syr` via `rocblas_set_batch_alpha_stride` (device pointer mode).
+* Per-batch `alpha` (scalar vector) API support for Level 1 `scal_batched`, `scal_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.
+* Support custom build with CMake arguments `BUILD_WITH_HIPBLASLT_ONLY=ON` that bypasses legacy Tensile.
+
+### Resolved issues
+* Fix for issue in `rocblas_gemm_batched_ex_get_solutions`. Starting in `rocBLAS 5.5.0` when using `hipBLASLt` backend it could provide sub-optimal solutions.
+
+### Upcoming changes
+
+* Deprecated the `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable. It is no longer required to disable only batched use of hipBLASLt due to optimizations. This env control is planned for removal in a future release.
+
+## rocBLAS 5.5.0 for ROCm 7.14
+
+### Added
+
 * Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched `gemv` via `rocblas_set_batch_alpha_stride` and `rocblas_set_batch_beta_stride` (device pointer mode).
 * Per-batch `alpha` support for Level 2 batched and strided-batched `ger`, `geru`, and `gerc` via `rocblas_set_batch_alpha_stride` (device pointer mode).
+* Per-batch `alpha` (scalar vector) API support for `axpy_batched`, `axpy_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.
+* support custom build with CMake arguments `GPU_TARGET=amdgcnspirv` when using `BUILD_WITH_TENSILE=OFF`.
+
+### Optimized
+
+* Improved the performance of `rocblas_gemm_batched` and `rocblas_gemm_batched_ex` when using the hipBLASLt backend.
+
+### Resolved issues
+
+* Fix incorrect results on gfx12 in `trsv`, `asum`,  and `nrm2` with large `batch_count` exceeding 65536.
+* Fix for `gemm` with very large `K` or inner product leading dimension for which element byte offset overflowed `int32`.
+* Fixed `install.sh/rmake.py` builds when `CMAKE_GENERATOR=Ninja` is set.
 
 ## rocBLAS 5.4.0
 

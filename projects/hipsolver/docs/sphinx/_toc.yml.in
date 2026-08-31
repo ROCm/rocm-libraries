@@ -22,7 +22,7 @@ subtrees:
 - caption: Reference
   entries:
   - file: reference/intro.rst
-  - file: reference/precision.rst
+  - file: reference/data-type-support.rst
   - file: reference/api/index.rst
     entries:
     - file: reference/api/types.rst

@@ -115,6 +115,11 @@ void write_matrix_with_offset(std::ofstream&             binary_out,
     {
         const DirectionVectorType direction = directions[k] + offset;
         binary_out.write(reinterpret_cast<const char*>(&direction), sizeof(direction));
+        if(!binary_out)
+        {
+            std::cerr << "Error: write failed at element " << k << std::endl;
+            return;
+        }
     }
 }
 

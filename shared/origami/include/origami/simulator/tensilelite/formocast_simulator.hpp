@@ -16,6 +16,7 @@
 #include <origami/simulator/tensilelite/formocast.hpp>
 #include "origami/types.hpp"
 #include "origami/hardware.hpp"
+#include "origami/origami_export.h"
 
 namespace origami
 {
@@ -31,7 +32,7 @@ namespace origami
      * capturing the performance characteristics and optimization strategies used in
      * TensileLite-generated GEMM kernels.
      */
-    class Formocast
+    class ORIGAMI_EXPORT Formocast
     {
     public:
         /**
@@ -774,7 +775,7 @@ namespace origami
      * @param svw_b Config B's store vector width
      * @return true if config A is better than config B, false otherwise
      */
-    bool compareConfigTieBreaker(
+    ORIGAMI_EXPORT bool compareConfigTieBreaker(
         double M, double N, double K, size_t batch,
         double mt0_a, double mt1_a, double du_a, int svw_a,
         double mt0_b, double mt1_b, double du_b, int svw_b

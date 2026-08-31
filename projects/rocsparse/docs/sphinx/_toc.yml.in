@@ -38,7 +38,7 @@ subtrees:
       - file: reference/api.rst
       - file: reference/debugging.rst
       - file: reference/types.rst
-      - file: reference/precision.rst
+      - file: reference/data_type_support.rst
       - file: reference/env_variables.rst
       - file: reference/roctx.rst
       - file: reference/enumerations.rst

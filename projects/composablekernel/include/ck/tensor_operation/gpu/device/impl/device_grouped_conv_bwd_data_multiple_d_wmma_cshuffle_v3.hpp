@@ -59,7 +59,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_data_wmma_cshuffle_v3(
         typename GridwiseGemm::Argument karg,
@@ -1402,7 +1402,10 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
                 ave_time += RunMultiDGemm<InMemoryDataOperationEnum::Set>(arg, stream_config);
             }
 
-            arg.Print();
+            if(stream_config.log_level_ > 0)
+            {
+                arg.Print();
+            }
 
             // Transpose from NHWGC to NGCHW
             if constexpr(NeedTransposeKernel)
@@ -1489,6 +1492,17 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
         }
 
         if(ck::is_gfx11_supported() && arg.k_batch_ > 1)
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "SplitK tests are not supported!" << " In " << __FILE__ << ":"
+                          << __LINE__ << ", in function: " << __func__ << std::endl;
+            }
+
+            return false;
+        }
+
+        if(ck::is_gfx12_supported() && arg.k_batch_ > 1)
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {

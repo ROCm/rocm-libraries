@@ -3,6 +3,7 @@ TestParameters:
   marks: [skip-gfx950, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx940, skip-gfx941]  # Only for gfx950
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
@@ -70,7 +71,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [4]
         - InnerUnroll: [1]
@@ -79,7 +80,7 @@ BenchmarkProblems:
         - LdsPadB: [4]
         - WorkGroupMapping: [64]
         #- StreamK: [0,3]
-        - UseSubtileImpl: [1] # TODO: enable subtile
+        - UseSubtileImpl: [true] # TODO: enable subtile
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

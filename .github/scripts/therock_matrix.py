@@ -4,6 +4,7 @@ This dictionary is used to map specific file directory changes to the correspond
 
 import copy
 import os
+from typing import Optional
 
 subtree_to_project_map = {
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
@@ -18,6 +19,7 @@ subtree_to_project_map = {
     "projects/hipdnn": "hipdnn",
     "projects/hipfft": "fft",
     "projects/hiprand": "rand",
+    "projects/hiptensor": "hiptensor",
     "projects/hipsolver": "solver",
     "projects/hipsparse": "sparse",
     "projects/hipsparselt": "sparselt",
@@ -29,10 +31,13 @@ subtree_to_project_map = {
     "projects/rocsolver": "solver",
     "projects/rocsparse": "sparse",
     "projects/rocthrust": "prim",
+    "projects/rocalution": "rocalution",
     "projects/rocwmma": "rocwmma",
+    "projects/hipthreads": "hipthreads",
+    "projects/rpp": "rpp",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
-    "shared/rocroller": "blas",
+    "shared/rocroller": "rocroller",
     "shared/stinkytofu": "blas",
     "shared/tensile": "blas",
 }
@@ -48,13 +53,7 @@ project_map = {
     },
     "blas": {
         "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
-        "projects_to_test": [
-            "hipblaslt",
-            "rocblas",
-            "hipblas",
-            "rocroller",
-            "tensilelite",
-        ],
+        "projects_to_test": ["hipblaslt", "rocblas", "hipblas", "tensilelite"],
     },
     "miopen": {
         "cmake_options": [
@@ -69,12 +68,37 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
         "projects_to_test": ["hipfft", "rocfft"],
     },
+    "hiptensor": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPTENSOR=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_RAND=ON",
+        ],
+        "additional_flags": {
+            "linux": ["-DTHEROCK_ENABLE_ROCPROFV3=ON"],
+        },
+        "projects_to_test": ["hiptensor"],
+    },
     "hip-kernel-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
             "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
+            "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON",
         ],
         "projects_to_test": ["hipkernelprovider"],
+    },
+    "hipthreads": {
+        "cmake_options": ["-DTHEROCK_ENABLE_HIPTHREADS=ON"],
+        "projects_to_test": ["hipthreads"],
+    },
+    # RPP is the computer vision umbrella. Its artifact only depends on core
+    # (core-runtime, core-hip, base, sysdeps), so no math umbrella is needed.
+    # Windows support is experimental and off by default in TheRock, and
+    # TheRock's rpp test job is Linux-only, so this row is restricted to Linux.
+    "rpp": {
+        "cmake_options": ["-DTHEROCK_ENABLE_RPP=ON"],
+        "projects_to_test": ["rpp"],
+        "platforms": ["linux"],
     },
 }
 
@@ -150,6 +174,23 @@ additional_options = {
         "projects_to_test": ["rocwmma"],
         "project_to_add": "blas",
     },
+    "rocalution": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ROCALUTION=ON",
+            "-DTHEROCK_ENABLE_SPARSE=ON",
+            "-DTHEROCK_ENABLE_RAND=ON",
+        ],
+        "projects_to_test": ["rocalution"],
+        "project_to_add": "blas",
+    },
+    # rocRoller is built under the BLAS umbrella but only tested when its own
+    # subtree changes. Merges into the "blas" job when a PR touches both, which
+    # avoids a redundant BLAS build and S3 artifact overlap.
+    "rocroller": {
+        "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
+        "projects_to_test": ["rocroller"],
+        "project_to_add": "blas",
+    },
 }
 
 # If a project has dependencies that are also being built, we combine build options and test options
@@ -158,11 +199,31 @@ dependency_graph = {
     "miopen": ["blas", "rand"],
 }
 
+# When these subtrees change, also activate the given optional matrix project so
+# its additional_options merge into the parent job (e.g. hipSPARSELt depends on hipBLASLt).
+SUBTREE_EXTRA_MATRIX_PROJECTS = {
+    "projects/hipblaslt": "sparselt",
+}
 
-def collect_projects_to_run(subtrees):
+ROCJITSU_RACE_CHECK_SUBTREES = {
+    "projects/hipblaslt",
+}
+
+
+def collect_projects_to_run(
+    subtrees, *, run_rocjitsu_race_check: Optional[bool] = None
+):
+    subtrees = list(subtrees)
     platform = os.getenv("PLATFORM")
     projects = set()
-    # Make a deep copy of project_map to avoid modifying the original
+    if run_rocjitsu_race_check is None:
+        # Direct callers can infer the marker from their unexpanded subtree
+        # list. The CI configuration path passes its preserved selection reason
+        # explicitly because workflow changes expand that list to every project.
+        run_rocjitsu_race_check = bool(
+            ROCJITSU_RACE_CHECK_SUBTREES.intersection(subtrees)
+        )
+    # Work on per-call deep copies so module-level state stays immutable across calls.
     local_project_map = copy.deepcopy(project_map)
     local_additional_options = copy.deepcopy(additional_options)
 
@@ -170,6 +231,10 @@ def collect_projects_to_run(subtrees):
     for subtree in subtrees:
         if subtree in subtree_to_project_map:
             projects.add(subtree_to_project_map.get(subtree))
+
+        extra_matrix = SUBTREE_EXTRA_MATRIX_PROJECTS.get(subtree)
+        if extra_matrix:
+            projects.add(extra_matrix)
 
     for project in list(projects):
         # Check if an optional math component was included.
@@ -222,6 +287,13 @@ def collect_projects_to_run(subtrees):
         if project in local_project_map:
             project_map_data = local_project_map.get(project)
 
+            # A project restricted to certain platforms is dropped from the
+            # other platform's matrix entirely, rather than built there and
+            # skipped at test time. Absent key means every platform.
+            supported_platforms = project_map_data.pop("platforms", None)
+            if supported_platforms is not None and platform not in supported_platforms:
+                continue
+
             # Check if platform-based additional flags are needed
             if (
                 "additional_flags" in project_map_data
@@ -239,6 +311,10 @@ def collect_projects_to_run(subtrees):
             )
             project_map_data["projects_to_test"] = list(
                 set(project_map_data["projects_to_test"])
+            )
+            project_map_data["run_rocjitsu_race_check"] = (
+                run_rocjitsu_race_check
+                and "tensilelite" in project_map_data["projects_to_test"]
             )
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])

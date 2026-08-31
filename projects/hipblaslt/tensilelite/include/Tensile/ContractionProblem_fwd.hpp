@@ -26,16 +26,14 @@
 
 #pragma once
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
-TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
-    class TENSILE_API ContractionProblemParameters;
-    class TENSILE_API ContractionProblem;
-    class TENSILE_API ContractionProblemGemm;
-    class TENSILE_API ContractionProblemGroupedGemm;
-    struct TENSILE_API ContractionInputs;
-    struct TENSILE_API ContractionGroupedInputs;
+    class TENSILELITEHOST_EXPORT ContractionProblemParameters;
+    class TENSILELITEHOST_EXPORT ContractionProblem;
+    class TENSILELITEHOST_EXPORT ContractionProblemGemm;
+    class TENSILELITEHOST_EXPORT ContractionProblemGroupedGemm;
+    struct TENSILELITEHOST_EXPORT ContractionInputs;
+    struct TENSILELITEHOST_EXPORT ContractionGroupedInputs;
 } // namespace TensileLite
-TENSILE_HIDDEN_END

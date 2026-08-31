@@ -30,28 +30,7 @@
 // This section is conditional to the definition
 // of ROCSPARSE_WITH_MEMSTAT
 //
-#ifndef ROCSPARSE_WITH_MEMSTAT
-
-#define rocsparse_hipMalloc(p_, nbytes_) hipMalloc((p_), (nbytes_))
-#define rocsparse_hipFree(p_) hipFree((p_))
-
-// if hip version is atleast 5.3.0 hipMallocAsync and hipFreeAsync are defined
-#if HIP_VERSION >= 50300000
-#define rocsparse_hipMallocAsync(p_, nbytes_, stream_) hipMallocAsync((p_), (nbytes_), (stream_))
-#define rocsparse_hipFreeAsync(p_, stream_) \
-    (((p_) != nullptr) ? hipFreeAsync((p_), (stream_)) : hipSuccess)
-#else
-#define rocsparse_hipMallocAsync(p_, nbytes_, stream_) hipMalloc((p_), (nbytes_))
-#define rocsparse_hipFreeAsync(p_, stream_) hipFree((p_))
-#endif
-
-#define rocsparse_hipHostMalloc(p_, nbytes_) hipHostMalloc((p_), (nbytes_))
-#define rocsparse_hipHostFree(p_) hipHostFree((p_))
-
-#define rocsparse_hipMallocManaged(p_, nbytes_) hipMallocManaged((p_), (nbytes_))
-#define rocsparse_hipFreeManaged(p_) hipFree((p_))
-
-#else
+#ifdef ROCSPARSE_WITH_MEMSTAT
 
 #include "rocsparse-auxiliary.h"
 

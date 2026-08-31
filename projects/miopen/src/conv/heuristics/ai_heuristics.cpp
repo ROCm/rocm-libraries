@@ -38,6 +38,7 @@
 #include <miopen/env.hpp>
 
 #include <any>
+#include <mutex>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 
@@ -47,6 +48,178 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 namespace miopen {
 namespace ai {
 // Common utilities now in ai_common.hpp
+
+namespace common {
+// Sign- and bounds-safe one-hot. Declared in ai_heuristics.hpp; shared by the immediate-mode
+// (TunaNet) and kernel-tuning (candidate-selection) paths.
+std::vector<int> OneHot(long long label, std::size_t num_classes)
+{
+    std::vector<int> out(num_classes, 0);
+    if(label >= 0 && static_cast<std::size_t>(label) < num_classes)
+        out[static_cast<std::size_t>(label)] = 1;
+    else
+        MIOPEN_LOG_W("OneHot: label " << label << " out of range for " << num_classes
+                                      << " classes, returning all-zero vector");
+    return out;
+}
+
+// Stable datatype->name mapping; declared in ai_heuristics.hpp. The name->index mapping is read
+// from each model's metadata, so all precision encoders share this single source of truth.
+const char* DataTypeToEncodingKey(miopenDataType_t data_type)
+{
+    // if-chain rather than switch: -Wswitch-enum would flag the many miopenDataType_t values no
+    // model encodes.
+    if(data_type == miopenBFloat16)
+        return "BF16";
+    if(data_type == miopenHalf)
+        return "FP16";
+    if(data_type == miopenFloat)
+        return "FP32";
+    if(data_type == miopenInt8)
+        return "INT8";
+    return nullptr;
+}
+
+MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
+                                                                  std::size_t C_in,
+                                                                  std::size_t C_out,
+                                                                  std::size_t H_in,
+                                                                  std::size_t W_in,
+                                                                  std::size_t H_out,
+                                                                  std::size_t W_out,
+                                                                  std::size_t K_h,
+                                                                  std::size_t K_w,
+                                                                  std::size_t groups,
+                                                                  std::size_t num_cu,
+                                                                  ConvDirection direction,
+                                                                  int spatial_dim,
+                                                                  std::size_t D_in,
+                                                                  std::size_t D_out,
+                                                                  std::size_t K_d)
+{
+    if(groups < 1) // avoid division by zero
+        groups = 1;
+
+    const auto safe_ratio = [](double numerator, double denominator) -> double {
+        if(denominator == 0.0)
+            return 0.0;
+        const double value = numerator / denominator;
+        return std::isfinite(value) ? value : 0.0;
+    };
+    const auto safe_log1p = [](double value) -> double {
+        if(value <= -1.0 || !std::isfinite(value))
+            return 0.0;
+        const double logged = std::log1p(value);
+        return std::isfinite(logged) ? logged : 0.0;
+    };
+
+    const bool is_3d = (spatial_dim == 3);
+    const double v_out =
+        static_cast<double>(D_out) * static_cast<double>(H_out) * static_cast<double>(W_out);
+    const double v_in =
+        static_cast<double>(D_in) * static_cast<double>(H_in) * static_cast<double>(W_in);
+    const double v_filt =
+        static_cast<double>(K_d) * static_cast<double>(K_h) * static_cast<double>(K_w);
+
+    // Computational complexity: FLOPs (multiply-accumulate = 2 ops), per group.
+    const double flops = safe_ratio(2.0 * static_cast<double>(N) * static_cast<double>(C_out) *
+                                        static_cast<double>(C_in) * v_filt * v_out,
+                                    static_cast<double>(groups));
+    // Implicit GEMM dimensions: Conv -> GEMM(M, N, K). The (M, N, K) assignment is
+    // direction-dependent (the conv is lowered to a different GEMM for Fwd/BwdData/Wrw).
+    const double n_v_out_over_g =
+        safe_ratio(static_cast<double>(N) * v_out, static_cast<double>(groups));
+    const double cin_over_g  = safe_ratio(static_cast<double>(C_in), static_cast<double>(groups));
+    const double cout_over_g = safe_ratio(static_cast<double>(C_out), static_cast<double>(groups));
+    const double cin_filter  = static_cast<double>(C_in) * v_filt;
+    const double cout_filter = static_cast<double>(C_out) * v_filt;
+
+    double M = 0.0, N_gemm = 0.0, K_gemm = 0.0;
+    switch(direction)
+    {
+    case ConvDirection::Forward:
+        M      = n_v_out_over_g;
+        N_gemm = cin_over_g;
+        K_gemm = cout_filter;
+        break;
+    case ConvDirection::BackwardData:
+        M      = cout_over_g;
+        N_gemm = cin_filter;
+        K_gemm = n_v_out_over_g;
+        break;
+    case ConvDirection::BackwardWeights:
+        M      = n_v_out_over_g;
+        N_gemm = cin_filter;
+        K_gemm = cout_over_g;
+        break;
+    }
+    const double gemm_size = M * N_gemm * K_gemm;
+    // Hardware utilization: work per compute unit.
+    const double work_per_cu =
+        safe_ratio(static_cast<double>(N) * v_out * static_cast<double>(C_out),
+                   static_cast<double>(groups) * static_cast<double>(num_cu));
+    // Spatial / channel ratios.
+    const double spatial_reduction = safe_ratio(v_in, v_out);
+    const double filter_coverage   = safe_ratio(v_filt, v_in);
+    const double channel_ratio = safe_ratio(static_cast<double>(C_in), static_cast<double>(C_out));
+    const double group_density = safe_ratio(static_cast<double>(groups), static_cast<double>(C_in));
+
+    std::vector<float> features = {
+        static_cast<float>(safe_log1p(flops)),
+        static_cast<float>(safe_log1p(M)),
+        static_cast<float>(safe_log1p(N_gemm)),
+        static_cast<float>(safe_log1p(K_gemm)),
+        static_cast<float>(safe_ratio(M, N_gemm)),
+        static_cast<float>(safe_ratio(M, K_gemm)),
+        static_cast<float>(safe_ratio(N_gemm, K_gemm)),
+        static_cast<float>(safe_log1p(gemm_size)),
+        static_cast<float>(safe_log1p(work_per_cu)),
+        static_cast<float>(spatial_reduction),
+        static_cast<float>(filter_coverage),
+        static_cast<float>(channel_ratio),
+        static_cast<float>(group_density),
+        static_cast<float>(safe_log1p(static_cast<double>(H_in))),
+        static_cast<float>(safe_log1p(static_cast<double>(W_in))),
+        static_cast<float>(safe_log1p(static_cast<double>(C_in))),
+        static_cast<float>(safe_log1p(static_cast<double>(C_out))),
+        static_cast<float>(safe_log1p(static_cast<double>(N))),
+    };
+    if(is_3d)
+        features.push_back(static_cast<float>(safe_log1p(static_cast<double>(D_in))));
+    return features;
+}
+
+MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim)
+{
+    // Single source of truth: construct the vector with placeholder dimensions and report its
+    // length, so the count tracks EngineeredConvFeatures automatically if features are added or
+    // removed. The placeholders (all 1) only exercise the fixed-length branch; the values are
+    // discarded. spatial_dim selects the 2D (18) vs 3D (19) length.
+    return EngineeredConvFeatures(/*N=*/1,
+                                  /*C_in=*/1,
+                                  /*C_out=*/1,
+                                  /*H_in=*/1,
+                                  /*W_in=*/1,
+                                  /*H_out=*/1,
+                                  /*W_out=*/1,
+                                  /*K_h=*/1,
+                                  /*K_w=*/1,
+                                  /*groups=*/1,
+                                  /*num_cu=*/1,
+                                  ConvDirection::Forward,
+                                  spatial_dim,
+                                  /*D_in=*/1,
+                                  /*D_out=*/1,
+                                  /*K_d=*/1)
+        .size();
+}
+
+bool IsTunaNetCategoricalFeature(const std::string& name)
+{
+    return name == "in_layout" || name == "fil_layout" || name == "out_layout" ||
+           name == "precision" || name == "direction";
+}
+} // namespace common
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 namespace immed_mode {
@@ -83,12 +256,16 @@ size_t Metadata::EncodeDirection(miopen::conv::Direction dir) const
 
 size_t Metadata::EncodePrecision(miopenDataType_t data_type) const
 {
-    if(data_type == miopenBFloat16)
-        return precision_encodings.at("BF16");
-    else if(data_type == miopenHalf)
-        return precision_encodings.at("FP16");
-    else if(data_type == miopenFloat)
-        return precision_encodings.at("FP32");
+    const char* key = common::DataTypeToEncodingKey(data_type);
+    if(key != nullptr)
+    {
+        const auto it = precision_encodings.find(key);
+        if(it != precision_encodings.end())
+            return it->second;
+    }
+    // Unsupported datatype, or a precision this model wasn't trained on: throw a miopen::Exception
+    // so the caller falls back to the non-AI heuristic rather than feeding a degraded feature
+    // vector.
     MIOPEN_THROW("Unsupported data type passed to TunaNet");
 }
 
@@ -236,7 +413,9 @@ public:
         for(const auto& solver_name : metadata.solver_map)
         {
             auto solver_id = solver::Id{solver_name.second};
-            auto solver    = solver_id.GetSolver();
+            if(!solver_id.IsValid())
+                continue;
+            auto solver = solver_id.GetSolver();
             if(solver.IsApplicable(ctx, problem))
             {
                 applicable_solvers++;
@@ -336,7 +515,9 @@ public:
         for(const auto& solver_name : metadata.solver_map)
         {
             auto solver_id = solver::Id{solver_name.second};
-            auto solver    = solver_id.GetSolver();
+            if(!solver_id.IsValid())
+                continue;
+            auto solver = solver_id.GetSolver();
             if(solver.IsApplicable(ctx, problem))
             {
                 applicable_solvers++;
@@ -429,7 +610,9 @@ public:
         for(const auto& solver_name : metadata.solver_map)
         {
             auto solver_id = solver::Id{solver_name.second};
-            auto solver    = solver_id.GetSolver();
+            if(!solver_id.IsValid())
+                continue;
+            auto solver = solver_id.GetSolver();
             if(solver.IsApplicable(ctx, problem))
             {
                 applicable_solvers++;
@@ -705,11 +888,22 @@ ProcessAndCachePredictions(const conv::ProblemDescription& problem,
     // Process predictions (sort by probability, filter invalid solvers)
     auto result = ProcessPredictions(predictions, solver_map, use_nd);
 
-    // TunaNet override: promote GemmBwdRest for point-output backward-data problems
-    if(problem.Is3d() && conv::IsBwdDataPointOutput3dStrideEqFilter(problem))
+    // TunaNet override: promote the GEMM solvers for point-output problems
+    if(conv::IsFwdDataPointOutputStrideEqFilter(problem) &&
+       problem.GetWeights().GetType() != miopenInt8)
+    {
+        PromoteSolverToFront(result, "GemmFwdRest");
+        MIOPEN_LOG_I2("TunaNet override: promoting GemmFwdRest for point-output forward");
+    }
+    if(conv::IsBwdDataPointOutputStrideEqFilter(problem))
     {
         PromoteSolverToFront(result, "GemmBwdRest");
         MIOPEN_LOG_I2("TunaNet override: promoting GemmBwdRest for point-output backward-data");
+    }
+    if(conv::IsWrwPointOutputStrideEqFilter(problem))
+    {
+        PromoteSolverToFront(result, "GemmWrwUniversal");
+        MIOPEN_LOG_I2("TunaNet override: promoting GemmWrwUniversal for point-output wrw");
     }
 
     // Cache results for future use
@@ -745,38 +939,52 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     // 1. Try ND model first (for gfx942/gfx950, supports both 2D and 3D)
     // 2. Fall back to legacy model (for gfx908/gfx90a, 2D only)
     // 3. Return empty vector to trigger WTI fallback for unsupported architectures
-
-    // Try ND model first (preferred for gfx942/gfx950)
-    if((is2d || is3d) && HasNDTunaNetSupport(device))
+    //
+    // Any failure inside this block (including a model that fdeep cannot load -- e.g. a
+    // model exported in an incompatible format, which throws a non-miopen std::exception)
+    // is swallowed and turned into an empty result, so the caller degrades to the non-AI
+    // heuristic instead of failing the convolution. This is the predictor's contract: it
+    // returns a prediction or nothing, but never throws.
+    try
     {
-        int dim                        = is3d ? 3 : 2;
-        std::unique_ptr<ModelND> model = GetNDModel(device, dim);
-
-        if(model && model->IsProblemSupported(problem, ctx))
+        // Try ND model first (preferred for gfx942/gfx950)
+        if((is2d || is3d) && HasNDTunaNetSupport(device))
         {
-            MIOPEN_LOG_I2("Evaluating ND TunaNet for " << device);
-            std::vector<float> predictions = model->Forward(problem);
-            return ProcessAndCachePredictions(
-                problem, device, true, predictions, model->GetSolverMap());
+            int dim                        = is3d ? 3 : 2;
+            std::unique_ptr<ModelND> model = GetNDModel(device, dim);
+
+            if(model && model->IsProblemSupported(problem, ctx))
+            {
+                MIOPEN_LOG_I2("Evaluating ND TunaNet for " << device);
+                std::vector<float> predictions = model->Forward(problem);
+                return ProcessAndCachePredictions(
+                    problem, device, true, predictions, model->GetSolverMap());
+            }
+            // If ND model failed for this architecture, don't try legacy - go to WTI
+            MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
+            return {};
         }
-        // If ND model failed for this architecture, don't try legacy - go to WTI
-        MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
-        return {};
+
+        // Fall back to legacy 2D model (for gfx908/gfx90a only)
+        if(is2d && HasLegacyTunaNetSupport(device))
+        {
+            std::unique_ptr<Model> model = GetModel(device);
+
+            if(model && model->IsProblemSupported(problem, ctx))
+            {
+                MIOPEN_LOG_I2("Evaluating legacy TunaNet for " << device);
+                std::vector<float> predictions = model->Forward(problem);
+                return ProcessAndCachePredictions(
+                    problem, device, false, predictions, model->metadata.solver_map);
+            }
+            MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
+            return {};
+        }
     }
-
-    // Fall back to legacy 2D model (for gfx908/gfx90a only)
-    if(is2d && HasLegacyTunaNetSupport(device))
+    catch(const std::exception& e)
     {
-        std::unique_ptr<Model> model = GetModel(device);
-
-        if(model && model->IsProblemSupported(problem, ctx))
-        {
-            MIOPEN_LOG_I2("Evaluating legacy TunaNet for " << device);
-            std::vector<float> predictions = model->Forward(problem);
-            return ProcessAndCachePredictions(
-                problem, device, false, predictions, model->metadata.solver_map);
-        }
-        MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
+        MIOPEN_LOG_W("TunaNet prediction failed (" << e.what()
+                                                   << "); falling back to non-AI heuristic");
         return {};
     }
 
@@ -787,6 +995,145 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 }
 
 // MetadataND implementation moved to metadata_nd.cpp
+
+namespace {
+
+float TunaNetRawFeatureValue(const std::string& name,
+                             const conv::ProblemDescription& problem,
+                             bool isFwd)
+{
+    if(name == "in_channels")
+        return static_cast<float>(isFwd ? problem.GetInChannels() : problem.GetOutChannels());
+    if(name == "in_d")
+        return static_cast<float>(isFwd ? problem.GetInDepth() : problem.GetOutDepth());
+    if(name == "in_h")
+        return static_cast<float>(isFwd ? problem.GetInHeight() : problem.GetOutHeight());
+    if(name == "in_w")
+        return static_cast<float>(isFwd ? problem.GetInWidth() : problem.GetOutWidth());
+    if(name == "out_channels")
+        return static_cast<float>(isFwd ? problem.GetOutChannels() : problem.GetInChannels());
+    if(name == "out_d")
+        return static_cast<float>(isFwd ? problem.GetOutDepth() : problem.GetInDepth());
+    if(name == "out_h")
+        return static_cast<float>(isFwd ? problem.GetOutHeight() : problem.GetInHeight());
+    if(name == "out_w")
+        return static_cast<float>(isFwd ? problem.GetOutWidth() : problem.GetInWidth());
+    if(name == "fil_d")
+        return static_cast<float>(problem.GetWeightsDepth());
+    if(name == "fil_h")
+        return static_cast<float>(problem.GetWeightsHeight());
+    if(name == "fil_w")
+        return static_cast<float>(problem.GetWeightsWidth());
+    if(name == "pad_d")
+        return static_cast<float>(problem.GetPadD());
+    if(name == "pad_h")
+        return static_cast<float>(problem.GetPadH());
+    if(name == "pad_w")
+        return static_cast<float>(problem.GetPadW());
+    if(name == "conv_stride_d")
+        return static_cast<float>(problem.GetKernelStrideD());
+    if(name == "conv_stride_h")
+        return static_cast<float>(problem.GetKernelStrideH());
+    if(name == "conv_stride_w")
+        return static_cast<float>(problem.GetKernelStrideW());
+    if(name == "dilation_d")
+        return static_cast<float>(problem.GetDilationD());
+    if(name == "dilation_h")
+        return static_cast<float>(problem.GetDilationH());
+    if(name == "dilation_w")
+        return static_cast<float>(problem.GetDilationW());
+    if(name == "batchsize")
+        return static_cast<float>(problem.GetOutBatchSize());
+    if(name == "group_count")
+        return static_cast<float>(problem.GetGroupCount());
+
+    MIOPEN_THROW("ExtractTunaNetNDFeatures: unsupported raw feature '" + name + "'");
+}
+
+} // namespace
+
+// Keep feature definitions in sync with EngineerCandidateSelectionInputFeatures
+// (ai_candidate_selection.cpp); implementations are intentionally separate.
+MIOPEN_INTERNALS_EXPORT std::vector<float>
+ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
+                         bool isFwd,
+                         const MetadataND& metadata,
+                         int spatial_dim)
+{
+    if(spatial_dim == 0)
+        spatial_dim = problem.Is3d() ? 3 : 2;
+
+    MIOPEN_LOG_I2("Using engineered " << spatial_dim << "d features for Tunanet");
+
+    const std::size_t N      = problem.GetOutBatchSize();
+    const std::size_t C_in   = isFwd ? problem.GetInChannels() : problem.GetOutChannels();
+    const std::size_t C_out  = isFwd ? problem.GetOutChannels() : problem.GetInChannels();
+    const std::size_t D_in   = isFwd ? problem.GetInDepth() : problem.GetOutDepth();
+    const std::size_t H_in   = isFwd ? problem.GetInHeight() : problem.GetOutHeight();
+    const std::size_t W_in   = isFwd ? problem.GetInWidth() : problem.GetOutWidth();
+    const std::size_t D_out  = isFwd ? problem.GetOutDepth() : problem.GetInDepth();
+    const std::size_t H_out  = isFwd ? problem.GetOutHeight() : problem.GetInHeight();
+    const std::size_t W_out  = isFwd ? problem.GetOutWidth() : problem.GetInWidth();
+    const std::size_t K_d    = problem.GetWeightsDepth();
+    const std::size_t K_h    = problem.GetWeightsHeight();
+    const std::size_t K_w    = problem.GetWeightsWidth();
+    std::size_t groups       = problem.GetGroupCount();
+    const std::size_t num_cu = metadata.GetNumCu();
+
+    const auto in_layout  = common::OneHot(metadata.EncodeInLayout(problem.GetInLayout()),
+                                          metadata.GetInLayoutClassCount());
+    const auto fil_layout = common::OneHot(metadata.EncodeFilLayout(problem.GetWeightsLayout()),
+                                           metadata.GetFilLayoutClassCount());
+    const auto out_layout = common::OneHot(metadata.EncodeOutLayout(problem.GetOutLayout()),
+                                           metadata.GetOutLayoutClassCount());
+    const auto precision  = common::OneHot(metadata.EncodePrecision(problem.GetInDataType()),
+                                          metadata.GetPrecisionClassCount());
+    const auto direction  = common::OneHot(metadata.EncodeDirection(problem.GetDirection()),
+                                          metadata.GetDirectionClassCount());
+
+    std::vector<float> features;
+    for(const auto* one_hot : {&in_layout, &fil_layout, &out_layout, &precision, &direction})
+        for(const auto bit : *one_hot)
+            features.push_back(static_cast<float>(bit));
+
+    // Raw numerics follow conv_params_used_as_features order; categoricals are one-hot encoded
+    // above. Parameters removed as constants during training (e.g. dilation_* for MI355_3d) are
+    // absent from the metadata list and are not appended here.
+    for(const auto& feature_name : metadata.GetFeatures())
+    {
+        if(common::IsTunaNetCategoricalFeature(feature_name))
+            continue;
+        features.push_back(TunaNetRawFeatureValue(feature_name, problem, isFwd));
+    }
+
+    const auto gemm_dir = problem.GetDirection() == conv::Direction::Forward
+                              ? common::ConvDirection::Forward
+                          : problem.GetDirection() == conv::Direction::BackwardData
+                              ? common::ConvDirection::BackwardData
+                              : common::ConvDirection::BackwardWeights;
+    const auto derived =
+        (spatial_dim == 3)
+            ? common::EngineeredConvFeatures(N,
+                                             C_in,
+                                             C_out,
+                                             H_in,
+                                             W_in,
+                                             H_out,
+                                             W_out,
+                                             K_h,
+                                             K_w,
+                                             groups,
+                                             num_cu,
+                                             gemm_dir,
+                                             3,
+                                             D_in,
+                                             D_out,
+                                             K_d)
+            : common::EngineeredConvFeatures(
+                  N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    features.insert(features.end(), derived.begin(), derived.end());
+    return features;
+}
 
 class TunaNetNDModel : public ModelND
 {
@@ -805,7 +1152,26 @@ public:
     std::vector<float> Forward(const conv::ProblemDescription& problem) const override
     {
         std::vector<float> features = ToFeatures(problem);
+        if(features.size() != metadata.GetEngineeredNumInputs())
+        {
+            MIOPEN_THROW("TunaNetNDModel: feature count mismatch: model expects " +
+                         std::to_string(metadata.GetEngineeredNumInputs()) + ", got " +
+                         std::to_string(features.size()));
+        }
         MIOPEN_LOG_I2("TunaNetNDModel: Extracted " << features.size() << " features");
+        if(miopen::IsLogging(LoggingLevel::Info2))
+        {
+            std::ostringstream features_ss;
+            features_ss << "TunaNetNDModel features: [";
+            for(size_t i = 0; i < features.size(); ++i)
+            {
+                if(i > 0)
+                    features_ss << ", ";
+                features_ss << features[i];
+            }
+            features_ss << "]";
+            MIOPEN_LOG_I2(features_ss.str());
+        }
 
         // Use fdeep to run TunaNetND inference
         const int dim                = problem.Is3d() ? 3 : 2;
@@ -864,7 +1230,12 @@ protected:
         const bool isFwd = problem.GetDirection() == conv::Direction::Forward;
 
         std::vector<float> features = {};
-        if(problem.Is2d()) // 2d version as in the
+        if((problem.Is2d() || problem.Is3d()) &&
+           (device_name == "gfx950" || device_name == "gfx942"))
+        {
+            features = ExtractTunaNetNDFeatures(problem, isFwd, metadata);
+        }
+        else if(problem.Is2d())
         {
             features = {
                 // Input dimensions
@@ -1134,22 +1505,23 @@ private:
 std::shared_ptr<Model> GetModel(const std::string& arch, const std::string& solver)
 {
     static std::map<std::string, std::shared_ptr<Model>> models;
-    auto it = models.find(solver);
+    static std::mutex models_mutex;
 
     auto model_arch = arch;
     if(model_arch == "gfx950")
         model_arch = "gfx942"; // use gfx942 model for gfx950 until we have a gfx950 model
 
+    // Guard the shared cache: this is called concurrently from multiple threads
+    // (e.g. per-thread MIOpen handles running convolutions at once).
+    std::lock_guard<std::mutex> lock(models_mutex);
+    auto it = models.find(solver);
     if(it == models.end())
     {
         std::shared_ptr<Model> model = std::make_shared<Model>(model_arch, solver);
         models[solver]               = model;
         return model;
     }
-    else
-    {
-        return it->second;
-    }
+    return it->second;
 }
 
 /**
@@ -1256,21 +1628,28 @@ bool ModelSetParams(const std::string& arch,
 namespace candidate_selection {
 
 // Helper to load and cache fdeep models
-const fdeep::model& GetFdeepModel(const std::string& path, const std::string& key)
+std::shared_ptr<fdeep::model> GetFdeepModel(const std::string& path, const std::string& key)
 {
-    static std::map<std::string, std::unique_ptr<fdeep::model>> models;
+    static std::map<std::string, std::shared_ptr<fdeep::model>> models;
+    static std::mutex models_mutex;
+
+    // Guard the shared cache. Without this lock, concurrent callers racing on the same
+    // key could both insert and corrupt the map / clobber an in-use entry (use-after-free
+    // inside fdeep predict). Holding the lock across find+insert serializes population.
+    // Return the model by shared_ptr (rather than a reference into the map) so the caller
+    // keeps it alive independently of the cache -- it stays valid even if the entry were
+    // ever replaced or evicted in the future, mirroring GetModel above.
+    std::lock_guard<std::mutex> lock(models_mutex);
     auto it = models.find(key);
     if(it == models.end())
     {
         if(!fs::exists(path))
             MIOPEN_THROW(miopenStatusInternalError, "Unable to load model file: " + path);
         auto model =
-            std::make_unique<fdeep::model>(fdeep::load_model(path, true, fdeep::dev_null_logger));
-        auto& ref   = *model;
-        models[key] = std::move(model);
-        return ref;
+            std::make_shared<fdeep::model>(fdeep::load_model(path, true, fdeep::dev_null_logger));
+        it = models.emplace(key, std::move(model)).first;
     }
-    return *it->second;
+    return it->second;
 }
 
 std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& features,
@@ -1284,7 +1663,7 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
         (GetSystemDbPath() / (arch + "_" + solver + "_input_encoder.tn.model")).string();
 
     MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path);
-    auto tensors = GetFdeepModel(path, key).predict({input_tensor});
+    auto tensors = GetFdeepModel(path, key)->predict({input_tensor});
     if(tensors.empty())
         MIOPEN_THROW(miopenStatusInternalError, "Input encoder returned empty tensor list");
     return tensors[0].to_vector();
@@ -1305,7 +1684,7 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
         (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model")).string();
 
     MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path);
-    const auto& model = GetFdeepModel(path, key);
+    const auto model = GetFdeepModel(path, key);
 
     // By default, use predict_multi (multi-threaded); use single-threaded loop only if env var is
     // set
@@ -1319,7 +1698,7 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
         fdeep::tensor t(fdeep::tensor_shape(candidate.size()), candidate);
         inputs_vec.push_back(fdeep::tensors{t}); // wrap tensor in a vector
     }
-    auto outputs = model.predict_multi(inputs_vec, !use_single); // parallelly = !use_single
+    auto outputs = model->predict_multi(inputs_vec, !use_single); // parallelly = !use_single
     if(outputs.size() != inputs_vec.size())
         MIOPEN_THROW(miopenStatusInternalError, "predict_multi returned wrong number of outputs");
     for(const auto& out : outputs)

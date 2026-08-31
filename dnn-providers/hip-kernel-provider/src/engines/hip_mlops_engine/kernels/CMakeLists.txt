@@ -15,12 +15,12 @@ add_kernels_for_embedding(
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/Configuration.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/ReductionFunctions.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/StaticUnroll.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/RMSNormCommon.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/RMSNormFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/RMSNormBwd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/resample/ResampleFwd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormBwd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormCommon.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormFwd.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/types/FloatTypes.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/VectorTypes.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/types/Bfloat16Dev.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelActivation.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelMath.hpp)

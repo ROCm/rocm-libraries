@@ -378,9 +378,9 @@ VALID_CONFIG_FILE_CONTENT = """GlobalParameters:
   DataInitTypeB: 13
   DataInitTypeC: 12
   DataInitTypeD: 12
-  PreciseKernelTime: 0
+  PreciseKernelTime: false
   Device: 0
-  SkipSlowSolutionRatio: 0
+  SkipSlowSolutionRatio: 0.0
   KeepBuildTmp: false
 BenchmarkProblems:
 - - OperationType: GEMM
@@ -414,8 +414,10 @@ BenchmarkProblems:
     - GlobalSplitU: [0]
     - LdsBlockSizePerPadA: [256]
     - LdsBlockSizePerPadB: [256]
+    - LdsBlockSizePerPadMetadata: [0]
     - LdsPadA: [16]
     - LdsPadB: [16]
+    - LdsPadMetadata: [0]
     - LocalReadVectorWidth: [8]
     - MaxLDS: [163840]
     - MbskPrefetchMethod: [0]

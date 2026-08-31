@@ -22,23 +22,27 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-
 # Configuration file for the Sphinx documentation builder.
 #
 # This file only contains a selection of the most common options. For a full
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+import os
 import re
 
 from rocm_docs import ROCmDocs
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'.*\bset\(VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    match = re.search(r".*\bset\(VERSION\s+\"?([0-9.]+)[^0-9.]+", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
 left_nav_title = f"RPP {version_number} documentation"
+
+# Expose the version to the Doxyfile via $(RPP_VERSION) so the API reference
+# stays in sync with CMakeLists.txt instead of hardcoding PROJECT_NUMBER.
+os.environ["RPP_VERSION"] = version_number
 
 # for PDF output on Read the Docs
 project = "RPP documentation"
@@ -56,7 +60,17 @@ docs_core.setup()
 docs_core.myst_heading_anchors = 6
 
 external_projects_current_project = "rpp"
-external_projects_remote_repository=""
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+# Theme-related settings
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/rpp/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}

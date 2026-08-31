@@ -1659,6 +1659,13 @@ The following test situations require additional consideration:
 
       ROCBLAS_TEST_NO_SIGACTION=1 rocgdb ./rocblas-test --gtest_filter=*stress*
 
+   On Linux the rocblas-test process now aborts when catching signals to log a stack dump. To disable this feature,
+   set the environment variable ``ROCBLAS_TEST_CONTINUE_ON_FATAL_SIGNAL``:
+
+   .. code-block:: bash
+
+      ROCBLAS_TEST_CONTINUE_ON_FATAL_SIGNAL=1 ./rocblas-test --gtest_filter=*stress*
+
 
 Adding a new rocBLAS unit test
 -------------------------------

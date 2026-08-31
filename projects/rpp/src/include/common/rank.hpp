@@ -28,14 +28,10 @@ SOFTWARE.
 namespace rpp {
 
 template <int N>
-struct rank : rank<N - 1>
-{
-};
+struct rank : rank<N - 1> {};
 
 template <>
-struct rank<0>
-{
-};
-} // namespace rpp
+struct rank<0> {};
+}  // namespace rpp
 
 #endif

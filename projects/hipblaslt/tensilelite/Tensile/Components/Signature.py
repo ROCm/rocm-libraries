@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -52,6 +52,7 @@ class UserArgumentsInfo:
     scaleAlphaVecSize: int = 0
     biasSize: int = 0
     eSize: int = 0
+    gateSize: int = 0
     activationSize: int = 0
     factorDimSize: int = 0
     # Total argument size
@@ -163,7 +164,13 @@ class SignatureDefault(Signature):
         if kernel["ProblemType"]["Sparse"]:
             signature.addArg("MetaData", SVK.SIG_GLOBALBUFFER, "void" , "generic")
 
-        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
+        # StreamKForceDPOnly (SK3 DP-first, gfx1250) never touches the workspace
+        # partials/fixup path, so AddressWS/AddressFlags are dead: they are dropped
+        # from the SGPR define (KernelWriter.py) and here from the .kd metadata. The
+        # host (ContractionSolution.cpp singleCallArgs) matches by not appending
+        # ws/Flags under streamKForceDPOnly, so the positional kernarg layout stays
+        # consistent host<->device.
+        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
             signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressFlags", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
 
@@ -222,17 +229,36 @@ class SignatureDefault(Signature):
             signature.addArg("SKItersPerWI",                       SVK.SIG_VALUE, "u32")
             signature.addArg("SKGrid",                             SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 24
-        elif kernel["StreamK"]:
+        elif kernel["StreamK"] == 5:
+            # Hybrid SK3+SK4. The host pushes only the 6 args matching the
+            # mode it selected for this launch; the SK4 reader names
+            # (TotalItems, SKTiles, SKSplit, SKItersPerWI, SKGrid) are emitted
+            # as RegSet aliases (see the SK5 block in KernelWriterAssembly.py)
+            # onto the same physical SGPRs as the SK3 primary names
+            # (MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG,
+            # skGrid, skTiles) respectively.
+            #
+            # The mode bit (bit 30 of slot 2) selects the active path. The
+            # signature metadata uses SK3 names as the primary kernarg labels
+            # because they are what defineSgpr() declares; SK4 names exist
+            # only as register aliases.
+            signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
+            signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("skGrid",                             SVK.SIG_VALUE, "u32")
+            signature.addArg("skTiles",                            SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 24
+        elif kernel["StreamK"] == 3:  # SK3 two-tile ABI
             # StreamK args
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
             signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
             signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
             signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 16
-            if kernel["StreamK"] >= 2: # Two-tile SK
-                signature.addArg("skGrid",                         SVK.SIG_VALUE, "u32")
-                signature.addArg("skTiles",                        SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.gemmArgumentSize += 8
+            signature.addArg("skGrid",                             SVK.SIG_VALUE, "u32")
+            signature.addArg("skTiles",                            SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 8
 
         if kernel["ProblemType"]["UseScaleAB"]:
             signature.addArg("AddressScaleA", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
@@ -260,6 +286,14 @@ class SignatureDefault(Signature):
                 if kernel["ProblemType"]["UseBias"] == 3:
                     userArgumentsInfo.factorDimSize = 4
         userArgumentsInfo.biasSize += (8 + 4 + 4)
+
+        if writer.states.useGateResidual:
+            signature.addArg("gate",     SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
+            signature.addArg("gateType", SVK.SIG_VALUE,        "u32")
+            for i in range(0, writer.states.gate.numSgprStrides):
+                signature.addArg("strideG%u"%i, SVK.SIG_VALUE, "u32")
+        # Gate is not part of the grouped-gemm UserArgs struct (totalSize); it is
+        # delivered via the normal kernarg above, so gate adds nothing to totalSize.
 
         if userArgumentsInfo.factorDimSize == 4:
             signature.addArg("factorDim", SVK.SIG_VALUE, "u32")
@@ -291,6 +325,28 @@ class SignatureDefault(Signature):
             signature.addArg(               "Synchronizer", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(               "GSUSync", SVK.SIG_VALUE,              "u32")
 
+        # Batch offset support for general batched mode (pointer array).
+        # Placed at the tail of the kernarg buffer (after the dstD/Synchronizer block)
+        # so no later arg is shifted; the host appends them in the same position,
+        # after the dstD/Synchronizer/seed block. Record each arg's kernarg byte
+        # offset so the assembly loads them from the accurate position rather
+        # than re-deriving it.
+        #
+        # signature.offset counts from the very first arg including the common header.
+        # The assembly loads these args with KernArgAddress already advanced past
+        # that header by commonArgsSize, so subtract it.
+        if not kernel["ProblemType"]["GroupedGemm"]:
+            commonArgsSize = userArgumentsInfo.commonArgsSize
+            writer.states.batchOffsetDKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetD", SVK.SIG_VALUE, "u64")
+            writer.states.batchOffsetCKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetC", SVK.SIG_VALUE, "u64")
+            writer.states.batchOffsetAKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetA", SVK.SIG_VALUE, "u64")
+            writer.states.batchOffsetBKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("batchOffsetB", SVK.SIG_VALUE, "u64")
+            userArgumentsInfo.gemmArgumentSize += 32  # 4 offsets * 8 bytes each
+
         activationType = ActivationType("all")
         for name in activationType.getAdditionalArgStringList():
             userArgumentsInfo.activationSize += userArgumentsInfo.actMaxSize
@@ -306,7 +362,8 @@ class SignatureDefault(Signature):
                                       userArgumentsInfo.biasSize + \
                                       userArgumentsInfo.factorDimSize + \
                                       userArgumentsInfo.eSize + \
-                                      userArgumentsInfo.activationSize
+                                      userArgumentsInfo.activationSize + \
+                                      userArgumentsInfo.gateSize
 
         writer.states.userArgsInfo = userArgumentsInfo
 

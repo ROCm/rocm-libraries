@@ -124,7 +124,7 @@ public:
     HIPCUB_DEVICE inline
     T Sum(T(&input)[ITEMS_PER_THREAD])
     {
-        T output;
+        T output{};
         base_type::reduce(input, output, temp_storage_);
         return output;
     }
@@ -149,7 +149,7 @@ public:
     HIPCUB_DEVICE inline
     T Reduce(T(&input)[ITEMS_PER_THREAD], ReduceOp reduce_op)
     {
-        T output;
+        T output{};
         base_type::reduce(input, output, temp_storage_, reduce_op);
         return output;
     }

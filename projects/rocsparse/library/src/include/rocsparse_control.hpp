@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 
 #include "rocsparse_argdescr.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_hip.hpp"
 #include "rocsparse_message.hpp"
 #include <iostream>
 
@@ -259,7 +260,7 @@ template <typename T, typename I>
 inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_size_ = 20)
 {
     T* p = new T[size_];
-    hipMemcpy(p, v, sizeof(T) * size_, hipMemcpyDeviceToHost);
+    rocsparse_hipMemcpy(p, v, sizeof(T) * size_, hipMemcpyDeviceToHost);
     for(I i = 0; i < rocsparse::min(size_, short_size_); ++i)
     {
         std::cout << "" << ((name_) ? name_ : "a") << "[" << i << "]" << p[i] << std::endl;
@@ -267,32 +268,32 @@ inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_siz
     delete[] p;
 }
 
-#define THROW_IF_HIPLAUNCHKERNELGGL_ERROR(...)                                                 \
+#define THROW_IF_HIPLAUNCHKERNELGGL_ERROR(K, G, T, M, S, ...)                                  \
     do                                                                                         \
     {                                                                                          \
         if(false == rocsparse_debug_variables.get_debug_kernel_launch())                       \
         {                                                                                      \
-            hipLaunchKernelGGL(__VA_ARGS__);                                                   \
+            rocsparse_hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__);                \
         }                                                                                      \
         else                                                                                   \
         {                                                                                      \
             THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL"); \
-            hipLaunchKernelGGL(__VA_ARGS__);                                                   \
+            rocsparse_hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__);                \
             THROW_IF_HIP_ERROR(hipGetLastError());                                             \
         }                                                                                      \
     } while(false)
 
-#define RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(...)                                                 \
+#define RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(K, G, T, M, S, ...)                                  \
     do                                                                                          \
     {                                                                                           \
         if(false == rocsparse_debug_variables.get_debug_kernel_launch())                        \
         {                                                                                       \
-            hipLaunchKernelGGL(__VA_ARGS__);                                                    \
+            rocsparse_hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__);                 \
         }                                                                                       \
         else                                                                                    \
         {                                                                                       \
             RETURN_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL"); \
-            hipLaunchKernelGGL(__VA_ARGS__);                                                    \
+            rocsparse_hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__);                 \
             RETURN_IF_HIP_ERROR(hipGetLastError());                                             \
         }                                                                                       \
     } while(false)

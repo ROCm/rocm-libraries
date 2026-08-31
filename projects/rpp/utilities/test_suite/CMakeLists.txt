@@ -63,6 +63,19 @@ project(rpp-test)
 enable_testing()
 include(CTest)
 
+# Include shared test categories module for ctest label support
+# Check monorepo location first, then installed location (share/rpp/test/cmake/shared/ctest/)
+if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+    set(RPP_ENABLE_CTEST_CATEGORIES ON)
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/shared/ctest/TestCategories.cmake")
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/shared/ctest/TestCategories.cmake)
+    set(RPP_ENABLE_CTEST_CATEGORIES ON)
+else()
+    set(RPP_ENABLE_CTEST_CATEGORIES OFF)
+endif()
+
 # Per-test CTest TIMEOUT (seconds) for selected long-running suites; all other tests use DartConfiguration.tcl TimeOut.
 # Increased timeout for: rpp_qa_tests_tensor_image_host_qa_mode_0, rpp_qa_tests_tensor_misc_host_test_type_1, rpp_qa_tests_tensor_image_hip_qa_mode_0
 # Image qa_mode_0 CTests are omitted when USING_THE_ROCK is ON; misc test_type_1 timeouts apply whenever those tests are registered.
@@ -130,17 +143,68 @@ find_library(libsnd_LIBS
 find_package(OpenMP COMPONENTS CXX QUIET)
 find_package(OpenCV QUIET)
 
-# find required python3-pip imports
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} -m pip show pandas
-    RESULT_VARIABLE PANDAS_FOUND
-    OUTPUT_QUIET
-    ERROR_QUIET
-)
+# find required python3-pip imports (only if Python3 is found)
+if(Python3_FOUND)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -m pip show pandas
+        RESULT_VARIABLE PANDAS_FOUND
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+else()
+    set(PANDAS_FOUND 1)  # Set to not-found value when Python3 is missing
+endif()
 
-# Top-level guards: Python3 and OpenMP are required to register CTests. Pandas is optional (see warning below).
+# Add HOST/HIP subdirectories to build executables (OpenMP required, Python3 optional)
+add_subdirectory(HOST)
+if(rpp_BACKEND_TYPE STREQUAL "HIP")
+    add_subdirectory(HIP)
+endif()
+
+# Minimal sanity CTests
+if(OpenMP_CXX_FOUND)
+    # Create output directory for HOST test
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HOST/output")
+
+    # Minimal sanity test for HOST: brightness f32 test
+    add_test(
+        NAME rpp_sanity_test_brightness_host_f32
+        COMMAND "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${CMAKE_CURRENT_SOURCE_DIR}/HOST"
+                             "${CMAKE_CURRENT_BINARY_DIR}/HOST"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "Tensor_image_host"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_BINARY_DIR}/HOST/output"
+            2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+endif()
+
+if(OpenMP_CXX_FOUND AND rpp_BACKEND_TYPE STREQUAL "HIP")
+    # Create output directory for HIP test
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HIP/output")
+
+    # Minimal sanity test for HIP: brightness f32 test
+    add_test(
+        NAME rpp_sanity_test_brightness_hip_f32
+        COMMAND "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${CMAKE_CURRENT_SOURCE_DIR}/HIP"
+                             "${CMAKE_CURRENT_BINARY_DIR}/HIP"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "Tensor_image_hip"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_BINARY_DIR}/HIP/output"
+            2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+endif()
+
+# Top-level guards: Python3 and OpenMP are required to register Python-based CTests. Pandas is optional (see warning below).
 if(NOT Python3_FOUND)
-    message("-- ${Yellow}Warning: Skipping all RPP-ctest test sets since Python3 is not found!${ColourReset}")
+    message("-- ${Yellow}Warning: Python3 not found — skipping Python-script based CTests; only sanity tests are registered.${ColourReset}")
     return()
 endif()
 if(NOT PANDAS_FOUND EQUAL 0)
@@ -253,3 +317,8 @@ set_tests_properties(
     rpp_qa_tests_tensor_misc_hip_all
     rpp_qa_tests_tensor_misc_hip_test_type_1
     PROPERTIES LABELS "rpp_rocm_stack_only")
+
+# Apply test category labels for ctest filtering (quick, standard, comprehensive, full)
+if(RPP_ENABLE_CTEST_CATEGORIES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+    apply_ctest_category_labels("${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+endif()

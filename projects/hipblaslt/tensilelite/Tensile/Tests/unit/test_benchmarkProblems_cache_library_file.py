@@ -83,6 +83,23 @@ def test_cache_yaml_without_LibraryFile_is_invalid(tmp_path):
     )
 
 
+def test_cached_path_accepts_zlib_compressed_library_file():
+    """The existence check must accept .dat.zlib when .dat is absent.
+
+    writeMsgPack produces .dat.zlib (PR #8294). The C++ client probes for
+    .zlib automatically, so cachedLibraryFile stays as .dat — but the
+    Python guard must not FATAL when only .dat.zlib exists on disk.
+    """
+    src = inspect.getsource(bp._benchmarkProblemType)
+    cached_branch = src.split("Using cached solution data", 1)[1]
+    cached_branch = cached_branch.split("writeSolutions", 1)[0]
+    assert '".zlib"' in cached_branch, (
+        "Cached path must check for .dat.zlib fallback alongside .dat. "
+        "writeMsgPack produces .dat.zlib; without this check, --use-cache "
+        "FATALs with 'library file no longer exists' for msgpack format."
+    )
+
+
 def test_cached_path_uses_loaded_LibraryFile_not_recompute():
     """The cached branch of _benchmarkProblemType must use the LibraryFile
     that flowed back from _loadCacheIfMatches, NOT recompute via libraryDir()."""

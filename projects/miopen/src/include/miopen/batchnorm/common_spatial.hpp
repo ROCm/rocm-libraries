@@ -34,6 +34,13 @@ namespace solver {
 
 namespace batchnorm {
 
+// Maximum vector width supported by the batch-norm spatial kernels.
+// Matches the DEFINE_VECTOR_MAPPING entries in src/kernels/vector_types.hpp and
+// the static_assert allowlists in src/kernels/miopen_math.hpp.
+// Increment this constant (and add the corresponding DEFINE_VECTOR_MAPPING) when
+// adding a new vector width.
+inline constexpr size_t kMaxSupportedVectorSize = 8;
+
 // Compute workgroup size configuration given a problem (NHWC) and a vectorsize
 // It supports only 2D workgroups
 inline void GetLocalConfigNHWC(const miopen::batchnorm::ProblemDescription& problem,

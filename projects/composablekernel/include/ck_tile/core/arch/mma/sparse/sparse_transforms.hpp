@@ -3,12 +3,17 @@
 
 #pragma once
 
-#include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/mma_transforms.hpp"
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/ext_vector_base.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
-#include <cstdint>
+#include "ck_tile/core/utility/bit_cast.hpp"
+#include "ck_tile/core/utility/functional.hpp"
+
+#include <tuple>
+#include <type_traits>
 
 namespace ck_tile::core::arch::mma {
 
@@ -131,15 +136,20 @@ static CK_TILE_DEVICE int32_t extract_fragment_idx(const SparseIdxPack<NumIdxWor
 
 /**
  * @class SparseCompressTransform
- * @brief Performs 2:4 structured sparsity compression to the vector v and produces an index mask.
- * @note  Returns a tuple of two. The first element is the vector v with the same scalar type but
- *        its size halved. The second element is the index mask.
+ * @brief Performs 2:4 structured sparsity compression on a static_distributed_tensor representing A
+ *        and produces an index mask.
+ * @note  Returns a tuple of two. The first element is an ext_vector containing all the compressed
+ *        elements. The second element is the index mask.
  */
 template <index_t CompressionRatio>
 struct SparseCompressTransform
 {
+    /**
+     * This function takes A in uncompressed form as a big ext_vector, and returns an owned
+     * compressed ext_vector.
+     */
     template <typename VecType>
-    CK_TILE_DEVICE static decltype(auto) exec(VecType& v)
+    CK_TILE_DEVICE static auto execExtVec(VecType input)
     {
         using VecTraits                         = vector_traits<remove_cvref_t<VecType>>;
         using ScalarT                           = typename VecTraits::scalar_type;
@@ -151,10 +161,29 @@ struct SparseCompressTransform
 
         static_assert(VecN % CompressionRatio == 0, "VecN must be divisible by CompressionRatio");
         static_assert(CompressedSize > 0, "CompressedSize must be > 0");
+        static_assert(!std::is_reference_v<VecCompressed>,
+                      "Sparse compression must own its transformed vector");
 
-        auto idx = sparse::detail::compress_a_impl<ScalarT, CompressedSize>(v);
+        auto idx        = sparse::detail::compress_a_impl<ScalarT, CompressedSize>(input);
+        auto compressed = *ck_tile::bit_cast<VecCompressed*>(&input);
 
-        return std::tuple<VecCompressed&, IdxType>(*ck_tile::bit_cast<VecCompressed*>(&v), idx);
+        return std::tuple<VecCompressed, IdxType>{compressed, idx};
+    }
+
+    /**
+     * This function takes A in uncompressed form as a static_distributed tensor and returns an
+     * owned compressed ext_vector. Returning an owned value keeps const inputs valid after the
+     * transform call completes.
+     */
+    template <typename ATensor>
+    CK_TILE_DEVICE static auto exec(const ATensor& a_tensor)
+    {
+        // Properties of ATensor as a big ext vector.
+        using ADataType        = typename ATensor::DataType;
+        constexpr index_t VecN = ATensor::get_thread_buffer_size();
+        using VecType          = ext_vector_t<ADataType, VecN>;
+
+        return execExtVec(a_tensor.get_thread_buffer().template get_as<VecType>().template at<0>());
     }
 };
 

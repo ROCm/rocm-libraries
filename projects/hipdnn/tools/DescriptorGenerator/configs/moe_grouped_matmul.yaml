@@ -1,0 +1,209 @@
+operation:
+  name: "MoeGroupedMatmul"
+  class_name: "MoeGroupedMatmulOperationDescriptor"
+  fbs_table: "MoeGroupedMatmulAttributes"
+  fbs_generated_header: "moe_grouped_matmul_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL"
+
+  error_label: "MoE grouped matmul"
+  packer_operation_label: "MoE grouped matmul"
+  packer_finalize_label: "MoE grouped matmul"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT"
+
+  frontend:
+    packer_function: "createMoeGroupedMatmulOperation"
+    unpacker_function: "unpackMoeGroupedMatmulOperation"
+    node_class: "MoeGroupedMatmulNode"
+    attributes_class: "MoeGroupedMatmulAttributes"
+    generate_node: false
+
+    inputs:
+      - name: "token"
+        enum_name: "TOKEN"
+        required: true
+        getter_name: "get_token"
+        setter_name: "set_token"
+      - name: "weight"
+        enum_name: "WEIGHT"
+        required: true
+        getter_name: "get_weight"
+        setter_name: "set_weight"
+      - name: "first_token_offset"
+        enum_name: "FIRST_TOKEN_OFFSET"
+        required: true
+        getter_name: "get_first_token_offset"
+        setter_name: "set_first_token_offset"
+      - name: "token_index"
+        enum_name: "TOKEN_INDEX"
+        required: false
+        getter_name: "get_token_index"
+        setter_name: "set_token_index"
+      - name: "token_ks"
+        enum_name: "TOKEN_KS"
+        required: false
+        getter_name: "get_token_ks"
+        setter_name: "set_token_ks"
+    outputs:
+      - name: "output"
+        enum_name: "OUTPUT"
+        required: true
+        getter_name: "get_output"
+        setter_name: "set_output"
+    graph_method_name: "moe_grouped_matmul"
+    graph_method_params:
+      - name: "token"
+        tensor_name: "token"
+      - name: "weight"
+        tensor_name: "weight"
+      - name: "firstTokenOffset"
+        tensor_name: "first_token_offset"
+      - name: "tokenIndex"
+        tensor_name: "token_index"
+        optional: true
+      - name: "tokenKs"
+        tensor_name: "token_ks"
+        optional: true
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "output"
+    node_type_enum: "NodeType::MOE_GROUPED_MATMUL"
+    node_attributes_union_type: "MoeGroupedMatmulAttributes"
+
+
+  tensor_fields:
+    - name: "token"
+      fbs_field: "token_tensor_uid"
+      attr_suffix: "TOKEN_DESC"
+      required: true
+    - name: "weight"
+      fbs_field: "weight_tensor_uid"
+      attr_suffix: "WEIGHT_DESC"
+      required: true
+    - name: "first_token_offset"
+      fbs_field: "first_token_offset_tensor_uid"
+      attr_suffix: "FIRST_TOKEN_OFFSET_DESC"
+      required: true
+      expected_data_type: "INT32"
+    - name: "token_index"
+      fbs_field: "token_index_tensor_uid"
+      attr_suffix: "TOKEN_INDEX_DESC"
+      required: false
+      expected_data_type: "INT32"
+    - name: "token_ks"
+      fbs_field: "token_ks_tensor_uid"
+      attr_suffix: "TOKEN_KS_DESC"
+      required: false
+      expected_data_type: "INT32"
+    - name: "output"
+      fbs_field: "output_tensor_uid"
+      attr_suffix: "OUTPUT_DESC"
+      required: true
+
+  data_fields:
+    - name: "mode"
+      fbs_field: "mode"
+      attr_name: "HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE"
+      type: "mode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode"
+      frontend_type: "MoeGroupedMatmulMode"
+      # cuDNN exposes NOT_SET in its frontend enum, but MoE attributes still
+      # default to NONE. Keep the sentinel frontend-only to preserve existing
+      # C API and FlatBuffers values: NONE=0, GATHER=1, SCATTER=2.
+      default_value: "MoeGroupedMatmulMode::NONE"
+      required: false
+      mode_sentinel: "optional"
+      frontend_sentinel_only: true
+      frontend_getter: "get_mode()"
+      backend_setter: "setMoeGroupedMatmulMode"
+      backend_getter: "getMoeGroupedMatmulMode"
+      backend_converter: "toBackendMoeGroupedMatmulMode"
+      frontend_inverse_converter: "fromHipdnnMoeGroupedMatmulMode"
+      backend_type_name: "HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE"
+      test_enum_value: "SCATTER"
+      test_alt_enum_value: "GATHER"
+      test_backend_value: "HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER"
+      test_c_type: "hipdnnMoeGroupedMatmulMode_t"
+      test_default_value: "HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER"
+      enum_def:
+        backend_header: "HipdnnMoeGroupedMatmulMode.h"
+        backend_prefix: "HIPDNN_MOE_GROUPED_MATMUL_MODE_"
+        values:
+          - { name: "NOT_SET", value: 0, sentinel: true, description: "Mode not specified" }
+          - { name: "NONE", value: 0, frontend_value: 1, description: "Tokens are already routed" }
+          - { name: "GATHER", value: 1, frontend_value: 2, description: "Gather tokens before grouped matmul" }
+          - { name: "SCATTER", value: 2, frontend_value: 3, description: "Scatter grouped matmul output to source token order" }
+
+    - name: "top_k"
+      fbs_field: "top_k"
+      attr_name: "HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K"
+      type: "scalar_int32"
+      default_value: "0"
+      required: true
+      frontend_getter: "get_top_k()"
+
+
+  mode_rules:
+    - mode: "NONE"
+      required_optional_tensors: []
+      serialized_scalars: []
+      scalar_constraints:
+        top_k: { equals: 0 }
+    - mode: "GATHER"
+      required_optional_tensors: ["token_index"]
+      serialized_scalars: []
+      scalar_constraints:
+        top_k: { equals: 0 }
+    - mode: "SCATTER"
+      required_optional_tensors: ["token_index", "token_ks"]
+      serialized_scalars: ["top_k"]
+      scalar_constraints:
+        top_k:
+          minimum: 1
+          maximum: { tensor: "weight", dimension: 0 }
+
+  mode_integration_scenarios:
+    - name: "none_canonicalizes_ignored_routing"
+      mode: "NONE"
+      provided_optional_inputs: ["token_index", "token_ks"]
+      expected_optional_inputs: []
+      scalar_overrides: { top_k: 2 }
+      expected_scalar_values: { top_k: 0 }
+    - name: "gather_canonicalizes_ignored_scatter_attributes"
+      mode: "GATHER"
+      provided_optional_inputs: ["token_index", "token_ks"]
+      expected_optional_inputs: ["token_index"]
+      scalar_overrides: { top_k: 2 }
+      expected_scalar_values: { top_k: 0 }
+    - name: "scatter_preserves_routing"
+      mode: "SCATTER"
+      provided_optional_inputs: ["token_index", "token_ks"]
+      expected_optional_inputs: ["token_index", "token_ks"]
+      scalar_overrides: { top_k: 2 }
+      expected_scalar_values: { top_k: 2 }
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC"
+
+  test_data:
+    tensor_const_prefix: "K_MOE_GROUPED_MATMUL_"
+    tensor_uids:
+      token: 1900
+      weight: 1901
+      first_token_offset: 1902
+      token_index: 1903
+      token_ks: 1904
+      output: 1905
+    tensor_configs:
+      token: { dims: [1, 8, 16], strides: [128, 16, 1] }
+      weight: { dims: [2, 16, 32], strides: [512, 32, 1] }
+      first_token_offset: { dims: [2, 1, 1], strides: [1, 1, 1], data_type: INT32 }
+      token_index: { dims: [1, 8, 1], strides: [8, 1, 1], data_type: INT32 }
+      token_ks: { dims: [1, 8, 1], strides: [8, 1, 1], data_type: INT32 }
+      output: { dims: [1, 8, 32], strides: [256, 32, 1] }
+    field_values:
+      top_k: 2

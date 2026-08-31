@@ -8,6 +8,10 @@ hipBLASLt is a GEMM library for AMD GPUs built on HIP. The public API (`hipblasL
 
 This directory (`projects/hipblaslt`) is one component of the larger `rocm-libraries` superbuild but is designed to also build standalone — see `CONTRIBUTING.md` for the standalone setup, which is the recommended dev loop.
 
+## PR Quality Skill
+
+When authoring, reviewing, or pre-merge-gating a hipBLASLt pull request, use the `hipblaslt-pr-quality` agent skill at [`skills/hipblaslt-pr-quality/SKILL.md`](skills/hipblaslt-pr-quality/SKILL.md). It is a thin overlay that *tightens* the library-agnostic `rocm-pr-quality` base skill (in `ROCm/TheRock` at `skills/rocm-pr-quality/`) for hipBLASLt — it never relaxes a base rule. The skill is advisory and never posts to GitHub/Jira without explicit human approval.
+
 ## Repository layout (high-level)
 
 | Path | Purpose |
@@ -34,7 +38,7 @@ invoke build -ca gfx942 -d     # add --install-deps on first run
 invoke --help build            # full flag list
 ```
 
-Useful flags (selected): `-d` install deps, `-n` install package after build, `-c` clients, `-d/-r/-k` Debug/RelWithDebInfo/RelWithDebInfo (default Release), `--clean`, `-a/--architecture` GPU target(s), `--skip-rocroller`, `-y/--legacy-hipblas-direct` (older-ROCm direct-hipBLAS API path), `-t/--no-tensile` for client-only, `-z/--no-lazy-load`, `-f/--logic-filter` to scope TensileLite logic dirs (massively faster device-lib build).
+Useful flags (selected): `-d` install deps, `-n` install package after build, `-c` clients, `-d/-r/-k` Debug/RelWithDebInfo/RelWithDebInfo (default Release), `--clean`, `-a/--architecture` GPU target(s), `--skip-rocroller`, `-y/--legacy-hipblas-direct` (older-ROCm direct-hipBLAS API path), `-t/--no-tensile` for client-only, `-z/--no-lazy-load`, `-f/--logic-filter` to scope TensileLite logic dirs (massively faster device-lib build), `--fortran-compiler` for `--clients` (path or name; default: `FC`, else `CMAKE_Fortran_COMPILER`, else auto-detect ROCm flang, else detected `gfortran`; exits if none found).
 
 `install.sh` is a deprecated compatibility wrapper that just shells out to `invoke build`; new instructions and tooling should call `invoke build` directly.
 
@@ -64,9 +68,29 @@ Existing files that still carry the legacy verbose MIT block MAY be migrated to 
 
 ## Pull requests
 
-Always write PR descriptions using the rocm-libraries PR template. Fill in every section (use "N/A" or "Docs only, no testing needed" where a section genuinely does not apply rather than deleting it):
+Always write PR descriptions using the rocm-libraries PR template. Fill in every section (use "N/A" or "Docs only, no testing needed" where a section genuinely does not apply rather than deleting it).
+
+PR titles **must** follow [Conventional Commits](https://www.conventionalcommits.org/) style:
+
+```
+type(optional-scope): short description
+```
+
+Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+
+The PR body **must** include a JIRA or issue reference line (before or after the template sections):
+
+```
+JIRA ID : PROJECT-1234
+```
+
+See the [Libraries PR Bot Policy FAQ](https://github.com/ROCm/rocm-libraries/blob/develop/docs/LIBRARIES_PR_BOT_FAQ.md) for the full set of automated checks enforced on every PR.
+
+### PR body template
 
 ```markdown
+JIRA ID : <JIRA key or N/A>
+
 ## Motivation
 <why this change is needed: the problem, bug, or feature being addressed>
 
@@ -84,8 +108,6 @@ Always write PR descriptions using the rocm-libraries PR template. Fill in every
 
 ## Risk level
 <None/Low/Medium/High, with a short justification>
-
-**Associated ticket**: <JIRA/issue id, or N/A>
 ```
 
 Use the `users/<github-username>/<branch-name>` branch convention and base PRs on `develop`.

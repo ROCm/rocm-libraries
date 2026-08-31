@@ -107,6 +107,13 @@ namespace rocisa
                 {
                     if(regContainer->regType == "acc")
                         continue;
+                    if(regContainer->regIdx < 0)
+                    {
+                        std::cerr << "ERROR: negative regIdx detected!" << std::endl;
+                        std::cerr << "  regContainer: " << regContainer->toString() << std::endl;
+                        std::cerr << "  instruction:  " << item->toString() << std::endl;
+                        throw std::runtime_error("GPR index out of range (negative regIdx)");
+                    }
                     for(int i = regContainer->regIdx;
                         i < regContainer->regIdx + regContainer->regNum;
                         ++i)
@@ -124,6 +131,15 @@ namespace rocisa
                             gprvec[i].push_back(std::make_shared<NoOptItem>(item));
                         else
                             gprvec[i].push_back(item);
+                    }
+                    // Track highest VGPR index seen in any instruction.  Done
+                    // outside the inner loop using regIdx+regNum-1 to avoid
+                    // repeated comparisons; acc registers are already skipped.
+                    if(regContainer->regType == "v")
+                    {
+                        int lastIdx = regContainer->regIdx + regContainer->regNum - 1;
+                        if(lastIdx > graph.maxVgprSeen)
+                            graph.maxVgprSeen = lastIdx;
                     }
                 }
             }

@@ -24,9 +24,69 @@
 
 import math
 from functools import lru_cache
+from typing import Any, Union
 
 from .Architectures import SUPPORTED_ISA
 from .Types import IsaVersion
+
+################################################################################
+# SwInstructionPrefetch bitmask API
+################################################################################
+# Single integer knob replacing the legacy (SwInstructionPrefetch: bool,
+# SwInstructionPrefetchAbs: bool) pair. Domain:
+#   -1 Auto      : resolve by architecture (Absolute on gfx1250 non-Stream-K,
+#                  Relative otherwise).
+#    0 Off       : no software instruction prefetch.
+#    1 Relative  : PC-relative prefetch (s_prefetch_inst_pc_rel; legacy default).
+#    2 Absolute  : absolute prefetch (s_prefetch_inst + label-fixed base);
+#                  gfx1250 non-Stream-K only.
+# Legacy booleans remain accepted as a deprecated alias so already-shipped
+# library-logic YAMLs (which carry `SwInstructionPrefetch: true`) keep loading
+# without a mass rewrite: True -> Relative(1), False -> Off(0).
+SW_INSTRUCTION_PREFETCH_AUTO = -1
+SW_INSTRUCTION_PREFETCH_OFF = 0
+SW_INSTRUCTION_PREFETCH_RELATIVE = 1
+SW_INSTRUCTION_PREFETCH_ABSOLUTE = 2
+
+
+def normalizeSwInstructionPrefetch(value):
+    """Map the SwInstructionPrefetch value (int bitmask or legacy bool) to the
+    canonical integer mode. ``True`` -> Relative(1), ``False`` -> Off(0)."""
+    # bool is a subclass of int, so check it first.
+    if isinstance(value, bool):
+        return SW_INSTRUCTION_PREFETCH_RELATIVE if value else SW_INSTRUCTION_PREFETCH_OFF
+    return int(value)
+
+
+def resolveSwInstructionPrefetch(value, isGfx1250, isStreamK, isF64=False):
+    """Resolve the SwInstructionPrefetch mode to the two module-option enables
+    the StinkyTofu passes read: ``(enableRelative, enableAbsolute)``.
+
+    Auto(-1) resolves to Absolute on gfx1250 non-Stream-K non-f64, and Relative
+    otherwise (Relative is a no-op on non-gfx1250, where StinkyTofu does not
+    run). Explicit Absolute(2) on Stream-K / non-gfx1250 / f64 is rejected
+    earlier in Solution.assignProblemIndependentDerivedParameters; the value it
+    maps to here is neutralized downstream by the baseSgpr=-1 gate regardless.
+
+    f64 (double) is excluded from Absolute: its OptNLL epilogue routinely exceeds
+    the 64 KiB I-cache (bucket-c fleet-wide) so the abs cover/ladder yields no
+    reliable benefit, and its sgprAlpha is a 2-dword pair (the OptNLL-aware
+    Case-B fp32 predicate does not apply). See design doc §16.8/§16.13.
+    """
+    mode = normalizeSwInstructionPrefetch(value)
+    if mode == SW_INSTRUCTION_PREFETCH_OFF:
+        return (False, False)
+    if mode == SW_INSTRUCTION_PREFETCH_RELATIVE:
+        return (True, False)
+    if mode == SW_INSTRUCTION_PREFETCH_ABSOLUTE:
+        # Absolute on f64 is rejected earlier; defensively fall back to Relative
+        # if it ever reaches this point.
+        return (True, False) if isF64 else (False, True)
+    # Auto
+    if isGfx1250 and not isStreamK and not isF64:
+        return (False, True)
+    return (True, False)
+
 
 ################################################################################
 # Enumerate Valid Solution Parameters
@@ -78,6 +138,13 @@ for i in range(1, maxWGsInCluster + 1):
   for j in range(1, maxWGsInCluster + 1):
     if i * j <= maxWGsInCluster:
       validClusterDimensions.append([i, j])
+
+# Shared valid values for LdsBlockSizePerPadA and LdsBlockSizePerPadB so they stay in sync.
+validLdsBlockSizePerPad = [-1, 0, 16, 32, 64, 96, 128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768,
+                           832, 896, 960, 1024, 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664,
+                           1728, 1792, 1856, 1920, 1984, 2048, 2176, 2304, 2432, 2560, 2688, 2816, 2944,
+                           3072, 3200, 3328, 3456, 3584, 3712, 3840, 3968, 4096, 4352, 4608, 4864, 5120,
+                           5376, 5632, 6144, 6656, 7168, 7680, 8192]
 
 @lru_cache
 def makeValidWorkGroups():
@@ -287,13 +354,7 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we have many power of 2 assumptions for prefetchGL2 address calculation, including:
-    #   NumThreads must be power of 2
-    #   ClusterDim must be power of 2 and not [1,1]
-    #   DepthU must be power of 2
-    #   MacroTile must be power of 2
-    #   DataTypeA and DataTypeB must not be 6-bit float
-    # Also does not support GSU, StreamK and general batch yet. May remove these limitations in the future.
+    # Currently we do not support GSU, StaggerU, StreamK and general batch. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
@@ -309,6 +370,20 @@ validParameters = { # we need to make sure this matches develop
     #   PGR==2: reject (use -1 or 0 in that case)
     # 1LDSBuffer will be 0 if DtlPlusLdsBuf if enabled
     "DtlPlusLdsBuf": [-1,0,1],
+    # Force allocating PGR+1 (i.e. 3) LDS buffers when PrefetchGlobalRead==2,
+    # if we have enough LDS memory size. It targets the TDM (datamover) PGR2 path
+    # (e.g. gfx1250). The extra LDS block lets the next-iteration global reads be
+    # scheduled over the barrier without colliding with the buffer currently
+    # being read.
+    # -1: auto (3 buffers if they fit in MaxLDS, otherwise fall back to 2)
+    #  0: disable
+    #  1: enable (forced; no MaxLDS fallback, so a kernel whose 3 buffers do not
+    #     fit is rejected by the usual LDS size check)
+    # Silently downgraded to 0 without TDM on both A and B, for
+    # PrefetchGlobalRead!=2, and for PrefetchAcrossPersistent=1.
+    # 1LDSBuffer never competes with this: TDM already resolves 1LDSBuffer==-1 to 0
+    # and rejects 1LDSBuffer==1 with PGR2.
+    "TDMPlusLdsBuf": [-1,0,1],
     # We use double LDS buffer when PrefetchGlobalRead.
     # While it reads data from LDS[0]/[1], it prefetch global data and writes to LDS[1]/[0]
     # If we can make sure all data are read from LDS to register before writing data to LDS, we can use 1 LDS buffer to save LDS memory.
@@ -321,6 +396,29 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
+    # gfx1250 LDS segment interleave: puts an operand's two components in different 64KiB LDS segments
+    # so the two read ports (one per SIMD pair) read different segments, avoiding a segment conflict
+    # (both ports reading one segment at once).
+    #
+    # Applies only to gfx1250 wave-separated TDM kernels, and requires:
+    #   - TDMInst=3, UnrollMajorLDS, MIWaveGroup [2,2], [4,1], [1,4]
+    #   - dtype bf16 / fp16 / fp8 / fp4 (incl. MXFP8/MXFP4 and mixed narrow types such as F8xF4)
+    #   - VWA (for [2,2], [4,1]) = WaveTileA or WaveTileA/2; VWB (for [1,4]) = WaveTileB or WaveTileB/2;
+    #     the WaveTile/2 case needs TDMSplit
+    # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
+    #
+    # Values:
+    #   -1 = auto: enable only where it needs no extra LDS reserved.
+    #    0 = off (default): baseline layout.
+    #    1 = on: enable wherever valid, including cases that reserve more LDS to reach a segment
+    #            boundary (needs PrefetchGlobalRead=2).
+    # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
+    "LDSSegmentInterleave": [-1, 0, 1],
+    # StreamK persistent loop: use the current tile's no-load-loop window to
+    # issue the first global-read group for the next persistent tile. The
+    # generated code keeps that first-PGR data durable and restores borrowed
+    # current-tile state before current tail/NLL code resumes.
+    "PrefetchAcrossPersistent": [0, 1],
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support
@@ -334,16 +432,30 @@ validParameters = { # we need to make sure this matches develop
     # don't create a whole copy of the Unroll loop with loads removed - instead
     # use buffer limits to suppress global loads and ignore unnecessary ds_reads
     "SuppressNoLoadLoop": [False, True],
-    # StinkyTofu: whether SwPrefetchInsertionPass may insert software instruction prefetch.
-    # True: Turn on StinkyTofu instruction prefetch for this solution (extra SGPR on supported ISAs only).
-    # False: no prefetch SGPR, prefetch pass disabled for this kernel.
+    # StinkyTofu: whether SwInstructionPrefetchRelStaticPass may insert software instruction prefetch.
+    # StinkyTofu software instruction-prefetch mode (single integer bitmask; see
+    # SW_INSTRUCTION_PREFETCH_* above). -1 Auto, 0 Off, 1 Relative, 2 Absolute.
     #
     # Purpose: command-processor (CP) prefetch only covers a bounded amount of code. When
     # the kernel's assembly footprint is large enough to exceed that window, the front of the
     # kernel can fall out of the I-cache before execution reaches it, causing misses. Software
     # prefetch instructions bring hot code back under software control so execution stays ahead of
     # the fetch pointer and avoids those misses.
-    "SwInstructionPrefetch": [False, True],
+    #
+    # Relative(1): PC-relative prefetch (s_prefetch_inst_pc_rel; no reserved SGPR needed).
+    # Absolute(2): absolute prefetch (s_prefetch_inst) using a label-fixed base address built from
+    #   s_getpc_b64 + s_add_u32; gfx1250 non-Stream-K only. Static regime (32640 < totalBytes <=
+    #   65536): single-label + koffset burst at entry BB. Dynamic regime (totalBytes > 65536):
+    #   run-time-targeted policy — emits a predicated prefetch ladder after label_MultiGemmEnd
+    #   (SwInstructionPrefetchAbsDynamicPass). The 3-SGPR base (even-aligned pair s[base:base+1] +
+    #   scratch s[base+2]) is auto-allocated in KernelWriter (reserved past the kernel-argument
+    #   region, then freed at label_MultiGemmEnd for body reuse) — no manual SGPR index needed.
+    # Auto(-1): Absolute on gfx1250 non-Stream-K, Relative otherwise.
+    # Explicit Absolute(2) on Stream-K / non-gfx1250 is rejected in Solution.py.
+    #
+    # Legacy booleans are accepted as a deprecated alias (True -> Relative, False -> Off) so
+    # already-shipped library-logic YAMLs keep loading; hence bool is a valid type here.
+    "SwInstructionPrefetch": [-1, 0, 1, 2, False, True],
     # For PrefetchGlobalRead=1, create a second copy of the unroll loop with
     # the LDS pointer swaps expanded into inline constants for LDS read and write instructions
     # This eliminates 4 vector XOR instructions used for pointer swap
@@ -400,6 +512,9 @@ validParameters = { # we need to make sure this matches develop
     "OptNoLoadLoop": [0, 1, 2],
     "BufferLoad": [False, True],
     "BufferStore": [False, True],
+    # CompactLoopStore default (opt-in, off by default). When enabled, the
+    # per-batch global write body is wrapped in a CLS countdown loop and
+    "CompactLoopStore": [False, True],
     # Attempt to load directly from global memory into Vgpr.
     # Assembly only
     "DirectToVgprA": [False, True],
@@ -499,7 +614,7 @@ validParameters = { # we need to make sure this matches develop
     #  - Tail loop can be unrolled up to InnerUnroll amount if AssertSummationElementMultiple%InnerUnroll==0
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertSummationElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128],
+    "AssertSummationElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Kernel generator will assume that the FreeIndex[0] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[0] is usually letter "I"
@@ -715,6 +830,10 @@ validParameters = { # we need to make sure this matches develop
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],
+    # UseDualFMAC: emit RDNA3/3.5/4 VOPD v_dual_fmac_f32 pairs in the f32 source/MAC inner
+    # loop (2x FMA issue rate). Source (non-MFMA) f32 kernels on gfx11/gfx12 only; auto-
+    # disabled elsewhere (see SolutionStructs.Solution.assignProblemIndependentDerivedParameters).
+    "UseDualFMAC": [False, True],
     # Following parameters are designed for store scheduling.
     # (store stands for load from C (with beta) and store to C/D)
     #
@@ -758,9 +877,10 @@ validParameters = { # we need to make sure this matches develop
     # Total work units are calculated as (#MTs x #LoopIters) and divided among workgroups.
     # In most cases each workgroup will calculate a partial tile that are accumulated in a fixup step in the same kernel
     # 0 : Standard data-parallel kernel
-    # 1 : Basic StreamK
-    # 2 : Two-Tile StreamK (each WG completes an even number of sk iterations, followed by an even number of dp tiles)
     # 3 : Two-Tile StreamK with DP before SK tiles
+    # 4 : Dynamic StreamK using per-XCD work queues
+    # 5 : Hybrid SK3 + SK4 in one kernel; mode bit 30 of MagicShiftItersPerTile
+    #     selects the active sub-path (see StreamKHybrid in StreamK.py).
     # StreamK kernels can adjust the number of CUs being used.
     # Using fewer sometimes increases overall throughput by allowing other kernels to run in parallel.
     # StreamK grid is controlled by setting these enviornment variables:
@@ -785,7 +905,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3, 4],
+    "StreamK": [0, 3, 4, 5],
     # Force StreamK=3 to run all output tiles through the persistent DP path.
     # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
     # to skip the SK region, and keeps the normal StreamK grid selection policy.
@@ -796,6 +916,14 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
     "StreamKAtomic": [0, 1],
+    # Codegen-time toggle for single-hop next-neighbor work stealing in the
+    # dynamic-queue StreamK fetch (SK4 / SK5-dynamic). Queue count =
+    # archCaps['NumXCD'] (8 on gfx942/gfx950). When a workgroup's home queue
+    # empties, it makes one atomic attempt on its next-neighbor per-XCD queue.
+    # Valid only for StreamK in (4, 5).
+    #  0: off
+    #  1: on
+    "StreamKWorkStealing": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
     #  0: uses default workgroup assignment
@@ -816,7 +944,7 @@ validParameters = { # we need to make sure this matches develop
     "DebugStreamK": [0, 1, 2, 3],
     # Persistent-kernel debug: when True, the persistent loop never exits.
     # Used as a co-tenant load kernel for contended-perf benchmarking.
-    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    # Termination is via process death. Requires StreamK = 3.
     "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
@@ -892,9 +1020,9 @@ validParameters = { # we need to make sure this matches develop
     # is added (readOffset aware of the pad and adjusts offset value based on this parameter value).
     # Only support LdsBlockSizePerPad >= unrollDepth * BPE
     # 0 means disable LdsBlockSizePerPad
-    "LdsBlockSizePerPadA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadA": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
-    "LdsBlockSizePerPadB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    "LdsBlockSizePerPadB": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     "LdsBlockSizePerPadMetadata": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     # Transpose LDS format. Local store in coalesced dimension , same as optimized global fetch dimension . applicable only in TLU=0 case for miSIMD(s)
@@ -911,6 +1039,7 @@ validParameters = { # we need to make sure this matches develop
     # For gfx942, sets sc0/sc1/nt bits
     # 0: none, 1: sc0, 2: sc1, 3: sc0 sc1, 4: nt, 5: nt sc0, 6: nt sc1, 7: nt sc0 sc1
     "NonTemporalE": list(range(0, 8)),
+    "NonTemporalGate": list(range(0, 8)),
     "NonTemporalD": list(range(0, 8)),
     "NonTemporalC": list(range(0, 8)),
     "NonTemporalA": list(range(0, 8)),
@@ -1057,6 +1186,11 @@ validParameters = { # we need to make sure this matches develop
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
     "TDMSplit": [False, True],
+    # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
+    # (different TDM wait groups) so every wave finishes the urgent group before any
+    # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
+    # gfx1250 / ScheduleIterAlg=4 path only, off by default.
+    "TDMLoadWaveSync": [False, True],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default
@@ -1126,6 +1260,63 @@ newMIValidParameters = {
     'WorkGroup': -1,
 }
 
+
+# Expected-type derivation for solution parameters --------------------------
+#
+# These helpers live here, next to `validParameters`, because that registry
+# is the source of truth for "what types this parameter is allowed to take".
+# Consumers (Solution.validateParameterTypes, and the input-YAML strict gate
+# in checkParametersAreValid) import them from this module. Keeping the
+# registry and its derived expected-types map co-located preserves the
+# Common -> Solution import direction; the prior layout (defined inside
+# Solution.py and imported back by ValidParameters extensions) would have
+# introduced a Common -> Solution reverse import.
+
+def _getExpectedTypes(validParams: dict[str, Union[int, list[Any], Any]]) -> dict[str, set[type]]:
+    """Build a map from parameter name to the set of allowed Python types.
+
+    Uses the validParameters registry as the source of truth.  For each
+    parameter whose allowed-value list is not the sentinel ``-1``, we
+    collect the concrete ``type()`` of every allowed value.  Because
+    Python ``bool`` is a subclass of ``int``, we use ``type()`` (not
+    ``isinstance``) so that ``bool`` and ``int`` are kept distinct.
+
+    Returns:
+        dict[str, set[type]]: e.g. {"UseCustomMainLoopSchedule": {int},
+                                     "BufferLoad": {bool}, ...}
+    """
+    typeMap = {}
+    for name, allowedValues in validParams.items():
+        if isinstance(allowedValues, list):
+            if len(allowedValues) == 0:
+                raise ValueError(f"Invalid parameter value: {name} = {allowedValues}")
+        else:  # Sentinel value -1 is allowed for all parameters
+            if allowedValues != -1:
+                raise ValueError(f"Invalid parameter value: {name} = {allowedValues}")
+            continue
+
+        typeMap[name] = set(type(v) for v in allowedValues)
+    return typeMap
+
+# Pre-compute once at import time so the per-Solution cost is a dict lookup.
+_expectedParamTypes = _getExpectedTypes(validParameters)
+
+# Parameters to skip during type validation because YAML serialization
+# inherently produces a different type (e.g. [9, 0, 10] -> list) and the
+# conversion to the canonical type happens downstream in the pipeline.
+# Also skip DataType* parameters as they are converted from strings/ints to
+# DataType objects.
+_skipTypeCheck = {
+    "ISA",
+    "DataType", "DataTypeA", "DataTypeB", "DataTypeC", "DataTypeD", "DataTypeE",
+    "MacDataTypeA", "MacDataTypeB",
+    "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
+    "DataTypeMXSA", "DataTypeMXSB",
+    "DestDataType", "ComputeDataType",
+    "F32XdlMathOp",  # Also converted to DataType
+}
+
+
 def checkSpaceFillAlgoIsValid(name, value):
     if type(value) != list:
         msgBase = "Invalid parameter value: {} = {}\nMust be a list of values"
@@ -1136,7 +1327,7 @@ def checkSpaceFillAlgoIsValid(name, value):
     else:
         maxOrderID = 5
         for orderId in value:
-            if orderId not in range(0,maxOrderID + 1):
+            if orderId not in range(0,maxOrderID + 1):  # pragma: no mutate
                 msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
                 raise Exception(msgBase.format(name, value))
 
@@ -1153,17 +1344,44 @@ def checkSpaceFillAlgoWGMIsValid(name, value):
                 msgBase = "Invalid parameter value: {} = {}\nMust be exactly 2 values per level"
                 raise Exception(msgBase.format(name, value))
             for dim in pair:
-                if dim not in range(0,256):
+                if dim not in range(0,256):  # pragma: no mutate
                     msgBase = "Invalid parameter value: {} = {}\nGridDim {} out of range [0,256)"
                     raise Exception(msgBase.format(name, value, dim))
 
 
-def checkParametersAreValid(param, validParams):
-    """Ensures paramaters in params exist and have valid values as specified by validParames"""
+def checkParametersAreValid(
+    param,
+    validParams,
+    *,
+    keyPathPrefix: str = "",
+    srcFile: str = "",
+):
+    """Ensures parameters in params exist and have valid values as specified by validParams.
+
+    In addition to the legacy name+value-membership checks, when the
+    parameter name has an entry in the derived ``_expectedParamTypes`` map
+    and is not in ``_skipTypeCheck``, each element of ``values`` is also
+    type-checked against the union of allowed-value types. ``type(value)``
+    is used (not ``isinstance``) so ``bool`` and ``int`` are distinguished.
+    Raises :class:`ConfigTypeError` immediately on the first type mismatch.
+
+    Args:
+        param: ``(name, values)`` tuple; ``values`` is the list of
+            candidate values.
+        validParams: registry to validate ``name``/``values`` against.
+        keyPathPrefix: dotted/bracketed prefix for the keypath in error
+            messages.
+        srcFile: YAML file path, used for src:line in messages.
+    """
+    # Defer imports of the shared error machinery so this module stays
+    # importable in any context that doesn't already pull in Common.
+    from .TypeValidationErrors import (
+        ConfigTypeError,
+        formatMismatch,
+    )
+
     (name, values) = param
     if name == "ProblemSizes":
-        return
-    elif name == "InternalSupportParams":
         return
 
     if name not in validParams:
@@ -1173,7 +1391,12 @@ def checkParametersAreValid(param, validParams):
             )
         )
 
-    for value in values:
+    runTypeCheck = (
+        name in _expectedParamTypes
+        and name not in _skipTypeCheck
+    )
+
+    for idx, value in enumerate(values):
         if validParams[name] != -1 and value not in validParams[name]:
             msgBase = "Invalid parameter value: {} = {}\nValid values for {} are {}{}."
             msgExt = (
@@ -1186,3 +1409,55 @@ def checkParametersAreValid(param, validParams):
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":
             checkSpaceFillAlgoWGMIsValid(name, value)
+
+        if runTypeCheck:
+            expectedTypes = _expectedParamTypes[name]
+            actualType = type(value)
+            if actualType not in expectedTypes:
+                # Build keypath. Lists of candidate values use [idx]; a
+                # single-element list (the common case for one value per
+                # key) still gets [0] so the location is unambiguous.
+                base = f"{keyPathPrefix}.{name}" if keyPathPrefix else name
+                keyPath = f"{base}[{idx}]" if len(values) > 1 else base
+                msg = formatMismatch(srcFile, keyPath, value, expectedTypes)
+                raise ConfigTypeError(msg)
+
+
+def validateInternalSupportParams(
+    d,
+    srcFile: str = "",
+    keyPathPrefix: str = "InternalSupportParams",
+):
+    """Validate an InternalSupportParams dict against defaultInternalSupportParams.
+
+    Sibling to ``checkParametersAreValid`` rather than a fold-in (per the
+    plan's B3): ``checkParametersAreValid`` has a ``(name, list)``
+    contract and ``InternalSupportParams`` arrives as a dict, so folding
+    would break the function's signature.
+
+    Each key in ``d`` must exist in ``defaultInternalSupportParams`` and
+    have ``type(default)``. Mismatches and unknown-key errors are
+    Raises :class:`ConfigTypeError` on the first bad key encountered. Strict is
+    the only behaviour.
+    """
+    if not d:
+        return
+
+    from .TypeValidationErrors import (
+        ConfigTypeError, formatMismatch,
+    )
+
+    # defaultInternalSupportParams lives in Common/GlobalParameters; import
+    # lazily because that module pulls in a lot.
+    from .GlobalParameters import defaultInternalSupportParams
+
+    for key, value in d.items():
+        if key not in defaultInternalSupportParams:
+            raise ConfigTypeError(
+                f"{keyPathPrefix}.{key}: unknown key. "
+                f"Valid keys are {sorted(defaultInternalSupportParams.keys())}."
+            )
+        default = defaultInternalSupportParams[key]
+        expectedTypes = {type(default)}
+        if type(value) not in expectedTypes:
+            raise ConfigTypeError(formatMismatch(srcFile, f"{keyPathPrefix}.{key}", value, expectedTypes))

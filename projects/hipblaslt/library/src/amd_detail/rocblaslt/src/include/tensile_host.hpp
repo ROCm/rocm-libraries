@@ -298,3 +298,18 @@ TensileLite::ProblemOverride
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
+
+// Push the GemmPreference-supplied StreamK tile scheduling mode onto every
+// contraction problem currently carried by gemmData. Defined in
+// tensile_host.cpp because gemmData's concrete type
+// (TensileDataGemm / TensileDataGroupedGemm) only exists there.
+void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
+                                rocblaslt::RocGemmType gemmType,
+                                int32_t                mode);
+
+// Likewise for the uniform-summation-order request. ORs into any value
+// already on the problem so a default-false preference cannot clear a
+// desc- or handle-level enable.
+void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
+                                rocblaslt::RocGemmType gemmType,
+                                bool                   value);

@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -304,6 +305,7 @@ try
     std::string algo_method_str = "";
 
     bool verify = 0;
+    bool ulp    = 0;
 
     bool                  grouped_gemm;
     std::vector<int64_t>  m, n, k;
@@ -473,6 +475,10 @@ try
          value<bool>(&verify)->default_value(false),
          "Validate GPU results with CPU?")
 
+        ("ulp",
+         value<bool>(&ulp)->default_value(false),
+         "Report ULP (unit in the last place) error vs CPU; reports max and average. Implies --verify.")
+
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
          "Iterations to run inside timing loop")
@@ -480,6 +486,65 @@ try
         ("cold_iters,j",
          value<int32_t>(&arg.cold_iters)->default_value(tuningEnv? 1000 : 2),
          "Cold Iterations to run before entering the timing loop")
+
+        ("adaptive",
+         value<bool>(&arg.adaptive)->default_value(false),
+         "Enable adaptive timing: collect timed samples and report the mean with "
+         "median/min/cv columns. Tune with the --adaptive_* options below. Not compatible "
+         "with --iters / --cold_iters.")
+
+        ("adaptive_warmup_time",
+         value<float>(&arg.warmup_time)->default_value(hipblaslt_bench::adaptive_defaults::warmup_time),
+         "Adaptive timing: warm up until this many ms have elapsed")
+
+        ("adaptive_sample_time",
+         value<float>(&arg.sample_time)->default_value(hipblaslt_bench::adaptive_defaults::sample_time),
+         "Adaptive timing: target wall-time (ms) of each timed sample; sets the back-to-back "
+         "batch size (larger = fewer, bigger samples; a value >= adaptive_measure_time makes "
+         "the whole measurement a single batch)")
+
+        ("adaptive_measure_time",
+         value<float>(&arg.measure_time)->default_value(hipblaslt_bench::adaptive_defaults::measure_time),
+         "Adaptive timing: minimum total measurement time in ms")
+
+        ("adaptive_max_measure_time",
+         value<float>(&arg.max_measure_time)->default_value(hipblaslt_bench::adaptive_defaults::max_measure_time),
+         "Adaptive timing: measurement ceiling in ms (0 = unbounded)")
+
+        ("adaptive_min_iters",
+         value<int32_t>(&arg.min_iters)->default_value(hipblaslt_bench::adaptive_defaults::min_iters),
+         "Adaptive timing: floor on total timed iterations (with adaptive_measure_time, the "
+         "minimum collected before convergence can end the run)")
+
+        ("adaptive_max_iters",
+         value<int32_t>(&arg.max_iters)->default_value(hipblaslt_bench::adaptive_defaults::max_iters),
+         "Adaptive timing: ceiling on total timed iterations (0 = unbounded)")
+
+        ("adaptive_noise_threshold",
+         value<float>(&arg.noise_threshold)->default_value(hipblaslt_bench::adaptive_defaults::noise_threshold),
+         "Adaptive timing: convergence target. Past the floor (adaptive_min_iters and "
+         "adaptive_measure_time) the run stops when the mean's relative standard error "
+         "(stddev/mean/sqrt(n)) falls below this fraction, e.g. 0.01 = 1% (status converged); "
+         "or, if it cannot, when the robust spread (IQR/median) plateaus (status stable); else "
+         "at the ceiling (adaptive_max_measure_time / adaptive_max_iters, status noisy). "
+         "0 disables both checks: the run goes to the ceiling")
+
+        ("adaptive_stability_threshold",
+         value<float>(&arg.stability_threshold)->default_value(hipblaslt_bench::adaptive_defaults::stability_threshold),
+         "Adaptive timing: noise-plateau fallback. When the precision target cannot be met, "
+         "stop anyway (status stable) once the robust spread (IQR/median) settles -- i.e. the "
+         "last adaptive_stability_window readings vary by less than this fraction. 0 disables "
+         "the fallback (a non-converging run then goes to the ceiling, status noisy)")
+
+        ("adaptive_stability_window",
+         value<int32_t>(&arg.stability_window)->default_value(hipblaslt_bench::adaptive_defaults::stability_window),
+         "Adaptive timing: number of recent rel_iqr readings the stability fallback tests "
+         "for a plateau (>= 2)")
+
+        ("adaptive_stability_interval",
+         value<int32_t>(&arg.stability_interval)->default_value(hipblaslt_bench::adaptive_defaults::stability_interval),
+         "Adaptive timing: record one rel_iqr reading for the stability fallback every N "
+         "samples (>= 1)")
 
         ("algo_method",
          value<std::string>(&algo_method_str)->default_value("heuristic"),
@@ -638,10 +703,19 @@ try
          "persistent-grid sizing. 0 (default) means use all CUs the device exposes. "
          "Negative values are rejected by the library.")
 
-        ("dyn_persistent_tile",
-         value<bool>(&hipblaslt_bench_options::dyn_persistent_tile_enabled())->default_value(false),
-         "Request the hipBLASLt dynamic persistent tile (work-stealing StreamK) scheduler "
-         "via the HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT extension attribute.")
+        ("streamk_tile_scheduling",
+         value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
+         "Select the StreamK=5 tile scheduling sub-path via the "
+         "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. "
+         "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
+         "leaves the attribute unset so the library default (auto) applies.")
+
+        ("uniform_summation_order",
+         value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
+         "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
+         "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
+         "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
+         "When omitted the bench leaves the attribute unset so the library default (off) applies.")
 
         ("help,h", "produces this help message")
 
@@ -657,6 +731,62 @@ try
     {
         hipblaslt_cout << desc << std::endl;
         return 0;
+    }
+
+    // Reject misuse rather than silently ignore, so a misconfigured run never
+    // reports mislabeled numbers. The --adaptive_* options require --adaptive;
+    // conversely --iters/--cold_iters cannot be used with --adaptive (warmup and
+    // batch are sized adaptively) -- passing either is an error.
+    if(!arg.adaptive)
+    {
+        for(const char* opt : {"adaptive_warmup_time",
+                               "adaptive_sample_time",
+                               "adaptive_measure_time",
+                               "adaptive_max_measure_time",
+                               "adaptive_min_iters",
+                               "adaptive_max_iters",
+                               "adaptive_noise_threshold",
+                               "adaptive_stability_threshold",
+                               "adaptive_stability_window",
+                               "adaptive_stability_interval"})
+        {
+            if(vm.count(opt) && !vm[opt].defaulted())
+            {
+                hipblaslt_cerr << "error: --" << opt << " requires --adaptive" << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
+    else
+    {
+        for(const char* opt : {"iters", "cold_iters"})
+        {
+            if(vm.count(opt) && !vm[opt].defaulted())
+            {
+                hipblaslt_cerr << "error: --" << opt
+                               << " cannot be used with --adaptive (use --adaptive_* options)"
+                               << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+        {
+            hipblaslt_bench::TimingConfig tmp;
+            tmp.warmup_time         = arg.warmup_time;
+            tmp.sample_time         = arg.sample_time;
+            tmp.min_iters           = arg.min_iters;
+            tmp.max_iters           = arg.max_iters;
+            tmp.measure_time        = arg.measure_time;
+            tmp.max_measure_time    = arg.max_measure_time;
+            tmp.noise_threshold     = arg.noise_threshold;
+            tmp.stability_threshold = arg.stability_threshold;
+            tmp.stability_window    = arg.stability_window;
+            tmp.stability_interval  = arg.stability_interval;
+            if(const auto err = hipblaslt_bench::validate_adaptive_config(tmp); !err.empty())
+            {
+                hipblaslt_cerr << "error: " << err << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
     }
 
     hipblaslt_print_version();
@@ -753,6 +883,41 @@ try
     {
         hipblaslt_cerr << "sm_count_target must be >= 0 (0 means \"use all CUs\")." << std::endl;
         return 1;
+    }
+
+    // Empty string stays unset (-1). off|0, on|1, and optionally auto|2.
+    auto parseModeFlag = [](std::string mode, bool allowAuto, const char* err) -> int32_t {
+        std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if(mode.empty())
+            return -1;
+        if(mode == "off" || mode == "0")
+            return 0;
+        if(mode == "on" || mode == "1")
+            return 1;
+        if(allowAuto && (mode == "auto" || mode == "2"))
+            return 2;
+        hipblaslt_cerr << err << std::endl;
+        return -2;
+    };
+
+    {
+        const int32_t resolved = parseModeFlag(hipblaslt_bench_options::streamk_tile_scheduling_mode_str(),
+                                               true,
+                                               "streamk_tile_scheduling must be one of off|0, on|1, auto|2.");
+        if(resolved == -2)
+            return 1;
+        hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
+    }
+
+    {
+        const int32_t resolved = parseModeFlag(hipblaslt_bench_options::uniform_summation_order_str(),
+                                               false,
+                                               "uniform_summation_order must be one of off|0, on|1.");
+        if(resolved == -2)
+            return 1;
+        hipblaslt_bench_options::uniform_summation_order() = resolved;
     }
 
     // transfer local variable state
@@ -1056,10 +1221,14 @@ try
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
 
-    if(verify)
+    if(verify || ulp)
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;
+    }
+    if(ulp)
+    {
+        arg.ulp_check = 1;
     }
 
     switch(api_method)

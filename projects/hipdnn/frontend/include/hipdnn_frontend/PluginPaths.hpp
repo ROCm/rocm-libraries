@@ -3,12 +3,11 @@
 
 /**
  * @file PluginPaths.hpp
- * @brief Frontend API for configuring engine plugin search paths
+ * @brief Frontend API for configuring plugin search paths
  *
- * Provides a type-safe C++ wrapper around the backend's
- * hipdnnSetEnginePluginPaths_ext() function. Accepts any iterable
- * container whose elements are convertible to std::filesystem::path
- * (e.g., std::filesystem::path, std::string, or const char*).
+ * Provides type-safe C++ wrappers around the backend plugin path functions.
+ * Accepts any iterable container whose elements are convertible to
+ * std::filesystem::path (e.g., std::filesystem::path, std::string, or const char*).
  *
  * @code{.cpp}
  * #include <hipdnn_frontend.hpp>
@@ -34,6 +33,7 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_frontend/Error.hpp>
@@ -75,6 +75,45 @@ inline std::optional<hipdnnPluginLoadingMode_ext_t>
     }
 }
 
+template <typename Container, typename BackendCall>
+inline Error setPluginPaths(const Container& pluginPaths,
+                            PluginLoadingMode mode,
+                            BackendCall backendCall,
+                            const char* failureMessage)
+{
+    static_assert(std::is_constructible_v<
+                      std::filesystem::path,
+                      std::decay_t<decltype(*std::begin(std::declval<const Container&>()))>>,
+                  "Container elements must be convertible to std::filesystem::path "
+                  "(e.g., std::filesystem::path, std::string, or const char*)");
+
+    auto backendMode = toBackendPluginLoadingMode(mode);
+    if(!backendMode)
+    {
+        return {ErrorCode::INVALID_VALUE,
+                "Invalid PluginLoadingMode value: " + std::to_string(static_cast<int>(mode))};
+    }
+
+    std::vector<std::string> pathStrings;
+    pathStrings.reserve(pluginPaths.size());
+    for(const auto& path : pluginPaths)
+    {
+        pathStrings.push_back(std::filesystem::path(path).string());
+    }
+
+    std::vector<const char*> cPaths;
+    cPaths.reserve(pathStrings.size());
+    for(const auto& path : pathStrings)
+    {
+        cPaths.push_back(path.c_str());
+    }
+
+    auto status
+        = backendCall(cPaths.size(), cPaths.empty() ? nullptr : cPaths.data(), *backendMode);
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(status, failureMessage);
+    return {};
+}
+
 } // namespace detail
 
 /**
@@ -97,37 +136,37 @@ inline std::optional<hipdnnPluginLoadingMode_ext_t>
 template <typename Container>
 inline Error setEnginePluginPaths(const Container& pluginPaths, PluginLoadingMode mode)
 {
-    static_assert(std::is_constructible_v<
-                      std::filesystem::path,
-                      std::decay_t<decltype(*std::begin(std::declval<const Container&>()))>>,
-                  "Container elements must be convertible to std::filesystem::path "
-                  "(e.g., std::filesystem::path, std::string, or const char*)");
+    return detail::setPluginPaths(
+        pluginPaths,
+        mode,
+        [](size_t numPaths, const char* const* paths, hipdnnPluginLoadingMode_ext_t backendMode) {
+            return detail::hipdnnBackend()->setEnginePluginPathsExt(numPaths, paths, backendMode);
+        },
+        "Failed to set engine plugin paths");
+}
 
-    auto backendMode = detail::toBackendPluginLoadingMode(mode);
-    if(!backendMode)
-    {
-        return {ErrorCode::INVALID_VALUE,
-                "Invalid PluginLoadingMode value: " + std::to_string(static_cast<int>(mode))};
-    }
-
-    std::vector<std::string> pathStrings;
-    pathStrings.reserve(pluginPaths.size());
-    for(const auto& p : pluginPaths)
-    {
-        pathStrings.push_back(std::filesystem::path(p).string());
-    }
-
-    std::vector<const char*> cPaths;
-    cPaths.reserve(pathStrings.size());
-    for(const auto& s : pathStrings)
-    {
-        cPaths.push_back(s.c_str());
-    }
-
-    auto status = detail::hipdnnBackend()->setEnginePluginPathsExt(
-        cPaths.size(), cPaths.data(), *backendMode);
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(status, "Failed to set engine plugin paths");
-    return {};
+/**
+ * @brief Configure the heuristic plugin search paths (container overload)
+ *
+ * Sets the list of directories or file paths that hipDNN will search
+ * when loading heuristic plugins. Must be called before creating a handle.
+ *
+ * @tparam Container An iterable container with size() and range-for support
+ * @param pluginPaths Container of paths to plugin directories or files
+ * @param mode Loading mode for user-specified paths.
+ * @return Error indicating success or failure
+ */
+template <typename Container>
+inline Error setHeuristicPluginPaths(const Container& pluginPaths, PluginLoadingMode mode)
+{
+    return detail::setPluginPaths(
+        pluginPaths,
+        mode,
+        [](size_t numPaths, const char* const* paths, hipdnnPluginLoadingMode_ext_t backendMode) {
+            return detail::hipdnnBackend()->setHeuristicPluginPathsExt(
+                numPaths, paths, backendMode);
+        },
+        "Failed to set heuristic plugin paths");
 }
 
 /**

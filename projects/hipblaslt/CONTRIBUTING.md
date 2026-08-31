@@ -131,6 +131,14 @@ If you run from elsewhere, the test may not find the data file. For more run opt
 
 ---
 
+## TensileLite Python tests (codegen / characterization)
+
+The sections above cover the **client** tests (`hipblaslt-test`, gtest, YAML data). The in-repo **TensileLite generator** has its own Python test suite under `tensilelite/Tensile/Tests/unit/`, including **characterization tests** that pin current behavior with [syrupy](https://github.com/syrupy-project/syrupy) `.ambr` golden files.
+
+If your change makes a characterization test fail, do **not** run a blanket `pytest --snapshot-update` (it rewrites every golden and destroys the safety net). Update only the affected node and review the diff. Full policy and the decision tree: [`tensilelite/Tensile/Tests/unit/characterization/README.md`](tensilelite/Tensile/Tests/unit/characterization/README.md).
+
+---
+
 ## Summary checklist for a working dev/test loop
 
 1. Configure and build from **`projects/hipblaslt`** (not repo root).

@@ -27,21 +27,15 @@ SOFTWARE.
 
 /* bitwiseNOT is logical operation only on U8 types.*/
 
-RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
-                                        RpptDescPtr srcDescPtr,
-                                        Rpp8u *dstPtr,
-                                        RpptDescPtr dstDescPtr,
-                                        RpptROIPtr roiTensorPtrSrc,
-                                        RpptRoiType roiType,
-                                        RppLayoutParams layoutParams,
-                                        rpp::Handle& Handle)
-{
+RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
+                                        RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc,
+                                        RpptRoiType roiType, RppLayoutParams layoutParams,
+                                        rpp::Handle& Handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
     omp_set_num_threads(Handle.GetNumThreads());
 #pragma omp parallel for
-    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -53,7 +47,8 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp8u *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
 #if __AVX2__
@@ -64,16 +59,15 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
 #endif
 
         // Bitwise NOT with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -82,15 +76,15 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                     __m256i p[3];
 
-                    rpp_simd_load(rpp_load96_u8pkd3_to_u8pln3, srcPtrTemp, p);    // simd loads
+                    rpp_simd_load(rpp_load96_u8pkd3_to_u8pln3, srcPtrTemp, p);  // simd loads
                     p[0] = _mm256_xor_si256(p[0], pxMax);
                     p[1] = _mm256_xor_si256(p[1], pxMax);
                     p[2] = _mm256_xor_si256(p[2], pxMax);
-                    rpp_simd_store(rpp_store96_u8pln3_to_u8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB, p);    // simd stores
+                    rpp_simd_store(rpp_store96_u8pln3_to_u8pln3, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, p);  // simd stores
 
                     srcPtrTemp += vectorIncrement;
                     dstPtrTempR += vectorIncrementPerChannel;
@@ -98,8 +92,7 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
                     dstPtrTempB += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR++ = ~srcPtrTemp[0];
                     *dstPtrTempG++ = ~srcPtrTemp[1];
                     *dstPtrTempB++ = ~srcPtrTemp[2];
@@ -115,16 +108,15 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
         }
 
         // Bitwise Not with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -133,15 +125,16 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256i p[3];
 
-                    rpp_simd_load(rpp_load96_u8_avx, srcPtrTempR, srcPtrTempG, srcPtrTempB, p);    // simd loads
+                    rpp_simd_load(rpp_load96_u8_avx, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                                  p);  // simd loads
                     p[0] = _mm256_xor_si256(p[0], pxMax);
                     p[1] = _mm256_xor_si256(p[1], pxMax);
                     p[2] = _mm256_xor_si256(p[2], pxMax);
-                    rpp_simd_store(rpp_store96_u8pln3_to_u8pkd3, dstPtrTemp, p);    // simd stores
+                    rpp_simd_store(rpp_store96_u8pln3_to_u8pkd3, dstPtrTemp, p);  // simd stores
 
                     srcPtrTempR += vectorIncrementPerChannel;
                     srcPtrTempG += vectorIncrementPerChannel;
@@ -149,8 +142,7 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
                     dstPtrTemp += vectorIncrement;
                 }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = ~(*srcPtrTempR);
                     dstPtrTemp[1] = ~(*srcPtrTempG);
                     dstPtrTemp[2] = ~(*srcPtrTempB);
@@ -169,8 +161,8 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
         }
 
         // Bitwise Not without fused output-layout toggle (NCHW -> NCHW for 3 channel)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NCHW)) {
 #if __AVX2__
             alignedLength = bufferLength & ~31;
 #endif
@@ -181,9 +173,9 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
-                Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
+                    *dstPtrTempB;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
                 srcPtrTempB = srcPtrRowB;
@@ -193,15 +185,17 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256i p[3];
 
-                    rpp_simd_load(rpp_load96_u8_avx, srcPtrTempR, srcPtrTempG, srcPtrTempB, p);    // simd loads
+                    rpp_simd_load(rpp_load96_u8_avx, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                                  p);  // simd loads
                     p[0] = _mm256_xor_si256(p[0], pxMax);
                     p[1] = _mm256_xor_si256(p[1], pxMax);
                     p[2] = _mm256_xor_si256(p[2], pxMax);
-                    rpp_simd_store(rpp_store96_u8pln3_to_u8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB, p);
+                    rpp_simd_store(rpp_store96_u8pln3_to_u8pln3, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, p);
 
                     srcPtrTempR += vectorIncrementPerChannel;
                     srcPtrTempG += vectorIncrementPerChannel;
@@ -211,8 +205,7 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
                     dstPtrTempB += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     *dstPtrTempR++ = ~(*srcPtrTempR);
                     *dstPtrTempG++ = ~(*srcPtrTempG);
                     *dstPtrTempB++ = ~(*srcPtrTempB);
@@ -231,9 +224,9 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
             }
         }
 
-        // Bitwise Not without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW for 1 channel)
-        else
-        {
+        // Bitwise Not without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW for 1
+        // channel)
+        else {
 #if __AVX2__
             alignedLength = bufferLength & ~31;
 #endif
@@ -242,28 +235,26 @@ RppStatus bitwise_not_u8_u8_host_tensor(Rpp8u *srcPtr,
             srcPtrRow = srcPtrChannel;
             dstPtrRow = dstPtrChannel;
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTemp, *dstPtrTemp;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
 #if __AVX2__
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256i p;
 
-                    p = _mm256_loadu_si256((const __m256i *)srcPtrTemp);   // simd loads
+                    p = _mm256_loadu_si256((const __m256i*)srcPtrTemp);  // simd loads
                     p = _mm256_xor_si256(p, pxMax);
-                    _mm256_storeu_si256((__m256i *)dstPtrTemp, p);    // simd stores
+                    _mm256_storeu_si256((__m256i*)dstPtrTemp, p);  // simd stores
 
                     srcPtrTemp += vectorIncrementPerChannel;
                     dstPtrTemp += vectorIncrementPerChannel;
                 }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     *dstPtrTemp++ = ~(*srcPtrTemp);
 
                     srcPtrTemp++;

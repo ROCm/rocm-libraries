@@ -4,7 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -47,7 +47,7 @@ BenchmarkProblems:
         - ClusterLocalRead: [1]
         - DepthU: [256]
         - ForceDisableShadowInit: [True]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - GlobalReadVectorWidthA: [16]
         - GlobalReadVectorWidthB: [16]
         - GlobalSplitU: [0]
@@ -60,12 +60,12 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PreloadKernArgs: [True]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StoreVectorWidth: [-1]
         - StreamK: [4]
         - TransposeLDS: [1]
         - UseSgprForGRO: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - WaveSeparateGlobalReadA: [0]

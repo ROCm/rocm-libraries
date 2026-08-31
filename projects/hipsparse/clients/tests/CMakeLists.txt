@@ -98,6 +98,8 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_scatter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_rot.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spvv.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_bell.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_bell_no_set_pointers.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_coo.cpp"
@@ -105,6 +107,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sparse_to_dense_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sparse_to_dense_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_csc.cpp"
@@ -112,9 +115,12 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_bell.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_bsr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spgeam_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemmreuse_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_batched_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_coo_aos.cpp"
@@ -125,6 +131,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gtsv_interleaved_batch.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_csrcolor.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_coo.cpp"
@@ -133,6 +140,18 @@ target_sources(hipsparse-test PRIVATE
 if(HIPSPARSE_ENABLE_SPMV_BSR)
     target_sources(hipsparse-test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
+    )
+endif()
+
+if(BUILD_WITH_CSC_TRSV)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csc.cpp"
+    )
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csc.cpp"
     )
 endif()
 
@@ -156,11 +175,14 @@ endif()
 if(HIPSPARSE_ENABLE_HIP)
   include(rocm/CMakeLists.txt)
 elseif(HIPSPARSE_ENABLE_CUDA)
-  if(CUDAToolkit_VERSION MATCHES "12.8")
+  if(CUDAToolkit_VERSION MATCHES "^12\\.8")
     include(cuda/12.8/CMakeLists.txt)
-    message("Building hipsparse-test executable using CUDAToolkit_VERSION ${CUDAToolkit_VERSION}")
+    message(STATUS "Building hipsparse-test executable using CUDAToolkit_VERSION ${CUDAToolkit_VERSION}")
+  elseif(CUDAToolkit_VERSION MATCHES "^13\\.")
+    include(cuda/13/CMakeLists.txt)
+    message(STATUS "Building hipsparse-test executable using CUDAToolkit_VERSION ${CUDAToolkit_VERSION}")
   else()
-    message("ERROR: Testing on CUDAToolkit_VERSION ${CUDAToolkit_VERSION} not supported.")
+    message(WARNING "Testing on CUDAToolkit_VERSION ${CUDAToolkit_VERSION} not explicitly supported; no test data will be generated.")
   endif()
 endif()
 

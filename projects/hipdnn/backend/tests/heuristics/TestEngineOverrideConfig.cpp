@@ -12,9 +12,13 @@
 #include "heuristics/config/EngineOverrideConfig.hpp"
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
 
 using namespace hipdnn_backend::heuristics::config;
@@ -22,6 +26,13 @@ using namespace hipdnn_data_sdk::utilities;
 
 namespace
 {
+namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion;
+// NOLINTNEXTLINE(misc-unused-alias-decls)
+namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
+namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
+namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
+// NOLINTNEXTLINE(misc-unused-alias-decls)
+namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
 
 struct TensorData
 {
@@ -31,7 +42,12 @@ struct TensorData
 
 TensorView viewOf(const TensorData& t)
 {
-    return TensorView{&t.dim, &t.stride};
+    return TensorView{"", &t.dim, &t.stride};
+}
+
+TensorView namedViewOf(std::string_view tensorId, const TensorData& t)
+{
+    return TensorView{tensorId, &t.dim, &t.stride};
 }
 
 std::vector<TensorView> viewsOf(const std::vector<TensorData>& ts)
@@ -57,6 +73,14 @@ TensorPattern makePatternWithStride(std::vector<int64_t> dim, std::vector<int64_
     TensorPattern p;
     p.dim = std::move(dim);
     p.stride = std::move(stride);
+    return p;
+}
+
+TensorPattern makeNamedPattern(std::string tensorId, std::vector<int64_t> dim)
+{
+    TensorPattern p;
+    p.tensorId = std::move(tensorId);
+    p.dim = std::move(dim);
     return p;
 }
 
@@ -185,6 +209,339 @@ TEST(TestEngineOverrideConfig, WrongOpNameReturnsNullopt)
     EXPECT_FALSE(config.matchOperation("conv_dgrad", viewsOf(tensors)).has_value());
     EXPECT_FALSE(config.matchOperation("conv_wgrad", viewsOf(tensors)).has_value());
     EXPECT_FALSE(config.matchOperation("matmul", viewsOf(tensors)).has_value());
+}
+
+TEST(TestEngineOverrideConfig, CriteriaMustMatch)
+{
+    OperationRule rule;
+    rule.op = "pointwise";
+    rule.engineName = MIOPEN_ENGINE_NAME;
+    rule.criteria = {Criterion{"pointwise_mode", 2}};
+    rule.tensors = {makePattern({2, 4, 16, 16}), makePattern({2, 4, 16, 16})};
+
+    const auto config = makeConfig({std::move(rule)});
+    const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}, {{2, 4, 16, 16}, {}}};
+
+    auto result
+        = config.matchOperation("pointwise", {Criterion{"pointwise_mode", 2}}, viewsOf(tensors));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+
+    EXPECT_FALSE(
+        config.matchOperation("pointwise", {Criterion{"pointwise_mode", 34}}, viewsOf(tensors))
+            .has_value());
+}
+
+TEST(TestEngineOverrideConfig, CriteriaOrderIsNormalizedBeforeMatch)
+{
+    OperationRule rule;
+    rule.op = config_op::RESAMPLE_FWD;
+    rule.engineName = MIOPEN_ENGINE_NAME;
+    rule.criteria = {Criterion{config_criterion::RESAMPLE_MODE, 1},
+                     Criterion{config_criterion::PADDING_MODE, 2}};
+    rule.tensors = {makePattern({2, 4, 16, 16})};
+
+    const auto config = makeConfig({std::move(rule)});
+    const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}};
+
+    auto result = config.matchOperation(config_op::RESAMPLE_FWD,
+                                        {Criterion{config_criterion::PADDING_MODE, 2},
+                                         Criterion{config_criterion::RESAMPLE_MODE, 1}},
+                                        viewsOf(tensors));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, MissingCriteriaDoesNotMatchSpecificRule)
+{
+    OperationRule rule;
+    rule.op = "pointwise";
+    rule.engineName = MIOPEN_ENGINE_NAME;
+    rule.criteria = {Criterion{"pointwise_mode", 2}};
+    rule.tensors = {makePattern({2, 4, 16, 16})};
+
+    const auto config = makeConfig({std::move(rule)});
+    const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}};
+
+    EXPECT_FALSE(config.matchOperation("pointwise", viewsOf(tensors)).has_value());
+}
+
+TEST(TestEngineOverrideConfig, SameShapeDifferentCriteriaSelectsDifferentEngines)
+{
+    OperationRule addRule;
+    addRule.op = "pointwise";
+    addRule.engineName = MIOPEN_ENGINE_NAME;
+    addRule.criteria = {Criterion{"pointwise_mode", 2}};
+    addRule.tensors = {makePattern({2, 4, 16, 16}), makePattern({2, 4, 16, 16})};
+
+    OperationRule mulRule;
+    mulRule.op = "pointwise";
+    mulRule.engineName = HIPBLASLT_ENGINE_NAME;
+    mulRule.criteria = {Criterion{"pointwise_mode", 30}};
+    mulRule.tensors = {makePattern({2, 4, 16, 16}), makePattern({2, 4, 16, 16})};
+
+    const auto config = makeConfig({std::move(addRule), std::move(mulRule)});
+    const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}, {{2, 4, 16, 16}, {}}};
+
+    auto addResult
+        = config.matchOperation("pointwise", {Criterion{"pointwise_mode", 2}}, viewsOf(tensors));
+    ASSERT_TRUE(addResult.has_value());
+    EXPECT_EQ(*addResult, MIOPEN_ENGINE_ID);
+
+    auto mulResult
+        = config.matchOperation("pointwise", {Criterion{"pointwise_mode", 30}}, viewsOf(tensors));
+    ASSERT_TRUE(mulResult.has_value());
+    EXPECT_EQ(*mulResult, HIPBLASLT_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, NamedTensorRulesIgnoreConfigTensorOrder)
+{
+    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+        {hipdnn_data_sdk::detail::autotune_config::json::VERSION,
+         hipdnn_data_sdk::detail::autotune_config::version::CURRENT},
+        {hipdnn_data_sdk::detail::autotune_config::json::ENGINE_OVERRIDES,
+         nlohmann::json::array(
+             {{{hipdnn_data_sdk::detail::autotune_config::json::OP, config_op::POINTWISE},
+               {hipdnn_data_sdk::detail::autotune_config::json::CRITERIA,
+                {{config_criterion::POINTWISE_MODE, 2}}},
+               {hipdnn_data_sdk::detail::autotune_config::json::ENGINE_NAME, MIOPEN_ENGINE_NAME},
+               {hipdnn_data_sdk::detail::autotune_config::json::TENSORS,
+                nlohmann::json::array(
+                    {{{hipdnn_data_sdk::detail::autotune_config::json::TENSOR_ID,
+                       config_tensor::IN_1},
+                      {hipdnn_data_sdk::detail::autotune_config::json::DIM, {5, 6}}},
+                     {{hipdnn_data_sdk::detail::autotune_config::json::TENSOR_ID,
+                       config_tensor::IN_0},
+                      {hipdnn_data_sdk::detail::autotune_config::json::DIM, {2, 4}}}})}}})}}
+                                                            .dump());
+    ASSERT_TRUE(config.has_value());
+
+    const TensorData x{{2, 4}, {}};
+    const TensorData y{{5, 6}, {}};
+    const std::vector<TensorView> tensors{namedViewOf(config_tensor::IN_0, x),
+                                          namedViewOf(config_tensor::IN_1, y)};
+
+    auto result = config->matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, tensors);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, MissingVersionUsesLegacyPositionalTensorMatchingEvenWithTensorIds)
+{
+    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+        {hipdnn_data_sdk::detail::autotune_config::json::ENGINE_OVERRIDES,
+         nlohmann::json::array(
+             {{{hipdnn_data_sdk::detail::autotune_config::json::OP, config_op::POINTWISE},
+               {hipdnn_data_sdk::detail::autotune_config::json::CRITERIA,
+                {{config_criterion::POINTWISE_MODE, 2}}},
+               {hipdnn_data_sdk::detail::autotune_config::json::ENGINE_NAME, MIOPEN_ENGINE_NAME},
+               {hipdnn_data_sdk::detail::autotune_config::json::TENSORS,
+                nlohmann::json::array(
+                    {{{hipdnn_data_sdk::detail::autotune_config::json::TENSOR_ID,
+                       config_tensor::IN_1},
+                      {hipdnn_data_sdk::detail::autotune_config::json::DIM, {2, 4}}},
+                     {{hipdnn_data_sdk::detail::autotune_config::json::TENSOR_ID,
+                       config_tensor::IN_0},
+                      {hipdnn_data_sdk::detail::autotune_config::json::DIM, {5, 6}}}})}}})}}
+                                                            .dump());
+    ASSERT_TRUE(config.has_value());
+
+    const TensorData x{{2, 4}, {}};
+    const TensorData y{{5, 6}, {}};
+    const std::vector<TensorView> tensors{namedViewOf(config_tensor::IN_0, x),
+                                          namedViewOf(config_tensor::IN_1, y)};
+
+    auto result = config->matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, tensors);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, NewerVersionUsesNamedTensorMatching)
+{
+    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+        {config_json::VERSION, config_version::CURRENT + 1},
+        {config_json::ENGINE_OVERRIDES,
+         nlohmann::json::array(
+             {{{config_json::OP, config_op::POINTWISE},
+               {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+               {config_json::ENGINE_NAME, MIOPEN_ENGINE_NAME},
+               {config_json::TENSORS,
+                nlohmann::json::array(
+                    {{{config_json::TENSOR_ID, config_tensor::IN_1}, {config_json::DIM, {5, 6}}},
+                     {{config_json::TENSOR_ID, config_tensor::IN_0},
+                      {config_json::DIM, {2, 4}}}})}}})}}.dump());
+    ASSERT_TRUE(config.has_value());
+
+    const TensorData x{{2, 4}, {}};
+    const TensorData y{{5, 6}, {}};
+    const std::vector<TensorView> tensors{namedViewOf(config_tensor::IN_0, x),
+                                          namedViewOf(config_tensor::IN_1, y)};
+
+    auto result = config->matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, tensors);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, LoadFromContentRejectsDuplicateTensorIdsInNamedConfig)
+{
+    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+        {config_json::VERSION, config_version::CURRENT},
+        {config_json::ENGINE_OVERRIDES,
+         nlohmann::json::array(
+             {{{config_json::OP, config_op::POINTWISE},
+               {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+               {config_json::ENGINE_NAME, MIOPEN_ENGINE_NAME},
+               {config_json::TENSORS,
+                nlohmann::json::array(
+                    {{{config_json::TENSOR_ID, config_tensor::IN_0}, {config_json::DIM, {2, 4}}},
+                     {{config_json::TENSOR_ID, config_tensor::IN_0},
+                      {config_json::DIM, {5, 6}}}})}}})}}.dump());
+    EXPECT_FALSE(config.has_value());
+}
+
+TEST(TestEngineOverrideConfig, LoadFromContentRejectsMissingTensorIdInNamedConfig)
+{
+    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+        {config_json::VERSION, config_version::CURRENT},
+        {config_json::ENGINE_OVERRIDES,
+         nlohmann::json::array(
+             {{{config_json::OP, config_op::POINTWISE},
+               {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+               {config_json::ENGINE_NAME, MIOPEN_ENGINE_NAME},
+               {config_json::TENSORS,
+                nlohmann::json::array(
+                    {{{config_json::TENSOR_ID, config_tensor::IN_0}, {config_json::DIM, {2, 4}}},
+                     {{config_json::DIM, {5, 6}}}})}}})}}.dump());
+    EXPECT_FALSE(config.has_value());
+}
+
+TEST(TestEngineOverrideConfig, FirstRuleDimMismatchFallsThroughToSecondMatchingRule)
+{
+    OperationRule first;
+    first.op = config_op::POINTWISE;
+    first.engineName = MIOPEN_ENGINE_NAME;
+    first.criteria = {Criterion{config_criterion::POINTWISE_MODE, 2}};
+    first.tensors = {makePattern({9, 9}), makePattern({5, 6})};
+
+    OperationRule second;
+    second.op = config_op::POINTWISE;
+    second.engineName = HIPBLASLT_ENGINE_NAME;
+    second.criteria = {Criterion{config_criterion::POINTWISE_MODE, 2}};
+    second.tensors = {makePattern({2, 4}), makePattern({5, 6})};
+
+    const auto config = makeConfig({std::move(first), std::move(second)});
+    const std::vector<TensorData> tensors = {{{2, 4}, {}}, {{5, 6}, {}}};
+    auto result = config.matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, viewsOf(tensors));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, HIPBLASLT_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, FirstRuleCriteriaMismatchFallsThroughToSecondMatchingRule)
+{
+    OperationRule first;
+    first.op = config_op::POINTWISE;
+    first.engineName = MIOPEN_ENGINE_NAME;
+    first.criteria = {Criterion{config_criterion::POINTWISE_MODE, 30}};
+    first.tensors = {makePattern({2, 4}), makePattern({5, 6})};
+
+    OperationRule second;
+    second.op = config_op::POINTWISE;
+    second.engineName = HIPBLASLT_ENGINE_NAME;
+    second.criteria = {Criterion{config_criterion::POINTWISE_MODE, 2}};
+    second.tensors = {makePattern({2, 4}), makePattern({5, 6})};
+
+    const auto config = makeConfig({std::move(first), std::move(second)});
+    const std::vector<TensorData> tensors = {{{2, 4}, {}}, {{5, 6}, {}}};
+    auto result = config.matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, viewsOf(tensors));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, HIPBLASLT_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, FirstRuleNamedTensorRoleMismatchFallsThroughToSecondMatchingRule)
+{
+    OperationRule first;
+    first.op = config_op::POINTWISE;
+    first.engineName = MIOPEN_ENGINE_NAME;
+    first.criteria = {Criterion{config_criterion::POINTWISE_MODE, 2}};
+    first.useNamedTensorIds = true;
+    first.tensors = {makeNamedPattern(config_tensor::IN_0, {5, 6}),
+                     makeNamedPattern(config_tensor::IN_1, {2, 4})};
+
+    OperationRule second;
+    second.op = config_op::POINTWISE;
+    second.engineName = HIPBLASLT_ENGINE_NAME;
+    second.criteria = {Criterion{config_criterion::POINTWISE_MODE, 2}};
+    second.useNamedTensorIds = true;
+    second.tensors = {makeNamedPattern(config_tensor::IN_0, {2, 4}),
+                      makeNamedPattern(config_tensor::IN_1, {5, 6})};
+
+    const auto config = makeConfig({std::move(first), std::move(second)});
+    const TensorData x{{2, 4}, {}};
+    const TensorData y{{5, 6}, {}};
+    const std::vector<TensorView> tensors{namedViewOf(config_tensor::IN_0, x),
+                                          namedViewOf(config_tensor::IN_1, y)};
+    auto result = config.matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, tensors);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, HIPBLASLT_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, NamedTensorRulesRejectSameShapeWrongRole)
+{
+    OperationRule rule;
+    rule.op = config_op::SDPA_FWD;
+    rule.engineName = MIOPEN_ENGINE_NAME;
+    rule.useNamedTensorIds = true;
+    rule.tensors = {makeNamedPattern(config_tensor::Q, {2, 4}),
+                    makeNamedPattern(config_tensor::K, {2, 4}),
+                    makeNamedPattern(config_tensor::V, {2, 4}),
+                    makeNamedPattern(config_tensor::SCALE, {1})};
+
+    const auto config = makeConfig({std::move(rule)});
+    const TensorData q{{2, 4}, {}};
+    const TensorData k{{2, 4}, {}};
+    const TensorData v{{2, 4}, {}};
+    const TensorData bias{{1}, {}};
+    const std::vector<TensorView> tensors{namedViewOf(config_tensor::Q, q),
+                                          namedViewOf(config_tensor::K, k),
+                                          namedViewOf(config_tensor::V, v),
+                                          namedViewOf(config_tensor::ATTN_MASK, bias)};
+
+    EXPECT_FALSE(config.matchOperation(config_op::SDPA_FWD, tensors).has_value());
+}
+
+TEST(TestEngineOverrideConfig, LegacyRuleWithoutTensorIdsUsesPositionalOrder)
+{
+    constexpr const char* CONTENTS = R"({
+  "engine_overrides": [
+    {
+      "op": "conv_fprop",
+      "engine_name": "MIOPEN_ENGINE",
+      "tensors": [
+        { "dim": [1, 3, 4, 4] },
+        { "dim": [2, 3, 1, 1] }
+      ]
+    }
+  ]
+})";
+
+    auto config = EngineOverrideConfig::loadFromContent(CONTENTS);
+    ASSERT_TRUE(config.has_value());
+
+    const TensorData x{{1, 3, 4, 4}, {}};
+    const TensorData w{{2, 3, 1, 1}, {}};
+    const std::vector<TensorView> matching{namedViewOf("x_tensor_uid", x),
+                                           namedViewOf("w_tensor_uid", w)};
+    const std::vector<TensorView> reversed{namedViewOf("w_tensor_uid", w),
+                                           namedViewOf("x_tensor_uid", x)};
+
+    EXPECT_TRUE(config->matchOperation("conv_fprop", matching).has_value());
+    EXPECT_FALSE(config->matchOperation("conv_fprop", reversed).has_value());
 }
 
 // ── Test 7: wrong tensor count in rule → nullopt ────────────────────────────
@@ -348,6 +705,35 @@ TEST(TestEngineOverrideConfig, LoadFromValidJsonFile)
     auto r2 = config->matchOperation("conv_fprop", viewsOf(other));
     ASSERT_TRUE(r2.has_value());
     EXPECT_EQ(*r2, HIP_MLOPS_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, LoadFromJsonParsesCriteria)
+{
+    constexpr const char* CONTENTS = R"({
+  "engine_overrides": [
+    {
+      "op": "pointwise",
+      "criteria": { "pointwise_mode": 2 },
+      "engine_name": "MIOPEN_ENGINE",
+      "tensors": [
+        { "dim": [2, 4, 16, 16] },
+        { "dim": [2, 4, 16, 16] }
+      ]
+    }
+  ]
+})";
+
+    auto config = EngineOverrideConfig::loadFromContent(CONTENTS);
+    ASSERT_TRUE(config.has_value());
+
+    const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}, {{2, 4, 16, 16}, {}}};
+    auto result
+        = config->matchOperation("pointwise", {Criterion{"pointwise_mode", 2}}, viewsOf(tensors));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+    EXPECT_FALSE(
+        config->matchOperation("pointwise", {Criterion{"pointwise_mode", 34}}, viewsOf(tensors))
+            .has_value());
 }
 
 TEST(TestEngineOverrideConfig, LoadFromMissingFileReturnsNullopt)

@@ -1,0 +1,75 @@
+# serializer version: 1
+# name: test_cli_archs_to_isa_separators
+  dict({
+    'semicolon': list([
+      tuple(
+        9,
+        4,
+        2,
+      ),
+      tuple(
+        9,
+        0,
+        10,
+      ),
+    ]),
+    'underscore': list([
+      tuple(
+        9,
+        4,
+        2,
+      ),
+      tuple(
+        9,
+        0,
+        10,
+      ),
+    ]),
+  })
+# ---
+# name: test_detect_global_current_isa_public_success
+  tuple(
+    9,
+    4,
+    2,
+  )
+# ---
+# name: test_detect_global_current_isa_success
+  tuple(
+    9,
+    4,
+    2,
+  )
+# ---
+# name: test_gfx_to_sw_codename
+  dict({
+    'gfx942': 'aquavanjaram',
+    'unknown': None,
+  })
+# ---
+# name: test_gfx_to_variants
+  list([
+    'gfxNope',
+  ])
+# ---
+# name: test_isa_to_gfx_and_back
+  dict({
+    'gfx': 'gfx942',
+    'roundtrip': tuple(
+      9,
+      4,
+      2,
+    ),
+  })
+# ---
+# name: test_isa_to_gfx_hex_step
+  'gfx94a'
+# ---
+# name: test_split_archs_no_predicates
+  dict({
+    'archs': list([
+      'gfx942',
+    ]),
+    'preds': None,
+  })
+# ---

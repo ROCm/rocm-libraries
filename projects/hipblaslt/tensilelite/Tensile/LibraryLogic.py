@@ -29,7 +29,7 @@ from . import SolutionSelectionLibrary
 from Tensile.Common import print1, print2, HR, printExit, \
   assignParameterWithDefault, ProgressBar, printWarning, ensurePath, \
   LIBRARY_LOGIC_DIR, BENCHMARK_DATA_DIR, getVerbosity, IsaInfo
-from Tensile.Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime
+from Tensile.Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
 from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
 
@@ -1440,6 +1440,30 @@ def generateLogic(
   print2("# LibraryLogic config: %s" % config)
   print2("# DefaultAnalysisParameters: " % defaultAnalysisParameters)
 
+  if config:
+    from Tensile.Common.TypeValidationErrors import (
+        ConfigTypeError, formatMismatch,
+    )
+    for key, value in config.items():
+      if key not in defaultAnalysisParameters:
+        raise ConfigTypeError(
+            f"LibraryLogic.{key}: unknown key. "
+            f"Valid keys are {sorted(defaultAnalysisParameters.keys())}."
+        )
+      if key in libraryLogicTypeOverrides:
+        expectedTypes = libraryLogicTypeOverrides[key]
+      else:
+        default = defaultAnalysisParameters[key]
+        expectedTypes = {type(default)}
+      if type(value) not in expectedTypes:
+        raise ConfigTypeError(formatMismatch("", f"LibraryLogic.{key}", value, expectedTypes))
+      if key == "SolutionImportanceMin":
+        if not (0.0 <= value <= 1.0):
+          raise ConfigTypeError(
+              f"LibraryLogic.SolutionImportanceMin = {value!r} "
+              f"is out of the allowed range [0.0, 1.0]."
+          )
+
   # Assign Defaults
   analysisParameters = {}
   for parameter in defaultAnalysisParameters:
@@ -1511,7 +1535,7 @@ def generateLogic(
           analysisParameters["ArchitectureName"], analysisParameters["DeviceNames"], analysisParameters["LibraryType"], logicTuple)
 
       if globalParameters["LogicFormat"] == "yaml":
-        LibraryIO.writeYAML(filename + ".yaml", data, explicit_start=False, explicit_end=False)
+        LibraryIO.writeYAML(filename + ".yaml", data, explicit_start=False, explicit_end=False, sort_keys=False)
       elif globalParameters["LogicFormat"] == "json":
         LibraryIO.write(filename, data, "json")
       else:

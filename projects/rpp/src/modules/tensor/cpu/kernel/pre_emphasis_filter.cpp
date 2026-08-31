@@ -24,26 +24,21 @@ SOFTWARE.
 
 #include "host_tensor_executors.hpp"
 
-RppStatus pre_emphasis_filter_host_tensor(Rpp32f *srcPtr,
-                                          RpptDescPtr srcDescPtr,
-                                          Rpp32f *dstPtr,
-                                          RpptDescPtr dstDescPtr,
-                                          Rpp32s *srcLengthTensor,
-                                          Rpp32f *coeffTensor,
-                                          Rpp32u borderType,
-                                          rpp::Handle& handle)
-{
+RppStatus pre_emphasis_filter_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
+                                          RpptDescPtr dstDescPtr, Rpp32s* srcLengthTensor,
+                                          Rpp32f* coeffTensor, Rpp32u borderType,
+                                          rpp::Handle& handle) {
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < srcDescPtr->n; batchCount++)
-    {
-        Rpp32f *srcPtrTemp = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        Rpp32f *dstPtrTemp = dstPtr + batchCount * dstDescPtr->strides.nStride;
+    for (int batchCount = 0; batchCount < srcDescPtr->n; batchCount++) {
+        Rpp32f* srcPtrTemp = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp32f* dstPtrTemp = dstPtr + batchCount * dstDescPtr->strides.nStride;
         Rpp32s bufferLength = srcLengthTensor[batchCount];
         Rpp32f coeff = coeffTensor[batchCount];
-        Rpp32f border = (borderType == RpptAudioBorderType::CLAMP) ? srcPtrTemp[0] :
-                        (borderType == RpptAudioBorderType::REFLECT) ? srcPtrTemp[1] : 0;
+        Rpp32f border = (borderType == RpptAudioBorderType::CLAMP)     ? srcPtrTemp[0]
+                        : (borderType == RpptAudioBorderType::REFLECT) ? srcPtrTemp[1]
+                                                                       : 0;
         dstPtrTemp[0] = srcPtrTemp[0] - coeff * border;
 
         Rpp32s vectorIncrement = 8;
@@ -53,8 +48,7 @@ RppStatus pre_emphasis_filter_host_tensor(Rpp32f *srcPtr,
         Rpp32s vectorLoopCount = 1;
         dstPtrTemp++;
         srcPtrTemp++;
-        for(; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-        {
+        for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
             __m256 pSrc[2];
             pSrc[0] = _mm256_loadu_ps(srcPtrTemp);
             pSrc[1] = _mm256_loadu_ps(srcPtrTemp - 1);
@@ -63,8 +57,7 @@ RppStatus pre_emphasis_filter_host_tensor(Rpp32f *srcPtr,
             srcPtrTemp += vectorIncrement;
             dstPtrTemp += vectorIncrement;
         }
-        for(; vectorLoopCount < bufferLength; vectorLoopCount++)
-        {
+        for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
             *dstPtrTemp++ = *srcPtrTemp - coeff * (*(srcPtrTemp - 1));
             srcPtrTemp++;
         }

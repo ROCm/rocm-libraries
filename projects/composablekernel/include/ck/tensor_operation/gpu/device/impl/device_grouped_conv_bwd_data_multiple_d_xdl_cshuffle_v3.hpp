@@ -50,7 +50,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_data_xdl_cshuffle_v3(
         typename GridwiseGemm::Argument karg,
@@ -59,130 +59,156 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch,
         const index_t num_k_per_block)
 {
-#if defined(__gfx9__)
-    // offset base pointer for each work-group
-    const index_t block_args_id = __builtin_amdgcn_readfirstlane(blockIdx.x);
-    const index_t g_idx         = __builtin_amdgcn_readfirstlane(blockIdx.y);
-    const index_t k_idx         = __builtin_amdgcn_readfirstlane(blockIdx.z * num_k_per_block);
-
-    const long_index_t a_batch_offset =
-        amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetAPtrOffset(g_idx));
-    const long_index_t b_batch_offset =
-        amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetBPtrOffset(g_idx));
-    const long_index_t e_batch_offset =
-        amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetEPtrOffset(g_idx));
-
-    __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
-
-    index_t left     = 0;
-    index_t right    = gemms_count;
-    index_t group_id = index_t((left + right) / 2);
-    while((!(block_args_id >= gemm_kernel_args[group_id].BlockStart_ &&
-             block_args_id < gemm_kernel_args[group_id].BlockEnd_)) &&
-          left <= right)
+#if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
+    if constexpr(GridwiseGemm::template IsValidCompilationParameter<EGlobalMemoryDataOperation>())
     {
-        if(block_args_id < gemm_kernel_args[group_id].BlockStart_)
-        {
-            right = group_id;
-        }
-        else
-        {
-            left = group_id;
-        }
-        group_id = index_t((left + right) / 2);
-    }
+        // offset base pointer for each work-group
+        const index_t block_args_id = __builtin_amdgcn_readfirstlane(blockIdx.x);
+        const index_t g_idx         = __builtin_amdgcn_readfirstlane(blockIdx.y);
+        const index_t k_idx         = __builtin_amdgcn_readfirstlane(blockIdx.z * num_k_per_block);
 
-    if constexpr(GridwiseGemm::DirectLoadEnabled)
-    {
+        const long_index_t a_batch_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetAPtrOffset(g_idx));
+        const long_index_t b_batch_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetBPtrOffset(g_idx));
+        const long_index_t e_batch_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetEPtrOffset(g_idx));
+
+        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
+
+        index_t left     = 0;
+        index_t right    = gemms_count;
+        index_t group_id = index_t((left + right) / 2);
+        while((!(block_args_id >= gemm_kernel_args[group_id].BlockStart_ &&
+                 block_args_id < gemm_kernel_args[group_id].BlockEnd_)) &&
+              left <= right)
+        {
+            if(block_args_id < gemm_kernel_args[group_id].BlockStart_)
+            {
+                right = group_id;
+            }
+            else
+            {
+                left = group_id;
+            }
+            group_id = index_t((left + right) / 2);
+        }
+
+        if constexpr(GridwiseGemm::DirectLoadEnabled)
+        {
 #if defined(__gfx950__)
-        const auto a_grid_desc_ak0_m_ak1_transformed =
-            GridwiseGemm::template TransformGrid<AGridDesc_AK0_M_AK1,
-                                                 GridwiseGemm::AK0Number,
-                                                 GridwiseGemm::AK1Number>(
-                gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_);
-        if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
-        {
-            GridwiseGemm::template Run<decltype(a_grid_desc_ak0_m_ak1_transformed),
-                                       BGridDesc_BK0_N_BK1,
-                                       EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                       true,
-                                       EGlobalMemoryDataOperation,
-                                       TailNum>(
-                karg.p_a_grid + a_batch_offset,
-                karg.p_b_grid + b_batch_offset,
-                karg.p_c_grid + e_batch_offset,
-                p_shared,
-                karg,
-                a_grid_desc_ak0_m_ak1_transformed,
-                gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
-                gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                k_idx,
-                gridDim.z,
-                blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
-        }
-        else
-        {
-            GridwiseGemm::template Run<decltype(a_grid_desc_ak0_m_ak1_transformed),
-                                       BGridDesc_BK0_N_BK1,
-                                       EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                       false,
-                                       EGlobalMemoryDataOperation,
-                                       TailNum>(
-                karg.p_a_grid + a_batch_offset,
-                karg.p_b_grid + b_batch_offset,
-                karg.p_c_grid + e_batch_offset,
-                p_shared,
-                karg,
-                a_grid_desc_ak0_m_ak1_transformed,
-                gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
-                gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                k_idx,
-                gridDim.z,
-                blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
-        }
+            const auto a_grid_desc_ak0_m_ak1_transformed =
+                GridwiseGemm::template TransformGrid<AGridDesc_AK0_M_AK1,
+                                                     GridwiseGemm::AK0Number,
+                                                     GridwiseGemm::AK1Number>(
+                    gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_);
+            if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
+            {
+                GridwiseGemm::template Run<decltype(a_grid_desc_ak0_m_ak1_transformed),
+                                           BGridDesc_BK0_N_BK1,
+                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                           true,
+                                           EGlobalMemoryDataOperation,
+                                           TailNum>(
+                    karg.p_a_grid + a_batch_offset,
+                    karg.p_b_grid + b_batch_offset,
+                    karg.p_c_grid + e_batch_offset,
+                    p_shared,
+                    karg,
+                    a_grid_desc_ak0_m_ak1_transformed,
+                    gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
+                    gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                    k_idx,
+                    gridDim.z,
+                    blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+            }
+            else
+            {
+                GridwiseGemm::template Run<decltype(a_grid_desc_ak0_m_ak1_transformed),
+                                           BGridDesc_BK0_N_BK1,
+                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                           false,
+                                           EGlobalMemoryDataOperation,
+                                           TailNum>(
+                    karg.p_a_grid + a_batch_offset,
+                    karg.p_b_grid + b_batch_offset,
+                    karg.p_c_grid + e_batch_offset,
+                    p_shared,
+                    karg,
+                    a_grid_desc_ak0_m_ak1_transformed,
+                    gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
+                    gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                    k_idx,
+                    gridDim.z,
+                    blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+            }
 #endif
-    }
-    else
-    {
-        if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
-        {
-            GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
-                                       BGridDesc_BK0_N_BK1,
-                                       EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                       true,
-                                       EGlobalMemoryDataOperation,
-                                       TailNum>(
-                karg.p_a_grid + a_batch_offset,
-                karg.p_b_grid + b_batch_offset,
-                karg.p_c_grid + e_batch_offset,
-                p_shared,
-                karg,
-                gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
-                gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
-                gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                k_idx,
-                gridDim.z,
-                blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
         }
         else
         {
-            GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
-                                       BGridDesc_BK0_N_BK1,
-                                       EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                       false,
-                                       EGlobalMemoryDataOperation,
-                                       TailNum>(
-                karg.p_a_grid + a_batch_offset,
-                karg.p_b_grid + b_batch_offset,
-                karg.p_c_grid + e_batch_offset,
-                p_shared,
-                karg,
-                gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
-                gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
-                gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                k_idx,
-                gridDim.z,
-                blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+            if constexpr(HasMainKBlockLoop || NoMainKBlockLoop)
+            {
+                GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
+                                           BGridDesc_BK0_N_BK1,
+                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                           HasMainKBlockLoop,
+                                           EGlobalMemoryDataOperation,
+                                           TailNum>(
+                    karg.p_a_grid + a_batch_offset,
+                    karg.p_b_grid + b_batch_offset,
+                    karg.p_c_grid + e_batch_offset,
+                    p_shared,
+                    karg,
+                    gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
+                    gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
+                    gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                    k_idx,
+                    gridDim.z,
+                    blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+            }
+            else
+            {
+                if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
+                {
+                    GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
+                                               BGridDesc_BK0_N_BK1,
+                                               EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                               true,
+                                               EGlobalMemoryDataOperation,
+                                               TailNum>(
+                        karg.p_a_grid + a_batch_offset,
+                        karg.p_b_grid + b_batch_offset,
+                        karg.p_c_grid + e_batch_offset,
+                        p_shared,
+                        karg,
+                        gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
+                        gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
+                        gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                        k_idx,
+                        gridDim.z,
+                        blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                }
+                else
+                {
+                    GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
+                                               BGridDesc_BK0_N_BK1,
+                                               EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                               false,
+                                               EGlobalMemoryDataOperation,
+                                               TailNum>(
+                        karg.p_a_grid + a_batch_offset,
+                        karg.p_b_grid + b_batch_offset,
+                        karg.p_c_grid + e_batch_offset,
+                        p_shared,
+                        karg,
+                        gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
+                        gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
+                        gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                        k_idx,
+                        gridDim.z,
+                        blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                }
+            }
         }
     }
 #else
@@ -192,7 +218,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     ignore = compute_ptr_offset_of_batch;
     ignore = num_k_per_block;
 
-#endif // End of if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
+#endif // end of if (defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__))
 }
 } // namespace
 
@@ -964,21 +990,31 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if constexpr(!LargeTensors)
+        // Memory access runtime error on gfx1250 (inconsistent across runs)
+        // TODO: need fix
+        if constexpr(LargeTensors)
         {
-            if(arg.stride_overflow)
+            if(is_gfx125_supported())
             {
                 return false;
             }
         }
-
-        if(get_warp_size() != 64)
+        if constexpr(!LargeTensors)
         {
-            // TODO: Enable for warp size 32
-            return false;
+            if(arg.stride_overflow)
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout
+                        << "Unsupported! stride_overflow is set but LargeTensors is not enabled!"
+                        << " In " << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                        << std::endl;
+                }
+                return false;
+            }
         }
+
         // Reject if the current warp size has no valid XDL configuration
-        // Warp size 32 is temporary not supported but leave it for the future
         if(get_warp_size() == 64)
         {
             if constexpr(MXdlPerWave64 == 0)
@@ -992,6 +1028,14 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
             {
                 return false;
             }
+        }
+
+        if(!ck::is_xdl_wmma_supported<AComputeType,
+                                      BComputeType,
+                                      Wave32MaxMNPerXdl,
+                                      Wave32MaxMNPerXdl>())
+        {
+            return false;
         }
 
         // check device
@@ -1009,8 +1053,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
-                    std::cout << "SplitK tests are not supported!" << " In " << __FILE__ << ":"
-                              << __LINE__ << ", in function: " << __func__ << std::endl;
+                    std::cout << "SplitK(" << arg.k_batch_ << ") tests are not supported!" << " In "
+                              << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                              << std::endl;
                 }
 
                 return false;
@@ -1021,8 +1066,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
-                std::cout << "SplitK tests are not supported!" << " In " << __FILE__ << ":"
-                          << __LINE__ << ", in function: " << __func__ << std::endl;
+                std::cout << "SplitK(" << arg.k_batch_ << ") tests are not supported!" << " In "
+                          << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                          << std::endl;
             }
 
             return false;
@@ -1638,6 +1684,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
         // clang-format off
         str << "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3"
+            << (get_warp_size() != 64 ? "_WmmaPorted" : "")
             << (DirectLoad ? "_DirectLoad" : "")
             << (LargeTensors ? "_Large_Tensor" : "")
             << "<"

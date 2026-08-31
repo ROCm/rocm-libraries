@@ -1,0 +1,59 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P2-widen HSS family seed config for gfx942 codegen characterization.
+#
+# Attribution entry gfx942__HSS_BH_Bias_yaml (+32 marginal whole-project lines):
+# a fp16-in / fp32-out (HSS) GEMM with Bias. This is a distinct DataType ->
+# DestDataType pairing the dominant bf16 seed and the h-in/h-out family seeds do
+# not reach: DataType h + DestDataType s drives the fp16-read + fp32-store PackData
+# / conversion component paths. No common config under Tests/common uses HSS as
+# BenchmarkProblems[0], so this minimal single-permutation config is authored to
+# seed exactly that family (1 emitted kernel).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HSS (fp16 in / fp32 out / f32 compute) TN, BH + Bias
+  # == attribution entry gfx942__HSS_BH_Bias_yaml
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['s']

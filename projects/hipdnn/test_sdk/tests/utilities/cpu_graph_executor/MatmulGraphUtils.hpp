@@ -13,8 +13,7 @@ namespace hipdnn_sdk_test_utils
 {
 
 template <typename InputType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildMatmulGraph(MatmulTensorBundle<InputType>& tensorBundle,
                      hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                      hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)

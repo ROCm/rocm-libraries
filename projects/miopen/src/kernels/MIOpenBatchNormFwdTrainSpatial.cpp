@@ -85,7 +85,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
 
         if(lid < segment)
         {
-            // The original OpenCL kernel unrolled the loop with a hint of 2 when using FP16.
+            // Unroll the loop with a hint of 2 when using FP16.
             // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr int unrollHint =
                 mio_config::input_type_strategy == type_strategy::fp16 ? 2 : 1;
@@ -132,7 +132,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
             FpAccumType inhat = cast<FpAccumType>(0.);
             FpPrecType value;
 
-            // The original OpenCL kernel unrolled the loop with a hint of 2 when using FP16.
+            // Unroll the loop with a hint of 2 when using FP16.
             // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr int unrollHint =
                 mio_config::input_type_strategy == type_strategy::fp16 ? 2 : 1;
@@ -636,7 +636,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
                                       ygid * ystride * mio_bn_config::vec_size_y +
                                       xgid * xstride * mio_bn_config::vec_size_x;
 
-            // The original OpenCL kernel unrolled the loop only when this condition was met.
+            // Unroll the loop only when this condition is met.
             // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr unsigned int unrollHint =
                 mio_bn_config::hw > mio_bn_config::loop_unroll_max_hw ? 1 : 2;
@@ -674,9 +674,9 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
     FinalMeanVariance(FpType* __restrict__ meanvarbuff,
                       FpPrecType INHW,
                       double epsilon,
-                      unsigned int& xgid,
-                      unsigned int& ygid,
-                      unsigned int& zgid,
+                      const unsigned int& xgid,
+                      const unsigned int& ygid,
+                      const unsigned int& zgid,
                       unsigned int& commitID,
                       FpPrecType_C& mean,
                       FpPrecType_C& variance,
@@ -687,8 +687,6 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         mean        = cast<FpPrecType_C>(0.);
 
         unsigned int xgrp_id = blockIdx.x;
-        unsigned int ygrp_id = blockIdx.y;
-        unsigned int zgrp_id = blockIdx.z;
 
         // These values (?grp_sz) cannot be substituted with mio_bn_config::launch_dim.grp? because
         // the dimensions of the blocks for this kernel may be different from the other
@@ -703,17 +701,10 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         unsigned int ylid = threadIdx.y;
         unsigned int zlid = threadIdx.z;
 
-        xgid = xgrp_id * xgrp_sz + xlid;
-        ygid = ygrp_id * ygrp_sz + ylid;
-        zgid = zgrp_id * zgrp_sz + zlid;
-
         unsigned int xstride = mio_config::layout_nhwc ? 1 : mio_bn_config::hw;
         unsigned int ystride = mio_config::layout_nhwc ? mio_bn_config::c : 1;
 
         commitID = 0;
-
-        if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
-            return;
 
         for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
         {
@@ -1034,10 +1025,13 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     fp_prec_c_type variance;
     fp_prec_c_type invVariance;
 
-    unsigned int xgid;
-    unsigned int ygid;
-    unsigned int zgid;
+    unsigned int xgid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int ygid = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int zgid = blockIdx.z * blockDim.z + threadIdx.z;
     unsigned int commitID;
+
+    if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
+        return;
 
     miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.FinalMeanVariance(
         meanvarbuff, INHW, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);

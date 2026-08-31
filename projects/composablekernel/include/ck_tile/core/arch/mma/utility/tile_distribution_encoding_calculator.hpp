@@ -9,6 +9,7 @@
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/tile_distribution_encoding.hpp"
+#include "ck_tile/core/arch/mma/mma_traits.hpp"
 
 #include <algorithm>
 #include <type_traits>
@@ -18,99 +19,238 @@ namespace ck_tile::core::arch::mma {
  * @class TileDistrEncCalc
  * @brief Given an MmaOp and modifiers, provides warp-level tile distribution encodings for mapping
  * ABC matrix fragment coordinates to register coordinates (lane, vector item) and vice versa. Note
- * that in case of compression or packed data types, the matrix minor dimension is effectively
- * shrunk by that factor. This is because tile distribution encodings always describe compressed /
- * packed *Datatype* elements, not logical / mathematical uncompressed *value* elements.
- * @tparam MmaOp          Intrinsic (amdgcn_mma).
- * @tparam CTranspose     Whether we are using CTranspose.
- * @tparam SFactor        Swizzle factor. Not implemented.
- * @tparam AttrNumAccessA Requested NumAccess for the A matrix. Must be multiple of "fundamental"
- *                        NumAccess for intrinsic. See details in amdgcn_mma.hpp.
- * @tparam AttrNumAccessB Requested NumAccess for the B matrix.
+ * that in case of compression (sparse intrinsics), we can choose to describe the compressed or
+ * uncompressed A matrix, where the former is the default (see UncompressedA). When considering A as
+ * compressed, the matrix minor dimension is effectively shrunk by the compression factor. Generally
+ * the compressed interpretation is used at the MmaOp level (compression has already taken place),
+ * whereas the uncompressed interpretation is used at the WarpGemm / MmaPipeline level (expects to
+ * be invoked with uncompressed A matrix, compression handled internally).
+ * @tparam MmaOp           Intrinsic (amdgcn_mma).
+ * @tparam CTranspose      Whether we are using CTranspose.
+ * @tparam SFactor         Swizzle factor: special permutation of the M dimension.
+ * @tparam kIter           K composition factor (consecutive intrinsic calls to form larger k dim).
+ * @tparam AttrNumAccessAV Requested NumAccess *value* for the A matrix. Must be multiple of
+ *                         "fundamental" NumAccess for intrinsic. See details in amdgcn_mma.hpp.
+ * @tparam AttrNumAccessBV Requested NumAccess *value* for the B matrix.
+ * @tparam UncompressedA   Give an uncompressed (full) layout for A instead. This is used at the
+ *                         pipeline level, whereas the MmaOp level deals with pre-compressed A
+ *                         matrices.
  */
 template <typename MmaOp,
-          bool CTranspose        = false,
-          index_t SFactor        = 1,
-          index_t AttrNumAccessA = MmaOp::kAKNumAccess,
-          index_t AttrNumAccessB = MmaOp::kBKNumAccess>
+          bool CTranspose         = false,
+          index_t SFactor         = 1,
+          index_t kIter           = 1,
+          index_t AttrNumAccessAV = 1,
+          index_t AttrNumAccessBV = 1,
+          bool UncompressedA      = false,
+          bool UsePackedNumAccess = false>
 struct TileDistrEncCalc
 {
     private:
-    static constexpr index_t NumAccessA = std::max(MmaOp::kAKNumAccess, AttrNumAccessA);
-    static constexpr index_t NumAccessB = std::max(MmaOp::kBKNumAccess, AttrNumAccessB);
+    // Silently set NumAccess values to at least the values from the intrinsic. In practice this is
+    // only used to turn a requested (1,1) into a (1,2) or (2,1) for a small number of gfx950
+    // intrinsics (some mixed precision scale intrinsics and some sparse intrinsics).
+    static constexpr index_t NumAccessA = std::max(MmaOp::kAKNumAccess, AttrNumAccessAV);
+    static constexpr index_t NumAccessB = std::max(MmaOp::kBKNumAccess, AttrNumAccessBV);
 
     // We are free to choose any NumAccess value to manipulate the load / store behavior, unless the
     // intrinsic fundamentally requires a base NumAccess factor for the layout to be correct.
-    static_assert(AttrNumAccessA % MmaOp::kAKNumAccess == 0,
-                  "Requesting NumAccessA incompatible with builtin.");
-    static_assert(AttrNumAccessB % MmaOp::kBKNumAccess == 0,
-                  "Requesting NumAccessB incompatible with builtin.");
+    static_assert(NumAccessA % MmaOp::kAKNumAccess == 0, "NumAccessA incompatible with builtin.");
+    static_assert(NumAccessB % MmaOp::kBKNumAccess == 0, "NumAccessB incompatible with builtin.");
 
-    static_assert(MmaOp::kABKPerLane %
-                      (NumAccessA * MmaOp::kCompressionRatio * MmaOp::APackedSize) ==
-                  0);
-    static_assert(MmaOp::kABKPerLane % (NumAccessB * MmaOp::BPackedSize) == 0);
-    static_assert(SFactor == 1, "Swizzle not implemented yet."); // TODO: Implement Swizzle.
+    static_assert(MmaOp::kABKPerLane % (NumAccessA * MmaOp::kCompressionRatio) == 0);
+    static_assert(MmaOp::kABKPerLane % NumAccessB == 0);
+    static_assert(MmaOp::kCMNumAccess % SFactor == 0, "kCMNumAccess must be multiple of SFactor");
 
-    template <index_t MajorDimSize,
-              index_t Repeat,
-              index_t NumAccess,
-              index_t PackedSize       = 1,
-              index_t CompressionRatio = 1>
-    using ABWarpDstrEnc = tile_distribution_encoding<
+    // Encoding with Ps2RHssMinor = <1, 0, 0> layout. Lane reads strided K values, i.e. K =
+    // {NumAccess, kABKLane, VecPerAccess}
+    template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    using ABWarpDstrEncStridedK = tile_distribution_encoding<
         sequence<Repeat>,
         tuple<sequence<MajorDimSize>,
               sequence<NumAccess,
                        MmaOp::kK / MmaOp::kABKPerLane,
-                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize>>,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio * kIter>>,
         tuple<sequence<2, 0, 1>>,
         tuple<sequence<1, 0, 0>>,
+        sequence<2, 2>,
+        sequence<0, 2>>;
+    // Encoding without trivial dims (Repeat == 1)
+    template <index_t MajorDimSize, index_t NumAccess, index_t CompressionRatio = 1>
+    using ABWarpDstrEncStridedKLegacy1 = tile_distribution_encoding<
+        sequence<>,
+        tuple<sequence<MajorDimSize>,
+              sequence<NumAccess,
+                       MmaOp::kK / MmaOp::kABKPerLane,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio * kIter>>,
+        tuple<sequence<2, 1>>,
+        tuple<sequence<1, 0>>,
+        sequence<2, 2>,
+        sequence<0, 2>>;
+    // Encoding without trivial dims (Repeat == 1 && NumAccess == 1)
+    template <index_t MajorDimSize, index_t CompressionRatio = 1>
+    using ABWarpDstrEncStridedKLegacy2 =
+        tile_distribution_encoding<sequence<>,
+                                   tuple<sequence<MajorDimSize>,
+                                         sequence<MmaOp::kK / MmaOp::kABKPerLane,
+                                                  MmaOp::kABKPerLane / CompressionRatio * kIter>>,
+                                   tuple<sequence<2, 1>>,
+                                   tuple<sequence<0, 0>>,
+                                   sequence<2>,
+                                   sequence<1>>;
+
+    // Encoding with Ps2RHssMinor = <0, 0, 0> layout. Lane reads contiguous K values, i.e. K =
+    // {kABKLane, NumAccess, VecPerAccess}
+    template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    using ABWarpDstrEncContiguousK = tile_distribution_encoding<
+        sequence<Repeat>,
+        tuple<sequence<MajorDimSize>,
+              sequence<MmaOp::kK / MmaOp::kABKPerLane,
+                       NumAccess,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio * kIter>>,
+        tuple<sequence<2, 0, 1>>,
+        tuple<sequence<0, 0, 0>>,
+        sequence<2, 2>,
+        sequence<1, 2>>;
+
+    // Map-equivalent reshaping of ABWarpDstrEncStridedK for the dense, single-block,
+    // single-repeat, single-access, uncompressed case. It relocates only size-1 dimensions
+    // relative to the general encoding, so it is a PROVABLY IDENTICAL lane/vector register map
+    // (verified by tracing calculate_bottom_index): it keeps the (size-1) Repeat dim OUT of the
+    // lane (P) decomposition (<2, 1> instead of threading it through P as <2, 0, 1>) and splits
+    // H0 from <MajorDimSize> into <1, MajorDimSize>. Correctness therefore rests on equivalence
+    // to ABWarpDstrEncStridedK (arch-independent), NOT on reproducing the legacy hand-written
+    // tree. It additionally COINCIDES term-for-term with the legacy WarpGemm A/B encoding only
+    // in the kAK0PerLane == 1 sub-case (e.g. gfx11/gfx12 16x16x16), which is exactly where
+    // matching the legacy merge/unmerge tree collapses the address arithmetic to the fused
+    // v_lshl_add_u32 (vs a separate v_add_nc_u32 + v_lshlrev_b32). Guarded to Repeat == 1
+    // because the general encoding threads Repeat through the lane mapping; for Repeat > 1 that
+    // term is not size-1 and must remain in P.
+    template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    using ABWarpDstrEncStridedKLegacy = tile_distribution_encoding<
+        sequence<Repeat>,
+        tuple<sequence<1, MajorDimSize>,
+              sequence<NumAccess,
+                       MmaOp::kK / MmaOp::kABKPerLane,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio * kIter>>,
+        tuple<sequence<2, 1>>,
+        tuple<sequence<1, 1>>,
+        sequence<1, 2, 2>,
+        sequence<0, 0, 2>>;
+
+    // Select the legacy-matching layout only for the case where the general strided-K encoding
+    // diverges from legacy purely by trivial-dimension placement. Confined to WMMA intrinsics
+    // (is_mma_op_wmma_v) so dense-MFMA codegen is left untouched, and to dense/single-C-block/
+    // uncompressed ops; the per-instantiation Repeat == 1 && NumAccess == 1 clause below adds
+    // the remaining conditions. All other cases (packed, multi-block, Repeat > 1, sub-access,
+    // sparse, MFMA) keep the general encoding.
+    static constexpr bool kUseLegacyStridedK =
+        (is_mma_op_wmma_v<MmaOp> && MmaOp::kCMBlocks == 1 && MmaOp::kCNBlocks == 1 &&
+         MmaOp::kCompressionRatio == 1);
+
+    template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    using ABWarpDstrEnc = std::conditional_t<
+        (UsePackedNumAccess && NumAccess > 1),
+        ABWarpDstrEncContiguousK<MajorDimSize, Repeat, NumAccess, CompressionRatio>,
+        std::conditional_t<
+            (kUseLegacyStridedK && Repeat == 1 && NumAccess == 1 && CompressionRatio == 1),
+            ABWarpDstrEncStridedKLegacy<MajorDimSize, Repeat, NumAccess, CompressionRatio>,
+            std::conditional_t<
+                Repeat == 1 && NumAccess == 1,
+                ABWarpDstrEncStridedKLegacy2<MajorDimSize, CompressionRatio>,
+                std::conditional_t<
+                    Repeat == 1,
+                    ABWarpDstrEncStridedKLegacy1<MajorDimSize, NumAccess, CompressionRatio>,
+                    ABWarpDstrEncStridedK<MajorDimSize, Repeat, NumAccess, CompressionRatio>>>>>;
+
+    // Special A Warp distribution encoding just for swizzle case. This was split out since it
+    // specifically deals with the M dimension which would make not sense for B.
+    template <index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    using AWarpDstrEncSwizzle = tile_distribution_encoding<
+        sequence<Repeat>,
+        tuple<sequence<MmaOp::kCMBlocks * MmaOp::kCMNumAccess / SFactor,
+                       MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane,
+                       SFactor,
+                       MmaOp::kCMPerLane / MmaOp::kCMNumAccess>,
+              sequence<NumAccess,
+                       MmaOp::kK / MmaOp::kABKPerLane,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio * kIter>>,
+        tuple<sequence<2, 0, 1, 1, 1, 1>>,
+        tuple<sequence<1, 0, 0, 2, 1, 3>>,
         sequence<2, 2>,
         sequence<0, 2>>;
 
     static constexpr auto get_cwarp_dstr_encoding()
     {
-        // We unmerge the M and N dimensions in the same way every time.
-        using MSubDims = sequence<MmaOp::kCMBlocks,
-                                  MmaOp::kCMNumAccess,
-                                  MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane,
-                                  MmaOp::kCMPerLane / MmaOp::kCMNumAccess>;
-        using NSubDims = sequence<MmaOp::kCNBlocks, MmaOp::kN / MmaOp::kCNBlocks>;
-
-        // In case of CTranspose, all we do is swap the M and N dimension.
-        using MatDims =
-            std::conditional_t<CTranspose, tuple<NSubDims, MSubDims>, tuple<MSubDims, NSubDims>>;
-        constexpr int MInx = CTranspose ? 2 : 1;
-        constexpr int NInx = CTranspose ? 1 : 2;
-
-        // For MFMA intrinsics with blocks, the block dimensions might be in the Lane dim or in the
-        // Vec dim, so we get different merge orderings.
-        if constexpr(MmaOp::CBlockDimInVecDim)
+        // TODO: Big kludge: some higher level code can not deal with extra trivial dimensions in
+        // the C distribution encoding. In theory this should be fixed there, but in practice the
+        // best way to deal with this for now is to provide a simplified C distribution for the
+        // cases without blocks.
+        if constexpr(MmaOp::kCMBlocks == 1 && MmaOp::kCNBlocks == 1)
         {
+            using MSubDims = sequence<MmaOp::kCMNumAccess / SFactor,
+                                      MmaOp::kM / MmaOp::kCMPerLane,
+                                      MmaOp::kCMPerLane * SFactor / MmaOp::kCMNumAccess>;
+            using NSubDims = sequence<MmaOp::kN>;
+
+            // In case of CTranspose, all we do is swap the M and N dimension.
+            using MatDims = std::
+                conditional_t<CTranspose, tuple<NSubDims, MSubDims>, tuple<MSubDims, NSubDims>>;
+            constexpr int MInx = CTranspose ? 2 : 1;
+            constexpr int NInx = CTranspose ? 1 : 2;
+
             return tile_distribution_encoding<sequence<1>,
                                               MatDims,
                                               tuple<sequence<MInx, NInx>>,
-                                              tuple<sequence<2, 1>>,
-                                              sequence<MInx, NInx, MInx, MInx>,
-                                              sequence<0, 0, 1, 3>>{};
+                                              tuple<sequence<1, 0>>,
+                                              sequence<MInx, MInx>,
+                                              sequence<0, 2>>{};
         }
         else
         {
-            return tile_distribution_encoding<sequence<1>,
-                                              MatDims,
-                                              tuple<sequence<MInx, MInx, NInx, NInx>>,
-                                              tuple<sequence<2, 0, 0, 1>>,
-                                              sequence<MInx, MInx>,
-                                              sequence<1, 3>>{};
+            // We unmerge the M and N dimensions in the same way every time.
+            using MSubDims = sequence<MmaOp::kCMBlocks,
+                                      MmaOp::kCMNumAccess / SFactor,
+                                      MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane,
+                                      MmaOp::kCMPerLane * SFactor / MmaOp::kCMNumAccess>;
+            using NSubDims = sequence<MmaOp::kCNBlocks, MmaOp::kN / MmaOp::kCNBlocks>;
+
+            // In case of CTranspose, all we do is swap the M and N dimension.
+            using MatDims = std::
+                conditional_t<CTranspose, tuple<NSubDims, MSubDims>, tuple<MSubDims, NSubDims>>;
+            constexpr int MInx = CTranspose ? 2 : 1;
+            constexpr int NInx = CTranspose ? 1 : 2;
+
+            // For MFMA intrinsics with blocks, the block dimensions might be in the Lane dim or in
+            // the Vec dim, so we get different merge orderings.
+            if constexpr(MmaOp::CBlockDimInVecDim)
+            {
+                return tile_distribution_encoding<sequence<1>,
+                                                  MatDims,
+                                                  tuple<sequence<MInx, NInx>>,
+                                                  tuple<sequence<2, 1>>,
+                                                  sequence<MInx, NInx, MInx, MInx>,
+                                                  sequence<0, 0, 1, 3>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<sequence<1>,
+                                                  MatDims,
+                                                  tuple<sequence<MInx, MInx, NInx, NInx>>,
+                                                  tuple<sequence<2, 0, 0, 1>>,
+                                                  sequence<MInx, MInx>,
+                                                  sequence<1, 3>>{};
+            }
         }
     }
 
-    using AEnc_ = ABWarpDstrEnc<MmaOp::kM,
-                                MmaOp::kARepeat,
-                                NumAccessA,
-                                MmaOp::APackedSize,
-                                MmaOp::kCompressionRatio>;
-    using BEnc_ = ABWarpDstrEnc<MmaOp::kN, MmaOp::kBRepeat, NumAccessB, MmaOp::BPackedSize>;
+    static constexpr index_t compressionRatioA = UncompressedA ? 1 : MmaOp::kCompressionRatio;
+
+    using AEnc_ = std::conditional_t<
+        (SFactor > 1),
+        AWarpDstrEncSwizzle<MmaOp::kARepeat, NumAccessA, compressionRatioA>,
+        ABWarpDstrEnc<MmaOp::kM, MmaOp::kARepeat, NumAccessA, compressionRatioA>>;
+    using BEnc_ = ABWarpDstrEnc<MmaOp::kN, MmaOp::kBRepeat, NumAccessB>;
 
     public:
     // When using CTranspose, the A and B matrices are swapped.
@@ -124,9 +264,11 @@ struct TileDistrEncCalc
     static_assert(TileDistrEncRegMap<CWarpDstrEncoding>::num_lanes == MmaOp::WaveSize);
 
     static_assert(TileDistrEncRegMap<AWarpDstrEncoding>::num_vector_items ==
-                  vector_traits<typename MmaOp::AVecType>::vector_size);
+                  vector_traits<typename MmaOp::AVecType>::vector_size * MmaOp::APackedSize *
+                      kIter * MmaOp::kCompressionRatio / compressionRatioA);
     static_assert(TileDistrEncRegMap<BWarpDstrEncoding>::num_vector_items ==
-                  vector_traits<typename MmaOp::BVecType>::vector_size);
+                  vector_traits<typename MmaOp::BVecType>::vector_size * MmaOp::BPackedSize *
+                      kIter);
     static_assert(TileDistrEncRegMap<CWarpDstrEncoding>::num_vector_items ==
                   vector_traits<typename MmaOp::CVecType>::vector_size);
 };

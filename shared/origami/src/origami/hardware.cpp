@@ -11,9 +11,26 @@
 
 namespace origami {
 
+// Resolve the number of CUs to model against.
+//   requested_num_cus: caller's CU budget. Signed so non-positive values are
+//                      handled without a caller-side clamp: 0 means "use all
+//                      CUs" and a negative (invalid) value is treated the same.
+//                      A positive value caps the budget.
+//   hardware_num_cus:  physical CU count (hardware_t::N_CU), the upper bound.
+// Returns the requested budget when it is positive and below the physical
+// count; otherwise the full physical count.
+std::size_t resolve_num_cus(std::int64_t requested_num_cus, std::size_t hardware_num_cus) {
+  if (requested_num_cus > 0
+      && static_cast<std::size_t>(requested_num_cus) < hardware_num_cus) {
+    return static_cast<std::size_t>(requested_num_cus);
+  }
+  return hardware_num_cus;
+}
+
 hardware_t::hardware_t(architecture_t arch,
                        size_t N_CU,
                        size_t lds_capacity,
+                       size_t rf_capacity,
                        size_t NUM_XCD,
                        double mem1_perf_ratio,
                        double mem2_perf_ratio,
@@ -21,10 +38,12 @@ hardware_t::hardware_t(architecture_t arch,
                        size_t L2_capacity,
                        double compute_clock_ghz,
                        size_t parallel_mi_cu,
-                       std::tuple<double, double, double> mem_bw_per_wg_coefficients)
+                       std::tuple<double, double, double> mem_bw_per_wg_coefficients,
+                       std::optional<int> pci_chip_id)
     : arch(arch)
     , N_CU(N_CU)
     , lds_capacity(lds_capacity)
+    , rf_capacity(rf_capacity)
     , mem1_perf_ratio(mem1_perf_ratio)
     , mem2_perf_ratio(mem2_perf_ratio)
     , mem3_perf_ratio(mem3_perf_ratio)
@@ -33,20 +52,24 @@ hardware_t::hardware_t(architecture_t arch,
     , compute_clock_ghz(compute_clock_ghz)
     , parallel_mi_cu(parallel_mi_cu)
     , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
-    , NUM_XCD(NUM_XCD) {}
+    , NUM_XCD(NUM_XCD)
+    , pci_chip_id(pci_chip_id) {}
 
 hardware_t::hardware_t(architecture_t arch,
                        size_t N_CU,
                        size_t lds_capacity,
+                       size_t rf_capacity,
                        const architecture_constants& constants,
                        size_t num_xcds,
                        size_t L2_capacity,
                        double compute_clock_ghz,
-                       double memory_clock_ghz)
+                       double memory_clock_ghz,
+                       std::optional<int> pci_chip_id)
    : hardware_t(
           arch,
           N_CU,
           lds_capacity,
+          rf_capacity,
           num_xcds,
           1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
           1e9 * constants.mem2_perf_ratio / (memory_clock_ghz * 1e6 * constants.mem_clock_ratio),
@@ -54,15 +77,17 @@ hardware_t::hardware_t(architecture_t arch,
           L2_capacity,
           compute_clock_ghz,
           constants.parallel_mi_cu,
-          constants.mem_bw_per_wg_coefficients) {}
+          constants.mem_bw_per_wg_coefficients,
+          pci_chip_id) {}
 
-hardware_t::hardware_t(hipDeviceProp_t properties)
-    : hardware_t(get_hardware_for_properties(properties)) {}
+hardware_t::hardware_t(hipDeviceProp_t properties, std::optional<int> pci_chip_id)
+    : hardware_t(get_hardware_for_properties(properties, 0, pci_chip_id)) {}
 
 hardware_t::hardware_t(const hardware_t& other)
     : arch(other.arch)
     , N_CU(other.N_CU)
     , lds_capacity(other.lds_capacity)
+    , rf_capacity(other.rf_capacity)
     , mem1_perf_ratio(other.mem1_perf_ratio)
     , mem2_perf_ratio(other.mem2_perf_ratio)
     , mem3_perf_ratio(other.mem3_perf_ratio)
@@ -71,10 +96,33 @@ hardware_t::hardware_t(const hardware_t& other)
     , compute_clock_ghz(other.compute_clock_ghz)
     , parallel_mi_cu(other.parallel_mi_cu)
     , mem_bw_per_wg_coefficients(other.mem_bw_per_wg_coefficients)
-    , NUM_XCD(other.NUM_XCD) {}
+    , NUM_XCD(other.NUM_XCD)
+    , pci_chip_id(other.pci_chip_id) {}
+
+namespace {
+// On RDNA, HIP runs in WGP (Work Group Processor) mode by default. In that mode CLR halves
+// the agent's compute-unit count, so hipDeviceProp_t::multiProcessorCount reports the number
+// of WGPs (2 CUs each) rather than physical CUs. Origami reasons in physical CUs, so scale
+// the reported count back up on the RDNA architectures. CDNA archs run in CU mode (factor 1).
+size_t cus_per_multiProcessorCount(hardware_t::architecture_t arch) {
+  switch (arch) {
+    case hardware_t::architecture_t::gfx1100:  // RDNA3
+    case hardware_t::architecture_t::gfx1150:  // RDNA3.5 (Strix)
+    case hardware_t::architecture_t::gfx1151:
+    case hardware_t::architecture_t::gfx1152:
+    case hardware_t::architecture_t::gfx1153:
+    case hardware_t::architecture_t::gfx1200:  // RDNA4
+    case hardware_t::architecture_t::gfx1201:  // RDNA4
+      return 2;
+    default:
+      return 1;
+  }
+}
+}  // namespace
 
 hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
-                                                   size_t num_xcds_override) {
+                                                   size_t num_xcds_override,
+                                                   std::optional<int> pci_chip_id) {
   auto arch_name = get_before_first_colon(properties.gcnArchName);
   auto arch_enum = arch_name_to_enum(arch_name);
   if (arch_enum == architecture_t::Count) {
@@ -82,22 +130,25 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
         std::string("Attempting to retrieve hardware constants for unsupported architecture: ") +
         std::string(arch_name));
   }
-  auto constants  = get_arch_constants(arch_enum);
+  auto constants = get_arch_constants(arch_enum, pci_chip_id);
   auto num_xcds   = (num_xcds_override > 0)
                       ? num_xcds_override
                       : get_default_num_xcds(arch_enum);
   return hardware_t(arch_enum,
-                    properties.multiProcessorCount,
+                    properties.multiProcessorCount * cus_per_multiProcessorCount(arch_enum),
                     properties.sharedMemPerBlock,
+                    properties.regsPerBlock * 4,  // RF capacity from device (regsPerBlock is in 32-bit registers, convert to bytes)
                     constants,
                     num_xcds,
                     properties.l2CacheSize,
                     properties.clockRate / 1.e6,
-                    properties.memoryClockRate / 1.e6);
+                    properties.memoryClockRate / 1.e6,
+                    pci_chip_id);
 }
 
 hardware_t hardware_t::get_hardware_for_device(int deviceId,
-                                               hipDeviceProp_t const& prop) {
+                                               hipDeviceProp_t const& prop,
+                                               std::optional<int> pci_chip_id) {
   size_t num_xcds = 0;
 #if HIP_VERSION_MAJOR >= 7
   int queried_xccs = 0;
@@ -105,9 +156,17 @@ hardware_t hardware_t::get_hardware_for_device(int deviceId,
       && queried_xccs > 0) {
     num_xcds = static_cast<size_t>(queried_xccs);
   }
+
+  auto arch_name = get_before_first_colon(prop.gcnArchName);
+  auto arch_enum = arch_name_to_enum(arch_name);
+  if (arch_enum == architecture_t::gfx950 && !pci_chip_id.has_value()) {
+      int queried_id = 0;
+      if (hipDeviceGetAttribute(&queried_id, hipDeviceAttributePciChipId, deviceId) == hipSuccess)
+        pci_chip_id = std::make_optional(queried_id);
+  }
 #endif
 
-  return get_hardware_for_properties(prop, num_xcds);
+  return get_hardware_for_properties(prop, num_xcds, pci_chip_id);
 }
 
 hardware_t hardware_t::get_hardware_for_device(int deviceId) {
@@ -121,22 +180,26 @@ hardware_t hardware_t::get_hardware_for_device(int deviceId) {
 hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
                                              size_t N_CU,
                                              size_t lds_capacity,
+                                             size_t rf_capacity,
                                              size_t L2_capacity,
-                                             int compute_clock_khz) {
+                                             int compute_clock_khz,
+                                             std::optional<int> pci_chip_id) {
   if (arch == architecture_t::Count) {
     throw std::runtime_error("Attempting to create hardware for unsupported architecture");
   }
 
-  auto constants = get_arch_constants(arch);
+  auto constants = get_arch_constants(arch, pci_chip_id);
 
   return hardware_t(arch,
                     N_CU,
                     lds_capacity,
+                    rf_capacity,
                     constants,
                     get_default_num_xcds(arch),
                     L2_capacity,
                     compute_clock_khz / 1.e6,
-                    compute_clock_khz / 1.e6 / constants.mem_clock_ratio);
+                    compute_clock_khz / 1.e6 / constants.mem_clock_ratio,
+                    pci_chip_id);
 }
 
 bool hardware_t::is_hardware_supported(hipDeviceProp_t properties) {
@@ -151,14 +214,14 @@ size_t hardware_t::get_default_num_xcds(architecture_t arch) {
     case architecture_t::gfx90a:  return 1;
     case architecture_t::gfx942:  return 8;
     case architecture_t::gfx950:  return 8;
+    case architecture_t::gfx1200: return 1;
     case architecture_t::gfx1201: return 1;
     case architecture_t::gfx1100: return 1;
     case architecture_t::gfx1150: return 1;
     case architecture_t::gfx1151: return 1;
     case architecture_t::gfx1152: return 1;
     case architecture_t::gfx1153: return 1;
-    // TODO: Update this with real value
-    case architecture_t::gfx1250: return 1;
+    case architecture_t::gfx1250: return 8;
     default:
       throw std::runtime_error(
           std::string("No default XCD count for architecture ") +
@@ -167,10 +230,16 @@ size_t hardware_t::get_default_num_xcds(architecture_t arch) {
   }
 }
 
+size_t hardware_t::get_default_cache_line_bytes(architecture_t /*arch*/) {
+  // Per-arch L2 cache-line size, currently uniform 128 B across supported archs.
+  return 128;
+}
+
 void hardware_t::print() const {
   std::cout << "================== Hardware Configuration ==================\n";
   std::cout << "Number of CUs (N_CU)      : " << N_CU << "\n";
   std::cout << "LDS capacity              : " << lds_capacity << " bytes\n";
+  std::cout << "RF capacity               : " << rf_capacity << " bytes\n";
   std::cout << "mem1_perf_ratio           : " << mem1_perf_ratio << "\n";
   std::cout << "mem2_perf_ratio           : " << mem2_perf_ratio << "\n";
   std::cout << "mem3_perf_ratio           : " << mem3_perf_ratio << "\n";
@@ -179,6 +248,13 @@ void hardware_t::print() const {
   std::cout << "Compute clock (GHz)       : " << compute_clock_ghz << "\n";
   std::cout << "Parallel MI/CU            : " << parallel_mi_cu << "\n";
   std::cout << "Number of XCDs (NUM_XCD)  : " << NUM_XCD << "\n";
+  if (pci_chip_id.has_value()) {
+    std::cout << "PCI chip ID               : 0x" << std::hex 
+              << static_cast<unsigned>(*pci_chip_id) << std::dec 
+              << " (" << *pci_chip_id << ")\n";
+  } else {
+    std::cout << "PCI chip ID               : (not set)\n";
+  }
   std::cout << "mem_bw_per_wg_coefficients: " << std::get<0>(mem_bw_per_wg_coefficients) << ", "
             << std::get<1>(mem_bw_per_wg_coefficients) << ", "
             << std::get<2>(mem_bw_per_wg_coefficients) << "\n\n";
@@ -220,6 +296,7 @@ bool hardware_t::has_MALL() const {
     case architecture_t::gfx90a:
     case architecture_t::gfx942:
     case architecture_t::gfx950:
+    case architecture_t::gfx1200:
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1151:
@@ -240,6 +317,7 @@ bool hardware_t::has_native_TF32() const {
       return true;
     case architecture_t::gfx90a:
     case architecture_t::gfx950:
+    case architecture_t::gfx1200:
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1150:

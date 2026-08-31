@@ -38,7 +38,7 @@
 #include <Tensile/DataTypes_BFloat16.hpp>
 #include <rocisa/include/enum.hpp>
 // Using hip header for both NANOO and OCP data types
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #if defined(__HIPCC__)
 #include <hip/hip_fp8.h>
@@ -55,8 +55,6 @@
 #include <Tensile/DataTypes_E8.hpp>
 #include <Tensile/DataTypes_E5M3.hpp>
 
-TENSILE_HIDDEN_BEGIN
-
 namespace rocisa
 {
     /**
@@ -71,21 +69,21 @@ namespace rocisa
  * @{
  */
 
-    std::string   TypeAbbrev(rocisa::DataType d);
-    float         GetElementSize(rocisa::DataType d);
-    std::ostream& operator<<(std::ostream& stream, rocisa::DataType const& t);
-    std::istream& operator>>(std::istream& stream, rocisa::DataType& t);
+    TENSILELITEHOST_EXPORT std::string   TypeAbbrev(rocisa::DataType d);
+    TENSILELITEHOST_EXPORT float         GetElementSize(rocisa::DataType d);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, rocisa::DataType const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, rocisa::DataType& t);
 
 } // namespace rocisa
 
 namespace TensileLite
 {
-    std::string ToString(rocisa::DataType d);
+    TENSILELITEHOST_EXPORT std::string ToString(rocisa::DataType d);
     /**
  * \ingroup DataTypes
  * \brief Runtime accessible data type metadata
  */
-    struct DataTypeInfo
+    struct TENSILELITEHOST_EXPORT DataTypeInfo
     {
         static DataTypeInfo const& Get(int index);
         static DataTypeInfo const& Get(rocisa::DataType t);
@@ -492,14 +490,13 @@ namespace TensileLite
     }
 #endif // !_WIN32 && TENSILE_USE_FP4
 
-    std::string ToString(ConstantVariant d);
-    bool        CompareValue(const ConstantVariant& d, double value);
+    TENSILELITEHOST_EXPORT std::string ToString(ConstantVariant d);
+    TENSILELITEHOST_EXPORT bool        CompareValue(const ConstantVariant& d, double value);
 
-    size_t multiplyElementSize(size_t element, float elementSize);
+    TENSILELITEHOST_EXPORT size_t multiplyElementSize(size_t element, float elementSize);
 
     /**
  * @}
  */
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

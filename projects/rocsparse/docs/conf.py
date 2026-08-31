@@ -8,8 +8,8 @@ import re
 
 from rocm_docs import ROCmDocs
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'set\(VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+', f.read())
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    match = re.search(r"set\(VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
@@ -34,3 +34,5 @@ external_toc_path = "./sphinx/_toc.yml"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]

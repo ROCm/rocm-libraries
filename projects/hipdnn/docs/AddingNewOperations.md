@@ -12,6 +12,7 @@ A contributor walkthrough for landing a new op across the hipDNN stack. The code
 
 **Supplementary Reference** *(read when you need it, not by default)*
 - [cuDNN Parity Rules](#cudnn-parity-rules)
+- [Cache-Key Annotations](#cache-key-annotations)
 - [File Map (PR Diff Template)](#file-map-pr-diff-template)
 - [Layer-by-Layer Reference](#layer-by-layer-reference)
 - [Testing Requirements](#testing-requirements)
@@ -75,7 +76,7 @@ After the agent finishes, go through the output before opening a PR:
 **Optional (if applicable):**
 
 - **End-user sample** under `samples/<op>/` — add if an engine is available for the op. Wrap `graph->build(handle)` with `HIPDNN_FE_CHECK_SKIPPABLE` so the test is gracefully skipped when no engine supports the configuration. See `samples/convolution/ConvFprop.cpp` as a template.
-- **Python bindings** — the one piece the agent does not generate automatically. Add a `.def(...)` line in `python/src/graph_bindings.cpp` and register the attributes class in `python/src/attributes_bindings.cpp` (check that file for the current curated set). You can also explicitly ask the agent to do this before it finishes.
+- **Python bindings** — the one piece the agent does not generate automatically. Add a `.def(...)` line in `python/frontend_bindings/src/graph_bindings.cpp` and register the attributes class in `python/frontend_bindings/src/attributes_bindings.cpp` (check that file for the current curated set). You can also explicitly ask the agent to do this before it finishes.
 
 ## PR Checklist
 
@@ -97,6 +98,7 @@ Copy-paste this into your PR description.
 - [ ] Schema added to the `SCHEMAS` list in `flatbuffers_sdk/CMakeLists.txt`
 - [ ] `graph.fbs` `NodeAttributes` union updated and include added
 - [ ] `hipdnn_flatbuffers_sdk` target rebuilt; generated headers committed
+- [ ] New/changed tensor-uid fields annotated `(cache_uid)` (or a documented reason they're not); `cachekey_generated.h` regenerated and committed — see [Cache-Key Annotations](#cache-key-annotations)
 - [ ] Backend descriptor type enum value assigned
 - [ ] Backend attribute name range assigned
 - [ ] (If new mode enum) `HipdnnBackendAttributeType.h` type tag added; `Hipdnn<Op>Mode.h` written; `hipdnn_backend.h` updated; `DataTypeConversion.{hpp,cpp}` and `DescriptorAttributeUtils.{hpp,cpp}` updated
@@ -107,7 +109,7 @@ Copy-paste this into your PR description.
 - [ ] All test layers from the matrix have at least one test (see Testing Requirements)
 - [ ] Lowering + lifting round-trip + tensor sharing + auto-UID + per-scalar tests present
 - [ ] `TestBackendEnumStringUtils.cpp` updated with new enum entries
-- [ ] `ninja unit-check` and `ninja integration-check` pass
+- [ ] `ninja check` passes.
 - [ ] `ninja format` + `ninja check_format` pass
 - [ ] ASAN build (`cmake -DBUILD_ADDRESS_SANITIZER=ON ..` + `ninja check`) clean
 - [ ] No clang-tidy errors, no compiler warnings
@@ -150,6 +152,62 @@ The decision applies to four name surfaces: the descriptor type name, each per-t
 A `_EXT` suffix is itself the marker for "not in cuDNN". Add a short comment in the descriptor or schema for any non-obvious semantic difference.
 
 ---
+## Cache-Key Annotations
+
+The kernel-ingestor winner cache reuses a benchmarked kernel ranking across graphs that
+describe the same work. Annotations in the `.fbs` files decide which fields identify that
+work: they drive `scripts/gen_cache_key.py`, which generates the hash and logical-equality
+functions in `cachekey_generated.h`.
+
+### Choosing an annotation
+
+A field participates in the key unless annotated. For each field you add, ask whether a
+kernel measurement taken on one graph would still be valid for another differing only in
+this field.
+
+| Field | Annotation | Effect |
+|---|---|---|
+| Irrelevant to the measurement | `(cache_ignore)` | Excluded from the key. Names, ids, and routing hints — `Graph.name`, `Graph.id`, `Graph.preferred_engine_id`. |
+| Holds a tensor uid | `(cache_uid)` | Folds the tensor's position in `Graph.tensors` rather than the caller's uid. |
+| Anything else | none | Folded by value. |
+
+`(cache_uid)` exists because a uid is a caller-assigned label, not structure. Folding it raw
+would change the key when a graph is renumbered and preserve it when an operand is rewired —
+both wrong. Positions come from the vector marked `(cache_uid_domain)` resolved against the
+field marked `(cache_uid_key)`; both are already set, on `Graph.tensors` and
+`TensorAttributes.uid`.
+
+### Getting it wrong is silent
+
+The generator checks that a `(cache_uid)` field is an integer, never that the annotation is
+the right one. Both mistakes compile:
+
+- **A missed `(cache_uid)`** keys on the raw uid, so structurally identical graphs numbered
+  differently never share an entry. Costs a redundant benchmark.
+- **`(cache_ignore)` on a field that changes the work** makes two different graphs share one
+  entry, so the cache serves the wrong kernel. Costs correctness.
+
+A name is not evidence: `PointwiseAttributes.axis_tensor_uid` is an axis index despite the
+suffix, and is correctly unannotated.
+
+### Adding a field
+
+1. Annotate it, or deliberately leave it unannotated.
+1. Regenerate `cachekey_generated.h`. It does not come from the ordinary `flatc` step, since
+   `flatc` does not expose custom attributes to its C++ output; `scripts/gen_cache_key.py`
+   re-derives it from the compiled schema. The `cache-key-hipdnn` pre-commit hook does this
+   on any change under `flatbuffers_sdk/schemas/` or to the script, and CI runs pre-commit on
+   every pull request, so a stale header fails there.
+1. Add a case to
+   [`TestGraphContentKey.cpp`](../flatbuffers_sdk/tests/flatbuffer_utilities/TestGraphContentKey.cpp): a keyed
+   field needs a differs-implies-unequal case, an ignored field an equal-despite-difference
+   case, and a tensor reference both equal-under-renumbering and unequal-under-rewiring.
+
+A new `.fbs` file must redeclare any annotation it uses (`attribute "cache_uid";`). `flatc`
+scopes attribute declarations to the schema being compiled; unlike types, they are not
+inherited through `include`.
+
+---
 
 ## File Map (PR Diff Template)
 
@@ -160,6 +218,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | FBS schema | `flatbuffers_sdk/schemas/matmul_attributes.fbs` |
 | FBS union entry | `flatbuffers_sdk/schemas/graph.fbs` (`NodeAttributes` union) |
 | FBS CMake list | `flatbuffers_sdk/CMakeLists.txt` (`SCHEMAS` variable) |
+| Cache-key annotation | `flatbuffers_sdk/schemas/matmul_attributes.fbs` (`(cache_uid)` on tensor-uid fields — see [Cache-Key Annotations](#cache-key-annotations)) |
 | Backend descriptor type enum | `backend/include/HipdnnBackendDescriptorType.h` |
 | Backend attribute name enum | `backend/include/HipdnnBackendAttributeName.h` |
 | Backend attribute type enum | `backend/include/HipdnnBackendAttributeType.h` |
@@ -179,7 +238,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | Frontend node class | `frontend/include/hipdnn_frontend/node/MatmulNode.hpp` |
 | Frontend Graph API | `frontend/include/hipdnn_frontend/Graph.hpp` (`Graph::matmul(...)`) |
 | JSON utility | `flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/json/MatmulAttributes.hpp` |
-| Python bindings (optional) | `python/src/graph_bindings.cpp`, `python/src/attributes_bindings.cpp` |
+| Python bindings (optional) | `python/frontend_bindings/src/graph_bindings.cpp`, `python/frontend_bindings/src/attributes_bindings.cpp` |
 | Backend descriptor unit test | `backend/tests/descriptors/TestMatmulOperationDescriptor.cpp` |
 | Backend fromNode test | `backend/tests/descriptors/TestMatmulOperationFromNode.cpp` |
 | Backend graph descriptor test | `backend/tests/descriptors/TestGraphDescriptorMatmul.cpp` |

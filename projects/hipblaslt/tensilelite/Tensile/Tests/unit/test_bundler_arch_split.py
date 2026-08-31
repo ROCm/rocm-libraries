@@ -44,10 +44,10 @@ pytestmark = pytest.mark.unit
         ("gfx942",                     "gfx942",                     "gfx942"),
         ("gfx942:xnack+",              "gfx942-xnack+",              "gfx942"),
         ("gfx942:xnack-",              "gfx942-xnack-",              "gfx942"),
-        ("gfx942:sramecc+",            "gfx942-sramecc+",            "gfx942"),
-        ("gfx942:sramecc+:xnack+",     "gfx942-sramecc+-xnack+",     "gfx942"),
-        ("gfx942:sramecc-:xnack-",     "gfx942-sramecc--xnack-",     "gfx942"),
-        ("gfx950:sramecc+:xnack+",     "gfx950-sramecc+-xnack+",     "gfx950"),
+        ("gfx942:sramecc+",            "gfx942",                     "gfx942"),
+        ("gfx942:sramecc+:xnack+",     "gfx942-xnack+",              "gfx942"),
+        ("gfx942:sramecc-:xnack-",     "gfx942-xnack-",              "gfx942"),
+        ("gfx950:sramecc+:xnack+",     "gfx950-xnack+",              "gfx950"),
         ("gfx1250",                    "gfx1250",                    "gfx1250"),
     ],
 )
@@ -77,3 +77,36 @@ def test_baseArch_collapses_all_cooked_variants_to_same_dir():
     ]
     bases = {_archNamesFromBundlerTarget(c)[1] for c in cooked}
     assert bases == {"gfx942"}
+
+
+@pytest.mark.parametrize(
+    "rawArch",
+    [
+        "gfx942:sramecc+",
+        "gfx942:sramecc+:xnack+",
+        "gfx942:sramecc-:xnack-",
+        "gfx950:sramecc+:xnack+",
+    ],
+)
+def test_filename_never_carries_sramecc(rawArch):
+    """The runtime helper-kernel loader (HipSolutionAdapter / tensile_host) only
+    probes ``{"", "-xnack-", "-xnack+"}`` appended to the base arch. A sramecc
+    suffix in the produced filename yields a code object the runtime can never
+    load -> "named symbol not found" for every source/PostGSU helper kernel.
+    """
+    filenameArch, _ = _archNamesFromBundlerTarget(rawArch)
+    assert "sramecc" not in filenameArch
+
+
+@pytest.mark.parametrize(
+    "rawArch,expectedHelperName",
+    [
+        ("gfx942",                 "Kernels.so-000-gfx942.hsaco"),
+        ("gfx942:sramecc+:xnack+", "Kernels.so-000-gfx942-xnack+.hsaco"),
+        ("gfx942:sramecc-:xnack-", "Kernels.so-000-gfx942-xnack-.hsaco"),
+    ],
+)
+def test_helper_kernel_name_matches_runtime_probe(rawArch, expectedHelperName):
+    """The runtime builds ``"Kernels.so-000-" + base + {"", "-xnack-", "-xnack+"}``."""
+    filenameArch, _ = _archNamesFromBundlerTarget(rawArch)
+    assert "Kernels.so-000-{0}.hsaco".format(filenameArch) == expectedHelperName

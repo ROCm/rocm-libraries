@@ -9,7 +9,7 @@ API reference library
 
 The MIOpen API library is structured as follows:
 
-* :doc:`Datatypes <./datatypes>`
+* :doc:`Precision support <./data_type_support>`
 
 * Modules:
 

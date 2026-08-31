@@ -29,9 +29,7 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/Comparison.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace std
 {
@@ -45,4 +43,3 @@ namespace std
     };
 } // namespace std
 
-TENSILE_HIDDEN_END

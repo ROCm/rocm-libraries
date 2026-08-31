@@ -151,6 +151,66 @@ TEST_F(TestSetEnginePluginPaths, SetEnginePluginPathsInvalidMode)
     EXPECT_EQ(error.get_code(), ErrorCode::INVALID_VALUE);
 }
 
+TEST_F(TestSetEnginePluginPaths, SetHeuristicPluginPathsAbsoluteSuccess)
+{
+    const std::vector<std::filesystem::path> paths
+        = {"/path/to/heuristic_a", "/path/to/heuristic_b"};
+
+    std::vector<std::string> expectedStrings;
+    expectedStrings.reserve(paths.size());
+    for(const auto& path : paths)
+    {
+        expectedStrings.push_back(path.string());
+    }
+
+    EXPECT_CALL(*_mockBackend,
+                setHeuristicPluginPathsExt(paths.size(),
+                                           pathArrayMatches(expectedStrings, paths.size()),
+                                           HIPDNN_PLUGIN_LOADING_ABSOLUTE))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto error = setHeuristicPluginPaths(paths, PluginLoadingMode::MODE_ABSOLUTE);
+    EXPECT_TRUE(error.is_good());
+}
+
+TEST_F(TestSetEnginePluginPaths, SetHeuristicPluginPathsBackendFailure)
+{
+    const std::array<const char*, 1> paths = {"/some/heuristic/path"};
+    const std::vector<std::string> expectedStrings = {"/some/heuristic/path"};
+
+    EXPECT_CALL(*_mockBackend,
+                setHeuristicPluginPathsExt(paths.size(),
+                                           pathArrayMatches(expectedStrings, paths.size()),
+                                           HIPDNN_PLUGIN_LOADING_ADDITIVE))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    auto error = setHeuristicPluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
+    EXPECT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestSetEnginePluginPaths, SetHeuristicPluginPathsEmptyPaths)
+{
+    const std::vector<std::filesystem::path> paths = {};
+
+    EXPECT_CALL(*_mockBackend,
+                setHeuristicPluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto error = setHeuristicPluginPaths(paths, PluginLoadingMode::MODE_ADDITIVE);
+    EXPECT_TRUE(error.is_good());
+}
+
+TEST_F(TestSetEnginePluginPaths, SetHeuristicPluginPathsInvalidMode)
+{
+    const std::vector<std::filesystem::path> paths = {"/path/to/heuristic"};
+    auto invalidMode = static_cast<PluginLoadingMode>(99);
+
+    auto error = setHeuristicPluginPaths(paths, invalidMode);
+    EXPECT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), ErrorCode::INVALID_VALUE);
+}
+
 TEST_F(TestSetEnginePluginPaths, GetLoadedEnginePluginPathsSuccess)
 {
     auto handle = reinterpret_cast<hipdnnHandle_t>(1);

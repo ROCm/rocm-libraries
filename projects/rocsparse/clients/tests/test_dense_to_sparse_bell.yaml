@@ -1,0 +1,133 @@
+# ########################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+# Quick
+- name: dense_to_sparse_bell
+  category: quick
+  function: dense_to_sparse_bell
+  indextype: *i32
+  precision: *single_only_precisions
+  M: [783]
+  N: [657]
+  denseld: [800]
+  block_dim: [2, 3, 4, 5]
+  baseA: [rocsparse_index_base_zero]
+  order: [rocsparse_order_row]
+
+- name: dense_to_sparse_bell
+  category: quick
+  function: dense_to_sparse_bell
+  indextype: *i64
+  precision: *double_only_precisions
+  M: [880]
+  N: [783]
+  denseld: [900]
+  block_dim: [6, 7, 8, 9]
+  baseA: [rocsparse_index_base_zero]
+  order: [rocsparse_order_column]
+
+- name: dense_to_sparse_bell
+  category: quick
+  function: dense_to_sparse_bell
+  indextype: *i32
+  precision: *single_only_precisions_complex_real
+  M: [1286]
+  N: [575]
+  denseld: [1300]
+  block_dim: [10, 11, 12, 13]
+  baseA: [rocsparse_index_base_one]
+  order: [rocsparse_order_column]
+
+- name: dense_to_sparse_bell
+  category: quick
+  function: dense_to_sparse_bell
+  indextype: *i64
+  precision: *double_only_precisions_complex_real
+  M: [1073]
+  N: [1328]
+  denseld: [1400]
+  block_dim: [14, 15, 16, 17]
+  baseA: [rocsparse_index_base_one]
+  order: [rocsparse_order_row]
+
+# Pre-checkin
+- name: dense_to_sparse_bell_bad_arg
+  category: pre_checkin
+  function: dense_to_sparse_bell_bad_arg
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+
+- name: dense_to_sparse_bell
+  category: pre_checkin
+  function: dense_to_sparse_bell
+  indextype: *i32
+  precision: *single_double_precisions_complex_real
+  M: [3746]
+  N: [2370]
+  denseld: [4000]
+  block_dim: [7, 16, 32, 64, 75]
+  baseA: [rocsparse_index_base_zero]
+  order: [rocsparse_order_row]
+
+- name: dense_to_sparse_bell
+  category: pre_checkin
+  function: dense_to_sparse_bell
+  indextype: *i64
+  precision: *single_double_precisions_complex_real
+  M: [1857]
+  N: [2846]
+  denseld: [4000]
+  block_dim: [12, 24, 35, 47, 51]
+  baseA: [rocsparse_index_base_one]
+  order: [rocsparse_order_column]
+
+# Nightly
+- name: dense_to_sparse_bell
+  category: nightly
+  function: dense_to_sparse_bell
+  indextype: *i64
+  precision: *single_only_precisions
+  M: [32567]
+  N: [1657]
+  denseld: [40000]
+  block_dim: [8, 13, 18, 23, 28]
+  baseA: [rocsparse_index_base_one]
+  order: [rocsparse_order_column]
+
+- name: dense_to_sparse_bell
+  category: nightly
+  function: dense_to_sparse_bell
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [1550]
+  N: [28465]
+  denseld: [30000]
+  block_dim: [5, 14, 19, 26, 31]
+  baseA: [rocsparse_index_base_zero]
+  order: [rocsparse_order_row]
+
