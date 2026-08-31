@@ -29,46 +29,24 @@ endif()
 option(TENSILELITE_ENABLE_SDMA "Build the GPU-initiated SDMA transport path" OFF)
 
 if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
-    # ROCm 7.x's hsakmt cmake config declares a link dependency on the imported
-    # target numa::numa but never provides it, so find_package(hsakmt) fails at
-    # generate time ("target numa::numa not found") unless we define it first.
-    # ROCm 7.x also vendors libnuma into ${ROCM_PATH}/lib/rocm_sysdeps/lib
-    # (renamed librocm_sysdeps_numa.so.1 with a libnuma.so symlink), which is
-    # NOT on the default library search path, so a bare find_library misses it.
-    # Search that directory explicitly in addition to the system paths, so both
-    # a vendored ROCm libnuma and a system-installed one are found.
-    if(NOT TARGET numa::numa)
-        if(NOT DEFINED ROCM_PATH)
-            if(DEFINED ENV{ROCM_PATH})
-                set(ROCM_PATH "$ENV{ROCM_PATH}")
-            else()
-                set(ROCM_PATH "/opt/rocm")
-            endif()
-        endif()
-        find_library(NUMA_LIBRARY
-            NAMES numa
-            HINTS "${ROCM_PATH}/lib/rocm_sysdeps/lib"
-            PATHS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
-        find_path(NUMA_INCLUDE_DIR
-            NAMES numa.h
-            HINTS "${ROCM_PATH}/include/rocm_sysdeps/include"
-            PATHS "${ROCM_PATH}/include/rocm_sysdeps/include")
-        if(NUMA_LIBRARY)
-            add_library(numa::numa UNKNOWN IMPORTED)
-            set_target_properties(numa::numa PROPERTIES IMPORTED_LOCATION "${NUMA_LIBRARY}")
-            if(NUMA_INCLUDE_DIR)
-                set_target_properties(numa::numa PROPERTIES
-                    INTERFACE_INCLUDE_DIRECTORIES "${NUMA_INCLUDE_DIR}")
-            endif()
+    if(NOT DEFINED ROCM_PATH)
+        if(DEFINED ENV{ROCM_PATH})
+            set(ROCM_PATH "$ENV{ROCM_PATH}")
         else()
-            message(FATAL_ERROR
-                "libnuma not found but required by hsakmt::hsakmt for "
-                "TENSILELITE_ENABLE_SDMA. Searched the ROCm-vendored path "
-                "'${ROCM_PATH}/lib/rocm_sysdeps/lib' and the default system "
-                "library paths. Set ROCM_PATH if your ROCm is elsewhere, or "
-                "point NUMA_LIBRARY at the libnuma.so to use.")
+            set(ROCM_PATH "/opt/rocm")
         endif()
     endif()
+
+    # hsakmt::hsakmt's exported link interface names numa::numa, so libnuma has
+    # to be found as an imported target before that export is loaded.
+    # cmake/FindNUMA.cmake does that, and it has to stay on CMAKE_MODULE_PATH
+    # across the find_package(hsakmt) below: ROCm 7.x's own hsakmt-config.cmake
+    # calls find_dependency(NUMA), and nothing -- not CMake, not libnuma-dev,
+    # not hsakmt itself -- installs a NUMA package config for it to find. See
+    # cmake/FindNUMA.cmake for the full story and for when this can be dropped.
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../cmake")
+    find_package(NUMA REQUIRED)
+
     find_package(hsa-runtime64 REQUIRED)
     find_package(hsakmt REQUIRED)
 
