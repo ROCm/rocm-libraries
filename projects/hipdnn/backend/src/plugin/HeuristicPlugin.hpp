@@ -65,12 +65,6 @@ struct HeuristicPluginFunctionTable
                                                      int64_t*,
                                                      size_t*)
         = nullptr;
-
-    // Trace retrieval (RFC 0019 §13)
-    hipdnnPluginStatus_t (*policyGetTrace)(hipdnnHeuristicPolicyDescriptor_t,
-                                           int64_t,
-                                           const char**)
-        = nullptr;
 };
 
 /**

@@ -88,6 +88,118 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     install(FILES
         src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
         DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels)
+
+    # ------------------------------------------------------------------
+    # Kernel variant regeneration (opt-in, requires a HIP compiler)
+    #
+    # The dispatcher in Flash2Dispatch.hpp selects among several tilings, each
+    # a separate .co built from HipFlash2FwdPlanVariant.hip with different
+    # F2_* macros. The variant table and this list MUST stay in sync: the
+    # builder checks HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK against the
+    # geometry the table claims and hard-errors on mismatch.
+    #
+    # Off by default. Only the legacy hip_flash2_fwd_gfx942.co is tracked in
+    # git; the per-variant objects are not, so build this target before
+    # installing if you want per-shape dispatch to be active:
+    #   cmake -DENABLE_HIP_FLASH2_ENGINE=ON -DHIP_FLASH2_BUILD_VARIANTS=ON ...
+    #   cmake --build . --target hip_flash2_variants
+    #
+    # IMPORTANT: build these with the SAME ROCm as the shipped default object.
+    # The current hip_flash2_fwd_gfx942.co was built with ROCm 10.0.0 and is
+    # ~1.4x faster than the identical source built with 7.2 (S=2048 D=128
+    # causal: 54.1 vs 38.3 TFLOPS). Mixing toolchains makes most shapes slower
+    # while looking like an upgrade.
+    option(HIP_FLASH2_BUILD_VARIANTS "Regenerate the Flash2 kernel variant .co files" OFF)
+    if(HIP_FLASH2_BUILD_VARIANTS)
+        find_program(HIP_FLASH2_HIPCC hipcc HINTS ${ROCM_PATH}/bin /opt/rocm/bin)
+        if(NOT HIP_FLASH2_HIPCC)
+            message(FATAL_ERROR "HIP_FLASH2_BUILD_VARIANTS=ON but hipcc was not found")
+        endif()
+
+        # Respect GPU_TARGETS rather than hardcoding gfx942: hardcoding both the
+        # flag and the output filename silently produces mislabelled objects if
+        # anyone points the build at another arch. Single-arch only -- the
+        # variant filename encodes one arch, so a multi-arch GPU_TARGETS list
+        # takes the first entry.
+        set(_f2_arch "gfx942")
+        if(GPU_TARGETS)
+            list(GET GPU_TARGETS 0 _f2_arch)
+        endif()
+
+        set(_f2_src ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/HipFlash2FwdPlanVariant.hip)
+        set(_f2_out ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/kernels)
+
+        # tag;WAVES;QG;KG -- all other knobs stay at the source defaults
+        # (F2_PIPE=0, F2_PAD=8, F2_PADK=8, F2_VTMAJOR=1, F2_SKIPRESCALE=1).
+        # Verified: rebuilding at these defaults reproduces the shipped
+        # objects' LDS footprint exactly for all five variants.
+        set(_f2_variants
+            "w4q1k4 4 1 4"
+            "w8q1k4 8 1 4"
+            "w8q2k4 8 2 4"
+            "w8q3k2 8 3 2"
+            "w8q3k4 8 3 4")
+
+        set(_f2_targets "")
+        foreach(_v IN LISTS _f2_variants)
+            # Space-separated, then re-split: a ;-list would be flattened by
+            # foreach(... IN LISTS ...), leaving each entry a bare scalar.
+            string(REPLACE " " ";" _vf "${_v}")
+            list(GET _vf 0 _tag)
+            list(GET _vf 1 _waves)
+            list(GET _vf 2 _qg)
+            list(GET _vf 3 _kg)
+            set(_co ${_f2_out}/hip_flash2_fwd_${_f2_arch}_${_tag}.co)
+            add_custom_command(
+                OUTPUT ${_co}
+                COMMAND ${HIP_FLASH2_HIPCC} --genco -O3 -std=c++17
+                        --offload-arch=${_f2_arch}
+                        -DF2_WAVES=${_waves} -DF2_QG=${_qg} -DF2_KG=${_kg}
+                        ${_f2_src} -o ${_co}
+                DEPENDS ${_f2_src}
+                COMMENT "Flash2: building variant ${_tag} (waves=${_waves} qg=${_qg} kg=${_kg})"
+                VERBATIM)
+            list(APPEND _f2_targets ${_co})
+        endforeach()
+
+        # The partial-tile correctness probe is a standalone HIP program, built
+        # only under this same opt-in flag. Leaving it in no target at all was
+        # the same class of problem as the dispatch test, which was fixed by
+        # registering it with hip_kernel_provider_tests.
+        add_executable(hip_flash2_partial_tile_probe EXCLUDE_FROM_ALL
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/tools/partial_tile_probe.cpp)
+        target_link_libraries(hip_flash2_partial_tile_probe PRIVATE hip::host)
+
+        add_custom_target(hip_flash2_variants
+            DEPENDS ${_f2_targets}
+            COMMENT "Regenerating all Flash2 kernel variant objects")
+    endif()
+
+    # Install any variant objects that are present. The engine falls back to
+    # the legacy single-kernel object when a variant is absent, so a partial
+    # or empty set is safe.
+    #
+    # The glob MUST be evaluated at install time, not configure time. The
+    # documented workflow is configure -> build hip_flash2_variants -> install,
+    # so at configure time the variant objects do not exist yet. A plain
+    # file(GLOB) + install(FILES) silently installs nothing in that order and
+    # leaves the dispatcher inert with no diagnostic (found by S. Reeder, who
+    # measured it: variants staged after configure -> legacy object only;
+    # staged before configure -> all six).
+    install(CODE "
+        file(GLOB _f2_co
+             \"${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_*_*.co\")
+        if(_f2_co)
+            file(INSTALL
+                 DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels\"
+                 TYPE FILE FILES \${_f2_co})
+        else()
+            message(STATUS
+                \"HipFlash2: no variant .co objects found; installing the legacy \"
+                \"single-kernel object only. Build the hip_flash2_variants target \"
+                \"before installing to enable per-shape dispatch.\")
+        endif()
+    ")
 else()
     message(STATUS "HIP Flash2 SDPA engine disabled")
 endif()

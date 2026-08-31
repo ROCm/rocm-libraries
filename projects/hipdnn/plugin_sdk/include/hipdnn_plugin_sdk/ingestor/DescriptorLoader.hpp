@@ -428,30 +428,17 @@ inline MetadataType metadataTypeFromString(const std::string& text, const std::s
     fail("unknown metadata type '" + text + "' in " + where);
 }
 
-inline UhdAdapter uhdAdapterFromString(const std::string& text, const std::string& where)
+inline HeuristicKind heuristicKindFromString(const std::string& text, const std::string& where)
 {
-    if(text == "static_order")
-    {
-        return UhdAdapter::STATIC_ORDER;
-    }
     if(text == "native")
     {
-        return UhdAdapter::NATIVE;
+        return HeuristicKind::NATIVE;
     }
-    if(text == "tree_data")
+    if(text == "model")
     {
-        return UhdAdapter::TREE_DATA;
+        return HeuristicKind::MODEL;
     }
-    if(text == "table")
-    {
-        return UhdAdapter::TABLE;
-    }
-    // `onnx` and `custom_library` are RFC 0019 §7 adapters the ingestor deliberately
-    // cannot build: one needs a runtime this path will not pull in, the other dlopens an
-    // author-supplied .so. Rejecting them by name beats accepting a descriptor that would
-    // then silently rank by declared order.
-    fail("unknown or unsupported UHD adapter '" + text + "' in " + where
-         + " (expected static_order, native, tree_data or table)");
+    fail("unknown heuristic kind '" + text + "' in " + where);
 }
 
 inline MatchScope matchScopeFromString(const std::string& text, const std::string& where)
@@ -611,185 +598,16 @@ inline MetadataSchema parseMetadataSchema(const nlohmann::json& root, const std:
     return schema;
 }
 
-/// The adapter-scoped body: one object whose key equals the `adapter` value
-/// (RFC 0019 §4). Each adapter fills only its own, and each requires exactly what it
-/// cannot work without.
-///
-/// A body naming a different adapter than the header is rejected rather than ignored: the
-/// two disagreeing means one of them is a typo, and guessing which produces an engine
-/// that ranks by something its author did not write.
-inline void parseHeuristicBody(const nlohmann::json& root,
-                               HeuristicDescriptor& heuristic,
-                               const std::string& where)
-{
-    const auto body = [&](const char* key) -> const nlohmann::json* {
-        const auto it = root.find(key);
-        return it == root.end() ? nullptr : &*it;
-    };
-
-    switch(heuristic.adapter)
-    {
-    case UhdAdapter::STATIC_ORDER:
-        if(const auto* object = body("static_order"); object != nullptr)
-        {
-            requireObject(*object, where + " 'static_order'");
-            requireKnownKeys(*object, {"order"}, where + " 'static_order'");
-            heuristic.staticOrderFields
-                = optionalStringArray(*object, "order", where + " 'static_order'");
-        }
-        // Absent is legal and means the default criteria, which is what an engine
-        // shipping no heuristic at all already gets.
-        if(heuristic.staticOrderFields.empty())
-        {
-            heuristic.staticOrderFields = {"priority", "id"};
-        }
-        break;
-
-    case UhdAdapter::NATIVE:
-    {
-        const auto* object = body("native");
-        if(object == nullptr)
-        {
-            fail("UHD adapter 'native' requires a 'native' body in " + where);
-        }
-        requireObject(*object, where + " 'native'");
-        requireKnownKeys(*object, {"symbol"}, where + " 'native'");
-        heuristic.nativeSymbol = requireString(*object, "symbol", where + " 'native'");
-        break;
-    }
-
-    case UhdAdapter::TREE_DATA:
-    case UhdAdapter::TABLE:
-    {
-        const char* key = heuristic.adapter == UhdAdapter::TREE_DATA ? "tree_data" : "table";
-        const auto* object = body(key);
-        if(object == nullptr)
-        {
-            fail("UHD adapter '" + std::string(key) + "' requires a '" + std::string(key)
-                 + "' body in " + where);
-        }
-        const std::string bodyWhere = where + " '" + key + "'";
-        requireObject(*object, bodyWhere);
-        requireKnownKeys(*object, {"artifact"}, bodyWhere);
-        heuristic.modelArtifactPath = requireString(*object, "artifact", bodyWhere);
-
-        // A model consumes features. Without a signature it would be handed an empty row
-        // and score every candidate identically, which reads as a working heuristic that
-        // has quietly stopped ranking.
-        if(heuristic.featuresSignature.empty())
-        {
-            fail("UHD adapter '" + std::string(key) + "' requires a non-empty "
-                 + "'features_signature' in " + where);
-        }
-        break;
-    }
-
-    // -Wswitch-default. Every enum member is handled above; uhdAdapterFromString
-    // rejects anything that is not one.
-    default:
-        break;
-    }
-}
-
-/// Parses a UHD: the universal header, then the adapter-scoped body whose key equals the
-/// adapter's own name (RFC 0019 §4).
-///
-/// Takes the file's path rather than a description of it, because a model artifact is a
-/// relative path and the directory it resolves against is only knowable here.
 inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
-                                                    const std::filesystem::path& path)
+                                                    const std::string& where)
 {
-    const std::string where = path.string();
-    requireKnownKeys(root,
-                     {"version",
-                      "id",
-                      "name",
-                      "adapter",
-                      "features_signature",
-                      "features_hash",
-                      "derived",
-                      "objective",
-                      "score",
-                      "static_order",
-                      "native",
-                      "tree_data",
-                      "table"},
-                     where);
+    requireKnownKeys(root, {"version", "id", "name", "kind", "payload"}, where);
 
     HeuristicDescriptor heuristic;
     heuristic.id = requireId(root, "id", where);
     heuristic.name = requireString(root, "name", where);
-    heuristic.adapter = uhdAdapterFromString(requireString(root, "adapter", where), where);
-    heuristic.baseDir = path.parent_path();
-
-    heuristic.featuresSignature = optionalStringArray(root, "features_signature", where);
-    if(const auto hash = root.find("features_hash"); hash != root.end())
-    {
-        heuristic.featuresHash = requireString(root, "features_hash", where);
-    }
-
-    if(const auto derived = root.find("derived"); derived != root.end())
-    {
-        if(!derived->is_array())
-        {
-            fail("'derived' must be an array in " + where);
-        }
-        for(const auto& entry : *derived)
-        {
-            const std::string entryWhere = where + " 'derived' entry";
-            requireObject(entry, entryWhere);
-            requireKnownKeys(entry, {"name", "expression"}, entryWhere);
-            heuristic.derived.push_back({requireString(entry, "name", entryWhere),
-                                         requireString(entry, "expression", entryWhere)});
-        }
-    }
-
-    // Defaulted rather than required: static_order scores nothing, so an objective would
-    // be a field with no meaning. RFC 0019 §4.1 requires it of any adapter that scores,
-    // and the per-adapter checks below enforce that.
-    if(const auto objective = root.find("objective"); objective != root.end())
-    {
-        heuristic.objective = requireString(root, "objective", where);
-        if(heuristic.objective != "max" && heuristic.objective != "min")
-        {
-            fail("UHD objective must be 'max' or 'min', got '" + heuristic.objective + "' in "
-                 + where);
-        }
-    }
-
-    if(const auto score = root.find("score"); score != root.end())
-    {
-        const std::string scoreWhere = where + " 'score'";
-        requireObject(*score, scoreWhere);
-        requireKnownKeys(*score, {"units", "calibrated", "transform"}, scoreWhere);
-        heuristic.score.units = requireString(*score, "units", scoreWhere);
-        heuristic.score.transform = requireString(*score, "transform", scoreWhere);
-        if(const auto calibrated = score->find("calibrated"); calibrated != score->end())
-        {
-            if(!calibrated->is_boolean())
-            {
-                fail("'calibrated' must be a boolean in " + scoreWhere);
-            }
-            heuristic.score.calibrated = calibrated->get<bool>();
-        }
-    }
-
-    // A calibrated score is comparable across engines, and RFC 0019 §11.3 defines that
-    // comparison on an absolute throughput metric -- necessarily higher-wins. A UHD
-    // claiming both is not expressing a preference a consumer could honour: it asks two
-    // engines to be ranked against each other while reporting their scores in opposite
-    // directions. Rejected at parse (RFC 0019.13 §15.1) rather than at comparison time,
-    // where the symptom would be an inverted cross-engine choice with nothing to blame.
-    //
-    // `min` on an uncalibrated score is ordinary and stays legal: a model trained on
-    // latency ranks ascending and simply declines cross-engine comparison.
-    if(heuristic.objective == "min" && heuristic.score.calibrated)
-    {
-        fail("UHD declares objective 'min' with a calibrated score in " + where
-             + "; a calibrated score is cross-engine comparable and must be 'max'");
-    }
-
-    parseHeuristicBody(root, heuristic, where);
+    heuristic.kind = heuristicKindFromString(requireString(root, "kind", where), where);
+    heuristic.payload = requireString(root, "payload", where);
     return heuristic;
 }
 
@@ -1291,24 +1109,6 @@ inline const T* findDescriptor(const DescriptorMap<T>& map, const DescriptorId& 
     return &it->second.descriptor;
 }
 
-/// The catalog entry a cross-reference names, or nullptr when it is missing or
-/// conflicted.
-///
-/// Same lookup as findDescriptor, returning the entry rather than the descriptor so a
-/// caller can reach the provenance settleCatalog() stamped -- the file the descriptor
-/// came from and the tree root it was found under. Neither is on the descriptor itself,
-/// because a descriptor built in memory has no file.
-template <typename T>
-inline const CatalogEntry<T>* findEntry(const DescriptorMap<T>& map, const DescriptorId& id)
-{
-    const auto it = map.find(id);
-    if(it == map.end() || it->second.conflicted)
-    {
-        return nullptr;
-    }
-    return &it->second;
-}
-
 /// What a pack's `kernelDescriptors` reference resolved to, or why it did not.
 struct KernelMatch
 {
@@ -1510,7 +1310,7 @@ inline constexpr std::array FILE_TYPES{
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.heuristics, parseHeuristicDescriptor(d, p), d, p);
+                 insertCatalogEntry(c.heuristics, parseHeuristicDescriptor(d, p.string()), d, p);
              }},
     FileType{SUFFIX_UED,
              1,
@@ -1878,18 +1678,14 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             continue;
         }
 
-        // Resolved through the entry, not the descriptor: a MODEL heuristic names a file,
-        // and the tree it was found under is the boundary that path may not cross. Only
-        // the entry carries it.
-        //
         // Only resolved when the UED names one. Naming a UHD no file defines still drops
         // the engine: the author asked for a model that did not ship, which is a broken
         // install rather than a deliberate declared-order ranking.
-        const CatalogEntry<HeuristicDescriptor>* heuristicEntry = nullptr;
+        const HeuristicDescriptor* heuristic = nullptr;
         if(engine.heuristicId.has_value())
         {
-            heuristicEntry = detail::findEntry(catalog.heuristics, *engine.heuristicId);
-            if(heuristicEntry == nullptr)
+            heuristic = detail::findDescriptor(catalog.heuristics, *engine.heuristicId);
+            if(heuristic == nullptr)
             {
                 HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                         << engine.name << "' names heuristic "
@@ -1933,12 +1729,9 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         DescriptorSet set;
         set.engine = engine;
         set.schema = *schema;
-        if(heuristicEntry != nullptr)
+        if(heuristic != nullptr)
         {
-            set.heuristic = heuristicEntry->descriptor;
-            // baseDir came from the file's own path at parse time; treeRoot is only known
-            // once the root that contributed the file has been settled.
-            set.heuristic->treeRoot = heuristicEntry->treeRoot;
+            set.heuristic = *heuristic;
         }
 
         // Keyed by id: deduplicates descriptors two packs share and orders them in one
@@ -2225,72 +2018,13 @@ inline std::vector<DescriptorSet>
         }
         // Nothing to pre-flight when the engine ships no UHD: declared-order ranking
         // resolves no symbol.
-        if(set.heuristic.has_value() && set.heuristic->adapter == UhdAdapter::NATIVE
-           && !ScoreRegistry::isRegistered(set.heuristic->nativeSymbol))
+        if(set.heuristic.has_value() && set.heuristic->kind == HeuristicKind::NATIVE
+           && !ScoreRegistry::isRegistered(set.heuristic->payload))
         {
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                     << set.engine.name << "' names unregistered score symbol '"
-                                    << set.heuristic->nativeSymbol << "'; dropping it");
+                                    << set.heuristic->payload << "'; dropping it");
             resolvable = false;
-        }
-
-        // A MODEL heuristic names a file, so it gets the two checks a path needs.
-        if(set.heuristic.has_value() && !set.heuristic->modelArtifactPath.empty())
-        {
-            std::error_code ignored;
-            const auto resolved = std::filesystem::weakly_canonical(
-                set.heuristic->baseDir / set.heuristic->modelArtifactPath, ignored);
-
-            // Containment first, and it drops rather than warns. The artifact is
-            // author-controlled input (RFC 0019 §16, "Drop-in trust"), so a payload that
-            // climbs out of the descriptor tree is an attempt to make the loader open a
-            // file the tree does not own -- not a deployment accident to degrade around.
-            //
-            // Bounded on treeRoot, not baseDir: one archive ships per arch shard at the
-            // shard root, so a descriptor nested inside a shard legitimately climbs out of
-            // its own folder. Anchoring on the folder would reject every nested descriptor,
-            // which is the defect IngestorKernelCode.hpp already had to fix for kernels.
-            const auto boundary = set.heuristic->treeRoot.empty()
-                                      ? set.heuristic->baseDir
-                                      : std::filesystem::weakly_canonical(
-                                            set.heuristic->treeRoot, ignored);
-            const std::string relative
-                = resolved.lexically_relative(boundary).generic_string();
-            if(resolved != boundary && (relative.empty() || relative.rfind("..", 0) == 0))
-            {
-                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                        << set.engine.name << "' names model artifact '"
-                                        << set.heuristic->modelArtifactPath
-                                        << "', which resolves to '" << resolved.string()
-                                        << "', outside the descriptor tree '"
-                                        << boundary.string() << "'; dropping it");
-                resolvable = false;
-            }
-            // A missing artifact drops the engine, like the other two. All three mean the
-            // descriptor asked for something that is not there, and none of them is a
-            // state a correctly built tree can reach: an unregistered symbol is a build
-            // fact, an escaping path is a trust fact, and an absent artifact is a
-            // packaging fact -- hkp_pack raises on it, so a tree that reaches the runtime
-            // missing one was not built by the packer or was damaged after it was.
-            //
-            // RFC 0019 §5 allows degrading to declared order instead, and that is what
-            // this used to do. It was the worse choice. An engine that quietly ranks by
-            // priority is indistinguishable from an engine that never had a model, so a
-            // dropped file surfaces as a performance regression nobody can attribute,
-            // months later, against a log line that scrolled past at startup. Dropping
-            // makes the packaging bug fail where it happened.
-            //
-            // The degrade path still exists for the case this cannot see: an artifact
-            // present but unloadable, which UhdKernelHeuristic::tryCreate turns into
-            // declared-order ranking rather than a throw.
-            else if(!std::filesystem::exists(resolved))
-            {
-                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                        << set.engine.name << "' names model artifact '"
-                                        << resolved.string()
-                                        << "', which is absent; dropping it");
-                resolvable = false;
-            }
         }
 
         // A name hashing onto an engine someone else already registered is dropped and the

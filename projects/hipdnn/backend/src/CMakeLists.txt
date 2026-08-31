@@ -108,21 +108,6 @@ hipdnn_enable_spdlog(hipdnn_backend_private)
 
 clang_tidy_check(hipdnn_backend_private)
 
-# RFC 0019 UHD selection. Gated with the kernel ingestor: both implement the
-# RFC 0017 descriptor family, both are experimental, and the UHD native adapter
-# resolves its scorer through the ingestor's NativeRegistry.
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    target_sources(
-        hipdnn_backend_private
-        PRIVATE
-        heuristics/uhd/EngineRegistry.cpp
-        heuristics/uhd/SelectionEngine.cpp
-        heuristics/uhd/UhdBuiltIn.cpp
-        heuristics/uhd/adapters/OnnxAdapter.cpp
-        heuristics/uhd/adapters/CustomLibraryAdapter.cpp
-    )
-endif()
-
 add_library(hipdnn_backend SHARED HipdnnBackend.cpp)
 
 hipdnn_generate_version_header(hipdnn_backend)
