@@ -461,9 +461,16 @@ size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
 
   // iters_per_tile == 1: pure tile-streaming (no K-split).  For non-batched
   // large-N streaming shapes, N-tiles have disjoint B data so DP's spatial
-  // locality wins when there are enough tiles to keep all CUs busy.
+  // locality wins -- but only over a bounded tile-count window:
+  //   * below 2*cu_count DP under-fills the GPU, so keep SK;
+  //   * above ~32*cu_count the DP grid is so large (hundreds of waves) that
+  //     launching `tiles` WGs costs more than SK tile-streaming's sequential
+  //     B access, so keep SK (a few CTAs each streaming many tiles).
+  // Measured: 16x512x32 M16/N884736 (tiles=1728, ~7 waves) -> DP is 2x faster;
+  //           16x448x32 M12/N33.5M   (tiles=74899, ~293 waves) -> DP is 1.4x slower.
   if (iters_per_tile <= 1) {
-    if (cu_count > 0 && tiles >= cu_count * 2) return tiles;
+    const size_t dp_upper = cu_count * streamk_hybrid_defaults_t::STREAMK_IPT1_DP_MAX_WAVES;
+    if (cu_count > 0 && tiles >= cu_count * 2 && tiles < dp_upper) return tiles;
     return sk_grid;
   }
 

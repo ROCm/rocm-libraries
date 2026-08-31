@@ -97,7 +97,7 @@ struct heuristic_defaults_t {
   static constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_ETP   = 10.0;
   static constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_SCALE = 0.2;
   static constexpr double NARROW_LOAD_ITER_PENALTY        = 500.0;
-  static constexpr double GRVW_ITER_PENALTY               = 50.0;
+  static constexpr double GRVW_ITER_PENALTY               = 0.0;
   static constexpr size_t EXACT_ONE_ITER_K_MIN           = 32;
   static constexpr double UNAMORTIZED_FILL_PENALTY       = 4.0;
   static constexpr double BATCHED_FILL_ITER_TARGET       = 4.0;
@@ -121,6 +121,12 @@ struct streamk_hybrid_defaults_t {
   static constexpr size_t MIN_TILES_FOR_DYNAMIC                  = 480;
   static constexpr int    MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC = 3;
   static constexpr double TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY   = 8.41;
+  // Upper bound (in DP waves = tiles/cu_count) for forcing DP on ipt==1
+  // tile-streaming shapes.  Below this the DP grid is small enough that spatial
+  // locality beats SK; above it the DP grid is too large (launch overhead) and
+  // SK tile-streaming wins.  Between the two measured points (7 waves -> DP,
+  // 293 waves -> SK) with margin.
+  static constexpr size_t STREAMK_IPT1_DP_MAX_WAVES              = 32;
 };
 
 /**
