@@ -24,8 +24,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
-
 WAVESIZE_32 = 32
 
 
@@ -41,9 +39,7 @@ def _init_rocisa_gfx1250():
 
 @pytest.fixture(autouse=True)
 def _rocisa_gfx1250():
-    with preserve_rocisa_kernel_state():
-        _init_rocisa_gfx1250()
-        yield
+    _init_rocisa_gfx1250()
 
 
 def _make_writer(has_cluster_barrier=True):

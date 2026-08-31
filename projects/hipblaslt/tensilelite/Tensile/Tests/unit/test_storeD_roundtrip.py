@@ -47,17 +47,11 @@ from gpu_test_helpers import (
     hip,
     hip_check,
     init_rocisa,
-    preserve_rocisa_kernel_state,
     GPU_MARKS,
 )
 
 pytestmark = GPU_MARKS
 
-
-@pytest.fixture(autouse=True)
-def _preserve_rocisa_state():
-    with preserve_rocisa_kernel_state():
-        yield
 
 # ---------------------------------------------------------------------------
 # Test configurations: (mt_a, mt_b, depth_u)

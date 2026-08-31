@@ -26,16 +26,13 @@ All tests are pure-assert (no syrupy snapshots) and CPU-only.
 import shutil
 
 import pytest
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
 def _rocisa_gfx942():
-    with preserve_rocisa_kernel_state():
-        _init_rocisa()
-        yield
+    _init_rocisa()
 
 # Force full Tensile package init before component imports.
 import rocisa  # noqa: F401

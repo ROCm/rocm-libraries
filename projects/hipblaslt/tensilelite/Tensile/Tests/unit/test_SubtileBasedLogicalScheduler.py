@@ -34,13 +34,6 @@ from Tensile.Components.Subtile.LogicalScheduler import (
 )
 from unittest.mock import MagicMock
 from rocisa.code import Module
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
-
-
-@pytest.fixture(autouse=True)
-def _preserve_rocisa_state():
-    with preserve_rocisa_kernel_state():
-        yield
 
 
 def makeTileInfo(tc, kernel):

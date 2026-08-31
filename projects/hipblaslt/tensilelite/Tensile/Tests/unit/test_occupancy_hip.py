@@ -31,13 +31,6 @@ from occupancy_hip_testutil import HIP_AVAILABLE, _hip, _hip_check
 from rocisa import rocIsa
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
-
-
-@pytest.fixture(autouse=True)
-def _preserve_rocisa_state():
-    with preserve_rocisa_kernel_state():
-        yield
 
 
 # ── GPU detection ───────────────────────────────────────────────────────────────
