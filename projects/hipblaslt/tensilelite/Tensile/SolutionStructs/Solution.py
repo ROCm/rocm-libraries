@@ -227,10 +227,16 @@ def _subtilePerWaveMTiles(mtTiles, stack, wgSize):
 # touches.  Taller is therefore better, up to a full line.
 _SUBTILE_STACK_SIZES = (16, 8, 4, 2)
 _SUBTILE_STACK_MIN = 2
+_SUBTILE_STACK_FULL_LINE = 16
 
-# Rounding the strip up to a taller stack fetches padding tiles that are written
-# to LDS and never read.  Past this ratio the wasted bandwidth outweighs the
-# cache-line gain (measured across the fp4 subtile benchmark suite).
+# Rounding a tile up to a taller stack pads it with tiles that are fetched and
+# written to LDS but never read, so the operand's global traffic and its LDS
+# footprint both grow by exactly the rounding ratio.  What that buys is bounded:
+# utilization is stack/_SUBTILE_STACK_FULL_LINE and stops improving once the
+# strip covers a whole line, and much of the gap it closes is served from cache
+# anyway, since the lines a narrow strip half-uses are finished by other lanes
+# and waves.  So the padding is a certain cost against a capped, partly-redundant
+# benefit; admit it only while it stays a small fraction of the operand.
 _SUBTILE_STACK_MAX_PAD_RATIO = 1.25
 
 
@@ -245,7 +251,7 @@ def _subtileStackForTile(mtTiles):
                _SUBTILE_STACK_MIN)
   if mtTiles <= 1:
     return exact
-  roundedUp = min(max(_SUBTILE_STACK_SIZES), 1 << (mtTiles - 1).bit_length())
+  roundedUp = min(_SUBTILE_STACK_FULL_LINE, 1 << (mtTiles - 1).bit_length())
   if roundedUp > exact and roundedUp <= mtTiles * _SUBTILE_STACK_MAX_PAD_RATIO:
     return roundedUp
   return exact
