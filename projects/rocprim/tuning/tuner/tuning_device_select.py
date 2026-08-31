@@ -33,30 +33,27 @@ class TunerSelect(BaseTuner):
     def __init__(self, args: TunerArgs):
         super().__init__(args)
 
-    def _get_tune_params(self) -> OrderedDict:
+    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()
+        element_size = TYPE_CONFIGS[key_type].size
+        max_items = min(64 // element_size, 32)
         params["block_size_x"] = list(range(128, 513, 64))
-        params["ipt"] = list(range(4, 65, 1))
+        params["ipt"] = list(range(4, max_items + 1, 1))
         return params
-
-    def _get_key_type(self) -> str:
-        return "data_type"
 
     def _get_restrictions(
         self, key_type: str, value_type: Optional[str] = None
     ) -> Callable[[dict], bool]:
         """Constraints for what parameter combinations are valid during tuning"""
-        element_size = TYPE_CONFIGS[key_type].size
-        max_items = min(64 // element_size, 32)
 
+        # No constraints needed al handled in the parameters.
         def validate(params):
-            ipt = params["ipt"]
-
-            # Item per thread constraint
-            if ipt > max_items:
-                return False
             return True
 
         return validate
+
+    def _get_key_type(self) -> str:
+        return "data_type"
+

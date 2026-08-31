@@ -210,7 +210,7 @@ class BaseTuner(ABC):
         cls(defaults).tune_all()
 
     @abstractmethod
-    def _get_tune_params(self) -> OrderedDict:
+    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         pass
@@ -406,7 +406,7 @@ class BaseTuner(ABC):
             "kernel_source": wrapper_string,
             "problem_size": self._get_problem_size(key_type, value_type),
             "arguments": [np.uint64(self.bytes_size)],
-            "tune_params": self._get_tune_params(),
+            "tune_params": self._get_tune_params(key_type, value_type),
             "strategy": self.strategy,
             "grid_div_x": self._get_grid_div_x(),
             "cache": str(self._get_cache_file_path(key_type, value_type)),
@@ -462,7 +462,7 @@ class BaseTuner(ABC):
             )
             cache_file.mkdir(parents=True, exist_ok=True)
             cache_file = cache_file / self._get_cache_file_name(key_type, value_type)
-            store_output_file(str(cache_file), results, self._get_tune_params())
+            store_output_file(str(cache_file), results, self._get_tune_params(key_type, value_type))
 
         with open(cache_file, "r") as f:
             cache_dict = json.load(f)
