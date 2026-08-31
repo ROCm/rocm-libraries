@@ -31,13 +31,13 @@ namespace
 
     using FakeFs = std::map<std::string, std::string>;
 
-    char const kDefaultMountinfo[] =
-        "100 90 0:1 / /sys/fs/cgroup rw shared:1 - cgroup2 cgroup2 rw\n"
-        "101 90 0:2 / /sys/fs/cgroup/memory rw shared:1 - cgroup memory rw\n";
+    char const kDefaultMountinfo[]
+        = "100 90 0:1 / /sys/fs/cgroup rw shared:1 - cgroup2 cgroup2 rw\n"
+          "101 90 0:2 / /sys/fs/cgroup/memory rw shared:1 - cgroup memory rw\n";
 
     size_t headroom(cgroup_paths const& paths,
-                    FakeFs const&         files,
-                    char const*           mountinfo = kDefaultMountinfo)
+                    FakeFs const&       files,
+                    char const*         mountinfo = kDefaultMountinfo)
     {
         return cgroup_available_memory_from(paths, mountinfo, files);
     }
@@ -71,10 +71,10 @@ INSTANTIATE_TEST_SUITE_P(
     CgroupParse,
     ParseProcSelfCgroupTest,
     testing::Values(
-        ParseProcSelfCgroupCase{"v2_unified", "0::/user.slice/app.slice\n", "/user.slice/app.slice", ""},
-        ParseProcSelfCgroupCase{"v1_memory_only", "5:memory:/docker/abc\n", "", "/docker/abc"},
         ParseProcSelfCgroupCase{
-            "v1_comounted", "12:memory,cpu:/same/path\n", "", "/same/path"},
+            "v2_unified", "0::/user.slice/app.slice\n", "/user.slice/app.slice", ""},
+        ParseProcSelfCgroupCase{"v1_memory_only", "5:memory:/docker/abc\n", "", "/docker/abc"},
+        ParseProcSelfCgroupCase{"v1_comounted", "12:memory,cpu:/same/path\n", "", "/same/path"},
         ParseProcSelfCgroupCase{
             "cpu_only_path_with_memory_substring", "12:cpu:/foo/memory/bar\n", "", ""},
         ParseProcSelfCgroupCase{"hybrid",
@@ -87,8 +87,7 @@ INSTANTIATE_TEST_SUITE_P(
         // Only a trailing carriage return is stripped; one inside an entry is
         // part of the path and must not truncate or drop the entry.
         ParseProcSelfCgroupCase{"embedded_cr_in_v2_path", "0::/we\rird\n", "/we\rird", ""},
-        ParseProcSelfCgroupCase{
-            "embedded_cr_in_v1_path", "5:memory:/we\rird\n", "", "/we\rird"}),
+        ParseProcSelfCgroupCase{"embedded_cr_in_v1_path", "5:memory:/we\rird\n", "", "/we\rird"}),
     [](testing::TestParamInfo<ParseProcSelfCgroupCase> const& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
@@ -134,29 +133,28 @@ TEST(ParseCgroupSizeToken, RejectsEmpty)
 
 TEST(ParseMountinfo, FindsCoMountedV1MemoryController)
 {
-    char const mountinfo[] =
-        "200 199 0:55 / /sys/fs/cgroup/cpu,memory rw shared:1 - cgroup cpu,memory rw,memory,cpu\n";
-    auto mounts = parse_mountinfo(mountinfo);
+    char const mountinfo[] = "200 199 0:55 / /sys/fs/cgroup/cpu,memory rw shared:1 - cgroup "
+                             "cpu,memory rw,memory,cpu\n";
+    auto       mounts      = parse_mountinfo(mountinfo);
     ASSERT_EQ(mounts.size(), 1u);
     EXPECT_EQ(mounts[0].mountpoint, "/sys/fs/cgroup/cpu,memory");
 
     cgroup_paths paths;
-    paths.v1 = "/docker/abc";
+    paths.v1          = "/docker/abc";
     auto const* mount = pick_cgroup_mount(mounts, false, paths.v1);
     ASSERT_NE(mount, nullptr);
-    EXPECT_EQ(resolve_cgroup_directory(*mount, paths.v1),
-              "/sys/fs/cgroup/cpu,memory/docker/abc");
+    EXPECT_EQ(resolve_cgroup_directory(*mount, paths.v1), "/sys/fs/cgroup/cpu,memory/docker/abc");
 }
 
 TEST(ResolveCgroupDirectory, NonRootV2MountRoot)
 {
-    char const mountinfo[] =
-        "300 299 0:56 /user.slice /sys/fs/cgroup/user.slice rw shared:1 - cgroup2 cgroup2 rw\n";
+    char const mountinfo[]
+        = "300 299 0:56 /user.slice /sys/fs/cgroup/user.slice rw shared:1 - cgroup2 cgroup2 rw\n";
     auto mounts = parse_mountinfo(mountinfo);
     ASSERT_EQ(mounts.size(), 1u);
 
     cgroup_paths paths;
-    paths.v2 = "/user.slice/app";
+    paths.v2          = "/user.slice/app";
     auto const* mount = pick_cgroup_mount(mounts, true, paths.v2);
     ASSERT_NE(mount, nullptr);
     EXPECT_EQ(resolve_cgroup_directory(*mount, paths.v2), "/sys/fs/cgroup/user.slice/app");
@@ -254,9 +252,9 @@ TEST(CgroupHeadroomFrom, V1HierarchyUsesLegacyFilenames)
 
 TEST(CgroupHeadroomFrom, CoMountedV1Mountpoint)
 {
-    char const mountinfo[] =
-        "200 199 0:55 / /sys/fs/cgroup/cpu,memory rw shared:1 - cgroup cpu,memory rw,memory,cpu\n";
-    FakeFs files;
+    char const mountinfo[] = "200 199 0:55 / /sys/fs/cgroup/cpu,memory rw shared:1 - cgroup "
+                             "cpu,memory rw,memory,cpu\n";
+    FakeFs     files;
     files["/sys/fs/cgroup/cpu,memory/docker/abc/memory.limit_in_bytes"] = "1073741824";
     files["/sys/fs/cgroup/cpu,memory/docker/abc/memory.usage_in_bytes"] = "536870912";
 
@@ -267,8 +265,8 @@ TEST(CgroupHeadroomFrom, CoMountedV1Mountpoint)
 
 TEST(CgroupHeadroomFrom, NonRootV2MountRoot)
 {
-    char const mountinfo[] =
-        "300 299 0:56 /user.slice /sys/fs/cgroup/user.slice rw shared:1 - cgroup2 cgroup2 rw\n";
+    char const mountinfo[]
+        = "300 299 0:56 /user.slice /sys/fs/cgroup/user.slice rw shared:1 - cgroup2 cgroup2 rw\n";
     FakeFs files;
     files["/sys/fs/cgroup/user.slice/app/memory.max"]     = "1073741824";
     files["/sys/fs/cgroup/user.slice/app/memory.current"] = "536870912";
@@ -307,8 +305,8 @@ TEST(CgroupProbeLiveIntegration, SkippedOnNonLinux)
 
 TEST(CgroupProbeLiveIntegration, LiveMatchesFromUsingRealProcFiles)
 {
-    std::string const cgroup     = read_proc_file("/proc/self/cgroup");
-    std::string const mountinfo  = read_proc_file("/proc/self/mountinfo");
+    std::string const  cgroup    = read_proc_file("/proc/self/cgroup");
+    std::string const  mountinfo = read_proc_file("/proc/self/mountinfo");
     cgroup_paths const paths     = parse_proc_self_cgroup(cgroup);
     size_t const       from_live = cgroup_available_memory_from(paths, mountinfo);
 
@@ -321,8 +319,8 @@ TEST(CgroupProbeLiveIntegration, ResolvedV2DirectoryHasMemoryFiles)
     if(paths.v2.empty())
         GTEST_SKIP() << "Process has no cgroup v2 line";
 
-    auto const mounts = parse_mountinfo(read_proc_file("/proc/self/mountinfo"));
-    auto const* mount = pick_cgroup_mount(mounts, true, paths.v2);
+    auto const  mounts = parse_mountinfo(read_proc_file("/proc/self/mountinfo"));
+    auto const* mount  = pick_cgroup_mount(mounts, true, paths.v2);
     if(!mount)
         GTEST_SKIP() << "No cgroup2 mount covers " << paths.v2;
 
@@ -338,8 +336,8 @@ TEST(CgroupProbeLiveIntegration, ResolvedV1MemoryDirectoryHasLimitFiles)
     if(paths.v1.empty())
         GTEST_SKIP() << "Process has no cgroup v1 memory line";
 
-    auto const mounts = parse_mountinfo(read_proc_file("/proc/self/mountinfo"));
-    auto const* mount = pick_cgroup_mount(mounts, false, paths.v1);
+    auto const  mounts = parse_mountinfo(read_proc_file("/proc/self/mountinfo"));
+    auto const* mount  = pick_cgroup_mount(mounts, false, paths.v1);
     if(!mount)
         GTEST_SKIP() << "No v1 memory mount covers " << paths.v1;
 
