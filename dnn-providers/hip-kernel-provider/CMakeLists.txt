@@ -170,6 +170,22 @@ if(ENABLE_HIP_FLASH2_ENGINE)
             ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/tools/partial_tile_probe.cpp)
         target_link_libraries(hip_flash2_partial_tile_probe PRIVATE hip::host)
 
+        # Split-K object: a different pair of entry points (per-chunk split plus
+        # merge), not another tiling, so it is built from its own source and
+        # named by tag rather than by w<waves>q<qg>k<kg>.
+        set(_f2_splitk_src
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/HipFlash2FwdPlanVariantSplitK.hip)
+        set(_f2_splitk_co ${_f2_out}/hip_flash2_fwd_${_f2_arch}_splitk.co)
+        add_custom_command(
+            OUTPUT ${_f2_splitk_co}
+            COMMAND ${HIP_FLASH2_HIPCC} --genco -O3 -std=c++17
+                    --offload-arch=${_f2_arch}
+                    ${_f2_splitk_src} -o ${_f2_splitk_co}
+            DEPENDS ${_f2_splitk_src}
+            COMMENT "Flash2: building split-K object (split + merge)"
+            VERBATIM)
+        list(APPEND _f2_targets ${_f2_splitk_co})
+
         add_custom_target(hip_flash2_variants
             DEPENDS ${_f2_targets}
             COMMENT "Regenerating all Flash2 kernel variant objects")

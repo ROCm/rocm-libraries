@@ -20,14 +20,16 @@ HipFlash2FwdPlan::HipFlash2FwdPlan(HipModuleGuard kernel, Flash2FwdParams params
 
 size_t HipFlash2FwdPlan::getWorkspaceSize(const Handle& /*handle*/) const
 {
-    // Flash-Attention 2 V7 uses only registers and LDS -- zero global workspace.
-    return 0;
+    // Single-pass uses only registers and LDS. Split-K needs fp32 partials:
+    // po[B*H][splitK][Sq][D] plus per-chunk m and l, sized by the same helper
+    // the builder used, so the two can never disagree.
+    return _params.workspaceBytes;
 }
 
 void HipFlash2FwdPlan::execute(const Handle& handle,
                                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                uint32_t numDeviceBuffers,
-                               void* /*workspace*/) const
+                               void* workspace) const
 {
     // -- 1. Build UID -> device pointer map ------------------------------------
     std::unordered_map<int64_t, void*> uidToPtrMap;
@@ -117,7 +119,114 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
     // too many fails with hipErrorLaunchFailure (719).
     const unsigned int blockDim = _params.blockDim;
 
-    // -- 4. Dispatch -----------------------------------------------------------
+    // -- 4. Split-K path -------------------------------------------------------
+    // Two launches on one stream: the split pass writes fp32 partials per KV
+    // chunk, the merge pass combines them with the exact online-softmax
+    // rescale. Same-stream ordering is the synchronisation -- no explicit
+    // barrier needed (SdpaBwdPlan relies on the same property).
+    if(_params.splitK > 1)
+    {
+        if(workspace == nullptr)
+        {
+            const std::string msg
+                = "HipFlash2FwdPlan::execute -- split-K requires a workspace of "
+                  + std::to_string(_params.workspaceBytes)
+                  + " bytes but the caller passed nullptr. Query getWorkspaceSize() "
+                    "and pass the allocation on the variant pack.";
+            HIPDNN_PLUGIN_LOG_ERROR(msg);
+            throw std::runtime_error(msg);
+        }
+        if(_kernel.mergeFunction() == nullptr)
+        {
+            const std::string msg
+                = "HipFlash2FwdPlan::execute -- split-K selected but the merge kernel "
+                  "was not loaded";
+            HIPDNN_PLUGIN_LOG_ERROR(msg);
+            throw std::runtime_error(msg);
+        }
+
+        // Carve the workspace exactly as the merge kernel indexes it. No
+        // zeroing: chunks with no work still write m = -inf and l = 0, so
+        // every slot the merge reads has been initialised by the split pass.
+        const size_t rows
+            = static_cast<size_t>(_params.batch) * static_cast<size_t>(_params.num_heads_q)
+              * static_cast<size_t>(_params.splitK) * static_cast<size_t>(_params.seq_len_q);
+        auto* po = static_cast<float*>(workspace);
+        auto* pm = po + rows * static_cast<size_t>(_params.head_dim);
+        auto* pl = pm + rows;
+
+        Flash2SplitKernelArgs sargs{};
+        sargs.ptr_q = Q;
+        sargs.ptr_k = K;
+        sargs.ptr_v = V;
+        sargs.ptr_po = po;
+        sargs.ptr_pm = pm;
+        sargs.ptr_pl = pl;
+        sargs.batch = _params.batch;
+        sargs.num_heads_q = _params.num_heads_q;
+        sargs.num_heads_k = _params.num_heads_k;
+        sargs.seq_len_q = _params.seq_len_q;
+        sargs.seq_len_kv = _params.seq_len_kv;
+        sargs.head_dim = _params.head_dim;
+        sargs.scale = args.scale;
+        sargs.causal = args.causal;
+        sargs.nsplit = _params.splitK;
+        sargs.q_stride_batch = args.q_stride_batch;
+        sargs.q_stride_head = args.q_stride_head;
+        sargs.q_stride_seq = args.q_stride_seq;
+        sargs.k_stride_batch = args.k_stride_batch;
+        sargs.k_stride_head = args.k_stride_head;
+        sargs.k_stride_seq = args.k_stride_seq;
+        sargs.v_stride_batch = args.v_stride_batch;
+        sargs.v_stride_head = args.v_stride_head;
+        sargs.v_stride_seq = args.v_stride_seq;
+
+        // Split grid: (query tiles, batch*heads, chunks). Note blockIdx.y is
+        // the fused batch-head pair here, unlike the single-pass kernel which
+        // takes batch and head as separate grid dimensions.
+        const unsigned int splitGridX
+            = (static_cast<unsigned>(_params.seq_len_q) + _params.qPerCta - 1u) / _params.qPerCta;
+        const unsigned int bh
+            = static_cast<unsigned>(_params.batch) * static_cast<unsigned>(_params.num_heads_q);
+        if(!launchFlash2SplitKernel(_kernel.function(),
+                                    sargs,
+                                    splitGridX,
+                                    bh,
+                                    static_cast<unsigned>(_params.splitK),
+                                    _params.blockDim,
+                                    handle.getStream()))
+        {
+            throw std::runtime_error("HipFlash2FwdPlan::execute: split kernel launch failed");
+        }
+
+        Flash2MergeKernelArgs margs{};
+        margs.ptr_po = po;
+        margs.ptr_pm = pm;
+        margs.ptr_pl = pl;
+        margs.ptr_o = O;
+        margs.batch = _params.batch;
+        margs.num_heads_q = _params.num_heads_q;
+        margs.seq_len_q = _params.seq_len_q;
+        margs.head_dim = _params.head_dim;
+        margs.nsplit = _params.splitK;
+        margs.o_stride_batch = args.o_stride_batch;
+        margs.o_stride_head = args.o_stride_head;
+        margs.o_stride_seq = args.o_stride_seq;
+
+        // Merge: 4 query rows per 256-thread CTA.
+        constexpr unsigned int K_MERGE_ROWS_PER_CTA = 4;
+        const unsigned int mergeGridX
+            = (static_cast<unsigned>(_params.seq_len_q) + K_MERGE_ROWS_PER_CTA - 1u)
+              / K_MERGE_ROWS_PER_CTA;
+        if(!launchFlash2MergeKernel(
+               _kernel.mergeFunction(), margs, mergeGridX, bh, handle.getStream()))
+        {
+            throw std::runtime_error("HipFlash2FwdPlan::execute: merge kernel launch failed");
+        }
+        return;
+    }
+
+    // -- 5. Single-pass dispatch -----------------------------------------------
     // I5: propagate launch failure so callers see a hard error.
     const bool ok = launchFlash2Kernel(
         _kernel.function(), args, gridX, gridY, gridZ, blockDim, handle.getStream());
