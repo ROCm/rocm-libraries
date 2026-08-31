@@ -53,3 +53,4 @@ BenchmarkProblems:
           # at both W=2 and W=4. Override with --fused-a2a-am to leave a local
           # tail. M is the feature (A2A) dim, N the token dim.
           - Exact: [3072, 512, 1, 2048]
+          - Exact: [3072, 511, 1, 2048]
