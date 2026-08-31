@@ -3,6 +3,42 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.1 for ROCm 10.1.0
+
+### Resolved Issues
+* [Conv] Fixed silently incorrect results from the grouped backward-weights CK xdlops solver when a tensor's element extent exceeds INT_MAX but its individual lengths and strides still fit int32; such problems now use a large-tensor (int64) CK instance instead of overflowing int32 indexing.
+* [Conv] Fixed a HIPRTC compilation failure in the ConvDepthwiseFwd3D (gfx942/gfx950) FP16/BFP16 solver.
+* [BatchNorm] Fixed MIOpen#3900 by implementing Welford's algorithm in FwdTrainSpatial variant 1
+
+### Added
+
+* Added support for building kernels with debug symbols. Set `MIOPEN_DEBUG_SYMBOLS_KERNEL=1` to add debug symbols.
+* [BatchNorm] Implements Welford's algorithm for calculating variance in FwdTrainSpatial variant 1
+
+
+### Removed
+* Removed disabled convolution solver `ConvCkIgemmFwdV6r1DlopsNchw`.
+* Removed disabled convolution solver `ConvHipImplicitGemmBwdDataV1R1Xdlops`.
+* Removed disabled convolution solver `ConvHipImplicitGemmBwdDataV4R1`.
+
+## MIOpen 3.6.0 for ROCm 10.0.0
+### Added
+* [Conv] Added gfx950 (MI350X/MI355X) 7x7 depthwise forward and backward-data convolution support (fp16/bf16), fixing a slow fallback-to-naive-kernel regression in ConvNeXt-style depthwise convolutions.
+
+### Changed
+* [Conv] Restored gfx12x support in the Winograd Rage solver, recovering performance that regressed when earlier gfx12 support was reverted.
+* [Conv] Refreshed the gfx1100, gfx1102, and gfx1201 (Navi) SystemDBs with updated tuned find/perf-database entries.
+* [Conv] Refreshed the gfx950 SystemDB with additional tuned entries to cover more models.
+* [Conv] Naive convolution solvers are now time-bounded during find when a non-naive solver has already succeeded. The warmup run is launched on a separate stream with a budget of 3x the best non-naive time; if it exceeds this budget the solver is skipped. Set `MIOPEN_NAIVE_TIMEOUT=0` to disable this behavior.
+
+### Resolved Issues
+* [BatchNorm] Fixed an off-by-stride indexing bug in the backward CalcStats mean/variance remainder loop that caused a ~1% systematic bias in NCHW batch normalization backward results.
+* [Conv][gfx1250] Fixed an integer overflow in tensor operation kernels for large allocations that could cause memory access faults.
+* [Conv] Fixed a naive convolution solver failure mode where a global work size of 2^32 or more work-items silently failed to launch and left a stale HIP error visible after Find returned success; such launches are now rejected up front.
+
+### Removed
+* Removed the OpenCL (OCL) backend; MIOpen now supports the HIP backend only.
+
 ## MIOpen 3.5.2 for ROCm 7.14.0
 ### Added
 * Added an informational log when the Composable Kernel (CK) dynamic library is loaded.
@@ -12,7 +48,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ### Changed
 * [Conv] Load the Composable Kernel (CK) dynamic library during handle creation (`miopenCreate`) instead of on first CK use, so the one-time library-load cost is paid at a predictable setup point rather than as an unpredictable mid-run stall.
-* [Conv] Naive convolution solvers are now skipped by default during find when any non-naive solver succeeds across any algorithm. Set `MIOPEN_NAIVE_DISABLE_IF_ALT=0` to restore the previous behavior.
 * [Conv] Refreshed the gfx942 SystemDB with updated tuned entries from recent perf-eval runs.
 * [Conv] Refined the 2D AI heuristics (Tunanet solver selection and kernel-tuning-network candidate ranking) with feature-engineered inputs for gfx942 and gfx950, improving selection for grouped implicit-GEMM convolutions.
 

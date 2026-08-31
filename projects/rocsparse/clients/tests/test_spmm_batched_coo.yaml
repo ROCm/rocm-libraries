@@ -511,7 +511,7 @@ Tests:
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  spmm_alg: [rocsparse_spmm_alg_coo_segmented_atomic]
+  spmm_alg: [rocsparse_spmm_alg_coo_atomic, rocsparse_spmm_alg_coo_segmented, rocsparse_spmm_alg_coo_segmented_atomic]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [nos4]

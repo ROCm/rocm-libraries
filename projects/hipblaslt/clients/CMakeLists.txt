@@ -30,6 +30,7 @@ add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
 if(HIPBLASLT_ENABLE_BLIS)
     target_link_libraries(hipblaslt-clients-common PUBLIC BLIS::BLIS)
+    target_compile_definitions(hipblaslt-clients-common PUBLIC HIPBLASLT_ENABLE_BLIS)
 endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC

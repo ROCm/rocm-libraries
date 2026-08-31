@@ -411,18 +411,23 @@ rocsparse_status rocsparse_csric0_clear(rocsparse_handle handle, rocsparse_mat_i
 *  \p rocsparse_csric0 computes the incomplete Cholesky factorization with 0 fill-ins
 *  and no pivoting of a sparse \f$m \times m\f$ CSR matrix \f$A\f$, such that
 *  \f[
-*    A \approx LL^T
+*    A \approx LL^H
 *  \f]
 *  where the lower triangular matrix \f$L\f$ is computed using:
 *  \f[
 *    L_{ij} = \left\{
 *    \begin{array}{ll}
-*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2}},   & \text{if i == j} \\
-*        \frac{1}{L_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times L_{jk}), & \text{if i > j}
+*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2}},   & \text{if i == j} \\
+*        \frac{1}{L_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times \overline{L_{jk}}), & \text{if i > j}
 *    \end{array}
 *    \right.
 *  \f]
 *  for each entry found in the CSR matrix \f$A\f$.
+*
+*  \note
+*  For complex data types this is the Hermitian Cholesky factorization \f$A \approx L L^H\f$ (note the
+*  conjugation in the formula above). For real data types \f$L^H = L^T\f$, so it reduces to the standard
+*  \f$A \approx L L^T\f$.
 *
 *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
 *  determine the size of the required temporary storage buffer by calling
@@ -436,7 +441,7 @@ rocsparse_status rocsparse_csric0_clear(rocsparse_handle handle, rocsparse_mat_i
 *
 *  When computing the Cholesky factorization, it is possible that \f$L_{jj} == 0\f$, which would result in a division by zero.
 *  This could occur from either \f$A_{jj}\f$ not existing in the sparse CSR matrix (referred to as a structural zero) or because
-*  \f$A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky
+*  \f$A_{jj} - \sum_{k=0}^{j-1}\left| L_{jk} \right|^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky
 *  factorization on the following matrix:
 *  \f[
 *    \begin{bmatrix}
@@ -560,7 +565,7 @@ rocsparse_status rocsparse_csric0_clear(rocsparse_handle handle, rocsparse_mat_i
 *  \par Example
 *  Consider the sparse \f$m \times m\f$ matrix \f$A\f$, stored in the CSR
 *  storage format. The following example computes the incomplete Cholesky factorization
-*  \f$M \approx LL^T\f$ and solves the preconditioned system \f$My = x\f$.
+*  \f$M \approx LL^H\f$ and solves the preconditioned system \f$My = x\f$.
 *  \snippet example_rocsparse_csric0.cpp doc example
 */
 /**@{*/

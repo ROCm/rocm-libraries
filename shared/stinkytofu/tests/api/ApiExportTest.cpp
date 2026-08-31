@@ -60,6 +60,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
@@ -71,14 +72,18 @@
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
+#include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 
 using namespace stinkytofu;
 
@@ -236,11 +241,15 @@ TEST(ApiExport, GetGfxArchID) {
 
 TEST(ApiExport, PassFactories) {
     EXPECT_NE(createStinkyDAGSchedulerPass(), nullptr);
+    EXPECT_NE(createStinkyMergeBarrierPass(), nullptr);
     EXPECT_NE(createSetMatrixReusePass(), nullptr);
     EXPECT_NE(createStinkyBuildImplicitDependencyPass(), nullptr);
     EXPECT_NE(createStinkyRemoveWaitCntPass(), nullptr);
+    EXPECT_NE(createRemoveDscntPass(), nullptr);
     EXPECT_NE(createStinkyRemoveNopPass(), nullptr);
     EXPECT_NE(createStinkyWaitCntInsertionPass(), nullptr);
+    EXPECT_NE(createGfx1250HazardPass(), nullptr);
+    EXPECT_NE(createWaitAwareScheduleRepairPass(), nullptr);
     EXPECT_NE(createBuildUseDefChainPass(true, false), nullptr);
     EXPECT_NE(createCFGBuilderPass(), nullptr);
     EXPECT_NE(createDumpStinkyModulePass({}), nullptr);
@@ -260,6 +269,7 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createInsertVgprMsbPass(), nullptr);
     EXPECT_NE(createLongBranchLoweringPass(), nullptr);
     EXPECT_NE(createInsertClusterBarrierPass(), nullptr);
+    EXPECT_NE(createTDMLoadWaveSyncPass(), nullptr);
     EXPECT_NE(createRemoveWaitAluPass(), nullptr);
     EXPECT_NE(createInsertWaitAluPass(), nullptr);
 }
