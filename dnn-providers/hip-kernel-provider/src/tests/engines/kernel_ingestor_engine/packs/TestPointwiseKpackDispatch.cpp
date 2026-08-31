@@ -34,6 +34,7 @@
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "TestDescriptorRoot.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -67,9 +68,7 @@ using hip_kernel_provider::kernel_ingestor_engine::testing::matchesGraph;
 using hip_kernel_provider::kernel_ingestor_engine::testing::POINTWISE_ADD;
 using hip_kernel_provider::kernel_ingestor_engine::testing::testDeviceProperties;
 
-/// Where this build stages the descriptors it packed, one subdirectory per arch. Same
-/// value main.cpp points the binary at.
-constexpr const char* PACKED_DESCRIPTOR_ROOT = HIPDNN_TEST_DESCRIPTOR_DIR;
+using hip_kernel_provider::testing::packedFixtureRoot;
 
 /// The packaged descriptor the [GPU] case takes its archive and toc_key from. Read out of
 /// the built file rather than written here: a copy would silently decouple this test
@@ -108,7 +107,7 @@ void findPackagedDirectory(hipDeviceProp_t& properties,
     const std::string reported = properties.gcnArchName;
     arch = reported.substr(0, reported.find(':'));
 
-    const std::filesystem::path candidate = std::filesystem::path(PACKED_DESCRIPTOR_ROOT) / arch;
+    const std::filesystem::path candidate = packedFixtureRoot() / arch;
     directory = std::filesystem::is_directory(candidate) ? candidate : std::filesystem::path{};
 }
 
@@ -454,7 +453,7 @@ TEST(TestPointwiseKpackDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
     if(packaged.empty())
     {
         GTEST_SKIP() << "nothing was packaged for this device (" << arch
-                     << "): " << std::filesystem::path(PACKED_DESCRIPTOR_ROOT) / arch
+                     << "): " << packedFixtureRoot() / arch
                      << " does not exist. Environmental -- the build packs per arch and this "
                         "device is outside GPU_TARGETS.";
     }

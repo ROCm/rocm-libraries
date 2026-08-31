@@ -113,7 +113,7 @@ std::shared_ptr<Graph> buildPointwiseAddGraph()
 }
 
 /// The directory the loader walks, derived the same way the loader derives it: from the
-/// plugin module, not from a path compiled in at configure time. HIPDNN_PACKAGED_FIXTURE_SUBDIR
+/// plugin module, not from a path compiled in at configure time. HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR
 /// is the single spelling of the arch_content layout, forwarded from the provider's
 /// CMakeLists so a rename cannot leave a stale copy here.
 std::filesystem::path packagedDescriptorRoot()
@@ -121,7 +121,7 @@ std::filesystem::path packagedDescriptorRoot()
     const std::filesystem::path pluginTarget(PLUGIN_PATH);
     return std::filesystem::weakly_canonical(getCurrentExecutableDirectory()
                                              / pluginTarget.parent_path()
-                                             / HIPDNN_PACKAGED_FIXTURE_SUBDIR);
+                                             / HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR);
 }
 
 /// Every .kpack under `root`, sorted so the choice of "first" is stable across runs.

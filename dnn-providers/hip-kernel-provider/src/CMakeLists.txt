@@ -74,11 +74,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # happened to exist, which also means nothing would ever exercise the installed copy.
     # Build-tree runs set HIPDNN_DESCRIPTOR_DIR instead; the test targets do it for ctest.
     target_compile_definitions(hip_kernel_provider_impl PRIVATE
-        HIPDNN_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
+        HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         # Container.cpp resolves this relative to the loaded .so first, so a
         # DESTDIR-staged, relocated, or repackaged install still finds its own
-        # descriptors; HIPDNN_DESCRIPTOR_INSTALL_DIR above is only its fallback.
-        HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
+        # descriptors; HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR above is only its fallback.
+        HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
     )
 
     # The kpack kernel source adapter. Listed here rather than beside Kernel.cpp above

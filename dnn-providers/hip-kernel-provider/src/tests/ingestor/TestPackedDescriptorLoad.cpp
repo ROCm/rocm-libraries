@@ -15,6 +15,8 @@
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
+#include "TestDescriptorRoot.hpp"
+
 /**
  * @file TestPackedDescriptorLoad.cpp
  * @brief The packer/loader seam: real packer OUTPUT read by the real loader.
@@ -54,9 +56,7 @@ using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog;
 using hipdnn_plugin_sdk::ingestor::resolveDescriptorSets;
 
-/// Where this build stages what it packed, one subdirectory per arch. The same define
-/// `TestKpackKernelLoader.cpp` reads; CMake sets it from `HIPDNN_DESCRIPTOR_BUILD_DIR`.
-constexpr const char* PACKED_DESCRIPTOR_ROOT = HIPDNN_TEST_DESCRIPTOR_DIR;
+using hip_kernel_provider::testing::packedFixtureRoot;
 
 /// Every per-arch shard this build produced.
 ///
@@ -69,7 +69,7 @@ std::vector<std::filesystem::path> packedArchShards()
     std::vector<std::filesystem::path> shards;
 
     std::error_code ec;
-    const std::filesystem::path root(PACKED_DESCRIPTOR_ROOT);
+    const std::filesystem::path& root = packedFixtureRoot();
     if(!std::filesystem::is_directory(root, ec))
     {
         return shards;
@@ -101,7 +101,7 @@ std::vector<std::filesystem::path> packedArchShards()
     const auto shards = packedArchShards();                                                \
     if((shards).empty())                                                                   \
     {                                                                                      \
-        GTEST_SKIP() << "no packed arch shard under " << PACKED_DESCRIPTOR_ROOT            \
+        GTEST_SKIP() << "no packed arch shard under " << packedFixtureRoot()               \
                      << " -- the packaging rule did not run. Configure with "              \
                         "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON, a discoverable hipcc, and a " \
                         "HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT.";                       \

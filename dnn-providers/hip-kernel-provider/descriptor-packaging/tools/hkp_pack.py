@@ -66,9 +66,11 @@ def _parse_args(argv):
     )
     p.add_argument(
         "--inter-root",
-        default=None,
-        help="Build-only intermediate root (never shipped). Defaults beside "
-        "out-root.",
+        required=True,
+        help="Build-only intermediate root (never shipped). Required: the caller "
+        "owns where compile scratch lands. Deriving it from --out-root would put "
+        "scratch inside whatever tree the output is written to, which is now a "
+        "staged, installable directory.",
     )
     p.add_argument(
         "--kpack-python-dir",
@@ -104,7 +106,7 @@ def main(argv=None):
         out_root=Path(args.out_root),
         hipcc=args.hipcc,
         rocm_kpack_dir=args.kpack_python_dir,
-        inter_root=Path(args.inter_root) if args.inter_root else None,
+        inter_root=Path(args.inter_root),
         rocke_wheel_stamp=args.rocke_wheel_stamp,
         group=args.group,
     )

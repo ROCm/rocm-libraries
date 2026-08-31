@@ -20,7 +20,7 @@ namespace
 /// rocm-kpack's own test archive, vendored beside this test. Its entries are placeholder
 /// payloads rather than HSA code objects, which is what makes it useful here: it is a
 /// real container, so the reader parses it, but nothing in it can load.
-constexpr const char* REAL_ARCHIVE = HIPDNN_TEST_KPACK_ARCHIVE;
+constexpr const char* REAL_ARCHIVE = HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE;
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 

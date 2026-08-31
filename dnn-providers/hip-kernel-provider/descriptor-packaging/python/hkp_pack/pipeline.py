@@ -675,7 +675,11 @@ def run_pipeline(
     flat = load_flat_input(source_root, log=log)
 
     if inter_root is None:
-        inter_root = out_root.parent / "hkp-intermediate"
+        raise HkpPackError(
+            "inter_root is required: pass --inter-root (or inter_root=) naming a "
+            "build-only directory. It must not be derived from out_root, which is a "
+            "staged output tree."
+        )
     inter_root = Path(inter_root)
 
     failures = {}

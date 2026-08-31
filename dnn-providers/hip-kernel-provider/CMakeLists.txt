@@ -37,9 +37,9 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE
     CACHE BOOL "Add paths to linker search and installed rpath"
 )
 
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
      ${CMAKE_CURRENT_SOURCE_DIR}/../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
@@ -153,9 +153,9 @@ endif()
 include(Tests)
 
 if(WIN32)
-    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "bin")
+    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "${CMAKE_INSTALL_BINDIR}")
 else()
-    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "lib")
+    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "${CMAKE_INSTALL_LIBDIR}")
 endif()
 
 set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR
@@ -167,23 +167,60 @@ message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # One spelling of the arch_content layout, shared by the staging rule, the install
-    # DESTINATION and the path compiled into the provider. A typo in a second copy would
-    # yield a provider that finds no descriptors, with no build error to say so.
-    #
-    # The provider's own directory is the root the loader walks; what sits under it is
-    # organizational. Today that is one folder per engine, and per-arch shards land as
-    # arch_content/hip-kernel-provider/<arch>/ once the packager emits them -- which needs
-    # no change here, since folder names mean nothing to the walk.
-    set(HIPDNN_DESCRIPTOR_SUBDIR "arch_content/hip-kernel-provider")
-    set(HIPDNN_DESCRIPTOR_BUILD_DIR
-        "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
+    # Production content.
+    set(HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR "arch_content/hip-kernel-provider")
+    set(HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR
+        "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
     )
-    # No HIPDNN_DESCRIPTOR_DIR is published for the suites: the integration binary loads
-    # the plugin and resolves the tree from that module, and the unit binary compiles this
-    # path in and applies it from main(). A CTest ENVIRONMENT entry would reach the
-    # install-time file too, naming a build directory that the installed tests cannot see.
-    message(STATUS "Kernel ingestor enabled: descriptors staged in ${HIPDNN_DESCRIPTOR_BUILD_DIR}")
+
+    # Test content lives in a sibling of arch_content/, under a provider segment for the
+    # same reason arch_content/ has one: the engines directory is shared by every provider,
+    # so an unqualified test_arch_content/ would let two providers collide on a set name --
+    # and would let this provider's install(DIRECTORY) ship another provider's content.
+
+    set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR "test_arch_content/hip-kernel-provider")
+    set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR
+        "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
+    )
+
+    # Test set 1: embedded_source + native descriptors. Copied, never packed -- an
+    # embedded_source descriptor names a kernel compiled into the plugin and JIT-compiled
+    # at load, and a native one names a C++ symbol, so neither has an arch dimension or
+    # anything for the packer to produce. Staged rather than read from the source tree so
+    # the build tree matches the install tree.
+    set(HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE "embedded_engine")
+    # Defined here, with the other path variables, and NOT beside the staging rule that
+    # writes it: add_subdirectory(src) runs before that rule, so a definition further down
+    # reaches the test subdirectories empty -- which resolves to no descriptor set at all
+    # and fails every test that needs one, with nothing in the build to say why.
+    set(HIPKERNELPROVIDER_EMBEDDED_ENGINE_BUILD_DIR
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_EMBEDDED_ENGINE}")
+    # Test set 2: authored hip, rewritten to kpack by the packer. Wired in
+    # descriptor-packaging/cmake/HkpPackaging.cmake.
+    set(HIPKERNELPROVIDER_TEST_SET_PACKED_FIXTURE "packed-fixture")
+    set(HIPKERNELPROVIDER_PACKED_FIXTURE_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors/packed-fixture-source")
+    set(HIPKERNELPROVIDER_PACKED_FIXTURE_BUILD_DIR
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_PACKED_FIXTURE}")
+
+    # The offset a test binary walks from its own directory to reach the test descriptor
+    # trees. Both trees hang off HIPDNN_PLUGIN_ROOTDIR and both binaries off
+    # CMAKE_INSTALL_BINDIR, under ${CMAKE_BINARY_DIR} in the build tree and under the
+    # prefix in the install tree, so this one offset reaches them in either -- and a
+    # binary carries no path belonging to the machine that configured it. Computed against
+    # a synthetic root because file(RELATIVE_PATH) needs two absolute paths, and only the
+    # relationship between them matters here.
+    set(_synthetic_root "/__hipkernelprovider_root__")
+    file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR
+         "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
+         "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}")
+
+    # No HIPDNN_DESCRIPTOR_DIR is published for the test suites: the integration binary loads
+    # the plugin and resolves the tree from that module, and the unit binary resolves it
+    # from its own module in main().
+    message(STATUS "Kernel ingestor enabled. Descriptors build into:")
+    message(STATUS "  production: ${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}")
+    message(STATUS "  test:       ${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}")
 endif()
 
 # ============================================================================
@@ -337,59 +374,35 @@ if(ENABLE_ASM_SDPA_ENGINE)
 endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    set(HIPDNN_DESCRIPTOR_SOURCE_DIR
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
+    # The embedded_engine test set. src/engines/kernel_ingestor_engine/descriptors/ is the
+    # PRODUCTION source root and holds no test content; these descriptors are development
+    # stand-ins for production integrations that do not exist yet, so they live under the
+    # sibling test_descriptors/ tree and stage into test_arch_content/.
+    set(HIPKERNELPROVIDER_EMBEDDED_ENGINE_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors/embedded_engine")
 
-    # Listed explicitly for the same reason the kernel sources beside them are: CMake's own
-    # docs discourage GLOB for build inputs, and CONFIGURE_DEPENDS does not re-run on
-    # removal under every generator. One list feeds staging, install, and the dependency
-    # edge below, so the three cannot disagree about what a descriptor tree contains.
-    set(HIPDNN_DESCRIPTOR_FILES
-        conv_fwd/conv_fwd.kdp.json
-        conv_fwd/conv_fwd.kmd.json
-        conv_fwd/conv_fwd.udd.json
-        conv_fwd/conv_fwd.ued.json
-        conv_fwd/conv_fwd.uhd.json
-        conv_fwd/conv_fwd_f16_block64.ukd.json
-        conv_fwd/kernel_dtype_matches_graph.umd.json
-        pointwise/kernel_dtype_matches_graph.umd.json
-        pointwise/operation_is_add.umd.json
-        pointwise/operation_is_mul.umd.json
-        pointwise/operation_is_sub.umd.json
-        pointwise/pointwise.kmd.json
-        pointwise/pointwise.udd.json
-        pointwise/pointwise.ued.json
-        pointwise/pointwise.uhd.json
-        pointwise/pointwise_add.kdp.json
-        pointwise/pointwise_mul.kdp.json
-        pointwise/pointwise_sub.kdp.json
+    file(GLOB_RECURSE _embedded_engine_sources CONFIGURE_DEPENDS
+         "${HIPKERNELPROVIDER_EMBEDDED_ENGINE_SOURCE_DIR}/*")
+
+    # The destination is wiped before each copy so a descriptor deleted from the source
+    # tree is retracted rather than orphaned: copy_directory writes what is there now but
+    # removes nothing, and the loader would keep reading a descriptor the sources no
+    # longer define.
+    set(_descriptor_stamp "${CMAKE_CURRENT_BINARY_DIR}/hip-kernel-provider-descriptors.stamp")
+    add_custom_command(
+        OUTPUT "${_descriptor_stamp}"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${HIPKERNELPROVIDER_EMBEDDED_ENGINE_BUILD_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${HIPKERNELPROVIDER_EMBEDDED_ENGINE_SOURCE_DIR}" "${HIPKERNELPROVIDER_EMBEDDED_ENGINE_BUILD_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E touch "${_descriptor_stamp}"
+        DEPENDS ${_embedded_engine_sources}
+        COMMENT "Staging hip-kernel-provider descriptors"
+        VERBATIM
     )
-
-    # Wiped once per configure, not once per build. copy_if_different below makes an
-    # unchanged build a no-op, but it cannot retract a descriptor deleted from the source
-    # tree: dropping a file from the list orphans its staged copy rather than removing it,
-    # and the loader would keep reading a descriptor the sources no longer define. Editing
-    # the list is what re-runs CMake, so clearing here is exactly as reliable as the old
-    # per-build rm -rf, without leaving the directory empty while a test reads it.
-    file(REMOVE_RECURSE "${HIPDNN_DESCRIPTOR_BUILD_DIR}")
-
-    set(_staged_descriptors)
-    foreach(_descriptor IN LISTS HIPDNN_DESCRIPTOR_FILES)
-        add_custom_command(
-            OUTPUT "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${HIPDNN_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
-                    "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}"
-            DEPENDS "${HIPDNN_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
-            COMMENT "Staging descriptor ${_descriptor}"
-            VERBATIM
-        )
-        list(APPEND _staged_descriptors "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_descriptor}")
-    endforeach()
 
     add_custom_target(
         hip_kernel_provider_descriptors ALL
-        DEPENDS ${_staged_descriptors}
+        DEPENDS "${_descriptor_stamp}"
         COMMENT "Staging hip-kernel-provider descriptors"
     )
 
@@ -404,15 +417,30 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         endif()
     endforeach()
 
-    # The same list again rather than a directory pattern, so the installed tree is the
-    # staged tree by construction -- a file the build serves and the install omits would
-    # otherwise be a difference nothing checks.
-    foreach(_descriptor IN LISTS HIPDNN_DESCRIPTOR_FILES)
-        get_filename_component(_descriptor_subdir "${_descriptor}" DIRECTORY)
-        install(
-            FILES "${HIPDNN_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
-            DESTINATION
-                "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}/${_descriptor_subdir}"
-        )
-    endforeach()
+    # The two descriptor trees are installed here and nowhere else. Whatever produces
+    # content -- a copy rule, the packer, a future step -- delivers it into one of these
+    # two build-tree folders, and these two rules ship them wholesale. The installed tree
+    # is then the build tree by construction, so a test that passes against one is
+    # evidence about the other, and a set cannot be staged for testing yet silently
+    # missing from the package.
+    #
+    # Neither rule is OPTIONAL: each is emitted only when something was wired to fill its
+    # tree, so a directory missing at install time means the build did not run to
+    # completion, and saying so beats shipping a package with no descriptors in it.
+    #
+    # hkp_packaging_product exists exactly when the production packer will write --
+    # source root set and a real directory, arches selected, hipcc found. Re-testing the
+    # source root here would emit the rule for configurations the packer skips, turning a
+    # supported build into an install-time failure.
+    if(TARGET hkp_packaging_product)
+        install(DIRECTORY "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/"
+                DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+    endif()
+
+    # The embedded_engine copy above is unconditional under this gate, so the test tree
+    # always has content to ship once the build has run.
+    if(HIPKERNELPROVIDER_ENABLE_TESTS)
+        install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/"
+                DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}")
+    endif()
 endif()
