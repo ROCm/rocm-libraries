@@ -11,9 +11,13 @@
 #include <string>
 
 using hipblaslt_client::cgroup_available_memory_from;
+using hipblaslt_client::cgroup_mount;
 using hipblaslt_client::cgroup_paths;
 using hipblaslt_client::parse_cgroup_size_token;
+using hipblaslt_client::parse_mountinfo;
 using hipblaslt_client::parse_proc_self_cgroup;
+using hipblaslt_client::pick_cgroup_mount;
+using hipblaslt_client::resolve_cgroup_directory;
 
 namespace
 {
@@ -22,9 +26,15 @@ namespace
 
     using FakeFs = std::map<std::string, std::string>;
 
-    size_t headroom(cgroup_paths const& paths, FakeFs const& files)
+    char const kDefaultMountinfo[] =
+        "100 90 0:1 / /sys/fs/cgroup rw shared:1 - cgroup2 cgroup2 rw\n"
+        "101 90 0:2 / /sys/fs/cgroup/memory rw shared:1 - cgroup memory rw\n";
+
+    size_t headroom(cgroup_paths const& paths,
+                    FakeFs const&         files,
+                    char const*           mountinfo = kDefaultMountinfo)
     {
-        return cgroup_available_memory_from(paths, files);
+        return cgroup_available_memory_from(paths, mountinfo, files);
     }
 } // namespace
 
@@ -109,6 +119,40 @@ TEST(ParseCgroupSizeToken, RejectsEmpty)
 }
 
 // ---------------------------------------------------------------------------
+// mountinfo resolution
+// ---------------------------------------------------------------------------
+
+TEST(ParseMountinfo, FindsCoMountedV1MemoryController)
+{
+    char const mountinfo[] =
+        "200 199 0:55 / /sys/fs/cgroup/cpu,memory rw shared:1 - cgroup cpu,memory rw,memory,cpu\n";
+    auto mounts = parse_mountinfo(mountinfo);
+    ASSERT_EQ(mounts.size(), 1u);
+    EXPECT_EQ(mounts[0].mountpoint, "/sys/fs/cgroup/cpu,memory");
+
+    cgroup_paths paths;
+    paths.v1 = "/docker/abc";
+    auto const* mount = pick_cgroup_mount(mounts, false, paths.v1);
+    ASSERT_NE(mount, nullptr);
+    EXPECT_EQ(resolve_cgroup_directory(*mount, paths.v1),
+              "/sys/fs/cgroup/cpu,memory/docker/abc");
+}
+
+TEST(ResolveCgroupDirectory, NonRootV2MountRoot)
+{
+    char const mountinfo[] =
+        "300 299 0:56 /user.slice /sys/fs/cgroup/user.slice rw shared:1 - cgroup2 cgroup2 rw\n";
+    auto mounts = parse_mountinfo(mountinfo);
+    ASSERT_EQ(mounts.size(), 1u);
+
+    cgroup_paths paths;
+    paths.v2 = "/user.slice/app";
+    auto const* mount = pick_cgroup_mount(mounts, true, paths.v2);
+    ASSERT_NE(mount, nullptr);
+    EXPECT_EQ(resolve_cgroup_directory(*mount, paths.v2), "/sys/fs/cgroup/user.slice/app");
+}
+
+// ---------------------------------------------------------------------------
 // cgroup_available_memory_from
 // ---------------------------------------------------------------------------
 
@@ -190,7 +234,7 @@ TEST(CgroupHeadroomFrom, FullyUsedCgroupHasZeroHeadroom)
 TEST(CgroupHeadroomFrom, V1HierarchyUsesLegacyFilenames)
 {
     FakeFs files;
-    files["/sys/fs/cgroup/memory/docker/abc/memory.limit_in_bytes"]  = "2147483648";
+    files["/sys/fs/cgroup/memory/docker/abc/memory.limit_in_bytes"] = "2147483648";
     files["/sys/fs/cgroup/memory/docker/abc/memory.usage_in_bytes"] = "536870912";
 
     cgroup_paths paths;
@@ -198,12 +242,38 @@ TEST(CgroupHeadroomFrom, V1HierarchyUsesLegacyFilenames)
     EXPECT_EQ(headroom(paths, files), kGiB + kGiB / 2);
 }
 
+TEST(CgroupHeadroomFrom, CoMountedV1Mountpoint)
+{
+    char const mountinfo[] =
+        "200 199 0:55 / /sys/fs/cgroup/cpu,memory rw shared:1 - cgroup cpu,memory rw,memory,cpu\n";
+    FakeFs files;
+    files["/sys/fs/cgroup/cpu,memory/docker/abc/memory.limit_in_bytes"] = "1073741824";
+    files["/sys/fs/cgroup/cpu,memory/docker/abc/memory.usage_in_bytes"] = "536870912";
+
+    cgroup_paths paths;
+    paths.v1 = "/docker/abc";
+    EXPECT_EQ(headroom(paths, files, mountinfo), kGiB / 2);
+}
+
+TEST(CgroupHeadroomFrom, NonRootV2MountRoot)
+{
+    char const mountinfo[] =
+        "300 299 0:56 /user.slice /sys/fs/cgroup/user.slice rw shared:1 - cgroup2 cgroup2 rw\n";
+    FakeFs files;
+    files["/sys/fs/cgroup/user.slice/app/memory.max"]     = "1073741824";
+    files["/sys/fs/cgroup/user.slice/app/memory.current"] = "536870912";
+
+    cgroup_paths paths;
+    paths.v2 = "/user.slice/app";
+    EXPECT_EQ(headroom(paths, files, mountinfo), kGiB / 2);
+}
+
 TEST(CgroupHeadroomFrom, MinAcrossV1AndV2Walks)
 {
     FakeFs files;
-    files["/sys/fs/cgroup/user.slice/app/memory.max"]                = "4294967296";
-    files["/sys/fs/cgroup/user.slice/app/memory.current"]            = "0";
-    files["/sys/fs/cgroup/memory/docker/abc/memory.limit_in_bytes"]  = "1073741824";
+    files["/sys/fs/cgroup/user.slice/app/memory.max"]               = "4294967296";
+    files["/sys/fs/cgroup/user.slice/app/memory.current"]           = "0";
+    files["/sys/fs/cgroup/memory/docker/abc/memory.limit_in_bytes"] = "1073741824";
     files["/sys/fs/cgroup/memory/docker/abc/memory.usage_in_bytes"] = "536870912";
 
     cgroup_paths paths;
