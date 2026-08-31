@@ -2604,6 +2604,11 @@ class Solution(collections.abc.Mapping):
               and state["ProblemType"]["HighPrecisionAccumulate"]):
         state["WaveTransposeStore"] = 0
 
+    # WaveTransposeStorePipe (software-pipeline the pass loop) is only meaningful when the
+    # wave-transpose store is actually active; force it off otherwise so a stray yaml value is inert.
+    if state.get("WaveTransposeStore", 0) <= 0:
+      state["WaveTransposeStorePipe"] = 0
+
     # This reject kernels in 950 logic yaml, temporarily comment it out.
     # finalLDSTrInst = state["enableLDSTrA"] or state["enableLDSTrB"]
     # if state["LDSTrInst"] != finalLDSTrInst:

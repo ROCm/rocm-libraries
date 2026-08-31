@@ -848,6 +848,11 @@ validParameters = { # we need to make sure this matches develop
     # -1 = plain-store baseline: keep WaveContiguousOutput layout but emit per-tile plain buffer_store
     #      (NO wave-transpose merge AND NO f8 partner-merge) for scheduling comparison.
     "WaveTransposeStore": [-1, 0, 1, 2, 3, 4],
+    # WaveTransposeStorePipe: software-pipeline the wave-transpose store pass loop to hide ds_bpermute
+    # LDS latency. 0=off (full s_wait_dscnt 0 drain each pass); 1=relaxed wait (ping-pong gather buffer,
+    # partial dscnt); 2=double-buffer (issue next pass's ds_bpermute before consuming current). Only
+    # active when WaveTransposeStore>0.
+    "WaveTransposeStorePipe": [0, 1, 2],
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],

@@ -16208,6 +16208,10 @@ class KernelWriterAssembly(KernelWriter):
         #   mBase, nBase (lane-invariant M-base / coord1-base, hoisted once per batch so each store
         #   trigger only adds its sgM/tt1 residual).
         cnt = T * dwordsPerBlock + dwordsPerBlock + 9
+        # WaveTransposeStorePipe>0 software-pipelines the pass loop, which needs a SECOND gather
+        # buffer (ping/pong) so pass p+1's ds_bpermute doesn't clobber pass p's not-yet-consumed regs.
+        if kernel.get("WaveTransposeStorePipe", 0) > 0:
+          cnt += T * dwordsPerBlock
         return self.vgprPool.checkOutAligned(cnt, dwordsPerBlock, tag="globalWriteElements_xpose"), cnt
       wantXpose = (kernel.get("WaveTransposeStore", 0) > 0 and kernel.get("WaveContiguousOutput")
                    and not kernel.get("UseSubtileImpl") and kernel["WavefrontSize"] == 32)

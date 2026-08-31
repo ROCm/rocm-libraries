@@ -4039,10 +4039,14 @@ class GlobalWriteBatchWriter:
     T*dwordsPerBlock gather + dwordsPerBlock sel + 9 singles). Both _emitWaveTransposeSetup (per batch)
     and _emitWaveTransposeStore (per trigger) index the SAME region so the hoisted invariants persist."""
     base = self.cvtVgprStruct.vgprXposeBase
-    single = base + T * dwordsPerBlock + dwordsPerBlock
+    pipe = self.kernel.get("WaveTransposeStorePipe", 0)
+    # pipe>0 reserves a SECOND gather buffer (ping/pong) right after the first; sel + singles shift up.
+    nGather = (2 if pipe > 0 else 1) * T * dwordsPerBlock
+    single = base + nGather + dwordsPerBlock
     return {
-      "gather":     base,                              # T*dwordsPerBlock dwords
-      "sel":        base + T * dwordsPerBlock,          # dwordsPerBlock dwords (store src)
+      "gather":     base,                              # T*dwordsPerBlock dwords (buffer A)
+      "gatherB":    base + T * dwordsPerBlock,          # T*dwordsPerBlock dwords (buffer B; == gather if pipe==0, unused)
+      "sel":        base + nGather,                     # dwordsPerBlock dwords (store src)
       "srcIdxBase": single + 0,                         # immutable pass-0 gather byte index (hoisted)
       "srcIdx":     single + 1,                         # per-trigger working copy, advanced per pass
       "gsel":       single + 2,                         # g = (L'>>1)&(T-1) (hoisted)
@@ -4212,27 +4216,25 @@ class GlobalWriteBatchWriter:
       module.add(VLShiftLeftB32(dst=vgpr(sTmp0), shiftHex=int(log2(bpe)), src=vgpr(sTmp0), comment="* bpe"))
     module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(sTmp0), comment="vaddr(p=0) = M_off + N_off"))
 
-    numStores = 0
-    for p in range(nPasses):
-      module.addComment1("f8 wave-transpose store pass %d/%d (columns %d..%d)"
-                         % (p + 1, nPasses, p * colsPerPass, p * colsPerPass + colsPerPass - 1))
-      # gather all T tile-groups' packed dwords from the HELD source-lane index (advanced per pass).
+    pipe = self.kernel.get("WaveTransposeStorePipe", 0)
+    gatherB = s["gatherB"]
+    dsPerPass = T * dwordsPerBlock  # ds_bpermute count issued per pass
+
+    def _issueGather(buf, comment):
       for g in range(T):
         for d in range(dwordsPerBlock):
-          module.add(DSBPermuteB32(dst=vgpr(gather + g * dwordsPerBlock + d), src0=vgpr(vSrcIdx),
-                                   src1=vgpr(tileBase[g] + d), comment="tile %d dword %d" % (g, d)))
-      module.add(SWaitCnt(dscnt=0, comment="wait ds_bpermute"))
+          module.add(DSBPermuteB32(dst=vgpr(buf + g * dwordsPerBlock + d), src0=vgpr(vSrcIdx),
+                                   src1=vgpr(tileBase[g] + d), comment="%s tile %d dword %d" % (comment, g, d)))
 
-      # T-way select group g into sel[0:dwordsPerBlock].
+    def _selectAndStore(buf):
       for d in range(dwordsPerBlock):
-        module.add(VMovB32(dst=vgpr(sel + d), src=vgpr(gather + d), comment="init sel with group 0"))
+        module.add(VMovB32(dst=vgpr(sel + d), src=vgpr(buf + d), comment="init sel with group 0"))
       for g in range(1, T):
         module.add(VCmpEQU32(dst=VCC(), src0=g, src1=vgpr(vGsel), comment="g == %d ?" % g))
         for d in range(dwordsPerBlock):
           module.add(VCndMaskB32(dst=vgpr(sel + d), src0=vgpr(sel + d),
-                                 src1=vgpr(gather + g * dwordsPerBlock + d), src2=VCC(),
+                                 src1=vgpr(buf + g * dwordsPerBlock + d), src2=VCC(),
                                  comment="select group %d dword %d" % (g, d)))
-
       module.add(storeCls(
         src=vgpr(sel, dwordsPerBlock),
         vaddr=vgpr(vAddr),
@@ -4241,11 +4243,40 @@ class GlobalWriteBatchWriter:
         mubuf=MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT),
         comment="wave-transpose coalesced store (8 M/lane, %d dwords)" % dwordsPerBlock))
 
-      # advance to next pass: srcLane += colsPerPass (byte index += colsPerPass*4), vaddr += delta.
-      if p + 1 < nPasses:
-        module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=colsPerPass * 4, comment="next pass: srcIdx += colsPerPass*4"))
-        module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(vDelta), comment="next pass: vaddr += delta"))
-      numStores += 1
+    numStores = 0
+    if pipe == 0:
+      # Serial: issue -> full drain -> select+store, per pass. LDS latency exposed each pass.
+      for p in range(nPasses):
+        module.addComment1("f8 wave-transpose store pass %d/%d (drain)" % (p + 1, nPasses))
+        _issueGather(gather, "p%d" % p)
+        module.add(SWaitCnt(dscnt=0, comment="wait ds_bpermute"))
+        _selectAndStore(gather)
+        if p + 1 < nPasses:
+          module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=colsPerPass * 4, comment="next pass: srcIdx += colsPerPass*4"))
+          module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(vDelta), comment="next pass: vaddr += delta"))
+        numStores += 1
+    else:
+      # Software-pipelined (double gather buffer). Issue pass p+1's ds_bpermute BEFORE consuming pass p
+      # so pass p+1's LDS latency overlaps pass p's select+store. pipe==1: conservative full drain;
+      # pipe==2: staggered dscnt (leave only pass p+1's ds outstanding) for deeper overlap.
+      bufs = [gather, gatherB]
+      module.addComment1("f8 wave-transpose store PIPELINE (pipe=%d): issue pass 0" % pipe)
+      _issueGather(bufs[0], "p0")
+      for p in range(nPasses):
+        if p + 1 < nPasses:
+          # advance srcIdx to pass p+1 and issue its gather into the other buffer (bpermute already
+          # latched vSrcIdx for pass p, so advancing now is safe).
+          module.add(VAddU32(dst=vgpr(vSrcIdx), src0=vgpr(vSrcIdx), src1=colsPerPass * 4, comment="pass %d: srcIdx += colsPerPass*4" % (p + 1)))
+          module.addComment1("f8 wave-transpose store pass %d/%d: issue-ahead + consume pass %d" % (p + 2, nPasses, p + 1))
+          _issueGather(bufs[(p + 1) % 2], "p%d" % (p + 1))
+          waitN = dsPerPass if pipe == 2 else 0  # pipe==2 leaves pass p+1's ds in flight; pipe==1 drains
+          module.add(SWaitCnt(dscnt=waitN, comment="wait pass %d ds (leave %d outstanding)" % (p, waitN)))
+        else:
+          module.add(SWaitCnt(dscnt=0, comment="wait final pass ds"))
+        _selectAndStore(bufs[p % 2])
+        if p + 1 < nPasses:
+          module.add(VAddU32(dst=vgpr(vAddr), src0=vgpr(vAddr), src1=vgpr(vDelta), comment="next pass: vaddr += delta"))
+        numStores += 1
 
     return module, numStores
 

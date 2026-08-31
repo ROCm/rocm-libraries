@@ -573,6 +573,7 @@ defaultBenchmarkCommonParameters = [
     {"CustomKernelName": [""]},
     {"NoReject": [False]},
     {"WaveTransposeStore": [0]},
+    {"WaveTransposeStorePipe": [2]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
     {"UseDualFMAC": [False]},
