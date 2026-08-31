@@ -1,4 +1,5 @@
 version: 2
+# Test comment for CI skip testing
 
 pr:
   # Special case: automated dependency "bump" PRs.

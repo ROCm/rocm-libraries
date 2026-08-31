@@ -14,7 +14,7 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe.
+# TheRock ref: pinned to ROCm/TheRock branch users/geomin12/path-based-external-2 for testing.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -109,6 +109,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
+      changed_files: ${{ steps.configure.outputs.changed_files }}
+      skip_ci_patterns: ${{ steps.configure.outputs.skip_ci_patterns }}
       test_projects: ${{ steps.test-projects.outputs.test_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
@@ -127,7 +129,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+          ref: users/geomin12/path-based-external-2
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -144,6 +146,10 @@ jobs:
             --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
 
+          # Output skip_ci_patterns matching therock_configure_ci.py's SKIPPABLE_PATH_PATTERNS
+          # This allows TheRock to skip CI when only docs/metadata files are changed.
+          echo 'skip_ci_patterns=["*.clinerules","*.cursorrules","*.mdc","*.md","*.rst","*.rtf","*/.markdownlint-ci2.yaml","*/.readthedocs.yaml","*/.spellcheck.local.yaml","*/.wordlist.txt",".gitignore","dnn-providers/*/.gitignore","dnn-providers/*/docs/*","docs/*","projects/*/.gitignore","projects/*/docs/*","projects/hipdnn/tools/*","shared/*/.gitignore","shared/*/docs/*","projects/composablekernel/Jenkinsfile","projects/composablekernel/Docker*","projects/composablekernel/client_example/*","projects/composablekernel/codegen/*","projects/composablekernel/dispatcher/*","projects/composablekernel/example/*","projects/composablekernel/experimental/*","projects/composablekernel/profiler/*","projects/composablekernel/python/*","projects/composablekernel/rocm_ck/*","projects/composablekernel/script/*","projects/composablekernel/test/*","projects/composablekernel/test_data/*","projects/composablekernel/tile_engine/*","projects/composablekernel/tutorial/*","projects/composablekernel/vars/*","projects/composablekernel/groovy/*"]' >> "$GITHUB_OUTPUT"
+
       - name: Select multi-arch test projects
         id: test-projects
         run: |
@@ -152,7 +158,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/path-based-external-2
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -183,20 +189,15 @@ jobs:
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
-      ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+      ref: users/geomin12/path-based-external-2
       # Pass external repo info for stage-impact analysis.
-      # extra_cmake_options is appended to the cmake configure line of every
-      # build stage, scoped to this repository's CI runs. TheRock keeps
-      # HIPKERNELPROVIDER_ENABLE_ROCKE OFF by default; enabling it here is what
-      # gives rocKE build and test signal while it is still in development.
-      # Keep the value constant: the flag state file participates in every
-      # subproject's configure fingerprint, and stage reuse does not key on
-      # flags (TheRock#3399), so a per-PR value would churn fingerprints and
-      # let baselines built with the opposite value look reusable.
+      # Include changed_files and skip_ci_patterns for path-based filtering.
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
+          "changed_files": ${{ needs.configure.outputs.changed_files || 'null' }},
+          "skip_ci_patterns": ${{ needs.configure.outputs.skip_ci_patterns || 'null' }},
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
@@ -209,7 +210,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/geomin12/path-based-external-2
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -223,7 +224,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+      ref: users/geomin12/path-based-external-2
     permissions:
       contents: read
       id-token: write
@@ -237,7 +238,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/geomin12/path-based-external-2
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -249,7 +250,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+      ref: users/geomin12/path-based-external-2
     permissions:
       contents: read
       id-token: write
@@ -270,7 +271,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+          ref: users/geomin12/path-based-external-2
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
