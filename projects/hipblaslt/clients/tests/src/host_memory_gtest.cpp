@@ -41,7 +41,7 @@ TEST(HostMemoryProbeLive, GetAvailableHostMemoryMinFreeramAndCgroup)
 #ifndef __linux__
     GTEST_SKIP() << "Linux-only: get_available_host_memory uses sysinfo(2)";
 #else
-    struct sysinfo info {};
+    struct sysinfo info{};
     ASSERT_EQ(sysinfo(&info), 0);
 
     HostMemoryProbe probe;

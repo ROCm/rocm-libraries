@@ -37,11 +37,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <hipblaslt/hipblaslt.h>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
-#include <hipblaslt/hipblaslt.h>
 
 #ifdef _WIN32
 #include <windows.h>
