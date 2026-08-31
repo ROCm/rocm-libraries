@@ -97,7 +97,6 @@ struct heuristic_defaults_t {
   static constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_ETP   = 10.0;
   static constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_SCALE = 0.2;
   static constexpr double NARROW_LOAD_ITER_PENALTY        = 500.0;
-  static constexpr double GRVW_ITER_PENALTY               = 0.0;
   static constexpr size_t EXACT_ONE_ITER_K_MIN           = 32;
   static constexpr double UNAMORTIZED_FILL_PENALTY       = 4.0;
   static constexpr double BATCHED_FILL_ITER_TARGET       = 4.0;
