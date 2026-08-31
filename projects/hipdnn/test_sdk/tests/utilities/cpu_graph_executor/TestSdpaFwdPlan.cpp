@@ -35,28 +35,28 @@ namespace
 // under test; the q/k/v/o uids and a packed float [1, 2, 4, 8] shape are filled in here.
 flatbuffers::FlatBufferBuilder makeRawSdpaFwdGraph(SdpaAttributesT attrs)
 {
-    constexpr int64_t qUid = 1;
-    constexpr int64_t kUid = 2;
-    constexpr int64_t vUid = 3;
-    constexpr int64_t oUid = 4;
+    constexpr int64_t Q_UID = 1;
+    constexpr int64_t K_UID = 2;
+    constexpr int64_t V_UID = 3;
+    constexpr int64_t O_UID = 4;
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
 
-    attrs.q_tensor_uid = qUid;
-    attrs.k_tensor_uid = kUid;
-    attrs.v_tensor_uid = vUid;
-    attrs.o_tensor_uid = oUid;
+    attrs.q_tensor_uid = Q_UID;
+    attrs.k_tensor_uid = K_UID;
+    attrs.v_tensor_uid = V_UID;
+    attrs.o_tensor_uid = O_UID;
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
     tensors.push_back(
-        CreateTensorAttributesDirect(builder, qUid, "Q", DataType::FLOAT, &strides, &dims));
+        CreateTensorAttributesDirect(builder, Q_UID, "Q", DataType::FLOAT, &strides, &dims));
     tensors.push_back(
-        CreateTensorAttributesDirect(builder, kUid, "K", DataType::FLOAT, &strides, &dims));
+        CreateTensorAttributesDirect(builder, K_UID, "K", DataType::FLOAT, &strides, &dims));
     tensors.push_back(
-        CreateTensorAttributesDirect(builder, vUid, "V", DataType::FLOAT, &strides, &dims));
+        CreateTensorAttributesDirect(builder, V_UID, "V", DataType::FLOAT, &strides, &dims));
     tensors.push_back(
-        CreateTensorAttributesDirect(builder, oUid, "O", DataType::FLOAT, &strides, &dims));
+        CreateTensorAttributesDirect(builder, O_UID, "O", DataType::FLOAT, &strides, &dims));
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;

@@ -14,12 +14,8 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: the resolve_therock_ref job picks one concrete ROCm/TheRock SHA
-# for the whole run. The setup job checks out the pinned TheRock SHA and
-# re-exports it as needs.setup.outputs.ref. The `uses:
-# ROCm/TheRock/...@b45a060` lines below are the workflow-definition refs
-# (Actions requires a literal there), and the matching `ref:` inputs are the
-# build-source refs consumed by those reusable workflows.
+# TheRock ref: pinned to ROCm/TheRock commit b45a060 for multi-arch package toggles.
+# NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
   pull_request:
@@ -27,6 +23,8 @@ on:
       - opened
       - synchronize
       - reopened
+      - labeled
+      - unlabeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -53,6 +51,22 @@ on:
         type: string
         default: ""
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
+      build_python_packages:
+        type: boolean
+        default: false
+        description: "Build ROCm Python packages"
+      build_pytorch:
+        type: boolean
+        default: false
+        description: "Build PyTorch wheels"
+      build_jax:
+        type: boolean
+        default: false
+        description: "Build JAX wheels"
+      build_native_linux:
+        type: boolean
+        default: false
+        description: "Build native Linux packages and run install tests"
 permissions:
   contents: read
   actions: read
@@ -66,8 +80,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-gate:
+    name: Check CI Label
+    runs-on: ubuntu-24.04
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Check for multi-arch opt-in
+        id: gate
+        run: |
+          echo "enabled=${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:multi-arch') }}" >> "${GITHUB_OUTPUT}"
+
   ci-env:
     name: Load CI Environment
+    needs: ci-gate
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
@@ -84,6 +111,8 @@ jobs:
 
   configure:
     name: Configure Changed Projects
+    needs: ci-gate
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
@@ -118,7 +147,8 @@ jobs:
             --config-path ".github/repos-config.json"
 
   setup:
-    needs: [ci-env, configure]
+    needs: [ci-gate, ci-env, configure]
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
     with:
       build_variant: "release"
@@ -134,13 +164,14 @@ jobs:
       prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg') || '' }}
       # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
       baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
+      build_python_packages: ${{ inputs.build_python_packages || false }}
+      build_pytorch: ${{ inputs.build_pytorch || false }}
+      build_jax: ${{ inputs.build_jax || false }}
+      build_native_linux: ${{ inputs.build_native_linux || false }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
-      # Concrete SHA resolved once by resolve_therock_ref; setup re-exports the
-      # checked-out commit as needs.setup.outputs.ref for downstream jobs.
-      # TODO: After multi-arch CI is fully migrated to TheRock, remove the explicit ref here
       ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
       # Pass external repo info for stage-impact analysis
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
@@ -203,12 +234,16 @@ jobs:
     name: Multi-Arch CI Summary
     if: always()
     needs:
+      - ci-gate
+      - ci-env
+      - configure
       - setup
       - linux_build_and_test
       - windows_build_and_test
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
+        if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
@@ -218,8 +253,15 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Evaluate workflow results
+        if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python build_tools/github_actions/workflow_summary.py \
             --needs-json '${{ toJSON(needs) }}'
+
+      - name: Report skipped workflow
+        if: ${{ needs.ci-gate.outputs.enabled != 'true' }}
+        run: |
+          echo "TheRock Multi-Arch CI is skipped by default for pull requests."
+          echo "Add the ci:multi-arch label to enable it."
