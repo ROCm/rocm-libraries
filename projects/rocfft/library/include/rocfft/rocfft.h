@@ -648,10 +648,14 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_mode( rocfft_execution_inf
 
 /*! @brief Set stream in execution info
  *  @details Associates an existing compute stream to a plan.  This
- * must be called before the call to ::rocfft_execute.
+ *  must be called before the call to ::rocfft_execute.
  *
  *  Once the association is made, execution of the FFT will run the
  *  computation through the specified stream.
+ *
+ *  The device for the stream is determined from the stream itself.
+ *  If the FFT plan uses multiple devices then this function can be
+ *  called repeatedly with streams for each of those devices.
  *
  *  The stream must be of type hipStream_t. It is an error to pass
  *  the address of a hipStream_t object.
