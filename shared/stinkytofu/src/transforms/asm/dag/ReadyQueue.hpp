@@ -27,6 +27,7 @@
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
 #include <queue>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/core/Function.hpp"
@@ -90,9 +91,20 @@ struct DAGNode {
     // gate short of real cycles to cover the gap with, falling back to a simulated
     // wait that has no matching instruction.
     int hazardDeadline = INT_MAX;
+    // --- Cluster-barrier SCC (ClusterBarrier kernels; see cluster-barrier.md) ---
+    bool handshakeBarrier = false;
+    unsigned sccChainId = 0;
+    unsigned sccChainReaders = 0;  // def node only
+    bool sccChainDef = false;
+    // kRule3CrossLoop false: INT_MIN. true: live-out SCC def lead floor.
+    int earliestClock = INT_MIN;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };
+
+// A scheduler-only hard ordering constraint: first must issue before second.
+// It is kept separate from the register-dependency DAG.
+using HardSchedulingConstraint = std::pair<StinkyInstruction*, StinkyInstruction*>;
 
 // comparator: return true if a should come *after* b.
 struct CompareByDAGid {
@@ -137,6 +149,13 @@ class ReadyQueue {
         return passCtx_;
     }
 
+    // Mirrors ModuleOptions::ClusterBarrier (wired in Gfx1250Backend as
+    // PassFeatureConfig::dagFeatures::clusterBarrier). When false, the DAG
+    // scheduler follows the pre-cluster-barrier path.
+    bool clusterBarrierEnabled() const {
+        return passCtx_.getPassFeatureConfig().dagFeatures.clusterBarrier;
+    }
+
     virtual ~ReadyQueue() = default;
 
     // Pick one node from the ready queue based on some strategy.
@@ -160,10 +179,12 @@ class ReadyQueue {
     // Hook called before scheduling each region. \p blockBegin is the start of the basic block
     // (prefix [blockBegin, regionStart) is visible for cross-region / preloop state).
     virtual void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                              IRList::iterator blockBegin) {
+                              IRList::iterator blockBegin,
+                              std::vector<HardSchedulingConstraint>& hardConstraints) {
         (void)regionStart;
         (void)regionEnd;
         (void)blockBegin;
+        (void)hardConstraints;
     }
 
     // Hook called after a basic block has been fully scheduled. When the queue is
