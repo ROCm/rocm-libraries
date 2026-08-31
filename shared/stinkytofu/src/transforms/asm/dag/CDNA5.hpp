@@ -89,12 +89,16 @@ struct CDNA5Config {
     int dsReadPerWmma;
     int globalReadPerWmma;
     int tensorLoadWmmaSpace;
+    // Distance for PipeOps hazard rules whose table entry leaves it 0.
+    // 0 here too = derive from the WMMA cost (deriveWarGateWmmas).
+    int warGateWmmas;
 };
 
 constexpr CDNA5Config kGfx1250Config = {
     /*dsReadPerWmma=*/3,
     /*globalReadPerWmma=*/1,
     /*tensorLoadWmmaSpace=*/0,
+    /*warGateWmmas=*/0,
 };
 
 // gfx1250v0: starts from the gfx1250 values. TODO(tuning): fill in gfx1250v0's real
@@ -493,13 +497,16 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::map<int, int> regLastTouch_;
     int clock_ = 0;
 
-    // (C) mode2 WAR: BB-wide WMMA index each reg was last WMMA-src-read; persists cross-region.
-    std::map<int, int> regLastWmmaRead_;
-    // Monotonic BB-wide WMMA counter (not per-region) so cross-region WAR distances stay
-    // meaningful.
-    int wmmaIssuedCountThisBB_ = 0;
-    // Per-BB WAR gate, derived from the WMMA cost in onInit.
-    int warGateWmmas_ = 0;
+    // PipeOps hazard lanes, one per rule (empty for Cycles rules). Per reg key: the
+    // pipe-op ordinal at which a rule.isProducer instruction last touched that register.
+    // The gap is (pipeOpCount_[rule] - stamp); only an isPipeOp issue closes it, so
+    // unlike hazardGates_ these never decay in advanceTime. BB-wide, not per-region, so
+    // distances stay meaningful across side-effect cuts.
+    std::vector<std::map<int, int>> pipeOpGates_;
+    // Monotonic per-rule count of isPipeOp instructions issued this BB.
+    std::vector<int> pipeOpCount_;
+    // Resolved distance per rule: table value, else arch policy, else derived.
+    std::vector<int> pipeOpDistance_;
 
     WMMAIssueConfig wmmaIssueConfig;
 
@@ -574,7 +581,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int getMaxSrcDataWait(DAGNode* node) const;
     int getHazardWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
-    bool warTooCloseToWmmaRead(DAGNode* node) const;
+    bool pipeOpGateBlocks(DAGNode* node) const;
+    void stampPipeOpGates(const StinkyInstruction& inst);
     int nodeElapseKey(DAGNode* node) const;
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
                           bool allowHiddenStall = false) const;
@@ -620,7 +628,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
         : ReadyQueue(passCtx),
           config_(cdna5ConfigForArch(passCtx.getGemmTileConfig().arch)),
           hw_(passCtx.getHWModel()),
-          hazardGates_(hw_.hazards.numRules) {}
+          hazardGates_(hw_.hazards.numRules),
+          pipeOpGates_(hw_.hazards.numRules),
+          pipeOpCount_(hw_.hazards.numRules, 0),
+          pipeOpDistance_(hw_.hazards.numRules, 0) {}
 
     DAGNode* pickOne() override;
     void push(DAGNode* node) override;
@@ -788,7 +799,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         // rule.cycles == -1 ("hoist as far as possible"): the strategy is producer-side
         // hoisting (deadline forced to 0 in the pre-scan), not a consumer-side hold, so
         // clamp the gate to 0 rather than stamping a negative wait.
-        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, hw_.hazards.rules[hf.ruleIdx].cycles);
+        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, hw_.hazards.rules[hf.ruleIdx].distance);
     // No longer a live hoist candidate once issued (decidePromote() must not try to
     // force it again).
     if (!node->hazardFlags.empty()) {
@@ -885,21 +896,50 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
     return false;
 }
 
-// (C) mode2 WAR gate: true if this ds_load's dest reg was WMMA-read < gate WMMAs ago.
-bool CDNA5ReadyQueue::warTooCloseToWmmaRead(DAGNode* node) const {
+// PipeOps hazard lanes: true when \p node is a rule.isConsumer whose dest regs are still
+// inside the gap opened by a rule.isProducer read. The gap is measured in issued pipe ops
+// (what va_vdst encodes), so no amount of elapsed time closes it -- only issuing another
+// isPipeOp instruction does. That is why this reports a veto rather than joining the
+// cycles wait channel of getMaxSrcDataWait / getHazardWait.
+bool CDNA5ReadyQueue::pipeOpGateBlocks(DAGNode* node) const {
     // Nothing to recover without va_vsrc tracking: the gate is pure cost there.
     if (!getPassContext().getPassFeatureConfig().dagFeatures.enableESM2TrackValuVsrc) return false;
-    const int gate = warGateWmmas_;
-    if (gate <= 0 || node == nullptr) return false;
-    for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
-        if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
-        for (unsigned off = 0; off < dstReg.reg.num; ++off) {
-            auto it = regLastWmmaRead_.find(regDepKey(dstReg.reg.type, dstReg.reg.idx + off));
-            if (it != regLastWmmaRead_.end() && (wmmaIssuedCountThisBB_ - it->second) < gate)
-                return true;
+    if (node == nullptr) return false;
+    for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
+        const HazardRule& rule = hw_.hazards.rules[ruleIdx];
+        if (rule.unit != HazardUnit::PipeOps || rule.dir != HazardDir::ReadThenWrite) continue;
+        const int distance = pipeOpDistance_[ruleIdx];
+        if (distance <= 0 || !rule.isConsumer(*node->inst)) continue;
+        const auto& gate = pipeOpGates_[ruleIdx];
+        if (gate.empty()) continue;
+        for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
+            if (!dstReg.isRegister() || isPseudoReg(dstReg) || dstReg.reg.type != rule.regType)
+                continue;
+            for (unsigned off = 0; off < dstReg.reg.num; ++off) {
+                auto it = gate.find(regDepKey(dstReg.reg.type, dstReg.reg.idx + off));
+                if (it != gate.end() && (pipeOpCount_[ruleIdx] - it->second) < distance)
+                    return true;
+            }
         }
     }
     return false;
+}
+
+// Advance each PipeOps lane whose isPipeOp matches, and stamp the regs this instruction
+// reads as a rule.isProducer, so a later isConsumer write to them is held off.
+void CDNA5ReadyQueue::stampPipeOpGates(const StinkyInstruction& inst) {
+    for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
+        const HazardRule& rule = hw_.hazards.rules[ruleIdx];
+        if (rule.unit != HazardUnit::PipeOps || rule.dir != HazardDir::ReadThenWrite) continue;
+        if (rule.isPipeOp != nullptr && rule.isPipeOp(inst)) ++pipeOpCount_[ruleIdx];
+        if (!rule.isProducer(inst)) continue;
+        for (const StinkyRegister& src : inst.getSrcRegs()) {
+            if (!src.isRegister() || isPseudoReg(src) || src.reg.type != rule.regType) continue;
+            for (unsigned off = 0; off < src.reg.num; ++off)
+                pipeOpGates_[ruleIdx][regDepKey(src.reg.type, src.reg.idx + off)] =
+                    pipeOpCount_[ruleIdx];
+        }
+    }
 }
 
 // (B) elapse key: min over the node's operand regs (dst + src) of (clock_ - lastTouch).
@@ -1047,13 +1087,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     stampDataReady(*node->inst);
     touchOperands(*node->inst);
     if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
-    // (C) mode2 WAR: stamp each WMMA src reg with this BB-wide WMMA index.
-    ++wmmaIssuedCountThisBB_;
-    for (const StinkyRegister& src : node->inst->getSrcRegs()) {
-        if (!src.isRegister() || isPseudoReg(src)) continue;
-        for (unsigned off = 0; off < src.reg.num; ++off)
-            regLastWmmaRead_[regDepKey(src.reg.type, src.reg.idx + off)] = wmmaIssuedCountThisBB_;
-    }
+    stampPipeOpGates(*node->inst);
     return node;
 }
 
@@ -1106,7 +1140,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // null so coIssueSlots is 0. EMPIRICAL: the co-issue count is not the mechanism.
     const int coIssueSlots = activeWmmaNode_ ? popcount16(activeWmmaNode_->inst->coIssueWindow) : 0;
     const bool feederNoSlot = coIssueSlots <= 1 && dsInsertedSinceLastWmma_ == 0;
-    const bool warTooClose = !wmmaQueue.empty() && !feederNoSlot && warTooCloseToWmmaRead(pickedDS);
+    const bool warTooClose = !wmmaQueue.empty() && !feederNoSlot && pipeOpGateBlocks(pickedDS);
     const bool dsBaseOk =
         pickedDS && !dsCapReached && !warTooClose && !destOverlapsActiveWmmaSrc(pickedDS);
     int dsThrottleWait = 0;
@@ -1902,9 +1936,9 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     deferFirstHeadWmmaActive_ = false;
     deferHeadBalanceThisRegion_ = false;
 
-    // (C) mode2 WAR: per-BB reset (not per-region — persists across s_wait_dscnt splits).
-    regLastWmmaRead_.clear();
-    wmmaIssuedCountThisBB_ = 0;
+    // PipeOps lanes are per-BB (not per-region — they persist across side-effect cuts).
+    for (auto& gate : pipeOpGates_) gate.clear();
+    std::fill(pipeOpCount_.begin(), pipeOpCount_.end(), 0);
 
     activeCoIssueWindow_ = 0;
     coIssueCyclePos_ = 0;
@@ -1939,8 +1973,16 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
             break;
         }
     }
-    // Derive the WAR gate from this BB's WMMA cost.
-    warGateWmmas_ = deriveWarGateWmmas(wmmaIssueConfig.latency, wmmaIssueConfig.issueCycles);
+    // Resolve each PipeOps rule's distance: table value, else arch policy, else derived
+    // from this BB's WMMA cost.
+    for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
+        const HazardRule& rule = hw_.hazards.rules[ruleIdx];
+        if (rule.unit != HazardUnit::PipeOps) continue;
+        int distance = rule.distance > 0 ? rule.distance : config_.warGateWmmas;
+        if (distance <= 0)
+            distance = deriveWarGateWmmas(wmmaIssueConfig.latency, wmmaIssueConfig.issueCycles);
+        pipeOpDistance_[ruleIdx] = distance;
+    }
 
     restoreCrossBBStateFromLoop();
 
@@ -2005,7 +2047,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // (B) elapse ordering state is per-region: reset the touch map and clock so a new
     // region starts with all regs "very old" (no spurious deferrals from a prior region).
     regLastTouch_.clear();
-    // regLastWmmaRead_ NOT cleared here — persists across regions (cleared per-BB).
+    // pipeOpGates_ NOT cleared here — they persist across regions (cleared per-BB).
     clock_ = 0;
     // Per-region: MSB state is not carried across a region boundary (side-effect cut).
     currentMsb_ = -1;

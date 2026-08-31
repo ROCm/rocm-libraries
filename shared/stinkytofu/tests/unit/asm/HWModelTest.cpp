@@ -57,7 +57,7 @@ TEST(HWModel, Gfx1250HazardRules) {
     const HWModel& hw = hwModelForArch(kGfx1250);
 
     ASSERT_EQ(hw.hazards.numRules, kNumCdna5HazardRules);
-    ASSERT_EQ(hw.hazards.numRules, 2);
+    ASSERT_EQ(hw.hazards.numRules, 3);
     ASSERT_NE(hw.hazards.rules, nullptr);
 
     // The model points at the shared table rather than carrying a copy.
@@ -65,11 +65,23 @@ TEST(HWModel, Gfx1250HazardRules) {
 
     EXPECT_STREQ(hw.hazards.rules[0].name, "SaluSgprToMemAddr");
     EXPECT_EQ(hw.hazards.rules[0].regType, RegType::S);
-    EXPECT_EQ(hw.hazards.rules[0].cycles, 8);
+    EXPECT_EQ(hw.hazards.rules[0].distance, 8);
+    EXPECT_EQ(hw.hazards.rules[0].dir, HazardDir::WriteThenRead);
+    EXPECT_EQ(hw.hazards.rules[0].unit, HazardUnit::Cycles);
 
     EXPECT_STREQ(hw.hazards.rules[1].name, "ValuVgprToVmemAddr");
     EXPECT_EQ(hw.hazards.rules[1].regType, RegType::V);
-    EXPECT_EQ(hw.hazards.rules[1].cycles, 32);
+    EXPECT_EQ(hw.hazards.rules[1].distance, 32);
+    EXPECT_EQ(hw.hazards.rules[1].dir, HazardDir::WriteThenRead);
+    EXPECT_EQ(hw.hazards.rules[1].unit, HazardUnit::Cycles);
+
+    // PipeOps rule: distance 0 in the table means the arch policy supplies it.
+    EXPECT_STREQ(hw.hazards.rules[2].name, "WmmaVgprSrcToDsWrite");
+    EXPECT_EQ(hw.hazards.rules[2].regType, RegType::V);
+    EXPECT_EQ(hw.hazards.rules[2].distance, 0);
+    EXPECT_EQ(hw.hazards.rules[2].dir, HazardDir::ReadThenWrite);
+    EXPECT_EQ(hw.hazards.rules[2].unit, HazardUnit::PipeOps);
+    EXPECT_NE(hw.hazards.rules[2].isPipeOp, nullptr);
 }
 
 // gfx1250v0 currently aliases gfx1250 field-for-field. This pins that it is a

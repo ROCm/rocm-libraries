@@ -521,6 +521,10 @@ static void scheduleRegionWithMovableSideEffects(
 
         for (int ruleIdx = 0; ruleIdx < hw.hazards.numRules; ++ruleIdx) {
             const HazardRule& rule = hw.hazards.rules[ruleIdx];
+            // Def-use discovery only finds write->read pairs; a WAR partner is a later
+            // writer and never appears in getUsers(). Those rules are stamped at issue
+            // time by the ready queue instead.
+            if (rule.dir != HazardDir::WriteThenRead) continue;
             if (!rule.isProducer(*prod)) continue;
 
             std::unordered_map<uint32_t, int> defKey;
@@ -575,8 +579,9 @@ static void scheduleRegionWithMovableSideEffects(
                 // rule.cycles == -1: "hoist as far as possible" mode. Force the deadline
                 // to 0 so decidePromote() issues this producer the instant it is free,
                 // maximizing its distance from the consumer instead of targeting a fixed gap.
-                const int deadline =
-                    rule.cycles < 0 ? 0 : cumCycles[ruleConsumerId] - rule.cycles - producerCost;
+                const int deadline = rule.distance < 0
+                                         ? 0
+                                         : cumCycles[ruleConsumerId] - rule.distance - producerCost;
                 bestDeadline = std::min(bestDeadline, deadline);
             }
         }
