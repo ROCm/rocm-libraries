@@ -9644,6 +9644,76 @@ TEST_F(TestGraph, AutotuneAcceptsExtraUidsInVariantPack)
     }
 }
 
+TEST_F(TestGraph, AutotuneDoesNotRequireUidsForPassByValueTensors)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+
+    graph.set_name("TestGraphPassByValue")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X").set_dim({1, 2, 3, 4});
+    x->set_stride({5, 6, 7, 8});
+    x->set_data_type(DataType::FLOAT);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(2)
+        .set_name("Mean")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(3)
+        .set_name("InvVariance")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(4)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1});
+
+    // Marked pass-by-value: the caller supplies it directly rather than
+    // through a device pointer, so it must not be demanded in the
+    // variantPack. Dims match the node's channel requirement.
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(5)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({1, 2, 1, 1})
+        .set_stride({2, 1, 1, 1})
+        .set_is_pass_by_value(true);
+
+    BatchnormInferenceAttributes batchnormAttributes;
+    batchnormAttributes.set_name("BatchnormNode");
+    graph.batchnorm_inference(x, mean, invVariance, scale, bias, batchnormAttributes);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
+
+    graph.injectDummyPlanSpec();
+
+    // UID 5 is pass-by-value and deliberately absent from the pack. This is
+    // the pack shape execute() accepts, so autotune() must accept it too.
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)}};
+    const auto result = graph.autotune(_handle, pack, nullptr, int64_t{0});
+    if(result.is_bad())
+    {
+        EXPECT_EQ(result.err_msg.find("missing"), std::string::npos)
+            << "Pass-by-value tensors must not be required in the variantPack: " << result.err_msg;
+    }
+}
+
 // ============================================================================
 // add_engines() batch method tests
 // ============================================================================

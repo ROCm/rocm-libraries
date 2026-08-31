@@ -1186,7 +1186,12 @@ private:
             std::vector<int64_t> missingUids;
             for(const auto& tensor : allTensors)
             {
-                if(tensor && tensor->has_uid() && !tensor->get_is_virtual())
+                // Pass-by-value tensors carry their value in the descriptor
+                // and never take a device pointer, so requiring a variantPack
+                // entry for them rejects packs that execute() accepts. Skip
+                // them exactly as virtual tensors are skipped.
+                if(tensor && tensor->has_uid() && !tensor->get_is_virtual()
+                   && !tensor->get_is_pass_by_value())
                 {
                     if(variantPack.find(tensor->get_uid()) == variantPack.end())
                     {
