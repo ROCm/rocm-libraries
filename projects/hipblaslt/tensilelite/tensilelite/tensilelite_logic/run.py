@@ -32,33 +32,33 @@ import threading
 import time
 import warnings
 
+from pathlib import Path
+from typing import Dict, FrozenSet, List, NamedTuple, Tuple
+
 import rocisa
 
-from pathlib import Path
-from typing import FrozenSet, List, Dict, NamedTuple, Tuple
-
-from tensilelite.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
+from tensilelite.Common import IsaInfo, IsaVersion, ParallelMap2, print1, print2, setVerbosity
 from tensilelite.Common.Architectures import SUPPORTED_ISA
 from tensilelite.Common.Capabilities import makeIsaInfoMap
 from tensilelite.Common.GlobalParameters import assignGlobalParameters, defaultSolution
-from tensilelite.CustomYamlLoader import load_logic_gfx_arch, archMatch
+from tensilelite.CustomYamlLoader import archMatch, load_logic_gfx_arch
 from tensilelite.LibraryIO import readYAML
 from tensilelite.Toolchain.Validators import validateToolchain
 
-from .parse_arguments import parseArguments, BUNDLED_KNOWN_BUGS
+from .handle_custom_kernel import handleCustomKernel, hasCustomKernel
 from .known_bugs import (
     KnownBugKey,
     is_known_bug,
+    load_bundled_known_bugs,
     load_known_bugs,
     normalize_logic_relative_path,
-    load_bundled_known_bugs,
 )
+from .parse_arguments import BUNDLED_KNOWN_BUGS, parseArguments
 from .valid_chip_id import _validateChipId
 from .ValidCorpusConsistency import check_corpus_invariants, report_corpus_invariant_violations
 from .valid_matrix_instruction import _validateMatrixInstruction
 from .valid_work_group import _validateWorkGroup
 from .valid_work_group_mapping_xcc import _validateWorkGroupMappingXCC, reset_reported_failures
-from .handle_custom_kernel import handleCustomKernel, hasCustomKernel
 
 
 class Check(NamedTuple):
