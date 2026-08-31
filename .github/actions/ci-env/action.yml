@@ -7,7 +7,7 @@ outputs:
     value: "release/bkc/therock-10.1-20260825"
   baseline-run-id:
     description: "TheRock workflow run ID for prebuilt stage artifacts"
-    value: "32786615045"
+    value: "33011103214"
   docker-image:
     description: "Docker container image for Linux builds"
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb"
