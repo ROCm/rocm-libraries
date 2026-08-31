@@ -3,6 +3,28 @@
 
 include(hipblaslt_codegen)
 
+set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING
+    "Number of CPU cores to use for building device libraries (uses nproc if unset).")
+set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE BOOL
+    "Keep the temporary device-library build directory.")
+set(TENSILELITE_ASM_DEBUG OFF CACHE BOOL
+    "Keep debug information in generated device libraries.")
+set(TENSILELITE_LOGIC_FILTER "" CACHE STRING
+    "Glob used to select logic files; empty selects all logic files.")
+set(TENSILELITE_NO_COMPRESS OFF CACHE BOOL
+    "Do not compress device code object files.")
+set(TENSILELITE_EXPERIMENTAL OFF CACHE BOOL
+    "Process experimental logic files.")
+set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE BOOL
+    "Emit comments in generated assembly.")
+set(TENSILELITE_OFFLOADBUNDLER "" CACHE FILEPATH
+    "Path to clang-offload-bundler.")
+set(TENSILELITE_LIBRARY_FORMAT "msgpack" CACHE STRING
+    "Device library serialization format (msgpack or yaml).")
+set_property(CACHE TENSILELITE_LIBRARY_FORMAT PROPERTY STRINGS msgpack yaml)
+set(Tensile_NO_LAZY_LIBRARY_LOADING OFF CACHE BOOL
+    "Disable lazy loading of device libraries.")
+
 set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
 set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Path to output the device gemm libraries.")
 
@@ -53,12 +75,21 @@ endif()
 create_device_library(
     LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
     OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
-    PYTHON_COMMAND "${HIPBLASLT_PYTHON_COMMAND}"
+    CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite"
+    PYTHON_EXECUTABLE "${Python3_EXECUTABLE}"
     ARCHES ${_main_arches}
     REQUIRE_GFX1250V0_OVERLAY ${_main_requires_gfx1250v0_overlay}
+    OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
+    JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
+    LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
     ASAN "${HIPBLASLT_ENABLE_ASAN}"
     YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}"
+    NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"
+    EXPERIMENTAL "${TENSILELITE_EXPERIMENTAL}"
     LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}"
+    ASM_COMMENTS "${TENSILELITE_ENABLE_ASM_COMMENTS}"
+    KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}"
+    ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
 )
 
 if(_build_gfx1250v0)
@@ -75,15 +106,24 @@ if(_build_gfx1250v0)
         TARGET tensilelite-device-libraries-gfx1250v0
         LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
         OUTPUT_DIR "${_gfx1250v0_output_dir}"
+        CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite"
+        PYTHON_EXECUTABLE "${Python3_EXECUTABLE}"
         ARCHES gfx1250v0
         # hipBLASLt owns the gfx1250/gfx1250v0 split for its own corpus, but
         # hipSPARSELt reuses this CMakeLists with a no-split corpus. Let the
         # embedding caller choose whether this target requires the directory.
         REQUIRE_GFX1250V0_OVERLAY ${HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY}
-        PYTHON_COMMAND "${HIPBLASLT_PYTHON_COMMAND}"
+        OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
+        JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
+        LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
         ASAN "${HIPBLASLT_ENABLE_ASAN}"
         YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}"
+        NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"
+        EXPERIMENTAL "${TENSILELITE_EXPERIMENTAL}"
         LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}"
+        ASM_COMMENTS "${TENSILELITE_ENABLE_ASM_COMMENTS}"
+        KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}"
+        ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
     )
 endif()
 

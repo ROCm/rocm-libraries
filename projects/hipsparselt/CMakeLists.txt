@@ -69,6 +69,27 @@ set(TENSILELITE_LIBLOGIC_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
     CACHE PATH "Path to the hipSPARSELt TensileLite logic files."
 )
+set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING
+    "Number of CPU cores to use for building device libraries (uses nproc if unset).")
+set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE BOOL
+    "Keep the temporary device-library build directory.")
+set(TENSILELITE_ASM_DEBUG OFF CACHE BOOL
+    "Keep debug information in generated device libraries.")
+set(TENSILELITE_LOGIC_FILTER "" CACHE STRING
+    "Glob used to select logic files; empty selects all logic files.")
+set(TENSILELITE_NO_COMPRESS OFF CACHE BOOL
+    "Do not compress device code object files.")
+set(TENSILELITE_EXPERIMENTAL OFF CACHE BOOL
+    "Process experimental logic files.")
+set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE BOOL
+    "Emit comments in generated assembly.")
+set(TENSILELITE_OFFLOADBUNDLER "" CACHE FILEPATH
+    "Path to clang-offload-bundler.")
+set(TENSILELITE_LIBRARY_FORMAT "msgpack" CACHE STRING
+    "Device library serialization format (msgpack or yaml).")
+set_property(CACHE TENSILELITE_LIBRARY_FORMAT PROPERTY STRINGS msgpack yaml)
+set(Tensile_NO_LAZY_LIBRARY_LOADING OFF CACHE BOOL
+    "Disable lazy loading of device libraries.")
 option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
 if(HIPSPARSELT_ENABLE_CLIENT)
     option(HIPSPARSELT_ENABLE_BENCHMARKS "Build benchmark client." ON)
@@ -166,30 +187,31 @@ if(HIPSPARSELT_ENABLE_HIP)
                 "hipSPARSELt device codegen needs the hipBLASLt tensilelite source at "
                 "'${HIPBLASLT_TENSILELITE_PATH}'; set -DHIPBLASLT_TENSILELITE_PATH.")
         endif()
-        set(HIPBLASLT_CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}")
-
-        find_package(origami CONFIG REQUIRED)
-
-        set(_hipsparselt_rocisa_dir "$<IF:$<PLATFORM_ID:Windows>,$<TARGET_FILE_DIR:roc::tensilelite-host>/../lib/hipblaslt/rocisa,$<TARGET_FILE_DIR:roc::tensilelite-host>/hipblaslt/rocisa>")
-        get_filename_component(_hipsparselt_hip_bindir "${hip_DIR}/../../../bin" ABSOLUTE)
-        get_filename_component(_hipsparselt_cxx_bindir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-
         set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
-        set(_hipsparselt_codegen_flags "")
-        if(HIPSPARSELT_ENABLE_ASAN)
-            list(APPEND _hipsparselt_codegen_flags ASAN)
+        set(_hipsparselt_yaml_format OFF)
+        if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
+            set(_hipsparselt_yaml_format ON)
         endif()
-        hipblaslt_make_python_command(HIPBLASLT_PYTHON_COMMAND
-            PYTHONPATH_DIRS "$<IF:$<PLATFORM_ID:Windows>,$<TARGET_FILE_DIR:roc::tensilelite-host>/../lib/hipblaslt,$<TARGET_FILE_DIR:roc::tensilelite-host>/hipblaslt>" "${HIPBLASLT_CODEGEN_ROOT}"
-            RUNTIME_LIB_DIRS "$<TARGET_FILE_DIR:roc::origami>" "${_hipsparselt_rocisa_dir}"
-            TOOL_BIN_DIRS "${_hipsparselt_hip_bindir}" "${_hipsparselt_cxx_bindir}"
-            ${_hipsparselt_codegen_flags}
-        )
+        set(_hipsparselt_lazy_load ON)
+        if(Tensile_NO_LAZY_LIBRARY_LOADING)
+            set(_hipsparselt_lazy_load OFF)
+        endif()
         create_device_library(
             LOGIC_PATH "${TENSILELITE_LIBLOGIC_PATH}"
             OUTPUT_DIR "${_hipsparselt_tensile_out}"
-            PYTHON_COMMAND "${HIPBLASLT_PYTHON_COMMAND}"
+            CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}"
+            PYTHON_EXECUTABLE "${Python3_EXECUTABLE}"
+            OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
+            JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
+            LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
             ASAN "${HIPSPARSELT_ENABLE_ASAN}"
+            YAML_FORMAT "${_hipsparselt_yaml_format}"
+            NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"
+            EXPERIMENTAL "${TENSILELITE_EXPERIMENTAL}"
+            LAZY_LOAD "${_hipsparselt_lazy_load}"
+            ASM_COMMENTS "${TENSILELITE_ENABLE_ASM_COMMENTS}"
+            KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}"
+            ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
         )
 
         if(WIN32)

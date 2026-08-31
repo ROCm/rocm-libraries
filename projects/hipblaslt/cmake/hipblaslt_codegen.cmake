@@ -3,41 +3,23 @@
 
 include_guard(GLOBAL)
 
-set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING
-    "Number of CPU cores to use for building device libraries (uses nproc if unset).")
-set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE BOOL
-    "Keep the temporary device-library build directory.")
-set(TENSILELITE_ASM_DEBUG OFF CACHE BOOL
-    "Keep debug information in generated device libraries.")
-set(TENSILELITE_LOGIC_FILTER "" CACHE STRING
-    "Glob used to select logic files; empty selects all logic files.")
-set(TENSILELITE_NO_COMPRESS OFF CACHE BOOL
-    "Do not compress device code object files.")
-set(TENSILELITE_EXPERIMENTAL OFF CACHE BOOL
-    "Process experimental logic files.")
-set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE BOOL
-    "Emit comments in generated assembly.")
-set(TENSILELITE_OFFLOADBUNDLER "" CACHE FILEPATH
-    "Path to clang-offload-bundler.")
-set(TENSILELITE_LIBLOGIC_PATH "" CACHE PATH
-    "Path to TensileLite library logic files.")
-set(TENSILELITE_LIBRARY_FORMAT "msgpack" CACHE STRING
-    "Device library serialization format (msgpack or yaml).")
-set_property(CACHE TENSILELITE_LIBRARY_FORMAT PROPERTY STRINGS msgpack yaml)
-set(Tensile_NO_LAZY_LIBRARY_LOADING OFF CACHE BOOL
-    "Disable lazy loading of device libraries.")
-
 function(hipblaslt_make_python_command out_command)
     set(_options ASAN TSAN)
+    set(_one PYTHON_EXECUTABLE)
     set(_multi PYTHONPATH_DIRS RUNTIME_LIB_DIRS TOOL_BIN_DIRS)
-    cmake_parse_arguments(arg "${_options}" "" "${_multi}" ${ARGN})
+    cmake_parse_arguments(arg "${_options}" "${_one}" "${_multi}" ${ARGN})
 
     if(arg_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "hipblaslt_make_python_command: unexpected arguments: ${arg_UNPARSED_ARGUMENTS} (permitted options: ASAN, TSAN; multi-value keywords: PYTHONPATH_DIRS, RUNTIME_LIB_DIRS, TOOL_BIN_DIRS)")
+        message(FATAL_ERROR "hipblaslt_make_python_command: unexpected arguments: ${arg_UNPARSED_ARGUMENTS} (permitted options: ASAN, TSAN; single-value keyword: PYTHON_EXECUTABLE; multi-value keywords: PYTHONPATH_DIRS, RUNTIME_LIB_DIRS, TOOL_BIN_DIRS)")
     endif()
 
-    if(NOT Python3_EXECUTABLE)
+    if(arg_PYTHON_EXECUTABLE)
+        set(_python_executable "${arg_PYTHON_EXECUTABLE}")
+    elseif(Python3_EXECUTABLE)
+        set(_python_executable "${Python3_EXECUTABLE}")
+    else()
         find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        set(_python_executable "${Python3_EXECUTABLE}")
     endif()
 
     set(_sanitizer_flag "")
@@ -77,7 +59,7 @@ function(hipblaslt_make_python_command out_command)
     list(APPEND environment "PATH=${base_path}")
 
     set(${out_command}
-        "${CMAKE_COMMAND}" -E env ${environment} -- "${Python3_EXECUTABLE}"
+        "${CMAKE_COMMAND}" -E env ${environment} -- "${_python_executable}"
         PARENT_SCOPE)
 endfunction()
 
@@ -147,14 +129,14 @@ endfunction()
 function(create_device_library)
     set(_opts "")
     set(_one
-        TARGET LOGIC_PATH OUTPUT_DIR CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER
+        TARGET LOGIC_PATH OUTPUT_DIR CODEGEN_ROOT PYTHON_EXECUTABLE CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER
         ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL LAZY_LOAD ASM_COMMENTS KEEP_BUILD_TMP ASM_DEBUG
         REQUIRE_GFX1250V0_OVERLAY)
-    set(_multi ARCHES PYTHON_COMMAND)
+    set(_multi ARCHES)
     cmake_parse_arguments(_cdl "${_opts}" "${_one}" "${_multi}" ${ARGN})
 
     if(_cdl_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "create_device_library: unexpected arguments: ${_cdl_UNPARSED_ARGUMENTS} (permitted single-value keywords: TARGET, LOGIC_PATH, OUTPUT_DIR, CXX_COMPILER, OFFLOAD_BUNDLER, JOBS, LOGIC_FILTER, ASAN, YAML_FORMAT, NO_COMPRESS, EXPERIMENTAL, LAZY_LOAD, ASM_COMMENTS, KEEP_BUILD_TMP, ASM_DEBUG, REQUIRE_GFX1250V0_OVERLAY; multi-value keywords: ARCHES, PYTHON_COMMAND)")
+        message(FATAL_ERROR "create_device_library: unexpected arguments: ${_cdl_UNPARSED_ARGUMENTS} (permitted single-value keywords: TARGET, LOGIC_PATH, OUTPUT_DIR, CODEGEN_ROOT, PYTHON_EXECUTABLE, CXX_COMPILER, OFFLOAD_BUNDLER, JOBS, LOGIC_FILTER, ASAN, YAML_FORMAT, NO_COMPRESS, EXPERIMENTAL, LAZY_LOAD, ASM_COMMENTS, KEEP_BUILD_TMP, ASM_DEBUG, REQUIRE_GFX1250V0_OVERLAY; multi-value keyword: ARCHES)")
     endif()
     if(NOT _cdl_LOGIC_PATH)
         message(FATAL_ERROR "create_device_library: LOGIC_PATH is required")
@@ -163,16 +145,26 @@ function(create_device_library)
         message(FATAL_ERROR "create_device_library: OUTPUT_DIR is required")
     endif()
 
-    if(NOT _cdl_PYTHON_COMMAND)
-        message(FATAL_ERROR
-            "create_device_library: PYTHON_COMMAND is required; build it with "
-            "hipblaslt_make_python_command() and pass it via the PYTHON_COMMAND argument.")
-    endif()
-
-    if(HIPBLASLT_CODEGEN_ROOT)
+    if(_cdl_CODEGEN_ROOT)
+        set(_codegen_dir "${_cdl_CODEGEN_ROOT}")
+    elseif(HIPBLASLT_CODEGEN_ROOT)
         set(_codegen_dir "${HIPBLASLT_CODEGEN_ROOT}")
     else()
-        get_filename_component(_codegen_dir "${CMAKE_CURRENT_LIST_DIR}/../tensilelite" ABSOLUTE)
+        message(FATAL_ERROR
+            "create_device_library: CODEGEN_ROOT is required; pass the TensileLite source root "
+            "or set HIPBLASLT_CODEGEN_ROOT.")
+    endif()
+    set(_known_bugs_resource "${_codegen_dir}/Tensile/TensileLogic/known_bugs.yaml")
+    foreach(_required_path
+            "${_codegen_dir}/Tensile/bin/TensileLogic"
+            "${_codegen_dir}/Tensile/TensileCreateLibrary/__main__.py"
+            "${_known_bugs_resource}")
+        if(NOT EXISTS "${_required_path}")
+            message(FATAL_ERROR "create_device_library: required codegen resource not found: ${_required_path}")
+        endif()
+    endforeach()
+    if(NOT IS_DIRECTORY "${_cdl_LOGIC_PATH}")
+        message(FATAL_ERROR "create_device_library: LOGIC_PATH is not a directory: ${_cdl_LOGIC_PATH}")
     endif()
 
     if(NOT _cdl_TARGET)
@@ -187,42 +179,46 @@ function(create_device_library)
     if(NOT _cdl_CXX_COMPILER)
         set(_cdl_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
     endif()
-    if(NOT DEFINED _cdl_OFFLOAD_BUNDLER)
-        set(_cdl_OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}")
-    endif()
-    if(NOT DEFINED _cdl_JOBS)
-        set(_cdl_JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}")
-    endif()
-    if(NOT DEFINED _cdl_LOGIC_FILTER)
-        set(_cdl_LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}")
-    endif()
-    if(NOT DEFINED _cdl_NO_COMPRESS)
-        set(_cdl_NO_COMPRESS "${TENSILELITE_NO_COMPRESS}")
-    endif()
-    if(NOT DEFINED _cdl_EXPERIMENTAL)
-        set(_cdl_EXPERIMENTAL "${TENSILELITE_EXPERIMENTAL}")
-    endif()
-    if(NOT DEFINED _cdl_ASM_COMMENTS)
-        set(_cdl_ASM_COMMENTS "${TENSILELITE_ENABLE_ASM_COMMENTS}")
-    endif()
-    if(NOT DEFINED _cdl_KEEP_BUILD_TMP)
-        set(_cdl_KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}")
-    endif()
-    if(NOT DEFINED _cdl_ASM_DEBUG)
-        set(_cdl_ASM_DEBUG "${TENSILELITE_ASM_DEBUG}")
-    endif()
     if(NOT DEFINED _cdl_YAML_FORMAT)
         set(_cdl_YAML_FORMAT OFF)
-        if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
-            set(_cdl_YAML_FORMAT ON)
-        endif()
     endif()
     if(NOT DEFINED _cdl_LAZY_LOAD)
         set(_cdl_LAZY_LOAD ON)
-        if(Tensile_NO_LAZY_LIBRARY_LOADING)
-            set(_cdl_LAZY_LOAD OFF)
-        endif()
     endif()
+
+    set(_python_path_dirs "${_codegen_dir}")
+    set(_runtime_lib_dirs "")
+    if(TARGET _rocisa)
+        list(APPEND _python_path_dirs "$<TARGET_FILE_DIR:_rocisa>/..")
+        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:_rocisa>")
+    elseif(TARGET roc::tensilelite-host)
+        set(_installed_python_root "$<IF:$<PLATFORM_ID:Windows>,$<TARGET_FILE_DIR:roc::tensilelite-host>/../lib/hipblaslt,$<TARGET_FILE_DIR:roc::tensilelite-host>/hipblaslt>")
+        list(APPEND _python_path_dirs "${_installed_python_root}")
+        list(APPEND _runtime_lib_dirs "${_installed_python_root}/rocisa")
+    endif()
+    if(TARGET roc::origami)
+        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::origami>")
+    endif()
+
+    set(_tool_bin_dirs "")
+    if(hip_DIR)
+        get_filename_component(_hip_bindir "${hip_DIR}/../../../bin" ABSOLUTE)
+        list(APPEND _tool_bin_dirs "${_hip_bindir}")
+    endif()
+    get_filename_component(_cxx_bindir "${_cdl_CXX_COMPILER}" DIRECTORY)
+    list(APPEND _tool_bin_dirs "${_cxx_bindir}")
+
+    set(_python_flags "")
+    if(_cdl_ASAN)
+        list(APPEND _python_flags ASAN)
+    endif()
+    hipblaslt_make_python_command(_python_command
+        PYTHON_EXECUTABLE "${_cdl_PYTHON_EXECUTABLE}"
+        PYTHONPATH_DIRS ${_python_path_dirs}
+        RUNTIME_LIB_DIRS ${_runtime_lib_dirs}
+        TOOL_BIN_DIRS ${_tool_bin_dirs}
+        ${_python_flags}
+    )
 
     file(MAKE_DIRECTORY "${_cdl_OUTPUT_DIR}/library")
 
@@ -262,7 +258,6 @@ function(create_device_library)
         list(APPEND _opts_list "--disable-asm-comments")
     endif()
 
-    set(_known_bugs_resource "${_codegen_dir}/Tensile/TensileLogic/known_bugs.yaml")
     set(_tensile_logic_args
         "${_cdl_LOGIC_PATH}"
         --architecture
@@ -277,7 +272,7 @@ function(create_device_library)
     add_custom_command(
         OUTPUT "${_logic_stamp}"
         COMMENT "Validating library logic (TensileLogic --check-all) for ${_cdl_TARGET} ..."
-        COMMAND ${_cdl_PYTHON_COMMAND}
+        COMMAND ${_python_command}
             "${_codegen_dir}/Tensile/bin/TensileLogic"
             ${_tensile_logic_args}
         COMMAND ${CMAKE_COMMAND} -E touch "${_logic_stamp}"
@@ -288,7 +283,7 @@ function(create_device_library)
 
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
-        ${_cdl_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
+        ${_python_command} -m Tensile.TensileCreateLibrary
         ${_opts_list}
         "${_cdl_LOGIC_PATH}"
         "${_cdl_OUTPUT_DIR}"
