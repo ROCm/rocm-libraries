@@ -27,6 +27,13 @@ if(${LINK_HIP_DEVICE_LIBS})
   )
 endif()
 
+if(ROCTHRUST_USE_LIBHIPCXX AND TARGET libhipcxx::libhipcxx)
+  target_link_libraries(rocthrust
+    INTERFACE
+    libhipcxx::libhipcxx
+  )
+endif()
+
 # hipstdpar header target
 add_library(hipstdpar INTERFACE)
 target_link_libraries(hipstdpar INTERFACE rocthrust)
