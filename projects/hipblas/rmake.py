@@ -391,8 +391,8 @@ def main():
     if args.use_cuda:
         os.environ['HIP_PLATFORM'] = 'nvidia'
         print("--cuda option is deprecated (use environment variable HIP_PLATFORM=nvidia)")
-
-    os.environ['HIP_PLATFORM'] = 'amd'
+    else:
+        os.environ['HIP_PLATFORM'] = 'amd'
 
     if os.environ['HIP_PLATFORM'] == 'nvidia' and args.static_lib:
         fatal("Static library not supported for CUDA backend. Not continuing.")
