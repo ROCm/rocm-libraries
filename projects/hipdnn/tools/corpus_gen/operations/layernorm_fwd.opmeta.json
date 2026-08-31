@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.0",
+  "operation": "layernorm_fwd",
+  "display_name": "LayerNorm Forward",
+  "description": "Layer normalization over the trailing normalized dimensions.",
+  "parameters": {
+    "batch": {
+      "type": "int64"
+    },
+    "seq_len": {
+      "type": "int64"
+    },
+    "hidden_dim": {
+      "type": "int64"
+    },
+    "dtype": {
+      "type": "enum",
+      "values": [
+        "float32",
+        "float16",
+        "bfloat16"
+      ]
+    }
+  },
+  "stratification_axis": "working_set",
+  "regimes": {
+    "hidden_dim": {
+      "parameter": "hidden_dim",
+      "buckets": [
+        768,
+        1024,
+        1536,
+        4096,
+        5120,
+        8192
+      ]
+    },
+    "batch": {
+      "parameter": "batch",
+      "buckets": [
+        1,
+        4,
+        16,
+        32,
+        64,
+        128
+      ]
+    },
+    "seq_len": {
+      "parameter": "seq_len",
+      "buckets": [
+        128,
+        512,
+        2048,
+        8192
+      ]
+    }
+  },
+  "graph_builder": {
+    "function": "layernormForward",
+    "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "arguments": [
+      {
+        "name": "dims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.seq_len",
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "strides",
+        "kind": "strides_of",
+        "of": "dims"
+      },
+      {
+        "name": "dataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype"
+      }
+    ]
+  }
+}

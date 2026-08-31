@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "operation": "pointwise",
+  "display_name": "Elementwise Binary Pointwise",
+  "description": "Two operands and a result of identical rank-4 extent. Broadcasting is a different operation.",
+  "parameters": {
+    "D0": {
+      "type": "int64"
+    },
+    "D1": {
+      "type": "int64"
+    },
+    "D2": {
+      "type": "int64"
+    },
+    "D3": {
+      "type": "int64"
+    },
+    "mode": {
+      "type": "enum",
+      "values": [
+        "ADD",
+        "MUL",
+        "SUB",
+        "DIV",
+        "MAX_OP",
+        "MIN_OP"
+      ],
+      "description": "FlatBuffers enumerator names; MIN and MAX are reserved words in the schema"
+    },
+    "dtype": {
+      "type": "enum",
+      "values": [
+        "float32",
+        "float16",
+        "bfloat16"
+      ]
+    }
+  },
+  "stratification_axis": "working_set",
+  "regimes": {
+    "d0": {
+      "parameter": "D0",
+      "buckets": [
+        1,
+        4,
+        32,
+        256
+      ]
+    },
+    "d1": {
+      "parameter": "D1",
+      "buckets": [
+        1,
+        16,
+        128,
+        1024
+      ]
+    },
+    "d2": {
+      "parameter": "D2",
+      "buckets": [
+        1,
+        14,
+        56,
+        224
+      ]
+    },
+    "d3": {
+      "parameter": "D3",
+      "buckets": [
+        1,
+        14,
+        56,
+        224
+      ]
+    }
+  },
+  "graph_builder": {
+    "function": "pointwiseBinary",
+    "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "arguments": [
+      {
+        "name": "dims",
+        "kind": "expr",
+        "value": [
+          "$q.D0",
+          "$q.D1",
+          "$q.D2",
+          "$q.D3"
+        ]
+      },
+      {
+        "name": "strides",
+        "kind": "strides_of",
+        "of": "dims"
+      },
+      {
+        "name": "mode",
+        "kind": "direct",
+        "source": "$q.mode"
+      },
+      {
+        "name": "dataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype"
+      }
+    ]
+  }
+}

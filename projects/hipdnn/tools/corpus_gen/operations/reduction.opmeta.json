@@ -1,0 +1,107 @@
+{
+  "schema_version": "1.0",
+  "operation": "reduction",
+  "display_name": "Reduction",
+  "description": "Reduces the trailing axis. The output shape is the statement of which axes reduce, so it is declared rather than inferred.",
+  "parameters": {
+    "rows": {
+      "type": "int64"
+    },
+    "cols": {
+      "type": "int64"
+    },
+    "mode": {
+      "type": "enum",
+      "values": [
+        "ADD",
+        "MUL",
+        "MIN_OP",
+        "MAX_OP",
+        "AMAX",
+        "AVG",
+        "NORM1",
+        "NORM2"
+      ],
+      "description": "FlatBuffers enumerator names; MIN and MAX are reserved words in the schema"
+    },
+    "dtype": {
+      "type": "enum",
+      "values": [
+        "float32",
+        "float16"
+      ]
+    }
+  },
+  "stratification_axis": "reduction_ratio",
+  "regimes": {
+    "rows": {
+      "parameter": "rows",
+      "buckets": [
+        1,
+        16,
+        256,
+        4096,
+        16384
+      ]
+    },
+    "cols": {
+      "parameter": "cols",
+      "buckets": [
+        8,
+        128,
+        1024,
+        8192
+      ]
+    }
+  },
+  "graph_builder": {
+    "function": "reduction",
+    "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "arguments": [
+      {
+        "name": "inDims",
+        "kind": "expr",
+        "value": [
+          "$q.rows",
+          "$q.cols"
+        ]
+      },
+      {
+        "name": "inStrides",
+        "kind": "strides_of",
+        "of": "inDims"
+      },
+      {
+        "name": "outDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.cols"
+        ]
+      },
+      {
+        "name": "outStrides",
+        "kind": "strides_of",
+        "of": "outDims"
+      },
+      {
+        "name": "mode",
+        "kind": "direct",
+        "source": "$q.mode"
+      },
+      {
+        "name": "dataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype"
+      }
+    ]
+  },
+  "constraints": [
+    {
+      ">": [
+        "$q.rows",
+        1
+      ]
+    }
+  ]
+}

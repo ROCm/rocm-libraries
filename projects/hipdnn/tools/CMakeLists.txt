@@ -1,6 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+add_subdirectory(bench)
 add_subdirectory(corpus_gen)
 
 add_executable(hipdnn_list_engines ListEngines.cpp)

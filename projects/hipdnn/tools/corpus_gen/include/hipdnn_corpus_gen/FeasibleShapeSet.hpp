@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -85,6 +86,17 @@ struct FeasibleSetStats
     /// how much spread cost.
     int64_t accepted = 0;
 
+    /// Cells the corpus is partitioned into, and how many hold a problem. Coverage is
+    /// occupied over total -- a measurement rather than a claim, which post-hoc thinning
+    /// could not provide.
+    int64_t cells = 0;
+    int64_t cellsOccupied = 0;
+
+    /// Distinct feasible points the search reached, before selection. The corpus is chosen
+    /// from these, so it can never exceed them -- and when it falls short, this says whether
+    /// the search or the selection was the limit.
+    int64_t distinct = 0;
+
     /// True when the target count was not reached. The caller MUST NOT read a short set as a
     /// small region: it may equally be a budget that ran out.
     bool budgetExhausted = false;
@@ -118,6 +130,18 @@ struct FeasibleSetRequest
 
     /// Reproducibility, per §5.8. Randomised against the region's structure, not across runs.
     uint64_t seed = 0;
+
+    /// Shapes to try before drawing any, and to walk from when accepted.
+    ///
+    /// Rejection sampling finds a region in proportion to its measure, and for an operation
+    /// whose parameters constrain each other that measure is nearly zero: independent draws
+    /// over a convolution's thirteen parameters produce a filter larger than its input almost
+    /// every time, and the search maps the frontend's validator instead of the engine.
+    ///
+    /// A caller that knows the structure -- declared regime buckets, recorded workload shapes
+    /// -- supplies it here. This is not a shortcut around the search: seeds are put to the
+    /// oracle like anything else, and the walk still discovers what no list contains.
+    std::vector<Shape> seeds;
 };
 
 namespace detail
@@ -142,6 +166,24 @@ inline int64_t fromLog(double value, int64_t low, int64_t high)
     return std::clamp(rounded, low, high);
 }
 
+/// Log space cannot represent zero, and some parameters legitimately start there. A
+/// convolution's padding is the common case: an engine that requires unpadded input --
+/// hip-kernel-provider's conv pack does -- accepts nothing a search floored at 1 can propose,
+/// and reports as serving no convolutions at all.
+///
+/// So the search runs over `value - low + 1`, which is at least 1 for any floor, and
+/// translates at the boundary. A dimension with `low = 1` is unchanged, which is most of them.
+inline double toLogFrom(int64_t value, int64_t low)
+{
+    return toLog(value - low + 1);
+}
+
+inline int64_t fromLogFrom(double value, int64_t low, int64_t high)
+{
+    const auto offset = fromLog(value, 1, high - low + 1);
+    return std::clamp(offset + low - 1, low, high);
+}
+
 /// Log-uniform draw across the box. Log-uniform rather than uniform because performance
 /// regimes scale multiplicatively: a uniform draw over [1, 2^20] puts almost every sample in
 /// the top octave and never visits the small shapes that are their own regime.
@@ -151,9 +193,9 @@ inline Shape drawLogUniform(const std::vector<ShapeDimension>& dimensions, std::
     shape.reserve(dimensions.size());
     for(const auto& dimension : dimensions)
     {
-        std::uniform_real_distribution<double> distribution(toLog(dimension.low),
-                                                            toLog(dimension.high));
-        shape.push_back(fromLog(distribution(rng), dimension.low, dimension.high));
+        std::uniform_real_distribution<double> distribution(
+            toLog(1), toLogFrom(dimension.high, dimension.low));
+        shape.push_back(fromLogFrom(distribution(rng), dimension.low, dimension.high));
     }
     return shape;
 }
@@ -200,60 +242,256 @@ inline double noveltyRadiusSquared(const std::vector<ShapeDimension>& dimensions
     return diagonal * 0.25 * 0.25;
 }
 
-/// Greedy farthest-point selection: repeatedly take the candidate furthest from everything
-/// already chosen.
+/// Well-spread cell centres over the points the search actually reached.
 ///
-/// A walk's output is not a sample of the region -- consecutive steps are neighbours, so the
-/// raw trace is clustered along whatever path it happened to take. Thinning by distance turns
-/// that into coverage. Greedy rather than optimal because the optimal choice is combinatorial
-/// and the greedy one is within a constant factor, which is far inside the noise of everything
-/// else here.
-inline std::vector<Shape> spreadSelect(const std::vector<Shape>& candidates, int64_t count)
+/// Not over the declared box, which was the first attempt and is wrong for the same reason a
+/// uniform prior is wrong here: the feasible set is usually a thin slice of the box. An engine
+/// requiring unit stride, unit dilation and no padding pins six of a convolution's thirteen
+/// parameters, so the region is seven-dimensional and every cell placed off that slice is
+/// unreachable by construction. Measured: 184 occupied of 10000 box cells, with the search
+/// having found more than a million feasible points to put in them.
+///
+/// Tessellating the observed set instead means every cell can be filled and the corpus spreads
+/// over the region that exists. How much of the *declared* space turned out to be reachable is
+/// a separate question, and is reported separately rather than folded into coverage.
+///
+/// k-centre over the observations, which is the practical stand-in for the centroidal Voronoi
+/// tessellation CVT-MAP-Elites uses to avoid a grid exponential in the parameter count.
+inline std::vector<std::vector<double>> buildCentroids(
+    const std::vector<std::vector<double>>& observed, size_t count)
 {
-    if(candidates.empty() || count <= 0)
+    std::vector<std::vector<double>> centroids;
+    if(observed.empty())
     {
-        return {};
-    }
-    if(static_cast<int64_t>(candidates.size()) <= count)
-    {
-        return candidates;
+        return centroids;
     }
 
-    std::vector<Shape> chosen;
-    chosen.reserve(static_cast<size_t>(count));
-    std::vector<bool> taken(candidates.size(), false);
+    centroids.push_back(observed.front());
+    std::vector<double> nearest(observed.size(), std::numeric_limits<double>::max());
 
-    // Seeded from the first accepted shape rather than an arbitrary one, so the selection is
-    // reproducible for a given walk.
-    chosen.push_back(candidates.front());
-    taken[0] = true;
-
-    std::vector<double> nearest(candidates.size(), std::numeric_limits<double>::max());
-    while(static_cast<int64_t>(chosen.size()) < count)
+    while(centroids.size() < count && centroids.size() < observed.size())
     {
         size_t best = 0;
         double bestDistance = -1.0;
-        for(size_t i = 0; i < candidates.size(); ++i)
+        for(size_t i = 0; i < observed.size(); ++i)
         {
-            if(taken[i])
+            double distance = 0.0;
+            for(size_t d = 0; d < observed[i].size(); ++d)
             {
-                continue;
+                const double delta = observed[i][d] - centroids.back()[d];
+                distance += delta * delta;
             }
-            nearest[i] = std::min(nearest[i], logDistanceSquared(candidates[i], chosen.back()));
+            nearest[i] = std::min(nearest[i], distance);
             if(nearest[i] > bestDistance)
             {
                 bestDistance = nearest[i];
                 best = i;
             }
         }
-        if(bestDistance < 0.0)
+        if(bestDistance <= 0.0)
         {
-            break;
+            break; // Every remaining observation coincides with a centre already chosen.
         }
-        taken[best] = true;
-        chosen.push_back(candidates[best]);
+        centroids.push_back(observed[best]);
     }
-    return chosen;
+    return centroids;
+}
+
+/// One problem per cell, kept by proximity to the cell's centre.
+///
+/// This replaces selecting a spread subset after the fact. Post-hoc selection can only choose
+/// among what the search produced, so when a declared skeleton dominates the accepted set it
+/// faithfully returns skeleton points and the corpus contains nothing the declaration did not
+/// already name. An archive cannot collapse that way: a seed occupies its own cell and no
+/// more, and coverage becomes a number -- occupied cells over total -- rather than a claim.
+class CellArchive
+{
+public:
+    CellArchive(std::vector<std::vector<double>> centroids,
+                const std::vector<ShapeDimension>& dimensions)
+        : _centroids(std::move(centroids))
+        , _dimensions(dimensions)
+        , _occupants(_centroids.size())
+        , _distances(_centroids.size(), std::numeric_limits<double>::max())
+    {
+    }
+
+    /// Places @p shape in its cell. Returns true when it took an empty cell, which is the
+    /// signal that the search reached somewhere new.
+    bool insert(const Shape& shape)
+    {
+        std::vector<double> position;
+        position.reserve(shape.size());
+        for(size_t d = 0; d < shape.size(); ++d)
+        {
+            position.push_back(toLogFrom(shape[d], _dimensions[d].low));
+        }
+
+        size_t cell = 0;
+        double best = std::numeric_limits<double>::max();
+        for(size_t c = 0; c < _centroids.size(); ++c)
+        {
+            double distance = 0.0;
+            for(size_t d = 0; d < position.size(); ++d)
+            {
+                const double delta = position[d] - _centroids[c][d];
+                distance += delta * delta;
+            }
+            if(distance < best)
+            {
+                best = distance;
+                cell = c;
+            }
+        }
+
+        const bool wasEmpty = !_occupants[cell].has_value();
+        if(wasEmpty || best < _distances[cell])
+        {
+            _occupants[cell] = shape;
+            _distances[cell] = best;
+        }
+        return wasEmpty;
+    }
+
+    std::vector<Shape> contents() const
+    {
+        std::vector<Shape> shapes;
+        for(const auto& occupant : _occupants)
+        {
+            if(occupant.has_value())
+            {
+                shapes.push_back(*occupant);
+            }
+        }
+        return shapes;
+    }
+
+    size_t occupied() const
+    {
+        return static_cast<size_t>(
+            std::count_if(_occupants.begin(), _occupants.end(), [](const auto& o) {
+                return o.has_value();
+            }));
+    }
+
+    size_t cells() const
+    {
+        return _centroids.size();
+    }
+
+private:
+    std::vector<std::vector<double>> _centroids;
+    const std::vector<ShapeDimension>& _dimensions;
+    std::vector<std::optional<Shape>> _occupants;
+    std::vector<double> _distances;
+};
+
+/// One discrete hit-and-run step from @p current (Baumert et al., *Operations Research* 57(3)).
+///
+/// A uniform random direction, then a uniform draw along the chord that direction cuts through
+/// the box -- shrinking the interval toward the current point on each refusal, which is what
+/// makes the step legal for a region that is neither convex nor connected.
+///
+/// This replaces a coordinate-direction walk with an adaptive step size. That walk is the one
+/// the literature singles out as failing to converge because it becomes trapped in isolated
+/// regions, and its step size was a hand-rolled substitute for the chord this samples directly.
+inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
+                                          const Shape& current,
+                                          const std::vector<ShapeDimension>& dimensions,
+                                          std::mt19937_64& rng,
+                                          int64_t maxShrinks,
+                                          int64_t& calls,
+                                          int64_t budget)
+{
+    // Half the steps move along one axis, half in a random direction.
+    //
+    // Neither alone is enough. A full-dimensional direction changes every coordinate at once,
+    // which is fatal for a region defined per coordinate -- a set admitting only multiples of
+    // eight in each of three dimensions is left by almost every diagonal step, and the walk
+    // stalls. A coordinate direction preserves the other coordinates and moves happily inside
+    // such a region, but cannot cross a diagonal ridge. Coordinate Hit-and-Run exists as a
+    // named variant for the first reason; keeping both is what covers the second.
+    std::vector<double> direction(dimensions.size(), 0.0);
+    std::bernoulli_distribution axisAligned(0.5);
+    if(axisAligned(rng))
+    {
+        std::uniform_int_distribution<size_t> pick(0, dimensions.size() - 1);
+        std::bernoulli_distribution sign(0.5);
+        direction[pick(rng)] = sign(rng) ? 1.0 : -1.0;
+    }
+    else
+    {
+        std::normal_distribution<double> gaussian(0.0, 1.0);
+        double norm = 0.0;
+        for(auto& component : direction)
+        {
+            component = gaussian(rng);
+            norm += component * component;
+        }
+        norm = std::sqrt(norm);
+        if(norm <= 0.0)
+        {
+            return std::nullopt;
+        }
+        for(auto& component : direction)
+        {
+            component /= norm;
+        }
+    }
+
+    // The chord's extent within the box, in log space.
+    double low = -std::numeric_limits<double>::max();
+    double high = std::numeric_limits<double>::max();
+    std::vector<double> position(dimensions.size());
+    for(size_t d = 0; d < dimensions.size(); ++d)
+    {
+        position[d] = toLogFrom(current[d], dimensions[d].low);
+        const double ceiling = toLogFrom(dimensions[d].high, dimensions[d].low);
+        if(std::abs(direction[d]) < 1e-12)
+        {
+            continue;
+        }
+        const double toFloor = (0.0 - position[d]) / direction[d];
+        const double toCeiling = (ceiling - position[d]) / direction[d];
+        low = std::max(low, std::min(toFloor, toCeiling));
+        high = std::min(high, std::max(toFloor, toCeiling));
+    }
+    if(!(low < high))
+    {
+        return std::nullopt;
+    }
+
+    for(int64_t shrink = 0; shrink < maxShrinks && calls < budget; ++shrink)
+    {
+        std::uniform_real_distribution<double> along(low, high);
+        const double t = along(rng);
+
+        Shape candidate(current.size());
+        for(size_t d = 0; d < dimensions.size(); ++d)
+        {
+            candidate[d] = fromLogFrom(position[d] + (t * direction[d]),
+                                       dimensions[d].low,
+                                       dimensions[d].high);
+        }
+
+        if(candidate == current)
+        {
+            // The draw landed back on the lattice point it started from; shrinking here would
+            // narrow the interval without having learned anything.
+            (t < 0.0 ? low : high) = t;
+            continue;
+        }
+
+        ++calls;
+        if(oracle(candidate))
+        {
+            return candidate;
+        }
+        // Refused: pull that side of the interval in to the refused point, which is the
+        // accept/reject a disconnected region makes unavoidable.
+        (t < 0.0 ? low : high) = t;
+    }
+    return std::nullopt;
 }
 
 } // namespace detail
@@ -287,19 +525,44 @@ inline FeasibleShapeSet buildFeasibleShapeSet(const ShapeOracle& oracle,
         return result;
     }
 
-    // Seed hits kept per restart. Small: enough to contribute the every-coordinate variation
-    // a walk cannot, without letting a dense region's pool grow without bound.
-    constexpr int64_t SEED_RETENTION_QUOTA = 8;
-
     std::mt19937_64 rng(request.seed);
-    std::vector<Shape> accepted;
-    std::uniform_int_distribution<size_t> pickDimension(0, request.dimensions.size() - 1);
 
     const auto ask = [&](const Shape& shape) {
         ++result.stats.oracleCalls;
         return oracle(shape);
     };
 
+    // Every feasible point the search reaches. Held because the cells are placed over these
+    // rather than over the declared box -- the region is typically a thin slice of the box,
+    // and cells placed off it can never be filled.
+    std::vector<Shape> observed;
+    const size_t observationCap = static_cast<size_t>(request.targetCount) * 200;
+
+    const auto record = [&](const Shape& shape) {
+        if(observed.size() < observationCap)
+        {
+            observed.push_back(shape);
+        }
+    };
+
+    std::vector<Shape> footholds;
+    for(const auto& seed : request.seeds)
+    {
+        if(result.stats.oracleCalls >= request.oracleBudget
+           || seed.size() != request.dimensions.size())
+        {
+            continue;
+        }
+        ++result.stats.seedAttempts;
+        if(ask(seed))
+        {
+            ++result.stats.seedsFound;
+            record(seed);
+            footholds.push_back(seed);
+        }
+    }
+
+    size_t nextFoothold = 0;
     for(int64_t restart = 0; restart < request.restarts; ++restart)
     {
         if(result.stats.oracleCalls >= request.oracleBudget)
@@ -307,159 +570,109 @@ inline FeasibleShapeSet buildFeasibleShapeSet(const ShapeOracle& oracle,
             break;
         }
 
-        // Seed. Draws continue past the first hit until one lands in unexplored territory,
-        // and every hit is kept.
-        //
-        // Stopping at the first hit would be cheaper and would be wrong for the job. Uniform
-        // draws find a component in proportion to its measure, so a region in two pieces --
-        // one of them a fortieth the size of the other -- hands the foothold to the larger
-        // piece forty times in forty-one. Restarts then re-explore what is already known and
-        // the small piece goes unfound however many are spent. Requiring novelty is what
-        // makes a restart worth its budget.
-        //
-        // Two allowances, because the seed phase does two jobs that cost differently and
-        // bounding them together makes each wrong.
-        //
-        // Reaching the first hit costs about one draw per feasible fraction of the box, and
-        // that fraction is exactly what nobody knows before the search starts. So it gets the
-        // generous share, and a box with no feasible region at all is what the bound is for.
-        //
-        // Hunting for novelty afterwards is bounded by what a corpus of this size can
-        // resolve. After n draws turn up nothing unexplored, a component still undiscovered
-        // occupies less than roughly 1/n of the box; at ten draws per requested shape that is
-        // a component too small to contribute even one shape to what was asked for. Spending
-        // past that buys resolution the caller did not request -- and in a region that is
-        // simply one connected piece it would be spent in full, every restart, to prove what
-        // the first draws already indicated.
         Shape current;
-        bool seeded = false;
-        double bestNovelty = -1.0;
-        int64_t retained = 0;
-        int64_t sinceFirstHit = 0;
-        const double radius = detail::noveltyRadiusSquared(request.dimensions);
-        const int64_t footholdAllowance
-            = std::max<int64_t>(1, request.oracleBudget / (request.restarts * 2));
-        const int64_t noveltyAllowance = std::max<int64_t>(64, request.targetCount * 10);
-        for(int64_t attempt = 0; attempt < footholdAllowance; ++attempt)
+        bool started = false;
+
+        if(nextFoothold < footholds.size())
         {
-            if(result.stats.oracleCalls >= request.oracleBudget
-               || (seeded && sinceFirstHit >= noveltyAllowance))
+            current = footholds[nextFoothold++];
+            started = true;
+        }
+        else
+        {
+            const auto allowance
+                = std::max<int64_t>(1, request.oracleBudget / (request.restarts * 2));
+            for(int64_t attempt = 0;
+                attempt < allowance && result.stats.oracleCalls < request.oracleBudget;
+                ++attempt)
             {
-                break;
-            }
-            if(seeded)
-            {
-                ++sinceFirstHit;
-            }
-            ++result.stats.seedAttempts;
-            const Shape candidate = detail::drawLogUniform(request.dimensions, rng);
-            if(!ask(candidate))
-            {
-                continue;
-            }
-            ++result.stats.seedsFound;
-
-            // Kept whether or not it becomes the foothold. It is a feasible shape that has
-            // already been paid for, and unlike a walk step it differs from its neighbours in
-            // every coordinate -- which is most of what per-dimension coverage comes from.
-            //
-            // Capped, because retention is a side benefit of the search rather than its
-            // purpose, and the novelty check is linear in what is already held. In a region
-            // where most draws are accepted an uncapped pool would grow by the whole
-            // allowance each restart and make the seed phase quadratic.
-            const double novelty = detail::distanceToSet(candidate, accepted);
-            if(retained < SEED_RETENTION_QUOTA)
-            {
-                accepted.push_back(candidate);
-                ++retained;
-            }
-
-            if(novelty > bestNovelty)
-            {
-                bestNovelty = novelty;
-                current = candidate;
-                seeded = true;
-            }
-            if(novelty > radius)
-            {
-                break;
+                ++result.stats.seedAttempts;
+                Shape candidate = detail::drawLogUniform(request.dimensions, rng);
+                if(ask(candidate))
+                {
+                    ++result.stats.seedsFound;
+                    record(candidate);
+                    current = std::move(candidate);
+                    started = true;
+                    break;
+                }
             }
         }
-        if(!seeded)
+
+        if(!started)
         {
             continue;
         }
 
-        // The foothold is kept whether or not the retention quota is spent. It is the most
-        // novel thing the phase found, which in a region of unequal pieces is the only point
-        // from the small one -- draws from the large piece fill the quota long before a rare
-        // one lands, so a quota applied here would discard precisely what the hunt was for.
-        accepted.push_back(current);
-
-        // Territory the walk has not seen is worth walking even when enough shapes are
-        // already held. Otherwise a component discovered late contributes the single shape
-        // that found it, and reports as a speck rather than as the region it is.
-        const bool novelFoothold = bestNovelty > radius;
-        int64_t walkAccepted = 0;
-
-        // Walk. One dimension at a time: a single-coordinate move is likelier to stay inside
-        // a region shaped by per-dimension rules than a move in every coordinate at once,
-        // which in high dimensions almost always leaves it.
-        double stepScale = 2.0;
+        int64_t moved = 0;
         for(int64_t step = 0; step < request.stepsPerStart; ++step)
         {
             if(result.stats.oracleCalls >= request.oracleBudget
-               || (!novelFoothold
-                   && static_cast<int64_t>(accepted.size()) >= request.targetCount * 4))
+               || observed.size() >= observationCap)
             {
                 break;
             }
 
-            const size_t dimension = pickDimension(rng);
-            std::uniform_real_distribution<double> factor(1.0 / stepScale, stepScale);
-
-            Shape candidate = current;
-            candidate[dimension] = detail::fromLog(detail::toLog(current[dimension])
-                                                       + std::log(factor(rng)),
-                                                   request.dimensions[dimension].low,
-                                                   request.dimensions[dimension].high);
-            if(candidate == current)
+            const auto next = detail::hitAndRunStep(oracle,
+                                                    current,
+                                                    request.dimensions,
+                                                    rng,
+                                                    /*maxShrinks=*/16,
+                                                    result.stats.oracleCalls,
+                                                    request.oracleBudget);
+            if(!next.has_value())
             {
                 continue;
             }
-
-            if(ask(candidate))
-            {
-                current = candidate;
-                accepted.push_back(current);
-                ++walkAccepted;
-                // Widen, but not without limit: an unbounded step degenerates into the
-                // log-uniform draw the seed phase already does, and loses the walk's one
-                // advantage of starting from somewhere feasible.
-                stepScale = std::min(stepScale * 1.1, 8.0);
-            }
-            else
-            {
-                // Narrow toward 1.0, where every proposal is a small move. A walk pressed
-                // against a boundary ends up sliding along it rather than repeatedly asking
-                // to cross.
-                stepScale = std::max(1.0 + ((stepScale - 1.0) * 0.7), 1.05);
-            }
+            current = *next;
+            ++result.stats.accepted;
+            record(current);
+            ++moved;
         }
 
-        if(walkAccepted == 0)
+        if(moved == 0)
         {
-            // A foothold that went nowhere: either an isolated point or a walk that could not
-            // get out of a corner. Either way it is not evidence of a region.
             ++result.stats.isolatedStarts;
         }
     }
 
-    std::sort(accepted.begin(), accepted.end());
-    accepted.erase(std::unique(accepted.begin(), accepted.end()), accepted.end());
-    result.stats.accepted = static_cast<int64_t>(accepted.size());
+    // Deduplicate before tessellating: a walk revisits points, and duplicates would pull
+    // centres toward wherever it lingered rather than toward where it reached.
+    std::sort(observed.begin(), observed.end());
+    observed.erase(std::unique(observed.begin(), observed.end()), observed.end());
+    result.stats.distinct = static_cast<int64_t>(observed.size());
 
-    result.shapes = detail::spreadSelect(accepted, request.targetCount);
+    if(observed.empty())
+    {
+        result.stats.budgetExhausted = true;
+        return result;
+    }
+
+    std::vector<std::vector<double>> positions;
+    positions.reserve(observed.size());
+    for(const auto& shape : observed)
+    {
+        std::vector<double> point;
+        point.reserve(shape.size());
+        for(size_t d = 0; d < shape.size(); ++d)
+        {
+            point.push_back(detail::toLogFrom(shape[d], request.dimensions[d].low));
+        }
+        positions.push_back(std::move(point));
+    }
+
+    const auto centroids
+        = detail::buildCentroids(positions, static_cast<size_t>(request.targetCount));
+
+    detail::CellArchive archive(centroids, request.dimensions);
+    for(const auto& shape : observed)
+    {
+        archive.insert(shape);
+    }
+
+    result.shapes = archive.contents();
+    result.stats.cells = static_cast<int64_t>(archive.cells());
+    result.stats.cellsOccupied = static_cast<int64_t>(archive.occupied());
     result.stats.budgetExhausted
         = static_cast<int64_t>(result.shapes.size()) < request.targetCount;
     return result;

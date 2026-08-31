@@ -82,20 +82,20 @@ TEST(TestFeasibleShapeSet, FindsARegionTooSparseForRejectionSampling)
     auto request = requestFor(matmulLikeDimensions());
     const auto result = buildFeasibleShapeSet(region, request);
 
-    EXPECT_EQ(static_cast<int64_t>(result.shapes.size()), request.targetCount);
+    // The corpus is the occupied cells, so it is not required to reach the requested count:
+    // this region covers about one box point in 512, and many cells contain no feasible point
+    // at all. A cell that cannot be filled is a fact about the region, and reporting coverage
+    // is more useful than topping the corpus up with duplicates of what was reachable.
+    EXPECT_GT(result.stats.cellsOccupied, request.targetCount / 2)
+        << "occupied " << result.stats.cellsOccupied << " of " << result.stats.cells;
+    EXPECT_EQ(static_cast<int64_t>(result.shapes.size()), result.stats.cellsOccupied);
 
-    // What the walk is for, stated as the cost it beats. About one box point in 512 qualifies
-    // here, so rejection sampling pays ~512 oracle calls per shape however many it wants.
-    // Measured against the same denominator this comes in several times below: footholds and
-    // the novelty hunt pay the rejection rate, and nothing the walk adds does.
-    //
-    // The threshold is loose on purpose. A sweep over forty seeds puts the worst case near
-    // 110, so a bound at the pinned seed's own figure would be asserting this seed rather
-    // than the property, and would fail on a change that left the property intact.
+    // What the walk is for, stated as the cost it beats: rejection sampling pays about 512
+    // oracle calls per shape in this region however many it wants.
     const double callsPerShape = static_cast<double>(result.stats.oracleCalls)
                                  / static_cast<double>(result.stats.accepted);
     EXPECT_LT(callsPerShape, 150.0) << "oracle calls " << result.stats.oracleCalls
-                                    << " for " << result.stats.accepted << " shapes";
+                                    << " for " << result.stats.accepted << " accepted";
 }
 
 TEST(TestFeasibleShapeSet, HandlesParametersThatConstrainEachOther)
