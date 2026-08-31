@@ -24,9 +24,12 @@
 
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/KernelCompileOptions.hpp"
+#include "compilation/KpackKernelLoader.hpp"
+#include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 
 /**
@@ -185,20 +188,21 @@ const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& conte
  *        device) and the memoized verdict is reused, with only the operation check left
  *        to each pack.
  */
-bool pointwiseGraphMatches(const MatchContext& context, BoundTokens& bound)
+std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
 {
+
     // Exactly one node: this engine's kernels each serve one complete graph.
     const auto* attributesPtr = pointwiseNode(context);
     if(attributesPtr == nullptr)
     {
-        return false;
+        return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
 
     // Binary: a second operand is required, a third would be a different operation.
     if(!attributes.in_1_tensor_uid().has_value() || attributes.in_2_tensor_uid().has_value())
     {
-        return false;
+        return std::nullopt;
     }
 
     const auto* inputA = findTensor(context, attributes.in_0_tensor_uid());
@@ -206,41 +210,43 @@ bool pointwiseGraphMatches(const MatchContext& context, BoundTokens& bound)
     const auto* output = findTensor(context, attributes.out_0_tensor_uid());
     if(inputA == nullptr || inputB == nullptr || output == nullptr)
     {
-        return false;
+        return std::nullopt;
     }
 
     if(!isSingleElement(*inputA) || !isSingleElement(*inputB) || !isSingleElement(*output))
     {
-        return false;
+        return std::nullopt;
     }
 
     if(inputA->virtual_() || inputB->virtual_() || output->virtual_())
     {
-        return false;
+        return std::nullopt;
     }
 
     if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputA)
        || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputB)
        || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(output))
     {
-        return false;
+        return std::nullopt;
     }
 
     if(inputA->data_type() != inputB->data_type() || inputA->data_type() != output->data_type())
     {
-        return false;
+        return std::nullopt;
     }
 
+    BoundTokens bound;
     bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
     bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
     bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
-    return true;
+    return bound;
 }
 
 /**
  * @brief Graph-scoped operation check: the one fact that separates this engine's packs.
- *        Binds nothing -- the applicability matcher above already bound every token
- *        dispatch reads.
+ *
+ * Listing this second matcher is the whole cost of a pack, and two packs claiming the
+ * same operation would be the authoring mistake, not two packs sharing the graph check.
  */
 bool pointwiseOperationMatches(const MatchContext& context, data_objects::PointwiseMode operation)
 {
@@ -248,17 +254,17 @@ bool pointwiseOperationMatches(const MatchContext& context, data_objects::Pointw
     return attributes != nullptr && attributes->operation() == operation;
 }
 
-bool pointwiseAddMatches(const MatchContext& context, BoundTokens& /*bound*/)
+bool pointwiseAddMatches(const MatchContext& context, const BoundTokens& /*bound*/)
 {
     return pointwiseOperationMatches(context, data_objects::PointwiseMode::ADD);
 }
 
-bool pointwiseMulMatches(const MatchContext& context, BoundTokens& /*bound*/)
+bool pointwiseMulMatches(const MatchContext& context, const BoundTokens& /*bound*/)
 {
     return pointwiseOperationMatches(context, data_objects::PointwiseMode::MUL);
 }
 
-bool pointwiseSubMatches(const MatchContext& context, BoundTokens& /*bound*/)
+bool pointwiseSubMatches(const MatchContext& context, const BoundTokens& /*bound*/)
 {
     return pointwiseOperationMatches(context, data_objects::PointwiseMode::SUB);
 }
@@ -268,7 +274,9 @@ bool pointwiseSubMatches(const MatchContext& context, BoundTokens& /*bound*/)
  *        Evaluated once per candidate kernel; without it an f32 graph could reach an
  *        f16 binary and return wrong numbers rather than failing.
  */
-bool pointwiseKernelMatches(const MatchContext& context, const KernelDefinition& kernel)
+bool pointwiseKernelMatches(const MatchContext& context,
+                            const BoundTokens& /*bound*/,
+                            const KernelDefinition& kernel)
 {
     const auto dataType = graphDataType(context);
     if(!dataType.has_value())
@@ -279,7 +287,9 @@ bool pointwiseKernelMatches(const MatchContext& context, const KernelDefinition&
     return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
 }
 
-double pointwiseScore(const KernelDefinition& kernel, const MatchContext& /*context*/)
+double pointwiseScore(const MatchContext& /*context*/,
+                      const BoundTokens& /*bound*/,
+                      const KernelDefinition& kernel)
 {
     return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
 }
@@ -384,10 +394,14 @@ class PointwiseDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDisp
 {
 public:
     /// @param kernelCompiler Must outlive this handler; both are process-lifetime.
+    /// @param kpackLoader Same must-outlive contract. Which of the two is consulted is
+    /// the selected kernel's source kind, decided in buildIngestorKernelCode.
     /// Device properties aren't held here -- they arrive per call via MatchContext,
     /// so each call compiles for the device it's actually for.
-    explicit PointwiseDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
+    PointwiseDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
+                             const compilation::KpackKernelLoader& kpackLoader)
         : _kernelCompiler(kernelCompiler)
+        , _kpackLoader(kpackLoader)
     {
     }
 
@@ -404,7 +418,7 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        // Reads the operand uids the matcher bound rather than re-deriving them.
+        // Reads the operand uids the graph match bound rather than re-deriving them.
         const auto binding = pointwiseBinding(bound);
 
         const auto blockSize
@@ -415,14 +429,14 @@ public:
         options.add("HIP_PLUGIN_POINTWISE_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_POINTWISE_BLOCK_SIZE", blockSize);
 
-        auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
-        auto runnableKernel = program->getKernel(kernel.source.entryPoint);
+        auto code
+            = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
 
-        runnableKernel->setBlockSize(blockSize, 1, 1);
-        runnableKernel->setGridSize(1, 1, 1);
+        code.kernel->setBlockSize(blockSize, 1, 1);
+        code.kernel->setGridSize(1, 1, 1);
 
         return std::make_unique<PreparedPointwise>(
-            std::move(program), std::move(runnableKernel), binding);
+            std::move(code.program), std::move(code.kernel), binding);
     }
 
     void launch(const Handle& handle,
@@ -446,15 +460,36 @@ public:
 
 private:
     const compilation::IKernelCompiler& _kernelCompiler;
+    const compilation::KpackKernelLoader& _kpackLoader;
 };
+
+} // namespace
+
+compilation::KpackModuleCache& pointwiseKpackModuleCache()
+{
+    // Process-lifetime, and exposed rather than hidden inside the loader so a test can
+    // observe that two dispatches over the same (archive, toc_key, arch) loaded one
+    // module -- which is otherwise unobservable.
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
+void resetPointwiseModuleCache()
+{
+    pointwiseKpackModuleCache().clear();
+}
+
+namespace
+{
 
 /// This pack's dispatch handler, process-lifetime: the registry holds a non-owning
 /// pointer to it, but a provider's Container is created and destroyed per handle, so
-/// it (and the compiler it holds) must outlive every Container.
+/// it (and the compiler and loader it holds) must outlive every Container.
 const PointwiseDispatchHandler& pointwiseDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
-    static const PointwiseDispatchHandler s_dispatchHandler(s_kernelCompiler);
+    static const compilation::KpackKernelLoader s_kpackLoader(pointwiseKpackModuleCache());
+    static const PointwiseDispatchHandler s_dispatchHandler(s_kernelCompiler, s_kpackLoader);
     return s_dispatchHandler;
 }
 
