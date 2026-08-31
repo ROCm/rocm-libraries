@@ -36,6 +36,28 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     // 16-byte aligned.
     static constexpr index_t kAccLdsPad = 4;
 
+    // Padding, in elements, added to the leading dimension of the four operand
+    // boxes that TDM writes and ds_load reads back.
+    //
+    // At headdim 128 with bf16 a row is 128 * 2 / 4 = 64 dwords, and gfx1250 has
+    // 64 LDS banks, so an unpadded row stride puts *every* row on bank 0 and the
+    // reader conflicts across the full width. One 128-bit unit of pad per row
+    // (16 elements = 32 B = 8 dwords) makes the stride 72 dwords, separating
+    // consecutive rows by 8 banks, and a whole number of 16 B units keeps the
+    // row start aligned for ds_read_b128 / ds_load_tr16_b128.
+    //
+    // This is the same failure kAccLdsPad fixes for the accumulators, arrived at
+    // from the other direction: there the conflict comes from the C fragment's
+    // lane mapping, here from the row stride landing on a multiple of the bank
+    // count. The value is derived the way the gemm pipeline derives it (see
+    // GetLdsPaddingConfig in gemm_universal_pipeline_ag_bg_cr_policy.hpp).
+    //
+    // XOR swizzling is not an option for these four: TDM writes a plain box
+    // without going through the descriptor, so a reader-side XOR would have
+    // nothing to cancel against. dS, which IS written through its descriptor by
+    // store_tile, keeps its XOR -- measured better there than padding.
+    static constexpr index_t kOperandLdsPad = 16;
+
     // ---- K: one plain box, K^T read back by ds_load_tr ----------------------
     //
     // K used to be materialised twice: once as-is for gemm_0, and once through
@@ -61,7 +83,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
 
         return make_naive_tensor_descriptor(
             make_tuple(number<kNPerBlock>{}, number<kKPerBlock>{}),
-            make_tuple(number<kKPerBlock>{}, number<1>{}),
+            make_tuple(number<kKPerBlock + kOperandLdsPad>{}, number<1>{}),
             number<kKPack>{},
             number<1>{});
     }
@@ -145,7 +167,35 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigK()
     {
-        return make_tuple(number<false>{}, number<0>{}, number<0>{});
+        // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
+        // (log2 of the dwords written between pads - 1). One row is exactly one
+        // interval here, so each row gets kOperandLdsPad elements appended --
+        // matching the descriptor stride above. The two MUST agree: TDM writes
+        // the box, the descriptor reads it, and nothing checks them against
+        // each other.
+        using DT                         = typename Problem::KDataType;
+        constexpr index_t kKPerBlock     = Problem::BlockFmhaShape::kQKHeaddim;
+        constexpr index_t kBytesPerDword = 4;
+
+        constexpr auto log2_floor = [](index_t x) constexpr {
+            index_t r = 0;
+            while(x > 1)
+            {
+                x >>= 1;
+                r++;
+            }
+            return r;
+        };
+
+        constexpr index_t pad_dwords = kOperandLdsPad * sizeof(DT) / kBytesPerDword;
+        constexpr index_t row_dwords = kKPerBlock * sizeof(DT) / kBytesPerDword;
+        static_assert(pad_dwords * kBytesPerDword == kOperandLdsPad * sizeof(DT),
+                      "operand LDS pad must be a whole number of dwords");
+        static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
+
+        return make_tuple(number<true>{},
+                          number<pad_dwords - 1>{},
+                          number<log2_floor(row_dwords) - 1>{});
     }
 
     // ---- dO: one plain box, dO^T read back by ds_load_tr --------------------
@@ -170,7 +220,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
 
         return make_naive_tensor_descriptor(
             make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}),
-            make_tuple(number<kKPerBlock>{}, number<1>{}),
+            make_tuple(number<kKPerBlock + kOperandLdsPad>{}, number<1>{}),
             number<kKPack>{},
             number<1>{});
     }
@@ -243,7 +293,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
 
         return make_naive_tensor_descriptor(
             make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}),
-            make_tuple(number<kKPerBlock>{}, number<1>{}),
+            make_tuple(number<kKPerBlock + kOperandLdsPad>{}, number<1>{}),
             number<kKPack>{},
             number<1>{});
     }
@@ -388,7 +438,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
 
         return make_naive_tensor_descriptor(
             make_tuple(number<kNPerBlock>{}, number<kKPerBlock>{}),
-            make_tuple(number<kKPerBlock>{}, number<1>{}),
+            make_tuple(number<kKPerBlock + kOperandLdsPad>{}, number<1>{}),
             number<kKPack>{},
             number<1>{});
     }
@@ -426,7 +476,35 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigV()
     {
-        return make_tuple(number<false>{}, number<0>{}, number<0>{});
+        // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
+        // (log2 of the dwords written between pads - 1). One row is exactly one
+        // interval here, so each row gets kOperandLdsPad elements appended --
+        // matching the descriptor stride above. The two MUST agree: TDM writes
+        // the box, the descriptor reads it, and nothing checks them against
+        // each other.
+        using DT                         = typename Problem::VDataType;
+        constexpr index_t kKPerBlock     = Problem::BlockFmhaShape::kVHeaddim;
+        constexpr index_t kBytesPerDword = 4;
+
+        constexpr auto log2_floor = [](index_t x) constexpr {
+            index_t r = 0;
+            while(x > 1)
+            {
+                x >>= 1;
+                r++;
+            }
+            return r;
+        };
+
+        constexpr index_t pad_dwords = kOperandLdsPad * sizeof(DT) / kBytesPerDword;
+        constexpr index_t row_dwords = kKPerBlock * sizeof(DT) / kBytesPerDword;
+        static_assert(pad_dwords * kBytesPerDword == kOperandLdsPad * sizeof(DT),
+                      "operand LDS pad must be a whole number of dwords");
+        static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
+
+        return make_tuple(number<true>{},
+                          number<pad_dwords - 1>{},
+                          number<log2_floor(row_dwords) - 1>{});
     }
 
     // GetSmemSizeV lives in the base and would otherwise call the base's
@@ -491,7 +569,29 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeStaged()
     {
-        return BlockFmhaBwdPipelineDefaultPolicy::template GetSmemSize<Problem>();
+        // Recomputed from THIS policy's sizes rather than delegating.
+        //
+        // The base's GetSmemSize resolves GetSmemSizeK/V/Q/OGrad *inside the
+        // base class*, so it cannot see the padded descriptors above. Delegating
+        // to it would undersize the region and let the padded boxes overrun
+        // whatever follows them, with nothing reporting an error. The internal
+        // offsets are fine either way -- the pipeline places LSE/D/dS through
+        // GetStagedTailOffset, which does use the derived sizes.
+        using Base = BlockFmhaBwdPipelineDefaultPolicy;
+
+        constexpr index_t stage0_0 = GetSmemSizeK<Problem>() + GetSmemSizeKT<Problem>();
+        constexpr index_t stage0_1 = GetSmemSizeV<Problem>();
+        constexpr index_t stage1 =
+            Base::template GetSmemSizeQT<Problem>() + GetSmemSizeQ<Problem>() +
+            Base::template GetSmemSizeOGradT<Problem>() + GetSmemSizeOGrad<Problem>() +
+            Base::template GetSmemSizeLSE<Problem>() + Base::template GetSmemSizeD<Problem>() +
+            max(Base::template GetSmemSizeBias<Problem>(),
+                Base::template GetSmemSizeSGrad<Problem>());
+
+        constexpr index_t total = max(stage0_0, stage0_1, stage1);
+        static_assert(total >= Base::template GetSmemSize<Problem>(),
+                      "padded staged region must not be smaller than the unpadded one");
+        return total;
     }
 
     template <typename Problem>
@@ -571,13 +671,69 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigQ()
     {
-        return make_tuple(number<false>{}, number<0>{}, number<0>{});
+        // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
+        // (log2 of the dwords written between pads - 1). One row is exactly one
+        // interval here, so each row gets kOperandLdsPad elements appended --
+        // matching the descriptor stride above. The two MUST agree: TDM writes
+        // the box, the descriptor reads it, and nothing checks them against
+        // each other.
+        using DT                         = typename Problem::QDataType;
+        constexpr index_t kKPerBlock     = Problem::BlockFmhaShape::kQKHeaddim;
+        constexpr index_t kBytesPerDword = 4;
+
+        constexpr auto log2_floor = [](index_t x) constexpr {
+            index_t r = 0;
+            while(x > 1)
+            {
+                x >>= 1;
+                r++;
+            }
+            return r;
+        };
+
+        constexpr index_t pad_dwords = kOperandLdsPad * sizeof(DT) / kBytesPerDword;
+        constexpr index_t row_dwords = kKPerBlock * sizeof(DT) / kBytesPerDword;
+        static_assert(pad_dwords * kBytesPerDword == kOperandLdsPad * sizeof(DT),
+                      "operand LDS pad must be a whole number of dwords");
+        static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
+
+        return make_tuple(number<true>{},
+                          number<pad_dwords - 1>{},
+                          number<log2_floor(row_dwords) - 1>{});
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigOGrad()
     {
-        return make_tuple(number<false>{}, number<0>{}, number<0>{});
+        // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
+        // (log2 of the dwords written between pads - 1). One row is exactly one
+        // interval here, so each row gets kOperandLdsPad elements appended --
+        // matching the descriptor stride above. The two MUST agree: TDM writes
+        // the box, the descriptor reads it, and nothing checks them against
+        // each other.
+        using DT                         = typename Problem::OGradDataType;
+        constexpr index_t kKPerBlock     = Problem::BlockFmhaShape::kVHeaddim;
+        constexpr index_t kBytesPerDword = 4;
+
+        constexpr auto log2_floor = [](index_t x) constexpr {
+            index_t r = 0;
+            while(x > 1)
+            {
+                x >>= 1;
+                r++;
+            }
+            return r;
+        };
+
+        constexpr index_t pad_dwords = kOperandLdsPad * sizeof(DT) / kBytesPerDword;
+        constexpr index_t row_dwords = kKPerBlock * sizeof(DT) / kBytesPerDword;
+        static_assert(pad_dwords * kBytesPerDword == kOperandLdsPad * sizeof(DT),
+                      "operand LDS pad must be a whole number of dwords");
+        static_assert(pad_dwords >= 1, "operand LDS pad must be at least one dword");
+
+        return make_tuple(number<true>{},
+                          number<pad_dwords - 1>{},
+                          number<log2_floor(row_dwords) - 1>{});
     }
 
     template <typename Problem>
