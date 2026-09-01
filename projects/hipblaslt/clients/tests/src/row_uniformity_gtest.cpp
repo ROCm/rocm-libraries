@@ -1061,6 +1061,19 @@ namespace
         // capability admits it.
         {"MultipleGridRaggedChunks_Cap", 16, 30, 64, 1, false, 16, 7, 32, true, true},
 
+        // The three grids that matter around the StreamKFlagElements (2048)
+        // bound, for tiles=100 I=256. 2048 is what clamping a selected grid
+        // down to the bound produces, and it is not a multiple of the tile
+        // count, so the packer lands on ragged chunks and the predicate refuses
+        // it -- which is why the bound is a constraint on grid selection rather
+        // than a correction applied after it. 1600 is the largest uniform grid
+        // at or below the bound and is accepted. The all-full grid is accepted
+        // even above the bound: tiles % grid == 0 leaves no partial tiles, so
+        // the launch never takes the flag protocol.
+        {"FlagClampedGridNotRowUniform", 100, 256, 2048, 1, false, 100, 12, 1024, false},
+        {"FlagBoundedGridRowUniform", 100, 256, 1600, 1, false, 100, 16, 0, true},
+        {"AllFullGridAboveFlagBound", 4096, 16, 4096, 1, false, 4096, 16, 0, true},
+
         // TENSILE_STREAMK_FULL_TILES=0 is the only way to reach a non-empty
         // data-parallel region alongside equally cut StreamK tiles. Those two
         // populations have different fold signatures, so skTiles == tiles is
@@ -1473,6 +1486,50 @@ namespace
         EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
             << "A dynamic-queue StreamK launch whose grid does not divide the tile count "
                "must be refused at selection";
+    }
+
+    // The dynamic-queue path takes no USO grid snap, so nothing there selects a
+    // grid under the flag bound. When the clamp fires on that path it rewrites
+    // the grid to StreamKFlagElements, which need not divide the tile count --
+    // and the gate must then refuse the launch rather than admit a split whose
+    // rows would depend on the schedule. This is the fail-closed half of the
+    // bound, and the reason the snap folds the bound in rather than relying on
+    // the clamp to repair a grid after the fact.
+    TEST(RowUniformityStreamKRejection_pre_checkin, FlagClampedDynamicGridFailsClosed)
+    {
+        auto hardware                 = probeHardware();
+        hardware.skFixedGrid          = 4096;
+        auto solution                 = probeSolution();
+        solution->sizeMapping.streamK = 4;
+
+        auto problem = TensileLite::ContractionProblemGemm::GEMM(
+            false, false, 1280, 1280, 1024, 1280, 1280, 1280, 0.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setParams().setUniformSummationOrder(true);
+
+        const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, 100u) << "1280x1280 with MT 128x128";
+        ASSERT_GT(static_cast<size_t>(hardware.skFixedGrid),
+                  static_cast<size_t>(TensileLite::StreamKFlagElements))
+            << "the requested grid must be above the bound so the clamp is what fires";
+
+        const size_t grid
+            = solution->getSKGrid(problem, hardware, tiles, origami::reduction_t::tree);
+        ASSERT_EQ(grid, static_cast<size_t>(TensileLite::StreamKFlagElements))
+            << "SK4 takes no snap, so the flag clamp is the only thing that moves the grid";
+        ASSERT_NE(tiles % grid, 0u) << "the clamped grid does not divide the tile count";
+
+        EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "a grid the flag clamp moved off a tile multiple must be refused at selection, "
+               "not launched";
+
+        // Control: the refusal is the uniform-summation-order gate acting on
+        // that grid, not some unrelated property of this mock solution.
+        auto problemOff = problem;
+        problemOff.setParams().setUniformSummationOrder(false);
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problemOff, hardware))
+            << "with the mode off the same configuration must still be selectable";
     }
 
     TEST(RowUniformityStreamKRejection_pre_checkin, FilterIsIdleWhenUniformSummationOrderIsOff)
@@ -2244,6 +2301,145 @@ namespace
                 << "I/F == 7 is below MinItersPerCU (8); F=2 must be refused and "
                    "the grid must snap down to all-full (T)";
         }
+    }
+
+    // StreamKFlagElements bounds the grid of any launch that takes the flag
+    // protocol. The F-star search carries that bound as one of its
+    // admissibility conditions, so the grid it selects already satisfies it.
+    //
+    // The three tests below pin the three regimes:
+    //   * the bound binds and a smaller uniform grid exists -- take it
+    //   * the bound binds and no uniform grid at or below it exists -- fall
+    //     back to all-full, which is exempt because it has no partial tiles
+    //   * the launch never reaches the flags -- the bound must not constrain it
+    //
+    // Selecting under the bound and clamping after it are not the same thing:
+    // clamping rewrites tiles*F to StreamKFlagElements, which is not in general
+    // a multiple of the tile count, and the resulting ragged split is then
+    // refused outright (kSplitCases/FlagClampedGridNotRowUniform).
+
+    TEST(RowUniformityGridSteering_pre_checkin, FlagRegionBoundBindsInsideTheSnap)
+    {
+        // T=100 (1280x1280, MT 128x128), I=256 (K=16384, DepthU=64),
+        // g0 = 3200 = T*32. F=32 and F=16 both divide I and both clear
+        // MinItersPerCU, so the flag bound is the only thing separating them.
+        auto solution = uniformitySteeringSolution();
+        auto device   = uniformitySteeringDevice();
+        device.skDynamicGrid = 0;
+        device.skFixedGrid   = 3200;
+
+        auto problem = uniformityGemm(1280, 1280, 16384);
+        // Large enough that partialTileSize() never rejects a candidate here;
+        // the bound, not the workspace, has to be what decides.
+        problem.setWorkspaceSize(1ull << 30);
+
+        const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
+        const size_t I
+            = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+        ASSERT_EQ(tiles, 100u);
+        ASSERT_EQ(I, 256u);
+        ASSERT_EQ(I % 32, 0u) << "F=32 must be rejected by the flag bound alone";
+        ASSERT_GT(3200u, static_cast<size_t>(TensileLite::StreamKFlagElements));
+        ASSERT_LE(solution->partialTileSize(3200), problem.workspaceSize());
+
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
+                  3200u)
+            << "mode off: the fixed grid stands";
+
+        problem.setParams().setUniformSummationOrder(true);
+        const size_t grid
+            = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+        EXPECT_EQ(grid, 1600u)
+            << "F must step down to the largest value keeping T*F inside the flag region";
+        EXPECT_LE(grid, static_cast<size_t>(TensileLite::StreamKFlagElements));
+        EXPECT_EQ(grid % tiles, 0u) << "the selected grid must stay a multiple of the tiles";
+
+        // The grid is admissible on its own terms, not merely small enough.
+        const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
+            tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
+        EXPECT_TRUE(TensileLite::streamKStaticSplitRowUniform(
+            split, tiles, I, grid, solution->internalArgsSupport.perTileExtraIters))
+            << "grid=" << grid << " must pack row-uniformly";
+
+        // What clamping after selection would have produced instead.
+        const TensileLite::StreamKStaticSplit clamped = TensileLite::streamKStaticSplit(
+            tiles, I, TensileLite::StreamKFlagElements, 1, false);
+        EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(
+            clamped, tiles, I, TensileLite::StreamKFlagElements,
+            solution->internalArgsSupport.perTileExtraIters))
+            << "the clamped grid is not row-uniform; selecting under the bound is what "
+               "keeps this shape admissible";
+    }
+
+    // The bound cannot always be met by a grid that splits tiles, because the
+    // tile count itself can exceed it. That is not a fail-closed case: F=1
+    // leaves tiles % grid == 0, so there are no partial tiles and no flag
+    // protocol, and the grid is legal at any size. The all-full grid is
+    // therefore always available as the floor of the search.
+    TEST(RowUniformityGridSteering_pre_checkin, AllFullGridExemptFromFlagRegionBound)
+    {
+        // T=4096 (8192x8192, MT 128x128) is already twice the bound.
+        auto solution = uniformitySteeringSolution();
+        auto device   = uniformitySteeringDevice();
+        device.skDynamicGrid = 0;
+        device.skFixedGrid   = 8192; // g0 = T*2
+
+        auto problem = uniformityGemm(8192, 8192, 1024);
+        problem.setWorkspaceSize(1ull << 30);
+
+        const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
+        const size_t I
+            = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+        ASSERT_EQ(tiles, 4096u);
+        ASSERT_EQ(I, 16u);
+        ASSERT_GT(tiles, static_cast<size_t>(TensileLite::StreamKFlagElements))
+            << "the point of the case: no grid that splits tiles can fit the bound";
+        ASSERT_EQ(I % 2, 0u);
+        ASSERT_GE(I / 2, 8u);
+        ASSERT_LE(solution->partialTileSize(8192), problem.workspaceSize())
+            << "F=2 must be rejected by the flag bound, not by the workspace";
+
+        problem.setParams().setUniformSummationOrder(true);
+        const size_t grid
+            = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+        EXPECT_EQ(grid, tiles)
+            << "with every F >= 2 outside the flag region, the search must land on all-full";
+        EXPECT_EQ(tiles % grid, 0u)
+            << "all-full leaves no partial tiles, so the launch takes no flag region and the "
+               "bound does not apply -- the grid may legally exceed it";
+
+        const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
+            tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
+        EXPECT_TRUE(TensileLite::streamKStaticSplitRowUniform(
+            split, tiles, I, grid, solution->internalArgsSupport.perTileExtraIters))
+            << "the all-full grid must remain admissible above the bound";
+    }
+
+    // Parallel reduction is passed Flags == nullptr and skips the flag protocol,
+    // so it is one of the cases the clamp deliberately leaves alone. The search
+    // is conditioned on the same predicates and must leave it alone too;
+    // otherwise the bound would shrink grids that have no flag region to overrun.
+    TEST(RowUniformityGridSteering_pre_checkin, FlagRegionBoundDoesNotBindParallelReduction)
+    {
+        auto solution = uniformitySteeringSolution();
+        auto device   = uniformitySteeringDevice();
+        device.skDynamicGrid = 0;
+        device.skFixedGrid   = 3200;
+
+        auto problem = uniformityGemm(1280, 1280, 16384);
+        problem.setWorkspaceSize(1ull << 30);
+
+        const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, 100u);
+        ASSERT_GT(3200u, static_cast<size_t>(TensileLite::StreamKFlagElements));
+
+        problem.setParams().setUniformSummationOrder(true);
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
+                  1600u)
+            << "tree takes the flag region, so the bound binds";
+        EXPECT_EQ(
+            solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel), 3200u)
+            << "parallel never reaches the flags; the bound must not shrink its grid";
     }
 
 } // namespace

@@ -5321,6 +5321,32 @@ namespace TensileLite
                     constexpr size_t MinItersPerCU = 8;
                     const bool perTileExtraIters = self.internalArgsSupport.perTileExtraIters;
 
+                    // The flag-region bound is a constraint ON this selection, not
+                    // a correction applied after it. Every grid this snap can emit
+                    // for F >= 2 is tiles * F > tiles, so tiles % skGrid == tiles
+                    // != 0 and the flag clamp below would fire on exactly these
+                    // grids -- rewriting tiles * F to StreamKFlagElements, which is
+                    // not in general a multiple of tiles and so is refused by
+                    // checkUniformSummationOrder as a non-row-uniform static split.
+                    // Folding the bound in here instead means the search picks a
+                    // uniform grid that already satisfies it and the clamp becomes
+                    // a no-op, so the flag-region invariant is enforced exactly as
+                    // before and never has to rewrite a uniform grid.
+                    //
+                    // Conditioned on the same three predicates the clamp uses, so a
+                    // launch that never touches the flag region is not constrained
+                    // by its size. The clamp's fourth predicate (tiles % skGrid !=
+                    // 0) is implied for every F >= 2 candidate and so is omitted.
+                    // The all-full grid (F == 1, skGrid == tiles) satisfies
+                    // tiles % skGrid == 0, uses no flag region at all, and is
+                    // therefore admissible at any tile count -- which is what keeps
+                    // FStar = 1 a valid floor even when tiles itself exceeds the
+                    // bound.
+                    const bool flagRegionBinds
+                        = self.sizeMapping.streamKAtomic == 0
+                          && self.sizeMapping.streamKForceDPOnly == 0
+                          && reductionStrat != origami::reduction_t::parallel;
+
                     if(g0 > tiles)
                     {
                         const size_t F0    = g0 / tiles;
@@ -5338,6 +5364,10 @@ namespace TensileLite
                                 continue;
                             // F==1 needs no partials; for F>=2 require workspace fit.
                             if(self.partialTileSize(tiles * F) > problem.workspaceSize())
+                                continue;
+                            // Stay inside the flag region these grids will use.
+                            if(flagRegionBinds
+                               && (tiles * F) > static_cast<size_t>(StreamKFlagElements))
                                 continue;
                             FStar = F;
                             break;
