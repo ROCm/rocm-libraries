@@ -64,10 +64,13 @@ try
     rocblas_stride const shiftA = 0;
     rocblas_stride const shiftB = 0;
 
+    // -------------------------------------------
     // normal (non-batched non-strided) execution
-    rocblas_stride const strideA = 0;
-    rocblas_stride const strideB = 0;
-    rocblas_stride const strideP = 0;
+    // use reasonable valid values
+    // -------------------------------------------
+    rocblas_stride const strideA = lda * n;
+    rocblas_stride const strideB = ldb * nrhs;
+    rocblas_stride const strideP = n;
     I const batch_count = 1;
 
     // memory workspace sizes:
