@@ -244,7 +244,7 @@ endforeach()
 
 # Skip build if no matching targets found
 if(NOT GEMM_GPU_TARGETS_INDIVIDUAL)
-    message(WARNING "Skipping Tile Engine GEMM build: No supported GPU targets (gfx90a, gfx942) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+    message(WARNING "Skipping Tile Engine GEMM build: No supported GPU targets (gfx90a, gfx942, gfx950) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 else()
     message(VERBOSE "Building individual GEMM targets for GPU targets: ${GEMM_GPU_TARGETS_INDIVIDUAL}")
 
