@@ -65,10 +65,10 @@ struct TransformConvFwdToGemm
 
         const IndexType N = a_g_n_c_wis_lengths[I1];
 
-        if(element_space_size > TwoGB)
+        if(element_space_size >= TwoGB)
         {
             // Minimum divisor of N to not exceed 2GB
-            const auto divisor = math::integer_divide_ceil(element_space_size, TwoGB);
+            const auto divisor = math::integer_divide_ceil(element_space_size, TwoGB - 1);
 
             if(divisor <= static_cast<double>(N))
             {
@@ -386,8 +386,8 @@ struct TransformConvFwdToGemm
             I1 + (N_ - I1) * NStrideTensorC_ + (Do_ - I1) * DoStride_ + (Ho_ - I1) * HoStride_ +
             (Wo_ - I1) * WoStride_ + (K_ - I1) * KStrideTensorC_;
 
-        bool is_a_descriptor_smaller_than_2GB = (in_desc_space_size * sizeof(ADataType)) <= TwoGB;
-        bool is_c_descriptor_smaller_than_2GB = (out_desc_space_size * sizeof(CDataType)) <= TwoGB;
+        bool is_a_descriptor_smaller_than_2GB = (in_desc_space_size * sizeof(ADataType)) < TwoGB;
+        bool is_c_descriptor_smaller_than_2GB = (out_desc_space_size * sizeof(CDataType)) < TwoGB;
 
         return is_a_descriptor_smaller_than_2GB && is_c_descriptor_smaller_than_2GB;
     }
