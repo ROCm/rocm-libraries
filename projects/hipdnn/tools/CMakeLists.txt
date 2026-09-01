@@ -1,6 +1,8 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+add_subdirectory(corpus_gen)
+
 add_executable(hipdnn_list_engines ListEngines.cpp)
 # hipdnn_data_sdk supplies the canonical engine-ID hex rendering (formatEngineIdHex). It is a
 # header-only INTERFACE target, and hipdnn_backend links it privately, so the tool names it here.
