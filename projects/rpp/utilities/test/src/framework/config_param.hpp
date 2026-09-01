@@ -127,13 +127,9 @@ inline std::string config_name(const TestConfig& c) {
            layout + "_" + roi_name(c.roi) + "_" + size_name(c.size);
 }
 
+namespace presets {
 // The default shape for images.
 inline constexpr Size kDefaultSize{2, 36, 48};
-
-// Shapes for reaching a kernel's scalar tail, which kDefaultSize never does: 48 is a multiple of
-// both SIMD widths (16 px for U8/I8, 8 px for F32/F16) at full and at partial ROI, and its row
-// padding leaves the maximum 8 px of slack. Ops opt in individually; the tail geometry is
-// per-kernel.
 
 // 55 % 16 == 55 % 8 == 7; partial ROI 27 leaves a different remainder. 1 px of row slack.
 inline constexpr Size kTailWidthSize{2, 36, 55};
@@ -141,8 +137,22 @@ inline constexpr Size kTailWidthSize{2, 36, 55};
 // 13 < 16: all tail, no vector, for U8/I8. h = 45 is two HIP y-blocks plus 13 rows.
 inline constexpr Size kSubVectorSize{1, 45, 13};
 
-// Nothing to vectorise. Full ROI only -- the w/2, h/2 rule makes the partial window empty here.
+// Unit size edge case with nothing to vectorize. Only works with FullROI.
 inline constexpr Size kUnitSize{1, 1, 1};
+
+// Full layout map for most images, including packed to planar (and vice-versa) conversions.
+inline const std::vector<LayoutConv> kLayoutsFullConv{{Layout::PKD3, Layout::PKD3},
+                                                      {Layout::PLN3, Layout::PLN3},
+                                                      {Layout::PLN1, Layout::PLN1},
+                                                      {Layout::PKD3, Layout::PLN3},
+                                                      {Layout::PLN3, Layout::PKD3}};
+
+// Layout map for most operators, not including packed to planar conversions.
+inline const std::vector<Layout> kLayoutsFull{Layout::PKD3, Layout::PLN3, Layout::PLN1};
+
+// Full standard datatypes for most operators.
+inline const std::vector<DType> kDefaultDTypes{DType::U8, DType::I8, DType::F16, DType::F32};
+}  // namespace presets
 
 // Cartesian product of the requested axes with every available backend. Pass the
 // dtype/layout/roi/size sets an op supports; HIP is only present when the suite was built
@@ -151,10 +161,9 @@ inline constexpr Size kUnitSize{1, 1, 1};
 // The layout axis takes conversions: {{PKD3, PLN1}, {PLN3, PLN1}} grids colour-to-greyscale over
 // both of its source layouts. An op that does not convert passes plain layouts to the overload
 // below instead.
-inline std::vector<TestConfig> make_configs(const std::vector<DType>& dtypes,
-                                            const std::vector<LayoutConv>& layouts,
-                                            const std::vector<Roi>& rois,
-                                            const std::vector<Size>& sizes = {kDefaultSize}) {
+inline std::vector<TestConfig> make_configs(
+    const std::vector<DType>& dtypes, const std::vector<LayoutConv>& layouts,
+    const std::vector<Roi>& rois, const std::vector<Size>& sizes = {presets::kDefaultSize}) {
     std::vector<TestConfig> configs;
     for (RppBackend backend : available_backends())
         for (DType dtype : dtypes)
@@ -167,10 +176,9 @@ inline std::vector<TestConfig> make_configs(const std::vector<DType>& dtypes,
 
 // The same grid for an op that writes the layout it reads, which is most of them: each layout
 // stands for the conversion {l, l}. Mirrors the plain-dtype overload of make_nd_configs().
-inline std::vector<TestConfig> make_configs(const std::vector<DType>& dtypes,
-                                            const std::vector<Layout>& layouts,
-                                            const std::vector<Roi>& rois,
-                                            const std::vector<Size>& sizes = {kDefaultSize}) {
+inline std::vector<TestConfig> make_configs(
+    const std::vector<DType>& dtypes, const std::vector<Layout>& layouts,
+    const std::vector<Roi>& rois, const std::vector<Size>& sizes = {presets::kDefaultSize}) {
     std::vector<LayoutConv> convs;
     convs.reserve(layouts.size());
     for (Layout l : layouts) convs.push_back({l, l});
@@ -178,8 +186,7 @@ inline std::vector<TestConfig> make_configs(const std::vector<DType>& dtypes,
 }
 
 // Joins config sets, so an op can grid its extra shapes over a narrower slice of the other axes.
-inline std::vector<TestConfig> concat_configs(
-    std::initializer_list<std::vector<TestConfig>> sets) {
+inline std::vector<TestConfig> concat_configs(std::initializer_list<std::vector<TestConfig>> sets) {
     std::vector<TestConfig> configs;
     std::size_t total = 0;
     for (const auto& s : sets) total += s.size();

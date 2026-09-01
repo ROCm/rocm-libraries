@@ -108,32 +108,16 @@ TEST_P(BrightnessTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_brightness<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-namespace {
-
-const std::vector<DType> kDtypes{DType::U8, DType::F16, DType::F32, DType::I8};
-
-// The layout axis carries the three same-layout cases and both directions of the fused
-// output-layout conversion (NHWC <-> NCHW), which is just another point on the grid.
-const std::vector<LayoutConv> kLayouts{{Layout::PKD3, Layout::PKD3},
-                                       {Layout::PLN3, Layout::PLN3},
-                                       {Layout::PLN1, Layout::PLN1},
-                                       {Layout::PKD3, Layout::PLN3},
-                                       {Layout::PLN3, Layout::PKD3}};
-
-// The shape sweep needs only the two distinct row geometries: brightness walks a PLN3 row as it
-// walks a PLN1 one. Every dtype stays -- U8/I8 vectorise 16 px, F32/F16 8, so they tail apart.
-const std::vector<Layout> kShapeSweepLayouts{Layout::PKD3, Layout::PLN1};
-
-}  // namespace
-
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, BrightnessTest,
-    ::testing::ValuesIn(with_params<BrightnessParams>(
-        concat_configs({
-            make_configs(kDtypes, kLayouts, {Roi::Full, Roi::Partial}),
-            make_configs(kDtypes, kShapeSweepLayouts, {Roi::Full, Roi::Partial},
-                         {kTailWidthSize, kSubVectorSize}),
-            make_configs(kDtypes, kShapeSweepLayouts, {Roi::Full}, {kUnitSize}),
-        }),
-        {BrightnessParams{1.75f, 50.0f}})),
-    op_config_name<BrightnessParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, BrightnessTest,
+                         ::testing::ValuesIn(with_params<BrightnessParams>(
+                             concat_configs({
+                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                                              {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
+                                              {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
+                                              {Roi::Full}, {presets::kUnitSize}),
+                             }),
+                             {BrightnessParams{1.75f, 50.0f}})),
+                         op_config_name<BrightnessParams>);
