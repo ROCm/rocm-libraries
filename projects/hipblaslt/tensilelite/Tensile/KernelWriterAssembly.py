@@ -421,10 +421,30 @@ class KernelWriterAssembly(KernelWriter):
     with self.allocTmpSgpr(1, tag="rapTdmWaveParity") as tmpSgprRes:
       self._emitTdmWaveParitySCC(module, kernel, tmpSgprRes.idx,
                                  comment="RAP: wave parity, odd waves carry B/MXSB")
-    # cselect rather than an inverted compare plus cmov: parity is already in SCC
-    # as "odd", and keeping the value on odd / zeroing it on even is one step.
-    module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=sgpr(groupSgprName), src1=0,
-                           comment="RAP: even wave carries A -> NULL descriptor, this load moves nothing"))
+    if not self.states.rapInPapNextTilePrefetch:
+      # cselect rather than an inverted compare plus cmov: parity is already in SCC
+      # as "odd", and keeping the value on odd / zeroing it on even is one step.
+      module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=sgpr(groupSgprName), src1=0,
+                             comment="RAP: even wave carries A -> NULL descriptor, this load moves nothing"))
+      return module
+    # This load feeds the next tile, not this one. Silencing A is only right while
+    # that tile goes on reusing the resident registers; when it changes batch the
+    # entry guard sends it to the fill copy, which computes from what this prefetch
+    # left behind. Fetch A for it. WorkGroup2 already names the next tile here --
+    # prefetchAcrossPersistentSetupNextTile has run and the current tile's identity
+    # is checkpointed -- so the batch is a compare away rather than another divide.
+    with self.allocTmpSgpr(1, tag="rapPapKeepA") as keepRes:
+      keep = keepRes.idx
+      module.add(SCSelectB32(dst=sgpr(keep), src0=-1, src1=0,
+                             comment="RAP: odd wave carries B -> keep descriptor"))
+      module.add(SCmpEQU32(src0=sgpr("WorkGroup2"), src1=sgpr("RAPResidentBatch"),
+                           comment="RAP: does the next tile stay in the resident batch?"))
+      module.add(SCSelectB32(dst=sgpr(keep), src0=sgpr(keep), src1=-1,
+                             comment="RAP: next tile changes batch -> it needs A prefetched"))
+      module.add(SCmpEQU32(src0=sgpr(keep), src1=0,
+                           comment="RAP: neither reason to keep the descriptor"))
+    module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=0, src1=sgpr(groupSgprName),
+                           comment="RAP: NULL descriptor, this load moves nothing"))
     return module
 
   def isTdmWaveSeparated(self, kernel) -> bool:
@@ -6685,6 +6705,12 @@ class KernelWriterAssembly(KernelWriter):
       return module
     # Subtile releases WaveIdx before graWorkGroup; never double-release it here.
     if kernel.get("UseSubtileImpl"):
+      return module
+    # RAP reads parity in both compute copies and again in PAP's next-tile
+    # prefetch, all of them past this point. Holding one low SGPR for the whole
+    # kernel buys back the ArgType packing and the PAP-side recompute, and leaves
+    # a single spelling of the parity check to read.
+    if kernel.get("ReuseAcrossPersistent"):
       return module
     if not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
       return module
@@ -18484,6 +18510,11 @@ class KernelWriterAssembly(KernelWriter):
     with self.allocPapTileIdentitySgprs(kernel) as prevTile:
       module.add(self.papCheckpointCurrentTileIdentity(kernel, prevTile))
       module.add(skComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))
+      # From here to the restore below, WorkGroup* names the next tile. RAP's A
+      # silencing reads that to decide whether the next tile still shares the
+      # resident A; nothing else in this window depends on the flag.
+      rapPapOuter = self.states.rapInPapNextTilePrefetch
+      self.states.rapInPapNextTilePrefetch = kernel["ReuseAcrossPersistent"]
       if kernel["enableTDMA"] and kernel["enableTDMB"]:
         module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA, tensorParametersB))
         if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
@@ -18507,6 +18538,7 @@ class KernelWriterAssembly(KernelWriter):
         self.vgprPool.checkIn(prevLoopVgpr)
       if kernel["enableTDMA"] and kernel["enableTDMB"]:
         module.add(self.papTdmSaveLdsBank(kernel))
+      self.states.rapInPapNextTilePrefetch = rapPapOuter
       module.add(self.papRestoreCurrentTileIdentity(kernel, prevTile))
     if (kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["NoTailLoop"]
         and not kernel["HalfPLR"]):
@@ -20331,10 +20363,12 @@ class KernelWriterAssembly(KernelWriter):
 
     In-place s_and / s_bitcmp1 / s_cbranch / s_or. No allocTmpSgpr (WaveIdx is
     still live at a low index; a nested 1-wide checkout can grow the monotone
-    high-water mark). ClusterBarrier and subtile keep WaveIdx and must not pack.
+    high-water mark). ClusterBarrier, subtile and RAP keep WaveIdx and must not
+    pack.
     """
     mod = Module("PackTdmParityIntoArgType")
-    if kernel.get("ClusterBarrier") or kernel.get("UseSubtileImpl"):
+    if (kernel.get("ClusterBarrier") or kernel.get("UseSubtileImpl")
+        or kernel.get("ReuseAcrossPersistent")):
       return mod
     if not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
       return mod

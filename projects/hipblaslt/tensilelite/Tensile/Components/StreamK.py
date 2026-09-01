@@ -814,6 +814,50 @@ class StreamK(Component):
 
         return module
 
+    def rapTileBatch(self, writer, kernel, dstSgpr):
+        """Batch index of the tile ``StreamKIter`` currently points at, into ``dstSgpr``.
+
+        Repeats the arithmetic ``skTileIndex`` and ``skIndexToWG`` perform -- tile
+        index from ``StreamKIter``, then tile index over the tiles per batch -- but
+        writes only ``dstSgpr`` and temporaries. ``skTileIndex`` also resets the
+        local-read offsets and ``skIndexToWG`` claims ``WorkGroup0/1/2``, neither of
+        which may happen at a point that might still branch away.
+
+        Valid only at a persistent-loop entry, where ``StreamKIter`` still names the
+        tile about to be computed; ``graWorkGroup`` advances it past that point.
+
+        ReuseAcrossPersistent calls this at both entries to decide whether the
+        resident A belongs to the tile this iteration will compute.
+        """
+        module = Module("StreamK rapTileBatch")
+        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
+
+        with writer.allocTmpSgpr(4, 2, "RAPTileBatchTemp") as sTmpRes:
+            sTmp = sTmpRes.idx
+            sMagicNum = writer.acquireStreamKConstSgpr(kernel, "MagicNumberItersPerTile")
+            sMagicShift = writer.acquireStreamKConstSgpr(kernel, "MagicShiftItersPerTile")
+            if skConstsInVgprs:
+                module.add(VReadfirstlaneB32(dst=sgpr(sMagicNum), src=vgpr(writer.states.skConstVgprs["MagicNumberItersPerTile"])))
+                module.add(VReadfirstlaneB32(dst=sgpr(sMagicShift), src=vgpr(writer.states.skConstVgprs["MagicShiftItersPerTile"])))
+            # No SK5 shift masking here: RAP requires StreamK 3, so bits 30/31 of
+            # MagicShiftItersPerTile carry no hybrid-mode overlay.
+            module.add(sMagicDiv2(sgpr(sTmp), sgpr(sTmp+1), sgpr("StreamKIter"),
+                                  sgpr(sMagicNum), sgpr(sMagicShift), sgpr(sTmp+2)))
+            writer.releaseStreamKConstSgpr(sMagicNum)
+            writer.releaseStreamKConstSgpr(sMagicShift)
+
+            module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
+                               comment="RAP: tiles per batch"))
+            tmpVgpr = writer.vgprPool.checkOut(2, "rapTileBatchDiv")
+            tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
+            module.add(scalarUInt32DivideAndRemainder(qReg=dstSgpr, dReg=sTmp, divReg=sTmp+1, rReg=sTmp+3,
+                                                      tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"],
+                                                      doRemainder=False,
+                                                      comment="RAP: batch of the tile at StreamKIter"))
+            writer.vgprPool.checkIn(tmpVgpr)
+
+        return module
+
     def skExtraIters(self, writer, kernel, sSkExtraIters, sTmp):
         # skExtraIters = skTiles * ItersPerTile - SKItersPerWG * skGrid
         # Use sSkExtraIters/sTmp as readfirstlane destinations to reduce SGPR pressure
