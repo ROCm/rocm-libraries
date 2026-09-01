@@ -188,7 +188,12 @@ jobs:
             -DPython_EXECUTABLE="$VENV_PATH/Scripts/python.exe" \
             -DPython3_EXECUTABLE="$VENV_PATH/Scripts/python.exe"
 
+      # See the Linux job: the packer's per-phase split, which one ninja edge
+      # cannot convey. Enabled here too so the Windows lane reports the cost of
+      # its (currently kernel-free) pack rather than leaving it unmeasured.
       - name: Build
+        env:
+          HKP_PACK_TIMING: 1
         run: cmake --build build
 
       # Packing is skipped with a STATUS message, so a resolution regression
@@ -430,7 +435,14 @@ jobs:
             -DPython_EXECUTABLE="$VENV_PATH/bin/python" \
             -DPython3_EXECUTABLE="$VENV_PATH/bin/python"
 
+      # HKP_PACK_TIMING makes the packer print its per-phase split (parallel
+      # rocke prewarm vs serial descriptor walk vs kpack assembly). Ninja reports
+      # one edge for the whole pack, so without this the log can say how long
+      # packing took but never where the time went -- and the interleaved edges
+      # around it make even the total an upper bound.
       - name: Build
+        env:
+          HKP_PACK_TIMING: 1
         run: cmake --build build
 
       # Packing is skipped with a STATUS message, so a resolution regression

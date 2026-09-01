@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 import shutil
+import time
+from contextlib import contextmanager
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -177,6 +179,43 @@ def _pack_jobs():
     return min(32, os.cpu_count() or 1)
 
 
+def _timing_enabled():
+    """Whether to emit the per-phase breakdown. Off unless HKP_PACK_TIMING is set.
+
+    Wall clock around the whole pack answers "how long", never "where". The three
+    phases below have very different scaling -- the prewarm is parallel, the
+    descriptor walk and kpack assembly are serial -- so a single number cannot say
+    whether more workers would help, and the claim that the serial half dominates
+    had never actually been measured. `1`, `true`, `yes`, `on` all enable it.
+    """
+    return os.environ.get("HKP_PACK_TIMING", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+@contextmanager
+def _phase(name, arch, log, out=None):
+    """Time one named phase, recording into `out` and logging when enabled.
+
+    A no-op beyond the bare timer when HKP_PACK_TIMING is unset, so the default
+    build pays one perf_counter pair per phase and prints nothing new -- log
+    output is parsed by CI and by the timing scripts in WIP/, so it must not
+    change shape unless asked.
+    """
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        dt = time.perf_counter() - t0
+        if out is not None:
+            out[name] = out.get(name, 0.0) + dt
+        if _timing_enabled():
+            log(f"hkp_pack[timing] {arch} {name}={dt:.2f}s")
+
+
 def _compile_one_rocke(job):
     """Top-level so it is picklable. Returns (vk, co_path, symbol) or an error."""
     vk, source, builder, spec, arch, out_dir = job
@@ -343,7 +382,9 @@ def _write_text_at(base, rel_dir, name, text):
     _dest_at(base, rel_dir, name).write_text(text, encoding="utf-8")
 
 
-def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=print):
+def compile_intermediate(
+    flat, source_root, arch, hipcc, inter_arch_dir, log=print, timings=None
+):
     """Compile every hip UKD in the KDPs targeting arch and stage a per-arch tree.
 
     Writes inter_arch_dir with: hsaco-form KDP JSON (inline UKDs rewritten
@@ -366,7 +407,16 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
     # Fill the variant caches in parallel before the serial walk below. Pure
     # optimisation: the walk still decides everything, and simply finds the
     # expensive results already computed.
-    _prewarm_rocke_variants(flat, arch, inter_arch_dir, variant_co, variant_symbol, log)
+    with _phase("prewarm", arch, log, timings):
+        _prewarm_rocke_variants(
+            flat, arch, inter_arch_dir, variant_co, variant_symbol, log
+        )
+
+    # The serial descriptor walk starts here. Timed with an explicit mark rather
+    # than a `with` block: the loop below is the bulk of this function, and
+    # indenting it under a context manager would bury a one-line measurement in a
+    # hundred-line reindent.
+    _walk_t0 = time.perf_counter()
 
     for kdp in flat.kdps():
         doc = kdp.doc
@@ -486,6 +536,12 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             generic.path.name,
             generic.path.read_bytes(),
         )
+
+    _walk_dt = time.perf_counter() - _walk_t0
+    if timings is not None:
+        timings["walk"] = timings.get("walk", 0.0) + _walk_dt
+    if _timing_enabled():
+        log(f"hkp_pack[timing] {arch} walk={_walk_dt:.2f}s")
 
     return IntermediateArch(
         arch=arch,
@@ -789,8 +845,16 @@ def run_pipeline(
             )
             continue
         try:
+            timings = {}
+            arch_t0 = time.perf_counter()
             inter = compile_intermediate(
-                flat, source_root, arch, hipcc, inter_root / arch, log=log
+                flat,
+                source_root,
+                arch,
+                hipcc,
+                inter_root / arch,
+                log=log,
+                timings=timings,
             )
             # Stage this arch into a sibling temp dir and rename it into place
             # only once pack_arch returns cleanly. pack_arch creates
@@ -802,17 +866,18 @@ def run_pipeline(
             staging = out_root / f".{arch}.staging"
             if staging.exists():
                 shutil.rmtree(staging)
-            result = pack_arch(
-                flat,
-                inter,
-                staging,
-                kpack_mod,
-                comp,
-                expected_sha256=expected_sha256,
-                hipcc=hipcc,
-                rocke_wheel_stamp=rocke_wheel_stamp,
-                group=group,
-            )
+            with _phase("assemble", arch, log, timings):
+                result = pack_arch(
+                    flat,
+                    inter,
+                    staging,
+                    kpack_mod,
+                    comp,
+                    expected_sha256=expected_sha256,
+                    hipcc=hipcc,
+                    rocke_wheel_stamp=rocke_wheel_stamp,
+                    group=group,
+                )
             if out_arch_dir.exists():
                 shutil.rmtree(out_arch_dir)
             staging.rename(out_arch_dir)
@@ -821,6 +886,24 @@ def run_pipeline(
                 out_dir=out_arch_dir,
                 kpack_path=out_arch_dir / KPACK_DIR_NAME / _kpack_filename(arch, group),
             )
+            if _timing_enabled():
+                total = time.perf_counter() - arch_t0
+                parts = " ".join(
+                    f"{k}={timings.get(k, 0.0):.2f}s"
+                    for k in ("prewarm", "walk", "assemble")
+                )
+                # `other` is whatever the three named phases do not account for
+                # (staging renames, tree cleanup). Reported rather than dropped so
+                # the parts visibly sum to the total.
+                named = sum(
+                    timings.get(k, 0.0) for k in ("prewarm", "walk", "assemble")
+                )
+                serial = timings.get("walk", 0.0) + timings.get("assemble", 0.0)
+                log(
+                    f"hkp_pack[timing] {arch} TOTAL={total:.2f}s {parts} "
+                    f"other={total - named:.2f}s "
+                    f"serial={100.0 * serial / total if total else 0.0:.0f}%"
+                )
         except HkpPackError as exc:
             # One arch failing must not destroy the other arches' work: a
             # wildcard-arch UKD hitting an arch-restricted builder should shrink
