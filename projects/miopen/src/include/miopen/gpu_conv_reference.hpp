@@ -27,7 +27,9 @@ struct MIOPEN_INTERNALS_EXPORT GpuConvReference
                        ConstData_t w,
                        const TensorDescriptor& yDesc,
                        Data_t y,
-                       const ConvolutionDescriptor& conv);
+                       const ConvolutionDescriptor& conv,
+                       double alpha = 1.0,
+                       double beta  = 0.0);
 
     static void RunBwd(const Handle& handle,
                        const TensorDescriptor& dyDesc,
@@ -36,7 +38,9 @@ struct MIOPEN_INTERNALS_EXPORT GpuConvReference
                        ConstData_t w,
                        const TensorDescriptor& dxDesc,
                        Data_t dx,
-                       const ConvolutionDescriptor& conv);
+                       const ConvolutionDescriptor& conv,
+                       double alpha = 1.0,
+                       double beta  = 0.0);
 
     static void RunWrw(const Handle& handle,
                        const TensorDescriptor& dyDesc,
@@ -45,7 +49,9 @@ struct MIOPEN_INTERNALS_EXPORT GpuConvReference
                        ConstData_t x,
                        const TensorDescriptor& dwDesc,
                        Data_t dw,
-                       const ConvolutionDescriptor& conv);
+                       const ConvolutionDescriptor& conv,
+                       double alpha = 1.0,
+                       double beta  = 0.0);
 };
 
 } // namespace miopen

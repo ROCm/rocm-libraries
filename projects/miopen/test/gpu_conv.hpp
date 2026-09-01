@@ -41,8 +41,8 @@ bool gpu_ref_convolution_fwd(const tensor<Tin>& input,
                              const tensor<Twei>& weights,
                              tensor<Tout>& rout,
                              miopen::ConvolutionDescriptor filter,
-                             const miopen::Scalar& /*alpha*/ = miopen::Scalar(1.0),
-                             const miopen::Scalar& /*beta*/  = miopen::Scalar(0.0))
+                             const miopen::Scalar& alpha = miopen::Scalar(1.0),
+                             const miopen::Scalar& beta  = miopen::Scalar(0.0))
 {
     if(env::enabled(MIOPEN_DEBUG_TEST_DISABLE_GPU_REF))
         return false;
@@ -59,7 +59,9 @@ bool gpu_ref_convolution_fwd(const tensor<Tin>& input,
                                      wei_dev.get(),
                                      rout.desc,
                                      out_dev.get(),
-                                     filter);
+                                     filter,
+                                     alpha.GetAsDouble(),
+                                     beta.GetAsDouble());
 
     rout.data = handle.Read<Tout>(out_dev, rout.data.size());
     return true;
@@ -70,8 +72,8 @@ bool gpu_ref_convolution_bwd(tensor<Tin>& input,
                              const tensor<Twei>& weights,
                              const tensor<Tout> output,
                              miopen::ConvolutionDescriptor filter,
-                             const miopen::Scalar& /*alpha*/ = miopen::Scalar(1.0),
-                             const miopen::Scalar& /*beta*/  = miopen::Scalar(0.0))
+                             const miopen::Scalar& alpha = miopen::Scalar(1.0),
+                             const miopen::Scalar& beta  = miopen::Scalar(0.0))
 {
     if(env::enabled(MIOPEN_DEBUG_TEST_DISABLE_GPU_REF))
         return false;
@@ -88,7 +90,9 @@ bool gpu_ref_convolution_bwd(tensor<Tin>& input,
                                      wei_dev.get(),
                                      input.desc,
                                      in_dev.get(),
-                                     filter);
+                                     filter,
+                                     alpha.GetAsDouble(),
+                                     beta.GetAsDouble());
 
     input.data = handle.Read<Tin>(in_dev, input.data.size());
     return true;
@@ -99,8 +103,8 @@ bool gpu_ref_convolution_wrw(const tensor<Tin>& input,
                              tensor<Twei>& weights,
                              const tensor<Tout> output,
                              miopen::ConvolutionDescriptor filter,
-                             const miopen::Scalar& /*alpha*/ = miopen::Scalar(1.0),
-                             const miopen::Scalar& /*beta*/  = miopen::Scalar(0.0))
+                             const miopen::Scalar& alpha = miopen::Scalar(1.0),
+                             const miopen::Scalar& beta  = miopen::Scalar(0.0))
 {
     if(env::enabled(MIOPEN_DEBUG_TEST_DISABLE_GPU_REF))
         return false;
@@ -117,7 +121,9 @@ bool gpu_ref_convolution_wrw(const tensor<Tin>& input,
                                      in_dev.get(),
                                      weights.desc,
                                      wei_dev.get(),
-                                     filter);
+                                     filter,
+                                     alpha.GetAsDouble(),
+                                     beta.GetAsDouble());
 
     weights.data = handle.Read<Twei>(wei_dev, weights.data.size());
     return true;

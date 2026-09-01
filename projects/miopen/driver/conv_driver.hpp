@@ -4011,14 +4011,31 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWeightsGPUReference()
 
     auto& miopen_handle = miopen::deref(handle);
     const auto& conv    = miopen::deref(convDesc);
-    miopen::GpuConvReference::RunWrw(miopen_handle,
-                                     miopen::deref(outputTensor),
-                                     dout.GetDevicePtr(),
-                                     miopen::deref(inputTensor),
-                                     in.GetDevicePtr(),
-                                     miopen::deref(weightTensor),
-                                     dwei.GetDevicePtr(),
-                                     conv);
+    if(mode == miopenTranspose)
+    {
+        // Transpose WrW: roles of "input" and "output" are swapped relative to a
+        // regular convolution (mirrors RunBackwardWeightsCPU's transpose branch,
+        // which calls cpu_convolution_backward_weight(dout, dwei, in, ...)).
+        miopen::GpuConvReference::RunWrw(miopen_handle,
+                                         miopen::deref(inputTensor),
+                                         in.GetDevicePtr(),
+                                         miopen::deref(outputTensor),
+                                         dout.GetDevicePtr(),
+                                         miopen::deref(weightTensor),
+                                         dwei.GetDevicePtr(),
+                                         conv);
+    }
+    else
+    {
+        miopen::GpuConvReference::RunWrw(miopen_handle,
+                                         miopen::deref(outputTensor),
+                                         dout.GetDevicePtr(),
+                                         miopen::deref(inputTensor),
+                                         in.GetDevicePtr(),
+                                         miopen::deref(weightTensor),
+                                         dwei.GetDevicePtr(),
+                                         conv);
+    }
 
     if(miopen_type<Tgpu>{} == miopen_type<Tref>{})
         dwei.CopyFromDeviceToHost(GetStream(), dwei_host);
@@ -4057,14 +4074,14 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGPUReference()
     const auto& conv    = miopen::deref(convDesc);
     if(mode == miopenTranspose)
     {
-        // Transpose BWD is semantically a forward pass
+        // Transpose BWD is semantically a forward pass: din = Fwd(x=dout, w)
         miopen::GpuConvReference::RunFwd(miopen_handle,
-                                         miopen::deref(inputTensor),
-                                         din.GetDevicePtr(),
-                                         miopen::deref(weightTensor),
-                                         wei.GetDevicePtr(),
                                          miopen::deref(outputTensor),
                                          dout.GetDevicePtr(),
+                                         miopen::deref(weightTensor),
+                                         wei.GetDevicePtr(),
+                                         miopen::deref(inputTensor),
+                                         din.GetDevicePtr(),
                                          conv);
     }
     else
