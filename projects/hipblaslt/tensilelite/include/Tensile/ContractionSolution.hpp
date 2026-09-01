@@ -53,6 +53,30 @@
 
 namespace TensileLite
 {
+    // Elements in one GSU (MBSK) reduction region. Usage there is
+    // synchronizerSizePerWG * numTiles * batch, which runs into the tens of
+    // thousands, so this keeps the size it has always had and a solution whose
+    // usage exceeds it is not selected (SynchronizerSizeCheck, both in
+    // ContractionSolution and in the predicate of the same name).
+    //
+    // Must stay in sync with _rocblaslt_handle::c_syncGsuSlotElements.
+    constexpr uint32_t GsuSynchronizerElements = 409600;
+
+    // Problems a grouped GEMM can be given private regions for. A wider group
+    // cannot be isolated per problem, so no solution that uses these flags may
+    // be selected for it.
+    //
+    // Must stay in sync with _rocblaslt_handle::c_syncGsuSlots.
+    constexpr uint32_t SynchronizerGroupedSlots = 16;
+
+    // Elements in one Stream-K flag region. Stream-K indexes its flags by
+    // workgroup id, so this is the largest skGrid that fits; gfx950 picks 224.
+    // A grid past this would write beyond its own region, so getSKGrid clamps
+    // against it.
+    //
+    // Must stay in sync with _rocblaslt_handle::c_syncSkSlotElements.
+    constexpr uint32_t StreamKFlagElements = 2048;
+
     template <typename TAct>
     struct DeviceUserArguments
     {
