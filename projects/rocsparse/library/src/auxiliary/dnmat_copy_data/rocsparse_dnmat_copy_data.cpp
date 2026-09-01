@@ -67,7 +67,7 @@ namespace rocsparse
 
         const auto tid = hipThreadIdx_x;
         const auto gid = BLOCKSIZE * hipBlockIdx_x + tid;
-        if(gid < nrows * ncols)
+        if(gid < static_cast<int64_t>(nrows) * ncols)
         {
             const auto i  = gid % nrows;
             const auto j  = gid / nrows;
@@ -104,7 +104,7 @@ namespace rocsparse
     {
         const T* alpha = {};
         I        batch_index;
-        for(batch_index = hipBlockIdx_y; batch_index < batch_count; batch_index += hipBlockDim_y)
+        for(batch_index = hipBlockIdx_y; batch_index < batch_count; batch_index += hipGridDim_y)
         {
             if(batch_index < batch_count)
             {
@@ -137,11 +137,11 @@ namespace rocsparse
             = (alpha) ? reinterpret_cast<const T*>(alpha->const_values) : nullptr;
         const int64_t alpha_stride = (alpha) ? alpha->batch_stride : 0;
         const auto    alpha_mode   = (alpha) ? alpha->pointer_mode : rocsparse_pointer_mode_device;
+
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::dnmat_copy_data_kernel<512, I, T>),
             dim3(((source->rows * source->cols - 1) / 512 + 1),
-                 target->batch_count), // std::min(target->batch_count,
-            //												    static_cast<int64_t>(8192)) ),
+                 std::min(target->batch_count, static_cast<int64_t>(65536))),
             dim3(512),
             0,
             handle->stream,
@@ -172,6 +172,7 @@ namespace rocsparse
     {
         switch(T_datatype)
         {
+            // LCOV_EXCL_START
         case rocsparse_datatype_f16_r:
             return dnmat_copy_data_kernel_launch<I, _Float16>;
         case rocsparse_datatype_i32_r:
@@ -184,6 +185,7 @@ namespace rocsparse
             return dnmat_copy_data_kernel_launch<I, uint8_t>;
         case rocsparse_datatype_bf16_r:
             return dnmat_copy_data_kernel_launch<I, rocsparse_bfloat16>;
+            // LCOV_EXCL_STOP
         case rocsparse_datatype_f32_r:
             return dnmat_copy_data_kernel_launch<I, float>;
         case rocsparse_datatype_f64_r:
@@ -346,10 +348,10 @@ rocsparse_status rocsparse::dnmat_copy_data(rocsparse_handle            handle,
         }
     }
 
-    const rocsparse_indextype I_indextype = (source->rows <= std::numeric_limits<int32_t>::max()
-                                             && source->cols <= std::numeric_limits<int32_t>::max())
-                                                ? rocsparse_indextype_i32
-                                                : rocsparse_indextype_i64;
+    const rocsparse_indextype I_indextype
+        = ((source->rows * source->cols) <= std::numeric_limits<int32_t>::max())
+              ? rocsparse_indextype_i32
+              : rocsparse_indextype_i64;
 
     auto f = rocsparse::dnmat_copy_data_find_kernel_launch(I_indextype, source->data_type);
     if(f == nullptr)
