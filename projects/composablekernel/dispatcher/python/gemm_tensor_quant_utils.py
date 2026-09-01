@@ -347,7 +347,7 @@ class TensorQuantGpuGemmRunner:
 # Subprocess helpers (self-contained, do not call ctypes_utils.py)
 # =============================================================================
 
-_SUPPORTED_ARCHS = ("gfx942", "gfx950")
+_SUPPORTED_ARCHS = ("gfx942", "gfx950", "gfx1250")
 
 
 def _validate_arch(arch: str) -> str:
@@ -618,7 +618,7 @@ def fp8_warp_tile_k_for_arch(gfx_arch: str) -> int:
     all-zeros (confirmed on GPU, MI300X). 32 is bit-exact and at parity with
     Old-TE (which launches ...16x16x32 on gfx942).
     """
-    return 128 if "gfx950" in gfx_arch else 32
+    return 128 if ("gfx950" in gfx_arch or "gfx12" in gfx_arch) else 32
 
 
 def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
