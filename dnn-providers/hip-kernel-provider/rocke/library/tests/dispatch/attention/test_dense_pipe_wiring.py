@@ -138,7 +138,10 @@ class TestDensePipeSupportGates(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn("3D", why)
 
-    def test_rejects_sliding_window(self):
+    def test_admits_d128_sliding_window(self):
+        # D128 sliding-window prefill rides the non-ring wide flash path (SW mask
+        # + windowed KV-skip live in the emitter, and the sliced-K ring is forced
+        # off for D128 SW), so ``_enable_gfx942_fp16_flash`` admits it.
         with _Gfx942Arch():
             candidate = next(
                 c
@@ -147,6 +150,26 @@ class TestDensePipeSupportGates(unittest.TestCase):
             )
             ok, why = candidate.admits(
                 _gfx942_fp16(seqlen_q=512, seqlen_k=4096, sliding_window=256)
+            )
+            self.assertTrue(ok, why)
+
+    def test_rejects_d64_sliding_window(self):
+        # Only D128 gained the sliding-window carve-out; D64 SW has no emitter
+        # path and must still be turned down by the fp16-flash gate.
+        with _Gfx942Arch():
+            candidate = next(
+                c
+                for c in attention_candidates()
+                if c.name == "attention_gfx942_dense_pipe"
+            )
+            ok, why = candidate.admits(
+                _gfx942_fp16(
+                    seqlen_q=512,
+                    seqlen_k=4096,
+                    hdim_q=64,
+                    hdim_v=64,
+                    sliding_window=256,
+                )
             )
             self.assertFalse(ok)
             self.assertIn("flash not eligible", why)
