@@ -36,6 +36,7 @@ add_executable(
     utilities/TestLineStore.cpp
     utilities/TestMigratableMemory.cpp
     utilities/TestPackedFp4Tensor.cpp
+    utilities/TestPackedFp6Tensor.cpp
     utilities/TestPathSanitizer.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestScopedResource.cpp

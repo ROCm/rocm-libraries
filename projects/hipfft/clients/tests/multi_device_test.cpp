@@ -81,8 +81,10 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
     static const std::vector<std::vector<size_t>> stride_range = {{1}};
 
     // function pointer callbacks need -fgpu-rdc, but that causes build
-    // nondeterminism in kpack
-    auto multi_device_callbacks = {fft_callback_type_none, /*fft_callback_type_funcptr, */};
+    // nondeterminism in kpack.
+    // JIT callbacks are not yet supported on multi-GPU transforms
+    auto multi_device_callbacks
+        = {fft_callback_type_none, /*fft_callback_type_funcptr, fft_callback_type_jit*/};
 
     // gather cases to test as single-device params, then distribute
     // to multiple GPUs

@@ -29,8 +29,12 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h>
+#include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_properties.h>
+#include <hipdnn_compatibility/cudnn/cudnn_frontend/sdpa_attributes.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
@@ -144,49 +148,242 @@ Result makeUnsupportedNodeResult(GraphT& graph)
 /// @brief Unsupported node attribute.
 /// hipDNN has no equivalent engine; the node compiles but reports
 /// `error_code_t::GRAPH_NOT_SUPPORTED` at validate()/build().
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(BN_finalize_attributes);
-/// @copydoc BN_finalize_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Genstats_attributes);
-/// @copydoc BN_finalize_attributes
+/// @copydoc Genstats_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(DBN_weight_attributes);
-/// @copydoc BN_finalize_attributes
+/// @copydoc Genstats_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Matmul_fp8_attributes);
-/// @copydoc BN_finalize_attributes
+/// @copydoc Genstats_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Instancenorm_attributes);
-/// @copydoc BN_finalize_attributes
+/// @copydoc Genstats_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Instancenorm_backward_attributes);
-/// @copydoc BN_finalize_attributes
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(AdaLayernorm_attributes);
-/// @copydoc BN_finalize_attributes
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(AdaLayernorm_backward_attributes);
-/// @copydoc BN_finalize_attributes
+/// @copydoc Genstats_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Rng_attributes);
-/// @copydoc BN_finalize_attributes
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Reshape_attributes);
-/// @copydoc BN_finalize_attributes
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Transpose_attributes);
-/// @copydoc BN_finalize_attributes
+/// @copydoc Genstats_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(RoPE_attributes);
-/// @copydoc BN_finalize_attributes
+/// @copydoc Genstats_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(RoPE_backward_attributes);
-/// @copydoc BN_finalize_attributes
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(SDPA_fp8_attributes);
-/// @copydoc BN_finalize_attributes
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(SDPA_fp8_backward_attributes);
-/// @copydoc BN_finalize_attributes
+/// @copydoc Genstats_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Softmax_attributes);
-/// @copydoc BN_finalize_attributes
+/// @copydoc Genstats_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(DiagonalBandMask_attributes);
-/// @copydoc BN_finalize_attributes
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Slice_attributes);
-/// @copydoc BN_finalize_attributes
+/// @copydoc Genstats_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(PagedCacheLoad_attributes);
-/// @copydoc BN_finalize_attributes
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Concatenate_attributes);
-/// @copydoc BN_finalize_attributes
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Moe_grouped_matmul_attributes);
-/// @copydoc BN_finalize_attributes
-HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Moe_grouped_matmul_bwd_attributes);
+
+/// @brief Unsupported node attribute that still stores its node-specific
+/// configuration, so consumer source which sets it compiles and can read it
+/// back. The node reports `error_code_t::GRAPH_NOT_SUPPORTED` at
+/// validate()/build() regardless — storing a value is not a claim to honor it.
+class Reshape_attributes : public detail::UnsupportedAttributes<Reshape_attributes>
+{
+public:
+    Reshape_attributes() {} // NOLINT(modernize-use-equals-default)
+
+    Reshape_attributes& set_reshape_mode(ReshapeMode_t mode)
+    {
+        _mode = mode;
+        return *this;
+    }
+
+    ReshapeMode_t get_reshape_mode() const
+    {
+        return _mode;
+    }
+
+private:
+    // Upstream defaults the mode to VIEW_ONLY, not to the enum's NOT_SET.
+    ReshapeMode_t _mode = ReshapeMode_t::VIEW_ONLY;
+};
+
+/// @copydoc Reshape_attributes
+class Transpose_attributes : public detail::UnsupportedAttributes<Transpose_attributes>
+{
+public:
+    Transpose_attributes() {} // NOLINT(modernize-use-equals-default)
+
+    Transpose_attributes& set_permutation(const std::vector<int64_t>& permutation)
+    {
+        _permutation = permutation;
+        return *this;
+    }
+
+    const std::vector<int64_t>& get_permutation() const
+    {
+        return _permutation;
+    }
+
+private:
+    std::vector<int64_t> _permutation;
+};
+
+/// @copydoc Reshape_attributes
+class Slice_attributes : public detail::UnsupportedAttributes<Slice_attributes>
+{
+public:
+    Slice_attributes() {} // NOLINT(modernize-use-equals-default)
+
+    Slice_attributes& set_slices(const std::vector<std::pair<int64_t, int64_t>>& slices)
+    {
+        _slices = slices;
+        return *this;
+    }
+
+    const std::vector<std::pair<int64_t, int64_t>>& get_slices() const
+    {
+        return _slices;
+    }
+
+    Slice_attributes& set_strides(const std::vector<int64_t>& strides)
+    {
+        _strides = strides;
+        return *this;
+    }
+
+    const std::vector<int64_t>& get_strides() const
+    {
+        return _strides;
+    }
+
+private:
+    std::vector<std::pair<int64_t, int64_t>> _slices;
+    std::vector<int64_t> _strides = {1};
+};
+
+/// @copydoc Reshape_attributes
+class Concatenate_attributes : public detail::UnsupportedAttributes<Concatenate_attributes>
+{
+public:
+    Concatenate_attributes() {} // NOLINT(modernize-use-equals-default)
+
+    Concatenate_attributes& set_axis(int64_t axis)
+    {
+        _axis = axis;
+        return *this;
+    }
+
+    int64_t get_axis() const
+    {
+        return _axis;
+    }
+
+    Concatenate_attributes& set_in_place_index(int64_t index)
+    {
+        _inPlaceIndex = index;
+        return *this;
+    }
+
+    int64_t get_in_place_index() const
+    {
+        return _inPlaceIndex;
+    }
+
+private:
+    int64_t _axis = 0;
+    int64_t _inPlaceIndex = -1;
+};
+
+/// @copydoc Reshape_attributes
+class AdaLayernorm_attributes : public detail::UnsupportedAttributes<AdaLayernorm_attributes>
+{
+public:
+    AdaLayernorm_attributes() {} // NOLINT(modernize-use-equals-default)
+
+    AdaLayernorm_attributes& set_forward_phase(NormFwdPhase_t phase)
+    {
+        _forwardPhase = phase;
+        return *this;
+    }
+
+    NormFwdPhase_t get_forward_phase() const
+    {
+        return _forwardPhase;
+    }
+
+    AdaLayernorm_attributes& set_epsilon(std::shared_ptr<Tensor_attributes> epsilon)
+    {
+        _epsilon = std::move(epsilon);
+        return *this;
+    }
+
+    const std::shared_ptr<Tensor_attributes>& get_epsilon() const
+    {
+        return _epsilon;
+    }
+
+private:
+    NormFwdPhase_t _forwardPhase = NormFwdPhase_t::NOT_SET;
+    std::shared_ptr<Tensor_attributes> _epsilon;
+};
+
+/// @copydoc Reshape_attributes
+class BN_finalize_attributes : public detail::UnsupportedAttributes<BN_finalize_attributes>
+{
+public:
+    BN_finalize_attributes() {} // NOLINT(modernize-use-equals-default)
+
+    // Non-const references mirror upstream's signature; consumer source passes
+    // lvalue shared_ptrs and an rvalue would not bind there either.
+    BN_finalize_attributes& set_previous_running_stats(std::shared_ptr<Tensor_attributes>& mean,
+                                                       std::shared_ptr<Tensor_attributes>& variance,
+                                                       std::shared_ptr<Tensor_attributes>& momentum)
+    {
+        _previousRunningMean = mean;
+        _previousRunningVariance = variance;
+        _momentum = momentum;
+        return *this;
+    }
+
+    const std::shared_ptr<Tensor_attributes>& get_previous_running_mean() const
+    {
+        return _previousRunningMean;
+    }
+
+    const std::shared_ptr<Tensor_attributes>& get_previous_running_variance() const
+    {
+        return _previousRunningVariance;
+    }
+
+    const std::shared_ptr<Tensor_attributes>& get_momentum() const
+    {
+        return _momentum;
+    }
+
+private:
+    std::shared_ptr<Tensor_attributes> _previousRunningMean;
+    std::shared_ptr<Tensor_attributes> _previousRunningVariance;
+    std::shared_ptr<Tensor_attributes> _momentum;
+};
+
+/// @copydoc Reshape_attributes
+class AdaLayernorm_backward_attributes
+    : public detail::UnsupportedAttributes<AdaLayernorm_backward_attributes>
+{
+public:
+    AdaLayernorm_backward_attributes() {} // NOLINT(modernize-use-equals-default)
+
+    AdaLayernorm_backward_attributes&
+        set_saved_mean_and_inv_variance(std::shared_ptr<Tensor_attributes> mean,
+                                        std::shared_ptr<Tensor_attributes> invVariance)
+    {
+        _mean = std::move(mean);
+        _invVariance = std::move(invVariance);
+        return *this;
+    }
+
+    const std::shared_ptr<Tensor_attributes>& get_saved_mean() const
+    {
+        return _mean;
+    }
+
+    const std::shared_ptr<Tensor_attributes>& get_saved_inv_variance() const
+    {
+        return _invVariance;
+    }
+
+private:
+    std::shared_ptr<Tensor_attributes> _mean;
+    std::shared_ptr<Tensor_attributes> _invVariance;
+};
 
 // NOLINTEND(readability-identifier-naming)
 
