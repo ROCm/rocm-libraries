@@ -30,7 +30,6 @@
 #include <cstdio>
 #include <iomanip>
 #include <iostream>
-#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -109,6 +108,11 @@ void rocblas_parallel_initialize(int parallel_devices);
 
 extern thread_local std::unique_ptr<std::function<void(rocblas_handle)>> t_set_stream_callback;
 
+#ifdef WIN32
+#define setenv(A, B, C) _putenv_s(A, B)
+#define unsetenv(A) _putenv_s(A, "")
+#endif
+
 /* ============================================================================================ */
 /*! \brief  Sets an environment variable for the lifetime of this object, restoring the previous
  *          value -- or unsetting it, if it had none -- on destruction.
@@ -125,20 +129,27 @@ class scoped_env_var
     std::string m_name;
     std::string m_old_value;
     bool        m_had_old_value{false};
+    bool        m_active{false};
 
 public:
-    scoped_env_var(const char* name, const char* value)
-        : m_name(name)
+    scoped_env_var() = default;
+
+    // Not set in the constructor: rocblas_local_handle needs these as plain (not optional<>)
+    // members so it stays buildable by clients/samples, which pins CXX_STANDARD below 17.
+    void activate(const char* name, const char* value)
     {
+        m_name          = name;
         const char* old = getenv(name);
         m_had_old_value = (old != nullptr);
-        if(m_had_old_value)
-            m_old_value = old;
+        m_old_value     = m_had_old_value ? old : std::string();
         setenv(name, value, true);
+        m_active = true;
     }
 
     ~scoped_env_var()
     {
+        if(!m_active)
+            return;
         if(m_had_old_value)
             setenv(m_name.c_str(), m_old_value.c_str(), true);
         else
@@ -156,8 +167,8 @@ public:
 class rocblas_local_handle
 {
     // Declared first => destroyed last, i.e. after m_handle has been released.
-    std::optional<scoped_env_var> m_hipblaslt_env;
-    std::optional<scoped_env_var> m_stream_order_env;
+    scoped_env_var m_hipblaslt_env;
+    scoped_env_var m_stream_order_env;
 
     rocblas_handle m_handle{nullptr};
     void*          m_memory{nullptr};

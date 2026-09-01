@@ -448,13 +448,13 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
     // failing), which a restore in ~rocblas_local_handle() would not be.
     if(arg.use_hipblaslt >= 0)
     {
-        m_hipblaslt_env.emplace("ROCBLAS_USE_HIPBLASLT",
-                                std::to_string(arg.use_hipblaslt).c_str());
+        m_hipblaslt_env.activate("ROCBLAS_USE_HIPBLASLT",
+                                 std::to_string(arg.use_hipblaslt).c_str());
     }
 
     if(arg.graph_test)
     {
-        m_stream_order_env.emplace("ROCBLAS_STREAM_ORDER_ALLOC", "1");
+        m_stream_order_env.activate("ROCBLAS_STREAM_ORDER_ALLOC", "1");
     }
 
     auto status = rocblas_create_handle(&m_handle);
