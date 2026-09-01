@@ -125,8 +125,6 @@ namespace rocsparse
                                                    "invalid analysis_policy");
         }
 
-        //    const rocsparse_datatype  alpha_datatype = sptrsm_descr->get_compute_datatype();
-
         const auto nrhs = Y->cols;
         //
         // Preprocess.
@@ -337,6 +335,7 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::sptrsm_convert_scalars(
                 handle, sptrsm_descr, sptrsm_descr->get_scalar_alpha(), &values));
             alpha->const_values = values;
+            alpha->data_type    = sptrsm_descr->get_compute_datatype();
         }
 
         _rocsparse_dnmat_descr Z_st{true,
@@ -357,7 +356,12 @@ namespace rocsparse
         {
             const size_t nbytes = rocsparse::align_size(rocsparse::datatype_sizeof(Z->data_type)
                                                         * Z->rows * Z->cols * Z->batch_count);
-            buffer              = reinterpret_cast<char*>(buffer) + nbytes;
+
+            RETURN_IF_ROCSPARSE_ERROR((nbytes <= buffer_size_in_bytes)
+                                          ? rocsparse_status_success
+                                          : rocsparse_status_invalid_size);
+
+            buffer = reinterpret_cast<char*>(buffer) + nbytes;
             buffer_size_in_bytes -= nbytes;
         }
 

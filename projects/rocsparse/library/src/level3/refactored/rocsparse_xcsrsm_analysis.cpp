@@ -162,18 +162,18 @@ namespace rocsparse
             1, 1, rocsparse::get_datatype<T>(), alpha, nullptr, 1, 0, handle->pointer_mode);
 
         rocsparse_csrsm_info csrsm_info = (info != nullptr) ? info->get_csrsm_info() : nullptr;
-        rocsparse::csrsm_analysis(handle,
-                                  nrhs,
-                                  trans_A,
-                                  trans_B,
-                                  &local_alpha,
-                                  &local_A,
-                                  &local_B,
-                                  analysis,
-                                  &csrsm_info,
-                                  std::numeric_limits<size_t>::max(),
-                                  temp_buffer,
-                                  p_error);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
+                                                            nrhs,
+                                                            trans_A,
+                                                            trans_B,
+                                                            &local_alpha,
+                                                            &local_A,
+                                                            &local_B,
+                                                            analysis,
+                                                            &csrsm_info,
+                                                            std::numeric_limits<size_t>::max(),
+                                                            temp_buffer,
+                                                            p_error));
 
         return rocsparse_status_success;
     }

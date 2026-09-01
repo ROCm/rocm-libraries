@@ -26,9 +26,6 @@ set(rocsparse_source
 
 # Auxiliary
   src/auxiliary/rocsparse_auxiliary.cpp
-  src/auxiliary/dnmat_transpose/rocsparse_dnmat_transpose.cpp
-  src/auxiliary/dnmat_copy_data/rocsparse_dnmat_copy_data.cpp
-  src/auxiliary/dnvec_copy_data/rocsparse_dnvec_copy_data.cpp
   src/auxiliary/rocsparse_error.cpp
 # Common
   src/common/rocsparse_singularity.cpp
@@ -710,6 +707,9 @@ endif()
 # OFF -> pristine pre-refactoring sources
 if(BUILD_WITH_TRSM_REFACTORING)
   list(APPEND rocsparse_source
+    src/auxiliary/dnmat_transpose/rocsparse_dnmat_transpose.cpp
+    src/auxiliary/dnmat_copy_data/rocsparse_dnmat_copy_data.cpp
+    src/auxiliary/dnvec_copy_data/rocsparse_dnvec_copy_data.cpp
     src/level3/refactored/rocsparse_xcsrsm_buffer_size.cpp
     src/level3/refactored/rocsparse_xcsrsm_analysis.cpp
     src/level3/refactored/rocsparse_xcsrsm_solve.cpp
