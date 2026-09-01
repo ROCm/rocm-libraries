@@ -106,9 +106,12 @@ static __global__
     // this thread block
     // ------------------------------------------------------
     I const nrhs = (col_end - col_start);
-    if((nrhs == 0) || (n == 0) || (batch_count == 0))
     {
-        return;
+        bool const has_work = (nrhs >= 1) && (n >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return;
+        }
     }
 
     Istride const offsetB = idx2D(0, col_start, ldb);
@@ -127,13 +130,27 @@ static __global__
         // -------------------------------------------------------
         // Use 1-based indexing to match Fortran/matlab convention
         // -------------------------------------------------------
-        auto A = [=](I const i, I const j) -> T { return (A_bid[idx2F(i, j, lda)]); };
+        auto A = [=](I const i, I const j) -> T {
+            assert((1 <= i) && (i <= n));
+            assert((1 <= j) && (j <= n));
+            return (A_bid[idx2F(i, j, lda)]);
+        };
 
-        auto B = [=](I const i, I const j) -> T& { return (B_with_offset[idx2F(i, j, ldb)]); };
+        auto B = [=](I const i, I const j) -> T& {
+            assert((1 <= i) && (i <= n));
+            assert((1 <= j) && (j <= nrhs));
+            return (B_with_offset[idx2F(i, j, ldb)]);
+        };
 
-        auto E = [=](I const i) -> T { return (E_bid[(i - 1)]); };
+        auto E = [=](I const i) -> T {
+            assert((1 <= i) && (i <= n));
+            return (E_bid[(i - 1)]);
+        };
 
-        auto ipiv = [=](I const i) -> I { return (ipiv_bid[(i - 1)]); };
+        auto ipiv = [=](I const i) -> I {
+            assert((1 <= i) && (i <= n));
+            return (ipiv_bid[(i - 1)]);
+        };
 
         // ---------------------------
         // scale row of B
@@ -351,6 +368,9 @@ static __global__
         // --------------------------------------------
 
         auto swap_rows = [=](I const k, I const kp) {
+            assert((1 <= k) && (k <= n));
+            assert((1 <= kp) && (kp <= n));
+
             for(I j = 1 + ij_start; j <= nrhs; j += ij_inc)
             {
                 swap(B(k, j), B(kp, j));
@@ -599,6 +619,9 @@ static __global__
         // swap(  B(k,1:nrhs),  B(kp, 1:nrhs) )
         // --------------------------------------------
         auto swap_rows = [=](I const k, I const kp) {
+            assert((1 <= k) && (k <= n));
+            assert((1 <= kp) && (kp <= n));
+
             for(I j = 1 + ij_start; j <= nrhs; j += ij_inc)
             {
                 swap(B(k, j), B(kp, j));
@@ -790,8 +813,13 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
                                             void* const work,
                                             size_t const size_work)
 {
-    if(n == 0 || nrhs == 0 || batch_count == 0)
-        return rocblas_status_success;
+    {
+        bool const has_work = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
+    }
 
     T const one = 1;
 
@@ -862,8 +890,64 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         return rocblas_status_success;
     }; // end call_trsm
 
-    bool const is_forward = false;
+    auto check_for_nan = [handle, batch_count, is_upper](auto name, auto nrow, auto ncol, auto A,
+                                                         auto shiftA, auto lda, auto strideA) {
+        size_t const len_A = size_t(batch_count) * lda * ncol;
+        std::vector<T> h_A(len_A);
+
+        hipStream_t stream;
+        rocblas_get_stream(handle, &stream);
+
+        for(I bid = 0; bid < batch_count; bid++)
+        {
+            void* const dst = &(h_A[size_t(bid) * lda * ncol]);
+            void* const src = load_ptr_batch<T>(A, bid, shiftA, strideA);
+            size_t const sizeBytes = sizeof(T) * lda * ncol;
+
+            auto const istat = (hipMemcpyAsync(dst, src, sizeBytes, hipMemcpyDeviceToHost, stream));
+            assert(istat == hipSuccess);
+        }
+        {
+            auto const istat = (hipStreamSynchronize(stream));
+            assert(istat == hipSuccess);
+        }
+
+        auto check_for_nan_bid = [=](auto bid) {
+            auto const A_bid = &(h_A[size_t(bid) * lda * ncol]);
+
+            for(I j = 0; j < ncol; j++)
+            {
+                for(I i = 0; i < nrow; i++)
+                {
+                    auto const aij = A_bid[i + j * lda];
+                    bool is_nan = std::isnan(std::real(aij));
+                    if constexpr(rocblas_is_complex<T>)
+                    {
+                        is_nan |= std::isnan(std::imag(aij));
+                    }
+
+                    if(is_nan)
+                    {
+                        std::cout << "is_upper " << is_upper << " " << name << "[" << i << "," << j
+                                  << "," << bid << "]"
+                                  << "\n";
+                        return;
+                    }
+                } // end for i
+            } // end for j
+        };
+
+        for(I bid = 0; bid < batch_count; bid++)
+        {
+            check_for_nan_bid(bid);
+        }
+        return rocblas_status_success;
+    }; // end check_for_nan
+
+    bool const is_forward = !is_upper;
     T const alpha = one;
+    Istride const shiftE = 0;
+    I const lde = n;
 
     if(is_upper)
     {
@@ -872,9 +956,12 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         //
         //        P**t * B
         // ------------------------------------------
+        check_for_nan("B_before_apply_pivot_upper", n, nrhs, B_arg, shiftB, ldb, strideB);
+
         ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
                                               strideB, ipiv_arg, strideP, batch_count));
 
+        check_for_nan("B_after_apply_pivot_upper", n, nrhs, B_arg, shiftB, ldb, strideB);
         // --------------------------------------------------
         //    compute (U \P**t * B) -> B    [ (U \P**t * B) ]
         // --------------------------------------------------
@@ -885,10 +972,15 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         // ---------------------------------------------
         //    compute D \ B -> B   [ B \ (U \P**t * B) ]
         // ---------------------------------------------
+        check_for_nan("E_before_apply_diag_block_upper", n, 1, E_arg, shiftE, lde, strideE);
+        check_for_nan("B_before_apply_diag_block_upper", n, nrhs, B_arg, shiftB, ldb, strideB);
+
         ROCBLAS_CHECK(apply_diag_block<T, I>(handle, is_forward, n, nrhs, A_arg, shiftA, lda,
                                              strideA, ipiv_arg, strideP, E_arg, strideE, B_arg,
                                              shiftB, ldb, strideB, batch_count));
 
+        check_for_nan("E_after_apply_diag_block_upper", n, 1, E_arg, shiftE, lde, strideE);
+        check_for_nan("B_after_apply_diag_block_upper", n, nrhs, B_arg, shiftB, ldb, strideB);
         // --------------------------------------------------------------
         //      compute (U**t \ B) -> B   [ U**t \ (D \ (U \P**t * B) ) ]
         //      NOTE: need pure transpose, not conjugate transpose
@@ -900,11 +992,16 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         //        --------------------------------------------
         //        P * B  [ P * (U**t \ (D \ (U \P**t * B) )) ]
         //        --------------------------------------------
+        check_for_nan("B_before_2nd_apply_diag_block_upper", n, nrhs, B_arg, shiftB, ldb, strideB);
+
         ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
                                               strideB, ipiv_arg, strideP, batch_count));
+
+        check_for_nan("B_after_2nd_apply_diag_block_upper", n, nrhs, B_arg, shiftB, ldb, strideB);
     }
     else
     {
+        check_for_nan("B_before_apply_pivot_lower", n, nrhs, B_arg, shiftB, ldb, strideB);
         // -------------------------------------------
         // *        solve A*X = B, where A = L*D*L**t.
         // *
@@ -913,12 +1010,17 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
                                               strideB, ipiv_arg, strideP, batch_count));
 
+        check_for_nan("B_after_apply_pivot_lower", n, nrhs, B_arg, shiftB, ldb, strideB);
+
         // ---------------------------------------------------
         //    compute (L \P**t * B) -> B    [ (L \P**t * B) ]
         // ---------------------------------------------------
         ROCBLAS_CHECK(call_trsm(rocblas_side_left, rocblas_fill_lower, rocblas_operation_none,
                                 rocblas_diagonal_unit, n, nrhs, alpha, A_arg, shiftA, lda, strideA,
                                 B_arg, shiftB, ldb, strideB, batch_count));
+
+        check_for_nan("E_before_apply_diag_block_lower", n, 1, E_arg, shiftE, lde, strideE);
+        check_for_nan("B_before_apply_diag_block_lower", n, nrhs, B_arg, shiftB, ldb, strideB);
 
         // ---------------------------------------------
         //    compute D \ B -> B   [ D \ (L \P**t * B) ]
@@ -927,6 +1029,8 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
                                              strideA, ipiv_arg, strideP, E_arg, strideE, B_arg,
                                              shiftB, ldb, strideB, batch_count));
 
+        check_for_nan("E_after_apply_diag_block_lower", n, 1, E_arg, shiftE, lde, strideE);
+        check_for_nan("B_after_apply_diag_block_lower", n, nrhs, B_arg, shiftB, ldb, strideB);
         // ------------------------------------------------------------
         //    compute (L**t \ B) -> B   [ L**t \ (D \ (L \P**t * B) ) ]
         //    NOTE: need pure transpose, not conjugate transpose
@@ -935,17 +1039,18 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
                                 rocblas_diagonal_unit, n, nrhs, alpha, A_arg, shiftA, lda, strideA,
                                 B_arg, shiftB, ldb, strideB, batch_count));
 
+        check_for_nan("B_before_2nd_apply_diag_block_lower", n, nrhs, B_arg, shiftB, ldb, strideB);
+
         // ----------------------------------------------------
         //         P * B  [ P * (L**t \ (D \ (L \P**t * B) )) ]
         // ----------------------------------------------------
         ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
                                               strideB, ipiv_arg, strideP, batch_count));
+        check_for_nan("B_after_2nd_apply_diag_block_lower", n, nrhs, B_arg, shiftB, ldb, strideB);
     }
 
     return (rocblas_status_success);
 }
-
-int constexpr ialign = 128;
 
 template <typename T, typename I>
 rocblas_status rocsolver_sytrs2_getMemorySize(rocblas_handle handle,
@@ -1104,6 +1209,14 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
         return rocblas_status_success;
 
     bool const is_upper = (uplo == rocblas_fill_upper);
+    bool const is_lower = (uplo == rocblas_fill_lower);
+    {
+        bool const is_valid_uplo = is_upper || is_lower;
+        if(!is_valid_uplo)
+        {
+            return (rocblas_status_invalid_value);
+        }
+    }
 
     std::byte* const pwork = static_cast<std::byte*>(work);
     std::byte* pfree = pwork;
@@ -1112,6 +1225,64 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
     T* const E = reinterpret_cast<T*>(pfree);
     pfree += size_E;
     Istride const strideE = n;
+    Istride const shiftE = 0;
+    I const lde = n;
+
+    auto check_for_nan = [handle, batch_count, is_upper](auto name, auto nrow, auto ncol, auto A,
+                                                         auto shiftA, auto lda, auto strideA) {
+        size_t const len_A = size_t(batch_count) * lda * ncol;
+        std::vector<T> h_A(len_A);
+
+        hipStream_t stream;
+        rocblas_get_stream(handle, &stream);
+
+        for(I bid = 0; bid < batch_count; bid++)
+        {
+            void* const dst = &(h_A[size_t(bid) * lda * ncol]);
+            void* const src = load_ptr_batch<T>(A, bid, shiftA, strideA);
+            size_t const sizeBytes = sizeof(T) * lda * ncol;
+
+            auto const istat = (hipMemcpyAsync(dst, src, sizeBytes, hipMemcpyDeviceToHost, stream));
+            assert(istat == hipSuccess);
+        }
+        {
+            auto const istat = (hipStreamSynchronize(stream));
+            assert(istat == hipSuccess);
+        }
+
+        auto check_for_nan_bid = [=](auto bid) {
+            auto const A_bid = &(h_A[size_t(bid) * lda * ncol]);
+
+            for(I j = 0; j < ncol; j++)
+            {
+                for(I i = 0; i < nrow; i++)
+                {
+                    auto const aij = A_bid[i + j * lda];
+                    bool is_nan = std::isnan(std::real(aij));
+                    if constexpr(rocblas_is_complex<T>)
+                    {
+                        is_nan |= std::isnan(std::imag(aij));
+                    }
+
+                    if(is_nan)
+                    {
+                        std::cout << "is_upper " << is_upper << " " << name << "[" << i << "," << j
+                                  << "," << bid << "]"
+                                  << "\n";
+                        return;
+                    }
+                } // end for i
+            } // end for j
+        };
+
+        for(I bid = 0; bid < batch_count; bid++)
+        {
+            check_for_nan_bid(bid);
+        }
+        return rocblas_status_success;
+    }; // end check_for_nan
+
+    check_for_nan("A_before_syconv_is_convert", n, n, A, shiftA, lda, strideA);
 
     // ----------------
     // convert matrix A
@@ -1121,6 +1292,12 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
     ROCBLAS_CHECK(rocsolver_syconv_template<T, I>(handle, is_upper, is_convert = true, n, A, shiftA,
                                                   lda, strideA, ipiv, strideP, E, strideE,
                                                   batch_count, pfree, size_remain));
+
+    check_for_nan("A_after_syconv_is_convert", n, n, A, shiftA, lda, strideA);
+
+    check_for_nan("B_before_sytrs2_inner", n, nrhs, B, shiftB, ldb, strideB);
+
+    check_for_nan("E_after_syconv", n, 1, E, shiftE, lde, strideE);
 
     // -------------------------------------------------
     // solve linear system with converted storage format
@@ -1147,6 +1324,10 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
         pfree = pfree_save;
     }
 
+    check_for_nan("A_after_sytrs2_inner", n, n, A, shiftA, lda, strideA);
+
+    check_for_nan("B_after_sytrs2_inner", n, nrhs, B, shiftB, ldb, strideB);
+
     // ---------------
     // NOTE: always revert matrix A
     // even if sytrs1 has an error
@@ -1164,6 +1345,8 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
 
         pfree = pfree_save;
     }
+
+    check_for_nan("A_after_syconv_no_convert", n, n, A, shiftA, lda, strideA);
 
     if(istat_sytrs1 != rocblas_status_success)
     {
