@@ -60,7 +60,7 @@ if(HIPSPARSELT_ENABLE_CUDA AND HIPSPARSELT_ENABLE_HIP)
     message(FATAL_ERROR "Cannot enable CUDA and HIP support simultaneously.")
 endif()
 
-option(BUILD_SHARED_LIBS "Build libraries as shared by default." ON)
+option(HIPSPARSELT_BUILD_SHARED_LIBS "Build the hipSPARSELt library as shared vs static." ON)
 option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
 option(HIPSPARSELT_BUILD_COVERAGE "Build tests with coverage enabled." OFF)
 
@@ -90,6 +90,18 @@ set(TENSILELITE_LIBRARY_FORMAT "msgpack" CACHE STRING
 set_property(CACHE TENSILELITE_LIBRARY_FORMAT PROPERTY STRINGS msgpack yaml)
 set(Tensile_NO_LAZY_LIBRARY_LOADING OFF CACHE BOOL
     "Disable lazy loading of device libraries.")
+mark_as_advanced(
+    TENSILELITE_BUILD_PARALLEL_LEVEL
+    TENSILELITE_KEEP_BUILD_TMP
+    TENSILELITE_ASM_DEBUG
+    TENSILELITE_LOGIC_FILTER
+    TENSILELITE_NO_COMPRESS
+    TENSILELITE_EXPERIMENTAL
+    TENSILELITE_ENABLE_ASM_COMMENTS
+    TENSILELITE_OFFLOADBUNDLER
+    TENSILELITE_LIBRARY_FORMAT
+    Tensile_NO_LAZY_LIBRARY_LOADING
+)
 option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
 if(HIPSPARSELT_ENABLE_CLIENT)
     option(HIPSPARSELT_ENABLE_BENCHMARKS "Build benchmark client." ON)
@@ -104,6 +116,12 @@ option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSELT_ENABLE_FETCH "Fetch dependencies." OFF)
 option(HIPSPARSELT_ENABLE_THEROCK "Enable TheRock support." OFF)
 set(HIPSPARSELT_COVERAGE_GTEST_FILTER "" CACHE STRING "GTest filter for coverage tests.")
+mark_as_advanced(
+    HIPSPARSELT_ENABLE_ASAN
+    HIPSPARSELT_ENABLE_FETCH
+    HIPSPARSELT_ENABLE_THEROCK
+    HIPSPARSELT_COVERAGE_GTEST_FILTER
+)
 
 if(NOT HIPSPARSELT_ENABLE_CUDA)
     set(GPU_TARGETS "all" CACHE STRING "AMD GFX targets to cross-compile")
@@ -175,54 +193,47 @@ if(HIPSPARSELT_ENABLE_HIP)
         set(HIPBLASLT_TENSILELITE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt/tensilelite")
     endif()
 
-    find_package(hipblaslt CONFIG QUIET)
-    if(hipblaslt_FOUND AND COMMAND create_device_library)
-        message(STATUS "hipSPARSELt uses support from the installed hipBLASLt package.")
+    if(HIPSPARSELT_ENABLE_THEROCK)
+        find_package(hipblaslt CONFIG REQUIRED)
+        message(STATUS "hipSPARSELt uses the staged hipBLASLt package.")
     else()
         if(NOT EXISTS "${HIPBLASLT_TENSILELITE_PATH}/CMakeLists.txt")
             message(FATAL_ERROR
-                "hipSPARSELt requires either an installed hipBLASLt package or the "
-                "hipBLASLt tensilelite source at '${HIPBLASLT_TENSILELITE_PATH}'.")
+                "hipSPARSELt source support requires the hipBLASLt tensilelite "
+                "source at '${HIPBLASLT_TENSILELITE_PATH}'.")
         endif()
 
         message(STATUS
-            "Installed hipBLASLt codegen support not found; building only the required source-tree support for hipSPARSELt.")
+            "hipSPARSELt uses private source-tree TensileLite support.")
         include("${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt/cmake/hipblaslt_codegen.cmake")
         find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
         set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON)
         set(HIPBLASLT_PYTHON_DEPS _rocisa)
         block()
-            set(BUILD_SHARED_LIBS OFF)
+            set(TENSILELITE_BUILD_SHARED_LIBS OFF)
             set(BUILD_TESTING OFF)
-            if(TARGET roc::tensilelite-host)
-                add_subdirectory(
-                    "${HIPBLASLT_TENSILELITE_PATH}/rocisa"
-                    "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/rocisa"
-                    EXCLUDE_FROM_ALL
-                )
+            set(CMAKE_SKIP_INSTALL_RULES ON)
+            if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
+                set(HIPBLASLT_ENABLE_YAML ON)
+                find_package(LLVM REQUIRED)
             else()
-                if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
-                    set(HIPBLASLT_ENABLE_YAML ON)
-                    find_package(LLVM REQUIRED)
+                set(HIPBLASLT_ENABLE_YAML OFF)
+                find_package(msgpack-cxx CONFIG)
+                if(msgpack-cxx_FOUND)
+                    set(hipblaslt_msgpack_target msgpack-cxx)
                 else()
-                    set(HIPBLASLT_ENABLE_YAML OFF)
-                    find_package(msgpack-cxx CONFIG)
-                    if(msgpack-cxx_FOUND)
-                        set(hipblaslt_msgpack_target msgpack-cxx)
-                    else()
-                        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
-                        set(hipblaslt_msgpack_target msgpackc-cxx)
-                    endif()
+                    find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+                    set(hipblaslt_msgpack_target msgpackc-cxx)
                 endif()
-                set(TENSILELITE_ENABLE_HOST ON)
-                set(TENSILELITE_ENABLE_CLIENT OFF)
-                set(TENSILELITE_BUILD_TESTING OFF)
-                add_subdirectory(
-                    "${HIPBLASLT_TENSILELITE_PATH}"
-                    "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/tensilelite"
-                    EXCLUDE_FROM_ALL
-                )
             endif()
+            set(TENSILELITE_ENABLE_HOST ON)
+            set(TENSILELITE_ENABLE_CLIENT OFF)
+            set(TENSILELITE_BUILD_TESTING OFF)
+            add_subdirectory(
+                "${HIPBLASLT_TENSILELITE_PATH}"
+                "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/tensilelite"
+                EXCLUDE_FROM_ALL
+            )
         endblock()
     endif()
 
@@ -277,6 +288,7 @@ if(HIPSPARSELT_ENABLE_HIP)
     endif()
 endif()
 
+set(BUILD_SHARED_LIBS "${HIPSPARSELT_BUILD_SHARED_LIBS}")
 add_subdirectory(library)
 
 if(HIPSPARSELT_BUILD_TESTING)
@@ -301,16 +313,16 @@ if(HIPSPARSELT_ENABLE_HIP)
     if(BUILD_SHARED_LIBS)
         rocm_package_add_dependencies(
             COMPONENT runtime
-            DEPENDS "hipblaslt >= ${hipblaslt_VERSION}"
+            DEPENDS hipblaslt
         )
     else()
         rocm_package_add_deb_dependencies(
             COMPONENT devel
-            DEPENDS "hipblaslt-static-dev >= ${hipblaslt_VERSION}"
+            DEPENDS hipblaslt-static-dev
         )
         rocm_package_add_rpm_dependencies(
             COMPONENT devel
-            DEPENDS "hipblaslt-static-devel >= ${hipblaslt_VERSION}"
+            DEPENDS hipblaslt-static-devel
         )
     endif()
 endif()

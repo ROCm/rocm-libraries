@@ -613,7 +613,7 @@ pushd .
       printf "Static library not supported for CUDA backend.\n"
       exit 1
     fi
-    cmake_common_options="${cmake_common_options} -DBUILD_SHARED_LIBS=OFF"
+    cmake_common_options="${cmake_common_options} -DHIPSPARSELT_BUILD_SHARED_LIBS=OFF"
     compiler="${rocm_path}/bin/amdclang++" #force amdclang++ for static libs, g++ doesn't work
     compiler_c="${rocm_path}/bin/amdclang"
     printf "Forcing compiler to amdclang++ for static library.\n"
