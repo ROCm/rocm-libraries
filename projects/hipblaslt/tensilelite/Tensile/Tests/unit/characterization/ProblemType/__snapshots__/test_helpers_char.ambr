@@ -18,6 +18,7 @@
     'DataTypeMXSB',
     'DestDataType',
     'F32XdlMathOp',
+    'FusedGemmA2A',
     'Gradient',
     'GroupedGemm',
     'HighPrecisionAccumulate',
@@ -116,6 +117,9 @@
     ]),
     'F32XdlMathOp': list([
       'int',
+    ]),
+    'FusedGemmA2A': list([
+      'bool',
     ]),
     'Gradient': list([
       'bool',

@@ -406,6 +406,17 @@ typedef enum
     /** @brief Device properties for this engine */
     HIPDNN_ATTR_ENGINE_DEVICEPROP = 1007,
 
+    /**
+     * @brief Human-readable name of this engine (HIPDNN_TYPE_CHAR, extension).
+     *
+     * Read-only and supplied by the backend. Never empty for a finalized engine
+     * descriptor. Names are unique across loaded engines, so the name reported
+     * here maps back to this engine through `hipdnnGetEngineIdByName_ext` and
+     * agrees with `hipdnnGetEngineInfo_ext`. See
+     * `EnginePluginResourceManager::resolveEngineName()`.
+     */
+    HIPDNN_ATTR_ENGINE_NAME_EXT = 1008,
+
     /** @} */
 
     /**
@@ -475,7 +486,8 @@ typedef enum
     /** @brief Required byte alignment of the tensor's physical buffer pointer */
     HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT = 1309,
 
-    /** @brief UID of the ragged-offset aux tensor for this tensor (int64_t, optional) */
+    /** @brief Ragged-offset aux tensor descriptor for this tensor
+     * (hipdnnBackendDescriptor_t of a HIPDNN_BACKEND_TENSOR_DESCRIPTOR, optional) */
     HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC = 1310,
 
     /** @} */

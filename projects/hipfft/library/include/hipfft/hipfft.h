@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights
+ * Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights
  * reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -58,6 +58,16 @@ DISABLE_WARNING_IGNORED_ATTRIBUTES
 #include <hip/hip_complex.h>
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
+
+#if defined(__cplusplus) && __cplusplus >= 201402L
+#define HIPFFT_DEPRECATED_MSG(msg) [[deprecated(msg)]]
+#elif defined(__GNUC__)
+#define HIPFFT_DEPRECATED_MSG(msg) __attribute__((deprecated(msg)))
+#elif defined(_MSC_VER)
+#define HIPFFT_DEPRECATED_MSG(msg) __declspec(deprecated(msg))
+#else // no-op
+#define HIPFFT_DEPRECATED_MSG(msg)
+#endif
 
 #ifdef __cplusplus
 #include <cstddef>
@@ -271,6 +281,10 @@ HIPFFT_EXPORT hipfftResult hipfftExtPlanScaleFactor(hipfftHandle plan, double sc
  *  @details Assumes that the plan has been created already, and
  *  modifies the plan associated with the plan handle.
  *
+ *  If the plan has been configured for multiple GPUs via ::hipfftXtSetGPUs,
+ *  this function returns ::HIPFFT_NOT_IMPLEMENTED when `batch` is `1`, with
+ *  rocFFT backend.
+ *
  *  @param[in] plan Handle of the FFT plan.
  *  @param[in] nx FFT length.
  *  @param[in] type FFT type.
@@ -300,7 +314,7 @@ HIPFFT_EXPORT hipfftResult hipfftMakePlan1d(hipfftHandle plan,
 HIPFFT_EXPORT hipfftResult
     hipfftMakePlan2d(hipfftHandle plan, int nx, int ny, hipfftType type, size_t* workSize);
 
-/*! @brief Initialize a new two-dimensional FFT plan.
+/*! @brief Initialize a new three-dimensional FFT plan.
  *
  *  @details Assumes that the plan has been created already, and
  *  modifies the plan associated with the plan handle.

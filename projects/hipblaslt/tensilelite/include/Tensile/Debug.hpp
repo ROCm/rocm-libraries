@@ -78,6 +78,13 @@ namespace TensileLite
         // runtime by streamK5EffectiveDynamic(). Gated by TENSILE_DB bit 0x100000.
         bool printStreamKModeSelection() const;
 
+        // Emits a StreamK "launch summary" of the decisions made in the StreamK
+        // launch-parameter path (mode, reduction, grid/tiles/split, workspace,
+        // partials, DP-only, fallbacks) for each StreamK solve(). Purely
+        // observational. Gated by TENSILE_DB bit 0x200000 = StreamK launch summary
+        // (sits alongside the 0x100000 StreamK-mode-selection bit above).
+        bool printStreamKLaunchSummary() const;
+
         bool naivePropertySearch() const;
 
         bool skipKernelLaunch() const;
