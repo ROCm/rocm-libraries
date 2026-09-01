@@ -85,7 +85,7 @@ __device__ static void rpp_yuv_to_rgb_pixel_fixed(T y, T u, T v, T* r, T* g, T* 
     const int kR = Y + ((V * rpp_y2r_crv_s) >> 16) - (rpp_y2r_crv_s >> 9);
     const int kB = Y + ((U * rpp_y2r_cbu_s) >> 16) - (rpp_y2r_cbu_s >> 9);
     const int kG = Y + ((U * rpp_y2r_cgu_s) >> 16) - (rpp_y2r_cgu_s >> 9) +
-                       ((V * rpp_y2r_cgv_s) >> 16) - (rpp_y2r_cgv_s >> 9);
+                   ((V * rpp_y2r_cgv_s) >> 16) - (rpp_y2r_cgv_s >> 9);
     *r = (T)rpp_clamp((kR * rpp_y2r_cy + rpp_y2r_C) >> 16, 0, 255);
     *g = (T)rpp_clamp((kG * rpp_y2r_cy + rpp_y2r_C) >> 16, 0, 255);
     *b = (T)rpp_clamp((kB * rpp_y2r_cy + rpp_y2r_C) >> 16, 0, 255);
@@ -169,13 +169,29 @@ __global__ void yuv_to_rgb_cubic_v_hip_kernel(uint8_t* __restrict__ dp_y, int y_
     // bottom boundary is handled correctly by source-row clamping alone.
     int cr_base, t0, t1, t2, t3;
     if (y == 0) {
-        cr_base = 0; t0 = 4432; t1 = -336; t2 = 0; t3 = 0;
+        cr_base = 0;
+        t0 = 4432;
+        t1 = -336;
+        t2 = 0;
+        t3 = 0;
     } else if (y == 2) {
-        cr_base = 0; t0 = 959; t1 = 3473; t2 = -336; t3 = 0;
+        cr_base = 0;
+        t0 = 959;
+        t1 = 3473;
+        t2 = -336;
+        t3 = 0;
     } else if (y & 1) {
-        cr_base = (y >> 1) - 1; t0 = -346; t1 = 3572; t2 = 985; t3 = -115;
+        cr_base = (y >> 1) - 1;
+        t0 = -346;
+        t1 = 3572;
+        t2 = 985;
+        t3 = -115;
     } else {
-        cr_base = (y >> 1) - 2; t0 = -115; t1 = 985; t2 = 3572; t3 = -346;
+        cr_base = (y >> 1) - 2;
+        t0 = -115;
+        t1 = 985;
+        t2 = 3572;
+        t3 = -346;
     }
     int r0 = rpp_clamp(cr_base, 0, chroma_height - 1);
     int r1 = rpp_clamp(cr_base + 1, 0, chroma_height - 1);
@@ -306,22 +322,37 @@ static hipError_t rpp_nv12_set_mat_yuv2rgb(RpptColorStandard col_standard,
     int crv, cbu, cgu_a, cgv_a;
     switch (col_standard) {
         case RpptColorStandard_BT709:
-            crv = 117489; cbu = 138438; cgu_a = 13975; cgv_a = 34925;
+            crv = 117489;
+            cbu = 138438;
+            cgu_a = 13975;
+            cgv_a = 34925;
             break;
         case RpptColorStandard_FCC:
-            crv = 104448; cbu = 132798; cgu_a = 24759; cgv_a = 53109;
+            crv = 104448;
+            cbu = 132798;
+            cgu_a = 24759;
+            cgv_a = 53109;
             break;
         case RpptColorStandard_SMPTE240M:
-            crv = 117579; cbu = 136230; cgu_a = 16907; cgv_a = 35559;
+            crv = 117579;
+            cbu = 136230;
+            cgu_a = 16907;
+            cgv_a = 35559;
             break;
         case RpptColorStandard_BT2020_NCL:
         case RpptColorStandard_BT2020_CL:
-            crv = 110013; cbu = 140363; cgu_a = 12277; cgv_a = 42626;
+            crv = 110013;
+            cbu = 140363;
+            cgu_a = 12277;
+            cgv_a = 42626;
             break;
         case RpptColorStandard_BT470BG:
         case RpptColorStandard_BT601:
         default:  // unspecified colorspace -> BT.601 (FFmpeg SWS_CS_DEFAULT)
-            crv = 104597; cbu = 132201; cgu_a = 25675; cgv_a = 53279;
+            crv = 104597;
+            cbu = 132201;
+            cgu_a = 25675;
+            cgv_a = 53279;
             break;
     }
     long long crvL = crv, cbuL = cbu;
