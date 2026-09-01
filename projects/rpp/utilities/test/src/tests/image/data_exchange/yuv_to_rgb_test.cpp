@@ -54,8 +54,11 @@ struct YuvParams {
     std::string name() const { return token; }
 };
 
-// NV12 requires even width and height. n = 1: the ops take a single image, not a batch.
-constexpr Size kSize{1, 36, 48};
+// NV12 requires even width and height, and these ops take a single image rather than a batch, so
+// none of the shared shape presets is legal here. These stand in for them: 48 is a multiple of the
+// HIP block width, 54 leaves a 6-wide tail, and 14 is narrower than one block (all-tail) on a frame
+// whose height is not a block multiple either.
+const std::vector<Size> kSizes{{1, 36, 48}, {1, 36, 54}, {1, 46, 14}};
 
 // The matrix axis: both ranges on the two mainstream standards, plus one wide-gamut and one
 // legacy matrix so a wr/wb table error cannot hide behind the two common entries.
@@ -78,8 +81,10 @@ std::vector<WithParams<YuvParams>> yuv_configs() {
     for (RppBackend backend : available_backends()) {
         if (backend != RPP_HIP_BACKEND) continue;
         for (const YuvParams& op : kYuvParams)
-            configs.push_back(
-                {TestConfig{backend, DType::U8, Layout::PKD3, Layout::PKD3, Roi::Full, kSize}, op});
+            for (const Size& size : kSizes)
+                configs.push_back(
+                    {TestConfig{backend, DType::U8, Layout::PKD3, Layout::PKD3, Roi::Full, size},
+                     op});
     }
     return configs;
 }

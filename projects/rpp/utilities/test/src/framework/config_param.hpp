@@ -213,13 +213,15 @@ inline std::vector<TestConfig> concat_configs(std::initializer_list<std::vector<
 //   * kUnitSize is full-ROI only: the w/2, h/2 rule makes a 1x1 image's partial window empty.
 //
 // The plain layouts are the non-converting entries of `layouts`, so an op declares its layout
-// interface once.
+// interface once. An op that only ever converts (colour-to-greyscale has no same-layout form) has
+// no such subset, and runs its whole set at every shape instead.
 inline std::vector<TestConfig> make_shape_configs(
     const std::vector<DType>& dtypes, const std::vector<LayoutConv>& layouts,
     const std::vector<Roi>& rois = {Roi::Full, Roi::Partial}) {
     std::vector<LayoutConv> plain;
     for (LayoutConv l : layouts)
         if (l.in == l.out) plain.push_back(l);
+    if (plain.empty()) plain = layouts;
     return concat_configs({
         make_configs(dtypes, layouts, rois, {presets::kTailWidthSize}),
         make_configs(dtypes, plain, rois, {presets::kDefaultSize, presets::kSubVectorSize}),

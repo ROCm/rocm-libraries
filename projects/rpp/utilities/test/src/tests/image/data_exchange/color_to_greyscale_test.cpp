@@ -115,7 +115,8 @@ TEST_P(ColorToGreyscaleTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_DataExchange, ColorToGreyscaleTest,
     ::testing::ValuesIn(with_params<ColorToGreyscaleParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PLN1}, {Layout::PLN3, Layout::PLN1}}, {Roi::Full}),
+        make_shape_configs(presets::kDefaultDTypes,
+                           {{Layout::PKD3, Layout::PLN1}, {Layout::PLN3, Layout::PLN1}},
+                           {Roi::Full}),
         {ColorToGreyscaleParams{RGBtype}, ColorToGreyscaleParams{BGRtype}})),
     op_config_name<ColorToGreyscaleParams>);
