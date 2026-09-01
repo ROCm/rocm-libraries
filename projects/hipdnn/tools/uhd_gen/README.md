@@ -21,9 +21,11 @@ pip install -e .
 ## The pipeline
 
 ```
-  sweep  ->  export-benchmarks  ->  train  ->  promote
-   |              |                   |          |
-   |              |                   |          `- writes the UED's "heuristic" id
+  sweep  ->  export-benchmarks  ->  train  ->  evaluate  ->  promote
+   |              |                   |           |             |
+   |              |                   |           |             `- writes the UED's
+   |              |                   |           |                "heuristic" id
+   |              |                   |           `- eval_report.json (§11.2 regret)
    |              |                   `- <stem>.uhd.json + model.bin
    |              `- §8.3 training CSV
    `- ingestor benchmark log
@@ -46,14 +48,19 @@ python -m uhd_gen train \
     --descriptor-name gemm \
     --name "GEMM UHD"
 
-# 4. promote: install the pair beside the engine's UED and write its heuristic id
+# 4. evaluate: how much worse is the model's pick than the best kernel measured?
+python -m uhd_gen evaluate \
+    --input bench.csv \
+    --model-dir ./uhd_output
+
+# 5. promote: install the pair beside the engine's UED and write its heuristic id
 python -m uhd_gen promote \
     --model-dir ./uhd_output \
     --descriptor-tree ./descriptors \
     --engine hipkernel:gemm
 ```
 
-**Step 4 is not optional.** Until a UED's `heuristic` field names the new UHD's id,
+**Step 5 is not optional.** Until a UED's `heuristic` field names the new UHD's id,
 `DescriptorLoader` resolves nothing and the engine ranks its kernels by priority then
 descriptor id — a perfectly valid state that logs no error. The only symptom of a
 skipped promote is that the model "did nothing".
@@ -170,6 +177,186 @@ It validates everything before writing anything, and refuses rather than half-su
   loudly, and is refused outright when another UED still names the id being replaced.
   Same for an artifact another installed descriptor points at — give the model a
   distinct `--descriptor-name` instead.
+
+## `evaluate`: regret against the best kernel that was measured
+
+RMSE on `log1p(target)` is what `train` reports, and it can improve while the model's
+*choice* gets worse. `evaluate` measures the choice, per RFC 0019.13 §11.2:
+
+- **top-1 regret** — how much worse the model's pick is than the oracle `v*(p)`, the
+  best measured candidate for that problem. `t(v̂)/t(v*) − 1` under `objective: min`,
+  `1 − t(v̂)/t(v*)` under `max`; non-negative either way, reported as mean, p50, p95,
+  max;
+- **regret tail** — the fraction of problems whose regret exceeds 5%;
+- **top-k recall** — how often the oracle is in the model's top k, for k = 1, 3, 5;
+- **per-regime regret** — the same mean, grouped by the corpus's regime column. §11.2
+  makes this the *primary* form: an aggregate hides a model that is excellent on the
+  dense middle of the corpus and useless on decode-shaped or prime-dimension problems.
+
+It writes `eval_report.json` — the artifact §10.4 names — into `--model-dir`.
+
+```bash
+python -m uhd_gen evaluate --input bench.csv --model-dir ./uhd_output
+```
+
+```
+Regret report (0019.13 §11.2) -- ./uhd_output/eval_report.json
+  target/objective:   minTimeMs (min)
+  problems grouped by: benchmark, device
+  split:              group_holdout_by_problem, seed 0, 12 eval / 48 train problem(s)
+  problems scored:    12
+  top-1 regret:       mean 0.7012  p50 0.0000  p95 2.1976  max 2.2109
+  regret tail (>5%):  0.4167 (5 problem(s))
+  top-1 recall:       strict 0.5833   tie-aware 0.5833
+  per-regime regret:  (from column 'regime')
+    decode                   mean 1.4025  (6 problem(s))
+    prefill                  mean 0.0000  (6 problem(s))
+  holdout integrity:  held_out
+```
+
+### A problem is `(benchmark, device)`
+
+The same graph on two GPUs is two problems with two different best kernels. Grouped on
+`benchmark` alone, the oracle becomes the best kernel on whichever card is faster and
+the regret figure is a different quantity — on the demo corpus above, conflating two
+devices moved the mean from 0.70 to 0.26.
+
+A corpus exported before the `device` column existed carries it empty on every row.
+`evaluate` degrades to `benchmark` alone rather than refusing, and says so on stdout,
+in `grouping.degraded`, and in `warnings[]`:
+
+```
+!! DEGRADED PROBLEM GROUPING: problems are identified by 'benchmark' ALONE because
+no 'device' column in this corpus ... They are not comparable with figures from a
+corpus that carries device identity. Re-export from a sweep that logs the `device`
+column.
+```
+
+### The split holds out problems, not rows
+
+Regret belongs to the evaluation slice (§5.6.4); on training data it is optimistic and
+is not the number anyone wants. `evaluate` holds out `--eval-fraction` of the
+**problems**, assigned by a seeded SHA-256 of the problem key — reproducible from
+`(corpus, --seed)` alone, and independent of row order, so concatenating a log
+differently does not move the slice.
+
+Splitting *rows* would put some of a problem's candidates in training and the rest in
+evaluation. The evaluation-side oracle would then be the best of a subset, and a
+mediocre pick would look correct because the better candidate was not there to compare
+against. On the fixture in `tests/test_evaluate.py` that turns a true regret of 3.00
+into 2.25; the tests assert the group-aware figure.
+
+The model must not have trained on the evaluation problems, and `evaluate` checks what
+it can: if the manifest says the model was trained on the very corpus being scored, the
+report says `holdout_integrity: COMPROMISED` and the reason is printed first. The fix
+is one extra step:
+
+```bash
+# write the training side of the split, then fit on that
+python -m uhd_gen evaluate --input bench.csv --model-dir ./uhd_output \
+    --emit-train-slice train_slice.csv
+python -m uhd_gen train --input train_slice.csv ... --output-dir ./uhd_honest
+python -m uhd_gen evaluate --input bench.csv --model-dir ./uhd_honest   # same --seed
+```
+
+On the demo corpus that raises the reported mean regret from 0.45 to 0.70: the leak was
+worth a third of the number.
+
+### What is excluded, and what is not
+
+§5.6.3 warns that dropping a configuration from the evaluation slice removes it from
+the oracle. So only rows that carry no usable measurement are dropped, and every drop
+is counted in `exclusions`:
+
+| Excluded | Why |
+|----------|-----|
+| `is_valid=False` rows | A candidate that never ran has no time and cannot be the best. Its empty timing column would otherwise read as a zero and win every `min`. |
+| Rows whose target is empty or non-numeric | Same reason, without the flag. |
+| Problems with one measured candidate | With nothing to choose between, a correct pick is not evidence; scoring it as regret 0 would dilute the mean. |
+| Problems whose oracle value is not positive | Both formulas divide by it, and under `max` the ratio's sense flips. |
+
+Every measured candidate of an evaluated problem stays in `V(p)`.
+
+### Ties within noise
+
+Regret needs no tie rule — it is measured in the target metric, so two kernels a
+fraction of a percent apart produce a regret a fraction of a percent from zero, which
+is §11.2's stated reason for measuring it that way. **Top-k recall does need one**: it
+is a rank test, and it scores the second of two statistically indistinguishable kernels
+as an outright miss.
+
+So recall is reported twice. `strict` demands the exact oracle row in the top k.
+`tie_aware` accepts any candidate that is tied with the oracle, where tied means either
+
+- within `--tie-rel-tolerance` (default 1%) of the oracle's measured value — unit-free,
+  works for either objective, and it is the same quantity the regret column reports, so
+  "tied" means exactly "costs less than 1%"; or
+- within `--tie-sigma` standard errors of it, using `stddevMs` and `iters`. Applied
+  **only** when the target is a millisecond timing (`minTimeMs`, `avgTimeMs`,
+  `robustMeanMs`), because `stddevMs` is in milliseconds and widening a TFLOPS
+  comparison by it would be a units error. For `avgTimeMs` that band is exact; for
+  `minTimeMs` the sample spread is a scale for the noise rather than that estimator's
+  own error, so the band is approximate and deliberately so — the alternative is no
+  noise notion at all for the §8.5 default statistic.
+
+`topk_recall.trivial` records the fraction of problems with no more than k measured
+candidates, so a recall@5 of 1.0 on 4-candidate problems is legible as the tautology it
+is.
+
+### `evaluate` arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--input` | Yes | Benchmark CSV/JSON to evaluate on |
+| `--model-dir` | Yes | A `train --output-dir` result |
+| `--model` | No | Artifact to rank with (default: `model.lgbm` if kept, else the descriptor's `tree_data.artifact` — the file the engine itself loads) |
+| `--output` | No | Report path (default: `<model-dir>/eval_report.json`) |
+| `--eval-fraction` | No | Fraction of **problems** held out and scored (default: 0.2; `1.0` scores everything and says loudly that the figure is optimistic) |
+| `--seed` | No | Seed for the problem-level split (default: 0), recorded in the report |
+| `--target` | No | Measured column regret is computed in (default: the manifest's `target`) |
+| `--objective` | No | Override the direction read from the descriptor/manifest |
+| `--device-column` | No | Column holding device identity (default: `device`) |
+| `--regime-column` | No | Regime column for the per-regime table (default: the first of `regime`, `corpus_regime`, `q.regime`, `problem.regime` that is present) |
+| `--tie-rel-tolerance` | No | Tie tolerance for tie-aware recall (default: 0.01) |
+| `--tie-sigma` | No | Noise-band width in standard errors (default: 2.0) |
+| `--regret-tail-threshold` | No | Tail cutoff (default: 0.05, §11.2's 5%) |
+| `--include-per-problem` | No | Write every problem's oracle, pick and regret into the report |
+| `--emit-train-slice` | No | Write the training side of this split to a CSV |
+
+The **objective is read, never assumed** — from the descriptor, falling back to the
+manifest. Both directions are legal and the wrong one inverts every number, so a corpus
+that offers neither is an error rather than a guess. Regret is asserted non-negative;
+a negative one means the direction is backwards, and `evaluate` fails instead of
+printing a plausible small number.
+
+### `eval_report.json`
+
+| Key | Contents |
+|-----|----------|
+| `schema` | `uhd_gen.eval_report/1` |
+| `corpus` | path, row count, problem count |
+| `target`, `objective` | what regret was measured in, and in which direction |
+| `grouping` | the problem-identity columns, `degraded`, and why |
+| `split` | method, unit, seed, fraction, train/eval problem counts, and the evaluated problem keys |
+| `slice` | that `V(p)` is what the sweep measured rather than every applicable configuration, so `v*(p)` is a lower bound (§11.1) |
+| `exclusions` | counts by reason, plus the policy that produced them |
+| `metrics` | `problems_scored`, `top1_regret` (mean/p50/p95/max), `regret_tail`, `topk_recall` (`strict`/`tie_aware`/`trivial`), `per_regime`, `per_regime_status` |
+| `ties` | tolerance, sigma, whether the noise band applied, and the policy |
+| `model` | artifact, features, what it was trained on, how many rows |
+| `holdout_integrity` | `held_out`, `COMPROMISED`, or `unknown`, with the reason |
+| `not_implemented` | the parts of §11.2/§11.3 this command does not compute |
+| `warnings` | every loud condition, in the order printed |
+| `per_problem` | with `--include-per-problem`: key, regime, candidate count, oracle, pick, regret, ranks |
+
+`per_regime` is `null` when the corpus has no regime column, and `per_regime_status`
+says so — an absent metric someone expected is worse than a stated gap.
+
+`not_implemented` names what is missing rather than leaving a reader to infer it:
+§11.2's regime-weighted aggregates (nothing declares weights yet), its calibration
+metrics (required only when `score.calibrated` is true), §11.3's leave-one-regime-out
+and leave-variants-out splits (both need retraining per fold), and §5.6.3's round-0
+core versus full slice and steering versus reserved portions (properties of a corpus
+collected by the campaign loop, which does not exist yet).
 
 ## Input Format
 

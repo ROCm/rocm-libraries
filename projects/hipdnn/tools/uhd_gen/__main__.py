@@ -3,10 +3,11 @@
 # SPDX-License-Identifier: MIT
 """UHD Generation Tool CLI.
 
-Three subcommands, one per stage of RFC 0019.13's pipeline that exists today:
+Four subcommands, one per stage of RFC 0019.13's pipeline that exists today:
 
     export-benchmarks   ingestor benchmark log -> §8.3 training CSV
     train               training CSV -> UHD descriptor + model artifact
+    evaluate            corpus + trained UHD -> §11.2 regret report
     promote             install that pair into a descriptor tree and point a UED at it
 
 Collect, train and install:
@@ -29,6 +30,10 @@ Collect, train and install:
         --descriptor-tree ./descriptors \\
         --engine hipkernel:pointwise
 
+    python -m uhd_gen evaluate \\
+        --input bench.csv \\
+        --model-dir ./uhd_output
+
 Features must be namespace-qualified (`q.`, `kernel.`, `device.`); an unqualified
 name produces a descriptor that loads but never scores.
 
@@ -47,6 +52,7 @@ from pathlib import Path
 import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
+from .evaluate import add_evaluate_arguments, run_evaluate
 from .features import build_features_signature, compute_features_hash
 from .lgbm_to_flatbuffer import convert
 from .promote import add_promote_arguments, run_promote
@@ -121,6 +127,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_train_arguments(train)
 
+    evaluate = subparsers.add_parser(
+        "evaluate",
+        help="score a trained UHD against the best measured kernel (RFC 0019.13 §11.2)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_evaluate_arguments(evaluate)
+
     promote = subparsers.add_parser(
         "promote",
         help="install a trained UHD into a descriptor tree and point a UED at it",
@@ -138,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "promote":
         return run_promote(args)
+    if args.command == "evaluate":
+        return run_evaluate(args)
     return _run_train(args)
 
 
