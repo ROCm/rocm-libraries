@@ -44,6 +44,11 @@ namespace fbs = hipdnn_flatbuffers_sdk::data_objects;
 // interaction reaching the model.
 const std::vector<std::string> SIGNATURE = {R"("$kernel.tile_m")", R"("$q.seqlen")"};
 
+/// The knobs a conformant UED would expose for SIGNATURE. RFC 0019 §6.3 check 2 requires
+/// `set(UED.knobs) == set($kernel.* axes the model reads)`, so a fixture that omitted these
+/// would describe a descriptor pair the loader is required to refuse.
+const std::vector<std::string> KNOBS = {"tile_m"};
+
 DescriptorId testId(uint8_t tag)
 {
     DescriptorId id{};
@@ -206,7 +211,7 @@ TEST(TestIngestorUhdKernelHeuristic, RanksByTheModelRatherThanByPriority)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_happy");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName));
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -226,7 +231,7 @@ TEST(TestIngestorUhdKernelHeuristic, TheProblemChangesTheRanking)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_problem");
     const auto fixture = writeFixture(dir.path(), preferLargeTilesOnLongSequences());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName));
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -252,9 +257,9 @@ TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
     const auto minFixture = writeFixture(minDir.path(), preferLargeTiles(), "min");
 
     const auto maximising
-        = makeKernelHeuristic(modelDescriptor(maxDir.path(), maxFixture.uhdFileName));
+        = makeKernelHeuristic(modelDescriptor(maxDir.path(), maxFixture.uhdFileName), {}, KNOBS);
     const auto minimising
-        = makeKernelHeuristic(modelDescriptor(minDir.path(), minFixture.uhdFileName));
+        = makeKernelHeuristic(modelDescriptor(minDir.path(), minFixture.uhdFileName), {}, KNOBS);
     ASSERT_NE(maximising, nullptr);
     ASSERT_NE(minimising, nullptr);
 
@@ -303,7 +308,7 @@ TEST(TestIngestorUhdKernelHeuristic, AFeaturesHashMismatchDegradesToDeclaredOrde
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", "sha256:not_the_real_hash");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName));
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -324,7 +329,7 @@ TEST(TestIngestorUhdKernelHeuristic, AKernelMissingAFeatureDegradesTheWholeRanki
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_partial");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName));
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     Catalog catalog;
@@ -352,7 +357,7 @@ TEST(TestIngestorUhdKernelHeuristic, AListValuedTokenIsSkippedRatherThanFatal)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_list");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName));
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, KNOBS);
     ASSERT_NE(heuristic, nullptr);
 
     auto catalog = catalogAgainstPriority(2048);
@@ -367,6 +372,47 @@ TEST(TestIngestorUhdKernelHeuristic, AListValuedTokenIsSkippedRatherThanFatal)
     EXPECT_EQ(ranked.front().kernelId, testId(0x02)); // still the model's order
 }
 
-} // namespace hipdnn_plugin_sdk::ingestor
+#endif // HIPDNN_ENABLE_K
+/// RFC 0019 §6.3 check 2: `set(UED.knobs) == set($kernel.* axes the model reads)`. Both
+/// directions of a mismatch fail silently, which is why the RFC asks for set equality rather
+/// than a subset test, and why both are pinned here.
+///
+/// The expected outcome is a degraded ranking, not a failure: §5 step 7 requires a broken
+/// feature contract to leave the engine selecting, by declared order.
+TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsRefused)
+{
+    // The caller can turn split_k and the heuristic will not react. Nothing in the output
+    // distinguishes that from a knob the model happens to weigh lightly.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_extra_knob");
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles());
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {},
+                                               {"tile_m", "split_k"});
+    ASSERT_NE(heuristic, nullptr);
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(ranked.size(), 2U);
+    // Declared order: the high-priority kernel leads, which is exactly what the model would
+    // have overturned had it been used.
+    EXPECT_EQ(ranked.front().kernelId, testId(0x01));
+}
+TEST(TestIngestorUhdKernelHeuristic, AnAxisWithNoKnobIsRefused)
+{
+    // The reverse direction: the model ranks on tile_m while the engine exposes nothing, so
+    // its scores turn on something no caller can influence.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_no_knob");
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles());
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName), {}, {});
+    ASSERT_NE(heuristic, nullptr);
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x01));
+}
 
-#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
+} // namespace hipdnn_plugin_sdk::ingestor

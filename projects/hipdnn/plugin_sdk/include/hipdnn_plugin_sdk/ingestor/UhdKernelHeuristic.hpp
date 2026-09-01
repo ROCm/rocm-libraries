@@ -125,6 +125,42 @@ inline std::vector<KernelDefinition> declaredOrder(const std::vector<KernelDefin
 
 /// @brief Ranks a catalog with the model a MODEL heuristic descriptor names.
 ///
+/// @brief The `$kernel.*` axes a feature signature actually reads.
+///
+/// RFC 0019 §6.3 check 2 requires `F == set(UED.knobs)`, where F is this set: the knobs an
+/// engine exposes must be exactly the axes its model ranks on. Both directions matter and both
+/// fail silently. A knob the model does not read is a dial the caller can turn while the
+/// heuristic ignores it; an axis with no knob is a model ranking on something the API never
+/// lets anyone vary.
+inline std::unordered_set<std::string> kernelAxesOf(const std::vector<std::string>& signature)
+{
+    std::unordered_set<std::string> axes;
+    for(const auto& entry : signature)
+    {
+        // An entry is a JsonLogic expression; a bare reference is not valid JSON on its own,
+        // so it arrives quoted and parses to a string.
+        try
+        {
+            for(const auto& variable :
+                uhd::JsonLogicEvaluator::extractVariables(nlohmann::json::parse(entry)))
+            {
+                constexpr std::string_view PREFIX = "$kernel.";
+                if(variable.rfind(PREFIX, 0) == 0)
+                {
+                    axes.insert(variable.substr(PREFIX.size()));
+                }
+            }
+        }
+        catch(const std::exception&)
+        {
+            // A signature entry that will not parse is already a broken contract; the load
+            // below reports it. Skipping here keeps this helper from being the messenger.
+            continue;
+        }
+    }
+    return axes;
+}
+
 /// Holds no mutable state: rank() keeps its shared feature row on the stack, so one
 /// instance serves concurrent selections without a lock.
 ///
@@ -140,7 +176,8 @@ public:
     /// @returns nullptr when the UHD cannot be brought up, so the caller can substitute
     ///          declared-order ranking. Never throws.
     static std::shared_ptr<UhdKernelHeuristic> tryCreate(const HeuristicDescriptor& descriptor,
-                                                         const std::string& describedBy)
+                                                         const std::string& describedBy,
+                                                         const std::vector<std::string>& knobs = {})
     {
         try
         {
@@ -148,6 +185,30 @@ public:
             auto config = uhd::UhdLoader::load(path);
             if(!config.has_value())
             {
+                return nullptr;
+            }
+
+            // RFC 0019 §6.3 check 2: the exposed knobs *are* the model's feature axes.
+            // Returning nullptr degrades to declared order, which is what §5 step 7 asks for
+            // on a broken feature contract -- the model's inputs are not the ones it was
+            // trained on, so its scores would be wrong.
+            const auto axes = kernelAxesOf(config->featuresSignature);
+            const std::unordered_set<std::string> exposed(knobs.begin(), knobs.end());
+            if(axes != exposed)
+            {
+                const auto join = [](const auto& names) {
+                    std::string text;
+                    for(const auto& name : names)
+                    {
+                        text += (text.empty() ? "" : ", ") + name;
+                    }
+                    return text.empty() ? std::string("<none>") : text;
+                };
+                HIPDNN_PLUGIN_LOG_ERROR(
+                    "uhd: " << describedBy << " exposes knobs [" << join(exposed)
+                            << "] but its model ranks on [" << join(axes)
+                            << "]; RFC 0019 §6.3 requires these to be the same set, so the "
+                               "model is not used and kernels rank by priority, then id");
                 return nullptr;
             }
 

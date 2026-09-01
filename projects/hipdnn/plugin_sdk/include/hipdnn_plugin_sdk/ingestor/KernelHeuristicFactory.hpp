@@ -26,9 +26,12 @@ namespace hipdnn_plugin_sdk::ingestor
 
 /// @param describedBy Engine named in the warning when @p descriptor is nullopt.
 /// @throws std::invalid_argument if @p descriptor names a kind with no adapter yet.
+/// @param knobs The UED's declared knobs, checked against the model's `$kernel.*` axes
+///              (RFC 0019 §6.3 check 2).
 inline std::shared_ptr<IKernelHeuristic>
     makeKernelHeuristic(const std::optional<HeuristicDescriptor>& descriptor,
-                        const std::string& describedBy = {})
+                        const std::string& describedBy = {},
+                        const std::vector<std::string>& knobs = {})
 {
     if(!descriptor.has_value())
     {
@@ -52,7 +55,7 @@ inline std::shared_ptr<IKernelHeuristic>
         // the engine could never score; an unloadable model is a deployment fact, and
         // RFC 0019 §5 wants the engine still selecting, by declared order.
         const auto named = describeDescriptor("heuristic", descriptor->name, descriptor->id);
-        if(auto heuristic = UhdKernelHeuristic::tryCreate(*descriptor, named))
+        if(auto heuristic = UhdKernelHeuristic::tryCreate(*descriptor, named, knobs))
         {
             return heuristic;
         }
