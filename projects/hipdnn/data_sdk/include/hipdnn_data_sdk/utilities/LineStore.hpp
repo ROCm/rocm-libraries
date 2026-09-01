@@ -295,6 +295,10 @@ inline std::optional<LineStoreFileId>
     peekLineStoreFileId(const std::filesystem::path& path) noexcept
 {
 #if defined(_WIN32)
+    // HANDLE is a typedef for void*, so `const HANDLE` is `void* const` -- a const
+    // pointer, which is what is wanted. misc-misplaced-const cannot see through the
+    // typedef and reads it as a misplaced `const void*`.
+    // NOLINTNEXTLINE(misc-misplaced-const)
     const HANDLE probe = CreateFileW(path.wstring().c_str(),
                                      FILE_READ_ATTRIBUTES,
                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -338,6 +342,9 @@ inline NativeLineStoreHandle openLineStoreHandle(const std::filesystem::path& pa
 {
 #if defined(_WIN32)
     return CreateFileW(path.wstring().c_str(),
+                       // FILE_GENERIC_* are SDK macros whose expansions share SYNCHRONIZE,
+                       // so the equivalent operands are in the Windows headers, not here.
+                       // NOLINTNEXTLINE(misc-redundant-expression)
                        FILE_GENERIC_READ | FILE_GENERIC_WRITE,
                        FILE_SHARE_READ | FILE_SHARE_WRITE,
                        nullptr,
@@ -434,6 +441,9 @@ inline NativeLineStoreHandle openExistingLineStoreHandle(const std::filesystem::
 {
 #if defined(_WIN32)
     return CreateFileW(path.wstring().c_str(),
+                       // FILE_GENERIC_* are SDK macros whose expansions share SYNCHRONIZE,
+                       // so the equivalent operands are in the Windows headers, not here.
+                       // NOLINTNEXTLINE(misc-redundant-expression)
                        FILE_GENERIC_READ | FILE_GENERIC_WRITE,
                        FILE_SHARE_READ | FILE_SHARE_WRITE,
                        nullptr,
@@ -605,7 +615,7 @@ inline bool appendRawLineStoreLine(NativeLineStoreHandle handle, std::string_vie
 
     size_t written = 0;
 #if defined(_WIN32)
-    LARGE_INTEGER end{};
+    const LARGE_INTEGER end{};
     if(SetFilePointerEx(handle, end, nullptr, FILE_END) == 0)
     {
         return false;
@@ -654,7 +664,7 @@ inline bool appendRawLineStoreLine(NativeLineStoreHandle handle, std::string_vie
 inline bool truncateLineStoreToEmpty(NativeLineStoreHandle handle) noexcept
 {
 #if defined(_WIN32)
-    LARGE_INTEGER origin{};
+    const LARGE_INTEGER origin{};
     if(SetFilePointerEx(handle, origin, nullptr, FILE_BEGIN) == 0)
     {
         return false;
@@ -675,7 +685,7 @@ inline std::optional<std::string> readAllLineStoreBytes(NativeLineStoreHandle ha
     std::array<char, 65536> buffer{};
 
 #if defined(_WIN32)
-    LARGE_INTEGER origin{};
+    const LARGE_INTEGER origin{};
     if(SetFilePointerEx(handle, origin, nullptr, FILE_BEGIN) == 0)
     {
         return std::nullopt;
