@@ -46,6 +46,7 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
+#include <thrust/iterator/strided_iterator.h>
 
 #include _THRUST_STD_INCLUDE(cstddef)
 #include _THRUST_STD_INCLUDE(type_traits)
@@ -57,7 +58,7 @@
 
 THRUST_NAMESPACE_BEGIN
 
-template <typename Incrementable, typename System, typename Traversal, typename Difference>
+template <typename Incrementable, typename System, typename Traversal, typename Difference, typename StrideHolder>
 class counting_iterator;
 
 namespace detail
@@ -66,7 +67,7 @@ template <typename Number>
 using counting_iterator_difference_type =
   ::internal::If<::internal::is_integral_v<Number> && sizeof(Number) < sizeof(int), int, _THRUST_STD::ptrdiff_t>;
 
-template <typename Incrementable, typename System, typename Traversal, typename Difference>
+template <typename Incrementable, typename System, typename Traversal, typename Difference, typename StrideHolder>
 struct make_counting_iterator_base
 {
   using system =
@@ -81,7 +82,7 @@ struct make_counting_iterator_base
   // to the internal state of an iterator causes subtle bugs (consider the temporary
   // iterator created in the expression *(iter + i)) and has no compelling use case
   using type =
-    iterator_adaptor<counting_iterator<Incrementable, System, Traversal, Difference>,
+    iterator_adaptor<counting_iterator<Incrementable, System, Traversal, Difference, StrideHolder>,
                      Incrementable,
                      Incrementable,
                      system,
@@ -89,6 +90,8 @@ struct make_counting_iterator_base
                      Incrementable,
                      difference>;
 };
+
+using unit_stride = compile_time_value<1>;
 } // namespace detail
 
 //! \addtogroup iterators
@@ -140,15 +143,7 @@ struct make_counting_iterator_base
 //!  // this example computes indices for all the nonzero values in a sequence
 //!
 //!  // sequence of zero and nonzero values
-//!  thrust::device_vector<int> stencil(8);
-//!  stencil[0] = 0;
-//!  stencil[1] = 1;
-//!  stencil[2] = 1;
-//!  stencil[3] = 0;
-//!  stencil[4] = 0;
-//!  stencil[5] = 1;
-//!  stencil[6] = 0;
-//!  stencil[7] = 1;
+//!  thrust::device_vector<int> stencil{0, 1, 1, 0, 0, 1, 0, 1};
 //!
 //!  // storage for the nonzero indices
 //!  thrust::device_vector<int> indices(8);
@@ -170,14 +165,17 @@ struct make_counting_iterator_base
 //!
 //! \see make_counting_iterator
 template <typename Incrementable,
-          typename System     = use_default,
-          typename Traversal  = use_default,
-          typename Difference = use_default>
+          typename System       = use_default,
+          typename Traversal    = use_default,
+          typename Difference   = use_default,
+          typename StrideHolder = detail::unit_stride>
 class THRUST_DECLSPEC_EMPTY_BASES counting_iterator
-    : public detail::make_counting_iterator_base<Incrementable, System, Traversal, Difference>::type
+    : public detail::make_counting_iterator_base<Incrementable, System, Traversal, Difference, StrideHolder>::type
+    , StrideHolder
 {
   //! \cond
-  using super_t = typename detail::make_counting_iterator_base<Incrementable, System, Traversal, Difference>::type;
+  using super_t =
+    typename detail::make_counting_iterator_base<Incrementable, System, Traversal, Difference, StrideHolder>::type;
   friend class iterator_core_access;
 
 public:
@@ -195,10 +193,11 @@ public:
   //! \param rhs The \p counting_iterator to copy.
   template <class OtherSystem,
             detail::enable_if_convertible_t<
-              typename iterator_system<counting_iterator<Incrementable, OtherSystem, Traversal, Difference>>::type,
-              typename iterator_system<super_t>::type,
+              iterator_system_t<counting_iterator<Incrementable, OtherSystem, Traversal, Difference, StrideHolder>>,
+              iterator_system_t<super_t>,
               int> = 0>
-  THRUST_HOST_DEVICE counting_iterator(counting_iterator<Incrementable, OtherSystem, Traversal, Difference> const& rhs)
+  THRUST_HOST_DEVICE
+  counting_iterator(counting_iterator<Incrementable, OtherSystem, Traversal, Difference, StrideHolder> const& rhs)
       : super_t(rhs.base())
   {}
 
@@ -210,18 +209,68 @@ public:
       : super_t(x)
   {}
 
+  THRUST_HOST_DEVICE explicit counting_iterator(Incrementable x, StrideHolder stride)
+      : super_t(x)
+      , StrideHolder(stride)
+  {}
+
   //! \cond
 
 private:
+  template <typename S = StrideHolder>
+  THRUST_HOST_DEVICE auto stride() const
+  {
+    return static_cast<const S&>(*this).value;
+  }
+
+  THRUST_EXEC_CHECK_DISABLE
+  THRUST_HOST_DEVICE void advance(difference_type n)
+  {
+    if constexpr (_THRUST_STD::is_same_v<StrideHolder, detail::unit_stride>)
+    {
+      this->base_reference() = static_cast<Incrementable>(this->base_reference() + n);
+    }
+    else
+    {
+      this->base_reference() += n * stride();
+    }
+  }
+
+  THRUST_EXEC_CHECK_DISABLE
+  THRUST_HOST_DEVICE void increment()
+  {
+    if constexpr (_THRUST_STD::is_same_v<StrideHolder, detail::unit_stride>)
+    {
+      ++this->base_reference();
+    }
+    else
+    {
+      this->base_reference() += stride();
+    }
+  }
+
+  THRUST_EXEC_CHECK_DISABLE
+  THRUST_HOST_DEVICE void decrement()
+  {
+    if constexpr (_THRUST_STD::is_same_v<StrideHolder, detail::unit_stride>)
+    {
+      --this->base_reference();
+    }
+    else
+    {
+      this->base_reference() -= stride();
+    }
+  }
+
   THRUST_HOST_DEVICE reference dereference() const
   {
     return this->base_reference();
   }
 
   // note that we implement equal specially for floating point counting_iterator
-  template <typename OtherSystem, typename OtherTraversal, typename OtherDifference>
-  THRUST_HOST_DEVICE bool
-  equal(counting_iterator<Incrementable, OtherSystem, OtherTraversal, OtherDifference> const& y) const
+  template <typename OtherSystem, typename OtherTraversal, typename OtherDifference, typename OtherStrideHolder>
+  THRUST_HOST_DEVICE bool equal(
+    counting_iterator<Incrementable, OtherSystem, OtherTraversal, OtherDifference, OtherStrideHolder> const& y) const
   {
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
     if constexpr (_THRUST_LIBCXX::is_floating_point_v<Incrementable>)
@@ -238,8 +287,8 @@ private:
   }
 
   template <typename OtherSystem, typename OtherTraversal, typename OtherDifference>
-  THRUST_HOST_DEVICE difference_type
-  distance_to(counting_iterator<Incrementable, OtherSystem, OtherTraversal, OtherDifference> const& y) const
+  THRUST_HOST_DEVICE difference_type distance_to(
+    counting_iterator<Incrementable, OtherSystem, OtherTraversal, OtherDifference, StrideHolder> const& y) const
   {
     if constexpr (::internal::is_integral<Incrementable>::value)
     {
@@ -264,6 +313,30 @@ inline THRUST_HOST_DEVICE counting_iterator<Incrementable> make_counting_iterato
 {
   return counting_iterator<Incrementable>(x);
 }
+
+// FIXME(bgruber): Sphinx fails to document the fancyiterators group if make_counting_iterator has overloads, so we
+// exclude them for now
+#ifndef THRUST_DOXYGEN_INVOKED // Do not document
+
+//! Constructs a counting_iterator with a runtime stride
+template <typename Incrementable, typename Stride>
+THRUST_HOST_DEVICE auto make_counting_iterator(Incrementable x, Stride stride)
+{
+  return counting_iterator<Incrementable, use_default, random_access_traversal_tag, use_default, runtime_value<Stride>>(
+    x, {stride});
+}
+
+//! Constructs a counting_iterator with a compile-time stride
+template <auto Stride, typename Incrementable>
+THRUST_HOST_DEVICE auto make_counting_iterator(Incrementable x)
+{
+  return counting_iterator<Incrementable,
+                           use_default,
+                           random_access_traversal_tag,
+                           use_default,
+                           compile_time_value<Stride>>(x, {});
+}
+#endif // THRUST_DOXYGEN_INVOKED
 
 //! \} // end fancyiterators
 //! \} // end iterators

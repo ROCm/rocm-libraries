@@ -65,9 +65,6 @@ class zip_iterator;
 
 namespace detail
 {
-template <typename... Ts>
-using minimum_category = minimum_type<Ts...>;
-
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <typename IteratorTuple>
 struct make_zip_iterator_base
@@ -78,8 +75,15 @@ struct make_zip_iterator_base
 template <typename... Its>
 struct make_zip_iterator_base<_THRUST_STD::tuple<Its...>>
 {
+  // We need this to make discard iterator work because that has a void reference type
+  template <class Iter>
+  using zip_iterator_reference_t =
+    _THRUST_STD::conditional_t<_THRUST_STD::is_same_v<it_reference_t<Iter>, void>,
+                               decltype(*_THRUST_STD::declval<Iter>()),
+                               it_reference_t<Iter>>;
+
   // reference type is the type of the tuple obtained from the iterator's reference types.
-  using reference = tuple_of_iterator_references<it_reference_t<Its>...>;
+  using reference = tuple_of_iterator_references<zip_iterator_reference_t<Its>...>;
 
   // Boost's Value type is the same as reference type. using value_type = reference;
   using value_type = _THRUST_STD::tuple<it_value_t<Its>...>;
@@ -88,15 +92,10 @@ struct make_zip_iterator_base<_THRUST_STD::tuple<Its...>>
   using difference_type = it_difference_t<_THRUST_STD::tuple_element_t<0, _THRUST_STD::tuple<Its...>>>;
 
   // Iterator system is the minimum system tag in the iterator tuple
-  using system = _THRUST_STD::__type_fold_left<_THRUST_STD::__type_list<iterator_system_t<Its>...>,
-                                               any_system_tag,
-                                               _THRUST_STD::__type_quote_trait<minimum_system>>;
+  using system = minimum_system_t<iterator_system_t<Its>...>;
 
   // Traversal category is the minimum traversal category in the iterator tuple
-  using traversal_category =
-    _THRUST_STD::__type_fold_left<_THRUST_STD::__type_list<iterator_traversal_t<Its>...>,
-                                  random_access_traversal_tag,
-                                  _THRUST_STD::__type_quote_trait<minimum_category>>;
+  using traversal_category = minimum_type<iterator_traversal_t<Its>...>;
 
   // The iterator facade type from which the zip iterator will be derived.
   using type =
@@ -254,8 +253,10 @@ struct tuple_of_value_types : tuple_meta_transform<IteratorTuple, internal::iter
 struct minimum_category_lambda
 {
   template <typename T1, typename T2>
-  struct apply : minimum_category<T1, T2>
-  {};
+  struct apply
+  {
+    using type = minimum_type<T1, T2>;
+  };
 };
 
 // Metafunction to obtain the minimal traversal tag in a tuple
@@ -273,8 +274,10 @@ struct minimum_traversal_category_in_iterator_tuple
 struct minimum_system_lambda
 {
   template <typename T1, typename T2>
-  struct apply : minimum_system<T1, T2>
-  {};
+  struct apply
+  {
+    using type = minimum_system_t<T1, T2>;
+  };
 };
 
 // Metafunction to obtain the minimal system tag in a tuple

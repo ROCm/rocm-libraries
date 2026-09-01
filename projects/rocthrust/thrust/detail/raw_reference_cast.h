@@ -82,7 +82,7 @@ struct raw_reference_impl<T, _THRUST_STD::enable_if_t<is_wrapped_reference<_THRU
 {};
 
 template <typename T>
-struct raw_reference_impl<T, _THRUST_STD::enable_if_t<is_proxy_reference<_THRUST_STD::remove_cv_t<T>>::value>>
+struct raw_reference_impl<T, _THRUST_STD::enable_if_t<is_proxy_reference_v<_THRUST_STD::remove_cv_t<T>>>>
 {
   using type = T;
 };
@@ -166,7 +166,7 @@ THRUST_HOST_DEVICE typename detail::raw_reference<const T>::type raw_reference_c
   return *thrust::raw_pointer_cast(&ref);
 }
 
-template <typename T, _THRUST_STD::enable_if_t<detail::is_proxy_reference<_THRUST_STD::remove_cv_t<T>>::value, int> = 0>
+template <typename T, _THRUST_STD::enable_if_t<detail::is_proxy_reference_v<_THRUST_STD::remove_cv_t<T>>, int> = 0>
 THRUST_HOST_DEVICE typename detail::raw_reference<T>::type raw_reference_cast(T&& t)
 {
   return t;
