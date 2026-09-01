@@ -45,7 +45,6 @@
 #include <cstdlib>
 #include <mutex>
 #include <random>
-#include <stdexcept>
 
 #include <sstream>
 
