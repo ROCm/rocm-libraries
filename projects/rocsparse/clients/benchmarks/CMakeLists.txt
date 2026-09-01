@@ -192,7 +192,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spsv_csr.cpp
 ../testings/testing_spsv_coo.cpp
 ../testings/testing_spsv_csc.cpp
-../testings/testing_spsv_ell.cpp
 ../testings/testing_sptrsv_csr.cpp
 ../testings/testing_sptrsv_csc.cpp
 ../testings/testing_sptrsv_coo.cpp
@@ -238,6 +237,10 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 
 if(BUILD_WITH_ILDLT0)
   list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spildlt0.cpp)
+endif()
+
+if(BUILD_WITH_ELL_TRSV)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spsv_ell.cpp)
 endif()
 
 add_executable(rocsparse-bench ${ROCSPARSE_BENCHMARK_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
