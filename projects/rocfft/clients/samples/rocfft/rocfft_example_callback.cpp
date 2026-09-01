@@ -208,6 +208,18 @@ int main()
     if(rocfft_execute(plan, (void**)&x, nullptr, info) != rocfft_status_success)
         throw std::runtime_error("rocfft_execute failed.");
 
+    // Read the result back before tearing down the plan and its resources.
+    std::vector<double2> y(N);
+    hip_status = hipMemcpy(&y[0], x, Nbytes, hipMemcpyDeviceToHost);
+    if(hip_status != hipSuccess)
+        throw std::runtime_error("hipMemcpy failed.");
+
+    for(size_t i = 0; i < N; i++)
+    {
+        std::cout << "element " << i << " input:  (" << cx[i].x << "," << cx[i].y << ")"
+                  << " output: (" << y[i].x << "," << y[i].y << ")" << std::endl;
+    }
+
     // Clean up work buffer
     if(work_buf_size)
     {
@@ -228,18 +240,6 @@ int main()
     // Destroy plan description
     if(rocfft_plan_description_destroy(desc) != rocfft_status_success)
         throw std::runtime_error("rocfft_plan_description_destroy failed.");
-
-    // Copy result back to host
-    std::vector<double2> y(N);
-    hip_status = hipMemcpy(&y[0], x, Nbytes, hipMemcpyDeviceToHost);
-    if(hip_status != hipSuccess)
-        throw std::runtime_error("hipMemcpy failed.");
-
-    for(size_t i = 0; i < N; i++)
-    {
-        std::cout << "element " << i << " input:  (" << cx[i].x << "," << cx[i].y << ")"
-                  << " output: (" << y[i].x << "," << y[i].y << ")" << std::endl;
-    }
 
     if(hipFree(cbdata_dev) != hipSuccess)
         throw std::runtime_error("hipFree failed.");
