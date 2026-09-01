@@ -77,6 +77,10 @@ private:
 /// expressions) using a FeatureExtractionContext. Supports RFC 0019 §6.4 derived
 /// values which are evaluated in order and bound to $derived.* namespace before
 /// evaluating the main signature. Also computes signature hashes for contract validation.
+///
+/// A signature entry naming a string-valued field (`$kernel.dtype`) yields that value's
+/// number from the fixed table in CategoricalEncoding.hpp (RFC 0019 §6.5), so a
+/// categorical field can be a feature at all. A string with no encoding still throws.
 class FeatureExtractor
 {
 public:

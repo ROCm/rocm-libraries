@@ -33,11 +33,21 @@ import math
 MAX_SAFE_NUMERIC_LITERAL = 1e15
 
 __all__ = [
+    "CATEGORICAL_ENCODING",
+    "CATEGORICAL_ENCODING_FROZEN_DIGEST",
+    "CATEGORICAL_ENCODING_FROZEN_ENTRIES",
+    "CATEGORICAL_ENCODING_VERSION",
     "FEATURE_NAMESPACES",
     "MAX_SAFE_NUMERIC_LITERAL",
     "build_features_signature",
     "canonicalize_signature",
+    "categorical_encoding_canonical_form",
+    "categorical_encoding_digest",
+    "categorical_encoding_entries",
+    "category_of_reference",
     "compute_features_hash",
+    "encode_categorical",
+    "encode_feature_value",
     "parse_signature_entry",
 ]
 
@@ -46,6 +56,168 @@ __all__ = [
 #: to nothing at selection time (FeatureExtractionContext binds exactly device/kernel/q
 #: in backend/src/heuristics/uhd/FeatureExtractor.cpp).
 FEATURE_NAMESPACES = ("device", "kernel", "q")
+
+
+# ---- Categorical encoding (RFC 0019 6.5) ---------------------------------------
+#
+# A mirror, not a source. The authoritative table is CATEGORICAL_ENCODING_TABLE in
+# plugin_sdk/include/hipdnn_plugin_sdk/ingestor/uhd/CategoricalEncoding.hpp, which is
+# what the runtime reads; this copy is what training encodes with. Two hand-maintained
+# copies is the defect class that already shipped here once -- a Python FlatBuffer
+# writer whose layout the C++ reader disagreed with, undetected for months -- so
+# tests/test_categorical_encoding.py reads the header itself and fails when either side
+# moves alone. Editing this dict without editing the header is caught, and vice versa.
+#
+# The mapping is global and fixed, not observed per training set: two engines that both
+# feed dtype="fp16" to their models have to produce the same number, or a model trained
+# on one corpus is meaningless against another and the cross-engine score comparison of
+# RFC 0019 11.3 compares two unrelated axes. Assignments are append-only and permanent;
+# a trained model.bin has them baked into its split thresholds, so renumbering one
+# silently re-points every threshold in every model in the field.
+#
+# Ordering, per-category, matches the header (a tree splits on these numbers, so the
+# order has to mean something): dtype by element byte width ascending, layout by tensor
+# rank with channel-first before channel-last.
+CATEGORICAL_ENCODING_VERSION = 1
+
+CATEGORICAL_ENCODING: dict[str, dict[str, int]] = {
+    # Every spelling to_string(DataType) produces in hipdnn_frontend/Types.hpp. Its
+    # "unknown" fallthrough is deliberately absent: an unrecognized data type must fail
+    # loudly rather than encode to something a model can split on.
+    "dtype": {
+        "fp4_e2m1": 0,
+        "int4": 1,
+        "fp6_e2m3": 2,
+        "fp6_e3m2": 3,
+        "fp8_e4m3": 4,
+        "fp8_e4m3_fnuz": 5,
+        "fp8_e5m2": 6,
+        "fp8_e5m2_fnuz": 7,
+        "fp8_e8m0": 8,
+        "int8": 9,
+        "uint8": 10,
+        "boolean": 11,
+        "bf16": 12,
+        "fp16": 13,
+        "fast_float_for_fp8": 14,
+        "fp32": 15,
+        "int32": 16,
+        "int8x4": 17,
+        "uint8x4": 18,
+        "complex_fp32": 19,
+        "fp64": 20,
+        "int64": 21,
+        "complex_fp64": 22,
+        "int8x32": 23,
+    },
+    # The TensorLayout constants in hipdnn_data_sdk/utilities/Tensor.hpp, by their name.
+    "layout": {
+        "NCL": 0,
+        "NLC": 1,
+        "NCHW": 2,
+        "NHWC": 3,
+        "NCDHW": 4,
+        "NDHWC": 5,
+        "BHSD": 6,
+        "BSHD": 7,
+    },
+}
+
+#: How many leading entries the pinned digest covers, mirroring the header. Appending
+#: past this leaves the digest alone; extending the freeze means raising both literals.
+CATEGORICAL_ENCODING_FROZEN_ENTRIES = 32
+
+#: Pinned fingerprint of the frozen prefix. Equal to CATEGORICAL_ENCODING_FROZEN_DIGEST
+#: in CategoricalEncoding.hpp, which the Python test asserts by reading that file.
+CATEGORICAL_ENCODING_FROZEN_DIGEST = "sha256:bf20c5a8243803c2"
+
+
+def categorical_encoding_entries() -> list[tuple[str, str, int]]:
+    """The table flattened to (category, value, code), in declaration order.
+
+    Insertion order carries the ordering rule and the digest depends on it, so this
+    must not sort.
+    """
+    return [
+        (category, value, code)
+        for category, members in CATEGORICAL_ENCODING.items()
+        for value, code in members.items()
+    ]
+
+
+def categorical_encoding_canonical_form() -> str:
+    """The exact bytes the frozen digest is taken over.
+
+    Mirrors ``categoricalEncodingCanonicalForm`` in CategoricalEncoding.hpp, which
+    renders the same compact JSON by hand. The header static_asserts that no category
+    or value needs escaping, which is what lets the two renderings agree byte for byte.
+    """
+    frozen = categorical_encoding_entries()[:CATEGORICAL_ENCODING_FROZEN_ENTRIES]
+    payload = [CATEGORICAL_ENCODING_VERSION, [[c, v, n] for c, v, n in frozen]]
+    return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+
+
+def categorical_encoding_digest() -> str:
+    """Fingerprint of the frozen prefix, in the same ``sha256:<16 hex>`` form as
+    features_hash."""
+    digest = hashlib.sha256(categorical_encoding_canonical_form().encode()).hexdigest()[:16]
+    return f"sha256:{digest}"
+
+
+def category_of_reference(reference: str) -> str:
+    """The category a ``$namespace.field`` reference names: the field, no namespace.
+
+    ``$kernel.dtype`` and ``$q.dtype`` are both ``dtype`` on purpose -- the category is
+    a property of the value, not of who holds it. Mirrors ``categoryOfReference``.
+    Returns "" for anything that is not a namespaced reference, so a bare string literal
+    never encodes.
+    """
+    if not reference.startswith("$") or "." not in reference:
+        return ""
+    return reference.rsplit(".", 1)[1]
+
+
+def encode_categorical(category: str, value: str) -> int | None:
+    """The number ``value`` takes in ``category``, or None if the pair is not in the
+    table."""
+    return CATEGORICAL_ENCODING.get(category, {}).get(value)
+
+
+def encode_feature_value(reference: str, value) -> float:
+    """Turn one raw logged value into the number the model trains on.
+
+    The training-side mirror of ``JsonLogicEvaluator::evaluateDouble``: the benchmark
+    log carries raw values (``dtype`` is logged as the string ``"fp16"``), and this is
+    the single point where a string becomes a number. Anything that encodes here
+    encodes identically at inference, because both sides read the same table.
+
+    A string with no code raises rather than falling back to NaN or to a hash of the
+    text. NaN is a missing value to a GBDT, which routes it down ``default_left`` and
+    returns an ordinary leaf -- the row trains as data and nothing in the log says so.
+    """
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        raise TypeError(f"{reference}: cannot use {type(value).__name__} as a feature value")
+
+    category = category_of_reference(reference)
+    code = encode_categorical(category, value)
+    if code is not None:
+        return float(code)
+    if category in CATEGORICAL_ENCODING:
+        raise ValueError(
+            f"{reference}: categorical value {value!r} has no code in category "
+            f"'{category}'. Append it to CATEGORICAL_ENCODING here and to "
+            "CATEGORICAL_ENCODING_TABLE in CategoricalEncoding.hpp; existing codes "
+            "must not move."
+        )
+    raise ValueError(
+        f"{reference}: {value!r} is a string and '{category}' has no categorical "
+        "encoding, so there is no number this can mean. Reduce the field through an "
+        "explicit expression, or add the category to both tables."
+    )
 
 
 def build_features_signature(feature_cols: list[str]) -> list[str]:

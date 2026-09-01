@@ -254,14 +254,22 @@ def _run_train(args: argparse.Namespace) -> int:
     if args.group_by:
         logger.info("GroupKFold columns: %s", args.group_by)
 
-    model = train_model(
-        df,
-        args.features,
-        args.target,
-        args.group_by,
-        num_boost_round=args.num_boost_round,
-        early_stopping_rounds=args.early_stopping,
-    )
+    # An unencodable categorical value is an input error like a missing column, and is
+    # reported like one. Letting build_feature_matrix's ValueError escape would print a
+    # traceback through LightGBM's call stack, burying the column/row/value it names --
+    # the only three facts an author needs to fix the CSV.
+    try:
+        model = train_model(
+            df,
+            args.features,
+            args.target,
+            args.group_by,
+            num_boost_round=args.num_boost_round,
+            early_stopping_rounds=args.early_stopping,
+        )
+    except ValueError as error:
+        logger.error("%s", error)
+        return 1
 
     lgbm_path = output_dir / "model.lgbm"
     model.save_model(str(lgbm_path))
