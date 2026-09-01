@@ -9,12 +9,6 @@
 #include <roc/host_numerics/generation.hpp>
 
 namespace roc::host_numerics {
-namespace mx_generation_random_domain_version_1 {
-inline constexpr uint64_t data = 0x3f84d5b5b5470917ULL;
-inline constexpr uint64_t normal = 0x9216d5d98979fb1bULL;
-inline constexpr uint64_t unboundedData = 0xd1b54a32d192ed03ULL;
-}  // namespace mx_generation_random_domain_version_1
-
 enum class MxDataQuantization {
     Nearest,
     PreserveRange,

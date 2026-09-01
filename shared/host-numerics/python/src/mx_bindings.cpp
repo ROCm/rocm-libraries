@@ -53,12 +53,6 @@ void registerMxBindings(nb::module_& module) {
         .def_rw("data", &MxGenerationProblem::data)
         .def_rw("scale", &MxGenerationProblem::scale);
 
-    module.attr("mx_data_random_domain_version_1") = mx_generation_random_domain_version_1::data;
-    module.attr("mx_normal_random_domain_version_1") =
-        mx_generation_random_domain_version_1::normal;
-    module.attr("mx_unbounded_data_random_domain_version_1") =
-        mx_generation_random_domain_version_1::unboundedData;
-
     nb::class_<MxGenerationResult>(module, "MxGenerationResult")
         .def_ro("data", &MxGenerationResult::data)
         .def_ro("scales", &MxGenerationResult::scales)

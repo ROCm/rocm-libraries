@@ -14,7 +14,6 @@ import roc_host_numerics as hv
 
 GENERATION_REAL_RANDOM_DOMAIN = 0
 GENERATION_IMAGINARY_RANDOM_DOMAIN = 0x243F6A8885A308D3
-MX_DATA_RANDOM_DOMAIN = 0x3F84D5B5B5470917
 MX_BOUNDED_SCALE_RANDOM_DOMAIN = 0xA24BAED4963EE407
 
 
@@ -41,13 +40,10 @@ def real_generation_recipe(
     *,
     seed=0,
     index_order=hv.IndexOrder.FirstDimensionFastest,
-    random_domain=GENERATION_REAL_RANDOM_DOMAIN,
 ):
     return hv.GenerationRecipe.real_only(
         component,
-        hv.GenerationRecipeSettings(
-            seed=seed, index_order=index_order, random_domain=random_domain
-        ),
+        hv.GenerationRecipeSettings(seed=seed, index_order=index_order),
     )
 
 
@@ -139,7 +135,9 @@ def bounded_mx_fp4_oracle(
     for column in range(columns):
         for row in range(rows):
             logical_index = row + column * rows
-            unit = indexed_uniform_unit(seed, MX_DATA_RANDOM_DOMAIN, logical_index)
+            unit = indexed_uniform_unit(
+                seed, GENERATION_REAL_RANDOM_DOMAIN, logical_index
+            )
             source[row, column] = minimum + (maximum - minimum) * unit
 
     physical_raw = [0] * (leading_dimension * columns)
@@ -1756,7 +1754,6 @@ class TensorAndGemmTests(unittest.TestCase):
                         hv.GenerationRecipe.uniform_real(
                             hv.UniformRealGenerationParameters(-1, 1)
                         ),
-                        random_domain=MX_DATA_RANDOM_DOMAIN,
                     ),
                     hv.MxRepresentedValueRange(-1, 1),
                 )
@@ -1804,7 +1801,6 @@ class TensorAndGemmTests(unittest.TestCase):
                             hv.UniformRealGenerationParameters(minimum, maximum)
                         ),
                         seed=seed,
-                        random_domain=MX_DATA_RANDOM_DOMAIN,
                     ),
                     hv.MxRepresentedValueRange(minimum, maximum),
                 )
@@ -1852,7 +1848,6 @@ class TensorAndGemmTests(unittest.TestCase):
                 hv.GenerationRecipe.uniform_real(
                     hv.UniformRealGenerationParameters(-1.0, 1.0)
                 ),
-                random_domain=MX_DATA_RANDOM_DOMAIN,
             ),
             hv.MxRepresentedValueRange(-1.0, 1.0),
         )
