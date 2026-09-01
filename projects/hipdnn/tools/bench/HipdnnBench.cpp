@@ -27,6 +27,7 @@
  */
 
 #include <hipdnn_bench/KnobEnumeration.hpp>
+#include <hipdnn_bench/CsvOutput.hpp>
 #include <hipdnn_bench/VariantPackBuilder.hpp>
 
 #include <hipdnn_backend.h>
@@ -493,8 +494,8 @@ int runBench(const std::vector<std::string>& args)
         {
             std::cout << ",kernel." << knob;
         }
-        std::cout << ",engine,rank,succeeded,min_time_ms,avg_time_ms,robust_time_ms,"
-                     "stddev_ms,iterations,converged,workspace_bytes\n";
+        std::cout << ",engine,rank,succeeded,is_valid,skip_reason,min_time_ms,avg_time_ms,"
+                     "robust_time_ms,stddev_ms,iterations,converged,workspace_bytes\n";
     }
 
     // Every variant is emitted, including the ones that lost and the ones that failed. A
@@ -519,8 +520,28 @@ int runBench(const std::vector<std::string>& args)
         {
             std::cout << "," << knobFor(result, knob);
         }
+        // RFC 0019.13 §7.4 / §8: a pair that was not timed is written with is_valid=False and
+        // a populated skip_reason rather than dropped. Pre-filtering saves benchmark time and
+        // destroys the record of what was filtered, which is the record coverage auditing
+        // needs -- "which variants were never eligible, and why" is unanswerable from a file
+        // containing only the ones that ran. Training excludes them by filtering on is_valid.
+        const bool timed = result.succeeded && result.iterationsRun > 0;
+        std::string skipReason;
+        if(!result.succeeded)
+        {
+            skipReason = "config_not_applicable: engine declined or failed to run this "
+                         "configuration";
+        }
+        else if(result.iterationsRun == 0)
+        {
+            // Reported as a success with nothing measured. Emitting it as valid would put a
+            // zero time in the training set, which reads as an infinitely fast kernel.
+            skipReason = "not_timed: autotune reported success without running an iteration";
+        }
+
         std::cout << "," << (options.engineName.empty() ? result.engineName : options.engineName)
                   << "," << result.rank << "," << (result.succeeded ? 1 : 0) << ","
+                  << (timed ? "True" : "False") << "," << hipdnn_bench::csvField(skipReason) << ","
                   << result.minTimeMs << "," << result.avgTimeMs << "," << result.robustTimeMs
                   << "," << result.stddevMs << "," << result.iterationsRun << ","
                   << (result.converged ? 1 : 0) << "," << result.workspaceSize << "\n";
