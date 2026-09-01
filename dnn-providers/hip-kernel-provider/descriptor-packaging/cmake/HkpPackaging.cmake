@@ -533,6 +533,13 @@ function(hkp_probe_comgr_resolvable out_ok out_detail)
         set(_sep ":")
     endif()
     set(_pp "${_rocke_root}/platform/python${_sep}${_rocke_root}/library")
+    # On Windows the path separator IS CMake's list separator, so an unescaped
+    # "a;b" makes `-E env` see two arguments: PYTHONPATH=<first> and a stray
+    # <second> it tries to run. The probe then fails with "no such file or
+    # directory" and reports it as comgr being unresolvable -- a real machine
+    # misconfiguration and this quoting bug are indistinguishable in the error.
+    # Escaping keeps it one argument; a no-op where the separator is ':'.
+    string(REPLACE ";" "\\;" _pp "${_pp}")
     # Probe under the SAME override the build will use, so configure and build
     # ask the same question. Without this a machine that only resolves comgr via
     # the override would fail configure despite being correctly configured.
