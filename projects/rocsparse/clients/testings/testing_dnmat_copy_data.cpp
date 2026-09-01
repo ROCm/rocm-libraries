@@ -171,7 +171,7 @@ void testing_dnmat_copy_data_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_dnmat_copy_data(const Arguments& arg)
 {
-    static constexpr bool verbose = true;
+    static constexpr bool verbose = false;
 
     const int64_t M = arg.M;
     const int64_t N = arg.N;
