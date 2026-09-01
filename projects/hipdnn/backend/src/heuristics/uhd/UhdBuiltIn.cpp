@@ -18,10 +18,10 @@
 #include "UhdBuiltIn.hpp"
 
 #include "EngineRegistry.hpp"
-#include "FeatureExtractor.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
 #include "SelectionEngine.hpp"
-#include "adapters/IUhdAdapter.hpp"
-#include "adapters/TreeDataAdapter.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/IUhdAdapter.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/TreeDataAdapter.hpp>
 #include "heuristics/BuiltInLogging.hpp"
 #include "logging/Logging.hpp"
 
@@ -47,6 +47,12 @@
 
 namespace hipdnn_backend::heuristics::uhd
 {
+
+// Names now come straight from the plugin SDK; the local forwarding headers that
+// used to alias them are gone (RFC 0019 §5 puts this machinery in the engine).
+using hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractionContext;
+
+
 namespace
 {
 

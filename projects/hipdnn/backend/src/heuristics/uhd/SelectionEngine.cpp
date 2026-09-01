@@ -12,6 +12,12 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
+// Names now come straight from the plugin SDK; the local forwarding headers that
+// used to alias them are gone (RFC 0019 §5 puts this machinery in the engine).
+using hipdnn_plugin_sdk::ingestor::uhd::UhdConfig;
+namespace score_transform = hipdnn_plugin_sdk::ingestor::uhd::score_transform;
+using hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractionContext;
+
 SelectionResult SelectionEngine::select(int64_t engineId,
                                         const FeatureExtractionContext::ValueMap& deviceVars,
                                         const FeatureExtractionContext::ValueMap& queryVars)

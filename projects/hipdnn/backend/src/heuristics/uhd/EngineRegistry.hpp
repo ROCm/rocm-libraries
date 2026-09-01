@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "FeatureExtractor.hpp"
-#include "adapters/IUhdAdapter.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/IUhdAdapter.hpp>
 
 #include <hipdnn_plugin_sdk/ingestor/uhd/UhdConfig.hpp>
 
@@ -20,12 +20,13 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
+// Names now come straight from the plugin SDK; the local forwarding headers that
+// used to alias them are gone (RFC 0019 §5 puts this machinery in the engine).
 using hipdnn_plugin_sdk::ingestor::uhd::UhdConfig;
+using hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractor;
+using hipdnn_plugin_sdk::ingestor::uhd::IUhdAdapter;
 
-/// @brief Kernel candidate metadata (mock for UKD).
-///
-/// Represents a single kernel variant with its KMD field values.
-/// In full RFC 0017 integration, this maps to UKD::metadata.
+
 struct KernelCandidate
 {
     int64_t kernelId;

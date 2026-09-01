@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "IUhdAdapter.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/IUhdAdapter.hpp>
 
 #include <memory>
 #include <string>
@@ -16,21 +16,12 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
-/// @brief ONNX Runtime adapter for neural network models (RFC 0019 §7.3).
-///
-/// The ONNX adapter is an opt-in, dependency-gated adapter that loads ONNX
-/// models via ONNX Runtime. It requires the onnxruntime library to be
-/// available at compile time (HIPDNN_ENABLE_ONNX defined) and link time.
-///
-/// When HIPDNN_ENABLE_ONNX is not defined:
-/// - load() returns nullptr with a clear log message
-/// - This satisfies the contract gap (ONNX is schema-valid, not silently rejected)
-///
-/// When HIPDNN_ENABLE_ONNX is defined:
-/// - Load .onnx model file via Ort::Session
-/// - Input: feature vector as 1D tensor (batch=1, features=N)
-/// - Output: single float score
-/// - Session cached per adapter instance
+// Names now come straight from the plugin SDK; the local forwarding headers that
+// used to alias them are gone (RFC 0019 §5 puts this machinery in the engine).
+using hipdnn_plugin_sdk::ingestor::uhd::IUhdAdapter;
+using hipdnn_plugin_sdk::ingestor::uhd::UhdAdapterType;
+
+
 class OnnxAdapter : public IUhdAdapter
 {
 public:

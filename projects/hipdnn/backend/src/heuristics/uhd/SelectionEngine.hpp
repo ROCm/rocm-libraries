@@ -4,9 +4,9 @@
 #pragma once
 
 #include "EngineRegistry.hpp"
-#include "FeatureExtractor.hpp"
-#include "ScoreTransform.hpp"
-#include "adapters/IUhdAdapter.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/ScoreTransform.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/IUhdAdapter.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -17,14 +17,13 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
-/// Device-property key holding the GPU architecture (e.g. "gfx942"), used for
-/// RFC 0019 §8.3 arch-keyed UHD resolution (not for feature extraction).
-///
-/// NOTE: Per RFC 0019 §6.1, architecture is NOT a device feature in the
-/// `$device.*` namespace for feature extraction. It is a KDP property used only
-/// for selecting which arch-keyed UHD to apply. The DeviceProperties FlatBuffer
-/// field is `architecture_name`; this key is shortened to `arch` for the internal
-/// device-vars map that drives arch resolution.
+// Names now come straight from the plugin SDK; the local forwarding headers that
+// used to alias them are gone (RFC 0019 §5 puts this machinery in the engine).
+using hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractionContext;
+using hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractor;
+using hipdnn_plugin_sdk::ingestor::uhd::IUhdAdapter;
+
+
 inline constexpr const char* DEVICE_ARCH_KEY = "arch";
 
 /// @brief Result of scoring a single kernel candidate.

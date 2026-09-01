@@ -3,13 +3,13 @@
 
 #include "EngineRegistry.hpp"
 
-#include "FeatureExtractor.hpp"
-#include "ScoreTransform.hpp"
-#include "adapters/TreeDataAdapter.hpp"
-#include "adapters/TableAdapter.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/ScoreTransform.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/TreeDataAdapter.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/TableAdapter.hpp>
 #include "adapters/OnnxAdapter.hpp"
-#include "adapters/CustomLibraryAdapter.hpp"
-#include "adapters/NativeAdapter.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/CustomLibraryAdapter.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/NativeAdapter.hpp>
 
 #include <hipdnn_plugin_sdk/ingestor/uhd/AdapterFactory.hpp>
 
@@ -21,6 +21,16 @@
 
 namespace hipdnn_backend::heuristics::uhd
 {
+
+// Names now come straight from the plugin SDK; the local forwarding headers that
+// used to alias them are gone (RFC 0019 §5 puts this machinery in the engine).
+using hipdnn_plugin_sdk::ingestor::uhd::UhdConfig;
+namespace score_transform = hipdnn_plugin_sdk::ingestor::uhd::score_transform;
+using hipdnn_plugin_sdk::ingestor::uhd::CustomLibraryAdapter;
+using hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractor;
+using hipdnn_plugin_sdk::ingestor::uhd::IUhdAdapter;
+using hipdnn_plugin_sdk::ingestor::uhd::JsonLogicError;
+
 
 std::optional<UhdConfig> EngineEntry::resolveUhd(
     const std::unordered_map<std::string, UhdConfig>& roleMap,
