@@ -134,19 +134,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack")
 
-    # The device cases above read the per-arch archive the packaging roots stage under
-    # test_arch_content/, and that target is reachable only through ALL.
-    # Building this binary by name -- what `ninja check` does -- otherwise runs them
+    # This binary reads the per-arch descriptors and archives the packing roots stage under
+    # test_arch_content/, and each packing target is reachable only through ALL.
+    # Building this binary by name -- what `ninja check` does -- otherwise runs the cases
     # against a directory that does not exist yet, and they skip rather than fail.
     # Each descriptor set has its own staging target. Name each one individually.
-    foreach(_hkp_set hkp_packaging_unit_conv hkp_packaging_archive_fixture)
+    foreach(_hkp_set hkp_packaging_unit_conv hkp_packaging_unit_pointwise
+                     hkp_packaging_archive_fixture)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_tests ${_hkp_set})
         endif()
     endforeach()
-    if(TARGET hip_kernel_provider_descriptors)
-        add_dependencies(hip_kernel_provider_tests hip_kernel_provider_descriptors)
-    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

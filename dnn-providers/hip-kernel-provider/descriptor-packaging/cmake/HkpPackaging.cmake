@@ -650,6 +650,15 @@ assertion: an unloadable path silently falls through to the next candidate.")
         OUT_ROOT "${HIPKERNELPROVIDER_UNIT_CONV_BUILD_DIR}")
 
     hkp_wire_pack_target(
+        NAME unit_pointwise
+        SOURCE_ROOT "${HIPKERNELPROVIDER_UNIT_POINTWISE_SOURCE_DIR}"
+        ENABLE_ROCKE OFF
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_UNIT_POINTWISE_BUILD_DIR}")
+
+    hkp_wire_pack_target(
         NAME integration_conv
         SOURCE_ROOT "${HIPKERNELPROVIDER_SHARED_CONV_SOURCE_DIR}"
         ENABLE_ROCKE OFF

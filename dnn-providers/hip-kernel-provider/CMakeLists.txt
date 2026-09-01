@@ -183,15 +183,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
     )
 
-    # Two test descriptor roots, one per test binary. The unit root holds one copied
-    # subtree and one packed subtree. The integration root holds three packed subtrees.
-    # A copied subtree carries embedded_source and native descriptors: an embedded_source
-    # descriptor names a kernel compiled into a binary and JIT-compiled at load, and a
-    # native one names a C++ symbol, so neither has an arch dimension or anything for the
-    # packer to produce. A packed subtree is authored hip and rewritten to kpack by the
-    # packer, wired in descriptor-packaging/cmake/HkpPackaging.cmake. Both roots stage
-    # into the build tree rather than being read from the source tree, so the build tree
-    # matches the install tree.
+    # Two test descriptor roots, one per test binary. The unit root holds two packed
+    # subtrees and the integration root holds three, all five wired in
+    # descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
+    # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
+    # the archive beside it, and it emits an embedded_source descriptor as authored, with
+    # the shard architecture stamped on it. An embedded_source descriptor names a kernel
+    # compiled into a binary and JIT-compiled at load. Its subtree gets descriptors and
+    # no archive. Both roots stage into the build tree rather than being
+    # read from the source tree, so the build tree matches the install tree.
     set(HIPKERNELPROVIDER_TEST_SET_UNIT "unit")
     set(HIPKERNELPROVIDER_TEST_SET_INTEGRATION "integration")
     # Defined here, with the other path variables, and NOT beside the staging rules that
@@ -401,48 +401,9 @@ if(ENABLE_ASM_SDPA_ENGINE)
 endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # Stage the unit binary's pointwise subtree. Its descriptors are embedded_source, so
-    # the packer produces nothing for them and this rule copies the authored tree verbatim
-    # into test_arch_content/.
-    file(GLOB_RECURSE _unit_pointwise_sources CONFIGURE_DEPENDS
-         "${HIPKERNELPROVIDER_UNIT_POINTWISE_SOURCE_DIR}/*")
-
-    # The destination is wiped before each copy so a descriptor deleted from the source
-    # tree is retracted rather than orphaned: copy_directory writes what is there now but
-    # removes nothing, and the loader would keep reading a descriptor the sources no
-    # longer define.
-    set(_descriptor_stamp "${CMAKE_CURRENT_BINARY_DIR}/hip-kernel-provider-descriptors.stamp")
-    add_custom_command(
-        OUTPUT "${_descriptor_stamp}"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${HIPKERNELPROVIDER_UNIT_POINTWISE_BUILD_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${HIPKERNELPROVIDER_UNIT_POINTWISE_SOURCE_DIR}" "${HIPKERNELPROVIDER_UNIT_POINTWISE_BUILD_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E touch "${_descriptor_stamp}"
-        DEPENDS ${_unit_pointwise_sources}
-        COMMENT "Staging hip-kernel-provider descriptors"
-        VERBATIM
-    )
-
-    add_custom_target(
-        hip_kernel_provider_descriptors ALL
-        DEPENDS "${_descriptor_stamp}"
-        COMMENT "Staging hip-kernel-provider descriptors"
-    )
-
-    # Both suites read the staged tree, but the target above is reachable only through ALL.
-    # Building a test target by name on a fresh tree -- `ninja hip_kernel_provider_tests &&
-    # ctest`, which is what `ninja check` does -- would otherwise run against a directory
-    # that does not exist yet and quietly find no descriptors. CI escapes this only because
-    # it builds the default target.
-    foreach(_descriptor_consumer hip_kernel_provider_tests hip_kernel_provider_integration_tests)
-        if(TARGET ${_descriptor_consumer})
-            add_dependencies(${_descriptor_consumer} hip_kernel_provider_descriptors)
-        endif()
-    endforeach()
-
-    # The two descriptor trees are installed here and nowhere else. Whatever produces
-    # content -- a copy rule, the packer, a future step -- delivers it into one of these
-    # two build-tree folders, and these two rules ship them wholesale. The installed tree
+    # The two descriptor trees are installed here and nowhere else. Every producer --
+    # the packer, or a step added later -- delivers content into one of these two
+    # build-tree folders, and these two rules ship them wholesale. The installed tree
     # is then the build tree by construction, so a test that passes against one is
     # evidence about the other, and a set cannot be staged for testing yet silently
     # missing from the package.
@@ -460,7 +421,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
     endif()
 
-    # The unit pointwise copy above is unconditional under this gate, so the test tree
+    # The test packing roots are wired unconditionally under this gate, so the test tree
     # always has content to ship once the build has run.
     if(HIPKERNELPROVIDER_ENABLE_TESTS)
         install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/"
