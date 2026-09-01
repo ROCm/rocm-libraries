@@ -54,6 +54,49 @@ TEST(TestMiopenConvDescriptor, CreateValidDescriptorFwd)
     EXPECT_TRUE(std::equal(returnedDilation.begin(), returnedDilation.end(), dilation.begin()));
 }
 
+TEST(TestMiopenConvDescriptor, PadsOneSpatialDimToTwoFwd)
+{
+    const std::vector<int64_t> prePadding{2};
+    const std::vector<int64_t> postPadding{2};
+    const std::vector<int64_t> stride{3};
+    const std::vector<int64_t> dilation{4};
+    const auto convMode = hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+    const size_t spatialDimCount = 1;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionFwdAttributesDirect(
+        builder, 0, 0, 0, &prePadding, &postPadding, &stride, &dilation, convMode);
+    builder.Finish(attrOffset);
+    auto attrPtr
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>(
+            builder.GetBufferPointer());
+
+    const MiopenConvDescriptor convDesc(spatialDimCount, *attrPtr, 1);
+
+    // MIOpen has no 1D convolution, so the descriptor must describe a 2D
+    // convolution whose trailing spatial dimension is a no-op.
+    int returnedSpatialDimCount = 0;
+    auto status
+        = miopenGetConvolutionSpatialDim(convDesc.convDescriptor(), &returnedSpatialDimCount);
+    EXPECT_EQ(status, miopenStatusSuccess);
+    EXPECT_EQ(returnedSpatialDimCount, 2);
+
+    std::vector<int> returnedPadding(2);
+    std::vector<int> returnedStride(2);
+    std::vector<int> returnedDilation(2);
+    status = miopenGetConvolutionNdDescriptor(convDesc.convDescriptor(),
+                                              2,
+                                              nullptr,
+                                              returnedPadding.data(),
+                                              returnedStride.data(),
+                                              returnedDilation.data(),
+                                              nullptr);
+    EXPECT_EQ(status, miopenStatusSuccess);
+    EXPECT_EQ(returnedPadding, (std::vector<int>{2, 0}));
+    EXPECT_EQ(returnedStride, (std::vector<int>{3, 1}));
+    EXPECT_EQ(returnedDilation, (std::vector<int>{4, 1}));
+}
+
 TEST(TestMiopenConvDescriptor, ThrowsOnWrongSpatialDimCountFwd)
 {
     const std::vector<int64_t> prePadding{0, 0, 0};

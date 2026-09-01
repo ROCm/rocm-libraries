@@ -584,6 +584,7 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1250
        .encode_waitcnt = rocke_ll_encode_waitcnt_gfx11,
        .kind = ROCKE_LL_ISA_RDNA,
        .has_async_lds_counter = true,
+       .blocks_ds_load_tr16 = true,
        .emits_legacy_s_waitcnt = false,
        .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_split,
        .ds_tr16_b128_spec = rocke_ll_tr16_spec_b128_gfx1250};
@@ -1941,7 +1942,48 @@ void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
                       "no LLVM lowering for op %s",
                       op->name ? op->name : rocke_opcode_name(oc));
     }
+    int dbg = (L->debug && op->loc) ? rocke_ll_debug_location_id(L, L->debug, op->loc) : -1;
+    if(dbg < 0)
+    {
+        fn(L, op);
+        return;
+    }
+    /* One op can append to several blocks and can create new ones (scf.for
+     * builds a header/body/latch/exit diamond), so remember where each block
+     * ended and label only what this op added. Ops with nested regions lower
+     * their children first, and those keep their own tighter locations.
+     * Keyed on the block pointer, not the index, because the CFG builders
+     * back-patch earlier blocks. */
+    size_t n_before = L->blocks.len;
+    size_t marks_base = L->dbg_marks.len;
+    for(size_t i = 0; i < n_before; i++)
+    {
+        rocke_ll_dbg_mark_t m;
+        m.block = L->blocks.data[i];
+        m.len = L->blocks.data[i]->lines.len;
+        int rc;
+        rocke_vec_push(&L->arena, &L->dbg_marks, m, rc);
+        if(rc != 0)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "debug marks");
+        }
+    }
     fn(L, op);
+    for(size_t i = 0; i < L->blocks.len; i++)
+    {
+        rocke_ll_block_t* blk = L->blocks.data[i];
+        size_t start = 0;
+        for(size_t j = marks_base; j < L->dbg_marks.len; j++)
+        {
+            if(L->dbg_marks.data[j].block == blk)
+            {
+                start = L->dbg_marks.data[j].len;
+                break;
+            }
+        }
+        rocke_ll_debug_annotate(L, blk, start, dbg);
+    }
+    L->dbg_marks.len = marks_base;
 }
 
 void rocke_ll_lower_region(rocke_lower_t* L, const rocke_region_t* region)
@@ -2206,7 +2248,14 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
             rocke_strbuf_appendf(out, "%s%s%s %%%s", i ? ", " : "", tstr, attrs, p->name);
         }
     }
-    rocke_strbuf_append(out, ") #0 {\n");
+    if(rocke_ll_debug_has_locations(L->debug))
+    {
+        rocke_strbuf_appendf(out, ") #0 !dbg !%d {\n", L->debug->subprogram_id);
+    }
+    else
+    {
+        rocke_strbuf_append(out, ") #0 {\n");
+    }
 
     for(size_t i = 0; i < L->blocks.len; i++)
     {
@@ -2263,6 +2312,10 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     {
         rocke_strbuf_append(out, "\n!3 = !{!\"agent\"}\n");
     }
+    if(L->debug)
+    {
+        rocke_ll_debug_render(L, L->debug, out);
+    }
 }
 
 /* ====================================================================== */
@@ -2303,6 +2356,17 @@ static void ll_lower_into(rocke_lower_t* L,
      * L->backend points at the static LL_BACKEND_RESOLVED scratch copy, so this
      * does not mutate the canonical per-arch descriptors. */
     LL_BACKEND_RESOLVED.datalayout = rocke_ll_datalayout_for_flavor(L->flavor);
+
+    /* Debug metadata is opt-in: the kernel carries `debug_info` only when it was
+     * built with location capture on, and an op's @loc rides the same
+     * serialization, so the engine sees exactly what the Python lowerer sees. */
+    const rocke_attr_value_t* dbg_attr = rocke_attr_get(&kernel->attrs, "debug_info");
+    if(dbg_attr
+       && ((dbg_attr->kind == ROCKE_ATTR_BOOL && dbg_attr->u.b)
+           || (dbg_attr->kind == ROCKE_ATTR_INT && dbg_attr->u.i)))
+    {
+        L->debug = rocke_ll_debug_create(L, kernel->name);
+    }
 
     /* Entry block (ll_make_block raises on OOM). */
     ll_make_block(L, "entry");
@@ -2392,6 +2456,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.smem_pool_size = 0;
     L.smem_pool_name = NULL;
     rocke_vec_init(&L.yield_stack);
+    rocke_vec_init(&L.dbg_marks);
 
     /* A failure anywhere in lowering raises a ckc::Error; catch it here so the
      * arena is always destroyed, then translate it into the legacy status code +

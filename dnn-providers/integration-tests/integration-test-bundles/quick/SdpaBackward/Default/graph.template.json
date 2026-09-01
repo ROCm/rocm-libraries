@@ -1,0 +1,145 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "SdpaBackwardTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "attn_mask_tensor_uid": null,
+        "do_tensor_uid": 7,
+        "dropout_mask_tensor_uid": null,
+        "dropout_scale_inv_tensor_uid": null,
+        "dropout_scale_tensor_uid": null,
+        "k_tensor_uid": 0,
+        "o_tensor_uid": 1,
+        "offset_tensor_uid": null,
+        "q_tensor_uid": 2,
+        "scale_tensor_uid": null,
+        "seed_tensor_uid": null,
+        "seq_len_kv_tensor_uid": null,
+        "seq_len_q_tensor_uid": null,
+        "stats_tensor_uid": 8,
+        "v_tensor_uid": 6
+      },
+      "name": "SdpaBwd_0",
+      "outputs": {
+        "dbias_tensor_uid": null,
+        "dk_tensor_uid": 3,
+        "dq_tensor_uid": 4,
+        "dv_tensor_uid": 5
+      },
+      "parameters": {
+        "alibi_mask": false,
+        "attn_scale_value": null,
+        "causal_mask": false,
+        "causal_mask_bottom_right": false,
+        "diagonal_alignment": "${case.attributes.parameters__diagonal_alignment}",
+        "dropout_probability": null,
+        "left_bound": "${case.attributes.parameters__left_bound}",
+        "padding_mask": false,
+        "right_bound": "${case.attributes.parameters__right_bound}"
+      },
+      "type": "SdpaBackwardAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "K",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "O",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Q",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "SdpaBwd_0::dK",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "SdpaBwd_0::dQ",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "SdpaBwd_0::dV",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "V",
+      "strides": "${case.strides}",
+      "uid": 6,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "dO",
+      "strides": "${case.strides}",
+      "uid": 7,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "stats",
+      "strides": "${case.strides}",
+      "uid": 8,
+      "virtual": false
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --WaitAwareScheduleRepairPass --print-output
+#
+# Work deferred past an anchor must keep moving through the anchors that follow.
+#
+# The key property checked here is that the last WMMA has no final waitcnt but
+# still receives carried work from the prior repaired windows. That no-wait
+# interval must also be considered for repair; otherwise all carried work would
+# settle before that WMMA and nothing would be pushed after it.
+#
+# A wait-less interval has no wait to protect, so it does not give up slots of
+# its own: its budget stays at its original count, which forwards exactly the
+# carry it received (two in, two out) instead of growing it.
+#
+# With kPreferMemProducerFirst each window's loads are selected before its other
+# work, so carried scalars appear after the loads rather than ahead of them.
+#
+# CHECK-LABEL: @wait_aware_schedule_repair_carry
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# Loads go first; the scalar carried across WMMA1 follows them.
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# Both loads keep their position ahead of the anchor: memory producers are never
+# moved past an anchor, even one that carries no wait.
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# Then the two carried scalars, plus one of this window's own, since it keeps its
+# original occupancy.
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# Only the forwarded carry lands after the wait-less anchor.
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+
+st.func @wait_aware_schedule_repair_carry() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[400:407], v[0:7]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+
+  v[100:103] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[104:107] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  s60 = "st.s_mov_b32"(60) { issueCycles = 1, latencyCycles = 2 }
+  s61 = "st.s_mov_b32"(61) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_wait_dscnt"(6) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 6, dscnt = -1, kmcnt = -1 } }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[208:215], v[400:407], v[8:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+
+  v[108:111] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[112:115] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
+  s62 = "st.s_mov_b32"(62) { issueCycles = 1, latencyCycles = 2 }
+  s63 = "st.s_mov_b32"(63) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_wait_dscnt"(4) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 4, dscnt = -1, kmcnt = -1 } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[216:223], v[400:407], v[16:23]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+
+  v[116:119] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[120:123] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 80, gds = false }, mod.memtoken = { tokens = [0] } }
+  s64 = "st.s_mov_b32"(64) { issueCycles = 1, latencyCycles = 2 }
+  s65 = "st.s_mov_b32"(65) { issueCycles = 1, latencyCycles = 2 }
+  s66 = "st.s_mov_b32"(66) { issueCycles = 1, latencyCycles = 2 }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[400:407], v[24:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+}

@@ -4,11 +4,22 @@
 # Structural guard for the intra-library layering rule (see rocke/AGENTS.md
 # "Layout"). `library` is layered lowest -> highest:
 #
-#     kernels -> builders -> dispatch -> benchmarks
+#     kernels -> dispatch -> builders -> benchmarks
 #
 # A package may import anything BELOW it and nothing at or above it. Skipping a
-# layer downward is allowed (dispatch imports kernels directly); importing
+# layer downward is allowed (builders imports kernels directly); importing
 # upward is not, because it creates a cycle.
+#
+# `dispatch` sits BELOW `builders`, which is the opposite of the order this file
+# first declared. `dispatch` is pure selection policy over `kernels` -- given a
+# request it picks a candidate and constructs the spec that ships -- and it
+# imports nothing but `kernels`. A builder is a host-side harness, and a harness
+# that measures anything other than the shipped spec is a decoration, not a gate;
+# so consuming `dispatch.<arch>.*_spec_for_request` is a permanent, one-way need
+# of the harness layer, not an accident of one file. Declaring builders below
+# dispatch made that legitimate edge a "cycle" while leaving the direction that
+# would actually be a cycle (dispatch -> builders, which no file does and none
+# should) unremarked.
 #
 # This is an AST check, not an import check, on purpose: the cheapest way to
 # "fix" a cycle is to bury the offending import inside a function body, which a
@@ -32,7 +43,7 @@ import pytest
 _LIBROOT = Path(__file__).resolve().parents[1]  # tests -> rocke/library
 
 # Lowest layer first. Index in this tuple IS the layer rank.
-LAYERS = ("kernels", "builders", "dispatch", "benchmarks")
+LAYERS = ("kernels", "dispatch", "builders", "benchmarks")
 _RANK = {name: i for i, name in enumerate(LAYERS)}
 
 # (file relative to library/, imported layer) pairs that predate this guard.

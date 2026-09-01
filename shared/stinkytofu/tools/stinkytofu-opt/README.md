@@ -64,6 +64,7 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 **Options:**
 - `--arch <arch>`: Target GPU architecture (default: gfx1250). Supported: `gfx1250`
 - `--remarks`: Enable optimization remarks on stderr (e.g. loop region diagnostics)
+- `--tensor-load-wmma-space=<int>`: Scheduler tuning knob for tensor-load/WMMA spacing (`TensorLoadWmmaSpace`). `0` disables this adjustment; values `> 0` apply the CDNA5 barrier-threshold offset.
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information
 

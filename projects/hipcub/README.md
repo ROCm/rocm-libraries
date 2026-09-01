@@ -30,9 +30,9 @@ environment, hipCUB uses the rocPRIM library as the backend.
 Optional:
 
 * [GoogleTest](https://github.com/google/googletest)
-* [Google Benchmark](https://github.com/google/benchmark)
-
-GoogleTest and Google Benchmark are automatically downloaded and built by the CMake script.
+  * This is automatically downloaded and built by the CMake script
+* [AMD SMI](https://github.com/ROCm/amdsmi)
+  * Required only for benchmarks. Building benchmarks is off by default.
 
 ## Build and install
 
@@ -69,7 +69,7 @@ mkdir build; cd build
 #   BUILD_TEST                   - OFF by default,
 #   BUILD_BENCHMARK              - OFF by default.
 #   ROCPRIM_FETCH_METHOD         - One of PACKAGE (default), DOWNLOAD, and MONOREPO. See below for a description of each.
-#   EXTERNAL_DEPS_FORCE_DOWNLOAD - OFF by default, forces download for non-ROCm dependencies (eg. Google Test / Benchmark).
+#   EXTERNAL_DEPS_FORCE_DOWNLOAD - OFF by default, forces download for non-ROCm dependencies (e.g., Google Test).
 #   DOWNLOAD_CUB                 - OFF by default, (Nvidia CUB backend only) forces download of CUB instead of searching for an installed package.
 #   BUILD_OFFLOAD_COMPRESS       - ON by default, compresses device code to reduce the size of the generated binary.
 #   BUILD_EXAMPLE                - OFF by default, builds examples.
@@ -253,24 +253,20 @@ ctest --resource-spec-file <path-to-your-resources.json> --parallel <number-of-j
 
 ## Running benchmarks
 
+hipCUB uses [primbench](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench) for benchmarking; see its [command-line options](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench#command-line-options) for advanced usage.
+
 ```shell
 # Go to hipCUB build directory
 cd projects/hipcub; cd build
 
 # To run benchmark for warp functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_warp_<function_name> [--size <size>] [--trials <trials>]
+./benchmark/benchmark_warp_<function_name>
 
 # To run benchmark for block functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_block_<function_name> [--size <size>] [--trials <trials>]
+./benchmark/benchmark_block_<function_name>
 
 # To run benchmark for device functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_device_<function_name> [--size <size>] [--trials <trials>]
+./benchmark/benchmark_device_<function_name>
 ```
 
 ## Building the documentation locally

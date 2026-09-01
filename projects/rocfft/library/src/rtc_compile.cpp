@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,6 +19,8 @@
 // THE SOFTWARE.
 
 #include "rtc_compile.h"
+
+#include "../../shared/hiprtc_except.h"
 
 #include <hip/hiprtc.h>
 #include <stdexcept>
@@ -45,7 +47,7 @@ std::vector<char> compile_inprocess(const std::string& kernel_src, const std::st
         throw std::runtime_error("unable to create program");
     }
 
-    std::string gpu_arch_arg = "--gpu-architecture=" + gpu_arch;
+    std::string gpu_arch_arg = "--offload-arch=" + gpu_arch;
 
     std::vector<const char*> options;
     options.push_back("-O3");
@@ -71,12 +73,30 @@ std::vector<char> compile_inprocess(const std::string& kernel_src, const std::st
         throw std::runtime_error("compile failed without log");
     }
 
-    size_t codeSize;
-    if(hiprtcGetCodeSize(state.prog, &codeSize) != HIPRTC_SUCCESS)
-        throw std::runtime_error("failed to get code size");
+    size_t            codeSize;
+    std::vector<char> code;
+    // SPIR-V is returned as bitcode, not a finished code object
+    if(gpu_arch == ARCH_SPIRV)
+    {
+        auto err = hiprtcGetBitcodeSize(state.prog, &codeSize);
+        if(err != HIPRTC_SUCCESS)
+            throw hiprtc_runtime_error("failed to get bitcode size", err);
 
-    std::vector<char> code(codeSize);
-    if(hiprtcGetCode(state.prog, code.data()) != HIPRTC_SUCCESS)
-        throw std::runtime_error("failed to get code");
+        code.resize(codeSize);
+        err = hiprtcGetBitcode(state.prog, code.data());
+        if(err != HIPRTC_SUCCESS)
+            throw hiprtc_runtime_error("failed to get bitcode", err);
+    }
+    else
+    {
+        auto err = hiprtcGetCodeSize(state.prog, &codeSize);
+        if(err != HIPRTC_SUCCESS)
+            throw hiprtc_runtime_error("failed to get code size", err);
+
+        code.resize(codeSize);
+        err = hiprtcGetCode(state.prog, code.data());
+        if(err != HIPRTC_SUCCESS)
+            throw hiprtc_runtime_error("failed to get code", err);
+    }
     return code;
 }

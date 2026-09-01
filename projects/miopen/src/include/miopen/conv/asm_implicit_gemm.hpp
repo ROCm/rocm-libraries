@@ -266,7 +266,7 @@ static inline int igemm_split_batch_size(const int hi,
     {
         // find the smallest multiple m of n such that (n / m) * image_size <= max_tensor_size.
         // once m is known, max_n := (n / m)
-        size_t m       = std::ceil(n / max_n); // m >= n * (image_size / max_tensor_size)
+        size_t m       = (static_cast<size_t>(n) + max_n - 1) / max_n;
         size_t _sqrt_n = std::sqrt(n);
         while(n % max_n != 0)
         {

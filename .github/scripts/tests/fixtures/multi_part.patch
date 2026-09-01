@@ -1,0 +1,9 @@
+From abc1234abc1234abc1234abc1234abc1234abc1234 Mon Sep 17 00:00:00 2001
+From: Jane Dev <jane@example.com>
+Date: Mon, 18 Aug 2026 10:00:00 -0400
+Subject: [PATCH 2/5] Fix the off-by-one error (#42)
+
+Commit body here.
+---
+ src/foo.cpp | 1 +
+ 1 file changed, 1 insertion(+)

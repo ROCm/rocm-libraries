@@ -59,6 +59,7 @@ target_compile_definitions(
             TEST_DUPLICATE_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_ID_B_PLUGIN_NAME}"
             TEST_INCOMPLETE_API_PLUGIN_NAME="${TEST_INCOMPLETE_API_PLUGIN_NAME}"
             TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
+            TEST_MISMATCHED_NAME_PLUGIN_NAME="${TEST_MISMATCHED_NAME_PLUGIN_NAME}"
             TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
             TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
             TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME="${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}"
@@ -80,6 +81,7 @@ add_dependencies(
     test_no_applicable_engines_a_plugin
     test_no_applicable_engines_b_plugin
     test_good_default_plugin
+    ${TEST_MISMATCHED_NAME_PLUGIN_NAME}
     test_duplicate_id_a_plugin
     test_duplicate_id_b_plugin
     test_incomplete_api_plugin

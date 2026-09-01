@@ -25,4 +25,16 @@ namespace hipblaslt_bench_options
         static std::string v;
         return v;
     }
+
+    int32_t& uniform_summation_order()
+    {
+        static int32_t v = -1;
+        return v;
+    }
+
+    std::string& uniform_summation_order_str()
+    {
+        static std::string v;
+        return v;
+    }
 }

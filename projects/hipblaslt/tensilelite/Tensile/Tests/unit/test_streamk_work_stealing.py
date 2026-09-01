@@ -369,11 +369,13 @@ class TestStealEmission:
 # ===========================================================================
 # 3c. Sticky-home: the home fetch is gated by a persistent StreamKStickyEmpty
 #     SGPR, and the flag is latched on an empty home fetch. Verified against
-#     the real graWorkGroup source.
+#     the real _fetchWorkItemAndBroadcast source (the pop was extracted out of
+#     graWorkGroup so PAP can reuse it without a second atomic).
 # ===========================================================================
 class TestStickyHomeGate:
     @pytest.mark.parametrize(
-        "func", [StreamKDynamic.graWorkGroup, StreamKHybrid.graWorkGroup]
+        "func",
+        [StreamKDynamic._fetchWorkItemAndBroadcast, StreamKHybrid._fetchWorkItemAndBroadcast],
     )
     def test_home_fetch_is_gated_by_sticky_flag(self, func):
         src = _source_of(func)
@@ -387,12 +389,13 @@ class TestStickyHomeGate:
         )
 
     @pytest.mark.parametrize(
-        "func", [StreamKDynamic.graWorkGroup, StreamKHybrid.graWorkGroup]
+        "func",
+        [StreamKDynamic._fetchWorkItemAndBroadcast, StreamKHybrid._fetchWorkItemAndBroadcast],
     )
     def test_steal_passes_grid_sgpr(self, func):
         # The steal now needs the mode-appropriate grid SGPR for its bound.
         src = _source_of(func)
-        grid = "SKGrid" if func is StreamKHybrid.graWorkGroup else "skGrid"
+        grid = "SKGrid" if func is StreamKHybrid._fetchWorkItemAndBroadcast else "skGrid"
         assert "streamKWorkStealingSteal" in src
         assert grid in src
 
@@ -445,16 +448,16 @@ class TestQueueConstants:
 #     against the real source so "off" provably emits nothing extra.
 # ===========================================================================
 class TestCallsitesAreToggleGated:
-    def test_sk4_grawg_steal_calls_are_all_gated(self):
-        guarded = _ws_guarded_calls(StreamKDynamic.graWorkGroup)
-        allcalls = _all_ws_calls(StreamKDynamic.graWorkGroup)
+    def test_sk4_fetch_steal_calls_are_all_gated(self):
+        guarded = _ws_guarded_calls(StreamKDynamic._fetchWorkItemAndBroadcast)
+        allcalls = _all_ws_calls(StreamKDynamic._fetchWorkItemAndBroadcast)
         assert {"streamKWorkStealingHomeBound", "streamKWorkStealingSteal"} <= guarded
         # Nothing slips through ungated.
         assert allcalls == guarded
 
-    def test_sk5_grawg_steal_calls_are_all_gated(self):
-        guarded = _ws_guarded_calls(StreamKHybrid.graWorkGroup)
-        allcalls = _all_ws_calls(StreamKHybrid.graWorkGroup)
+    def test_sk5_fetch_steal_calls_are_all_gated(self):
+        guarded = _ws_guarded_calls(StreamKHybrid._fetchWorkItemAndBroadcast)
+        allcalls = _all_ws_calls(StreamKHybrid._fetchWorkItemAndBroadcast)
         assert {"streamKWorkStealingHomeBound", "streamKWorkStealingSteal"} <= guarded
         assert allcalls == guarded
 

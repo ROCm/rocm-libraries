@@ -391,6 +391,21 @@ class MacroInstruction(Instruction):
 # this case and let the literal-string fallthrough emit it untouched,
 # which is byte-correct for inspection but not semantically meaningful
 # until the macro-expansion pass lands.
+# Hardware condition/mask register container strings -> canonical RegType
+# strings accepted by ``stinkytofu.Register(type, idx, count)`` (see
+# RegisterType.def). Values mirror StinkyRegister::get{VCC,EXEC,SCC}Register.
+_SPECIAL_REG_TYPE = {
+    "vcc": "vcc",
+    "vcc_lo": "vcc_lo",
+    "vcc_hi": "vcc_hi",
+    "exec": "exec",
+    "exec_lo": "exec_lo",
+    "exec_hi": "exec_hi",
+    "scc": "SCC",
+    "SCC": "SCC",
+}
+
+
 def _to_stinky_register(arg: Any) -> Any:
     """Convert a rocisa-side instruction operand to a stinkytofu Register.
 
@@ -417,7 +432,22 @@ def _to_stinky_register(arg: Any) -> Any:
     if isinstance(arg, str):
         return _st.Register(arg)
     if isinstance(arg, _Container):
-        return _st.Register(arg.toString())
+        s = arg.toString()
+        # Hardware condition/mask registers (VCC/EXEC/SCC) must be lowered to
+        # *structured* StinkyRegisters (RegType-typed, idx 0), not opaque
+        # literal-string registers. The C++ implicit-operand legalizer
+        # (legalizeImplicitSpecialRegisters / getVCCRegister / getEXECRegister)
+        # adds these same structured registers for the implicit vcc/exec reads &
+        # writes; if an explicit operand here stayed a literal string it would
+        # NOT match the implicit form in def-use/dependency analysis, so the
+        # scheduler could freely reorder across an exec/vcc write (e.g. move a
+        # predicated VALU ahead of `s_mov exec, ...`), corrupting the active-lane
+        # mask and producing NaNs. Other Container keywords (e.g. buffer "null"/
+        # "off") are genuinely opaque and stay literal strings.
+        reg_type = _SPECIAL_REG_TYPE.get(s)
+        if reg_type is not None:
+            return _st.Register(reg_type, 0, 1)
+        return _st.Register(s)
     raise TypeError(
         f"rocisa_stinkytofu_adaptor.instruction: cannot coerce operand of "
         f"type {type(arg).__name__!r} into a stinkytofu Register. Supported "
@@ -2284,6 +2314,29 @@ _WAIT_MARKER_DSCNT = "\x00@WD@"
 _WAIT_MARKER_KMCNT = "\x00@WK@"
 
 
+def _make_swaitcnt(comment: str = "", vlcnt: int = -1, vscnt: int = -1,
+                   dlcnt: int = -1, dscnt: int = -1, kmcnt: int = -1) -> Any:
+    """Build one logical ``s_waitcnt`` carrying per-counter SWaitCntData.
+
+    The C++ lowering (ToStinkyAsmPass) forwards this to a ``SWaitCntData``
+    modifier and calls ``legalizeWaitCnt`` before the O3 pipeline, splitting it
+    into the gfx12+ typed waits (s_wait_loadcnt / s_wait_dscnt / ...) exactly as
+    the native rocisa->asm path does. This replaces the old comment-marker +
+    assembly-text post-processing scheme, which left an opaque combined
+    ``s_waitcnt`` in the IR that ``waitReconstruction()`` could not rebuild — so
+    it was never stripped/re-inserted and perturbed scheduling.
+
+    If every counter is ``-1`` (a no-op wait) no SWaitCntData is attached and a
+    bare ``s_waitcnt`` is returned unchanged.
+    """
+    import stinkytofu as _st  # noqa: WPS433
+
+    inst = _st.SWaitCnt(_to_stinky_register(0), comment)
+    if any(c != -1 for c in (vlcnt, vscnt, dlcnt, dscnt, kmcnt)):
+        inst.set_swaitcnt(vlcnt=vlcnt, vscnt=vscnt, dlcnt=dlcnt, dscnt=dscnt, kmcnt=kmcnt)
+    return inst
+
+
 class _SWaitCnt(Instruction):
     """``s_waitcnt`` primitive (lgkmcnt/vmcnt combined)."""
 
@@ -2323,22 +2376,11 @@ class _SWaitCnt(Instruction):
         to loadcnt (VMEM load counter), mirroring the native C++
         AllHwMappings.cpp logic that sets dlcnt=lgkmcnt, vlcnt=vmcnt.
         """
-        import stinkytofu as _st  # noqa: WPS433
-
-        insts: List[Any] = []
-        if self.lgkmcnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(self.lgkmcnt),
-                _WAIT_MARKER_DSCNT + self.comment,
-            ))
-        if self.vmcnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(self.vmcnt),
-                _WAIT_MARKER_LOADCNT + self.comment,
-            ))
-        if not insts:
-            return _st.SWaitCnt(_to_stinky_register(0), self.comment)
-        return insts
+        return _make_swaitcnt(
+            comment=self.comment,
+            vlcnt=self.vmcnt,
+            dscnt=self.lgkmcnt,
+        )
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2371,12 +2413,7 @@ class _SWaitCntVscnt(Instruction):
         return self.formatWithComment(f"s_waitcnt_vscnt null, {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        return _st.SWaitCnt(
-            _to_stinky_register(self.cnt),
-            _WAIT_MARKER_STORECNT + self.comment,
-        )
+        return _make_swaitcnt(comment=self.comment, vscnt=self.cnt)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2409,12 +2446,7 @@ class _SWaitStorecnt(Instruction):
         return self.formatWithComment(f"s_wait_storecnt {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        return _st.SWaitCnt(
-            _to_stinky_register(self.cnt),
-            _WAIT_MARKER_STORECNT + self.comment,
-        )
+        return _make_swaitcnt(comment=self.comment, vscnt=self.cnt)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2447,12 +2479,7 @@ class _SWaitLoadcnt(Instruction):
         return self.formatWithComment(f"s_wait_loadcnt {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        return _st.SWaitCnt(
-            _to_stinky_register(self.cnt),
-            _WAIT_MARKER_LOADCNT + self.comment,
-        )
+        return _make_swaitcnt(comment=self.comment, vlcnt=self.cnt)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2485,12 +2512,7 @@ class _SWaitKMcnt(Instruction):
         return self.formatWithComment(f"s_wait_kmcnt {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        return _st.SWaitCnt(
-            _to_stinky_register(self.cnt),
-            _WAIT_MARKER_KMCNT + self.comment,
-        )
+        return _make_swaitcnt(comment=self.comment, kmcnt=self.cnt)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2523,12 +2545,7 @@ class _SWaitDscnt(Instruction):
         return self.formatWithComment(f"s_wait_dscnt {self.cnt}")
 
     def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        return _st.SWaitCnt(
-            _to_stinky_register(self.cnt),
-            _WAIT_MARKER_DSCNT + self.comment,
-        )
+        return _make_swaitcnt(comment=self.comment, dscnt=self.cnt)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2572,13 +2589,12 @@ class SWaitCnt(Instruction):
         return self.formatWithComment(self.instStr)
 
     def to_stinky_logical(self) -> Any:
-        """Decompose into individual gfx12+ wait logical instructions.
+        """Emit one logical ``s_waitcnt`` carrying all requested counters.
 
-        Returns a list of SWaitCnt logical instructions with type markers
-        so the post-processing step can emit the correct opcodes.
+        The C++ ``legalizeWaitCnt`` (invoked in ToStinkyAsmPass before the O3
+        pipeline) splits it into the gfx12+ typed waits, exactly as the native
+        rocisa->asm path does.
         """
-        import stinkytofu as _st  # noqa: WPS433
-
         # rocisa SWaitCnt::setupInstructions treats waitAll as "wait for
         # everything": vlcnt = vscnt = dscnt = kmcnt = 0. Mirror that here so a
         # bare SWaitCnt(waitAll=True) lowers to the four typed gfx12 waits rather
@@ -2588,30 +2604,13 @@ class SWaitCnt(Instruction):
         vlcnt = 0 if self.waitAll else self.vlcnt
         vscnt = 0 if self.waitAll else self.vscnt
 
-        insts: List[Any] = []
-        if dscnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(dscnt),
-                _WAIT_MARKER_DSCNT + self.comment,
-            ))
-        if kmcnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(kmcnt),
-                _WAIT_MARKER_KMCNT + self.comment,
-            ))
-        if vlcnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(vlcnt),
-                _WAIT_MARKER_LOADCNT + self.comment,
-            ))
-        if vscnt != -1:
-            insts.append(_st.SWaitCnt(
-                _to_stinky_register(vscnt),
-                _WAIT_MARKER_STORECNT + self.comment,
-            ))
-        if not insts:
-            return _st.SWaitCnt(_to_stinky_register(0), self.comment)
-        return insts
+        return _make_swaitcnt(
+            comment=self.comment,
+            vlcnt=vlcnt,
+            vscnt=vscnt,
+            dscnt=dscnt,
+            kmcnt=kmcnt,
+        )
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2850,7 +2849,7 @@ _VAddPKF32 = _make_scalar_alu_class("VAddPKF32", "v_pk_add_f32", InstType.INST_F
 # logicalIR: VAddPKF32
 VAddPKF32 = _make_scalar_alu_class("VAddPKF32", "v_pk_add_f32", InstType.INST_F32)
 # logicalIR: VAdd3U32
-VAdd3U32 = _make_scalar_alu_class("VAdd3U32", "v_add3_u32", InstType.INST_U32)
+VAdd3U32 = _make_ternary_class("VAdd3U32", "v_add3_u32", InstType.INST_U32)
 # logicalIR: VMulF16
 VMulF16 = _make_scalar_alu_class("VMulF16", "v_mul_f16", InstType.INST_F16)
 # VMulF32 — real class (see Vector ALU section above)
@@ -4158,10 +4157,11 @@ def _make_tensor_load_class():
             kwargs["group2"] = _to_stinky_register(group2)
         if group3 is not None:
             kwargs["group3"] = _to_stinky_register(group3)
-        return _st.TensorLoadToLds(
+        logical = _st.TensorLoadToLds(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             **kwargs)
+        return logical
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4285,9 +4285,23 @@ def _init_wmma_matrix_fmt() -> None:
     })
 
 
+_WMMA_TYPE_CONVERT_KNOWN = None
+
+
 def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> str:
     """Port of rocisa ``MFMAInstruction::typeConvert`` for the low-precision
-    (f8f6f4-family) inputs. Standard types defer to :func:`_inst_type_to_str`."""
+    (f8f6f4-family) inputs. Standard types defer to :func:`_inst_type_to_str`.
+
+    Raises RuntimeError for types with no matrix-instruction spelling (e.g.
+    complex), matching the C++ ``throw std::runtime_error("Type not found")``.
+    """
+    global _WMMA_TYPE_CONVERT_KNOWN  # noqa: PLW0603
+    if _WMMA_TYPE_CONVERT_KNOWN is None:
+        _WMMA_TYPE_CONVERT_KNOWN = frozenset({
+            InstType.INST_F16, InstType.INST_F32, InstType.INST_F64,
+            InstType.INST_BF16, InstType.INST_XF32, InstType.INST_I32,
+        })
+
     f8f6f4_k = 128 if has_wmma_v3 else 64
     f4_t = 32 if has_wmma_v3 else 0
     if it in _WMMA_F8F6F4_ALWAYS:
@@ -4309,7 +4323,9 @@ def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> st
         return "iu8"
     if it == InstType.INST_I8:
         return "i8"
-    return _inst_type_to_str(it)
+    if it in _WMMA_TYPE_CONVERT_KNOWN:
+        return _inst_type_to_str(it)
+    raise RuntimeError(f"Type not found: {it}")
 
 
 def _wmma_matrix_fmts(it: Any, m: int, n: int, k: int, has_wmma_v3: bool):
@@ -4347,6 +4363,41 @@ class MFMAInstruction(Instruction):
         self.acc2 = acc2
         self.acc2_imm = acc2_imm
         self.neg = neg
+
+    def preStr(self) -> str:
+        """Port of rocisa MFMAInstruction::preStr (mfma.hpp)."""
+        from .base import getAsmCaps
+        caps = getAsmCaps()
+        m = self.variant[0] if len(self.variant) > 0 else 0
+        n = self.variant[1] if len(self.variant) > 1 else 0
+        k = self.variant[2] if len(self.variant) > 2 else 0
+        blocks = self.variant[3] if len(self.variant) > 3 else 1
+        variant_str = f"{m}x{n}x{k}"
+        has_wmma_v3 = bool(caps.get("HasWMMA_V3", 0))
+
+        if bool(caps.get("HasMFMA_explictB", 0)) and not self.mfma1k:
+            str_b = f"{blocks}b_" if blocks > 1 else ""
+            return (f"v_mfma_{_inst_type_to_str(self.accType)}_{variant_str}_"
+                    f"{str_b}{_wmma_type_convert(self.instType, m, n, k, has_wmma_v3)}")
+
+        is_mfma = bool(caps.get("HasMFMA", 0))
+        instruction_name = "mfma" if is_mfma else "wmma"
+        instruction_step = "" if is_mfma else "_"
+        mfma_1k = "_1k" if self.mfma1k else ""
+        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3)
+
+        # forceScaledWMMA: gfx1250 low-precision WMMA must use v_wmma_scale_*
+        try:
+            from . import rocIsa  # noqa: WPS433
+            isa = tuple(rocIsa.getInstance().getKernel().isa)
+        except Exception:  # noqa: BLE001
+            isa = ()
+        if not is_mfma and isa == (12, 5, 0) and type_str in ("f8f6f4", "f4"):
+            return (f"v_wmma_scale_{_inst_type_to_str(self.accType)}_{variant_str}"
+                    f"{instruction_step}{type_str}")
+
+        return (f"v_{instruction_name}_{_inst_type_to_str(self.accType)}_{variant_str}"
+                f"{instruction_step}{type_str}{mfma_1k}")
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
@@ -4466,6 +4517,21 @@ class MXMFMAInstruction(Instruction):
         # rocisa passes this via `block=max(MXBlockA, MXBlockB)`. It is distinct
         # from variant[3] (the MI blocks count, typically 1).
         self.block = block
+
+    def preStr(self) -> str:
+        """Port of rocisa MXMFMAInstruction::preStr (mfma.hpp:694-707)."""
+        from .base import getAsmCaps
+        caps = getAsmCaps()
+        m = self.variant[0] if len(self.variant) > 0 else 0
+        n = self.variant[1] if len(self.variant) > 1 else 0
+        k = self.variant[2] if len(self.variant) > 2 else 0
+        variant_str = f"{m}x{n}x{k}"
+        if bool(caps.get("HasMFMA", 0)):
+            return f"v_mfma_scale_f32_{variant_str}_f8f6f4"
+        blk_str = "16" if self.block == 16 else ""
+        f4_t = 32
+        type_str = "f8f6f4" if (m < f4_t and n < f4_t) else "f4"
+        return f"v_wmma_scale{blk_str}_f32_{variant_str}_{type_str}"
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st

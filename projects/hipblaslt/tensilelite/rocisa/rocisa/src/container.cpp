@@ -533,11 +533,12 @@ void init_containers(nb::module_ m)
             });
 
     nb::class_<rocisa::DPPModifiers, rocisa::Container>(m_con, "DPPModifiers")
-        .def(nb::init<int, int, int, const std::vector<int>&>(),
+        .def(nb::init<int, int, int, const std::vector<int>&, int>(),
              nb::arg("row_shr")    = -1,
              nb::arg("row_bcast")  = -1,
              nb::arg("bound_ctrl") = -1,
-             nb::arg("quad_perm")  = std::vector<int>{})
+             nb::arg("quad_perm")  = std::vector<int>{},
+             nb::arg("row_xmask")  = -1)
         .def("__str__", &rocisa::DPPModifiers::toString);
 
     nb::class_<rocisa::VOP3PModifiers, rocisa::Container>(m_con, "VOP3PModifiers")

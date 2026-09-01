@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -63,6 +63,10 @@ cusolverDeterministicMode_t hip2cuda_deterministic(hipsolverDeterministicMode_t 
 
 hipsolverDeterministicMode_t cuda2hip_deterministic(cusolverDeterministicMode_t mode);
 #endif
+
+cusolverDirectMode_t hip2cuda_direct(hipsolverDirectMode_t direct);
+
+cusolverStorevMode_t hip2cuda_storev(hipsolverStorevMode_t storev);
 
 hipsolverStatus_t cuda2hip_status(cusolverStatus_t cuStatus);
 

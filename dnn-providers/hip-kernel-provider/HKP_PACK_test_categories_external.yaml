@@ -1,0 +1,39 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# CTest categories for the descriptor-packaging (hkp) pytest tests, which are
+# pre-registered via add_test() in descriptor-packaging/cmake/HkpPackaging.cmake
+# (not through a GTest binary). apply_ctest_category_labels() attaches the tier
+# labels below by exact test name.
+#
+# The two entries run DISJOINT pytest sets: the quick entry runs `-m quick` (the
+# no-compile subset) and the standard entry runs `-m "not quick"` (the rest). The
+# tier cascade labels a quick test quick;standard;comprehensive;full and a
+# standard test standard;comprehensive;full, so every tier runs each test once
+# with no overlap, and comprehensive/full run the union via the cascade (there
+# are no comprehensive- or full-only tests yet).
+test_categories:
+  quick:
+    description: "hkp descriptor-packaging pytest: no-compile validation subset"
+    test_patterns:
+      - "hip-kernel-provider-hkp-pack-quick"
+    labels:
+      - "unit_test"
+      - "hip-kernel-provider"
+      - "host"
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks"
+    test_patterns:
+      - "hip-kernel-provider-hkp-pack-quick"
+    labels:
+      - "ffm-full"
+
+  standard:
+    description: "hkp descriptor-packaging pytest: full suite (real compile)"
+    test_patterns:
+      - "hip-kernel-provider-hkp-pack"
+    labels:
+      - "unit_test"
+      - "hip-kernel-provider"
+      - "host"

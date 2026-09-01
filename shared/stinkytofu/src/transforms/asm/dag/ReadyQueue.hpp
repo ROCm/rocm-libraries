@@ -27,6 +27,7 @@
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
 #include <queue>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/core/Function.hpp"
@@ -34,8 +35,13 @@
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 
-namespace {
-using namespace stinkytofu;
+namespace stinkytofu {
+namespace dag {
+
+// Defined in RegionDAG.hpp, which includes THIS header -- forward-declared to keep the
+// dependency one-way. Region pre-scans in derived queues read the same graph the
+// scheduler drains, rather than rebuilding their own view of it.
+struct RegionDAG;
 
 // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
 // from BuildDefUseChain.hpp. All callers now use the shared implementation.
@@ -90,8 +96,35 @@ struct DAGNode {
     // gate short of real cycles to cover the gap with, falling back to a simulated
     // wait that has no matching instruction.
     int hazardDeadline = INT_MAX;
+    // --- Cluster-barrier SCC (ClusterBarrier kernels; see cluster-barrier.md) ---
+    bool handshakeBarrier = false;
+    unsigned sccChainId = 0;
+    unsigned sccChainReaders = 0;  // def node only
+    bool sccChainDef = false;
+    // kRule3CrossLoop false: INT_MIN. true: live-out SCC def lead floor.
+    int earliestClock = INT_MIN;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
+};
+
+// A scheduler-only hard ordering constraint: first must issue before second.
+// It is kept separate from the register-dependency DAG.
+using HardSchedulingConstraint = std::pair<StinkyInstruction*, StinkyInstruction*>;
+
+// The ordering a region is scheduled under: the dependency edges that already exist,
+// and the ones the queue would like added. Both members are edges of the same graph,
+// which is what makes them one parameter rather than two -- it is not a bag for
+// whatever a future hook happens to need.
+struct RegionDependencies {
+    // IN: register-dependency graph the scheduler is about to drain, handed over before
+    // this region's policy edges are merged into it -- a pre-scan asking "which loads
+    // does this WMMA wait on" wants the data dependencies, not the heuristic orderings.
+    const RegionDAG& dag;
+
+    // OUT: orderings the queue requests. The caller merges each into the DAG as an edge
+    // and drops any that would close a cycle. Writable through a const RegionDependencies&:
+    // the constness is the struct's, not the vector's.
+    std::vector<HardSchedulingConstraint>& requestedConstraints;
 };
 
 // comparator: return true if a should come *after* b.
@@ -100,18 +133,6 @@ struct CompareByDAGid {
         return a->id < b->id;  // smaller id has higher priority
     }
 };
-
-using DAGNodeList = std::vector<DAGNode>;
-
-static void addEdgeById(DAGNode* from, DAGNode* to,
-                        std::vector<std::unordered_set<unsigned>>& dagGraph) {
-    // Don't add duplicate edges, or self-loops.
-    if (from->id == to->id || dagGraph[from->id].count(to->id) > 0) return;
-
-    // Add edge from 'from' to 'to'
-    dagGraph[from->id].insert(to->id);
-    to->inDegree++;
-}
 
 // Cross-BB scheduling state: outstanding memory op latencies carried
 // from one BB to the next via CFG predecessor lookup.
@@ -149,6 +170,13 @@ class ReadyQueue {
         return passCtx_;
     }
 
+    // Mirrors ModuleOptions::ClusterBarrier (wired in Gfx1250Backend as
+    // PassFeatureConfig::dagFeatures::clusterBarrier). When false, the DAG
+    // scheduler follows the pre-cluster-barrier path.
+    bool clusterBarrierEnabled() const {
+        return passCtx_.getPassFeatureConfig().dagFeatures.clusterBarrier;
+    }
+
     virtual ~ReadyQueue() = default;
 
     // Pick one node from the ready queue based on some strategy.
@@ -171,11 +199,14 @@ class ReadyQueue {
 
     // Hook called before scheduling each region. \p blockBegin is the start of the basic block
     // (prefix [blockBegin, regionStart) is visible for cross-region / preloop state).
+    // \p deps carries what the region depends on and what the queue may ask for; see
+    // RegionDependencies.
     virtual void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
-                              IRList::iterator blockBegin) {
+                              IRList::iterator blockBegin, const RegionDependencies& deps) {
         (void)regionStart;
         (void)regionEnd;
         (void)blockBegin;
+        (void)deps;
     }
 
     // Hook called after a basic block has been fully scheduled. When the queue is
@@ -279,7 +310,7 @@ class ReadyQueueByDAGid : public ReadyQueue {
     }
 };
 
-DAGNode* ReadyQueueByDAGid::pickOne() {
+inline DAGNode* ReadyQueueByDAGid::pickOne() {
     assert(!queue.empty() && "Ready queue must not be empty");
     DAGNode* node = queue.top();
     queue.pop();
@@ -299,4 +330,5 @@ struct WMMAIssueConfig {
     int issueCycles = 1;  // single-WMMA issue cycles
     int issuedCount = 0;  // WMMA count in region (for barrier threshold math)
 };
-}  // namespace
+}  // namespace dag
+}  // namespace stinkytofu

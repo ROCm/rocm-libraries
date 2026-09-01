@@ -477,6 +477,31 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Custom equality hook for SDPA-backward-specific attributes
+     *
+     * Compares masking flags, dropout probability, attention scale,
+     * diagonal band bounds, and diagonal alignment — all of which define
+     * the mathematical semantics of the backward pass rather than tensor
+     * layout, so logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const SdpaBackwardAttributes& other) const
+    {
+        return alibi_mask == other.alibi_mask && padding_mask == other.padding_mask
+               && causal_mask == other.causal_mask
+               && causal_mask_bottom_right == other.causal_mask_bottom_right
+               && dropout_probability == other.dropout_probability
+               && attn_scale_value == other.attn_scale_value && left_bound == other.left_bound
+               && right_bound == other.right_bound
+               && diagonal_alignment == other.diagonal_alignment;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const SdpaBackwardAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
     // -- cuDNN parity setters --
     // Each accepts the cuDNN frontend spelling/overload/semantics that is more
     // than a straight rename of a native setter (overload merge, one-to-many

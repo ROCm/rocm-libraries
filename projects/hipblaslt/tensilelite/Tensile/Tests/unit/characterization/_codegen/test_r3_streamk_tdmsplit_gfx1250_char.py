@@ -29,7 +29,13 @@ import pytest
 
 from config_harness import emit_kernels_from_config
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    # TDMSplit is currently disabled (rejected in Solution.py), so these
+    # configs produce 0 solutions and cannot emit assembly. Expected-fail
+    # until TDMSplit is re-enabled.
+    pytest.mark.xfail(reason="TDMSplit is currently disabled", strict=False),
+]
 
 _ARCH = "gfx1250"
 

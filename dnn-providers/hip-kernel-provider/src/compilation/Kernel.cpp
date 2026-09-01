@@ -5,12 +5,20 @@
 #include "Program.hpp"
 #include "Utils.hpp"
 
+#include <utility>
+
 namespace hip_kernel_provider::compilation
 {
 
 Kernel::Kernel(const Program& program, const std::string& kernelName)
     : _kernelName(kernelName)
     , _kernel(program.getKernel(kernelName))
+{
+}
+
+Kernel::Kernel(hipFunction_t kernel, std::string kernelName)
+    : _kernelName(std::move(kernelName))
+    , _kernel(kernel)
 {
 }
 

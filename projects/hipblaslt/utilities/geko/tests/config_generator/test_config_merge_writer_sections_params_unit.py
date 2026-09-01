@@ -134,7 +134,7 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
     assert (tmp_path / "Config_HHS_NN.log").is_file()
 
 
-def _section_cfg(dtype="H", epilogues=True, ga=False):
+def _section_cfg(dtype="H", epilogues=True, backend="tensile", search_space="heuristic"):
     gt = GemmType.from_tensile("N", "N", dtype, dtype, "S" if dtype != "D" else "D")
     return {
         "GemmProblem": type("GP", (), {"gemm_type": gt})(),
@@ -142,25 +142,26 @@ def _section_cfg(dtype="H", epilogues=True, ga=False):
         "CUs": 256,
         "XCC": 8,
         "EPILOGUES": epilogues,
-        "GA": ga,
+        "backend": backend,
+        "search_space": search_space,
         "SIZE_OPTION": 0,
     }
 
 
 def test_config_sections_generator_paths(monkeypatch) -> None:
-    gen = csg.ConfigSectionGenerator(_section_cfg(dtype="H", epilogues=True, ga=False))
+    gen = csg.ConfigSectionGenerator(_section_cfg(dtype="H", epilogues=True, backend="tensile", search_space="heuristic"))
     assert gen._is_tf32("X") is True
     assert gen._convert_type("X1") == "B"
     assert gen._calc_iters(16, 16, 1, 16) >= 5
 
     e = _mk_entry((16, 16, 1, 16), {"Groups": _fp("Groups", [[{"MatrixInstruction": _fp("MatrixInstruction", [1], metadata={"MT": (64, 64), "wave": (2, 2), "GSU": 1, "LSU": 1})}]])})
-    cfg = gen.build_config(e, is_ga=False)
+    cfg = gen.build_config(e, backend="tensile")
     assert "GlobalParameters" in cfg
     assert "BenchmarkProblems" in cfg
 
-    # GA path with deterministic cost function inputs.
-    gen_ga = csg.ConfigSectionGenerator(_section_cfg(dtype="H", epilogues=True, ga=True))
-    cfg2 = gen_ga.build_config(e, is_ga=True, config_name="x", cms_priority=False, soo=True)
+    # Ductile path with deterministic cost function inputs.
+    gen_ga = csg.ConfigSectionGenerator(_section_cfg(dtype="H", epilogues=True, backend="ductile", search_space="generic"))
+    cfg2 = gen_ga.build_config(e, backend="ductile", config_name="x", cms_priority=False, soo=True)
     assert cfg2["Backend"]["Name"] == "Ductile"
     assert "Config" in cfg2["Backend"]
     assert "weights" not in cfg2["Backend"]["Config"]
@@ -178,15 +179,15 @@ def test_config_sections_generator_paths(monkeypatch) -> None:
             )
         },
     )
-    cfg3 = gen_ga.build_config(e2, is_ga=True, config_name="x2", cms_priority=False, soo=True)
+    cfg3 = gen_ga.build_config(e2, backend="ductile", config_name="x2", cms_priority=False, soo=True)
     assert "weights" in cfg3["Backend"]["Config"]
     assert "# Total #kernels" in gen_ga.generate_comment(10)
 
     # Invalid validation profile branch.
-    bad = _section_cfg(dtype="H", epilogues=True, ga=True)
-    bad["GA_VALIDATION_PROFILE"] = 999
+    bad = _section_cfg(dtype="H", epilogues=True, backend="ductile", search_space="generic")
+    bad["DUCTILE_VALIDATION_PROFILE"] = 999
     gen_bad = csg.ConfigSectionGenerator(bad)
-    with pytest.raises(ValueError, match="Invalid GA_VALIDATION_PROFILE"):
+    with pytest.raises(ValueError, match="Invalid DUCTILE_VALIDATION_PROFILE"):
         gen_bad._build_ductile(e.fork_params, e.sizes, "x", False, False)
 
 

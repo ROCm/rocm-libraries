@@ -228,6 +228,11 @@ add_custom_target(miopen-check
 )
 add_custom_target(miopen-tests COMMENT "Aggregate target for MIOpen tests")
 
+if(NOT ROCM_LIBS_SUPERBUILD)
+    add_custom_target(check DEPENDS miopen-check COMMENT "Back-compat alias for miopen-check")
+    add_custom_target(tests DEPENDS miopen-tests COMMENT "Back-compat alias for miopen-tests")
+endif()
+
 if(MIOPEN_TEST_GPU_DETECTION_FAILED AND NOT (MIOPEN_NO_GPU))
     add_custom_target(miopen-gpu-detection-check COMMAND echo "*** FATAL: GPU DETECTION FAILED DURING CMAKE PHASE, CHECK CMAKE WARNINGS ***" COMMAND exit 1 COMMENT "Reporting failed GPU detection")
     add_dependencies(miopen-check miopen-gpu-detection-check)
@@ -481,7 +486,6 @@ set(LONG_TESTS
     test_immed_conv3d
     test_conv3d_extra
     test_conv_3d
-    test_conv_ck_igemm_fwd_v6r1_dlops_nchw
     )
 
 # Assign a ctest COST to a test so long-running tests are scheduled first.
@@ -725,8 +729,7 @@ function(add_custom_test NAME)
         AND (${NAME} MATCHES "test_conv_3d"
           OR ${NAME} MATCHES "test_conv_group"
           OR ${NAME} MATCHES "test_conv_extra"
-          OR ${NAME} MATCHES "test_conv_for_implicit_gemm"
-          OR ${NAME} MATCHES "test_conv_ck_igemm_fwd_v6r1_dlops_nchw"))
+          OR ${NAME} MATCHES "test_conv_for_implicit_gemm"))
         set_tests_properties(${NAME} PROPERTIES RUN_SERIAL On)
     endif()
 
@@ -845,12 +848,6 @@ add_custom_test(test_regression_issue_2624 SKIP_UNLESS_ALL GFX900_DISABLED GFX90
     COMMAND $<TARGET_FILE:test_conv2d> ${MIOPEN_TEST_FLOAT_ARG} --verbose --input 2 1 22 22 --weights 1 1 4 4 --pads_strides_dilations 1 2 4 4 3 2 --disable-backward-data --disable-backward-weights
 )
 
-# MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW is explicitly enabled due to the kernel is disabled by default via #2306
-set(CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW_ENV
-    MIOPEN_FIND_MODE=normal
-    MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvCkIgemmFwdV6r1DlopsNchw
-    MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW=1)
-
 # NOTES ON WRITING TESTS FOR TUNABLE SOLVERS
 # * Enforce tuning (SEARCH_DB_UPDATE).
 # * Use TEST_TUNING. This flag leads to test failure in case of any "Error"
@@ -904,10 +901,4 @@ if(MIOPEN_TEST_DISCRETE)
 add_subdirectory(gtest EXCLUDE_FROM_ALL)
 else()
 add_subdirectory(gtest)
-endif()
-
-# Legacy targets are defined for CI support ONLY. Always use the 'miopen-' targets.
-if(NOT ROCM_LIBS_SUPERBUILD)
-    add_custom_target(check DEPENDS miopen-check COMMENT "Back-compat alias for miopen-check")
-    add_custom_target(tests DEPENDS miopen-tests COMMENT "Back-compat alias for miopen-tests")
 endif()

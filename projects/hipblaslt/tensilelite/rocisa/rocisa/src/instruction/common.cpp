@@ -636,6 +636,18 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SBfmB32& self, nb::dict&) { return new rocisa::SBfmB32(self); });
 
+    nb::class_<rocisa::SBfmB64, rocisa::CommonInstruction>(m_common, "SBfmB64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::SBfmB64& self, nb::dict&) { return new rocisa::SBfmB64(self); });
+
     nb::class_<rocisa::SFlbitI32B32, rocisa::CommonInstruction>(m_common, "SFlbitI32B32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -876,6 +888,14 @@ void common_inst(nb::module_ m_common)
         .def("__str__", &rocisa::_SWaitStorecnt::toString)
         .def("__deepcopy__", [](const rocisa::_SWaitStorecnt& self, nb::dict&) {
             return new rocisa::_SWaitStorecnt(self);
+        });
+
+    nb::class_<rocisa::_SWaitAsynccnt, rocisa::Instruction>(m_common, "_SWaitAsynccnt")
+        .def(nb::init<int, const std::string&>(), nb::arg("asynccnt") = -1, nb::arg("comment") = "")
+        .def("getParams", &rocisa::_SWaitAsynccnt::getParams)
+        .def("__str__", &rocisa::_SWaitAsynccnt::toString)
+        .def("__deepcopy__", [](const rocisa::_SWaitAsynccnt& self, nb::dict&) {
+            return new rocisa::_SWaitAsynccnt(self);
         });
 
     nb::class_<rocisa::_SWaitLoadcnt, rocisa::Instruction>(m_common, "_SWaitLoadcnt")

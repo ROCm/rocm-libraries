@@ -65,17 +65,51 @@ struct StinkyInstruction;
 namespace waitcnt {
 
 /// Hardware counters we track. Index matches arrays in DataflowState.
-enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_KM = 2, CK_Tensor = 3, CK_Count = 4 };
+enum CounterKind { CK_DS = 0, CK_Load = 1, CK_KM = 2, CK_Tensor = 3, CK_Async = 4, CK_Count = 5 };
 
 /// Map a tracked async memop to its hardware counter. Returns CK_Count when
 /// `inst` is not tracked by the waitcnt pass.
 CounterKind classifyMemOp(const StinkyInstruction& inst);
 
+/// Who, if anyone, regenerates a given wait instruction after it is stripped.
+enum class WaitReconstruction {
+    /// StinkyWaitCntInsertionPass re-derives it from this dataflow. Every
+    /// counter in WaitCountSpec lands here.
+    WaitCntInsertion,
+    /// Gfx1250HazardPass re-derives it from its XNACK replay-group model, by its
+    /// own rules rather than from this dataflow. s_wait_xcnt only.
+    HazardPass,
+    /// Nothing rebuilds it, so stripping one silently drops the hazard it
+    /// guarded. Today: anything naming STOREcnt, which is not modelled.
+    None,
+};
+
+/// Classify a wait instruction by who can rebuild it.
+///
+/// This is the legality condition StinkyRemoveWaitCntPass is built on: removing
+/// a `None` is never legal, so the pass has no code path that does it.
+/// Unrecognised wait opcodes classify as `None`, making a newly added one
+/// preserved-by-default rather than silently dropped.
+///
+/// Keep in lockstep with StinkyWaitCntInsertionPass::emitOneSpec -- that
+/// function is what "WaitCntInsertion" promises.
+WaitReconstruction waitReconstruction(const StinkyInstruction& inst);
+
+/// Wait immediate that guarantees the op sitting `countFrom` positions from a
+/// queue's tail (i.e. PerPredQueue::countFrom(op), so 1 == tail) has completed.
+/// Returns kUnused for countFrom <= 0 (op not in flight).
+///
+/// This is the ONLY place a queue position becomes a wait immediate. Whether
+/// that conversion is possible at all is a per-counter property: an in-order
+/// counter may leave the countFrom - 1 newest ops in flight, while on an
+/// out-of-order counter (kmcnt) a nonzero immediate names no particular op, so
+/// the answer is a full drain. Never derive a wait from a queue index directly.
+int waitToDrain(CounterKind c, int countFrom);
+
 /// One queue of in-flight memops on a given counter, tagged by the CFG
 /// predecessor it was seeded from. For an op OP, the wait value is
-/// countFrom(OP) - 1, capped to the hardware maximum wait immediate. Ops
-/// older than the bounded tail are remembered in saturatedOps and report the
-/// maximum count.
+/// waitToDrain(counter, countFrom(OP)). Ops older than the bounded tail are
+/// remembered in saturatedOps and report the maximum count.
 ///
 /// At block entry there is one entry per CFG predecessor; these are kept
 /// (not collapsed) at block exit so a successor's mergeFromPredecessors can
@@ -97,7 +131,7 @@ struct PerPredQueue {
 /// that counter (e.g. all incoming sources were VALU).
 struct PhiSummary {
     int waits[CK_Count] = {WaitCountSpec::kUnused, WaitCountSpec::kUnused, WaitCountSpec::kUnused,
-                           WaitCountSpec::kUnused};
+                           WaitCountSpec::kUnused, WaitCountSpec::kUnused};
 
     bool operator==(const PhiSummary& other) const {
         for (int c = 0; c < CK_Count; ++c) {

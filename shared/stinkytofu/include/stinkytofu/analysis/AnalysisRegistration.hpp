@@ -24,6 +24,7 @@
 
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/analysis/LoopAnalysis.hpp"
+#include "stinkytofu/analysis/asm/ssa/SSALiveIntervalsAnalysis.hpp"
 #include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/core/AnalysisManager.hpp"
 
@@ -34,6 +35,7 @@ inline void registerAllAnalyses(AnalysisManager& AM) {
     AM.registerPass<BBIndexAnalysis>();
     AM.registerPass<DominanceAnalysis>();
     AM.registerPass<LoopAnalysis>();
+    AM.registerPass<SSALiveIntervalsAnalysis>();
 }
 
 /// Convenience: build a PreservedAnalyses that keeps CFG analyses.

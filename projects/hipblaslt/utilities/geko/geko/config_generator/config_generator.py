@@ -164,8 +164,9 @@ def _run_per_gemm_type(
     parallel_for(emit_one, indexed_entries)
     # Serial pass: shared run-all script and Config_*.log must append in index order.
     for idx, entry in indexed_entries:
+        base_name = GEMM_type + f"_{idx}"
         output_writer.append_aggregate_metadata(
-            GEMM_type + f"_{idx}",
+            base_name,
             entry,
             progress=f"{idx}/{progress_denom}",
         )
@@ -231,7 +232,7 @@ def _emit_entity_files(
     entity_name = gemm_type + cat_name
     built = csg.build_config(
         entry,
-        is_ga=config["GA"],
+        backend=config.get("backend", "ductile"),
         config_name=entity_name,
         cms_priority=config["CMS_PRIORITY"],
         soo=config["MACROTILE_OPT"],

@@ -83,7 +83,6 @@ namespace rocsparse
         rocsparse_csric0_info csric0_info = (info != nullptr) ? info->get_csric0_info() : nullptr;
 
         _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                                   false,
                                    static_cast<int64_t>(1),
                                    m,
                                    m,

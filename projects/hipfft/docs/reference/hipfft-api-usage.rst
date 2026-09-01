@@ -187,6 +187,7 @@ Callbacks
 .. doxygenfunction:: hipfftXtSetCallback
 .. doxygenfunction:: hipfftXtClearCallback
 .. doxygenfunction:: hipfftXtSetCallbackSharedSize
+.. doxygenfunction:: hipfftXtSetJITCallback
 
 
 Single-process multi-GPU transforms
@@ -212,7 +213,11 @@ To implement this functionality, use the API as follows:
 
 #. Allocate memory for the data on the devices with
    :cpp:func:`hipfftXtMalloc`, which returns the allocated memory as
-   a :cpp:struct:`hipLibXtDesc` descriptor.
+   a :cpp:struct:`hipLibXtDesc` descriptor. Use a subformat compatible
+   with the desired placement of results (see :cpp:enum:`hipfftXtSubFormat`);
+   note that restrictions apply, e.g., multi-device unbatched
+   multi-dimensional transforms require subformats compatible with in-place
+   execution.
 
 #. Copy data from the host to the descriptor with :cpp:func:`hipfftXtMemcpy`.
 
@@ -226,7 +231,10 @@ To implement this functionality, use the API as follows:
    * :cpp:func:`hipfftXtExecDescriptorD2Z`
    * :cpp:func:`hipfftXtExecDescriptorZ2D`
 
-   Pass the descriptor as input and output.
+   For in-place execution, pass the same descriptor as both input and output.
+   For out-of-place batched execution, pass separate input and output
+   descriptors. The descriptors' subformats must be compatible with the desired
+   placement of results (see :cpp:enum:`hipfftXtSubFormat`).
 
 #. Copy the output from the descriptor back to the host with :cpp:func:`hipfftXtMemcpy`.
 
@@ -235,6 +243,39 @@ To implement this functionality, use the API as follows:
 #. Clean up the plan by calling :cpp:func:`hipfftDestroy`.
 
 .. doxygenfunction:: hipfftXtSetGPUs
+
+.. doxygenenum:: hipfftXtSubFormat
+
+.. note::
+
+   The distribution across :math:`N` devices for a data set divided along one of its
+   dimensions of length :math:`L` attributes the range of indices
+
+   .. math::
+
+      \left[\;
+         j \lfloor L / N \rfloor + \min(j,\; L \bmod N),\;
+         (j+1) \lfloor L / N \rfloor + \min(j+1,\; L \bmod N)
+      \;\right)
+
+   along that dimension to the :math:`j\text{-th}` device (:math:`0 \le j < N`). All
+   other dimensions (if any) are fully replicated across all devices.
+
+.. note::
+
+   For real-to-complex or complex-to-real plans, all subformats compatible
+   with in-place operations result in padding of real domain data along the
+   fastest dimension. :cpp:func:`hipfftXtMemcpy` assumes (resp. produces)
+   similar padding in the source (resp. destination) host-side buffer when
+   copying from (resp. to) such a descriptor, with a multi-device plan for
+   real forward (resp. inverse) transform.
+
+.. note::
+
+   When considering an unbatched 3D (resp. 2D) transform with data array
+   dimensions ``[X][Y][Z]`` (resp. ``[X][Y]``), the "slowest dimension" has
+   length X, the "second-slowest dimension" has length Y, and the "fastest
+   dimension" has length Z (resp. Y for 2D cases).
 
 .. doxygenstruct:: hipXtDesc
 .. doxygenstruct:: hipLibXtDesc

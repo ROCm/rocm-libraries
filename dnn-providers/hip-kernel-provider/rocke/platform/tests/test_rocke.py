@@ -595,6 +595,63 @@ class TestHelpers(unittest.TestCase):
             2,
         )
 
+    def test_coalesced_loader_choose_vec_row_axis(self):
+        # vector_axis="row" checks tile_rows % vec instead of tile_cols % vec
+        # (used by wgrad to vectorise the stride-1 free axis). 64x64/256: the
+        # row axis 64%8==0 and 4096/8=512 ≥ 256 (and %256==0) -> vec=8.
+        self.assertEqual(
+            CoalescedTileLoader.choose_vec(
+                tile_rows=64, tile_cols=64, block_size=256, vector_axis="row"
+            ),
+            8,
+        )
+        # Row axis constrains the width even when the column axis would allow
+        # more: tile_rows=20 is divisible by 4 and 2 but not 8, so a row-mode
+        # vector caps at 4 (whereas a 64-wide column axis would permit 8).
+        self.assertEqual(
+            CoalescedTileLoader.choose_vec(
+                tile_rows=20, tile_cols=64, block_size=64, vector_axis="row"
+            ),
+            4,
+        )
+        # rows_per_vec mirrors cols_per_vec but along the row axis.
+        ldr = CoalescedTileLoader(
+            tile_rows=64, tile_cols=32, block_size=256, load_vec=8, vector_axis="row"
+        )
+        self.assertEqual(ldr.rows_per_vec, 8)
+
+    def test_coalesced_loader_vector_axis_validation(self):
+        # A mistyped vector_axis must fail fast (not silently fall through to the
+        # "col" branch), at both construction entry points.
+        with self.assertRaises(ValueError):
+            CoalescedTileLoader.choose_vec(
+                tile_rows=64, tile_cols=64, block_size=256, vector_axis="Row"
+            )
+        with self.assertRaises(ValueError):
+            CoalescedTileLoader(
+                tile_rows=64,
+                tile_cols=64,
+                block_size=256,
+                load_vec=1,
+                vector_axis="Row",
+            )
+
+    def test_coalesced_loader_from_tile_normalizes_scalar_axis(self):
+        # When choose_vec collapses to 1 the axis is irrelevant; from_tile must
+        # normalise "row" back to the canonical scalar "col" path so a vec==1
+        # loader is byte-identical regardless of the axis requested.
+        ldr = CoalescedTileLoader.from_tile(
+            tile_rows=64, tile_cols=1, block_size=64, max_vec=8, vector_axis="row"
+        )
+        self.assertEqual(ldr.load_vec, 1)
+        self.assertEqual(ldr.vector_axis, "col")
+        # A width > 1 keeps the requested row axis.
+        ldr_vec = CoalescedTileLoader.from_tile(
+            tile_rows=64, tile_cols=64, block_size=256, max_vec=8, vector_axis="row"
+        )
+        self.assertEqual(ldr_vec.load_vec, 8)
+        self.assertEqual(ldr_vec.vector_axis, "row")
+
     def test_async_loader_choose_dwords(self):
         # 128 halves wide => has to be multiple of 8 halves (dwords=4):
         # tile_rows=64, tile_cols=128, threads=256: chunks = 64*128/8 = 1024 ≥ 256 ✓
@@ -6407,7 +6464,13 @@ class TestExtendedHelperBuilds(unittest.TestCase):
         b.global_atomic_add_pk_bf16(ptr, idx, b.zero_vec(BF16, 2))
         b.ret()
         ll = lower_kernel_to_llvm(b.kernel)
-        self.assertIn("@llvm.amdgcn.global.atomic.fadd.v2bf16", ll)
+        # There is no llvm.amdgcn.global.atomic.fadd.v2bf16 in the shipping ROCm
+        # LLVM; the packed-bf16 atomic goes through a generic atomicrmw plus the
+        # AMDGPU memory-model metadata that selects global_atomic_pk_add_bf16.
+        self.assertIn("atomicrmw fadd ptr addrspace(1)", ll)
+        self.assertIn("<2 x bfloat>", ll)
+        self.assertIn("amdgpu.no.fine.grained.memory", ll)
+        self.assertNotIn("@llvm.amdgcn.global.atomic.fadd.v2bf16", ll)
 
     def test_umul_hi_i32_lowers_via_zext_mul_lshr_trunc(self):
         from rocke.core.ir import I32, IRBuilder

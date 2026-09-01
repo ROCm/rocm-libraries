@@ -154,6 +154,12 @@ def test_invalid_runtime_language_exits(monkeypatch):
         PA.parseArguments()
 
 
+def test_ocl_runtime_language_exits(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "/logic", "/out", "OCL"])
+    with pytest.raises(SystemExit):
+        PA.parseArguments()
+
+
 def test_invalid_code_object_version_exits(monkeypatch):
     with pytest.raises(SystemExit):
         _run(monkeypatch, ["--code-object-version", "9"])

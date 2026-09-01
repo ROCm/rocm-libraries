@@ -673,6 +673,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
+        param('fused-gemm-a2a', problemType.fusedGemmA2A)
         if problemType.mxBlockA:
             param('mx-a-block', problemType.mxBlockA)
             param('mx-a-type', problemType.mxTypeA.toName())

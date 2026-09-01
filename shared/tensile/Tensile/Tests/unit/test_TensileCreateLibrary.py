@@ -45,7 +45,7 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriterBase import KernelWriterBase
 from Tensile.KernelWriterSource import KernelWriterSource
 from Tensile.SolutionStructs import ProblemSizes, Solution
-from Tensile.Utilities.ConditionalImports import yamlLoader
+from Tensile.Utilities.ConditionalImports import SafeLoader
 from Tensile.Utilities.Toolchain import ToolchainDefaults, validateToolchain
 
 mylogger = logging.getLogger()
@@ -156,7 +156,7 @@ def test_WriteClientLibraryFromSolutions(tmpdir):
         stream = open(tensileYamlFilePath, "r")
     except IOError:
         mylogger.error("Cannot open file: %s" % tensileYamlFilePath)
-    config = yaml.load(stream, yamlLoader)
+    config = yaml.load(stream, SafeLoader)
     stream.close()
     actualSolutions = config["solutions"]
 
@@ -170,7 +170,7 @@ def test_WriteClientLibraryFromSolutions(tmpdir):
         stream = open(metadataYamlFilePath, "r")
     except IOError:
         mylogger.error("Cannot open file: %s" % metadataYamlFilePath)
-    metadata = yaml.load(stream, yamlLoader)
+    metadata = yaml.load(stream, SafeLoader)
     stream.close()
     actualProblemType = metadata["ProblemType"]
 

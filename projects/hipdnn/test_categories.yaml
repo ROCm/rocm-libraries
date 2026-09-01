@@ -27,17 +27,18 @@ test_categories:
     description: "Full hipDNN validation tier"
     test_patterns:
 
-  ffm_quick:
+  ffm-quick:
     description: "Fast-feedback mechanism (FFM) quick tier; currently mirrors the quick tier"
     test_patterns:
       - ".*"
     labels:
-      - "ffm_full"
+      - "ffm-full"
 
   unit:
     description: "Current hipDNN unit-check coverage"
     test_patterns:
       - "hipdnn_test_name_validation"
+      - "hipdnn_cache_key_codegen_tests"
       - "hipdnn_data_sdk_tests"
       - "hipdnn_flatbuffers_sdk_tests"
       - "hipdnn_backend_tests"
@@ -52,3 +53,7 @@ test_categories:
       - "hipdnn_public_backend_tests"
       - "hipdnn_backend_logging_shutdown_tests"
       - "hipdnn_public_frontend_tests"
+      # Build tree only: hipdnn_list_engines_smoke runs a CMake driver script rather than an
+      # installed gtest binary, so it is absent from the installed CTestTestfile.cmake. See
+      # tools/CMakeLists.txt.
+      - "hipdnn_list_engines_smoke"

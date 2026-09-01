@@ -4,6 +4,7 @@ Determines which component CI jobs to run based on changed files.
 Outputs boolean flags per component via GITHUB_OUTPUT:
   - stinkytofu=true/false
   - rocisa=true/false
+  - geko=true/false
   - miopen=true/false
   - tensilelite_coverage=true/false
 
@@ -25,6 +26,10 @@ COMPONENTS = {
     "rocisa": [
         "projects/hipblaslt/tensilelite/rocisa/**",
         "shared/stinkytofu/**",
+    ],
+    "geko": [
+        "projects/hipblaslt/utilities/geko/**",
+        ".github/workflows/component-ci-geko.yml",
     ],
     "miopen": [
         "projects/miopen/**",

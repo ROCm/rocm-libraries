@@ -28,7 +28,7 @@ version = 1
 # ref=4.5, threshold becomes 0.11) with ~75% margin, and covers the
 # smaller 0.03125-at-ref=2.0625 case with ~95% margin.
 [[tolerance_overrides]]
-filters = ["Smoke/IntegrationGpuMatmulBiasActivBf16.Correctness/*"]
+filters = ["Smoke/IntegrationGpuMatmulBiasActivBf16.Correctness/*", "quick_MatmulPointwise_Variant3.*bfp16*swish*"]
 atol = 0.02
 rtol = 0.02
 

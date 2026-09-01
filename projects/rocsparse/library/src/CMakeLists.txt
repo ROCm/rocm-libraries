@@ -694,6 +694,14 @@ if(BUILD_ROCSPARSE_DEBUGGING)
     src/hip/rocsparse_hip_debug_t.cpp)
 endif()
 
+# ELL triangular solve sources, gated by BUILD_WITH_ELL_TRSV.
+if(BUILD_WITH_ELL_TRSV)
+  list(APPEND rocsparse_source
+    src/level2/rocsparse_ellsv.cpp
+    src/level2/rocsparse_ellsv_analysis.cpp
+    src/level2/rocsparse_ellsv_solve.cpp)
+endif()
+
 # Incomplete LDL^T (zero fill-in) sources, gated by BUILD_WITH_ILDLT0.
 if(BUILD_WITH_ILDLT0)
   list(APPEND rocsparse_source

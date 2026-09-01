@@ -557,8 +557,6 @@ catch(...)
     return rocblas_status_internal_error;
 }
 
-#undef ROCSOLVER_ROCBLAS_HAS_F8_DATATYPES
-
 // RAII class to set and restore pointer mode.
 class rocblas_pointer_mode_saver
 {
@@ -594,6 +592,81 @@ private:
     rocblas_handle& handle_;
     rocblas_pointer_mode old_mode_;
 };
+
+/// @return ceil( x / y ), for integers x >= 0, y > 0.
+/// This formula returns 0 for x = 0 and avoids overflow.
+template <typename Ix, typename Iy>
+__device__ __host__ constexpr auto ceildiv(const Ix x, const Iy y)
+{
+    return x / y + (x % y != 0);
+}
+
+/// @return ceil( x / y )*y, for integers x >= 0, y > 0.
+/// That is, round x up to the next multiple of y.
+template <typename Ix, typename Iy>
+__device__ __host__ constexpr auto roundup(Ix x, Iy y)
+{
+    return y * ceildiv(x, y);
+}
+
+//------------------------------------------------------------------------------
+// return true if arg is nan. Extends std::nan to rocblas and complex types.
+template <
+    typename T,
+    std::enable_if_t<!rocblas_is_complex<T> && !std::is_same_v<T, rocblas_half> && !std::is_same_v<T, rocblas_bfloat16>,
+                     int> = 0>
+__device__ __host__ inline bool rocblas_isnan(T arg)
+{
+    return std::isnan(arg);
+}
+
+template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+__device__ __host__ inline bool rocblas_isnan(const T& arg)
+{
+    return rocblas_isnan(std::real(arg)) || rocblas_isnan(std::imag(arg));
+}
+
+__device__ __host__ inline bool rocblas_isnan(rocblas_half arg)
+{
+    union
+    {
+        rocblas_half fp;
+        uint16_t data;
+    } x = {arg};
+    // NaN if exponent is all 1s and mantissa is non-zero (IEEE 754 half)
+    return (~x.data & 0x7c00) == 0 && (x.data & 0x03ff) != 0;
+}
+
+__device__ __host__ inline bool rocblas_isnan(rocblas_bfloat16 arg)
+{
+    // NaN if exponent is all 1s and mantissa is non-zero
+    return (~arg.data & 0x7f80) == 0 && (arg.data & 0x007f) != 0;
+}
+
+//------------------------------------------------------------------------------
+// max that propagates NaNs consistently:
+//   rocblas_max_nan( 1,   NaN ) = NaN
+//   rocblas_max_nan( NaN, 1   ) = NaN
+template <
+    typename T,
+    std::enable_if_t<!rocblas_is_complex<T> && !std::is_same_v<T, rocblas_half> && !std::is_same_v<T, rocblas_bfloat16>,
+                     int> = 0>
+__device__ __host__ inline T rocblas_max_nan(T x, T y)
+{
+    return (rocblas_isnan(y) || y >= x) ? y : x;
+}
+
+__device__ __host__ inline rocblas_half rocblas_max_nan(rocblas_half x, rocblas_half y)
+{
+    return (rocblas_isnan(y) || float(y) >= float(x)) ? y : x;
+}
+
+__device__ __host__ inline rocblas_bfloat16 rocblas_max_nan(rocblas_bfloat16 x, rocblas_bfloat16 y)
+{
+    return (rocblas_isnan(y) || float(y) >= float(x)) ? y : x;
+}
+
+#undef ROCSOLVER_ROCBLAS_HAS_F8_DATATYPES
 
 #ifdef ROCSOLVER_LIBRARY
 ROCSOLVER_END_NAMESPACE

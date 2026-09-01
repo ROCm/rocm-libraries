@@ -7,6 +7,12 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * Introduced a new API: hipBLASLt-ext::isSolutionSupported(). This API is used by new hipBLASLt integration from rocBLAS to check if a given solution is supported for a certain GPU and Problem Type. 
+* `HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT`,
+  `hipblaslt_ext::GemmPreference::setUniformSummationOrder`, and
+  `hipblasLtSetUniformSummationOrder` / `hipblasLtGetUniformSummationOrder`
+  opt into a uniform summation order across `M` (not run-to-run determinism).
+  See `hipblaslt.h`. `hipblaslt-bench --uniform_summation_order` forwards
+  the descriptor attribute.
 
 ## hipBLASLt 1.4.0
 

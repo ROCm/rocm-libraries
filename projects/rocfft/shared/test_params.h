@@ -25,8 +25,8 @@
 #include <stdexcept>
 
 extern int verbose;
-extern int ngpus;
 
+extern size_t gpus_per_rank;
 extern size_t n_random_tests;
 
 extern size_t random_seed;

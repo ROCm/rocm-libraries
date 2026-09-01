@@ -38,6 +38,7 @@
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
@@ -78,6 +79,7 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     // addRegistersToInstruction() in ToStinkyTofuUtils.cpp.
     std::vector<StinkyRegister> destRegs;
     std::vector<StinkyRegister> srcRegs;
+    std::optional<AttachedSSA> attachedSSA_;
 
     StinkyInstruction(const HwInstDesc* mcid)
         : IRBase(IRType::StinkyTofu),
@@ -86,7 +88,9 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
           latencyCycles(mcid->latency),
           coIssueWindow(mcid->coIssueWindow) {}
 
-    ~StinkyInstruction() override = default;
+    ~StinkyInstruction() override {
+        clearAttachedSSA();
+    }
 
    public:
     void addSrcReg(const StinkyRegister& srcReg) {
@@ -227,6 +231,20 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
         destRegs.resize(size);
     }
 
+    bool hasAttachedSSA() const {
+        return attachedSSA_.has_value();
+    }
+    void attachSSA(AttachedSSA ssa);
+    void clearAttachedSSA();
+
+    size_t getNumSSAResults() const;
+    StinkySSAValue* getSSAResult(size_t i) const;
+    size_t getNumSSAOperands() const;
+    StinkyOpOperand* getSSAOperand(size_t i);
+    const StinkyOpOperand* getSSAOperand(size_t i) const;
+    StinkySSAValue* getSSAOperandValue(size_t i) const;
+    void setSSAOperandValue(size_t i, StinkySSAValue* v);
+
     /**
      * @brief Clone this instruction (deep copy)
      *
@@ -258,8 +276,8 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
             cloned->modifiers.push_back(mod->clone());
         }
 
-        // Note: users/sources are intentionally NOT copied
-        // These are dependency tracking and should be rebuilt if needed
+        // Note: users/sources and attached SSA are intentionally NOT copied.
+        // Def-use chains and SSA use-lists must be rebuilt or reattached.
 
         return cloned;
     }
@@ -305,7 +323,7 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     /// reordered across it.
     StinkyInstruction* createFence() {
         static const HwInstDesc fenceMCID{
-            GFX::FENCE, GFX::FENCE, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::FENCE, GFX::FENCE, 0, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
         return create(&fenceMCID);
     }
 
@@ -325,8 +343,14 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     ///   final linear ASM stream.
     StinkyInstruction* createFunctionAsmPlacementMarker(const std::string& functionName) {
         static const HwInstDesc functionAsmPlacementMarkerMCID{
-            GFX::FUNCTION_ASM_PLACEMENT_MARKER, GFX::FUNCTION_ASM_PLACEMENT_MARKER,       0, 0, 0,
-            "FUNCTION_ASM_PLACEMENT_MARKER",    makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::FUNCTION_ASM_PLACEMENT_MARKER,
+            GFX::FUNCTION_ASM_PLACEMENT_MARKER,
+            0,
+            0,
+            0,
+            0,
+            "FUNCTION_ASM_PLACEMENT_MARKER",
+            makeFlagSet({InstFlag::IF_HasSideEffect})};
         StinkyInstruction* inst = create(&functionAsmPlacementMarkerMCID);
         inst->addModifier<LabelData>(LabelData{functionName});
         return inst;
@@ -336,7 +360,7 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     /// so the DAG scheduler treats it as one atomic node. Own descriptor carries no
     /// IF_HasSideEffect; hasSideEffect() below still inherits it from children.
     StinkyInstruction* createExecMaskGroup(IRBase* insertBefore) {
-        static const HwInstDesc execGroupMCID{GFX::EXEC_GROUP, GFX::EXEC_GROUP, 0, 0, 0,
+        static const HwInstDesc execGroupMCID{GFX::EXEC_GROUP, GFX::EXEC_GROUP, 0, 0, 0, 0,
                                               "EXEC_GROUP",    makeFlagSet({})};
         return create(&execGroupMCID, insertBefore);
     }
@@ -406,6 +430,10 @@ inline bool isGLOBALStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALStore);
 }
 
+inline bool isGlobalStoreAsyncFromLds(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALStoreAsyncFromLds);
+}
+
 inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALAtomic);
 }
@@ -436,6 +464,11 @@ inline bool isBufferMemLoad(const StinkyInstruction& inst) {
 
 inline bool isBufferMemStore(const StinkyInstruction& inst) {
     return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst);
+}
+
+inline bool isVmemTexStore(const StinkyInstruction& inst) {
+    return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst) ||
+           isGlobalStoreAsyncFromLds(inst);
 }
 
 /// Check if instruction is a scheduling fence pseudo-instruction.
@@ -472,7 +505,8 @@ inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
-    return isSMemStore(inst) || isFLATStore(inst) || isMUBUFStore(inst) || isGLOBALStore(inst);
+    return isSMemStore(inst) || isFLATStore(inst) || isMUBUFStore(inst) || isGLOBALStore(inst) ||
+           isGlobalStoreAsyncFromLds(inst);
 }
 
 /// A destination register is implicit (not printed) when it was added solely
@@ -524,6 +558,20 @@ inline bool isReturningAtomic(const StinkyInstruction& inst) {
 
 inline bool isTensorLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_TENSORLoadToLds);
+}
+
+// Async memory ops tracked by ASYNCcnt (s_wait_asynccnt). Shared FIFO counter
+// across the whole async family; extend this predicate as async loads /
+// cluster-async / ds_atomic_async_barrier_arrive are added.
+inline bool isAsyncMemOp(const StinkyInstruction& inst) {
+    return isGlobalStoreAsyncFromLds(inst);
+}
+
+// Vector memory outside the DS and FLAT classes.
+inline bool isVmemTex(const StinkyInstruction& inst) {
+    return isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) ||
+           isGLOBALOrAtomic(inst) || isAsyncMemOp(inst) || isGlobalPrefetch(inst) ||
+           isTensorLoad(inst);
 }
 
 inline bool isDSRead(const StinkyInstruction& inst) {
@@ -644,6 +692,55 @@ inline bool isWaitCnt(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_WaitCnt);
 }
 
+// ---------------------------------------------------------------------------
+// Packed wait immediate (s_wait_loadcnt_dscnt / s_wait_storecnt_dscnt)
+//
+// Both opcodes carry two counters in one SIMM16:
+//   DS  = SIMM16[5:0]   -- wait for dscnt <= N
+//   MEM = SIMM16[13:8]  -- wait for loadcnt <= N or storecnt <= N, whichever
+//                          the opcode selects
+// Bits [7:6] and [15:14] are reserved. Every counter named here is 6 bits
+// wide, so the field max doubles as the field mask.
+// ---------------------------------------------------------------------------
+
+/// Largest value a 6-bit dependency-counter field can hold.
+constexpr int kWaitCntMax = 63;
+
+/// SIMM16 bits that belong to a counter field; the rest are reserved.
+constexpr int kPackedWaitCntMask = (kWaitCntMax << 8) | kWaitCntMax;
+
+inline bool isValidPackedWaitCnt(int simm16) {
+    return (simm16 & ~kPackedWaitCntMask) == 0;
+}
+
+/// Saturate a counter to what its field can hold. Upstream producers tolerate
+/// over-counting (TensileLite's dscnt is a static estimate, and rocisa likewise
+/// clamps when printing), so this is not an error: a smaller count is always
+/// the stricter wait. Only a negative value is a bug -- it means the "-1 means
+/// absent" sentinel escaped the caller's guard.
+inline int clampToWaitCntField(int count) {
+    assert(count >= 0 && "s_wait immediate: negative counter reached encoding");
+    return std::min(count, kWaitCntMax);
+}
+
+/// Build the SIMM16 for a packed wait. Saturating each half is what keeps an
+/// over-large count from bleeding into the neighbouring field.
+inline int packMemDsWaitCnt(int memCount, int dsCount) {
+    return (clampToWaitCntField(memCount) << 8) | clampToWaitCntField(dsCount);
+}
+
+inline int unpackMemWaitCnt(int simm16) {
+    assert(isValidPackedWaitCnt(simm16) &&
+           "packed s_wait immediate: reserved bits SIMM16[15:14]/[7:6] are set");
+    return (simm16 >> 8) & kWaitCntMax;
+}
+
+inline int unpackDsWaitCnt(int simm16) {
+    assert(isValidPackedWaitCnt(simm16) &&
+           "packed s_wait immediate: reserved bits SIMM16[15:14]/[7:6] are set");
+    return simm16 & kWaitCntMax;
+}
+
 inline bool isMFMA(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_MFMA);
 }
@@ -729,10 +826,11 @@ inline bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
 /// scheduler has no dependency edges to prove reordering is safe.
 inline bool hasSideEffect(const StinkyInstruction& inst) {
     if (!inst.getHwInstDesc()) return false;
-    if (isGlobalMemStore(inst) || isBranch(inst) || isCall(inst) || isWaitCnt(inst) ||
-        isHasSideEffect(inst))
+    if ((isGlobalMemStore(inst) && !isGlobalStoreAsyncFromLds(inst)) || isBranch(inst) ||
+        isCall(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
         return true;
-    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
+    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst) ||
+         isGlobalStoreAsyncFromLds(inst)) &&
         !hasLdsPseudoRegs(inst))
         return true;
     if (isExecMaskGroup(inst)) {

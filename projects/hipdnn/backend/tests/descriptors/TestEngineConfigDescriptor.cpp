@@ -61,10 +61,11 @@ public:
 
     void makeEngineConfigFinalized() const
     {
-        // TODO: These expectations being hidden in here are dangerous.
-        // It's easy to forget they exist, and if any of these functions are called prior to this
-        // call it is undefined behavior. Similarly, any expectations on functions called within
-        // "finalize" or "setup" made after calling this function are UB
+        // WARNING: Mock expectations set here apply to all tests that call this helper.
+        // Setting expectations on the same mock methods *before* this call causes
+        // undefined behavior (gmock uses the last matching expectation). Likewise,
+        // expectations added *after* this call on the same methods may silently
+        // shadow the ones below. Keep this in mind when writing new tests.
         EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
         EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
         EXPECT_CALL(*getMockEngine(), getGraph()).WillRepeatedly(Return(getMockGraphDescriptor()));

@@ -28,6 +28,7 @@ import pandas as pd
 from geko import bench, library, logger, optim, search, _set_log_level
 from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe
 from geko.bench.utils import update_lib_source
+from geko.config_generator.constants import VALID_BACKENDS
 from geko.constants import SUPPORTED_ARCH
 from geko.schemas import GemmConfig, RunState
 from geko.utils import parse_devices
@@ -291,6 +292,7 @@ def run_configure(
     keep_thr: float = 0,
     arch: str = "gfx950",
     backend: str = "ductile",
+    search_space: str | None = None,
     workdir: str = "workdir",
     verbose: int = 1,
     bench_freq: bool = False,
@@ -309,6 +311,7 @@ def run_configure(
         keep_thr: Minimum grouped % of total time to keep a GEMM row.
         arch: Target gfx string in constants.SUPPORTED_ARCH.
         backend: "ductile" or "tensile".
+        search_space: "heuristic", "generic", or None (auto from backend).
         workdir: Created if missing; holds run_state.json and outputs above.
         verbose: Logger level via _set_log_level.
         bench_freq: Forwarded to bench.log.summarize when keep_thr > 0
@@ -336,8 +339,8 @@ def run_configure(
     if arch not in SUPPORTED_ARCH:
         raise ValueError(f"Must be one of {SUPPORTED_ARCH}")
 
-    if backend.lower() not in ("ductile", "tensile"):
-        raise ValueError("'backend' must be one of ('ductile', 'tensile')")
+    if backend.lower() not in VALID_BACKENDS:
+        raise ValueError(f"'backend' must be one of {VALID_BACKENDS}")
 
     hipblaslt_path, log_file, workdir, state, state_path = _prepare_workflow_context(
         hipblaslt_path, log_file, workdir, verbose
@@ -349,6 +352,7 @@ def run_configure(
     logger.info(f"Backend: '{backend}'")
     logger.info(f"Working directory: '{workdir}'")
     logger.info(f"Keep threshold: {keep_thr}")
+    logger.info(f"Search space: {search_space}")
 
     _, uniq_df = bench.log.summarize(
         hipblaslt_path,
@@ -377,6 +381,7 @@ def run_configure(
         tuning_dir,
         arch=arch,
         backend=backend,
+        search_space=search_space,
     )
     n_configs = len(gemm_configs)
 

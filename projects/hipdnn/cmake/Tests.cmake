@@ -225,6 +225,24 @@ endfunction() # _create_check_targets_internal
 
 
 
+# Registers the cache-key generator's own unit tests as a ctest test. The generated
+# header's runtime behaviour is covered by the C++ suites; this covers the generator's
+# field policy, so a change to it fails here rather than silently reshaping the key.
+#
+# The policy under test belongs to the schemas, so this runs regardless of
+# HIPDNN_ENABLE_KERNEL_INGESTOR.
+function(_create_cache_key_codegen_test_internal prefix_name)
+    if(Python3_FOUND)
+        add_test(
+            NAME ${prefix_name}_cache_key_codegen_tests
+            COMMAND ${Python3_EXECUTABLE} -m unittest discover -s
+                    ${PROJECT_SOURCE_DIR}/scripts -p "test_gen_cache_key.py" -v
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/scripts
+        )
+        _apply_hipdnn_test_category_labels(${prefix_name}_cache_key_codegen_tests)
+    endif() # Python3_FOUND
+endfunction() # _create_cache_key_codegen_test_internal
+
 # Finalizes and creates all of the test targets
 #
 # Arguments:
@@ -234,6 +252,7 @@ endfunction() # _create_check_targets_internal
 # In standalone builds (non-superbuild), also creates unprefixed aliases for backward compatibility.
 function(finalize_test_targets prefix_name)
     _create_test_name_validation_target_internal(${prefix_name})
+    _create_cache_key_codegen_test_internal(${prefix_name})
 
     _create_check_targets_internal(${prefix_name})
 

@@ -46,9 +46,71 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
 endif()
 
+if(ENABLE_HIP_FLASH2_ENGINE)
+    # Precompiled-kernel engine: compile the host-side engine/plan sources into the
+    # provider object library. HipFlash2FwdPlan.hip is intentionally excluded (it is
+    # the offline source for the shipped .co files and needs rocWMMA headers).
+    target_sources(hip_kernel_provider_impl PRIVATE
+        engines/hip_flash2_engine/HipFlash2Engine.cpp
+        engines/hip_flash2_engine/HipFlash2FwdPlan.cpp
+        engines/hip_flash2_engine/HipFlash2FwdPlanBuilder.cpp)
+    target_compile_definitions(hip_kernel_provider_impl PRIVATE
+        HIPDNN_ENGINE_HIP_FLASH2
+        HIP_FLASH2_KERNEL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels")
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_FLASH2=1)
+    # Defect E fix: copy .co files to build tree so build-tree test runs work without
+    # manual HIP_FLASH2_KERNEL_DIR export (mirrors asm_sdpa_engine pattern)
+    # Copy every .co present, not just the legacy object: naming only the
+    # legacy one meant a build-tree ctest could never exercise a variant even
+    # when the install was correct (S. Reeder had to stage objects by hand to
+    # test the dispatcher at all).
+    file(GLOB _f2_build_cos
+         ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/*.co)
+    file(COPY ${_f2_build_cos}
+        DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels)
+    # Override HIP_FLASH2_KERNEL_DIR at test time to point to build tree
+    set(HIP_FLASH2_KERNEL_DIR_BUILD "${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels"
+        CACHE STRING "Build-tree path for Flash2 .co kernels (for test runs)")
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
+    # Only the install path is compiled in. Baking the build tree in as well would ship an
+    # absolute path from this machine inside the plugin and prefer it on any host where it
+    # happened to exist, which also means nothing would ever exercise the installed copy.
+    # Build-tree runs set HIPDNN_DESCRIPTOR_DIR instead; the test targets do it for ctest.
+    target_compile_definitions(hip_kernel_provider_impl PRIVATE
+        HIPDNN_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
+        # Container.cpp resolves this relative to the loaded .so first, so a
+        # DESTDIR-staged, relocated, or repackaged install still finds its own
+        # descriptors; HIPDNN_DESCRIPTOR_INSTALL_DIR above is only its fallback.
+        HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
+    )
+
+    # The kpack kernel source adapter. Listed here rather than beside Kernel.cpp above
+    # because it does not compile without the ingestor: KpackArchive.cpp is the only
+    # translation unit in the provider that includes <rocm_kpack/kpack.h>.
+    target_sources(hip_kernel_provider_impl PRIVATE
+        compilation/KpackArchive.cpp
+        compilation/KpackKernelLoader.cpp
+        compilation/KpackProgram.cpp
+    )
+
+    # The object library gets rocm::rocm_kpack for its include directories; the two
+    # targets that actually link have to name it themselves, because they consume the
+    # objects via $<TARGET_OBJECTS:...>, which carries no link interface.
+    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
+    target_link_libraries(hip_kernel_provider_private PUBLIC rocm::rocm_kpack)
+endif()
+
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # See the note above hip_kernel_provider_impl: $<TARGET_OBJECTS:...> carries no link
+    # interface, so the plugin has to name the kpack reader itself.
+    target_link_libraries(hip_kernel_provider PRIVATE rocm::rocm_kpack)
+endif()
 
 if(NOT WIN32)
     target_link_libraries(hip_kernel_provider PRIVATE "-Xlinker --exclude-libs=ALL")
@@ -113,12 +175,15 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         # TEST_ENVIRONMENT (ASAN symbolizer path, coverage LLVM_PROFILE_FILE, set by
         # dnn-providers/cmake/Sanitizers.cmake / _build_test_environment_list_internal) to
         # every generated suite; without it those suites run unsanitized/uninstrumented.
+        # The per-target published variable is that same ambient set merged with anything
+        # passed to add_unit_test_target() -- HIPDNN_DESCRIPTOR_DIR, without which the
+        # descriptor-backed engines are absent and every test that reads one fails.
         apply_test_category_labels(
             hip_kernel_provider_tests
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-            ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT ${hip_kernel_provider_tests_TEST_ENVIRONMENT}
         )
         # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT is TEST_ENVIRONMENT
         # merged with any per-target ENVIRONMENT passed to add_integration_test_target()
@@ -233,20 +298,18 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
 
-    # For standalone builds we need to install the ctest files.
-    # When YAML-based categorization is active, install the generated install_CTestTestfile.cmake
-    # to bin/hip_kernel_provider/ so TheRock CI's test_runner.py can drive `ctest -L quick`
-    # (etc.) from the artifact's install tree. Otherwise, fall back to the project's
-    # own install_provider_ctest_files() which emits an unlabeled CTestTestfile.cmake.
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
-            install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-                    DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
-                    RENAME "CTestTestfile.cmake"
-            )
-        else()
-            install_provider_ctest_files("hip_kernel_provider")
-        endif()
+    # Install the ctest files. When YAML-based categorization is active, install the
+    # generated install_CTestTestfile.cmake to bin/hip_kernel_provider/ so TheRock CI's
+    # test_runner.py can drive `ctest -L quick` (etc.) from the artifact's install tree.
+    # Otherwise, fall back to the project's own install_provider_ctest_files() which
+    # emits an unlabeled CTestTestfile.cmake.
+    if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
+        install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
+                RENAME "CTestTestfile.cmake"
+        )
+    else()
+        install_provider_ctest_files("hip_kernel_provider")
     endif()
 endif()
 

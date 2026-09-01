@@ -189,6 +189,24 @@ void _rocsparse_mat_info::set_csrildlt0_info(rocsparse_operation    operation,
     this->m_trm.create_csrildlt0_info()->set(operation, fill_mode, trm);
 }
 
+rocsparse_ellsv_info _rocsparse_mat_info::get_ellsv_info()
+{
+    return this->m_trm.create_ellsv_info();
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_ellsv_info(rocsparse_operation operation,
+                                                           rocsparse_fill_mode fill_mode)
+{
+    return this->get_ellsv_info()->get(operation, fill_mode);
+}
+
+void _rocsparse_mat_info::set_ellsv_info(rocsparse_operation    operation,
+                                         rocsparse_fill_mode    fill_mode,
+                                         rocsparse::trm_info_t* trm)
+{
+    this->get_ellsv_info()->set(operation, fill_mode, trm);
+}
+
 std::shared_ptr<_rocsparse_csrsv_info> _rocsparse_mat_info::get_shared_csrsv_info()
 {
     return this->m_trm.get_shared_csrsv_info();
@@ -263,6 +281,10 @@ void _rocsparse_mat_info::clear_bsric0_info()
 {
     this->m_trm.clear_bsric0_info();
 }
+void _rocsparse_mat_info::clear_ellsv_info()
+{
+    this->m_trm.clear_ellsv_info();
+}
 
 //
 // Duplicate all the trm_info_t.
@@ -292,6 +314,16 @@ void _rocsparse_mat_info::set_bsrmv_info(rocsparse_bsrmv_info value)
     this->bsrmv_info = value;
 }
 
+rocsparse_coomv_info _rocsparse_mat_info::get_coomv_info()
+{
+    return this->coomv_info;
+}
+
+void _rocsparse_mat_info::set_coomv_info(rocsparse_coomv_info value)
+{
+    this->coomv_info = value;
+}
+
 void _rocsparse_mat_info::set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value)
 {
     this->m_sorted_coo2csr_info = value;
@@ -300,6 +332,11 @@ void _rocsparse_mat_info::set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info
 rocsparse::sorted_coo2csr_info_t* _rocsparse_mat_info::get_sorted_coo2csr_info()
 {
     return this->m_sorted_coo2csr_info;
+}
+
+std::shared_ptr<_rocsparse_ellsv_info> _rocsparse_mat_info::get_shared_ellsv_info()
+{
+    return this->m_trm.get_shared_ellsv_info();
 }
 
 _rocsparse_mat_info::~_rocsparse_mat_info()
@@ -334,6 +371,12 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
     {
         delete this->bsrmv_info;
         this->bsrmv_info = nullptr;
+    }
+
+    if(this->coomv_info != nullptr)
+    {
+        delete this->coomv_info;
+        this->coomv_info = nullptr;
     }
 
     rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = this->get_sorted_coo2csr_info();

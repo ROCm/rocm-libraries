@@ -130,7 +130,7 @@ namespace rocsparse
     //
     std::string handle_get_arch_name(rocsparse_handle handle);
 
-    struct rocpsarse_arch_names
+    struct rocsparse_arch_names
     {
         static constexpr const char* gfx908 = "gfx908";
     };

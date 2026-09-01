@@ -1337,8 +1337,9 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
 
         auto* C = load_ptr_batch(d_C, batch, 0, stride_C);
 
-        // offset W_C by batch
-        W_C += ((int64_t(n) * (n - 1)) / 2) * batch;
+        // offset W_C by batch into a local, as accumulating into the parameter
+        // would compound the offset on each pass of the batch sweep
+        T* W_C_batch = W_C + ((int64_t(n) * (n - 1)) / 2) * batch;
 
         int row = blockIdx.y * blockDim.y + threadIdx.y;
         int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1352,9 +1353,9 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
                 // Calculate the index in the destination matrix W_C
                 int index = (row * (row - 1)) / 2 + col;
                 if constexpr(copy_from_C_to_W_C)
-                    W_C[index] = C[row + col * int64_t(ldc)];
+                    W_C_batch[index] = C[row + col * int64_t(ldc)];
                 else
-                    C[row + col * int64_t(ldc)] = W_C[index];
+                    C[row + col * int64_t(ldc)] = W_C_batch[index];
             }
         }
         else
@@ -1365,9 +1366,9 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
                 // Calculate the index in the destination matrix W_C
                 int index = (row * (2 * n - row - 1)) / 2 + (col - row - 1);
                 if constexpr(copy_from_C_to_W_C)
-                    W_C[index] = C[row + col * int64_t(ldc)];
+                    W_C_batch[index] = C[row + col * int64_t(ldc)];
                 else
-                    C[row + col * int64_t(ldc)] = W_C[index];
+                    C[row + col * int64_t(ldc)] = W_C_batch[index];
             }
         }
 

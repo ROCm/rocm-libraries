@@ -72,7 +72,6 @@ namespace rocsparse
         rocsparse_bsrilu0_info bsrilu0_info
             = (info != nullptr) ? info->get_bsrilu0_info() : nullptr;
         _rocsparse_spmat_descr bsr(rocsparse_format_bsr,
-                                   false,
                                    static_cast<int64_t>(1),
                                    static_cast<int64_t>(mb),
                                    static_cast<int64_t>(mb),

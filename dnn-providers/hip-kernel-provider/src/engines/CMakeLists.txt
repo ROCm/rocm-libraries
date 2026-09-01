@@ -8,3 +8,7 @@ endif()
 if(ENABLE_HIP_MLOPS_ENGINE)
     add_subdirectory(hip_mlops_engine)
 endif()
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_subdirectory(kernel_ingestor_engine)
+endif()

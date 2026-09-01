@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <stdio.h>
 #include <gtest/gtest.h>
+#include <stdio.h>
 
 #include <hip/hip_runtime.h>
 #include <rocrand/rocrand.h>
@@ -27,22 +27,18 @@
 #include "test_common.hpp"
 #include "test_rocrand_common.hpp"
 
-class rocrand_generate_tests : public ::testing::TestWithParam<rocrand_rng_type> { };
+class rocrand_generate_tests : public ::testing::TestWithParam<rocrand_rng_type>
+{};
 
 TEST_P(rocrand_generate_tests, int_test)
 {
     const rocrand_rng_type rng_type = GetParam();
 
     rocrand_generator generator;
-    ROCRAND_CHECK(
-        rocrand_create_generator(
-            &generator,
-            rng_type
-        )
-    );
+    ROCRAND_CHECK(rocrand_create_generator(&generator, rng_type));
 
-    const size_t size = 12563;
-    unsigned int * data;
+    const size_t  size = 12563;
+    unsigned int* data;
     HIP_CHECK(hipMallocHelper(&data, size * sizeof(unsigned int)));
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -70,15 +66,10 @@ TEST_P(rocrand_generate_tests, char_test)
     const rocrand_rng_type rng_type = GetParam();
 
     rocrand_generator generator;
-    ROCRAND_CHECK(
-        rocrand_create_generator(
-            &generator,
-            rng_type
-        )
-    );
+    ROCRAND_CHECK(rocrand_create_generator(&generator, rng_type));
 
-    const size_t size = 12563;
-    unsigned char * data;
+    const size_t   size = 12563;
+    unsigned char* data;
     HIP_CHECK(hipMallocHelper(&data, size * sizeof(unsigned char)));
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -106,15 +97,10 @@ TEST_P(rocrand_generate_tests, short_test)
     const rocrand_rng_type rng_type = GetParam();
 
     rocrand_generator generator;
-    ROCRAND_CHECK(
-        rocrand_create_generator(
-            &generator,
-            rng_type
-        )
-    );
+    ROCRAND_CHECK(rocrand_create_generator(&generator, rng_type));
 
-    const size_t size = 12563;
-    unsigned short * data;
+    const size_t    size = 12563;
+    unsigned short* data;
     HIP_CHECK(hipMallocHelper(&data, size * sizeof(unsigned short)));
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -158,8 +144,9 @@ TEST(rocrand_generate_tests, neg_test)
 }
 
 INSTANTIATE_TEST_SUITE_P(rocrand_generate_tests,
-                        rocrand_generate_tests,
-                        ::testing::ValuesIn(rng_types));
+                         rocrand_generate_tests,
+                         ::testing::ValuesIn(rng_types),
+                         rocrand_rng_type_test_name);
 
 class rocrand_generate_long_long_tests : public ::testing::TestWithParam<rocrand_rng_type>
 {};
@@ -197,4 +184,5 @@ TEST_P(rocrand_generate_long_long_tests, long_long_test)
 
 INSTANTIATE_TEST_SUITE_P(rocrand_generate_long_long_tests,
                          rocrand_generate_long_long_tests,
-                         ::testing::ValuesIn(long_long_rng_types));
+                         ::testing::ValuesIn(long_long_rng_types),
+                         rocrand_rng_type_test_name);

@@ -163,6 +163,15 @@
       "monorepo_source_of_truth": true
     },
     {
+      "name": "rocalution",
+      "url": "ROCm/rocALUTION",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
       "name": "rocroller",
       "url": "ROCm/rocRoller",
       "branch": "develop",
@@ -232,6 +241,24 @@
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "hipthreads",
+      "url": "ROCm/hipThreads",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rpp",
+      "url": "ROCm/rpp",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {

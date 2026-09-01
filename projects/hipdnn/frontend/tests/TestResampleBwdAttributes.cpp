@@ -195,3 +195,117 @@ TEST(TestResampleBwdAttributes, SetTensorsConstRef)
     EXPECT_NE(indexTensor, nullptr);
     EXPECT_NE(dxTensor, nullptr);
 }
+
+TEST(TestResampleBwdAttributes, LogicalAndStrictEquality)
+{
+    ResampleBwdAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_pre_padding({1, 1});
+    attr1.set_post_padding({1, 1});
+    attr1.set_stride({2, 2});
+    attr1.set_window({3, 3});
+    attr1.set_resample_mode(ResampleMode::MAXPOOL);
+    attr1.set_padding_mode(PaddingMode::ZERO_PAD);
+
+    auto dy1 = std::make_shared<TensorAttributes>();
+    dy1->set_uid(1).set_name("Dy").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_dy(dy1);
+
+    auto dx1 = std::make_shared<TensorAttributes>();
+    dx1->set_uid(2).set_name("Dx").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_dx(dx1);
+
+    ResampleBwdAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_pre_padding({1, 1});
+    attr2.set_post_padding({1, 1});
+    attr2.set_stride({2, 2});
+    attr2.set_window({3, 3});
+    attr2.set_resample_mode(ResampleMode::MAXPOOL);
+    attr2.set_padding_mode(PaddingMode::ZERO_PAD);
+
+    auto dy2 = std::make_shared<TensorAttributes>();
+    dy2->set_uid(1).set_name("Dy").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_dy(dy2);
+
+    auto dx2 = std::make_shared<TensorAttributes>();
+    dx2->set_uid(2).set_name("Dx").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_dx(dx2);
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatchDy = std::make_shared<TensorAttributes>();
+    structuralMismatchDy->set_uid(99).set_name("MismatchedDy");
+    attr2.set_dy(structuralMismatchDy);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.set_dy(dy2); // Revert
+
+    // pre_padding mismatch: semantic, must fail both checks
+    attr2.set_pre_padding({0, 0});
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_pre_padding({1, 1}); // Revert
+
+    // post_padding mismatch: semantic, must fail both checks
+    attr2.set_post_padding({0, 0});
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_post_padding({1, 1}); // Revert
+
+    // stride mismatch: semantic, must fail both checks
+    attr2.set_stride({1, 1});
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_stride({2, 2}); // Revert
+
+    // window mismatch: semantic, must fail both checks
+    attr2.set_window({2, 2});
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_window({3, 3}); // Revert
+
+    // resample_mode mismatch: semantic, must fail both checks
+    attr2.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_resample_mode(ResampleMode::MAXPOOL); // Revert
+
+    // padding_mode mismatch: semantic, must fail both checks
+    attr2.set_padding_mode(PaddingMode::EDGE_VAL_PAD);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_padding_mode(PaddingMode::ZERO_PAD); // Revert
+
+    // Unset-vs-unset optional fields: two default-constructed attrs with
+    // matching resample mode should still compare equal
+    ResampleBwdAttributes sparse1;
+    sparse1.set_resample_mode(ResampleMode::MAXPOOL);
+    ResampleBwdAttributes sparse2;
+    sparse2.set_resample_mode(ResampleMode::MAXPOOL);
+    EXPECT_TRUE(sparse1 == sparse2);
+    EXPECT_TRUE(sparse1.logicallyEquals(sparse2));
+
+    // Set-vs-unset padding_mode should differ
+    sparse2.set_padding_mode(PaddingMode::EDGE_VAL_PAD);
+    EXPECT_FALSE(sparse1 == sparse2);
+    EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatchDy = std::make_shared<TensorAttributes>();
+    logicalMatchDy
+        ->set_uid(555) // Diverges from attr1's dy1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's dy1 ("Dy")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.set_dy(logicalMatchDy);
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+}

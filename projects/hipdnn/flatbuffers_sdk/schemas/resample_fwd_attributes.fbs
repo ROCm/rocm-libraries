@@ -3,13 +3,16 @@
 
 include "resample_common.fbs";
 
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 table ResampleFwdAttributes {
     // Input/Output tensor UIDs
-    x_tensor_uid: long;          // Input tensor
-    y_tensor_uid: long;          // Output tensor (resample result)
-    index_tensor_uid: long = null; // Optional index tensor (for max resample indices)
+    x_tensor_uid: long (cache_uid);          // Input tensor
+    y_tensor_uid: long (cache_uid);          // Output tensor (resample result)
+    index_tensor_uid: long = null (cache_uid); // Optional index tensor (for max resample indices)
 
     // Resample parameters (N-dimensional support)
     pre_padding: [long];         // Padding before each spatial dimension

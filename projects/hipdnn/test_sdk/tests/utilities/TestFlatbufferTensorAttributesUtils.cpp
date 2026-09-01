@@ -46,6 +46,68 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateShallowTensor)
     EXPECT_EQ(tensor->memory().hostData(), data.data());
 }
 
+TEST(TestFlatbufferTensorAttributesUtils, BindShallowTensorReturnsMatchingTensor)
+{
+    TensorAttributesT attr;
+    attr.uid = 7;
+    attr.name = "z";
+    attr.data_type = DataType::FLOAT;
+    attr.dims = {2, 2};
+    attr.strides = {2, 1};
+
+    std::array<float, 4> data = {1.0f, 2.0f, 3.0f, 4.0f};
+    const std::unordered_map<int64_t, void*> variantPack{{7, data.data()}};
+
+    auto tensor = bindShallowTensor<float>(attr, variantPack);
+
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->dims(), attr.dims);
+    EXPECT_EQ(tensor->strides(), attr.strides);
+    EXPECT_EQ(tensor->memory().hostData(), data.data());
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, BindShallowTensorThrowsOnMissingUid)
+{
+    TensorAttributesT attr;
+    attr.uid = 8;
+    attr.data_type = DataType::FLOAT;
+    attr.dims = {2, 2};
+    attr.strides = {2, 1};
+
+    const std::unordered_map<int64_t, void*> variantPack; // uid 8 absent
+
+    EXPECT_THROW(bindShallowTensor<float>(attr, variantPack), std::out_of_range);
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, BindOptionalShallowTensorNulloptYieldsNullptr)
+{
+    const std::optional<TensorAttributesT> attr = std::nullopt;
+    const std::unordered_map<int64_t, void*> variantPack;
+
+    auto tensor = bindOptionalShallowTensor<float>(attr, variantPack);
+
+    EXPECT_EQ(tensor, nullptr);
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, BindOptionalShallowTensorPresentBinds)
+{
+    TensorAttributesT attr;
+    attr.uid = 9;
+    attr.data_type = DataType::FLOAT;
+    attr.dims = {3};
+    attr.strides = {1};
+
+    std::array<float, 3> data = {1.0f, 2.0f, 3.0f};
+    const std::unordered_map<int64_t, void*> variantPack{{9, data.data()}};
+
+    auto tensor
+        = bindOptionalShallowTensor<float>(std::optional<TensorAttributesT>(attr), variantPack);
+
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->dims(), attr.dims);
+    EXPECT_EQ(tensor->memory().hostData(), data.data());
+}
+
 TEST(TestFlatbufferTensorAttributesUtils, CreateTensorBoolean)
 {
     const std::vector<int64_t> dims = {2, 2};

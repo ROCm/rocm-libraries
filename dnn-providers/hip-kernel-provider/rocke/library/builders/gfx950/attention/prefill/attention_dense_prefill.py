@@ -55,6 +55,8 @@ def _make_launcher(spec: AttentionDenseSpec):
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.use_sinks:
+        sb = sb.ptr("sink_ptr", spec.dtype)
     if spec.varlen:
         sb = sb.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
     sig = sb.build()
@@ -84,10 +86,17 @@ def run(
     out = torch.zeros(B, Sq, Hq, D, dtype=dt, device=dev)
     scale = 1.0 / math.sqrt(D)
 
+    # Generate sink tensor if needed (per query head, raw attention scores)
+    sinks = None
+    if spec.use_sinks:
+        sinks = torch.randn(Hq, dtype=dt, device=dev).contiguous()
+
     launcher = _make_launcher(spec)
     stream = torch.cuda.current_stream().cuda_stream
     cfg = _launch_config(spec, stream)
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
+    if spec.use_sinks:
+        vals["sink_ptr"] = sinks
 
     def call():
         launcher(vals, config=cfg)
@@ -97,23 +106,63 @@ def run(
 
     err = float("nan")
     if check:
-        qh = q.transpose(1, 2).float()
+        qh = q.transpose(1, 2).float()  # [B, Hq, Sq, D]
         rep = Hq // Hkv
-        kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
-        vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
+        kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()  # [B, Hq, Skv, D]
+        vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()  # [B, Hq, Skv, D]
         W = spec.sliding_window
-        if spec.causal and W > 0:
-            # Banded mask: keep k in [q-W+1, q] (causal AND sliding window).
-            qi = torch.arange(Sq, device=dev).view(-1, 1)
+
+        # When sinks are enabled, must use manual implementation (torch SDPA doesn't support sinks)
+        if spec.use_sinks:
+            # Query-chunked attention to avoid OOM on large seqlens.
+            # Computing attn=[B, Hq, Sq, Skv] all at once allocates B*Hq*Sq*Skv*4 bytes
+            # (fp32), e.g., 34.4 GB for Sq=8192, Hq=128, then torch.cat and torch.softmax
+            # each allocate another copy. Chunking over queries caps memory at ~1 GiB per
+            # chunk and is exact (softmax normalizes along keys, so query rows are
+            # independent).
             ki = torch.arange(Skv, device=dev).view(1, -1)
-            allowed = (ki <= qi) & (ki > qi - W)
-            ref = torch.nn.functional.scaled_dot_product_attention(
-                qh, kh, vh, attn_mask=allowed
-            ).transpose(1, 2)
+            sink_col = sinks.float().view(1, Hq, 1, 1)
+            # Cap each chunk at ~1 GiB of scores (B*Hq*q_blk*(Skv+1)*4 bytes)
+            q_blk = max(1, min(Sq, (1 << 30) // max(1, B * Hq * (Skv + 1) * 4)))
+            ref = torch.empty_like(qh)
+            for q0 in range(0, Sq, q_blk):
+                q1 = min(q0 + q_blk, Sq)
+                qn = q1 - q0
+                attn = torch.einsum("bhqd,bhkd->bhqk", qh[:, :, q0:q1], kh) / math.sqrt(
+                    D
+                )
+                if spec.causal or W > 0:
+                    # Global query indices: chunk-local arange slides the mask boundary
+                    qi = torch.arange(q0, q1, device=dev).view(-1, 1)
+                    mask = torch.zeros(qn, Skv, dtype=torch.bool, device=dev)
+                    if spec.causal:
+                        mask |= ki > qi  # Causal: mask future tokens
+                    if W > 0:
+                        mask |= ki <= (
+                            qi - W
+                        )  # Sliding window: mask tokens beyond window
+                    attn.masked_fill_(mask.view(1, 1, qn, Skv), float("-inf"))
+                attn = torch.cat([attn, sink_col.expand(B, Hq, qn, 1)], dim=-1)
+                attn = torch.softmax(attn, dim=-1)[
+                    ..., :-1
+                ]  # Softmax then drop sink column
+                ref[:, :, q0:q1] = torch.einsum("bhqk,bhkd->bhqd", attn, vh)
+            ref = ref.transpose(1, 2)
+
         else:
-            ref = torch.nn.functional.scaled_dot_product_attention(
-                qh, kh, vh, is_causal=spec.causal
-            ).transpose(1, 2)
+            # Original fast path: use PyTorch's optimized SDPA when sinks not needed
+            if spec.causal and W > 0:
+                # Banded mask: keep k in [q-W+1, q] (causal AND sliding window).
+                qi = torch.arange(Sq, device=dev).view(-1, 1)
+                ki = torch.arange(Skv, device=dev).view(1, -1)
+                allowed = (ki <= qi) & (ki > qi - W)
+                ref = torch.nn.functional.scaled_dot_product_attention(
+                    qh, kh, vh, attn_mask=allowed
+                ).transpose(1, 2)
+            else:
+                ref = torch.nn.functional.scaled_dot_product_attention(
+                    qh, kh, vh, is_causal=spec.causal
+                ).transpose(1, 2)
         err = (out.float() - ref).abs().max().item()
 
     for _ in range(warmup):
@@ -163,7 +212,9 @@ def main():
     ap.add_argument(
         "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
     )
+    ap.add_argument("--use-sinks", action="store_true", help="enable attention sinks")
     args = ap.parse_args()
+
     for sq in (256, 512, 2048, 8192):
         spec = AttentionDenseSpec(
             batch=1,
@@ -180,6 +231,7 @@ def main():
             num_persistent=args.np,
             interleave=args.interleave,
             sliding_window=args.sw,
+            use_sinks=args.use_sinks,
         )
         run(spec)
 

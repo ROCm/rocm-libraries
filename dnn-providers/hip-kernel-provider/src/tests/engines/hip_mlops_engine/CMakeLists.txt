@@ -15,6 +15,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Batchnorm/TestBatchnormCommon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Batchnorm/TestBatchnormApplicabilityChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Layernorm/TestLayernormPlanBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/Layernorm/TestLayernormBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Layernorm/TestLayernormFwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Layernorm/TestLayernormApplicabilityChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/TestPlanUtils.cpp

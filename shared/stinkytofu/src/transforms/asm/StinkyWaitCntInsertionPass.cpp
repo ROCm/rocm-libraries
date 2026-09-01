@@ -134,11 +134,11 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             d.dlcnt = spec.dsCount;
             w->addModifier<SWaitCntData>(d);
         }
-        if (spec.bufferCount != WaitCountSpec::kUnused) {
+        if (spec.loadCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_loadcnt, arch), anchor);
-            w->addSrcReg(StinkyRegister(spec.bufferCount));
+            w->addSrcReg(StinkyRegister(spec.loadCount));
             SWaitCntData d;
-            d.vlcnt = spec.bufferCount;
+            d.vlcnt = spec.loadCount;
             w->addModifier<SWaitCntData>(d);
         }
         if (spec.kmCount != WaitCountSpec::kUnused) {
@@ -155,6 +155,19 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             SWaitTensorCntData d;
             d.tlcnt = spec.tensorCount;
             w->addModifier<SWaitTensorCntData>(d);
+            // Tag the wait with the drained loads' memory tokens so downstream passes
+            // (e.g. TDMLoadWaveSyncPass) can identify the drained wait group. The
+            // tlcnt above is what the hardware waits on.
+            if (!spec.tensorTokens.empty()) {
+                w->addModifier<MemTokenData>(MemTokenData{spec.tensorTokens});
+            }
+        }
+        if (spec.asyncCount != WaitCountSpec::kUnused) {
+            StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_asynccnt, arch), anchor);
+            w->addSrcReg(StinkyRegister(spec.asyncCount));
+            SWaitAsyncCntData d;
+            d.asynccnt = spec.asyncCount;
+            w->addModifier<SWaitAsyncCntData>(d);
         }
     }
 

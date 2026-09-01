@@ -103,7 +103,7 @@ def test_run_single_device_sets_custom_lib_env_and_calls_subprocess(
     assert seen["cmd"][3] == "--device"
     assert seen["cmd"][4] == "2"
     assert seen["env"]["HIPBLASLT_BENCH_FREQ"] == "true"
-    assert seen["env"]["HIPBLASLT_TENSILE_LIBPATH"].endswith("library/gfx950")
+    assert Path(seen["env"]["HIPBLASLT_TENSILE_LIBPATH"]).parts[-2:] == ("library", "gfx950")
 
 
 def test_run_multi_device_chunk_path_aggregates_outputs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

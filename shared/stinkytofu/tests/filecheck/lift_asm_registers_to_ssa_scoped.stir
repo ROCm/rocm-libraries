@@ -1,0 +1,41 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=s --DumpStinkyModulePass=ssaForm,stdout
+#
+# LiftAsmRegistersToSSAPass: a lift can be scoped to some register classes.
+#
+# Everything outside the scope stays physical. Those operands carry an immediate
+# payload, contribute no value slot, and SSA destruction never rewrites them, so
+# they come out exactly as the producer wrote them. That is how one class is
+# allocated while the others are left alone: lifting SGPRs alone leaves every
+# VGPR untouched, and with it the VGPR high-water mark and its kernel metadata.
+#
+# Scope is not capability. A class the lifter cannot model is still an error;
+# narrowing the scope only chooses among the classes it can already handle.
+#
+# CHECK-LABEL: st.func @lift_asm_registers_to_ssa_scoped
+#
+# Only the scalar live-ins become block arguments. A VGPR read is not a value
+# here, so no argument is created for it.
+# CHECK-NEXT: ^entry(%1:s, %2:s):
+#
+# The scalar operands read SSA values; the vector destination defines nothing and
+# keeps its physical spelling.
+# CHECK-NEXT: v0 = "st.v_mov_b32"(%1:s)
+#
+# A scalar destination still defines a value, and the VGPR operands beside it stay
+# physical, so one instruction mixes both spellings.
+# CHECK-NEXT: %3:s = "st.v_cmp_eq_u32"(v10, v11)
+#
+# Redefining a scalar makes a new value, exactly as an unscoped lift would.
+# CHECK-NEXT: %4:s = "st.s_add_u32"(%1:s, %2:s)
+# CHECK-NEXT: v1 = "st.v_mov_b32"(%4:s)
+#
+# Nothing vector-class was lifted, so no VGPR ever prints as a value.
+# CHECK-NOT: %{{[0-9]+}}:v
+
+st.func @lift_asm_registers_to_ssa_scoped() {
+^entry:
+  v0 = "st.v_mov_b32"(s4)
+  s0 = "st.v_cmp_eq_u32"(v10, v11)
+  s5 = "st.s_add_u32"(s4, s6)
+  v1 = "st.v_mov_b32"(s5)
+}

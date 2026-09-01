@@ -27,7 +27,7 @@ and the **transposed-x8** flash regime — actually do.
 | $V$ | $S_k \times d$ | value matrix |
 | $O$ | $S_q \times d$ | output (same shape as $Q$) |
 | $S_q, S_k$ | scalar | sequence lengths (query, key) |
-| $d$ | scalar | head dimension (`head_size`, here 64 or 128) |
+| $d$ | scalar | head dimension (`head_size`, here 64, 128, or 256) |
 | $\tau$ | scalar | softmax scale, $\tau = 1/\sqrt{d}$ |
 | $T$ | scalar | the KV tile width (`block_size`, 64 in this example) |
 
@@ -168,11 +168,14 @@ exercises the same build + launch plumbing as the provider.
 
 ---
 
-## 6. Two matmul orientations: narrow vs transposed-x8
+## 6. Three matmul schedules: narrow, transposed-x8, D256-lean
 
-The recurrence of Section 3 is fixed; the two shipped gfx942 paths differ only in
+The recurrence of Section 3 is fixed; the shipped gfx942 paths differ only in
 **how the two matmuls ($QK^\top$ and $PV$) are mapped onto the CDNA3 matrix
-unit**. The harness selects between them in `_build_spec`.
+unit** and how K/V reach it. The harness's `_build_spec` selects between the first
+two (narrow §6.1, transposed-x8 §6.2); the third — the D256 lean natural-QK path
+(§6.3) — is a *production-dispatcher* path (`_d256_gfx942_fast`), not a harness
+`_build_spec` choice.
 
 ### 6.1 The narrow default (`16x16x16`)
 
@@ -230,6 +233,74 @@ is a *kernel-path* restriction, not a hardware one: gfx942 does have the bf16
 through the `..._1k` builtin), but the transposed-x8 attention path is only wired
 and validated for fp16. That is why D128 **bf16** falls back to the narrow
 `16x16x16` path (Section 6.1) rather than the flash regime.
+
+### 6.3 The D256 lean natural-QK path (bf16 prefill)
+
+`head_size = 256` gets its own dedicated body. gfx942 has **no** fast D256 route
+on the two paths above: the wide-flash gate (`_enable_gfx942_bf16_flash`) excludes
+`head_size == 256`, and the narrow `16x16x16` fallback overflows the 64 KB LDS at
+any competitive tile. When the D256 body was folded into the shared D128
+sliding-window kernel during an earlier routing consolidation it inherited that
+path's heavier memory schedule (K **and** V staged + double-buffered, a 3-way
+masked loop-split, a K prefetch pipeline) — machinery a D256 prefill does not
+need — and regressed below the standalone kernel it replaced, losing to the
+reference. The fix is a **self-contained lean builder**
+(`_build_gfx942_4warp_gqa_lean`, reached from `build_gfx942_4warp_gqa` for
+`head_size == 256`) that keeps only what D256 needs.
+
+It is a **natural-QK** schedule — it computes $S = Q K^{\top}$ *directly* (the
+narrow orientation of §6.1), **not** the transposed $S^{\top} = K Q^{\top}$ trick
+of §6.2 — on the gfx942-legal bf16 `mfma_32x32x8` atom, laid out for the 4-wave64
+/ `BLOCK_M = 128` workgroup (`block = (256, 1, 1)`). The data movement is the lean
+part:
+
+- **K and Q stream direct from global memory into registers** — no K/Q LDS
+  staging, no prefetch pipeline.
+- **V is the only operand in LDS.** A single-buffer `V_lds` of `[BN, HD] = [64,
+  256]` is filled once per KV tile and read back as the PV A-operand. Single-buffer
+  means the tile loop needs **both** barriers around the fill: a **WAR** barrier
+  before the stores (the previous iteration's PV reads of `V_lds` must finish
+  before this tile overwrites it) and the **RAW** barrier after (the stores must be
+  visible before PV reads them).
+- **One masked key-loop** over `BN = 64`-key tiles — a single bottom-right causal +
+  varlen mask (§4) with the early-exit `kvend = min(causal_tile, klen_tile)`, not
+  the D128 path's 3-way masked/interior/tail split. The 2-wave max/sum reductions
+  go through `ds_bpermute` (lane `xor 32`).
+- **Both softmax exponentials use `exp2_fast`** — the rescale $\alpha = 2^{\,(m_{t-1}-m_t)}$
+  and the per-key weight $p = 2^{\,(s - m_t)}$. Both exponents are $\le 0$ **by
+  construction** (running max subtracted), which is exactly the domain the
+  range-reduction-free intrinsic is valid on. This is the D256-only site; the
+  §6.1/§6.2 copies are untouched.
+
+**Why it is faster.** The D256 path is latency/memory-bound, not compute-bound, so
+the win is issuing fewer global-memory ops for the same matmul/softmax work: the
+lean body stops paying for the D128 kernel's prefetch/scheduling overhead that
+bought nothing at D256. `exp2_fast` then collapses the multi-instruction
+range-reduced exponential to one VALU op and relieves register pressure enough to
+drop a scratch spill the fuller exponential forced. (Ratios vs the reference /
+AITER live in the gate docstring; absolute throughput is on the protected results
+page per `AGENTS.md`.)
+
+**Scope / how it is selected.** The cohort is exactly `_d256_gfx942_fast`: gfx942,
+**bf16**, `head_size == 256`, **causal prefill** (`sliding_window == 0`,
+`max_seqlen_q > 1`), `block_size in {16, 32}`, none of the feature flags
+(fp8/softcap/sinks/alibi/qq-bias), and i32-addressable KV (caches $\le$ 2 GiB).
+Anything outside that cohort falls back to the default builder. The body itself
+guards `head_size == _4WGQA_LEAN_HEAD_SIZE` **and** `sliding_window == 0`, raising
+`NotImplementedError` otherwise. The head-size guard is a **real limit** of the
+lean body, not merely a validation gate: most head-dim extents derive from
+`head_size`, but the V-staging stride is hardwired to the 256-wide row, so a
+different head size would compute wrong offsets — those sizes are served instead by
+the general 4-warp body (the D128 branch, whose V-fill derives the stride from
+`BN·HD`) and the default tiled builder. Correctness is otherwise the same online-softmax
+recurrence (§3), bottom-right causal mask (§4), and paged-KV layout (§5), gated by
+the fp32 reference (§10) on real gfx942.
+
+> The same `build_gfx942_4warp_gqa` builder also serves the **D128
+> sliding-window** cohort (`_d128_gfx942_swa_fast`) through its non-lean branch;
+> that branch keeps the fuller D128 schedule (K **and** V staged, double-buffered
+> at `block_size ≤ 32`) and adds the windowed mask / windowed KV-skip. Only
+> `head_size == 256` takes the lean body above.
 
 ---
 

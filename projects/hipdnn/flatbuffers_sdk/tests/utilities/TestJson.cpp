@@ -224,10 +224,16 @@ TEST(TestJson, GraphToJsonAndBack)
             graphBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(true);
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid resample bwd graph)";
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulGraph();
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid MoE grouped matmul graph)";
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulBwdGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid MoE grouped matmul backward graph)";
             break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
@@ -324,6 +330,24 @@ TEST(TestJson, MoeGroupedMatmulDefaultsRoundTrip)
     EXPECT_FALSE(inputs.contains("token_ks_tensor_uid"));
 
     toJsonAndBackTestSuite(graph, "(MoE grouped matmul defaults)");
+}
+
+TEST(TestJson, MoeGroupedMatmulBwdRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulBwdGraph();
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+    const auto& inputs = nodeJson.at("inputs");
+    const auto& outputs = nodeJson.at("outputs");
+
+    EXPECT_EQ(nodeJson.at("type").get<std::string>(), "MoeGroupedMatmulBwdAttributes");
+    EXPECT_EQ(inputs.at("doutput_tensor_uid").get<int64_t>(), 1);
+    EXPECT_EQ(inputs.at("token_tensor_uid").get<int64_t>(), 2);
+    EXPECT_EQ(inputs.at("first_token_offset_tensor_uid").get<int64_t>(), 3);
+    EXPECT_EQ(outputs.at("dweight_tensor_uid").get<int64_t>(), 4);
+
+    toJsonAndBackTestSuite(graph, "(MoE grouped matmul backward)");
 }
 
 namespace

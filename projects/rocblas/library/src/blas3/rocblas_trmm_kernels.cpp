@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -210,7 +210,7 @@ rocblas_trmm_outofplace_kernel(rocblas_diagonal diag,
         auto C     = load_ptr_batch(C_arg, batch, offset_c, stride_c);
 
         if(alpha == 0)
-            return;
+            continue;
 
         const rocblas_int k = LEFT ? m : n;
 

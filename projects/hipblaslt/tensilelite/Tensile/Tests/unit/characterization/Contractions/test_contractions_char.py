@@ -24,7 +24,9 @@ _FIXTURE = Path(__file__).parent.parent / "LibraryIO" / "data" / "logic_gfx942_H
 
 @pytest.fixture(scope="module")
 def raw():
-    return yaml.load(_FIXTURE.read_text(), Loader=L.StrictTypeLoader)
+    # read_text() is on its own line so the marker covers only the yaml.load call.
+    doc = _FIXTURE.read_text()
+    return yaml.load(doc, Loader=L.StrictTypeLoader)  # nosec B506
 
 
 @pytest.fixture

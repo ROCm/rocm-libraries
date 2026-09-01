@@ -1,0 +1,131 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --enable-wmma-hide-budget-prescan --remarks 2>&1
+#
+# Per-window hide-budget pre-scan (analyzeWmmaHideBudget, run from onInitRegion).
+#
+# Whether a WMMA window may issue past its slot is not a property of the region, it is
+# a property of that window: a ds_load feeding WMMA 3 has to be issued before WMMA 3
+# whether or not a shadow has room for it, while an independent SALU can wait forever.
+# So the pre-scan walks the region DAG, gives every instruction the index of the
+# earliest WMMA that transitively depends on it, and compares each deadline against the
+# shadow actually available before it. Where the shadow falls short, the last window
+# that can still meet the deadline is told by how much it must overrun.
+#
+# The pre-scan is off unless asked for -- nothing in the pick paths gates on its verdict
+# yet, so a production compile would pay for an answer nobody reads -- hence
+# --enable-wmma-hide-budget-prescan here. The flag lives in dagFeatures only, with no
+# ModuleOptions mirror, so TensileLite has no way to turn it on.
+#
+# --debug-pass StinkyDAGSchedulerPass prints capacityCycles / capacityValu / extraIssue
+# per window; --remarks reports only the windows that owe an overrun.
+
+#===----------------------------------------------------------------------===#
+# 20 ds_loads all feed WMMA #3, so their deadline is 3 and only windows 0..2 can hide
+# them. Plain WMMA at FP8 gives 7 issue cycles each, 21 in total: 20 fit, nothing is
+# owed, and the region stays quiet.
+#===----------------------------------------------------------------------===#
+
+# CHECK-NOT: must issue past their slot
+st.func @plain_wmma_deadline_fits() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[8:15] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[132:147], v[148:163], v[8:15]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[16:23] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[16:23]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v32 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v33 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 4, gds = false }, mod.memtoken = { tokens = [0] } }
+  v34 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 8, gds = false }, mod.memtoken = { tokens = [0] } }
+  v35 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 12, gds = false }, mod.memtoken = { tokens = [0] } }
+  v36 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v37 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 20, gds = false }, mod.memtoken = { tokens = [0] } }
+  v38 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 24, gds = false }, mod.memtoken = { tokens = [0] } }
+  v39 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 28, gds = false }, mod.memtoken = { tokens = [0] } }
+  v40 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v41 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 36, gds = false }, mod.memtoken = { tokens = [0] } }
+  v42 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 40, gds = false }, mod.memtoken = { tokens = [0] } }
+  v43 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 44, gds = false }, mod.memtoken = { tokens = [0] } }
+  v44 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
+  v45 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 52, gds = false }, mod.memtoken = { tokens = [0] } }
+  v46 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 56, gds = false }, mod.memtoken = { tokens = [0] } }
+  v47 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 60, gds = false }, mod.memtoken = { tokens = [0] } }
+  v48 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v49 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 68, gds = false }, mod.memtoken = { tokens = [0] } }
+  v50 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 72, gds = false }, mod.memtoken = { tokens = [0] } }
+  v51 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 76, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:31] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[32:47], v[48:63], v[24:31]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# Identical dependency structure on the scale pair. blockedScaleMask takes the LD_SCALE
+# cycle out of every window, so windows 0..2 offer 6 each, 18 in total. The same 20
+# ds_loads no longer fit before WMMA #3, and window #2 -- the last one that can still
+# meet the deadline -- is the one told to overrun, by 2 issue cycles.
+#===----------------------------------------------------------------------===#
+
+# CHECK: 1 of 4 WMMA windows must issue past their slot (#2 +2 over 6 issue cycles); work a later WMMA depends on does not fit the shadow before it
+st.func @scale_wmma_deadline_forces_overrun() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[132:147], v[148:163], v[8:15]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[16:23]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v32 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v33 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 4, gds = false }, mod.memtoken = { tokens = [0] } }
+  v34 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 8, gds = false }, mod.memtoken = { tokens = [0] } }
+  v35 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 12, gds = false }, mod.memtoken = { tokens = [0] } }
+  v36 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v37 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 20, gds = false }, mod.memtoken = { tokens = [0] } }
+  v38 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 24, gds = false }, mod.memtoken = { tokens = [0] } }
+  v39 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 28, gds = false }, mod.memtoken = { tokens = [0] } }
+  v40 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v41 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 36, gds = false }, mod.memtoken = { tokens = [0] } }
+  v42 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 40, gds = false }, mod.memtoken = { tokens = [0] } }
+  v43 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 44, gds = false }, mod.memtoken = { tokens = [0] } }
+  v44 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
+  v45 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 52, gds = false }, mod.memtoken = { tokens = [0] } }
+  v46 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 56, gds = false }, mod.memtoken = { tokens = [0] } }
+  v47 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 60, gds = false }, mod.memtoken = { tokens = [0] } }
+  v48 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v49 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 68, gds = false }, mod.memtoken = { tokens = [0] } }
+  v50 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 72, gds = false }, mod.memtoken = { tokens = [0] } }
+  v51 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 76, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[32:47], v[48:63], v[24:31]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# The deadline reaches through LDS, not just registers: the tensor_load writes the
+# memory token the ds_load reads, and StinkyBuildImplicitDependencyPass materialises
+# that as an LDS pseudo-register, so the region DAG carries the edge. The tensor_load
+# therefore inherits WMMA #1's deadline instead of floating, and counts against the
+# shadow before it -- a latency-4 FP4 window that has 2 issue cycles to give.
+#===----------------------------------------------------------------------===#
+
+# CHECK: 1 of 2 WMMA windows must issue past their slot (#0 +3 over 2 issue cycles)
+# CHECK: 2 of 2 WMMA windows lost every VALU co-issue slot they had to the LD_SCALE cycle
+st.func @tensor_load_chain_reaches_wmma() {
+^entry:
+  v[0:7] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP4, fmtB = MATRIX_FMT_FP4 } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  v[32:35] = "st.ds_load_b128"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[36:39] = "st.ds_load_b128"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:31] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[32:39], v[40:55], v[24:31]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP4, fmtB = MATRIX_FMT_FP4 } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# capacityValu == 0 is not by itself an LD_SCALE story. v_wmma_f32_16x16x4_f32 carries
+# coIssueWindow 0x0000, so it has no VALU co-issue slot to begin with and
+# blockedScaleMask never takes one away -- the window still offers 15 issue cycles of
+# shadow to SALU and memory. Only windows that HAD slots and lost them are reported.
+#===----------------------------------------------------------------------===#
+
+# CHECK-NOT: lost every VALU co-issue slot
+st.func @no_coissue_window_is_not_an_ld_scale_story() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x4_f32"(v[20:23], v[24:27], v[0:7])
+  v[8:15] = "st.v_wmma_f32_16x16x4_f32"(v[28:31], v[32:35], v[8:15])
+  s10, SCC0 = "st.s_add_u32"(s100, s110) { issueCycles = 1, latencyCycles = 1 }
+  s11, SCC0 = "st.s_add_u32"(s101, s111) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

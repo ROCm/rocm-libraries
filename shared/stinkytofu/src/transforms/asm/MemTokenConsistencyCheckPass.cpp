@@ -33,13 +33,15 @@ namespace {
 using namespace stinkytofu;
 
 static bool isMemTokenCandidate(const StinkyInstruction& inst) {
-    return isTensorLoad(inst) || isDSWrite(inst) || isDSRead(inst);
+    return isTensorLoad(inst) || isDSWrite(inst) || isDSRead(inst) ||
+           isGlobalStoreAsyncFromLds(inst);
 }
 
 static const char* memTokenCandidateKind(const StinkyInstruction& inst) {
     if (isTensorLoad(inst)) return "tensor_load";
     if (isDSWrite(inst)) return "ds_store";
     if (isDSRead(inst)) return "ds_load";
+    if (isGlobalStoreAsyncFromLds(inst)) return "global_store_async_from_lds";
     return "unknown";
 }
 

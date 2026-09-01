@@ -209,4 +209,5 @@ TEST(rocrand_generate_log_normal_tests, neg_test)
 
 INSTANTIATE_TEST_SUITE_P(rocrand_generate_log_normal_tests,
                          rocrand_generate_log_normal_tests,
-                         ::testing::ValuesIn(rng_types));
+                         ::testing::ValuesIn(rng_types),
+                         rocrand_rng_type_test_name);

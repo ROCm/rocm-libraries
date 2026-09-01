@@ -660,6 +660,8 @@ bool IRParser::parseAttributes(ParsedInstruction& inst) {
 
     // Parse comma-separated attributes
     while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof) {
+        skipNewlines();  // the block may span lines
+
         // Check for end of attributes
         if (peek().kind == TokenKind::RightBrace) {
             consume();
@@ -726,6 +728,7 @@ bool IRParser::parseAttributes(ParsedInstruction& inst) {
         }
 
         // Check for comma or end of attributes
+        skipNewlines();
         if (peek().kind == TokenKind::Comma) {
             consume();
             continue;
@@ -925,6 +928,18 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
     const Token& regTypeTok = consume();
     std::string regTypeStr(regTypeTok.text);
 
+    // The emitter glues VOP3 neg to the register (-v0) and the lexer returns it
+    // as one identifier, so split the sign off before matching the type.
+    bool isMinus = false;
+    if (regTypeStr.size() > 1 && regTypeStr[0] == '-') {
+        isMinus = true;
+        regTypeStr.erase(0, 1);
+    }
+    auto withSign = [&](StinkyRegister reg) {
+        reg.reg.isMinus = isMinus;
+        return reg;
+    };
+
     // Handle label_*: label reference (e.g. label_LoopEndL, label_LoopBeginL)
     if (regTypeStr.size() >= 6 && regTypeStr.substr(0, 6) == "label_") {
         return StinkyRegister(regTypeStr);
@@ -985,7 +1000,7 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
             std::all_of(suffix.begin(), suffix.end(),
                         [](unsigned char c) { return std::isdigit(c); })) {
             auto idx = safeStoi(suffix);
-            if (idx) return StinkyRegister(rt, *idx, 1);
+            if (idx) return withSign(StinkyRegister(rt, *idx, 1));
         }
     }
 
@@ -1005,7 +1020,7 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
             emitError("Register index out of range or invalid: " + std::string(idxTok.text));
             return std::nullopt;
         }
-        return StinkyRegister(regType, *idx, 1);  // Single element
+        return withSign(StinkyRegister(regType, *idx, 1));  // Single element
     }
 
     // Check for format: v[12] or v[10:13]
@@ -1062,7 +1077,7 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
         return std::nullopt;
     }
 
-    return StinkyRegister(regType, *startIdx, regNum);
+    return withSign(StinkyRegister(regType, *startIdx, regNum));
 }
 
 bool IRParser::expect(TokenKind kind, const std::string& message) {

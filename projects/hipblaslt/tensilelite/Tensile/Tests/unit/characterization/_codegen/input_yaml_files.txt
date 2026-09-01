@@ -89,6 +89,7 @@ Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx942/str
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx942/streamk_sfc.yaml
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx942/streamk_xccm.yaml
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx942/wgm.yaml
+Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/cms_fusi_preloop_wait.yaml
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/hhs_hplr_snll.yaml
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/localread_cafs_fp8.yaml
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/lra_tr.yaml

@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -795,8 +795,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         // half-lds
         body += set_lds_is_real();
 
-        body += CallbackLoadDeclaration{scalar_type.name, callback_type.name};
-        body += CallbackStoreDeclaration{scalar_type.name, callback_type.name};
+        body += CallbackLoadDeclaration{};
+        body += CallbackStoreDeclaration{};
 
         body += LineBreak{};
         body += CommentLines{"large twiddles"};

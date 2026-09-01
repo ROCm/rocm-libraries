@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -20,6 +21,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsStaticPass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
 
@@ -286,6 +288,40 @@ TEST_F(SwInstructionPrefetchAbsStaticPassTest, AboveP0_SiteBeforeGetpcBeforePref
         }
     }
     EXPECT_EQ(s, State::Done) << "burst instruction sequence not found in entry BB";
+}
+
+// ---------------------------------------------------------------------------
+// gfx1250 hardware-entrypoint prologue
+// ---------------------------------------------------------------------------
+
+// With the prologue present (s_mov_b64 s[64:65], 0 / v_nop / global_prefetch_b8, inserted by
+// InsertInitialUnclausedVmemPass), the entry burst must go AFTER it so the prologue stays the
+// kernel's first executed code.
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, AboveP0_BurstFollowsEntryPrologue) {
+    buildAboveP0Kernel(bb, arch);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    pm.addPass(createInsertInitialUnclausedVmemPass());
+    pm.addPass(createSwInstructionPrefetchAbsStaticPass(64));
+    pm.run(*func);
+
+    ASSERT_EQ(countSPrefetchInst(*func), 1);
+
+    // The first four StinkyTofu nodes are the 3 prologue instructions then the burst site label.
+    std::vector<uint16_t> head;
+    for (auto it = bb->begin(); it != bb->end() && head.size() < 4; ++it) {
+        const IRBase* n = it.getNodePtr();
+        if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+        head.push_back(cast<StinkyInstruction>(n)->getUnifiedOpcode());
+    }
+    ASSERT_EQ(head.size(), 4u);
+    EXPECT_EQ(head[0], GFX::s_mov_b64);
+    EXPECT_EQ(head[1], GFX::v_nop);
+    EXPECT_EQ(head[2], GFX::global_prefetch_b8);
+    EXPECT_EQ(head[3], GFX::LABEL) << "burst site label must follow the prologue";
+    EXPECT_TRUE(hasLabel(*bb, kSwPrefetchAbsSiteLabel));
 }
 
 // ---------------------------------------------------------------------------

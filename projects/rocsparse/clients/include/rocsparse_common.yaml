@@ -146,6 +146,7 @@ Datatypes:
         rocsparse_itilu0_alg_async_inplace: 1
         rocsparse_itilu0_alg_async_split: 2
         rocsparse_itilu0_alg_sync_split: 3
+        rocsparse_itilu0_alg_sync_split_fusion: 4
   - rocsparse_sddmm_alg:
       bases: [c_int ]
       attr:

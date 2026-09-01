@@ -238,8 +238,8 @@ materialize the inner hipDNN attribute object on calls into hipDNN.
 | `Block_scale_quantize_attributes` | 2911 | `BlockScaleQuantizeAttributes` |
 | `Block_scale_dequantize_attributes` | 2952 | `BlockScaleDequantizeAttributes` |
 | `Concatenate_attributes` | 3026 | (none) |
-| `Moe_grouped_matmul_attributes` | 3053 | (none) |
-| `Moe_grouped_matmul_bwd_attributes` | 3082 | (none) |
+| `Moe_grouped_matmul_attributes` | 3053 | `MoeGroupedMatmulAttributes` |
+| `Moe_grouped_matmul_bwd_attributes` | 3082 | `MoeGroupedMatmulBwdAttributes` |
 
 (Plus `CustomOpAttributes` on the hipDNN side, which has no cuDNN
 equivalent.)

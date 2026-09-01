@@ -46,6 +46,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ExactLogicLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FreeSizeLibrary.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FusedA2AKernArg.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/GranularitySelectionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/KernelArguments.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/KernelLanguageTypes.hpp"
@@ -104,7 +105,6 @@ target_sources(tensilelite-host
         FILE_SET tensilelite_private_headers TYPE HEADERS
             BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}"
             FILES
-                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ArithmeticUnitTypes.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedData.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionMapLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionValidation.hpp"

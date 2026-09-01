@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "81015c65-9bc4-507a-a7bf-e70d43dc1b54",
+  "name": "example tiled-attention selector",
+  "kind": "native",
+  "payload": "hipkernel.pointwise.score"
+}

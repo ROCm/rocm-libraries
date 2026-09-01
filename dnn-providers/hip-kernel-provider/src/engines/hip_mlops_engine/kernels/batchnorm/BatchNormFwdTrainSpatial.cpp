@@ -754,9 +754,9 @@ struct BatchNormFwdTrainSpatialImplVar2
         FinalMeanVariance(FpType* __restrict__ meanvarbuff,
                           FpPrecType INHW,
                           double epsilon,
-                          unsigned int& xgid,
-                          unsigned int& ygid,
-                          unsigned int& zgid,
+                          const unsigned int& xgid,
+                          const unsigned int& ygid,
+                          const unsigned int& zgid,
                           unsigned int& commitID,
                           FpPrecType_C& mean,
                           FpPrecType_C& variance,
@@ -767,8 +767,6 @@ struct BatchNormFwdTrainSpatialImplVar2
         mean = cast<FpPrecType_C>(0.);
 
         unsigned int xgrp_id = blockIdx.x;
-        unsigned int ygrp_id = blockIdx.y;
-        unsigned int zgrp_id = blockIdx.z;
 
         // These values (?grp_sz) cannot be substituted with hip_plugin_bn_config::launch_dim.grp? because
         // the dimensions of the blocks for this kernel may be different from the other
@@ -783,17 +781,10 @@ struct BatchNormFwdTrainSpatialImplVar2
         unsigned int ylid = threadIdx.y;
         unsigned int zlid = threadIdx.z;
 
-        xgid = xgrp_id * xgrp_sz + xlid;
-        ygid = ygrp_id * ygrp_sz + ylid;
-        zgid = zgrp_id * zgrp_sz + zlid;
-
         unsigned int xstride = hip_plugin_config::layout_nhwc ? 1 : hip_plugin_bn_config::hw;
         unsigned int ystride = hip_plugin_config::layout_nhwc ? hip_plugin_bn_config::c : 1;
 
         commitID = 0;
-
-        if(xgid * hip_plugin_bn_config::vec_size_x >= hip_plugin_bn_config::c)
-            return;
 
         for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
         {
@@ -1133,10 +1124,13 @@ extern "C" __global__ void
     fp_prec_c_type variance;
     fp_prec_c_type invVariance;
 
-    unsigned int xgid;
-    unsigned int ygid;
-    unsigned int zgid;
+    unsigned int xgid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int ygid = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int zgid = blockIdx.z * blockDim.z + threadIdx.z;
     unsigned int commitID;
+
+    if(xgid * hip_plugin_bn_config::vec_size_x >= hip_plugin_bn_config::c)
+        return;
 
     hip_kernel_provider::batchnorm::BNFwdTrainSpatialVar2{}.FinalMeanVariance(
         meanvarbuff, INHW, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);

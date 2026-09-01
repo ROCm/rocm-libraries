@@ -109,7 +109,16 @@ static int32_t int64ToInt32ForValuLiteral(int64_t v) {
 
 void collectAsmSetSymbolValues(const Function& func,
                                std::unordered_map<std::string, int64_t>& out) {
+    std::unordered_map<std::string, AsmSetSymbolInfo> info;
+    collectAsmSetSymbolInfo(func, info);
+    out.clear();
+    for (const auto& kv : info) out[kv.first] = kv.second.value;
+}
+
+void collectAsmSetSymbolInfo(const Function& func,
+                             std::unordered_map<std::string, AsmSetSymbolInfo>& out) {
     std::unordered_map<std::string, std::string> raw;
+    std::unordered_map<std::string, unsigned> counts;
     for (const BasicBlock& bb : func) {
         for (auto it = bb.begin(); it != bb.end(); ++it) {
             const IRBase* node = it.getNodePtr();
@@ -118,6 +127,7 @@ void collectAsmSetSymbolValues(const Function& func,
             if (directive == nullptr || directive->kind != AsmDirectiveKind::SET) continue;
             if (directive->symbol.empty()) continue;
             raw[directive->symbol] = trimAsmToken(directive->value);
+            ++counts[directive->symbol];
         }
     }
 
@@ -125,7 +135,13 @@ void collectAsmSetSymbolValues(const Function& func,
     for (const auto& kv : raw) {
         std::unordered_set<std::string> expanding;
         int64_t v = 0;
-        if (resolveAsmSetRhs(kv.second, raw, expanding, 0, v)) out[kv.first] = v;
+        AsmSetSymbolInfo info;
+        info.definitionCount = counts[kv.first];
+        if (resolveAsmSetRhs(kv.second, raw, expanding, 0, v)) {
+            info.value = v;
+            info.resolved = true;
+        }
+        out[kv.first] = info;
     }
 }
 

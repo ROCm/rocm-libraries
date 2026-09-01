@@ -5,6 +5,7 @@
 # ArchHelper_includes.inc includes them directly (same dir)
 target_sources(stinkytofu_objs PRIVATE
     ArchHelper.cpp
+    AsmTargetRegisters.cpp
     ComgrProbe.cpp
     HWModel.cpp
     HwReg.cpp

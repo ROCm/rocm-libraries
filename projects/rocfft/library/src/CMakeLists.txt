@@ -260,7 +260,6 @@ set( rocfft_source
   tree_node_real.cpp
   fuse_shim.cpp
   assignment_policy.cpp
-  callback_map.cpp
   node_factory.cpp
   enum_printer.cpp
   rtc_exports.cpp
@@ -305,6 +304,7 @@ add_library( rocfft-rtc-gen OBJECT
   rtc_chirp_gen.cpp
   rtc_test_harness.cpp
   load_store_ops_gen.cpp
+  ${CMAKE_SOURCE_DIR}/shared/sha256.c
 )
 # caching of generation/compilation
 add_library( rocfft-rtc-cache OBJECT

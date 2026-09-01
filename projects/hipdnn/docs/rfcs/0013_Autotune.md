@@ -838,7 +838,7 @@ Write unit tests alongside each stage of implementation. Key areas:
   - `PlanSpec` deduplication: knob order must not affect equality
 - **Algorithms**:
   - `CartesianProduct` (§ 6.2.5): correctness across axis counts, combination limit enforcement
-  - `BenchmarkStatistics` (§ 6.4): empty input, single value, uniform values, division-by-zero in CoV
+  - `TimingStatistics` (§ 6.4): empty input, single value, uniform values, division-by-zero in CoV
 - **Autotune logic** (§ 6.3, § 6.4):
   - `global.benchmarking` knob stripped from user-provided plan specs
   - Ranking: default comparator (`minTimeMs`), failed-engine ordering, custom `AutotuneRankingFn`

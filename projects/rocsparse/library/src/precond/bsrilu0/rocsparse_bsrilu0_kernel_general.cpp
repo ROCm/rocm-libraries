@@ -480,7 +480,7 @@ rocsparse::bsrilu0_kernel_launch_t rocsparse::find_bsrilu0_kernel_general_launch
     rocsparse_handle handle, rocsparse_bsrilu0_info bsrilu0_info, rocsparse_const_spmat_descr A)
 {
     const bool sleep
-        = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908 && //
+        = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908 && //
            handle->asic_rev < 2);
 
     if(sleep)

@@ -20,6 +20,7 @@
 
 #include "tree_node.h"
 #include "../../shared/precision_type.h"
+#include "../../shared/ptrdiff.h"
 #include "function_pool.h"
 #include "kernel_launch.h"
 #include "logging.h"
@@ -28,6 +29,7 @@
 #include "rocfft_mpi.h"
 #include "twiddles.h"
 
+#include <cstdint>
 #include <limits>
 #include <sstream>
 #include <thread>
@@ -362,6 +364,31 @@ void LeafNode::SetupGridParam(GridParam& gp)
 // grid params are set up by RTC
 void TransposeNode::SetupGridParam_internal(GridParam& gp) {}
 
+IndexType TransposeNode::GetKernelIndexType() const
+{
+    auto idx_limit = GetU32KernelIndexLimit();
+
+    // No scalar_type reinterpretation by this kernel (see rtc_transpose_gen.cpp).
+    // INT32_MAX, not UINT32_MAX: the compiler may sign-extend 32-bit indices to 64-bit.
+    if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
+       || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit)
+    {
+        return IndexType::U64;
+    }
+    return IndexType::U32;
+}
+
+size_t LeafNode::MaxKernelIndex(io_data_label io) const
+{
+    // Offsets (iOffset/oOffset) are applied to base pointers before
+    // launch (see powX.cpp) and don't affect kernel index arithmetic.
+    const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
+    const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
+    const auto  io_length = io == io_data_label::INPUT ? length : GetOutputLength();
+    // compute_ptrdiff returns the buffer size (one-past-the-end).
+    return compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
+}
+
 void TreeNode::SetTransposeOutputLength()
 {
     switch(scheme)
@@ -591,8 +618,7 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan                     plan,
                                     void*                                 in_buffer[],
                                     void*                                 out_buffer[],
                                     const rocfft_execution_info_internal& info,
-                                    size_t                                multiPlanIdx,
-                                    const std::map<int, device_callback_t>&)
+                                    size_t                                multiPlanIdx)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
@@ -710,8 +736,7 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                                     void*                                 in_buffer[],
                                     void*                                 out_buffer[],
                                     const rocfft_execution_info_internal& info,
-                                    size_t                                multiPlanIdx,
-                                    const std::map<int, device_callback_t>&)
+                                    size_t                                multiPlanIdx)
 {
     const auto devices = rccl.get_devices();
 
@@ -722,9 +747,9 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                  + " " + PrintArrayType(arrayType) + "\n");
     }
 
-    // collect per-rank send/recv pointers and streams.  the wrapper
-    // requires each vector to be sized num_ranks() and indexed by
-    // RCCL rank; agents[] is already in that order (see constructor).
+    // collect per-rank send/recv pointers. The wrapper requires each
+    // vector to be sized num_ranks() and indexed by RCCL rank; agents[]
+    // is already in that order (see constructor).
     //
     // Buffer layout (disjoint send/recv):
     //   sendBuffer:  slot[dst_rank] at offset dst_rank * count_per_rank
@@ -733,27 +758,23 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
     //                (populated by the collective; read by unpack step)
     std::vector<const void*> send_ptrs(agents.size(), nullptr);
     std::vector<void*>       recv_ptrs(agents.size(), nullptr);
-    std::vector<hipStream_t> streams(agents.size(), nullptr);
     for(size_t r = 0; r < agents.size(); ++r)
     {
         rocfft_scoped_device dev(devices[r]);
         send_ptrs[r] = agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
         recv_ptrs[r] = agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
-        streams[r]   = agents[r].stream;
     }
 
-    // wrapper owns the ncclGroupStart/End scope and per-call
-    // hipSetDevice, so a single call fires the whole collective.
-    rccl.alltoall(send_ptrs, recv_ptrs, streams, count_per_rank, precision, arrayType);
+    // one call fires the whole collective on the comm-owned streams.
+    rccl.alltoall(send_ptrs, recv_ptrs, count_per_rank, precision, arrayType);
 
-    // collective work is now enqueued on each agent's stream.
-    // record a completion event per agent so Wait() can synchronize
-    // on events (matching every other MultiPlanItem) rather than on
-    // streams directly.
+    // record a completion event per agent on the same comm stream the
+    // collective was enqueued on, so Wait() can sync on events.
     for(size_t r = 0; r < agents.size(); ++r)
     {
         rocfft_scoped_device dev(devices[r]);
-        if(agents[r].event && hipEventRecord(agents[r].event, agents[r].stream) != hipSuccess)
+        if(agents[r].event
+           && hipEventRecord(agents[r].event, rccl.get_stream(devices[r])) != hipSuccess)
             throw std::runtime_error("hipEventRecord failed for RCCL AllToAll on device "
                                      + std::to_string(devices[r]));
     }
@@ -798,8 +819,7 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                                    void*                                 in_buffer[],
                                    void*                                 out_buffer[],
                                    const rocfft_execution_info_internal& info,
-                                   size_t                                multiPlanIdx,
-                                   const std::map<int, device_callback_t>&)
+                                   size_t                                multiPlanIdx)
 {
     if(LOG_PLAN_ENABLED())
     {
@@ -842,7 +862,6 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                           t.count,
                           t.peer_location.device,
                           t.local_location.device,
-                          t.stream,
                           precision,
                           arrayType);
                 break;
@@ -851,7 +870,6 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                           t.count,
                           t.peer_location.device,
                           t.local_location.device,
-                          t.stream,
                           precision,
                           arrayType);
                 break;
@@ -862,15 +880,14 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
     // close the group explicitly so a launch failure throws before events record
     group.end();
 
-    // record a completion event per local transfer so Wait() can
-    // synchronize on events (matching every other MultiPlanItem)
-    // rather than on streams directly.
+    // record a completion event per local transfer on the comm-owned
+    // stream it was enqueued on, so Wait() can sync on events.
     for(auto& t : transfers)
     {
         if(t.event)
         {
             rocfft_scoped_device dev(t.local_location.device);
-            if(hipEventRecord(t.event, t.stream) != hipSuccess)
+            if(hipEventRecord(t.event, rccl.get_stream(t.local_location.device)) != hipSuccess)
                 throw std::runtime_error("hipEventRecord failed for RCCL Grouped on device "
                                          + std::to_string(t.local_location.device));
         }
@@ -917,8 +934,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan                     plan,
                                void*                                 in_buffer[],
                                void*                                 out_buffer[],
                                const rocfft_execution_info_internal& info,
-                               size_t                                multiPlanIdx,
-                               const std::map<int, device_callback_t>&)
+                               size_t                                multiPlanIdx)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
@@ -1049,8 +1065,7 @@ void CommGather::ExecuteAsync(const rocfft_plan                     plan,
                               void*                                 in_buffer[],
                               void*                                 out_buffer[],
                               const rocfft_execution_info_internal& info,
-                              size_t                                multiPlanIdx,
-                              const std::map<int, device_callback_t>&)
+                              size_t                                multiPlanIdx)
 {
     if(LOG_PLAN_ENABLED())
     {
@@ -1184,8 +1199,7 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                                 void*                                 in_buffer[],
                                 void*                                 out_buffer[],
                                 const rocfft_execution_info_internal& info,
-                                size_t                                multiPlanIdx,
-                                const std::map<int, device_callback_t>&)
+                                size_t                                multiPlanIdx)
 {
     if(LOG_PLAN_ENABLED())
     {

@@ -23,7 +23,6 @@ def test_derived_paths():
     # Absolute paths are env-specific; pin their structure, not the prefix.
     assert os.path.isabs(Tensile.ROOT_PATH)
     assert Tensile.SOURCE_PATH == os.path.join(Tensile.ROOT_PATH, "Source")
-    assert Tensile.CUSTOM_KERNEL_PATH == os.path.join(Tensile.ROOT_PATH, "CustomKernels")
 
 
 def test_print_tensile_root(capsys):

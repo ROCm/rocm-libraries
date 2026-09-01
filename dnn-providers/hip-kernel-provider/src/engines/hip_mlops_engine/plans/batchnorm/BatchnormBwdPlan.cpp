@@ -198,7 +198,14 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         _activationBeta = static_cast<float>(_params.optActivation()->beta);
     }
 
-    constexpr unsigned int STASH_VALUES_BWD = 2;
+    // _usesSavedStats is true when the caller supplied mean/variance, so the backward
+    // pass need not recompute them. That sets how many per-channel fields the
+    // multi-workgroup reduction path stashes into the dx-aliased buffer: 4 when it must
+    // compute stats (mean, variance, dscale, dbias), 2 when they are supplied (dscale,
+    // dbias only). The applicability gate selects that path only when this many fields
+    // fit in dx, so this count must not be too small. This matches the logic captured
+    // in MIOpen backward_spatial.cpp.
+    const unsigned int stashValuesBwd = !_usesSavedStats ? 4u : 2u;
     KernelConfig config;
     if(useMultiple(dims.n,
                    dims.h,
@@ -215,7 +222,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                      dims.isLayoutNHWC,
                                      dims.useFp32,
                                      minWorkgroups,
-                                     STASH_VALUES_BWD,
+                                     stashValuesBwd,
                                      config);
         if(config.variant == -1)
         {
@@ -322,7 +329,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
         stashMethod = getStashMethod(dims.isLayoutNHWC,
                                      dims.useFp32,
-                                     STASH_VALUES_BWD,
+                                     stashValuesBwd,
                                      dims.c,
                                      dims.n,
                                      dims.inCstride,

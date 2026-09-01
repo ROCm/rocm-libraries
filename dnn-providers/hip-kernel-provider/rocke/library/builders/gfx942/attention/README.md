@@ -116,8 +116,19 @@ prefill shapes are not included.
   gfx942-legal `mfma_f32_32x32x8_f16` atom so that $P^\top$ stays
   **register-resident** as the PV B-operand — no `P_lds` round-trip. See
   [`ALGORITHM.md`](ALGORITHM.md) §6.2.
-- **`use_mfma_32x32x8` is fp16-only** (gfx942 has no bf16 `32x32x8` atom), so
-  D128 **bf16** uses the narrow `16x16x16` path, not the flash regime.
+- **The transposed-x8 flash *path* is fp16-only**, so D128 **bf16** uses the
+  narrow `16x16x16` path, not the flash regime. This is a kernel-path
+  restriction, not a hardware one — gfx942 *does* have the bf16 `32x32x8` atom
+  (`mfma_f32_32x32x8_bf16`), and the D256 lean path below uses it. See
+  [`ALGORITHM.md`](ALGORITHM.md) §6.2.
+- **D256 bf16 causal prefill has its own lean natural-QK path.** For the
+  `_d256_gfx942_fast` cohort (bf16, `head_size = 256`, causal prefill,
+  `block_size {16, 32}`) the production dispatcher routes to a dedicated
+  LDS-light body (`build_gfx942_4warp_gqa` → `_build_gfx942_4warp_gqa_lean`):
+  natural QK ($S = Q K^\top$) on the bf16 `32x32x8` atom, K/Q streamed direct
+  from global, V-only single-buffer LDS, one masked key-loop, `exp2_fast`
+  softmax. It recovers a regression from folding D256 into the shared D128 body.
+  See [`ALGORITHM.md`](ALGORITHM.md) §6.3.
 - **wide4 is the *provider's* analytic default, not the spec's.** A bare spec
   with no flash knobs lands on **L4** (WG=64); `parity_unified_attention.py` sets
   `num_warps=4` explicitly to reproduce the shipped peak. `HIPDNN_GFX942_FLASH_WIDE`
@@ -157,12 +168,17 @@ echoed at startup):
 
 ## Troubleshooting
 
-- **`head_size = 256` is off by default.** There is no tiled d256 path on gfx942,
-  so the dispatcher falls back to the scalar kernel, which is much slower than
-  flash, fails the tolerance on some shapes, and is slow enough at `S2048` to
-  stall graph capture (it can look like a hang). The `d256_disabled` group is
-  skipped unless you pass `--groups d256_disabled` (and expect failures /
-  slowness). A proper tiled d256 implementation is needed to revisit it.
+- **`head_size = 256` is tiled only for the bf16 causal-prefill cohort.** The
+  production dispatcher now serves that cohort (`_d256_gfx942_fast`: bf16,
+  causal prefill, `block_size {16, 32}`) through the lean natural-QK path (Arch
+  notes above / [`ALGORITHM.md`](ALGORITHM.md) §6.3). **Every other D256 shape**
+  — fp16, non-cohort block sizes, or the hand-built specs in this harness that
+  bypass the dispatcher gate — still falls back to the scalar kernel, which is
+  much slower than flash, fails the tolerance on some shapes, and is slow enough
+  at `S2048` to stall graph capture (it can look like a hang). The harness's
+  `d256_disabled` inline group stays skipped unless you pass
+  `--groups d256_disabled` (and, for its non-cohort shapes, expect the scalar
+  path's failures / slowness).
 - **Flash-ineligible shapes fall back to Torch's default SDP backend.** In
   `final_shapes_check.py`, non-square causal shapes (`seqlen_q != seqlen_k`) and
   d256 are rejected by AOTriton flash, so those rows are timed against Torch's

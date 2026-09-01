@@ -37,6 +37,11 @@ def _init_rocisa_gfx1250():
     ri.setKernel(isa, WAVESIZE_32)
 
 
+@pytest.fixture(autouse=True)
+def _rocisa_gfx1250():
+    _init_rocisa_gfx1250()
+
+
 def _make_writer(has_cluster_barrier=True):
     """Minimal writer stub: a unique-label factory and the asm capability map."""
     counters = {}
@@ -87,7 +92,6 @@ class TestClusterBarrierHalves:
         # insertClusterBarrier asserts on this; lock it at the source.
         from Tensile.Components.Subtile.ClusterBarrier import subtileClusterBarrierSignal
         from rocisa.instruction import SCBranchSCC0
-        _init_rocisa_gfx1250()
         items = subtileClusterBarrierSignal(_make_writer(), kernel={}).flatitems()
         assert sum(isinstance(i, SCBranchSCC0) for i in items) == 1
 
@@ -96,7 +100,6 @@ class TestInsertClusterBarrier:
 
     def test_noop_when_disabled(self):
         from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
-        _init_rocisa_gfx1250()
         mod = _module(_wg_barrier(), _fake_wmma())
         out = insertClusterBarrier(mod, _make_writer(), kernel={})
         # disabled -> returns the very same object, untouched
@@ -106,7 +109,6 @@ class TestInsertClusterBarrier:
 
     def test_requires_cluster_barrier_cap(self):
         from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
-        _init_rocisa_gfx1250()
         mod = _module(_wg_barrier(), _fake_wmma())
         writer = _make_writer(has_cluster_barrier=False)
         with pytest.raises(AssertionError):
@@ -115,7 +117,6 @@ class TestInsertClusterBarrier:
     def test_branch_placed_after_wmma(self):
         """signal block reuses the wg barrier; election branch hides behind the WMMA."""
         from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
-        _init_rocisa_gfx1250()
         mod = _module(_wg_barrier(), _fake_wmma("mainloop wmma"), _comment("tail"))
         out = insertClusterBarrier(mod, _make_writer(), kernel={"ClusterBarrier": True})
         lines = [ln for ln in str(out).splitlines() if ln.strip()]
@@ -138,7 +139,6 @@ class TestInsertClusterBarrier:
     def test_signal_intact_when_no_wmma_follows(self):
         """No MFMA after the wg barrier: emit the signal block whole (best effort)."""
         from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
-        _init_rocisa_gfx1250()
         mod = _module(_wg_barrier(), _comment("no wmma here"))
         out = insertClusterBarrier(mod, _make_writer(), kernel={"ClusterBarrier": True})
         lines = [ln for ln in str(out).splitlines() if ln.strip()]
@@ -151,7 +151,6 @@ class TestInsertClusterBarrier:
     def test_signal_prepended_when_no_wg_barrier(self):
         """No workgroup barrier to reuse: open the handshake at the very start."""
         from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
-        _init_rocisa_gfx1250()
         mod = _module(_fake_wmma("lone wmma"), _comment("tail"))
         out = insertClusterBarrier(mod, _make_writer(), kernel={"ClusterBarrier": True})
         lines = [ln for ln in str(out).splitlines() if ln.strip()]
@@ -163,7 +162,6 @@ class TestInsertClusterBarrier:
 
     def test_input_module_left_untouched(self):
         from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
-        _init_rocisa_gfx1250()
         mod = _module(_wg_barrier(), _fake_wmma())
         before = str(mod)
         insertClusterBarrier(mod, _make_writer(), kernel={"ClusterBarrier": True})

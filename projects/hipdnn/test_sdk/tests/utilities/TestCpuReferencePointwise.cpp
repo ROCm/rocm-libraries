@@ -1949,3 +1949,56 @@ TEST(TestCpuReferencePointwiseRegressions, ParameterizedReluBwdBfloat16LowerClip
 
     EXPECT_EQ(output.getHostValue(0, 0, 0, 0), dy.getHostValue(0, 0, 0, 0));
 }
+
+// --- Ternary operation tests ---
+
+TEST(TestCpuReferencePointwiseTernary, BinarySelectInput0BroadcastMismatchThrows)
+{
+    const Tensor<float> in0({1, 2, 1, 1});
+    const Tensor<float> in1({1, 1, 1, 1});
+    const Tensor<bool> mask({1, 1, 1, 1});
+    Tensor<float> output({1, 3, 1, 1});
+
+    EXPECT_THROW((CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+                     PointwiseMode::BINARY_SELECT, output, in0, in1, mask)),
+                 std::runtime_error);
+}
+
+TEST(TestCpuReferencePointwiseTernary, BinarySelectInput1BroadcastMismatchThrows)
+{
+    const Tensor<float> in0({1, 1, 1, 1});
+    const Tensor<float> in1({1, 2, 1, 1});
+    const Tensor<bool> mask({1, 1, 1, 1});
+    Tensor<float> output({1, 3, 1, 1});
+
+    EXPECT_THROW((CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+                     PointwiseMode::BINARY_SELECT, output, in0, in1, mask)),
+                 std::runtime_error);
+}
+
+TEST(TestCpuReferencePointwiseTernary, BinarySelectMaskBroadcastMismatchThrows)
+{
+    const Tensor<float> in0({1, 1, 1, 1});
+    const Tensor<float> in1({1, 1, 1, 1});
+    const Tensor<bool> mask({1, 2, 1, 1});
+    Tensor<float> output({1, 3, 1, 1});
+
+    EXPECT_THROW((CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+                     PointwiseMode::BINARY_SELECT, output, in0, in1, mask)),
+                 std::runtime_error);
+}
+
+TEST(TestCpuReferencePointwiseTernary, UnsupportedTernaryModeThrows)
+{
+    const Tensor<float> in0({1, 1, 1, 1});
+    const Tensor<float> in1({1, 1, 1, 1});
+    const Tensor<bool> mask({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+
+    // CMP_GT is a real PointwiseMode but has no ternary functor; calling the
+    // 3-input overload directly (bypassing arity classification) must reject
+    // it instead of silently misinterpreting the operands.
+    EXPECT_THROW((CpuReferencePointwiseImpl<float, float, float, bool>::pointwiseCompute(
+                     PointwiseMode::CMP_GT, output, in0, in1, mask)),
+                 std::runtime_error);
+}

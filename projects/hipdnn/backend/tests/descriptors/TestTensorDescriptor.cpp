@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include "DescriptorTestUtils.hpp"
+#include "HipdnnDataType.h"
 #include "HipdnnException.hpp"
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
+#include "descriptors/DataTypeConversion.hpp"
+#include "descriptors/ScopedDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
 
@@ -1504,30 +1507,89 @@ TEST_F(TestTensorDescriptor, SetGetRaggedOffsetDesc)
     setRequiredAttributes();
     desc->finalize();
 
-    int64_t uid = 0;
+    TensorDescriptor offsetDesc;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC, HIPDNN_TYPE_INT64, 1, &elementCount, &uid));
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &elementCount,
+                                       &offsetDesc));
     EXPECT_EQ(elementCount, 0);
+}
+
+TEST_F(TestTensorDescriptor, SetUnfinalizedRaggedOffset)
+{
+
+    const auto desc = getDescriptor();
+
+    const int64_t uid = 7;
+    const std::vector<int64_t> dims = {8, 1};
+    const std::vector<int64_t> strides = {1, 1};
+    const hipdnnDataType_t dataType = HIPDNN_DATA_FP8_E4M3;
+
+    auto wrapper = createDescriptor<TensorDescriptor>();
+    auto tensorDesc = wrapper->asDescriptor<TensorDescriptor>();
+
+    tensorDesc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid);
+    tensorDesc->setAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,
+                             HIPDNN_TYPE_INT64,
+                             static_cast<int64_t>(dims.size()),
+                             dims.data());
+    tensorDesc->setAttribute(HIPDNN_ATTR_TENSOR_STRIDES,
+                             HIPDNN_TYPE_INT64,
+                             static_cast<int64_t>(strides.size()),
+                             strides.data());
+    tensorDesc->setAttribute(HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &dataType);
+
+    auto rawOffset = wrapper.get();
+
+    ASSERT_ANY_THROW(desc->setAttribute(HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<void*>(&rawOffset)));
 }
 
 TEST_F(TestTensorDescriptor, SetRaggedOffsetDescStored)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
-    const int64_t raggedUid = 77;
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC, HIPDNN_TYPE_INT64, 1, &raggedUid));
-    EXPECT_TRUE(desc->getData().ragged_offset_tensor_uid.has_value());
-    EXPECT_EQ(desc->getData().ragged_offset_tensor_uid.value(), raggedUid);
+    const int64_t uid = 7;
+    const std::vector<int64_t> dims = {8, 1};
+    const std::vector<int64_t> strides = {1, 1};
+    const hipdnnDataType_t dataType = HIPDNN_DATA_FP8_E4M3;
+
+    auto offsetTensor = test_utilities::createFinalizedTensor(uid, dims, strides, dataType);
+    auto rawOffset = offsetTensor.get();
+
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       static_cast<void*>(&rawOffset)));
+
+    ASSERT_TRUE(desc->getRaggedOffsetDesc());
+    EXPECT_EQ(desc->getRaggedOffsetDesc()->getData().data_type, toSdkDataType(dataType));
+    EXPECT_EQ(desc->getRaggedOffsetDesc()->getData().dims, dims);
+    EXPECT_EQ(desc->getRaggedOffsetDesc()->getData().strides, strides);
+    ASSERT_TRUE(desc->getData().ragged_offset_tensor_uid.has_value());
+    EXPECT_EQ(desc->getData().ragged_offset_tensor_uid.value(), uid);
+    ASSERT_FALSE(desc->getRaggedOffsetDesc()->getData().ragged_offset_tensor_uid.has_value());
 
     setRequiredAttributes();
     desc->finalize();
 
-    int64_t retrieved = 0;
+    ScopedDescriptor retrievedDesc;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC, HIPDNN_TYPE_INT64, 1, &elementCount, &retrieved));
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &elementCount,
+                                       static_cast<void*>(retrievedDesc.getPtr())));
+
+    const auto retrievedTensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        static_cast<void*>(retrievedDesc.getPtr()),
+        HIPDNN_STATUS_INTERNAL_ERROR,
+        "Failed to unpack retrieved ragged offset desc");
+
     EXPECT_EQ(elementCount, 1);
-    EXPECT_EQ(retrieved, raggedUid);
+    EXPECT_EQ(desc->getRaggedOffsetDesc()->getData(), retrievedTensorDesc->getData());
 }

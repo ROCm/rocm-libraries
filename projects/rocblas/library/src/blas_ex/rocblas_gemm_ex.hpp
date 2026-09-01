@@ -26,6 +26,7 @@
 #include "../blas3/Tensile/gemm_tensile.hpp"
 #endif
 
+#include "../blas2/rocblas_gemv.hpp"
 #include "../blas3/rocblas_gemm.hpp"
 #include "handle.hpp"
 #include "logging.hpp"
@@ -167,7 +168,249 @@ bool rocblas_use_gemv_in_gemm(rocblas_handle    handle,
                               ToPtr             d,
                               rocblas_stride    offset_d,
                               rocblas_int       ldd,
-                              rocblas_stride    stride_d);
+                              rocblas_stride    stride_d)
+{
+    // Can only use gemv in the case where m == 1 || n == 1
+    if((m == 1 || n == 1) && k != 0)
+    {
+        using Tex = rocblas_type_from_ptr_t<TScal, false>;
+        using Ti  = rocblas_type_from_ptr_t<TiConstPtr, BATCHED>;
+        using Toc = rocblas_type_from_ptr_t<ToConstPtr, BATCHED>;
+        using Tod = rocblas_type_from_ptr_t<ToPtr, BATCHED>;
+        constexpr bool is_sgemv
+            = std::is_same_v<
+                  Tex,
+                  float> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_dgemv
+            = std::is_same_v<
+                  Tex,
+                  double> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_cgemv
+            = std::is_same_v<
+                  Tex,
+                  rocblas_float_complex> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_zgemv
+            = std::is_same_v<
+                  Tex,
+                  rocblas_double_complex> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_hshgemv
+            = std::is_same_v<
+                  Tex,
+                  float> && std::is_same_v<Ti, rocblas_half> && std::is_same_v<Toc, rocblas_half> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_hssgemv
+            = std::is_same_v<
+                  Tex,
+                  float> && std::is_same_v<Ti, rocblas_half> && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_tstgemv
+            = std::is_same_v<
+                  Tex,
+                  float> && std::is_same_v<Ti, rocblas_bfloat16> && std::is_same_v<Toc, rocblas_bfloat16> && std::is_same_v<Toc, Tod>;
+        constexpr bool is_tssgemv
+            = std::is_same_v<
+                  Tex,
+                  float> && std::is_same_v<Ti, rocblas_bfloat16> && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
+
+        bool gemv_constraints = rocblas_can_use_gemv_in_gemm(trans_a,
+                                                             trans_b,
+                                                             m,
+                                                             n,
+                                                             k,
+                                                             (void*)c,
+                                                             offset_c,
+                                                             ldc,
+                                                             stride_c,
+                                                             (void*)d,
+                                                             offset_d,
+                                                             ldd,
+                                                             stride_d);
+
+        // for now not using on gfx94x or gfx12
+        int arch    = handle->getArch();
+        int archMaj = handle->getArchMajor();
+        int supported_arch
+            = (arch == 906 || arch == 908 || arch == 910) || (archMaj == 10 || archMaj == 11);
+
+        if(gemv_constraints && supported_arch)
+        {
+            // The per-precision rules below were tuned on architectures that have
+            // size-tuned Tensile fp32/fp64 logic. Consumer RDNA ships none (see
+            // ROCm/rocm-libraries#9163), so Tensile falls back to a source kernel and
+            // gemv wins in every configuration measured on gfx1100: 1.1x to 12.5x over
+            // five (free dimension, k) regimes, and never a loss outside launch-overhead
+            // noise. Applying the rules there only rejects wins.
+            // m == 1 && n == 1 is excluded: a 1x1 output is a dot product, the gemv
+            // it maps to has a length-one output of its own, and measurement showed
+            // no speedup and a slightly worse single-precision result (5.5e-7 against
+            // 1.2e-7 at k = 4096). It keeps the rules below.
+            if(archMaj == 11 && !(m == 1 && n == 1))
+                return true;
+
+            bool transNN = (trans_a == rocblas_operation_none && trans_b == rocblas_operation_none);
+            bool transNT = (trans_a == rocblas_operation_none && trans_b != rocblas_operation_none);
+            bool transTN = (trans_a != rocblas_operation_none && trans_b == rocblas_operation_none);
+            bool transTT = (trans_a != rocblas_operation_none && trans_b != rocblas_operation_none);
+
+            // These are heuristics set by us to try to determine whether gemv kernels will outperform Tensile
+            if(is_sgemv)
+            {
+                if(n == 1 && transNN && ldb > 1)
+                    return false;
+                else if(n == 1 && transNT)
+                    return false;
+                else if(n == 1 && ldb > 8)
+                    return false;
+                else if(n == 1 && ldb > 1 && transTT && arch == 906)
+                    return false;
+                else if(m == 1 && transNT)
+                    return false;
+                else if(m == 1 && (lda > 1 || ldc > 1))
+                    return false;
+            }
+            else if(is_dgemv)
+            {
+                if(n == 1 && transTT && ldb > 8)
+                    return false;
+                else if(m == 1 && transNN && (lda > 8 || ldc > 8))
+                    return false;
+                else if(m == 1 && transTT)
+                    return false;
+            }
+            else if(is_hshgemv || is_hssgemv)
+            {
+                if(n == 1 && (transNN || transTN))
+                    return false;
+                else if(n == 1 && transTT && ldb > 8)
+                    return false;
+                else if(m == 1 && (transNN || transTN))
+                    return false;
+            }
+            else if(is_tstgemv || is_tssgemv)
+            {
+                if(n == 1 && (transNN || transTN))
+                    return false;
+                else if(n == 1 && transNT && (arch == 908 || arch == 910))
+                    return false;
+                else if(n == 1 && ldb > 8)
+                    return false;
+                else if(m == 1 && (transNN || transTN))
+                    return false;
+            }
+            else if(is_cgemv)
+            {
+                if(n == 1 && transTT && ldb > 8)
+                    return false;
+                else if(m == 1 && transNN && (lda > 8 || ldc > 8))
+                    return false;
+            }
+            else if(is_zgemv)
+            {
+                if(n == 1 && transTT && ldb > 8)
+                    return false;
+                else if(m == 1 && transNN && (lda > 8 || ldc > 8))
+                    return false;
+            }
+
+            return true;
+        }
+    }
+
+    return false;
+}
+/*
+ * Runs a GEMM whose m or n is 1 as a GEMV. The caller must have established
+ * that this is legal (rocblas_can_use_gemv_in_gemm) and desirable
+ * (rocblas_use_gemv_in_gemm). Shared by gemm_ex and by the plain gemm entry
+ * points, which reach it through rocblas_internal_gemm.
+ */
+template <typename TScal, typename TiConstPtr, typename ToPtr>
+rocblas_status rocblas_gemv_in_gemm_launcher(rocblas_handle    handle,
+                                             rocblas_operation trans_a,
+                                             rocblas_operation trans_b,
+                                             rocblas_int       m,
+                                             rocblas_int       n,
+                                             rocblas_int       k,
+                                             TScal             alpha,
+                                             TiConstPtr        a,
+                                             rocblas_stride    offset_a,
+                                             rocblas_int       lda,
+                                             rocblas_stride    stride_a,
+                                             TiConstPtr        b,
+                                             rocblas_stride    offset_b,
+                                             rocblas_int       ldb,
+                                             rocblas_stride    stride_b,
+                                             TScal             beta,
+                                             ToPtr             d,
+                                             rocblas_stride    offset_d,
+                                             rocblas_int       ldd,
+                                             rocblas_stride    stride_d,
+                                             rocblas_int       batch_count)
+{
+    if(n == 1)
+    {
+        // If transB is transpose, then just use ldb as increment. Currently can't handle trans_b as conjugate.
+        rocblas_int incx_gemv = trans_b == rocblas_operation_none ? 1 : ldb;
+
+        // gemm and gemv handle transA differently
+        rocblas_int m_gemv = trans_a == rocblas_operation_none ? m : k;
+        rocblas_int n_gemv = trans_a == rocblas_operation_none ? k : m;
+        return rocblas_internal_gemv_launcher(handle,
+                                              trans_a,
+                                              m_gemv,
+                                              n_gemv,
+                                              alpha,
+                                              0,
+                                              a,
+                                              offset_a,
+                                              lda,
+                                              stride_a,
+                                              b,
+                                              offset_b,
+                                              incx_gemv,
+                                              stride_b,
+                                              beta,
+                                              0,
+                                              d,
+                                              offset_d,
+                                              1,
+                                              stride_d,
+                                              batch_count);
+    }
+    else if(m == 1)
+    {
+        // Can't handle either trans_a or trans_b as conjugate
+        rocblas_operation transA_gemv = trans_b == rocblas_operation_none
+                                            ? rocblas_operation_transpose
+                                            : rocblas_operation_none;
+        rocblas_int       incx_gemv   = trans_a == rocblas_operation_none ? lda : 1;
+
+        // gemm and gemv handle transA differently
+        rocblas_int m_gemv = transA_gemv == rocblas_operation_none ? n : k;
+        rocblas_int n_gemv = transA_gemv == rocblas_operation_none ? k : n;
+        return rocblas_internal_gemv_launcher(handle,
+                                              transA_gemv,
+                                              m_gemv,
+                                              n_gemv,
+                                              alpha,
+                                              0,
+                                              b,
+                                              offset_b,
+                                              ldb,
+                                              stride_b,
+                                              a,
+                                              offset_a,
+                                              incx_gemv,
+                                              stride_a,
+                                              beta,
+                                              0,
+                                              d,
+                                              offset_d,
+                                              ldd,
+                                              stride_d,
+                                              batch_count);
+    }
+
+    return rocblas_status_internal_error; // rocblas_use_gemv_in_gemm() requires m == 1 || n == 1
+}
 
 template <bool BATCHED>
 rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,

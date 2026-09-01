@@ -10630,6 +10630,368 @@ inline hipsolverStatus_t hipsolver_sytrf(testAPI_t               API,
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
+
+/******************** LARFT ********************/
+// 64-bit API only (API_COMPAT)
+inline hipsolverStatus_t hipsolver_larft_bufferSize(testAPI_t             API,
+                                                    hipsolverHandle_t     handle,
+                                                    hipsolverDnParams_t   params,
+                                                    hipsolverDirectMode_t direct,
+                                                    hipsolverStorevMode_t storev,
+                                                    int64_t               n,
+                                                    int64_t               k,
+                                                    float*                V,
+                                                    int64_t               ldv,
+                                                    float*                tau,
+                                                    float*                T,
+                                                    int64_t               ldt,
+                                                    size_t*               lworkOnDevice,
+                                                    size_t*               lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXlarft_bufferSize(handle,
+                                            params,
+                                            direct,
+                                            storev,
+                                            n,
+                                            k,
+                                            HIP_R_32F,
+                                            V,
+                                            ldv,
+                                            HIP_R_32F,
+                                            tau,
+                                            HIP_R_32F,
+                                            T,
+                                            ldt,
+                                            HIP_R_32F,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_larft_bufferSize(testAPI_t             API,
+                                                    hipsolverHandle_t     handle,
+                                                    hipsolverDnParams_t   params,
+                                                    hipsolverDirectMode_t direct,
+                                                    hipsolverStorevMode_t storev,
+                                                    int64_t               n,
+                                                    int64_t               k,
+                                                    double*               V,
+                                                    int64_t               ldv,
+                                                    double*               tau,
+                                                    double*               T,
+                                                    int64_t               ldt,
+                                                    size_t*               lworkOnDevice,
+                                                    size_t*               lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXlarft_bufferSize(handle,
+                                            params,
+                                            direct,
+                                            storev,
+                                            n,
+                                            k,
+                                            HIP_R_64F,
+                                            V,
+                                            ldv,
+                                            HIP_R_64F,
+                                            tau,
+                                            HIP_R_64F,
+                                            T,
+                                            ldt,
+                                            HIP_R_64F,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_larft_bufferSize(testAPI_t             API,
+                                                    hipsolverHandle_t     handle,
+                                                    hipsolverDnParams_t   params,
+                                                    hipsolverDirectMode_t direct,
+                                                    hipsolverStorevMode_t storev,
+                                                    int64_t               n,
+                                                    int64_t               k,
+                                                    hipsolverComplex*     V,
+                                                    int64_t               ldv,
+                                                    hipsolverComplex*     tau,
+                                                    hipsolverComplex*     T,
+                                                    int64_t               ldt,
+                                                    size_t*               lworkOnDevice,
+                                                    size_t*               lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXlarft_bufferSize(handle,
+                                            params,
+                                            direct,
+                                            storev,
+                                            n,
+                                            k,
+                                            HIP_C_32F,
+                                            V,
+                                            ldv,
+                                            HIP_C_32F,
+                                            tau,
+                                            HIP_C_32F,
+                                            T,
+                                            ldt,
+                                            HIP_C_32F,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_larft_bufferSize(testAPI_t               API,
+                                                    hipsolverHandle_t       handle,
+                                                    hipsolverDnParams_t     params,
+                                                    hipsolverDirectMode_t   direct,
+                                                    hipsolverStorevMode_t   storev,
+                                                    int64_t                 n,
+                                                    int64_t                 k,
+                                                    hipsolverDoubleComplex* V,
+                                                    int64_t                 ldv,
+                                                    hipsolverDoubleComplex* tau,
+                                                    hipsolverDoubleComplex* T,
+                                                    int64_t                 ldt,
+                                                    size_t*                 lworkOnDevice,
+                                                    size_t*                 lworkOnHost)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXlarft_bufferSize(handle,
+                                            params,
+                                            direct,
+                                            storev,
+                                            n,
+                                            k,
+                                            HIP_C_64F,
+                                            V,
+                                            ldv,
+                                            HIP_C_64F,
+                                            tau,
+                                            HIP_C_64F,
+                                            T,
+                                            ldt,
+                                            HIP_C_64F,
+                                            lworkOnDevice,
+                                            lworkOnHost);
+    default:
+        *lworkOnDevice = 0;
+        *lworkOnHost   = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_larft(testAPI_t             API,
+                                         hipsolverHandle_t     handle,
+                                         hipsolverDnParams_t   params,
+                                         hipsolverDirectMode_t direct,
+                                         hipsolverStorevMode_t storev,
+                                         int64_t               n,
+                                         int64_t               k,
+                                         float*                V,
+                                         int64_t               ldv,
+                                         int64_t               stV,
+                                         float*                tau,
+                                         int64_t               stT,
+                                         float*                T,
+                                         int64_t               ldt,
+                                         int64_t               stW,
+                                         float*                workOnDevice,
+                                         size_t                lworkOnDevice,
+                                         float*                workOnHost,
+                                         size_t                lworkOnHost,
+                                         int                   bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXlarft(handle,
+                                 params,
+                                 direct,
+                                 storev,
+                                 n,
+                                 k,
+                                 HIP_R_32F,
+                                 V,
+                                 ldv,
+                                 HIP_R_32F,
+                                 tau,
+                                 HIP_R_32F,
+                                 T,
+                                 ldt,
+                                 HIP_R_32F,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_larft(testAPI_t             API,
+                                         hipsolverHandle_t     handle,
+                                         hipsolverDnParams_t   params,
+                                         hipsolverDirectMode_t direct,
+                                         hipsolverStorevMode_t storev,
+                                         int64_t               n,
+                                         int64_t               k,
+                                         double*               V,
+                                         int64_t               ldv,
+                                         int64_t               stV,
+                                         double*               tau,
+                                         int64_t               stT,
+                                         double*               T,
+                                         int64_t               ldt,
+                                         int64_t               stW,
+                                         double*               workOnDevice,
+                                         size_t                lworkOnDevice,
+                                         double*               workOnHost,
+                                         size_t                lworkOnHost,
+                                         int                   bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXlarft(handle,
+                                 params,
+                                 direct,
+                                 storev,
+                                 n,
+                                 k,
+                                 HIP_R_64F,
+                                 V,
+                                 ldv,
+                                 HIP_R_64F,
+                                 tau,
+                                 HIP_R_64F,
+                                 T,
+                                 ldt,
+                                 HIP_R_64F,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_larft(testAPI_t             API,
+                                         hipsolverHandle_t     handle,
+                                         hipsolverDnParams_t   params,
+                                         hipsolverDirectMode_t direct,
+                                         hipsolverStorevMode_t storev,
+                                         int64_t               n,
+                                         int64_t               k,
+                                         hipsolverComplex*     V,
+                                         int64_t               ldv,
+                                         int64_t               stV,
+                                         hipsolverComplex*     tau,
+                                         int64_t               stT,
+                                         hipsolverComplex*     T,
+                                         int64_t               ldt,
+                                         int64_t               stW,
+                                         hipsolverComplex*     workOnDevice,
+                                         size_t                lworkOnDevice,
+                                         hipsolverComplex*     workOnHost,
+                                         size_t                lworkOnHost,
+                                         int                   bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXlarft(handle,
+                                 params,
+                                 direct,
+                                 storev,
+                                 n,
+                                 k,
+                                 HIP_C_32F,
+                                 V,
+                                 ldv,
+                                 HIP_C_32F,
+                                 tau,
+                                 HIP_C_32F,
+                                 T,
+                                 ldt,
+                                 HIP_C_32F,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_larft(testAPI_t               API,
+                                         hipsolverHandle_t       handle,
+                                         hipsolverDnParams_t     params,
+                                         hipsolverDirectMode_t   direct,
+                                         hipsolverStorevMode_t   storev,
+                                         int64_t                 n,
+                                         int64_t                 k,
+                                         hipsolverDoubleComplex* V,
+                                         int64_t                 ldv,
+                                         int64_t                 stV,
+                                         hipsolverDoubleComplex* tau,
+                                         int64_t                 stT,
+                                         hipsolverDoubleComplex* T,
+                                         int64_t                 ldt,
+                                         int64_t                 stW,
+                                         hipsolverDoubleComplex* workOnDevice,
+                                         size_t                  lworkOnDevice,
+                                         hipsolverDoubleComplex* workOnHost,
+                                         size_t                  lworkOnHost,
+                                         int                     bc)
+{
+    switch(API)
+    {
+    case API_COMPAT:
+        return hipsolverDnXlarft(handle,
+                                 params,
+                                 direct,
+                                 storev,
+                                 n,
+                                 k,
+                                 HIP_C_64F,
+                                 V,
+                                 ldv,
+                                 HIP_C_64F,
+                                 tau,
+                                 HIP_C_64F,
+                                 T,
+                                 ldt,
+                                 HIP_C_64F,
+                                 workOnDevice,
+                                 lworkOnDevice,
+                                 workOnHost,
+                                 lworkOnHost);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
 /********************************************************/
 
 /******************** SYEV/HEEV ********************/

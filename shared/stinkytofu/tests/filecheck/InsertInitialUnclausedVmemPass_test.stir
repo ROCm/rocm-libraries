@@ -1,19 +1,23 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --InsertInitialUnclausedVmemPass --print-output
 #
 # InsertInitialUnclausedVmemPass: gfx1250 hardware entrypoints must begin with
-#   global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE th:TH_LOAD_RT
+#   s_mov_b64 s[64:65], 0
 #   v_nop
+#   global_prefetch_b8 v0, [s64, s65] scope:SCOPE_SE th:TH_LOAD_RT
 # so the kernel's first VMEM instruction is not in a clause (global_prefetch_b8
 # is a VMEM op that ignores EXEC) and the first VALU instruction is a safe
-# v_nop. The pass prepends this sequence before the first real (non-pseudo)
-# instruction of the entry function.
+# v_nop. s[64:65] is never initialized by the hardware, so zeroing it costs
+# nothing; the v_nop also covers the write-to-use delay between the SALU write
+# and the global op that reads the pair. The pass prepends this sequence before
+# the first real (non-pseudo) instruction of the entry function.
 
 #--- Prologue is inserted, in order, ahead of the first real instruction.
 # CHECK-LABEL: @simple_kernel
-# CHECK: "st.global_prefetch_b8"(v0, s[0:1])
+# CHECK: s[64:65] = "st.s_mov_b64"(0)
+# CHECK-NEXT: "st.v_nop"()
+# CHECK-NEXT: "st.global_prefetch_b8"(v0, s[64:65])
 # CHECK-SAME: th = "TH_LOAD_RT"
 # CHECK-SAME: scope = "SCOPE_SE"
-# CHECK-NEXT: "st.v_nop"()
 # CHECK-NEXT: "st.v_add_f32"
 # CHECK: s_endpgm
 
@@ -23,13 +27,15 @@ st.func @simple_kernel() {
   "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
 }
 
-#--- The first three instructions are exactly global_prefetch_b8, v_nop, then
-#--- the original first instruction, with nothing inserted between them.
+#--- The first four instructions are exactly s_mov_b64, v_nop,
+#--- global_prefetch_b8, then the original first instruction, with nothing
+#--- inserted between them.
 # CHECK-LABEL: @order_kernel
-# CHECK: "st.global_prefetch_b8"(v0, s[0:1])
+# CHECK: s[64:65] = "st.s_mov_b64"(0)
+# CHECK-NEXT: "st.v_nop"()
+# CHECK-NEXT: "st.global_prefetch_b8"(v0, s[64:65])
 # CHECK-SAME: th = "TH_LOAD_RT"
 # CHECK-SAME: scope = "SCOPE_SE"
-# CHECK-NEXT: "st.v_nop"()
 # CHECK-NEXT: "st.v_mul_f32"
 
 st.func @order_kernel() {

@@ -33,6 +33,20 @@ def test_add_common_arguments_defaults():
     assert args.global_parameters == []
 
 
+def test_add_common_arguments_rejects_ocl_runtime():
+    p = argparse.ArgumentParser()
+    M.addCommonArguments(p)
+    with pytest.raises(SystemExit):
+        p.parse_args(["--runtime-language", "OCL"])
+
+
+def test_add_common_arguments_rejects_opencl_platform():
+    p = argparse.ArgumentParser()
+    M.addCommonArguments(p)
+    with pytest.raises(SystemExit):
+        p.parse_args(["--platform", "1"])
+
+
 def test_add_common_arguments_global_parameters_eval():
     p = argparse.ArgumentParser()
     M.addCommonArguments(p)
@@ -41,12 +55,24 @@ def test_add_common_arguments_global_parameters_eval():
     assert ("Bar", "baz") in args.global_parameters
 
 
+def test_add_common_arguments_global_parameters_accumulate():
+    # Repeated --global-parameters must accumulate, not clobber.
+    p = argparse.ArgumentParser()
+    M.addCommonArguments(p)
+    args = p.parse_args([
+        "--global-parameters", "KeepBuildTmp=True",
+        "--global-parameters", "CheckASMCodeSize=True",
+    ])
+    assert ("KeepBuildTmp", True) in args.global_parameters
+    assert ("CheckASMCodeSize", True) in args.global_parameters
+
+
 # ---------------------------------------------------------------------------
 # argUpdatedGlobalParameters
 # ---------------------------------------------------------------------------
 def _args(**over):
     base = dict(
-        platform=None, RuntimeLanguage=None, CodeObjectVersion=None, debug=False,
+        RuntimeLanguage=None, CodeObjectVersion=None, debug=False,
         client_lock=None, prebuilt_client=None, MXScaleFormat=0, global_parameters=[],
     )
     base.update(over)
@@ -56,12 +82,11 @@ def _args(**over):
 def test_arg_updated_global_parameters_all_overrides(monkeypatch):
     monkeypatch.delenv("PyTestBuildArchNames", raising=False)
     args = _args(
-        platform=2, RuntimeLanguage="HIP", CodeObjectVersion="5", debug=True,
+        RuntimeLanguage="HIP", CodeObjectVersion="5", debug=True,
         client_lock="/lock", prebuilt_client="/client", MXScaleFormat=1,
         global_parameters=[("K", "V")],
     )
     rv = M.argUpdatedGlobalParameters(args)
-    assert rv["Platform"] == 2
     assert rv["RuntimeLanguage"] == "HIP"
     assert rv["CodeObjectVersion"] == "5"
     assert rv["CMakeBuildType"] == "Debug"
@@ -74,6 +99,22 @@ def test_arg_updated_global_parameters_all_overrides(monkeypatch):
 def test_arg_updated_global_parameters_empty(monkeypatch):
     monkeypatch.delenv("PyTestBuildArchNames", raising=False)
     assert M.argUpdatedGlobalParameters(_args()) == {}
+
+
+def test_arg_updated_global_parameters_rejects_ocl_global_override(monkeypatch):
+    monkeypatch.delenv("PyTestBuildArchNames", raising=False)
+    with pytest.raises(SystemExit):
+        M.argUpdatedGlobalParameters(
+            _args(global_parameters=[("RuntimeLanguage", "OCL")])
+        )
+
+
+def test_arg_updated_global_parameters_rejects_opencl_platform_override(monkeypatch):
+    monkeypatch.delenv("PyTestBuildArchNames", raising=False)
+    with pytest.raises(SystemExit):
+        M.argUpdatedGlobalParameters(
+            _args(global_parameters=[("Platform", 1)])
+        )
 
 
 def test_arg_updated_global_parameters_pytest_arch_env(monkeypatch):

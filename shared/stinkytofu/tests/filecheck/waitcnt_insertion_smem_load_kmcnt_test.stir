@@ -1,0 +1,52 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): SMRD scalar loads (s_load_*) retire on
+# the kmcnt counter, not loadcnt/dscnt. The pass classifies them as CK_KM and
+# inserts an s_wait_kmcnt before a consumer of an outstanding load. The inserted
+# instruction carries an `mod.swaitcnt` modifier exposing the semantic fields
+# (vlcnt / vscnt / dlcnt / dscnt / kmcnt) that downstream emitters consume.
+#
+# Unlike dscnt/loadcnt, kmcnt is an OUT-OF-ORDER counter: scalar loads may
+# return in any order, so a nonzero immediate names no particular load. kmcnt is
+# not even an instruction count (+1 per single-DWORD fetch, +2 per fetch of two
+# or more DWORDs). The only usable immediate is therefore 0
+# (CounterOrder::OutOfOrder in WaitDataflow.cpp's policy table).
+#
+# Pattern (single-block):
+#   s_load_b64 s[8:9]   (scalar load 0)
+#   s_load_b64 s[10:11] (scalar load 1)
+#   s_add_u32  s8, s8     (uses scalar load 0)
+#   s_add_u32  s10, s10   (uses scalar load 1)
+#
+# Expected waits inserted by the pass:
+#   s_wait_kmcnt 0   before the first s_add_u32. An in-order counter would allow
+#                    `1` here (drain load 0, keep load 1 in flight), which would
+#                    let load 1 satisfy the wait while s[8:9] is still stale.
+#   nothing          before the second s_add_u32: the full drain above already
+#                    landed load 1, so no second wait is required.
+#
+# CHECK-LABEL: @waitcnt_insertion_smem_load_kmcnt
+# CHECK: s_load_b64
+# CHECK-NEXT: s_load_b64
+# CHECK-NEXT: s_wait_kmcnt
+# CHECK-SAME: kmcnt = 0
+# Scalar loads touch no counter but kmcnt, so every other field stays unused.
+# CHECK-SAME: vlcnt = -1
+# CHECK-SAME: vscnt = -1
+# CHECK-SAME: dlcnt = -1
+# CHECK-SAME: dscnt = -1
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# One full drain covers both loads; a second wait would be redundant.
+# CHECK-NOT: s_wait_kmcnt
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_smem_load_kmcnt() {
+^entry:
+  s[8:9] = "st.s_load_b64"(s[0:1])
+  s[10:11] = "st.s_load_b64"(s[0:1])
+  s20 = "st.s_add_u32"(s8, s8)
+  s21 = "st.s_add_u32"(s10, s10)
+}

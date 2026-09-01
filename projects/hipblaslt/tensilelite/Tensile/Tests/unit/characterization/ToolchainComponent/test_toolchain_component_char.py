@@ -92,6 +92,34 @@ def test_get_rocm_version_uses_hipconfig(monkeypatch):
     assert seen["exe"] == C.ToolchainDefaults.HIP_CONFIG
 
 
+@pytest.mark.parametrize(
+    "hipconfig_output, expected_version",
+    [
+        pytest.param(
+            b"7.1.25424-4179531dcd",
+            SemanticVersion(7, 1, 25424),
+            id="rocm_7_1_build_suffix",
+        ),
+        pytest.param(
+            b"7.2.26015-fc0010cf6a",
+            SemanticVersion(7, 2, 26015),
+            id="rocm_7_2_build_suffix",
+        ),
+    ],
+)
+def test_get_rocm_version_parses_hipconfig_build_suffix(
+    monkeypatch, hipconfig_output, expected_version
+):
+    monkeypatch.setattr(C, "validateToolchain", lambda x: x)
+
+    class _R:
+        stdout = hipconfig_output
+
+    monkeypatch.setattr(C, "run", lambda *a, **k: _R())
+
+    assert C.get_rocm_version() == expected_version
+
+
 # ---------------------------------------------------------------------------
 # Component base
 # ---------------------------------------------------------------------------

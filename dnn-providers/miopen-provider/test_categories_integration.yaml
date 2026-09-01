@@ -12,15 +12,21 @@ _common_excludes: &common_excludes
 
 test_categories:
   quick:
-    description: "Fast external integration coverage: Smoke GPU cases, quick-tier bundle sweeps, plus quick CPU golden-reference bundles"
+    description: "Fast external integration coverage: quick-tier bundle sweeps plus always-built C++ tests"
     test_patterns:
-      # "Smoke/*" (slash) matches the C++ parameterised smoke suites (legacy
-      # naming, to be renamed later); "quick_*" matches the bundle sweep
-      # suites whose names mirror the on-disk tier directory. GTest treats
-      # '/' and '_' as literal chars, so both patterns are needed.
+      # "quick_*" matches the bundle suites, whose names mirror the on-disk
+      # tier directory (integration-test-bundles/quick/...); bundles are the CI
+      # driver. "Smoke/*" (slash) matches the C++ parameterised suites. Most of
+      # those are graph tests that no longer build by default — see
+      # BUILD_CPP_GRAPH_TESTS in
+      # dnn-providers/integration-tests/src/integration-tests/CMakeLists.txt —
+      # but "Smoke/*" is not dead: the always-built non-graph tests
+      # (Smoke/IntegrationConvFwdSerializeRoundTripFp32,
+      # Smoke/IntegrationGpuResampleForward*) still register under it. It also
+      # picks the graph tests back up on a -DBUILD_CPP_GRAPH_TESTS=ON branch.
+      # GTest treats '/' and '_' as literal chars, so both patterns are needed.
+      - "quick_*"
       - "Smoke/*"
-      # - "quick_*"  # uncomment when bundles are the CI driver
-      - "TestCpu*GoldenReference*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -28,12 +34,11 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Standard external integration coverage: quick coverage plus standard CPU golden-reference bundles"
+    description: "Standard external integration coverage: quick coverage plus standard-tier bundles"
     test_patterns:
+      - "quick_*"
+      - "standard_*"
       - "Smoke/*"
-      # - "quick_*"  # uncomment when bundles are the CI driver
-      - "TestCpu*GoldenReference*"
-      - "TestCpu*GoldenRefStd*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -59,20 +64,47 @@ test_categories:
       - "full"
       - "all"
 
-  ffm_quick:
-    description: "Fast-feedback mechanism (FFM) quick tier: one Smoke case per operation for rapid signal"
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: one bundle case per operation for rapid signal"
     test_patterns:
-      - "Smoke/IntegrationGpuConvFwd2dFp32.Correctness/0"
-      - "Smoke/IntegrationGpuBatchnormForwardInference2dFp32.Correctness/0"
-      - "Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness/0"
-      - "Smoke/IntegrationGpuReductionFp32.Correctness/0"
-      - "Smoke/IntegrationGpuRMSNormFp32.Correctness/0"
-      - "Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/mha"
+      # One case per op, named exactly. These are sweep-case ids taken from
+      # integration-test-bundles/quick/<Op>/Default/sweep.json (and the SDPA
+      # single-graph bundle path); regenerating a sweep can rename them, in
+      # which case this tier silently shrinks. Verify with:
+      #   ctest -L ffm-quick -N
+      - "quick_ConvolutionFwd_Default.1_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0"
+      - "quick_BatchnormInference_Default.1_3_224_bfp16_ncl"
+      - "quick_Pointwise_Default.2_4_8_8_fp16_nchw"
+      - "quick_Reduction_Default.1_16_8_8_bfp16_nchw_modeadd"
+      - "quick_RMSNorm_Default.2_16_8_8_bfp16_nchw_772637"
+      - "quick_SdpaFwd_bhsd_bf16_hd128_nomask_batch_Small.Small"
     exclude: *common_excludes
     labels:
-      - "ffm_quick"
-      - "ffm_full"
+      - "ffm-quick"
+      - "ffm-full"
 
+# GPU-arch-specific exclusions. `"*"` means "this whole suite does not run on
+# gfx110X Windows"; the shared parser emits the suite with CTest's DISABLED
+# property rather than a gtest filter, so the binary is never launched.
+#
+# Rationale, inherited by analogy rather than directly: TheRock's legacy
+# test_miopenprovider.py carved gfx110X Windows out with
+#
+#     # TODO(#3709): Re-enable gfx110X tests once issues are resolved
+#     "gfx110X-all": {"windows": ["miopen_plugin_integration_tests"]},
+#
+# That entry names miopen_plugin_integration_tests, a different binary from
+# the hipdnn_integration_tests this file governs. The sibling
+# test_categories.yaml is the direct port of it (pattern "*Integration*",
+# scoping the carve-out to the integration binary because its categories match
+# both binaries). This file's categories match only hipdnn_integration_tests,
+# so `"*"` is the whole target.
+#
+# ROCm/TheRock#3709 is a *timeout* on the Windows gfx110X runner, not a
+# correctness failure, and it is still open. No failure list was ever recorded
+# for hipdnn_integration_tests specifically on gfx110X, and this suite has not
+# been observed running a case there, so the carve-out is retained rather than
+# narrowed. Re-enabling needs real signal from a Windows gfx110X runner.
 exclude_gpu:
   exclude_gpu_gfx110X_windows:
     test_patterns:
@@ -82,6 +114,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "ffm-quick"
       - "ex_gpu_gfx110X"
 
 execution_settings:
@@ -96,3 +129,4 @@ execution_settings:
     standard: 2700
     comprehensive: 25200
     full: 28800
+    ffm-quick: 7200  # 2 hours

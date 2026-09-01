@@ -33,6 +33,8 @@ import functools
 import re
 import shutil
 
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+
 # --- assembly canonicalization ---------------------------------------------
 
 # The emitter tags branch/loop labels with a random 16-char [A-Z0-9] suffix
@@ -121,13 +123,14 @@ def _isolated_globals():
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
-    try:
-        yield
-    finally:
-        globalParameters.clear()
-        globalParameters.update(saved_gp)
-        validParameters.clear()
-        validParameters.update(saved_vp)
+    with preserve_rocisa_kernel_state():
+        try:
+            yield
+        finally:
+            globalParameters.clear()
+            globalParameters.update(saved_gp)
+            validParameters.clear()
+            validParameters.update(saved_vp)
 
 
 def _init_rocisa_for(kernel):

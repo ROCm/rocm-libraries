@@ -15,18 +15,15 @@ RPP provides a way to utilize all the hardware available for training and augmen
   :width: 200pt
   :align: center
 
-The RPP source is located in the `ROCm/rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ monorepo under `projects/rpp <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rpp>`_. It was previously developed in the standalone ``ROCm/rpp`` repository.
+The RPP project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/rpp.
 
 .. grid:: 2
   :gutter: 3
 
   .. grid-item-card:: Install
 
-    * :doc:`RPP prerequisites <./install/rpp-prerequisites>`
-    * :doc:`Installing RPP <./install/rpp-install>`
-    * :doc:`Installing RPP with the package installer <./install/rpp-install-with-installer>`
-    * :doc:`Building and installing RPP from source <./install/rpp-build-and-install>`
-    * :doc:`Verifying the RPP installation <./install/rpp-verify-install>`
+    * :doc:`Install RPP <install/rpp-install>`
+    * :doc:`Build from source <install/rpp-build>`
 
   .. grid-item-card:: Reference
 

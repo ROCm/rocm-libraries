@@ -406,6 +406,21 @@ TEST(TestCpuIntReferenceValidationUint8, BasicTensorUsage)
 
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }
+TEST(TestCpuIntReferenceValidationBool, ComparesLegalTrueValues)
+{
+    const CpuIntReferenceValidation<bool> refValidation;
+    Tensor<bool> reference({2});
+    Tensor<bool> implementation({2});
+    reference.setHostValue(true, 0);
+    reference.setHostValue(false, 1);
+    implementation.setHostValue(true, 0);
+    implementation.setHostValue(false, 1);
+
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
+
+    implementation.setHostValue(true, 1);
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
 
 // TensorNotComparable tests
 TEST(TestCpuIntReferenceValidationInt32, TensorNotComparable)

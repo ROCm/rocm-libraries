@@ -78,6 +78,14 @@ filters = ["quick_ConvolutionFwd_Default.*fp32_ncdhw*", "quick_ConvolutionFwd_De
 atol = 5e-5
 rtol = 1e-5
 
+# MatmulPointwise Variant3 bf16 swish — single-element ULP mismatch at
+# magnitude ~2.0 (diff=3.125e-2, one bf16 ULP). Default atol=0.01 is
+# tighter than bf16 precision allows at this magnitude.
+[[tolerance_overrides]]
+filters = ["quick_MatmulPointwise_Variant3.*bfp16*swish*"]
+atol = 0.035
+rtol = 0.01
+
 # -- Test Skips --
 # Skip tests on specific architectures (or globally if 'archs' is omitted).
 # Each entry requires:

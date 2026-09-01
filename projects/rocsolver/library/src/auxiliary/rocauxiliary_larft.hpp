@@ -46,17 +46,17 @@ ROCSOLVER_BEGIN_NAMESPACE
 /*************** Main kernels *********************************************************/
 /**************************************************************************************/
 
-template <typename T, typename U, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
-ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
-                                     const rocblas_int k,
+template <typename T, typename I, typename U, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+ROCSOLVER_KERNEL void set_triangular(const I n,
+                                     const I k,
                                      U V,
-                                     const rocblas_int shiftV,
-                                     const rocblas_int ldv,
+                                     const rocblas_stride shiftV,
+                                     const I ldv,
                                      const rocblas_stride strideV,
                                      T* tau,
                                      const rocblas_stride strideT,
                                      T* F,
-                                     const rocblas_int ldf,
+                                     const I ldf,
                                      const rocblas_stride strideF,
                                      const rocblas_direct direct,
                                      const rocblas_storev storev,
@@ -140,17 +140,17 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
     }
 }
 
-template <typename T, typename U, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
-ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
-                                     const rocblas_int k,
+template <typename T, typename I, typename U, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+ROCSOLVER_KERNEL void set_triangular(const I n,
+                                     const I k,
                                      U V,
-                                     const rocblas_int shiftV,
-                                     const rocblas_int ldv,
+                                     const rocblas_stride shiftV,
+                                     const I ldv,
                                      const rocblas_stride strideV,
                                      T* tau,
                                      const rocblas_stride strideT,
                                      T* F,
-                                     const rocblas_int ldf,
+                                     const I ldf,
                                      const rocblas_stride strideF,
                                      const rocblas_direct direct,
                                      const rocblas_storev storev,
@@ -235,8 +235,8 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
     }
 }
 
-template <typename T>
-ROCSOLVER_KERNEL void set_tau(const rocblas_int k, T* tau, const rocblas_stride strideT)
+template <typename T, typename I>
+ROCSOLVER_KERNEL void set_tau(const I k, T* tau, const rocblas_stride strideT)
 {
     const auto b = hipBlockIdx_y;
     const auto i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -248,23 +248,23 @@ ROCSOLVER_KERNEL void set_tau(const rocblas_int k, T* tau, const rocblas_stride 
     }
 }
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
-                                           const rocblas_int n,
-                                           const rocblas_int k,
+                                           const I n,
+                                           const I k,
                                            U VA,
-                                           const rocblas_int shiftV,
-                                           const rocblas_int ldv,
+                                           const rocblas_stride shiftV,
+                                           const I ldv,
                                            const rocblas_stride strideV,
                                            T* tauA,
                                            const rocblas_stride strideT,
                                            T* FA,
-                                           const rocblas_int ldfA,
+                                           const I ldfA,
                                            const rocblas_stride strideF)
 {
-    const rocblas_int bid = hipBlockIdx_y;
-    const rocblas_int tid = hipThreadIdx_x;
-    const rocblas_int tid_inc = hipBlockDim_x;
+    const I bid = hipBlockIdx_y;
+    const I tid = hipThreadIdx_x;
+    const I tid_inc = hipBlockDim_x;
 
     // select batch instance
     T* V = load_ptr_batch<T>(VA, bid, shiftV, strideV);
@@ -275,19 +275,19 @@ ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
     extern __shared__ double lmem[];
     T* work = reinterpret_cast<T*>(lmem);
     T* F = work + k;
-    rocblas_int ldf = k;
+    I ldf = k;
 
     // copy F to shared memory
-    for(rocblas_int i = tid; i < k; i += tid_inc)
-        for(rocblas_int j = i; j < k; j++)
+    for(I i = tid; i < k; i += tid_inc)
+        for(I j = i; j < k; j++)
             F[i + j * ldf] = Ftemp[i + j * ldfA];
     __syncthreads();
 
     // --------- MAIN BODY ---------
-    for(rocblas_int kk = 1; kk < k; kk++)
+    for(I kk = 1; kk < k; kk++)
     {
-        const rocblas_int mm = kk;
-        const rocblas_int nn = n - 1 - kk;
+        const I mm = kk;
+        const I nn = n - 1 - kk;
 
         T* Fx = F + kk * ldf;
 
@@ -298,10 +298,10 @@ ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
             T* Vx = V + (kk + 1) + kk * ldv;
 
             // gemv (conjugate transpose)
-            for(rocblas_int i = tid; i < mm; i += tid_inc)
+            for(I i = tid; i < mm; i += tid_inc)
             {
                 T temp = 0;
-                for(rocblas_int j = 0; j < nn; j++)
+                for(I j = 0; j < nn; j++)
                     temp += conj(Vm[j + i * ldv]) * Vx[j];
                 work[i] = tau[kk] * temp + Fx[i];
             }
@@ -312,10 +312,10 @@ ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
             T* Vx = V + kk + (kk + 1) * ldv;
 
             // gemv (no transpose)
-            for(rocblas_int i = tid; i < mm; i += tid_inc)
+            for(I i = tid; i < mm; i += tid_inc)
             {
                 T temp = 0;
-                for(rocblas_int j = 0; j < nn; j++)
+                for(I j = 0; j < nn; j++)
                     temp += Vm[i + j * ldv] * conj(Vx[j * ldv]);
                 work[i] = tau[kk] * temp + Fx[i];
             }
@@ -325,10 +325,10 @@ ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
 
         // multiply by previous triangular factor
         // trmv (no transpose)
-        for(rocblas_int i = tid; i < mm; i += tid_inc)
+        for(I i = tid; i < mm; i += tid_inc)
         {
             T temp = 0;
-            for(rocblas_int j = i; j < mm; j++)
+            for(I j = i; j < mm; j++)
                 temp += F[i + j * ldf] * work[j];
             Fx[i] = temp;
         }
@@ -337,28 +337,28 @@ ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
     }
 
     // copy shared memory back to F
-    for(rocblas_int i = tid; i < k; i += tid_inc)
-        for(rocblas_int j = i; j < k; j++)
+    for(I i = tid; i < k; i += tid_inc)
+        for(I j = i; j < k; j++)
             Ftemp[i + j * ldfA] = F[i + j * ldf];
 }
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
-                                            const rocblas_int n,
-                                            const rocblas_int k,
+                                            const I n,
+                                            const I k,
                                             U VA,
-                                            const rocblas_int shiftV,
-                                            const rocblas_int ldv,
+                                            const rocblas_stride shiftV,
+                                            const I ldv,
                                             const rocblas_stride strideV,
                                             T* tauA,
                                             const rocblas_stride strideT,
                                             T* FA,
-                                            const rocblas_int ldfA,
+                                            const I ldfA,
                                             const rocblas_stride strideF)
 {
-    const rocblas_int bid = hipBlockIdx_y;
-    const rocblas_int tid = hipThreadIdx_x;
-    const rocblas_int tid_inc = hipBlockDim_x;
+    const I bid = hipBlockIdx_y;
+    const I tid = hipThreadIdx_x;
+    const I tid_inc = hipBlockDim_x;
 
     // select batch instance
     T* V = load_ptr_batch<T>(VA, bid, shiftV, strideV);
@@ -369,19 +369,19 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
     extern __shared__ double lmem[];
     T* work = reinterpret_cast<T*>(lmem);
     T* F = work + k;
-    rocblas_int ldf = k;
+    I ldf = k;
 
     // copy F to shared memory
-    for(rocblas_int i = tid; i < k; i += tid_inc)
-        for(rocblas_int j = 0; j <= i; j++)
+    for(I i = tid; i < k; i += tid_inc)
+        for(I j = 0; j <= i; j++)
             F[i + j * ldf] = Ftemp[i + j * ldfA];
     __syncthreads();
 
     // --------- MAIN BODY ---------
-    for(rocblas_int kk = k - 2; kk >= 0; kk--)
+    for(I kk = k - 2; kk >= 0; kk--)
     {
-        const rocblas_int mm = k - kk - 1;
-        const rocblas_int nn = n - k + kk;
+        const I mm = k - kk - 1;
+        const I nn = n - k + kk;
 
         T* Fm = F + (kk + 1) + (kk + 1) * ldf;
         T* Fx = F + (kk + 1) + kk * ldf;
@@ -393,10 +393,10 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
             T* Vx = V + kk * ldv;
 
             // gemv (conjugate transpose)
-            for(rocblas_int i = tid; i < mm; i += tid_inc)
+            for(I i = tid; i < mm; i += tid_inc)
             {
                 T temp = 0;
-                for(rocblas_int j = 0; j < nn; j++)
+                for(I j = 0; j < nn; j++)
                     temp += conj(Vm[j + i * ldv]) * Vx[j];
                 work[i] = tau[kk] * temp + Fx[i];
             }
@@ -407,10 +407,10 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
             T* Vx = V + kk;
 
             // gemv (no transpose)
-            for(rocblas_int i = tid; i < mm; i += tid_inc)
+            for(I i = tid; i < mm; i += tid_inc)
             {
                 T temp = 0;
-                for(rocblas_int j = 0; j < nn; j++)
+                for(I j = 0; j < nn; j++)
                     temp += Vm[i + j * ldv] * conj(Vx[j * ldv]);
                 work[i] = tau[kk] * temp + Fx[i];
             }
@@ -420,10 +420,10 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
 
         // multiply by previous triangular factor
         // trmv (no transpose)
-        for(rocblas_int i = tid; i < mm; i += tid_inc)
+        for(I i = tid; i < mm; i += tid_inc)
         {
             T temp = 0;
-            for(rocblas_int j = 0; j <= i; j++)
+            for(I j = 0; j <= i; j++)
                 temp += Fm[i + j * ldf] * work[j];
             Fx[i] = temp;
         }
@@ -432,18 +432,18 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
     }
 
     // copy shared memory back to F
-    for(rocblas_int i = tid; i < k; i += tid_inc)
-        for(rocblas_int j = 0; j <= i; j++)
+    for(I i = tid; i < k; i += tid_inc)
+        for(I j = 0; j <= i; j++)
             Ftemp[i + j * ldfA] = F[i + j * ldf];
 }
 
 /******************* Host functions *********************************************/
 /*******************************************************************************/
 
-template <bool BATCHED, typename T>
-void rocsolver_larft_getMemorySize(const rocblas_int n,
-                                   const rocblas_int k,
-                                   const rocblas_int batch_count,
+template <bool BATCHED, typename T, typename I>
+void rocsolver_larft_getMemorySize(const I n,
+                                   const I k,
+                                   const I batch_count,
                                    size_t* size_scalars,
                                    size_t* size_work,
                                    size_t* size_workArr)
@@ -470,14 +470,14 @@ void rocsolver_larft_getMemorySize(const rocblas_int n,
         *size_workArr = 0;
 }
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_larft_argCheck(rocblas_handle handle,
                                         const rocblas_direct direct,
                                         const rocblas_storev storev,
-                                        const rocblas_int n,
-                                        const rocblas_int k,
-                                        const rocblas_int ldv,
-                                        const rocblas_int ldf,
+                                        const I n,
+                                        const I k,
+                                        const I ldv,
+                                        const I ldf,
                                         T V,
                                         U tau,
                                         U F)
@@ -508,22 +508,22 @@ rocblas_status rocsolver_larft_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
-template <typename T, typename U, bool COMPLEX = rocblas_is_complex<T>>
+template <typename T, typename I, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_larft_template(rocblas_handle handle,
                                         const rocblas_direct direct,
                                         const rocblas_storev storev,
-                                        const rocblas_int n,
-                                        const rocblas_int k,
+                                        const I n,
+                                        const I k,
                                         U V,
-                                        const rocblas_int shiftV,
-                                        const rocblas_int ldv,
+                                        const rocblas_stride shiftV,
+                                        const I ldv,
                                         const rocblas_stride strideV,
                                         T* tau,
                                         const rocblas_stride strideT,
                                         T* F,
-                                        const rocblas_int ldf,
+                                        const I ldf,
                                         const rocblas_stride strideF,
-                                        const rocblas_int batch_count,
+                                        const I batch_count,
                                         T* scalars,
                                         T* work,
                                         T** workArr)
@@ -550,8 +550,8 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     const T zero = T(0);
     const T one = T(1);
 
-    const rocblas_int u1_n = use_gemm ? k : n;
-    const rocblas_int u2_n = use_gemm ? n - k : 0;
+    const I u1_n = use_gemm ? k : n;
+    const I u2_n = use_gemm ? n - k : 0;
 
     // Compute T=V2'*V2 or V2*V2' (V'=[V1' V2'] where V1 is triangular and V is trapezoidal)
     // SYRK/HERK can be used alternatively, but GEMM is currently more performant.
@@ -588,12 +588,15 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     // Fix diagonal of T, make zero the not used triangular part,
     // setup tau (changing signs) and account for the non-stored 1's on the
     // householder vectors
-    rocblas_int blocks = (k - 1) / BS2 + 1;
-    ROCSOLVER_LAUNCH_KERNEL(set_triangular, dim3(blocks, blocks, batch_count), dim3(BS2, BS2), 0,
-                            stream, n, k, V, shiftV, ldv, strideV, tau, strideT, F, ldf, strideF,
-                            direct, storev, use_gemm);
-    ROCSOLVER_LAUNCH_KERNEL(set_tau, dim3(blocks, batch_count), dim3(32, 1), 0, stream, k, tau,
-                            strideT);
+    I blocks = (k - 1) / BS2 + 1;
+    ROCSOLVER_LAUNCH_KERNEL((set_triangular<T, I, U>),
+                            dim3(static_cast<uint32_t>(blocks), static_cast<uint32_t>(blocks),
+                                 static_cast<uint32_t>(batch_count)),
+                            dim3(BS2, BS2), 0, stream, n, k, V, shiftV, ldv, strideV, tau, strideT,
+                            F, ldf, strideF, direct, storev, use_gemm);
+    ROCSOLVER_LAUNCH_KERNEL((set_tau<T, I>),
+                            dim3(static_cast<uint32_t>(blocks), static_cast<uint32_t>(batch_count)),
+                            dim3(BS2, 1), 0, stream, k, tau, strideT);
 
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
     size_t lmemsize = sizeof(T) * (k + 1) * k;
@@ -612,13 +615,13 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
 
         if(k <= LARFT_SWITCHSIZE && lmemsize <= props->sharedMemPerBlock)
         {
-            ROCSOLVER_LAUNCH_KERNEL(larft_kernel_forward, dim3(1, batch_count), dim3(BS1, 1),
-                                    lmemsize, stream, storev, u1_n, k, V, shiftV, ldv, strideV, tau,
-                                    strideT, F, ldf, strideF);
+            ROCSOLVER_LAUNCH_KERNEL((larft_kernel_forward<T, I, U>), dim3(1, batch_count),
+                                    dim3(BS1, 1), lmemsize, stream, storev, u1_n, k, V, shiftV, ldv,
+                                    strideV, tau, strideT, F, ldf, strideF);
         }
         else
         {
-            for(rocblas_int i = 1; i < k; ++i)
+            for(I i = 1; i < k; ++i)
             {
                 // compute the matrix vector product, using the householder vectors
                 if(storev == rocblas_column_wise)
@@ -668,13 +671,13 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
         {
             auto shiftU2 = shiftV
                 + ((storev == rocblas_column_wise) ? idx2D(u2_n, 0, ldv) : idx2D(0, u2_n, ldv));
-            ROCSOLVER_LAUNCH_KERNEL(larft_kernel_backward, dim3(1, batch_count), dim3(BS1, 1),
-                                    lmemsize, stream, storev, u1_n, k, V, shiftU2, ldv, strideV,
-                                    tau, strideT, F, ldf, strideF);
+            ROCSOLVER_LAUNCH_KERNEL((larft_kernel_backward<T, I, U>), dim3(1, batch_count),
+                                    dim3(BS1, 1), lmemsize, stream, storev, u1_n, k, V, shiftU2,
+                                    ldv, strideV, tau, strideT, F, ldf, strideF);
         }
         else
         {
-            for(rocblas_int i = k - 2; i >= 0; --i)
+            for(I i = k - 2; i >= 0; --i)
             {
                 // compute the matrix vector product, using the householder vectors
                 if(storev == rocblas_column_wise)
@@ -712,18 +715,18 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     }
 
     // restore tau
-    ROCSOLVER_LAUNCH_KERNEL(set_tau, dim3(blocks, batch_count), dim3(32, 1), 0, stream, k, tau,
+    ROCSOLVER_LAUNCH_KERNEL(set_tau, dim3(blocks, batch_count), dim3(BS2, 1), 0, stream, k, tau,
                             strideT);
 
     return rocblas_status_success;
 }
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 ROCSOLVER_KERNEL void larft_set_tri(const rocblas_fill uplo,
-                                    const rocblas_int k,
+                                    const I k,
                                     U A,
-                                    const rocblas_int shiftA,
-                                    const rocblas_int lda,
+                                    const rocblas_stride shiftA,
+                                    const I lda,
                                     const rocblas_stride strideA,
                                     T* buffer)
 {
@@ -731,7 +734,7 @@ ROCSOLVER_KERNEL void larft_set_tri(const rocblas_fill uplo,
     const auto j = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     const auto i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
-    const rocblas_int ldb = k;
+    const I ldb = k;
     const rocblas_stride strideB = rocblas_stride(ldb) * k;
 
     const bool upper = (uplo == rocblas_fill_upper);
@@ -753,12 +756,12 @@ ROCSOLVER_KERNEL void larft_set_tri(const rocblas_fill uplo,
     }
 }
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 ROCSOLVER_KERNEL void larft_restore_tri(const rocblas_fill uplo,
-                                        const rocblas_int k,
+                                        const I k,
                                         U A,
-                                        const rocblas_int shiftA,
-                                        const rocblas_int lda,
+                                        const rocblas_stride shiftA,
+                                        const I lda,
                                         const rocblas_stride strideA,
                                         T* buffer)
 {
@@ -766,7 +769,7 @@ ROCSOLVER_KERNEL void larft_restore_tri(const rocblas_fill uplo,
     const auto j = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     const auto i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
-    const rocblas_int ldb = k;
+    const I ldb = k;
     const rocblas_stride strideB = rocblas_stride(ldb) * k;
 
     const bool upper = (uplo == rocblas_fill_upper);
@@ -785,12 +788,12 @@ ROCSOLVER_KERNEL void larft_restore_tri(const rocblas_fill uplo,
     }
 }
 
-template <typename T>
-ROCSOLVER_KERNEL void larft_set_diag(rocblas_int k,
+template <typename T, typename I>
+ROCSOLVER_KERNEL void larft_set_diag(I k,
                                      T* tau,
                                      const rocblas_stride strideT,
                                      T* F,
-                                     const rocblas_int ldf,
+                                     const I ldf,
                                      const rocblas_stride strideF)
 {
     const auto b = hipBlockIdx_z;
@@ -806,10 +809,10 @@ ROCSOLVER_KERNEL void larft_set_diag(rocblas_int k,
     }
 }
 
-template <bool BATCHED, typename T>
-void rocsolver_larft_inverse_getMemorySize(const rocblas_int n,
-                                           const rocblas_int k,
-                                           const rocblas_int batch_count,
+template <bool BATCHED, typename T, typename I>
+void rocsolver_larft_inverse_getMemorySize(const I n,
+                                           const I k,
+                                           const I batch_count,
                                            size_t* size_work,
                                            size_t* size_workArr)
 {
@@ -831,22 +834,22 @@ void rocsolver_larft_inverse_getMemorySize(const rocblas_int n,
         *size_workArr = 0;
 }
 
-template <typename T, typename U, bool COMPLEX = rocblas_is_complex<T>>
+template <typename T, typename I, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
                                                 const rocblas_direct direct,
                                                 const rocblas_storev storev,
-                                                const rocblas_int n,
-                                                const rocblas_int k,
+                                                const I n,
+                                                const I k,
                                                 U V,
-                                                const rocblas_int shiftV,
-                                                const rocblas_int ldv,
+                                                const rocblas_stride shiftV,
+                                                const I ldv,
                                                 const rocblas_stride strideV,
                                                 T* tau,
                                                 const rocblas_stride strideT,
                                                 T* F,
-                                                const rocblas_int ldf,
+                                                const I ldf,
                                                 const rocblas_stride strideF,
-                                                const rocblas_int batch_count,
+                                                const I batch_count,
                                                 T* work,
                                                 T** workArr)
 {
@@ -874,7 +877,7 @@ rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
     rocblas_operation transB
         = colwise ? rocblas_operation_none : rocblas_operation_conjugate_transpose;
 
-    rocblas_int tri_offset;
+    I tri_offset;
     rocblas_fill tri_uplo;
 
     if(colwise)
@@ -888,12 +891,12 @@ rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
         tri_offset = (!forward && n > k) ? idx2D(0, n - k, ldv) : 0;
     }
 
-    rocblas_int blocks = (k - 1) / BS2 + 1;
+    I blocks = (k - 1) / BS2 + 1;
     dim3 gridTri(blocks, blocks, batch_count);
     dim3 blockTri(BS2, BS2);
 
     // set V to unit triangular/trapezoidal
-    ROCSOLVER_LAUNCH_KERNEL((larft_set_tri), gridTri, blockTri, 0, stream, tri_uplo, k, V,
+    ROCSOLVER_LAUNCH_KERNEL((larft_set_tri<T, I, U>), gridTri, blockTri, 0, stream, tri_uplo, k, V,
                             shiftV + tri_offset, ldv, strideV, work);
 
     // compute: V' * V or V * V'
@@ -901,12 +904,12 @@ rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
                    strideV, &zero, F, 0, ldf, strideF, batch_count, workArr);
 
     // set F diag to 1 / tau
-    ROCSOLVER_LAUNCH_KERNEL(larft_set_diag, dim3(blocks, 1, batch_count), dim3(32, 1), 0, stream, k,
-                            tau, strideT, F, ldf, strideF);
+    ROCSOLVER_LAUNCH_KERNEL((larft_set_diag<T, I>), dim3(blocks, 1, batch_count), dim3(BS2, 1), 0,
+                            stream, k, tau, strideT, F, ldf, strideF);
 
     // restore original V
-    ROCSOLVER_LAUNCH_KERNEL((larft_restore_tri), gridTri, blockTri, 0, stream, tri_uplo, k, V,
-                            shiftV + tri_offset, ldv, strideV, work);
+    ROCSOLVER_LAUNCH_KERNEL((larft_restore_tri<T, I, U>), gridTri, blockTri, 0, stream, tri_uplo, k,
+                            V, shiftV + tri_offset, ldv, strideV, work);
 
     return rocblas_status_success;
 }

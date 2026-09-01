@@ -61,9 +61,18 @@
 namespace stinkytofu {
 
 namespace {
+// True when \p it points at a real instruction in \p bb with unified opcode \p uop.
+// False at end(), or on an asm directive (non-StinkyTofu node).
+bool isUnifiedOpcodeAt(BasicBlock& bb, IRList::iterator it, uint16_t uop) {
+    if (it == bb.end()) return false;
+    IRBase* node = it.getNodePtr();
+    if (node->getType() != IRBase::IRType::StinkyTofu) return false;
+    return static_cast<const StinkyInstruction*>(node)->getUnifiedOpcode() == uop;
+}
+
 // Return {BB, iterator} for the entry prefetch-burst insertion point: immediately AFTER the
-// gfx1250 hardware-entrypoint prologue (`global_prefetch_b8` [+ following `v_nop`], inserted by
-// InsertInitialUnclausedVmemPass) so the prologue stays the kernel's first executed
+// gfx1250 hardware-entrypoint prologue (`s_mov_b64 s[64:65], 0` + `v_nop` + `global_prefetch_b8`,
+// inserted by InsertInitialUnclausedVmemPass) so the prologue stays the kernel's first executed
 // instruction(s). The prologue is the function's first real (non label/phi/directive) instruction
 // and may sit in a later BB than getEntryBlock() (e.g. after an empty preamble + label_ASM_Start),
 // so we scan the whole function. Falls back to {entryBB, begin()} when no prologue is present
@@ -79,17 +88,18 @@ std::pair<BasicBlock*, IRList::iterator> entryBurstInsertPoint(Function& func) {
             // find the "first real instruction" (LABEL/PHI/FENCE/placement marker), so both passes
             // agree on where the prologue sits.
             if (isPseudoInst(inst)) continue;
-            // First real instruction of the function.
-            if (inst->getUnifiedOpcode() == GFX::global_prefetch_b8) {
+            // First real instruction of the function. Walk the prologue shape
+            //   s_mov_b64 s[64:65], 0 ; v_nop ; global_prefetch_b8 v0, s[64:65]
+            // leading pieces are tolerated as absent (isolated unit tests), but the
+            // global_prefetch_b8 must be there for this to be the prologue.
+            {
                 IRList::iterator after = it;
-                ++after;  // past global_prefetch_b8
-                if (after != bb.end()) {
-                    IRBase* n2 = after.getNodePtr();
-                    if (n2->getType() == IRBase::IRType::StinkyTofu &&
-                        static_cast<const StinkyInstruction*>(n2)->getUnifiedOpcode() == GFX::v_nop)
-                        ++after;  // past v_nop
+                if (isUnifiedOpcodeAt(bb, after, GFX::s_mov_b64)) ++after;
+                if (isUnifiedOpcodeAt(bb, after, GFX::v_nop)) ++after;
+                if (isUnifiedOpcodeAt(bb, after, GFX::global_prefetch_b8)) {
+                    ++after;  // past global_prefetch_b8
+                    return {&bb, after};
                 }
-                return {&bb, after};
             }
             // First real insn isn't the prologue -> no prologue; fall back to entry begin().
             BasicBlock* entry = func.getEntryBlock();
@@ -261,9 +271,10 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
         const std::string targetLabelName = std::string(kSwPrefetchAbsTargetLabelBase) + "0";
 
         // Resolve the burst site: AFTER the gfx1250 hardware-entrypoint prologue
-        // (global_prefetch_b8 + v_nop) wherever it lives in the function, so the prologue stays the
-        // kernel's first executed instruction(s). May be a later BB than getEntryBlock() (empty
-        // preamble + label_ASM_Start). Falls back to entry begin() when no prologue is present.
+        // (s_mov_b64 + v_nop + global_prefetch_b8) wherever it lives in the function, so the
+        // prologue stays the kernel's first executed instruction(s). May be a later BB than
+        // getEntryBlock() (empty preamble + label_ASM_Start). Falls back to entry begin() when
+        // no prologue is present.
         auto [burstBB, insertAt] = entryBurstInsertPoint(func);
         if (burstBB == nullptr) {
             if (m_debug)

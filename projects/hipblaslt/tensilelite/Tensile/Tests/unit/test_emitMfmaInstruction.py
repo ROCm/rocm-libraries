@@ -13,7 +13,7 @@ TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 from Tensile.Common.DataType import DataType
 from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
-from gpu_test_helpers import init_rocisa  # initializes rocisa target=gfx950
+from gpu_test_helpers import init_rocisa, preserve_rocisa_kernel_state
 
 
 # ---- minimal stubs ---------------------------------------------------------
@@ -66,7 +66,9 @@ def _rocisa_once():
     # host (and the asserts on "v_mfma_scale_*" / "cbsz:X blgp:Y" would all
     # fail). amdclang++ assembles any -mcpu= target regardless of the host
     # GPU, so this works on any machine that has ROCm installed.
-    init_rocisa(target="gfx950")
+    with preserve_rocisa_kernel_state():
+        init_rocisa(target="gfx950")
+        yield
 
 
 @pytest.fixture

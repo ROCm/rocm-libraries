@@ -81,6 +81,15 @@ namespace TensileLite
 {
     namespace Client
     {
+        // Single-process multi-GPU fused GEMM.A2A entry point.
+        // Defined in FusedA2AClient.cpp. Dispatched per problem when the
+        // fused-gemm-a2a option is set; returns a process exit code.
+        int runFusedA2A(po::variables_map const&                                       args,
+                        std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
+                        std::shared_ptr<Hardware>                                      hardware,
+                        ContractionProblem*                                            problem,
+                        int                                                            runIdx);
+
         __global__ void flush_icache()
         {
             asm __volatile__("s_icache_inv \n\t"
@@ -227,6 +236,7 @@ namespace TensileLite
                 ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
+                ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -256,11 +266,6 @@ namespace TensileLite
                 ("init-mx-b",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for B")
                 ("pristine-on-gpu",          po::value<bool>()->default_value(true), "Keep a pristine copy of inputs on GPU for performance")
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
-                ("offset-a",                 po::value<size_t>()->default_value(0), "buffer a start offset")
-                ("offset-b",                 po::value<size_t>()->default_value(0), "buffer b start offset")
-                ("offset-c",                 po::value<size_t>()->default_value(0), "buffer c start offset")
-                ("offset-d",                 po::value<size_t>()->default_value(0), "buffer d start offset")
-                ("offset-e",                 po::value<size_t>()->default_value(0), "buffer e start offset")
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
@@ -284,8 +289,11 @@ namespace TensileLite
                 ("dump-tensors",             po::value<bool>()->default_value(false), "Binary dump tensors instead of printing.")
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
+                ("fused-a2a-world",          po::value<int>()->default_value(0), "World size (number of GPUs) for the fused GEMM.A2A run. 0 takes the visible device count.")
+                ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
+                ("fused-a2a-drain-send",     po::value<int>()->default_value(0), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
+                ("fused-a2a-am",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "A2A column count along FEATURE (M, index-0) for the fused GEMM.A2A run (col-major swap): the first AM feature columns PUSH all-to-all; [AM,M) stay local. Defaults to M, so every feature column goes all-to-all. Must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0, AM<=M (MT0 = solution MacroTile0). AM is a per-problem dimension: pass it once to apply to every problem, or comma-separated, one value per problem selected by --problem-start-idx/--num-problems, in that order (e.g. 2048 for the medium shape, 10240 for the full shape).")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
-                ("platform-idx",             po::value<int>()->default_value(0), "OpenCL Platform Index")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
                 ("sync-after-warmups",       po::value<bool>()->default_value(true), "Synchronize GPU after warmup kernel runs")
@@ -303,7 +311,6 @@ namespace TensileLite
                 ("perf-l2-write-hits",       po::value<double>()->default_value(0.5), "L2 write hits")
                 ("perf-l2-read-bw-mul",      po::value<double>()->default_value(2.0), "L2 read bandwidth multiplier")
                 ("perf-read-efficiency",     po::value<double>()->default_value(0.85), "Read efficiency")
-                ("perf-ops-per-cycle",       po::value<int>()->default_value(64), "Ops per cycle")
                 ("csv-export-extra-cols",    po::value<bool>()->default_value(false), "CSV exports winner information")
                 ("csv-merge-same-problems",  po::value<bool>()->default_value(false), "CSV merge rows of same problem id")
                 ("PrintWinnersOnly",         po::value<bool>()->default_value(false), "PrintWinnersOnly")
@@ -376,7 +383,6 @@ namespace TensileLite
                 ("prediction-threshold",     po::value<double>()->default_value(2.0), "Don't run a solution if predicted performance is low")
 
                 ("activation-type",           po::value<ActivationType>()->default_value(ActivationType::None), "An activation type")
-                ("activation-hpa",            po::value<bool>()->default_value(false), "Use the same data type as high precision accumulate.")
                 ("activation-no-guard",          po::value<bool>()->default_value(false), "Use activation guard to deall with nan outputs.")
                 ("activation-additional-args",vector_default_empty<std::string>(), "Activation additional floating-point number arguments.")
                 ("activation-enum-args",      po::value<std::vector<ActivationType>>()->default_value(std::vector<ActivationType>(1, ActivationType::None), "[]"), "Activation enum argument.")
@@ -534,6 +540,7 @@ namespace TensileLite
             DUMP_OPT("f32-xdl-math-op", rocisa::DataType);
             DUMP_OPT("swizzle-tensor-a", bool);
             DUMP_OPT("swizzle-tensor-b", bool);
+            DUMP_OPT("fused-gemm-a2a", bool);
             DUMP_OPT("activation-compute-type", rocisa::DataType);
             DUMP_OPT("high-precision-accumulate", bool);
             DUMP_OPT("sparse", int);
@@ -1247,6 +1254,20 @@ int main(int argc, const char* argv[])
                 reporters->report(ResultKey::ProblemIndex, problemIdx);
                 reporters->report(ResultKey::ProblemProgress,
                                   concatenate(problemIdx, "/", lastProblemIdx));
+
+                // Self-contained setup+launch across W devices; skips the
+                // single-GPU path below.
+                if(args["fused-gemm-a2a"].as<bool>())
+                {
+                    int rc = runFusedA2A(
+                        args, library, hardware, problem, problemIdx - firstProblemIdx);
+                    if(rc != 0)
+                    {
+                        flushTimingBuffer();
+                        return rc;
+                    }
+                    continue;
+                }
 
                 {
                     ScopedTimer timer("pre_problem");

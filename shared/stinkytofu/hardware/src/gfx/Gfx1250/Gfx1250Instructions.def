@@ -435,15 +435,26 @@ DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {G
 // Global load with transpose-read (TR) — gfx1250 only.
 // global_load_tr_b64: 64-bit TR load; D0 = 64-bit vgpr dest,
 // S0 = 32-bit vaddr (offset), S1 = 64-bit saddr (base).
-DEF_T(GlobalLoadTrB64Inst, "global_load_tr_b64", .format = VGLOBAL, .logical = "GlobalLoadTR8B64",
+DEF_T(GlobalLoadTrB64Inst, "global_load_tr_b64", .format = VGLOBAL, .flags = {GLOBALLoad},
+    .logical = "GlobalLoadTR8B64",
     .cost = {12, 116},
     .operand_fields = { {D0, vdst, vgpr, 64}, {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
 
 // global_load_tr_b128: 128-bit TR load; D0 = 128-bit vgpr dest,
 // S0 = 32-bit vaddr (offset), S1 = 64-bit saddr (base).
-DEF_T(GlobalLoadTrB128Inst, "global_load_tr_b128", .format = VGLOBAL, .logical = "GlobalLoadTR16B128",
+DEF_T(GlobalLoadTrB128Inst, "global_load_tr_b128", .format = VGLOBAL, .flags = {GLOBALLoad},
+    .logical = "GlobalLoadTR16B128",
     .cost = {12, 116},
     .operand_fields = { {D0, vdst, vgpr, 128}, {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
+
+// global_store_async_from_lds_*: gfx1250 async store copying data from LDS to
+// global memory, completion via s_wait_asynccnt. Operand layout and flag are
+// shared via the VGLOBAL_ASYNC_FROM_LDS format.
+DEF_BATCH(.format = VGLOBAL_ASYNC_FROM_LDS,
+    GlobalStoreAsyncFromLdsB8Inst, "global_store_async_from_lds_b8",
+    GlobalStoreAsyncFromLdsB32Inst, "global_store_async_from_lds_b32",
+    GlobalStoreAsyncFromLdsB64Inst, "global_store_async_from_lds_b64",
+    GlobalStoreAsyncFromLdsB128Inst, "global_store_async_from_lds_b128")
 
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
@@ -798,9 +809,32 @@ DEF_T(VReadfirstlaneB32Inst, "v_readfirstlane_b32", .format = VOP1, .logical = "
         {S0, src0, vgpr, 32},
     },
 )
+DEF_T(VReadlaneB32Inst, "v_readlane_b32", .format = VOP3_2SRC, .logical = "VReadlaneB32",
+    .operand_fields = {
+        {D0, vdst, sreg, 32},
+        {S0, src0, vgpr, 32},
+        {S1, src1, ssrc, 32},
+    },
+)
+DEF_T(VWritelaneB32Inst, "v_writelane_b32", .format = VOP3_2SRC, .logical = "VWritelaneB32",
+    .operand_fields = {
+        {D0, vdst, vgpr, 32, RW},
+        {S0, src0, ssrc, 32},
+        {S1, src1, ssrc, 32},
+    },
+)
 
 // Vector ALU — VOP1 only (special swap)
 DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
+    .operand_fields = {
+        {D0, vdst, vgpr, 32, RW},
+        {D1, src0, src_vgpr, 32, RW},
+    },
+)
+
+// Vector ALU — VOP1 only (swaps the b32 across lane pairs 16 apart; both
+// operands are read-modify-write, like v_swap_b32).
+DEF_T(VPermlane16SwapB32Inst, "v_permlane16_swap_b32", .format = VOP1, .logical = "VPermlane16SwapB32",
     .operand_fields = {
         {D0, vdst, vgpr, 32, RW},
         {D1, src0, src_vgpr, 32, RW},

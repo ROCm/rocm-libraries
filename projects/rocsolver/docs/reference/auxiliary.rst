@@ -174,6 +174,14 @@ rocsolver_<type>larfg()
 
 rocsolver_<type>larft()
 ---------------------------------------
+.. doxygenfunction:: rocsolver_zlarft_64
+   :outline:
+.. doxygenfunction:: rocsolver_clarft_64
+   :outline:
+.. doxygenfunction:: rocsolver_dlarft_64
+   :outline:
+.. doxygenfunction:: rocsolver_slarft_64
+   :outline:
 .. doxygenfunction:: rocsolver_zlarft
    :outline:
 .. doxygenfunction:: rocsolver_clarft

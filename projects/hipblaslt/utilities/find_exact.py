@@ -42,9 +42,9 @@ except ImportError:
             "You must install tqdm."
 from typing import List
 try:
-    from yaml import CSafeLoader as yamlLoader
+    from yaml import CSafeLoader as SafeLoader
 except ImportError:
-    from yaml import SafeLoader as yamlLoader
+    from yaml import SafeLoader
     assert 0 and "CSafeLoader not installed. Fallback to SafeLoader."
 
 from fix_yaml_types import fix_content
@@ -100,7 +100,7 @@ def ensurePath(path):
 def readYaml(filename):
     try:
         with open(filename, "r") as f:
-            data = yaml.load(f, yamlLoader)
+            data = yaml.load(f, SafeLoader)
             return data
     except:
         str1 = "Failed to read yaml file %s"%filename

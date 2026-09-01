@@ -1,0 +1,29 @@
+{
+  "version": "0.1",
+  "id": "kdp-solo",
+  "name": "Solo pack",
+  "arch": ["gfx942"],
+  "matchers": ["umd-solo"],
+  "engine": "ued-solo",
+  "dispatch": "udd-solo",
+  "kernelDescriptors": [
+    {
+      "version": "0.1",
+      "id": "ukd-solo-add-f32-b64",
+      "name": "PointwiseAdd f32 block64 (solo)",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "PointwiseAdd.cpp",
+        "entry": "PointwiseAdd",
+        "build": {
+          "defines": {
+            "HIP_PLUGIN_POINTWISE_ADD_TYPE": "float",
+            "HIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE": 64
+          }
+        }
+      },
+      "metadata": { "dtype": "FLOAT", "block_size": 64 },
+      "priority": 0
+    }
+  ]
+}

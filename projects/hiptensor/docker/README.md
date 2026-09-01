@@ -53,12 +53,12 @@ docker build -f Dockerfile.ubuntu24.prebuilt \
 
 **Available tarball sources** (`THEROCK_URL_BASE`):
 
-| Source                   | URL                                           |
-|--------------------------|-----------------------------------------------|
-| Nightly builds (default) | `https://rocm.nightlies.amd.com/tarball/`     |
-| Stable releases          | `https://repo.amd.com/rocm/tarball/`          |
-| Prereleases (QA)         | `https://rocm.prereleases.amd.com/tarball/`   |
-| Dev builds               | `https://rocm.devreleases.amd.com/tarball/`   |
+| Source                   | URL                                                |
+|--------------------------|----------------------------------------------------|
+| Nightly builds (default) | `https://nightly.repo.amd.com/rocm/core/tarball/`  |
+| Stable releases          | `https://repo.amd.com/rocm/tarball/`               |
+| Prereleases (QA)         | `https://rocm.prereleases.amd.com/tarball/`        |
+| Dev builds               | `https://dev.repo.amd.com/rocm/core/tarball/`      |
 
 See the [TheRock releases page](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#browsing-release-tarballs) for details.
 

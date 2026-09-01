@@ -339,4 +339,14 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR = 37,
 
+    /**
+     * @brief MoE grouped matmul backward operation descriptor
+     *
+     * Represents the weight-gradient pass of grouped matrix multiplication over
+     * routed mixture-of-experts tokens, taking the output gradient (DOUTPUT),
+     * token, and first token offset tensors and producing the weight gradient
+     * (DWEIGHT) tensor.
+     */
+    HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR = 38,
+
 } hipdnnBackendDescriptorType_t;

@@ -78,7 +78,6 @@ namespace rocsparse
             handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, buffer_size));
 
         _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                                   false,
                                    static_cast<int64_t>(1),
                                    m,
                                    m,

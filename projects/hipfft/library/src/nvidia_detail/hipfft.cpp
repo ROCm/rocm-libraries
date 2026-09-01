@@ -787,6 +787,27 @@ catch(...)
     return handle_exception();
 }
 
+hipfftResult hipfftXtSetJITCallback(hipfftHandle         plan,
+                                    const char*          symbol_name,
+                                    const void*          bitcode_data,
+                                    size_t               bitcode_len_bytes,
+                                    hipfftXtCallbackType cbtype,
+                                    void**               cbdata)
+try
+{
+    return cufftResultToHipResult(
+        cufftXtSetJITCallback(plan,
+                              symbol_name,
+                              bitcode_data,
+                              bitcode_len_bytes,
+                              hipfftCallbackTypeToCufftCallbackType(cbtype),
+                              cbdata));
+}
+catch(...)
+{
+    return handle_exception();
+}
+
 hipfftResult hipfftXtMakePlanMany(hipfftHandle   plan,
                                   int            rank,
                                   long long int* n,

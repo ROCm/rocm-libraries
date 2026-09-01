@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,4 +29,4 @@
 
 #define TESTING_LARFT(...) template void testing_larft<__VA_ARGS__>(Arguments&);
 
-INSTANTIATE(TESTING_LARFT, FOREACH_SCALAR_TYPE, APPLY_STAMP)
+INSTANTIATE(TESTING_LARFT, FOREACH_SCALAR_TYPE, FOREACH_INT_TYPE, APPLY_STAMP)

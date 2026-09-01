@@ -34,6 +34,15 @@ post-processing:
   - `_ua_shape_utils.py`
   - `benchmark_rocke_unified_attention.py` (moved to `rocke/library/builders/common/benchmark_rocke_unified_attention.py`)
   - `benchmark_triton_unified_attention.py`
+- `stage2_capture/`
+  - `capture_att_trace.py` — one-command `rocprofv3 --att` capture: preflights the
+    decoder, discovers the kernel name, decodes, and reports each dispatch
+- `wavescope/` — capture and post-process traces for the WaveScope viewer
+  - `capture_wavescope_trace.py` — wraps `stage2_capture` with the source-location
+    env and the sidecar step, so the trace opens with Python correlation
+  - `emit_inline_frames.py` — `inline_frames.json` sidecar recovering the inlining
+    call stack rocprofv3 flattens away
+  - `README.md`                    — install the extension, capture, and read a trace
 - `stage3_extract_isa/`
   - `count_instructions.py`
   - `extract_isa.py`
@@ -70,6 +79,24 @@ PYTHONPATH=rocke/library python3 -m builders.common.benchmark_rocke_unified_atte
 
 ## Profiling Note
 
-ATT trace analysis requires `rocprof-trace-decoder`. If it is unavailable, use
-the PMC profiling path documented in `skills/capture-kernel-trace-rocke.md`
-instead of relying on `code.json` instruction-level traces.
+ATT trace analysis requires `rocprof-trace-decoder`, which does not ship with ROCm
+and is not in the ROCm apt repository — install it separately from
+<https://github.com/ROCm/rocprof-trace-decoder>. If it is unavailable, use the PMC
+profiling path documented in `skills/capture-kernel-trace-rocke.md` instead of
+relying on `code.json` instruction-level traces.
+
+A decoded `ui_output_*_dispatch_*` folder can be read interactively in the
+**WaveScope** viewer (per-wave timeline over the ISA listing, occupancy, bottleneck
+rules) as well as by `stage4_analyze/parse_kernel_trace.py`. WaveScope also carries a
+two-way annotation protocol — an agent writes `annotations.json` into the dispatch
+folder and the developer replies with `notes.json` — so a bottleneck claim can be
+visually verified and argued with rather than just read. See Step 6 of
+`skills/capture-kernel-trace-rocke.md`.
+
+The `Source` column of `code.json` is empty unless the kernel was built with
+`ROCKE_DEBUG_LOC=1`, which makes the lowering emit DWARF line tables and gives
+every instruction the Python line that authored it. Without it all trace
+analysis is at ISA level. See
+`tools/wavescope/README.md` for the capture, and
+`dsl_docs/architecture/wavescope_integration.md` for how the inline call stack
+above that line is recovered.

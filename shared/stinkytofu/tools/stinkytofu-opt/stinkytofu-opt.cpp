@@ -173,16 +173,18 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
         if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3") continue;
         if (arg.substr(0, 2) == "--") {
             if (arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
-                arg == "--verify-each" || arg == "--preserve-symbolic-regs" ||
-                arg == "--preserve-comments" || arg.starts_with("--ds-read-order=") ||
-                arg.starts_with("--ds-read-queue-depth=") ||
+                arg == "--verify-each" || arg == "--dump-passes" ||
+                arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
+                arg.starts_with("--ds-read-order=") || arg.starts_with("--ds-read-queue-depth=") ||
                 arg.starts_with("--ds-read-drain-latency=") ||
                 arg.starts_with("--ds-read-throttle-latency=") ||
                 arg.starts_with("--ds-read-per-wmma=") ||
+                arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
-                arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
-                arg == "--to-label" || isKernelConfigArg(arg))
+                arg.starts_with("--merge-barrier-threshold=") ||
+                arg == "--enable-wmma-hide-budget-prescan" || arg.starts_with("--vgpr-msb-mode=") ||
+                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -301,6 +303,8 @@ static void printKernelConfigHelp(std::ostream& os) {
 
 int main(int argc, char** argv) {
     BackendRegistry::registerAllBackends();
+    AllocatorRegistry::registerAllAllocators();
+    AllocationRulesRegistry::registerAll();
 
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
@@ -311,6 +315,9 @@ int main(int argc, char** argv) {
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
+        std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
+        std::cerr << "                   after.txt in the working directory (implied by\n";
+        std::cerr << "                   --debug-pass)\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -369,6 +376,9 @@ int main(int argc, char** argv) {
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
+        std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
+        std::cerr << "                   after.txt in the working directory (implied by\n";
+        std::cerr << "                   --debug-pass)\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -503,10 +513,16 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsReadThrottleLatency = std::stoi(a.substr(27));
         } else if (a.starts_with("--ds-read-per-wmma=")) {
             passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
+        } else if (a.starts_with("--tensor-load-wmma-space=")) {
+            passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
+        } else if (a == "--enable-wmma-hide-budget-prescan") {
+            passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
+        } else if (a.starts_with("--merge-barrier-threshold=")) {
+            passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }
     }
 
@@ -549,6 +565,10 @@ int main(int argc, char** argv) {
     bool emitAsm = false;
     bool enableRemarks = false;
     bool verifyEach = false;
+    // Off by default: createDebugPrintInstrumentation() opens before.txt/after.txt
+    // eagerly, so installing it unconditionally littered the working directory of every
+    // run. Mirrors the needsFileOutput gate the pipeline path already has.
+    bool dumpPasses = false;
     bool preserveSymbolicRegs = false;
     bool preserveComments = false;
     std::string outputFile;
@@ -559,9 +579,12 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
         if (std::string(argv[i]) == "--remarks") enableRemarks = true;
         if (std::string(argv[i]) == "--verify-each") verifyEach = true;
+        if (std::string(argv[i]) == "--dump-passes") dumpPasses = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
         if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
+            // Naming a pass to debug is only meaningful with the dumps on.
+            dumpPasses = true;
             stinkytofu::PassManagerDebugConfig::addDebugOnly(argv[++i]);
         }
         if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
@@ -788,7 +811,7 @@ int main(int argc, char** argv) {
             stinkytofu::PassManager passManager;
             stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
-            passManager.addInstrumentation(createDebugPrintInstrumentation());
+            if (dumpPasses) passManager.addInstrumentation(createDebugPrintInstrumentation());
             if (verifyEach) {
                 passManager.addInstrumentation(
                     std::make_shared<stinkytofu::VerifyInstrumentation>());
@@ -800,6 +823,7 @@ int main(int argc, char** argv) {
             if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
             // Stand in for rocisa's archCaps, which only TensileLite can supply.
             caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
+            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0};
             passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 

@@ -1,3 +1,7 @@
 invoke
-nanobind
+# nanobind 3.0.0 does not build with clang on Windows: NB_SLOT_ALIAS constexpr-
+# initialises a function pointer to the dllimport'd PyObject_Vectorcall, which is not a
+# constant expression there. Fixed upstream by wjakob/nanobind#1421, so exclude just that
+# release rather than capping the 3.x line -- 3.0.1 will be picked up automatically.
+nanobind>=2.0,!=3.0.0
 pytest
