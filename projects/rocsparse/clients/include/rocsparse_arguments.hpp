@@ -170,8 +170,8 @@ struct Arguments
     uint32_t host_memory_gb;
     uint32_t device_memory_gb;
 
-    int32_t solve_mode;
-    int32_t diagonal_modifier;
+    rocsparse_solve_mode        solve_mode;
+    rocsparse_diagonal_modifier diagonal_modifier;
 
     // Validate input format.
     // rocsparse_gentest.py is expected to conform to this format.

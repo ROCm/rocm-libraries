@@ -28,30 +28,84 @@
 
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
 
+struct _rocsparse_csrsv_info;
+typedef _rocsparse_csrsv_info* rocsparse_csrsv_info;
+
 namespace rocsparse
 {
-    rocsparse_status diagonal_solve(rocsparse_handle            handle,
-                                    rocsparse_operation         trans,
-                                    rocsparse_diagonal_modifier modifier,
-                                    const void*                 alpha,
-                                    rocsparse_const_spmat_descr A,
-                                    rocsparse_indextype         diag_ind_type,
-                                    const void*                 diag_ind,
-                                    const void*                 transposed_perm,
-                                    int64_t                     nrhs,
-                                    const void*                 x,
-                                    int64_t                     x_row_stride,
-                                    int64_t                     x_col_stride,
-                                    int64_t                     x_batch_stride,
-                                    void*                       y,
-                                    int64_t                     y_row_stride,
-                                    int64_t                     y_col_stride,
-                                    int64_t                     y_batch_stride,
-                                    int64_t                     batch_count,
-                                    bool                        conj_x,
-                                    void*                       zero_pivot,
-                                    int64_t                     zero_pivot_stride,
-                                    bool                        is_host_mode);
+    struct spdiag_view
+    {
+        rocsparse_indextype offset_type{}; // index type of diag_ind / transposed_perm
+        const void*         diag_ind{nullptr}; // per-row diagonal position
+        const void*         transposed_perm{nullptr}; // remap into val, or nullptr
+    };
+
+    rocsparse_status build_spdiag_view(rocsparse_const_spmat_descr A,
+                                       rocsparse_operation         trans,
+                                       rocsparse_csrsv_info        info,
+                                       rocsparse::spdiag_view*     view);
+
+    rocsparse_status diagonal_solve(rocsparse_handle              handle,
+                                    rocsparse_operation           trans,
+                                    rocsparse_diagonal_modifier   modifier,
+                                    const void*                   alpha,
+                                    rocsparse_const_spmat_descr   A,
+                                    const rocsparse::spdiag_view& diag,
+                                    int64_t                       nrhs,
+                                    const void*                   x,
+                                    int64_t                       x_row_stride,
+                                    int64_t                       x_col_stride,
+                                    int64_t                       x_batch_stride,
+                                    void*                         y,
+                                    int64_t                       y_row_stride,
+                                    int64_t                       y_col_stride,
+                                    int64_t                       y_batch_stride,
+                                    int64_t                       batch_count,
+                                    bool                          conj_x,
+                                    void*                         zero_pivot,
+                                    int64_t                       zero_pivot_stride,
+                                    bool                          is_host_mode);
+
+    // Format-specific entry points that perform a complete diagonal solve: they
+    // build the diagonal view from the analysis info, seed the numeric zero-pivot
+    // buffer, and launch the solve. CSR and CSC differ only in how the analysis
+    // pivot is typed, so callers dispatch on the matrix format rather than sharing
+    // a single CSR-centric path.
+    rocsparse_status diagonal_solve_csr(rocsparse_handle            handle,
+                                        rocsparse_operation         trans,
+                                        rocsparse_diagonal_modifier modifier,
+                                        const void*                 alpha,
+                                        rocsparse_const_spmat_descr A,
+                                        rocsparse_csrsv_info        info,
+                                        int64_t                     nrhs,
+                                        const void*                 x,
+                                        int64_t                     x_row_stride,
+                                        int64_t                     x_col_stride,
+                                        int64_t                     x_batch_stride,
+                                        void*                       y,
+                                        int64_t                     y_row_stride,
+                                        int64_t                     y_col_stride,
+                                        int64_t                     y_batch_stride,
+                                        int64_t                     batch_count,
+                                        bool                        conj_x);
+
+    rocsparse_status diagonal_solve_csc(rocsparse_handle            handle,
+                                        rocsparse_operation         trans,
+                                        rocsparse_diagonal_modifier modifier,
+                                        const void*                 alpha,
+                                        rocsparse_const_spmat_descr A,
+                                        rocsparse_csrsv_info        info,
+                                        int64_t                     nrhs,
+                                        const void*                 x,
+                                        int64_t                     x_row_stride,
+                                        int64_t                     x_col_stride,
+                                        int64_t                     x_batch_stride,
+                                        void*                       y,
+                                        int64_t                     y_row_stride,
+                                        int64_t                     y_col_stride,
+                                        int64_t                     y_batch_stride,
+                                        int64_t                     batch_count,
+                                        bool                        conj_x);
 }
 
 #endif

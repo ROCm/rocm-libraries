@@ -393,7 +393,6 @@ typedef enum rocsparse_fill_mode_
     rocsparse_fill_mode_upper = 1 /**< Upper triangular part is stored. */
 } rocsparse_fill_mode;
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
 /*! \ingroup types_module
  *  \brief Select whether a solve stage performs a triangular or diagonal-only solve.
  *
@@ -428,7 +427,6 @@ typedef enum rocsparse_diagonal_modifier_
     rocsparse_diagonal_modifier_none     = 0, /**< Use \f$d\f$ (default). */
     rocsparse_diagonal_modifier_absolute = 1 /**< Use \f$|d|\f$. */
 } rocsparse_diagonal_modifier;
-#endif
 
 /*! \ingroup types_module
  *  \brief Specify whether the matrix is stored sorted or not.
@@ -1088,7 +1086,11 @@ typedef enum rocsparse_sptrsv_input_
     rocsparse_sptrsv_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSV descriptor. */
-    rocsparse_sptrsv_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    rocsparse_sptrsv_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSV descriptor. */
+#endif
 } rocsparse_sptrsv_input;
 
 /*! \ingroup types_module
