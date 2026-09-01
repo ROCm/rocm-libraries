@@ -55,7 +55,7 @@ using namespace hipdnn_plugin_sdk::ingestor;
 /// the handle stays usable if the loader ever needs more of it.
 struct ValidatorHandle
 {
-    hipStream_t getStream() const
+    static hipStream_t getStream()
     {
         return nullptr;
     }
@@ -67,24 +67,25 @@ struct ValidatorHandle
 class StubDispatchHandler : public IKernelDispatchHandler<ValidatorHandle>
 {
 public:
-    size_t workspaceBytes(const MatchContext&,
-                          const BoundTokens&,
-                          const KernelDefinition&) const override
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*tokens*/,
+                          const KernelDefinition& /*kernel*/) const override
     {
         return 0;
     }
 
-    std::unique_ptr<PreparedDispatch>
-        prepare(const MatchContext&, const BoundTokens&, const KernelDefinition&) const override
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*tokens*/,
+                                              const KernelDefinition& /*kernel*/) const override
     {
         return nullptr;
     }
 
-    void launch(const ValidatorHandle&,
-                const PreparedDispatch&,
-                const hipdnnPluginDeviceBuffer_t*,
-                uint32_t,
-                void*) const override
+    void launch(const ValidatorHandle& /*handle*/,
+                const PreparedDispatch& /*dispatch*/,
+                const hipdnnPluginDeviceBuffer_t* /*buffers*/,
+                uint32_t /*bufferCount*/,
+                void* /*workspace*/) const override
     {
         // Never called: the validator never builds a real plan.
     }
@@ -94,24 +95,28 @@ public:
 /// engine-level verdict that empties the whole catalog and skips every remaining pack
 /// of that engine (`KernelIngestorStateManager.hpp`), which would make every engine
 /// declaring a graph_match symbol validate as empty rather than as its real shape.
-std::optional<BoundTokens> stubGraphMatch(const MatchContext&)
+std::optional<BoundTokens> stubGraphMatch(const MatchContext& /*context*/)
 {
     return BoundTokens{};
 }
 
 /// The stub `GraphCriterionFn`/`KernelMatcherFn`/`ScoreFn`. Never invoked by
 /// `makeStateManager`'s construction-only probe; only their registration is checked.
-bool stubGraphCriterion(const MatchContext&, const BoundTokens&)
+bool stubGraphCriterion(const MatchContext& /*context*/, const BoundTokens& /*tokens*/)
 {
     return true;
 }
 
-bool stubKernelMatcher(const MatchContext&, const BoundTokens&, const KernelDefinition&)
+bool stubKernelMatcher(const MatchContext& /*context*/,
+                       const BoundTokens& /*tokens*/,
+                       const KernelDefinition& /*kernel*/)
 {
     return true;
 }
 
-double stubScore(const MatchContext&, const BoundTokens&, const KernelDefinition&)
+double stubScore(const MatchContext& /*context*/,
+                 const BoundTokens& /*tokens*/,
+                 const KernelDefinition& /*kernel*/)
 {
     return 0.0;
 }
@@ -262,7 +267,7 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets)
 /// throw must never reach here -- it is Phase 1's halt condition, not a validator
 /// failure mode -- so registering from a `std::set` rather than a raw harvested list
 /// keeps the registration itself well-formed regardless of what the descriptors name.
-StubDispatchHandler g_stubDispatchHandler;
+StubDispatchHandler stubDispatchHandler;
 
 void registerStubs(const HarvestedSymbols& harvested)
 {
@@ -284,7 +289,7 @@ void registerStubs(const HarvestedSymbols& harvested)
     }
     for(const auto& symbol : harvested.dispatch)
     {
-        DispatchRegistry<ValidatorHandle>::registerSymbol(symbol, &g_stubDispatchHandler);
+        DispatchRegistry<ValidatorHandle>::registerSymbol(symbol, &stubDispatchHandler);
     }
 }
 
@@ -319,10 +324,10 @@ struct NativeSourceCheck
 /// referenced from `register<Name>Symbols` are kept.
 std::map<std::string, std::string> extractStringViewConstants(const std::string& text)
 {
-    static const std::regex constantPattern(
+    static const std::regex s_constantPattern(
         R"RE(constexpr\s+std::string_view\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"((?:[^"\\]|\\.)*)"\s*;)RE");
     std::map<std::string, std::string> constants;
-    for(auto it = std::sregex_iterator(text.begin(), text.end(), constantPattern);
+    for(auto it = std::sregex_iterator(text.begin(), text.end(), s_constantPattern);
         it != std::sregex_iterator();
         ++it)
     {
@@ -337,13 +342,13 @@ std::map<std::string, std::string> extractStringViewConstants(const std::string&
 /// nested block inside the function does not truncate the match.
 std::optional<std::string> extractRegisterSymbolsBody(const std::string& text)
 {
-    static const std::regex signaturePattern(R"(void\s+register\w*Symbols\s*\([^)]*\)\s*\{)");
+    static const std::regex s_signaturePattern(R"(void\s+register\w*Symbols\s*\([^)]*\)\s*\{)");
     std::smatch match;
-    if(!std::regex_search(text, match, signaturePattern))
+    if(!std::regex_search(text, match, s_signaturePattern))
     {
         return std::nullopt;
     }
-    size_t bodyStart = static_cast<size_t>(match.position(0)) + match.length(0);
+    const size_t bodyStart = static_cast<size_t>(match.position(0)) + match.length(0);
     int depth = 1;
     size_t index = bodyStart;
     for(; index < text.size() && depth > 0; ++index)
@@ -372,10 +377,10 @@ std::optional<std::string> extractRegisterSymbolsBody(const std::string& text)
 /// silently diff empty-vs-empty.
 std::vector<std::string> extractScopeAddArgumentNames(const std::string& registerBody)
 {
-    static const std::regex scopeAddPattern(
+    static const std::regex s_scopeAddPattern(
         R"(scope\s*\.\s*add\s*\(\s*(?:std::string\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)|([A-Za-z_][A-Za-z0-9_]*))\s*,)");
     std::vector<std::string> names;
-    for(auto it = std::sregex_iterator(registerBody.begin(), registerBody.end(), scopeAddPattern);
+    for(auto it = std::sregex_iterator(registerBody.begin(), registerBody.end(), s_scopeAddPattern);
         it != std::sregex_iterator();
         ++it)
     {
@@ -429,10 +434,17 @@ NativeSourceCheck checkNativeSource(const std::string& path,
         if(it == constants.end())
         {
             check.parseError = true;
-            check.parseErrorMessage += (check.parseErrorMessage.empty() ? "" : "; ")
-                                       + ("'scope.add' in " + path + " references '" + name
-                                          + "', which has no 'constexpr std::string_view " + name
-                                          + " = \"...\";' declaration in the same file");
+            if(!check.parseErrorMessage.empty())
+            {
+                check.parseErrorMessage.append("; ");
+            }
+            check.parseErrorMessage.append("'scope.add' in ")
+                .append(path)
+                .append(" references '")
+                .append(name)
+                .append("', which has no 'constexpr std::string_view ")
+                .append(name)
+                .append(" = \"...\";' declaration in the same file");
             continue;
         }
         check.resolvedSymbols.insert(it->second);
@@ -453,7 +465,7 @@ NativeSourceCheck checkNativeSource(const std::string& path,
 
     for(const auto& symbol : check.resolvedSymbols)
     {
-        if(descriptorSymbols.find(symbol) == descriptorSymbols.end())
+        if(descriptorSymbols.count(symbol) == 0)
         {
             check.inSourceNotInDescriptors.insert(symbol);
         }
@@ -479,7 +491,7 @@ std::set<std::string>
     std::set<std::string> undeclared;
     for(const auto& symbol : descriptorSymbols)
     {
-        if(declared.find(symbol) == declared.end())
+        if(declared.count(symbol) == 0)
         {
             undeclared.insert(symbol);
         }
@@ -514,7 +526,7 @@ void printHelp(const char* programName)
               << "  --help, -h                Show this help message\n";
 }
 
-std::optional<Options> parseArgs(int argc, char* argv[])
+std::optional<Options> parseArgs(int argc, const char* const* argv)
 {
     Options options;
     for(int i = 1; i < argc; ++i)
@@ -563,6 +575,7 @@ std::optional<Options> parseArgs(int argc, char* argv[])
 } // namespace
 
 int main(int argc, char* argv[])
+try
 {
     const auto options = parseArgs(argc, argv);
     if(!options.has_value())
@@ -582,7 +595,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::vector<std::filesystem::path> roots(options->roots.begin(), options->roots.end());
+    const std::vector<std::filesystem::path> roots(options->roots.begin(), options->roots.end());
 
     // Installed for the whole run, before the first load: the loader never throws, so
     // without this sink every rejection is invisible and the tool would report nothing
@@ -744,6 +757,14 @@ int main(int argc, char* argv[])
     }
 
     return success ? 0 : 1;
+}
+catch(const std::exception& error)
+{
+    // The tool walks the filesystem, runs regexes and parses JSON, all of which throw.
+    // Letting one escape `main` gives the caller a terminate() and no diagnostic, which
+    // in a validator is indistinguishable from a crash in the thing being validated.
+    std::cerr << "FATAL: " << error.what() << "\n";
+    return 2;
 }
 
 #else // HIPDNN_ENABLE_KERNEL_INGESTOR
