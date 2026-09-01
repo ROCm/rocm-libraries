@@ -11,6 +11,7 @@
 #include <hipblaslt/client/MatmulPreparation.hpp>
 #include <roc/host_numerics/gemm.hpp>
 
+#include <cstddef>
 #include <optional>
 #include <utility>
 
@@ -39,6 +40,13 @@ namespace hipblaslt::host_numerics
         std::optional<roc::host_numerics::Scalar> scaleC;
         std::optional<roc::host_numerics::Scalar> scaleD;
     };
+
+    roc::host_numerics::Layout referenceBatchLayout(const hipblaslt::client::MatmulMatrix& matrix,
+                                                    size_t                                 rows,
+                                                    size_t                                 columns,
+                                                    hipblasOperation_t operation,
+                                                    size_t             batch,
+                                                    bool               separateBatchStorage);
 
     roc::host_numerics::GemmRunInfo
         referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,

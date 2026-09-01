@@ -1666,6 +1666,145 @@ TEST(HostNumericsCblasBridge, ComplexConjugateTranspose)
     EXPECT_FLOAT_EQ(d[0].imag(), expected.imag());
 }
 
+TEST(HostNumericsCblasBridge, UsesResolvedComplexReferenceTypes)
+{
+    using namespace roc::host_numerics;
+    using Complex = std::complex<float>;
+
+    Arguments arguments{};
+    arguments.init();
+    arguments.a_type     = HIP_C_32F;
+    arguments.b_type     = HIP_C_32F;
+    arguments.c_type     = HIP_C_32F;
+    arguments.d_type     = HIP_C_32F;
+    const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(arguments);
+
+    const Layout matrixLayout = Layout::contiguousLastDimensionFastest(Shape{1, 1});
+    const Layout batchedLayout(Shape{1, 1, 1}, {1, 1, 1});
+    const hipblaslt::client::MatmulMatrix matrix{
+        HIP_C_32F, ScalarType::ComplexFloat32, batchedLayout, 1};
+    const hipblaslt::client::MatmulProblem problem{
+        .m          = 1,
+        .n          = 1,
+        .k          = 1,
+        .operationA = HIPBLAS_OP_N,
+        .operationB = HIPBLAS_OP_N,
+        .batchMode  = HIPBLASLT_BATCH_MODE_STRIDED,
+        .batchCount = 1,
+        .a          = matrix,
+        .b          = matrix,
+        .c          = matrix,
+        .d          = matrix,
+        .auxiliary  = std::nullopt,
+        .cEqualsD   = false,
+    };
+    hipblaslt::client::PreparedMatmulProblem preparation;
+    preparation.alpha.cf = Complex{2.0f, 3.0f};
+    preparation.beta.cf  = Complex{4.0f, 5.0f};
+
+    const Complex                                   a{1.0f, 2.0f};
+    const Complex                                   b{3.0f, -1.0f};
+    const Complex                                   c{-2.0f, 4.0f};
+    Tensor                                          d(ScalarType::ComplexFloat32, matrixLayout);
+    hipblaslt::host_numerics::MatmulReferenceInputs inputs(
+        Tensor::copyNativeValues<Complex>(Shape{1, 1}, std::span<const Complex>(&a, 1)),
+        Tensor::copyNativeValues<Complex>(Shape{1, 1}, std::span<const Complex>(&b, 1)),
+        Tensor::copyNativeValues<Complex>(Shape{1, 1}, std::span<const Complex>(&c, 1)),
+        d);
+
+    (void)hipblaslt::host_numerics::referenceMatmulGemm(problem,
+                                                        dataTypes,
+                                                        preparation,
+                                                        std::move(inputs),
+                                                        hipblaslt_scaling_format::none,
+                                                        hipblaslt_scaling_format::none);
+
+    const Complex expected = preparation.alpha.cf * a * b + preparation.beta.cf * c;
+    EXPECT_FLOAT_EQ(d.loadAs<Complex>({0, 0}).real(), expected.real());
+    EXPECT_FLOAT_EQ(d.loadAs<Complex>({0, 0}).imag(), expected.imag());
+}
+
+TEST(HostNumericsCblasBridge, BuildsEmptyBatchLayoutsWithoutAddressingAnElement)
+{
+    using namespace roc::host_numerics;
+
+    const hipblaslt::client::MatmulMatrix matrix{
+        HIP_R_32F, ScalarType::Float32, Layout(Shape{4, 0, 3}, {1, 4, 17}), 51};
+
+    const Layout emptyColumns
+        = hipblaslt::host_numerics::referenceBatchLayout(matrix, 4, 0, HIPBLAS_OP_N, 2, false);
+    EXPECT_EQ(emptyColumns, Layout(Shape{4, 0}, {1, 4}, 34));
+
+    const Layout emptyRows
+        = hipblaslt::host_numerics::referenceBatchLayout(matrix, 0, 4, HIPBLAS_OP_T, 2, false);
+    EXPECT_EQ(emptyRows, Layout(Shape{0, 4}, {4, 1}, 34));
+
+    const Layout separate
+        = hipblaslt::host_numerics::referenceBatchLayout(matrix, 4, 0, HIPBLAS_OP_N, 2, true);
+    EXPECT_EQ(separate, Layout(Shape{4, 0}, {1, 4}));
+}
+
+TEST(HostNumericsCblasBridge, EmptyOutputShapesAreNoOps)
+{
+    const std::array<float, 6> values{1, 2, 3, 4, 5, 6};
+
+    EXPECT_NO_THROW(testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+                                                      HIPBLAS_OP_N,
+                                                      0,
+                                                      3,
+                                                      2,
+                                                      1.0f,
+                                                      nullptr,
+                                                      1,
+                                                      values.data(),
+                                                      2,
+                                                      0.0f,
+                                                      nullptr,
+                                                      1,
+                                                      nullptr,
+                                                      1,
+                                                      nullptr,
+                                                      nullptr,
+                                                      nullptr,
+                                                      1.0f,
+                                                      false,
+                                                      false,
+                                                      HIP_R_32F,
+                                                      HIP_R_32F,
+                                                      HIP_R_32F,
+                                                      HIP_R_32F,
+                                                      HIP_R_32F,
+                                                      HIP_R_32F));
+
+    EXPECT_NO_THROW(testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+                                                      HIPBLAS_OP_N,
+                                                      3,
+                                                      0,
+                                                      2,
+                                                      1.0f,
+                                                      values.data(),
+                                                      3,
+                                                      nullptr,
+                                                      2,
+                                                      0.0f,
+                                                      nullptr,
+                                                      3,
+                                                      nullptr,
+                                                      3,
+                                                      nullptr,
+                                                      nullptr,
+                                                      nullptr,
+                                                      1.0f,
+                                                      false,
+                                                      false,
+                                                      HIP_R_32F,
+                                                      HIP_R_32F,
+                                                      HIP_R_32F,
+                                                      HIP_R_32F,
+                                                      HIP_R_32F,
+                                                      HIP_R_32F));
+}
+
 TEST(HostNumericsCblasBridge, ComplexScaleCUsesOnlyItsRealComponent)
 {
     using Complex = std::complex<float>;
