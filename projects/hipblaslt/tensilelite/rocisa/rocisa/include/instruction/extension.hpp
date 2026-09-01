@@ -528,7 +528,7 @@ namespace rocisa
     inline std::shared_ptr<RegisterContainer>
         t16(const std::shared_ptr<RegisterContainer>& reg, HighBitSel sel)
     {
-        if(reg && rocIsa::getInstance().getArchCaps()["NoSDWA"])
+        if(reg && capOrDefault(rocIsa::getInstance().getArchCaps(), "NoSDWA"))
         {
             return regWithHalf(reg, sel);
         }
