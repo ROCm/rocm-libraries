@@ -416,9 +416,16 @@ private:
     /// KernelDefinition for nothing, and teaching it to reach into a graph would cost it
     /// the opacity its benchmarkId comment exists to protect.
     ///
-    /// Keys are the UHD namespaces with the `$` dropped, so a signature entry
-    /// `"$q.seqlen"` names the exported column `q.seqlen` and no translation table sits
-    /// between the sweep and the trainer.
+    /// Keys mirror how FeatureExtractor will bind the same values, so a logged column and
+    /// a `features_signature` entry are the same string minus the `$`. Both roots come
+    /// from `bindNamespace`: bound tokens land under `q` (`bindQueryVars`) and KMD
+    /// metadata under `kernel` (`bindKernelVars`). Dropping either prefix here would name
+    /// a column no signature can reference.
+    ///
+    /// Note this makes `q` a namespace meaning "the problem", which is NOT what RFC 0020
+    /// §6.1 means by it -- there `$q` is a pattern variable naming the query tensor. The
+    /// divergence is FeatureExtractor's, not this function's; mirroring it is the only way
+    /// the two sides agree today. Reconciling them is the pattern-driven path's to do.
     ///
     /// Built for every sweep, whatever the engine ships. Gating this on a UHD being
     /// present would make the corpus collectable only by a build that already has the
