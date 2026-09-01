@@ -67,7 +67,7 @@ Memory layout:
 Characteristics:
 
 * All matrices live in one contiguous buffer per operand.
-* Batch mode (``hipblasltBatchMode_t``) is set to ``HIPBLASLT_BATCH_MODE_STRIDED`` ( or ``0``).
+* Batch mode (``hipblasLtBatchMode_t``) is set to ``HIPBLASLT_BATCH_MODE_STRIDED`` (or ``0``).
 * Uniform stride between batches set with ``HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET``.
 * More memory-efficient and often slightly better cache locality.
 * Less flexible: requires contiguous allocation.
