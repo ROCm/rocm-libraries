@@ -588,6 +588,11 @@ struct RocblasltContractionProblem
 
     hipStream_t stream;
     void*       Synchronizer;
+    // Stream-K flag region, private to this (stream, problem index) pair. Not a
+    // constructor parameter: the object API builds the problem before it knows
+    // its stream, so this is assigned once the stream is available rather than
+    // threaded through a 60-argument constructor that every caller spells out.
+    void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
     hipblasLtBatchMode_t batchMode;   
