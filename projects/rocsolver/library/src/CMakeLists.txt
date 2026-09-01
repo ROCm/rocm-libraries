@@ -252,6 +252,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_aliases.cpp
   auxiliary/rocauxiliary_lacgv.cpp
   auxiliary/rocauxiliary_laswp.cpp
+  auxiliary/rocauxiliary_laset.cpp
   # householder reflections
   auxiliary/rocauxiliary_larfg.cpp
   auxiliary/rocauxiliary_larf.cpp
@@ -279,6 +280,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_ormql_unmql.cpp
   auxiliary/rocauxiliary_ormbr_unmbr.cpp
   auxiliary/rocauxiliary_ormtr_unmtr.cpp
+  auxiliary/rocauxiliary_ormtr_unmtr_hb2st.cpp
   # bidiagonal matrices
   auxiliary/rocauxiliary_bdsqr.cpp
   auxiliary/rocauxiliary_bdsvdx.cpp
@@ -299,6 +301,9 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_lasyf.cpp
   # triangular matrices
   auxiliary/rocauxiliary_lauum.cpp
+  # band matrices
+  auxiliary/rocauxiliary_sb2st_hb2st.cpp
+  auxiliary/rocauxiliary_sy2sb_he2hb.cpp
 )
 
 set(rocsolver_refact_source
@@ -532,6 +537,9 @@ endif()
 if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
   target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
+if(ROCSOLVER_ENABLE_EIG_2STAGE)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
+endif()
 if(ROCSOLVER_ENABLE_HESSENBERG)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
 endif()
@@ -544,6 +552,11 @@ target_compile_definitions(rocsolver PRIVATE
 )
 
 add_armor_flags(rocsolver "${ARMOR_LEVEL}")
+
+# Embed PE version metadata (VERSIONINFO) into the DLL
+if(WIN32 AND BUILD_SHARED_LIBS)
+  target_sources(rocsolver PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
 
 if(WIN32)
   if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
@@ -590,4 +603,3 @@ rocm_export_targets(
     ${static_depends}
   NAMESPACE roc::
 )
-
