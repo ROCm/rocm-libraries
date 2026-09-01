@@ -385,9 +385,15 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             make_tile_window(q_lds, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {0, 0});
 
 #if CK_TILE_FMHA_BWD_PREFETCH_QDO
-        QDataType* q_lds_ptr_b = static_cast<QDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) +
-            Policy::template GetQPrefetchSmemOffset<Problem>()));
+        // When this instance does not prefetch, B is built at A's offset. It
+        // then aliases A, phase never flips, and every selection below resolves
+        // to the original single-buffer behaviour.
+        constexpr bool kPrefetchQDO = Policy::template UseQDOPrefetch<Problem>();
+        QDataType* q_lds_ptr_b =
+            kPrefetchQDO ? static_cast<QDataType*>(static_cast<void*>(
+                               static_cast<char*>(smem_ptr) +
+                               Policy::template GetQPrefetchSmemOffset<Problem>()))
+                         : q_lds_ptr;
         auto q_lds_b = make_tensor_view<address_space_enum::lds>(
             q_lds_ptr_b, Policy::template MakeQLdsBlockDescriptor<Problem>());
         auto q_lds_window_b =
@@ -439,9 +445,11 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             make_tile_window(do_lds, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
 
 #if CK_TILE_FMHA_BWD_PREFETCH_QDO
-        OGradDataType* do_lds_ptr_b = static_cast<OGradDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) +
-            Policy::template GetOGradPrefetchSmemOffset<Problem>()));
+        OGradDataType* do_lds_ptr_b =
+            kPrefetchQDO ? static_cast<OGradDataType*>(static_cast<void*>(
+                               static_cast<char*>(smem_ptr) +
+                               Policy::template GetOGradPrefetchSmemOffset<Problem>()))
+                         : do_lds_ptr;
         auto do_lds_b = make_tensor_view<address_space_enum::lds>(
             do_lds_ptr_b, Policy::template MakeOGradLdsBlockDescriptor<Problem>());
         auto do_lds_window_b =
@@ -976,7 +984,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             move_tile_window(dq_dram_window, {kM0, 0});
 
 #if CK_TILE_FMHA_BWD_PREFETCH_QDO
-            phase = !phase;
+            if constexpr(Policy::template UseQDOPrefetch<Problem>())
+            {
+                phase = !phase;
+            }
 #endif
             i_total_loops += 1;
             seqlen_q_step += kM0;
