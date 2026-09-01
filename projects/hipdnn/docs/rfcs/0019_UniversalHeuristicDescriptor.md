@@ -416,7 +416,7 @@ The normative header. A loader can validate every row here without instantiating
 | `categorical_encoding` | if a feature reads a string field | field → (value → code) | Generated during training; makes string→number conversion explicit ([Section 6.5](#65-categorical-encoding)). |
 | `features_hash` | if `features_signature` | `sha256:…` | Fingerprint of the **resolved feature contract** — the canonicalized signature *and* `categorical_encoding` ([Section 6.3](#63-contract-enforcement)). |
 | `trained_against` | if the adapter features | `{ued, umd, kmd}` semvers | The descriptor versions this heuristic was generated against ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
-| `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score. *Deferred in implementation* — the current layout fixes higher-wins; adapters normalize until this lands. |
+| `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score. The UHD's author chooses it, because only they know what their model predicts: a model trained on TFLOPS ranks descending, one trained on latency ranks ascending. Both are ordinary; neither is a fallback. |
 | `score` | no | object | `units`, `calibrated`, `transform` — lets a consumer recover real TFLOPS ([Section 11.3](#113-cross-engine-comparison)). |
 | `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. Keys inside it are the adapter's concern, not the loader's. |
 

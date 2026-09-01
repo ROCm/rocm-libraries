@@ -1343,10 +1343,12 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")",
                                                              R"("$derived.tiles_m")"});
     heuristic["features_hash"] = "sha256:unchecked";
-    heuristic["objective"] = "min";
+    // max with a calibrated score: the pair a cross-engine consumer may act on, and the
+    // one combination where `calibrated` is not its default, so the boolean parse is real.
+    heuristic["objective"] = "max";
     heuristic["derived"] = nlohmann::json::array(
         {{{"name", "tiles_m"}, {"expression", R"({"ceil_div": ["$q.M", "$kernel.tile_m"]})"}}});
-    heuristic["score"] = {{"units", "latency_ms"}, {"calibrated", true}, {"transform", "log1p"}};
+    heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
     heuristic["tree_data"] = {{"artifact", "model.bin"}};
     writeDocuments(dir.path(), documents);
     writeArtifact(dir.path() / "model.bin");
@@ -1357,16 +1359,78 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     ASSERT_TRUE(sets.front().heuristic.has_value());
     const auto& parsed = *sets.front().heuristic;
 
-    EXPECT_EQ(parsed.objective, "min");
+    EXPECT_EQ(parsed.objective, "max");
     ASSERT_EQ(parsed.featuresSignature.size(), 2u);
     EXPECT_EQ(parsed.featuresSignature[1], R"("$derived.tiles_m")");
     EXPECT_EQ(parsed.featuresHash, "sha256:unchecked");
     ASSERT_EQ(parsed.derived.size(), 1u);
     EXPECT_EQ(parsed.derived.front().name, "tiles_m");
     EXPECT_EQ(parsed.derived.front().expression, R"({"ceil_div": ["$q.M", "$kernel.tile_m"]})");
-    EXPECT_EQ(parsed.score.units, "latency_ms");
+    EXPECT_EQ(parsed.score.units, "tflops");
     EXPECT_TRUE(parsed.score.calibrated);
     EXPECT_EQ(parsed.score.transform, "log1p");
+}
+
+/// A cost-target UHD is ordinary: `min` on an uncalibrated score parses and is kept.
+///
+/// The direction is the author's to choose, because only they know what their model
+/// predicts -- a model fitted on TFLOPS ranks descending, one fitted on latency ascending.
+/// Neither is a fallback for the other, and dropping `min` on the floor would silently
+/// invert every ranking a latency model produces.
+TEST(TestDescriptorLoader, KeepsAMinimisingObjectiveOnAnUncalibratedScore)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("objective_min"));
+
+    auto documents = makeSetDocuments('1', "test:objective_min");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    heuristic["objective"] = "min";
+    heuristic["score"] = {{"units", "latency_ms"}, {"calibrated", false}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->objective, "min");
+    EXPECT_FALSE(sets.front().heuristic->score.calibrated);
+}
+
+/// `min` with a calibrated score is a load error, not a preference.
+///
+/// RFC 0019 §11.3 defines cross-engine comparison on an absolute throughput metric, which
+/// is higher-wins by construction. A descriptor claiming both asks two engines to be
+/// ranked against each other while reporting their scores in opposite directions. Caught
+/// at parse (RFC 0019.13 §15.1): at comparison time the symptom is an inverted choice
+/// between two engines, with nothing left to attribute it to.
+TEST(TestDescriptorLoader, RejectsAMinimisingObjectiveOnACalibratedScore)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("objective_clash"));
+
+    auto documents = makeSetDocuments('1', "test:objective_clash");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    heuristic["objective"] = "min";
+    heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    EXPECT_TRUE(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "calibrated"));
 }
 
 /// A `derived` that is not a list of name/expression objects is a parse error.
