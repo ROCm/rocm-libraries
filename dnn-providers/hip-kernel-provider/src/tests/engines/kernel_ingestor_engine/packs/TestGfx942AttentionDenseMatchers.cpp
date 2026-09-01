@@ -4,9 +4,11 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -738,6 +740,219 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesUnsupportedMmaCoreMode)
     GraphSpec spec;
     spec.mmaCoreMode = data_objects::DataType::BFLOAT16;
     EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// The BINDING -- what a matched graph publishes for a UHD to rank on.
+//
+// Before these fields existed the matcher bound four tensor uids, `causal` and a float
+// bit pattern, so a model could not see the problem's SHAPE at all and every candidate
+// scored alike on every graph. RFC 0019 §13.6 owns the two cost fields and settles their
+// counting convention.
+//
+// Every case below runs on an ASYMMETRIC graph: batch, both head counts, both sequence
+// lengths and the head size are six DISTINCT numbers, so a binding that reads the wrong
+// axis or the wrong operand -- Hkv where Hq was meant, K's sequence where Q's was -- has
+// no way to pass by coincidence. The default GraphSpec is square and equal-headed and
+// would hide exactly those bugs.
+// ---------------------------------------------------------------------------
+
+/// The bound value at @p token as a string, or nullopt when the token is absent or holds
+/// something else. The mirror of tryGetBoundInt, which the SDK ships but has no string
+/// twin.
+std::optional<std::string> boundString(const BoundTokens& bound, std::string_view token)
+{
+    const auto entry = bound.find(std::string(token));
+    if(entry == bound.end())
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<std::string>(&entry->second);
+    return value == nullptr ? std::nullopt : std::make_optional(*value);
+}
+
+using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
+
+/// B=3, Hq=8, Hkv=2 (GQA, and 8 % 2 == 0), Sq=64, Skv=128, D=32: six distinct extents,
+/// far inside the 32-bit addressing limits, top-left causal so Sq != Skv stays servable.
+GraphSpec asymmetricSpec()
+{
+    GraphSpec spec;
+    spec.batch = 3;
+    spec.numQueryHeads = 8;
+    spec.numKvHeads = 2;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 128;
+    spec.headSize = 32;
+    spec.headSizeV = 32;
+    return spec;
+}
+
+TEST(TestGfx942AttentionDenseBinding, BindsEveryGeometricFieldTheGraphCarries)
+{
+    const auto bound = matchGraph(asymmetricSpec());
+    ASSERT_TRUE(bound.has_value());
+
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.batch"), 3);
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.num_query_heads"), 8);
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.num_kv_heads"), 2);
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.seqlen_q"), 64);
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.seqlen_kv"), 128);
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.head_size"), 32);
+}
+
+TEST(TestGfx942AttentionDenseBinding, StillBindsTheUidsCausalAndScaleThatDispatchReadsBack)
+{
+    // prepare() re-reads every one of these and throws when one is missing, so dropping
+    // any of them while adding the geometry above breaks DISPATCH -- not merely a feature.
+    const auto bound = matchGraph(asymmetricSpec());
+    ASSERT_TRUE(bound.has_value());
+
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.q.uid"), Q_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.k.uid"), K_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.v.uid"), V_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.o.uid"), O_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.causal"), 1);
+
+    // The scale travels as its IEEE-754 bit pattern. Reassembling it is what prepare()
+    // does, and a pattern that no longer round-trips is a wrong softmax scale on device.
+    const auto scaleBits = tryGetBoundInt(*bound, "attention_dense.scale_bits");
+    ASSERT_TRUE(scaleBits.has_value());
+    const auto raw = static_cast<int32_t>(*scaleBits);
+    float scale = 0.0F;
+    std::memcpy(&scale, &raw, sizeof(scale));
+    EXPECT_EQ(scale, SCALE);
+}
+
+TEST(TestGfx942AttentionDenseBinding, BindsDtypeAsTheRuntimeSpellingNotTheKmdSpelling)
+{
+    auto spec = asymmetricSpec();
+    const auto bf16 = matchGraph(spec);
+    spec.dataType = data_objects::DataType::HALF;
+    const auto fp16 = matchGraph(spec);
+    ASSERT_TRUE(bf16.has_value());
+    ASSERT_TRUE(fp16.has_value());
+
+    // "bf16" -- NOT the KMD's "BF16" that kernel_match compares against, and not the
+    // flatbuffer enum's "BFLOAT16". CategoricalEncoding.hpp knows only the lowercase
+    // to_string() vocabulary and refuses anything else as unknown, which costs the
+    // feature silently rather than failing loudly.
+    EXPECT_EQ(boundString(*bf16, "attention_dense.dtype"), "bf16");
+    EXPECT_EQ(boundString(*fp16, "attention_dense.dtype"), "fp16");
+
+    // A string, never a pre-encoded number: the integer code space belongs to the feature
+    // extractor, and freezing it inside the matcher would let the two drift apart.
+    EXPECT_FALSE(tryGetBoundInt(*bf16, "attention_dense.dtype").has_value());
+}
+
+TEST(TestGfx942AttentionDenseBinding, BindsCausalEffectiveFlopsNotTheDenseCount)
+{
+    const auto bound = matchGraph(asymmetricSpec());
+    ASSERT_TRUE(bound.has_value());
+
+    // Hand-computed for B=3, Hq=8, Sq=64, Skv=128, D=32, causal:
+    //   average effective KV per query = Skv - Sq + (Sq + 1) / 2 = 128 - 64 + 32.5 = 96.5
+    //   MACs per sequence              = 64 * 96.5 = 6176
+    //                                    (= Sq*Skv - Sq*(Sq-1)/2 = 8192 - 2016, the same
+    //                                     number in exact integers)
+    //   flops = 4 * B * macs * Hq * D  = 4 * 3 * 6176 * 8 * 32 = 18,972,672
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.flops"), 18972672);
+}
+
+TEST(TestGfx942AttentionDenseBinding, BindsTheDenseCountWithNoMaskAndCausalIsStrictlySmaller)
+{
+    auto unmaskedSpec = asymmetricSpec();
+    unmaskedSpec.leftBound = std::nullopt;
+    unmaskedSpec.rightBound = std::nullopt;
+    const auto unmasked = matchGraph(unmaskedSpec);
+    const auto causal = matchGraph(asymmetricSpec());
+    ASSERT_TRUE(unmasked.has_value());
+    ASSERT_TRUE(causal.has_value());
+
+    // The same shape with no mask: every query attends all 128 keys, so the effective
+    // count collapses to the dense one,
+    //   4 * B * Sq * Skv * Hq * D = 4 * 3 * 64 * 128 * 8 * 32 = 25,165,824.
+    EXPECT_EQ(tryGetBoundInt(*unmasked, "attention_dense.causal"), 0);
+    EXPECT_EQ(tryGetBoundInt(*unmasked, "attention_dense.flops"), 25165824);
+
+    // The whole point of the effective convention: the mask discards 2016 of every
+    // sequence's 8192 MACs, so causal must cost strictly LESS on an identical shape.
+    // Counting densely on both branches -- the easy mistake -- makes these two equal.
+    EXPECT_LT(*tryGetBoundInt(*causal, "attention_dense.flops"),
+              *tryGetBoundInt(*unmasked, "attention_dense.flops"));
+}
+
+TEST(TestGfx942AttentionDenseBinding, BindsFlopsForASingleQueryDecodeShape)
+{
+    auto spec = asymmetricSpec();
+    spec.seqLenQ = 1;
+    const auto bound = matchGraph(spec);
+    ASSERT_TRUE(bound.has_value());
+
+    // Sq == 1 masks nothing out -- the one query is the last row and attends all 128 keys:
+    //   macs = 1 * 128, flops = 4 * 3 * 128 * 8 * 32 = 393,216.
+    // The shape that catches a `Sq * (Sq - 1)` routed through the positive-factors-only
+    // checkedMultiply: the zero factor would make flops ABSENT on every decode graph,
+    // which is the half of the corpus that matters most for a latency-ranked heuristic.
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.flops"), 393216);
+}
+
+TEST(TestGfx942AttentionDenseBinding, ReproducesTheReferenceFallbackWhenQueriesOutrunKeys)
+{
+    auto spec = asymmetricSpec();
+    spec.seqLenKv = 8;
+    const auto bound = matchGraph(spec);
+    ASSERT_TRUE(bound.has_value());
+
+    // Sq > 2 * Skv + 1 (64 > 17), where the suffix formula gives a NEGATIVE effective KV
+    // length. `attention_flops` substitutes kv_len / 2 there, and this pack reproduces
+    // that substitution rather than improving on it: the field is worth something only
+    // while it equals what the corpus generator computed for the same shape, and a count
+    // that diverges only in a corner is the disagreement nobody ever notices.
+    //   macs = floor(64 * 8 / 2) = 256, flops = 4 * 3 * 256 * 8 * 32 = 786,432.
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.flops"), 786432);
+}
+
+TEST(TestGfx942AttentionDenseBinding, BindsBytesAsThePerOperandSumOfElementsTimesItsDtypeWidth)
+{
+    const auto bound = matchGraph(asymmetricSpec());
+    ASSERT_TRUE(bound.has_value());
+
+    // Q and O are B*Hq*Sq*D = 3*8*64*32 = 49,152 elements each; K and V are
+    // B*Hkv*Skv*D = 3*2*128*32 = 24,576 each. bf16 is 2 bytes wide:
+    //   (49152 + 24576 + 24576 + 49152) * 2 = 294,912.
+    // The asymmetry is what makes this a check rather than a restatement: the shortcut of
+    // sizing one operand and quadrupling it (49152 * 4 * 2 = 393,216) cannot pass.
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.bytes"), 294912);
+}
+
+TEST(TestGfx942AttentionDenseBinding, ByteCountFollowsTheKvOperandsAndFlopsDoesNot)
+{
+    auto multiHead = asymmetricSpec();
+    multiHead.numKvHeads = multiHead.numQueryHeads; // 2 -> 8: K and V grow 4x, Q and O do not.
+    const auto grouped = matchGraph(asymmetricSpec());
+    const auto multi = matchGraph(multiHead);
+    ASSERT_TRUE(grouped.has_value());
+    ASSERT_TRUE(multi.has_value());
+
+    // K and V are now B*Hq*Skv*D = 98,304 elements each:
+    //   (49152 + 98304 + 98304 + 49152) * 2 = 589,824.
+    EXPECT_EQ(tryGetBoundInt(*multi, "attention_dense.bytes"), 589824);
+    EXPECT_EQ(tryGetBoundInt(*grouped, "attention_dense.bytes"), 294912);
+
+    // flops counts QUERY heads only -- GQA replays one K/V head across a group rather than
+    // doing more arithmetic -- so the same move must leave it untouched. A count written
+    // over `num_kv_heads` moves here, and is wrong by the group size on every GQA graph in
+    // the corpus.
+    EXPECT_EQ(tryGetBoundInt(*multi, "attention_dense.flops"),
+              tryGetBoundInt(*grouped, "attention_dense.flops"));
+    EXPECT_EQ(tryGetBoundInt(*multi, "attention_dense.flops"), 18972672);
+
+    // The dtype-width version of this test cannot exist for this pack: the matcher
+    // declines every dtype but bf16 and fp16 (supportedDataTypeName), and both are two
+    // bytes wide, so no REACHABLE graph moves `bytes` by precision alone. The per-tensor
+    // width is still the form the binding computes; it only becomes observable if that
+    // gate ever widens, and the hand-computed totals above pin the width meanwhile.
 }
 
 // ---------------------------------------------------------------------------
