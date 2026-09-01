@@ -428,11 +428,7 @@ inline LineStoreRegistryEntry* openOrFindLineStoreEntry(const std::filesystem::p
             // per transient stat failure, which is the cheaper of the two defects.
             return position->second.get();
         }
-        // Owned by the registry from here on, which never closes a descriptor. Blanked
-        // only now to record that it is no longer this function's to close on any later
-        // failure: emplace() can throw, and until it returns this was still the only
-        // reference to the descriptor.
-        handle = INVALID_LINE_STORE_HANDLE;
+        // Owned by the registry from here on; the registry never closes a descriptor.
         return position->second.get();
     }
     catch(...)
@@ -526,7 +522,7 @@ inline LineStoreRegistryEntry* findExistingLineStoreEntry(const std::filesystem:
             // registered one.
             return position->second.get();
         }
-        handle = INVALID_LINE_STORE_HANDLE;
+        // Owned by the registry from here on; the registry never closes a descriptor.
         return position->second.get();
     }
     catch(...)
