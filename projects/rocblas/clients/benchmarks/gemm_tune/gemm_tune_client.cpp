@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,8 @@
 #include "gemm_tuners.hpp"
 
 #include "type_dispatch.hpp"
+
+#include "tensile_host.hpp"
 
 #include <memory>
 #include <sstream>
@@ -188,8 +190,11 @@ int main(int argc, char* argv[])
             // run benchmark
             int best_solution_index = rocblas_gemm_dispatch<GEMMTunerDispatch>(arg);
 
-            // log result, if solution is found
-            if(best_solution_index > 0)
+            // log result, if solution is found and the index is a valid tensile or
+            // hipblaslt index. The reserved indices name a rocBLAS kernel such as the
+            // gemv fallback, which an override file has no way to select.
+            if(rocblas_tensile_index(best_solution_index)
+               || rocblas_hipblaslt_index(best_solution_index))
             {
                 *current_entry = true;
                 *current_os << arg_key << DELIM << best_solution_index << "\n";
