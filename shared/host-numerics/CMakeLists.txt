@@ -18,22 +18,22 @@ else()
 endif()
 
 option(HOST_NUMERICS_BUILD_TESTING
-       "Build host-numerics tests."
+       "Build the standalone C++ and installed-package validation suites."
        ${HOST_NUMERICS_STANDALONE})
 option(HOST_NUMERICS_BUILD_PYTHON
-       "Build the host-numerics nanobind module."
+       "Build the Python module that exposes tensors and numerical operations through nanobind."
        ${HOST_NUMERICS_STANDALONE})
 option(HOST_NUMERICS_BUILD_BLAS_BACKEND
-       "Build the optional host-numerics CBLAS GEMM backend."
+       "Build the optional CBLAS GEMM backend; the provider must use 32-bit (LP64) dimensions."
        OFF)
 option(HOST_NUMERICS_BUILD_BENCHMARKS
-       "Build host-numerics development benchmarks."
+       "Build standalone development benchmarks; these are not installed."
        OFF)
 option(HOST_NUMERICS_ENABLE_FETCH
-       "Allow host-numerics tests to fetch missing dependencies."
+       "Allow standalone validation builds to fetch missing test dependencies."
        ${HOST_NUMERICS_STANDALONE})
 option(HOST_NUMERICS_AMD_GPU_LAYOUT_ENABLE_OPENMP
-       "Use OpenMP for large AMD GPU physical-layout transforms when available."
+       "Parallelize large CPU-side AMD GPU layout transforms with OpenMP when available."
        ON)
 
 # Install one public target and its component-specific export file.
