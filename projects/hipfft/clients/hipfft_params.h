@@ -163,6 +163,11 @@ public:
     // will be provided with externally-managed work area(s):
     static std::vector<gpubuf> externally_managed_workareas;
 
+    // JIT callback data pointers, stored in a params-level vector so
+    // that they live as long as the plan
+    std::vector<void*> load_jit_cb_data_ptrs;
+    std::vector<void*> store_jit_cb_data_ptrs;
+
     static std::vector<size_t> externally_managed_extra_vram_footprint()
     {
         std::vector<size_t> footprint;
@@ -1256,8 +1261,6 @@ private:
         {
             return HIPFFT_SUCCESS;
         }
-        throw unimplemented_exception("jit callbacks not implemented");
-#if 0
         hipfftResult_t       ret{HIPFFT_INVALID_PLAN};
         hipfftXtCallbackType cbtype = HIPFFT_CB_UNDEFINED;
         switch(itype)
@@ -1302,14 +1305,13 @@ private:
         }
 
         check_jit_callback_state();
-        ret = hipfftXtSetJITCallback(plan,
+        load_jit_cb_data_ptrs = load_jit_cb_state->get_raw_data_ptrs();
+        ret                   = hipfftXtSetJITCallback(plan,
                                      load_jit_cb_state->symbol,
                                      load_jit_cb_state->func.data(),
                                      load_jit_cb_state->func.size(),
                                      cbtype,
-                                     load_jit_cb_state->data.empty()
-                                         ? nullptr
-                                         : load_jit_cb_state->get_raw_data_ptrs().data());
+                                     load_jit_cb_data_ptrs.data());
         if(ret != HIPFFT_SUCCESS)
             return ret;
 
@@ -1353,16 +1355,14 @@ private:
             throw std::runtime_error("unsupported data type for store callback");
         }
         }
-        ret = hipfftXtSetJITCallback(plan,
+        store_jit_cb_data_ptrs = store_jit_cb_state->get_raw_data_ptrs();
+        ret                    = hipfftXtSetJITCallback(plan,
                                      store_jit_cb_state->symbol,
                                      store_jit_cb_state->func.data(),
                                      store_jit_cb_state->func.size(),
                                      cbtype,
-                                     store_jit_cb_state->data.empty()
-                                         ? nullptr
-                                         : store_jit_cb_state->get_raw_data_ptrs().data());
+                                     store_jit_cb_data_ptrs.data());
         return ret;
-#endif
     }
 
     // call hipfftCreate + hipfftMake* functions, inserting calls to

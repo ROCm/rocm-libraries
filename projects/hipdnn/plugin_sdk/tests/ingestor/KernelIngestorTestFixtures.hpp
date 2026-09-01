@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -554,18 +555,62 @@ inline std::vector<DispatchDescriptor> makeTestDispatches()
     return {{DISPATCH_ID, "test dispatch", "test.dispatch"}};
 }
 
+inline KernelSource makeEmbeddedSource(const std::string& sourceFile = "Test.cpp",
+                                       const std::string& entryPoint = "TestKernel")
+{
+    KernelSource source;
+    source.kind = KernelSourceKind::EMBEDDED_SOURCE;
+    source.sourceFile = sourceFile;
+    source.entryPoint = entryPoint;
+    return source;
+}
+
+/// Defaults spell the shape the descriptor packager emits.
+inline KernelSource makeKpackSource(const std::string& library
+                                    = "kpack/hip_kernel_provider_gfx942.kpack",
+                                    const std::string& tocKey = "test-toc-key",
+                                    const std::string& symbol = "TestKernel",
+                                    const std::string& sha256 = std::string(64, 'a'))
+{
+    KernelSource source;
+    source.kind = KernelSourceKind::KPACK;
+    source.library = library;
+    source.tocKey = tocKey;
+    source.symbol = symbol;
+    source.sha256 = sha256;
+    return source;
+}
+
 inline KernelDefinition makeDefinition(const DescriptorId& id,
                                        int64_t blockSize,
                                        int64_t priority = 0,
                                        const std::vector<std::string>& arch = {})
 {
-    return {id,
-            PACK_ID,
-            DISPATCH_ID,
-            KernelSource{KernelSourceKind::EMBEDDED_SOURCE, "Test.cpp", "TestKernel"},
-            {{BLOCK_SIZE, MetadataValue{blockSize}}},
-            priority,
-            arch};
+    KernelDefinition definition;
+    definition.kernelId = id;
+    definition.packId = PACK_ID;
+    definition.dispatchId = DISPATCH_ID;
+    definition.source = makeEmbeddedSource();
+    definition.metadata = {{BLOCK_SIZE, MetadataValue{blockSize}}};
+    definition.priority = priority;
+    definition.arch = arch;
+    return definition;
+}
+
+/// @p originDirectory is what `source.library` resolves against; a test that only reads
+/// the coordinates can leave it empty.
+inline KernelDefinition makeKpackDefinition(const DescriptorId& id,
+                                            int64_t blockSize,
+                                            const std::filesystem::path& originDirectory = {},
+                                            const KernelSource& source = makeKpackSource(),
+                                            int64_t priority = 0,
+                                            const std::vector<std::string>& arch = {})
+{
+    KernelDefinition definition = makeDefinition(id, blockSize, priority, arch);
+    definition.source = source;
+    definition.originDirectory = originDirectory;
+    definition.name = "kpack kernel";
+    return definition;
 }
 
 /// RAII: registers the engine's graph match and one kernel matcher under
@@ -625,6 +670,28 @@ inline std::unique_ptr<StateManager>
         "test.graph",
         "engine 'test fixture'",
         cacheCapacity);
+}
+
+/// The same engine as makeStateManager(), but carrying @p engineName so its on-disk
+/// winner-cache shard resolves. makeStateManager() leaves the name empty, which
+/// disables the disk cache, so every test that does not opt in stays in-memory only.
+inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
+{
+    std::vector<MatchDescriptor> matchers{
+        {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
+    ensureNoopDispatchRegistered<TestHandle>();
+    std::vector<DispatchDescriptor> dispatches{{DISPATCH_ID, "test dispatch", "test.dispatch"}};
+
+    return std::make_unique<StateManager>(
+        makeSchema(),
+        std::move(matchers),
+        std::move(dispatches),
+        std::vector<KernelDescriptorPack>{makePack({KERNEL_MATCHER_ID})},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph",
+        "engine 'test fixture'",
+        StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
+        engineName);
 }
 
 /// Installs @p handler under @p symbol for the object's lifetime, replacing

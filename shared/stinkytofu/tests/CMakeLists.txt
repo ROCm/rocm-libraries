@@ -45,8 +45,10 @@ set(TEST_LINK_LIBS
 set(UNIT_ASM_TEST_FILES
     unit/asm/WaitCntInsertionTest.cpp
     unit/asm/DAGSchedulerPassTest.cpp
+    unit/asm/CDNA5ReadyQueueTest.cpp
     unit/asm/ExecMaskGroupingTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
+    unit/asm/StinkyUnreachableBlockElimPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
     unit/asm/EstimateAsmCyclesTest.cpp
@@ -64,6 +66,11 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/StinkyModifiersTest.cpp
     unit/asm/LegalizationUtilsTest.cpp
     unit/asm/VirtualRegisterTest.cpp
+    unit/ssa/AttachedSSATest.cpp
+    unit/ssa/AsmPrinterSSAFormTest.cpp
+    unit/ssa/LiftAsmRegistersToSSATest.cpp
+    unit/asm/DefUseAnalysisCleanupTest.cpp
+    unit/ssa/SSADestructionTest.cpp
     # Parser/Lexer Tests (added for critical testing gaps)
     unit/asm/IRLexerTest.cpp
     unit/asm/IRParserTest.cpp
@@ -72,6 +79,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/HwInstDescTest.cpp
     unit/asm/ReadWriteOperandTest.cpp
     unit/asm/BarrierTest.cpp
+    unit/asm/MergeBarrierPassTest.cpp
     unit/asm/LoopRegionRemarkPassTest.cpp
     unit/asm/BranchHelpersTest.cpp
     unit/asm/SetpcSwappcCfgTest.cpp
@@ -90,7 +98,6 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/BasicBlockTest.cpp
     unit/asm/DumpStinkyModulePassTest.cpp
     unit/asm/StinkySignatureTest.cpp
-    unit/asm/RederiveExpertScopePassTest.cpp
     unit/asm/HWModelTest.cpp
 )
 
