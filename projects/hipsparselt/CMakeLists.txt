@@ -261,7 +261,7 @@ if(HIPSPARSELT_ENABLE_HIP)
             LOGIC_PATH "${TENSILELITE_LIBLOGIC_PATH}"
             OUTPUT_DIR "${_hipsparselt_tensile_out}"
             CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}"
-            PYTHON_EXECUTABLE "${Python3_EXECUTABLE}"
+            PYTHON_EXECUTABLE "${Python_EXECUTABLE}"
             OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
             JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
             LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
@@ -291,6 +291,15 @@ endif()
 set(BUILD_SHARED_LIBS "${HIPSPARSELT_BUILD_SHARED_LIBS}")
 add_subdirectory(library)
 
+# The shared source-provider build embeds its private static TensileLite
+# support. Static hipsparselt and staged/TheRock builds export or link the
+# hipBLASLt provider instead.
+set(_hipsparselt_requires_hipblaslt OFF)
+if(HIPSPARSELT_ENABLE_HIP
+        AND (HIPSPARSELT_ENABLE_THEROCK OR NOT BUILD_SHARED_LIBS))
+    set(_hipsparselt_requires_hipblaslt ON)
+endif()
+
 if(HIPSPARSELT_BUILD_TESTING)
   enable_testing()
 endif()
@@ -309,11 +318,19 @@ endif()
 
 # --- Packaging and installation ---
 
-if(HIPSPARSELT_ENABLE_HIP)
+if(_hipsparselt_requires_hipblaslt)
     if(BUILD_SHARED_LIBS)
         rocm_package_add_dependencies(
             COMPONENT runtime
             DEPENDS hipblaslt
+        )
+        rocm_package_add_deb_dependencies(
+            COMPONENT devel
+            DEPENDS hipblaslt-dev
+        )
+        rocm_package_add_rpm_dependencies(
+            COMPONENT devel
+            DEPENDS hipblaslt-devel
         )
     else()
         rocm_package_add_deb_dependencies(
@@ -386,7 +403,7 @@ rocm_install(
 )
 
 set(_hipsparselt_export_depends PACKAGE hip)
-if(HIPSPARSELT_ENABLE_HIP)
+if(_hipsparselt_requires_hipblaslt)
     list(APPEND _hipsparselt_export_depends PACKAGE hipblaslt)
 endif()
 
@@ -401,6 +418,7 @@ rocm_export_targets(
     ${_hipsparselt_export_depends}
 )
 unset(_hipsparselt_export_depends)
+unset(_hipsparselt_requires_hipblaslt)
 
 if(HIPSPARSELT_ENABLE_CLIENT)
     if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)
