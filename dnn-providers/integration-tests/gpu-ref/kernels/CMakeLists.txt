@@ -9,7 +9,7 @@ set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/sdpa/GpuRefSdpaFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/GpuRefRMSNormFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/GpuRefRMSNormBwd.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/GpuRefBatchnormFwd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/GpuRefBatchnormFwdInf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pointwise/GpuRefPointwiseUnary.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pointwise/GpuRefPointwiseBinary.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/validator/GpuRefValidator.cpp

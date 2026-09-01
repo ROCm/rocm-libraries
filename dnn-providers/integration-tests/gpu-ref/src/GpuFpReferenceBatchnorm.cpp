@@ -166,7 +166,7 @@ void GpuFpReferenceBatchnorm::launchFwdInf(const void* inputPtr,
     defines.emplace_back(std::string("-DLOCAL_SIZE_Y=") + std::to_string(localSize[1]));
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     const auto& kernel
-        = compiler.getOrCompile("GpuRefBatchnormFwd.cpp", defines, "BatchnormFwdInfRef");
+        = compiler.getOrCompile("GpuRefBatchnormFwdInf.cpp", defines, "BatchnormFwdInfRef");
 
     BatchnormFwdArgs args{};
     args.input = inputPtr;

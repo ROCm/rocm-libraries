@@ -57,7 +57,7 @@ template <typename InputDataType,
           typename ScaleBiasDataType = InputDataType,
           typename MeanVarDataType = InputDataType,
           typename ComputeDataType = double>
-void runGpuVsCpuBatchnormFwd(const std::vector<int64_t>& ioDims, const TensorLayout& layout)
+void runGpuVsCpuBatchnormFwdInf(const std::vector<int64_t>& ioDims, const TensorLayout& layout)
 {
     std::vector<int64_t> affineDims(ioDims.size(), 1);
     affineDims[1] = ioDims[1];
@@ -117,7 +117,7 @@ void runGpuVsCpuBatchnormFwd(const std::vector<int64_t>& ioDims, const TensorLay
 }
 
 // ============================================================================
-// BatchnormFwdTestSuite — parameterized fixture for shape-based CPU-vs-GPU tests
+// BatchnormFwdInfTestSuite — parameterized fixture for shape-based CPU-vs-GPU tests
 // ============================================================================
 
 using BnFwdInfTestCase = std::tuple<TensorLayout, BatchnormTestCase>;
@@ -127,19 +127,19 @@ template <typename InputDataType,
           typename ScaleBiasDataType = InputDataType,
           typename MeanVarDataType = InputDataType,
           typename ComputeDataType = double>
-class BatchnormFwdTestSuite : public ::testing::TestWithParam<BnFwdInfTestCase>
+class BatchnormFwdInfTestSuite : public ::testing::TestWithParam<BnFwdInfTestCase>
 {
 protected:
-    void runBatchnormFwdTest()
+    void runBatchnormFwdInfTest()
     {
         SKIP_IF_NO_DEVICES();
         const auto& tc = GetParam();
         const auto& [layout, bnTestCase] = tc;
-        runGpuVsCpuBatchnormFwd<InputDataType,
-                                OutputDataType,
-                                ScaleBiasDataType,
-                                MeanVarDataType,
-                                ComputeDataType>(bnTestCase.ioDims, layout);
+        runGpuVsCpuBatchnormFwdInf<InputDataType,
+                                   OutputDataType,
+                                   ScaleBiasDataType,
+                                   MeanVarDataType,
+                                   ComputeDataType>(bnTestCase.ioDims, layout);
     }
 };
 

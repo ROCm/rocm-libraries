@@ -27,7 +27,7 @@ template <typename XDataType,
           typename MeanVarianceDataType,
           typename YDataType,
           typename ComputeDataType>
-inline std::vector<std::string> buildBatchnormFwdDefines()
+inline std::vector<std::string> buildBatchnormFwdInfDefines()
 {
     std::vector<std::string> defines;
     defines.emplace_back(std::string("-DINPUT_TYPE=") + HipRtcTypeName<XDataType>::VALUE);
@@ -73,17 +73,17 @@ public:
                      hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& invVariance,
                      hipdnn_data_sdk::utilities::TensorBase<YDataType>& y)
     {
-        validateFwdInput<XDataType,
-                         ScaleBiasDataType,
-                         MeanVarianceDataType,
-                         YDataType,
-                         ComputeDataType>(x, scale, bias, estimatedMean, invVariance, y);
+        validateFwdInfInput<XDataType,
+                            ScaleBiasDataType,
+                            MeanVarianceDataType,
+                            YDataType,
+                            ComputeDataType>(x, scale, bias, estimatedMean, invVariance, y);
 
-        auto defines = detail::buildBatchnormFwdDefines<XDataType,
-                                                        ScaleBiasDataType,
-                                                        MeanVarianceDataType,
-                                                        YDataType,
-                                                        ComputeDataType>();
+        auto defines = detail::buildBatchnormFwdInfDefines<XDataType,
+                                                           ScaleBiasDataType,
+                                                           MeanVarianceDataType,
+                                                           YDataType,
+                                                           ComputeDataType>();
 
         launchFwdInf(x.memory().deviceData(),
                      x.dims(),
@@ -238,7 +238,7 @@ private:
               typename MeanVarianceDataType,
               typename OutputDataType,
               typename ComputeDataType>
-    static void validateFwdInput(
+    static void validateFwdInfInput(
         const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
         const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
         const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
