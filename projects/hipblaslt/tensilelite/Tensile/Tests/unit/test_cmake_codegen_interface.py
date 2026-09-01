@@ -11,8 +11,9 @@ TENSILELITE_ROOT = Path(__file__).resolve().parents[3]
 _CODEGEN_MODULE_CANDIDATES = (
     # Source tree: projects/hipblaslt/tensilelite -> projects/hipblaslt/cmake.
     TENSILELITE_ROOT.parent / "cmake" / "hipblaslt_codegen.cmake",
-    # Installed test artifact: <prefix>/share/hipblaslt/tensilelite -> <prefix>/lib/cmake.
+    # Installed test artifact: <prefix>/share/hipblaslt/tensilelite -> <prefix>/lib*/cmake.
     TENSILELITE_ROOT.parents[2] / "lib" / "cmake" / "hipblaslt" / "hipblaslt_codegen.cmake",
+    TENSILELITE_ROOT.parents[2] / "lib64" / "cmake" / "hipblaslt" / "hipblaslt_codegen.cmake",
 )
 CODEGEN_MODULE = next(
     (candidate for candidate in _CODEGEN_MODULE_CANDIDATES if candidate.is_file()),
