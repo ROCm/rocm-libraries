@@ -197,6 +197,24 @@ TEST(FusedEpilogueLifecycle, rmsnormStatsCreateNullRejected)
     EXPECT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(nullptr), HIPBLAS_STATUS_INVALID_VALUE);
 }
 
+TEST(FusedEpilogueLifecycle, rmsnormStatsBufferValidation)
+{
+    hipblasLtFusedEpilogueRMSNormDescriptor_t stats = nullptr;
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats), HIPBLAS_STATUS_SUCCESS);
+
+    float storage = 0.0f;
+    EXPECT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(nullptr, &storage, sizeof(storage)),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, nullptr, sizeof(storage)),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, &storage, 0),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, &storage, sizeof(storage)),
+              HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorDestroy(stats), HIPBLAS_STATUS_SUCCESS);
+}
+
 // ---- Add: ordering legality ----
 
 TEST_F(FusedEpilogueTest, legalOrderAccepted)
@@ -950,20 +968,9 @@ static void expectBf16Near(const std::vector<uint16_t>& actual,
 // Exercises the decomposed flow's consumer stage in isolation: a GEMM2 with the
 // HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY epilogue multiplies each output row by a
 // pre-computed per-row rstd carried in the handoff descriptor (K3 RstdScale, normal
-// orientation, no reduction). This test injects a host-computed rstd into the opaque handoff via
-// a test-only hook so the consumer can be exercised independently of the producer. Verifies
+// orientation, no reduction). This test puts a host-computed rstd in the caller-owned handoff
+// buffer so the consumer can be exercised independently of the producer. Verifies
 // D[m,n] = (alpha * op(A)*op(B))[m,n] * rstd[m]. gfx950-only.
-
-// Test-only hook (defined in amd_detail/hipblaslt.cpp) to populate the opaque RMSNorm handoff
-// descriptor with a caller-provided device rstd buffer.
-extern "C++" bool
-    rocblaslt_rmsnorm_handoff_set_scale_for_testing(hipblasLtFusedEpilogueRMSNormDescriptor_t desc,
-                                                    void* per_row_scale);
-
-// Test-only hook to read back the device rstd buffer that the library auto-allocates
-// for a producer. Lets the test validate the handoff without intercepting alloc paths.
-extern "C++" void*
-    rocblaslt_rmsnorm_handoff_get_scale_for_testing(hipblasLtFusedEpilogueRMSNormDescriptor_t desc);
 
 static void createScaleApplyDescriptor(hipblasLtFusedEpilogueRMSNormDescriptor_t stats,
                                        hipblasLtFusedEpilogueDescriptor_t*       fused)
@@ -1018,10 +1025,12 @@ TEST(FusedEpilogueE2E, decomposedScaleApplyMatchesReference)
     hipblasLtHandle_t handle = nullptr;
     ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
 
-    // Decomposed handoff, populated with the host rstd via the test-only hook.
+    // Decomposed handoff, populated with the host rstd in caller-owned device memory.
     hipblasLtFusedEpilogueRMSNormDescriptor_t stats = nullptr;
     ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats), HIPBLAS_STATUS_SUCCESS);
-    ASSERT_TRUE(rocblaslt_rmsnorm_handoff_set_scale_for_testing(stats, dRstd));
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
+                  stats, dRstd, hRstd.size() * sizeof(float)),
+              HIPBLAS_STATUS_SUCCESS);
 
     // Consumer chain: RMSNorm scale-apply reads the deferred per-row scale from the handoff.
     hipblasLtFusedEpilogueDescriptor_t cons = nullptr;
@@ -1061,8 +1070,8 @@ TEST(FusedEpilogueE2E, decomposedScaleApplyMatchesReference)
 
 // ---- End-to-end: decomposed producer(GEMM1) -> consumer(GEMM2) two-call flow ----
 //
-// The full decomposed RMSNorm flow across two matmul calls linked by the library-populated
-// RMSNorm handoff descriptor (no test hook):
+// The full decomposed RMSNorm flow across two matmul calls linked by a caller-buffered RMSNorm
+// handoff descriptor:
 //   GEMM1 (producer, PARTIAL_RMSNORM_STATS): h2 = (x @ W0) * gamma  [M, N_hidden]; the library
 //     runs K1 (PartialRMS) + row_rstd, stashing rstd = rsqrt(mean(h1^2)+eps) in the handoff.
 //   GEMM2 (consumer, RMSNORM_SCALE_APPLY):    y  = rstd * (h2 @ W1)  [M, N_out] via Kernel 3.
@@ -1091,7 +1100,7 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
     fillRandomBf16(hResidual, rng, dist);
 
     void *dX = nullptr, *dW0 = nullptr, *dGamma = nullptr, *dH2 = nullptr, *dW1 = nullptr,
-         *dD2 = nullptr, *dResidual = nullptr, *dWs = nullptr;
+         *dD2 = nullptr, *dResidual = nullptr, *dRstd = nullptr, *dWs = nullptr;
     const size_t wsSize = size_t(256) * 1024 * 1024;
     ASSERT_EQ(hipMalloc(&dX, hX.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dW0, hW0.size() * 2), hipSuccess);
@@ -1099,7 +1108,7 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
     ASSERT_EQ(hipMalloc(&dH2, size_t(M) * Nhidden * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dW1, hW1.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dD2, size_t(M) * Nout * 2), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dResidual, hResidual.size() * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dRstd, size_t(M) * sizeof(float)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
     ASSERT_EQ(hipMemcpy(dX, hX.data(), hX.size() * 2, hipMemcpyHostToDevice), hipSuccess);
     ASSERT_EQ(hipMemcpy(dW0, hW0.data(), hW0.size() * 2, hipMemcpyHostToDevice), hipSuccess);
@@ -1113,9 +1122,12 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
     hipblasLtHandle_t handle = nullptr;
     ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
 
-    // Library-populated handoff shared by both calls (no test hook).
+    // Caller-owned handoff shared by both calls.
     hipblasLtFusedEpilogueRMSNormDescriptor_t stats = nullptr;
     ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
+                  stats, dRstd, size_t(M) * sizeof(float)),
+              HIPBLAS_STATUS_SUCCESS);
 
     // Producer chain: residual-add + partial RMSNorm stats + gamma + eps + handoff.
     // The only deployed bf16 PartialRMS kernel (BBS_H_PRMS_RA) requires residual-add.
@@ -1209,6 +1221,7 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
     static_cast<void>(hipFree(dW1));
     static_cast<void>(hipFree(dD2));
     static_cast<void>(hipFree(dResidual));
+    static_cast<void>(hipFree(dRstd));
     static_cast<void>(hipFree(dWs));
 }
 
@@ -1537,7 +1550,7 @@ static void launchProducerAndReadback(hipblasLtHandle_t                         
                                       void*                                     dD1,
                                       void*                                     dMxScale,
                                       hipblasLtFusedEpilogueDescriptor_t        prod,
-                                      hipblasLtFusedEpilogueRMSNormDescriptor_t stats,
+                                      void*                                     dRstd,
                                       void*                                     dWs,
                                       size_t                                    wsSize,
                                       ProducerResults&                          out,
@@ -1595,12 +1608,9 @@ static void launchProducerAndReadback(hipblasLtHandle_t                         
     ASSERT_EQ(hipMemcpy(out.hMxScale.data(), dMxScale, d.scaleBufSz, hipMemcpyDeviceToHost),
               hipSuccess);
 
-    // Read rstd handoff via the test-only getter.
-    void* rstdDevPtr = rocblaslt_rmsnorm_handoff_get_scale_for_testing(stats);
-    ASSERT_NE(rstdDevPtr, nullptr) << "library did not allocate the rstd handoff buffer";
     out.hRstd.resize(static_cast<size_t>(d.rstdRows));
     ASSERT_EQ(
-        hipMemcpy(out.hRstd.data(), rstdDevPtr, d.rstdRows * sizeof(float), hipMemcpyDeviceToHost),
+        hipMemcpy(out.hRstd.data(), dRstd, d.rstdRows * sizeof(float), hipMemcpyDeviceToHost),
         hipSuccess);
 
     if(dResidualOut != nullptr)
@@ -2398,7 +2408,7 @@ TEST(FusedEpilogueE2E, chainedMxfp8ScaledResidualOutProducerConsumerMatchesRefer
 
     void *dA = nullptr, *dB = nullptr, *dGamma = nullptr;
     void *dD1 = nullptr, *dMxScale = nullptr, *dWs = nullptr;
-    void *dW1 = nullptr, *dD2 = nullptr, *dResidual = nullptr;
+    void *dW1 = nullptr, *dD2 = nullptr, *dResidual = nullptr, *dRstd = nullptr;
     void *dMxScaleA = nullptr, *dMxScaleB = nullptr, *dResidualOut = nullptr;
     ASSERT_EQ(hipMalloc(&dA, d.szABytes), hipSuccess);
     ASSERT_EQ(hipMalloc(&dB, d.szBBytes), hipSuccess);
@@ -2409,6 +2419,7 @@ TEST(FusedEpilogueE2E, chainedMxfp8ScaledResidualOutProducerConsumerMatchesRefer
         hipMalloc(&dW1, static_cast<size_t>(d.nHid) * d.nOut * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(
         hipMalloc(&dD2, static_cast<size_t>(d.mTok) * d.nOut * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dRstd, static_cast<size_t>(d.rstdRows) * sizeof(float)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
     ASSERT_EQ(
         hipMalloc(&dResidual, static_cast<size_t>(d.mTok) * d.nHid * sizeof(uint16_t)), hipSuccess);
@@ -2449,9 +2460,12 @@ TEST(FusedEpilogueE2E, chainedMxfp8ScaledResidualOutProducerConsumerMatchesRefer
     hipblasLtHandle_t handle = nullptr;
     ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
 
-    // Library-owned rstd handoff shared by both GEMM calls.
+    // Caller-owned rstd handoff shared by both GEMM calls.
     hipblasLtFusedEpilogueRMSNormDescriptor_t stats = nullptr;
     ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
+                  stats, dRstd, static_cast<size_t>(d.rstdRows) * sizeof(float)),
+              HIPBLAS_STATUS_SUCCESS);
 
     // Producer: RESIDUAL_ADD -> PARTIAL_RMSNORM_STATS -> REQUANT(MX) with bf16 residualOut.
     hipblasLtFusedEpilogueDescriptor_t prod = nullptr;
@@ -2467,7 +2481,7 @@ TEST(FusedEpilogueE2E, chainedMxfp8ScaledResidualOutProducerConsumerMatchesRefer
                                                       dD1,
                                                       dMxScale,
                                                       prod,
-                                                      stats,
+                                                      dRstd,
                                                       dWs,
                                                       wsSize,
                                                       pr,
@@ -2498,5 +2512,6 @@ TEST(FusedEpilogueE2E, chainedMxfp8ScaledResidualOutProducerConsumerMatchesRefer
     static_cast<void>(hipFree(dMxScaleA));
     static_cast<void>(hipFree(dMxScaleB));
     static_cast<void>(hipFree(dResidualOut));
+    static_cast<void>(hipFree(dRstd));
     static_cast<void>(hipFree(dWs));
 }
