@@ -731,6 +731,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SAtomicInc(sgpr(0), sgpr(1), sgpr(2));
         case logical::SAtomicDec:
             return SAtomicDec(sgpr(0), sgpr(1));
+        case logical::SAtomicCmpswapX2:
+            return SAtomicCmpswapX2(sgpr(0, 4), sgpr(1), sgpr(2));
         case logical::SCSelectB64:
             return SCSelectB64(sgpr(0), sgpr(1), sgpr(2));
         case logical::SCmpKEQU32:
@@ -1112,6 +1114,7 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         logical::SStoreB512,
         logical::SAtomicInc,
         logical::SAtomicDec,
+        logical::SAtomicCmpswapX2,
         logical::SCSelectB64,
         logical::SCmpKEQU32,
         logical::SCmpKGeU32,

@@ -3256,6 +3256,16 @@
              false,
              "IF_SMemAtomic"},
 
+                                    {"SAtomicCmpswapX2",
+             "SAtomicCmpswapX2",
+             2,
+             true,
+             "Memory Scalar",
+             false,
+             false,
+             false,
+             "IF_SMemAtomic"},
+
                                     {"SCSelectB64",
              "SCSelectB64",
              2,
