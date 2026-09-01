@@ -56,10 +56,13 @@ try
     rocblas_stride const shiftA = 0;
     rocblas_stride const shiftB = 0;
 
+    // ------------------------------------------
     // normal (non-batched non-strided) execution
-    rocblas_stride const strideA = 0;
-    rocblas_stride const strideB = 0;
-    rocblas_stride const strideP = 0;
+    // use reasonable default values
+    // ------------------------------------------
+    rocblas_stride const strideA = rocblas_stride(lda) * n;
+    rocblas_stride const strideB = rocblas_stride(ldb) * nrhs;
+    rocblas_stride const strideP = rocblas_stride(n);
     I const batch_count = 1;
 
     // memory workspace sizes:
@@ -77,7 +80,7 @@ try
     if(!mem)
         return rocblas_status_memory_error;
 
-    void* const work = static_cast<void*>(mem[0]);
+    void* const work = static_cast<void*>(em[0]);
 
 #ifdef NDEBUG
 #else
