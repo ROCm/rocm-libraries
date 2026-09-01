@@ -44,6 +44,12 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
+#TO DELETE 
+#if(BUILD_WITH_TRSM_REFACTORING)
+#  add_compile_options(-DROCSPARSE_WITH_TRSM_REFACTORING)
+#endif()
+#
+
 #
 # Client matrices.
 #
@@ -188,8 +194,6 @@ set(ROCSPARSE_TEST_SOURCES
   test_spsm_csr.cpp
   test_spsm_csc.cpp
   test_spsm_coo.cpp
-  test_dnmat_copy_data.cpp
-  test_dnmat_transpose.cpp
   test_sptrsm.cpp
   test_sptrsm_csr.cpp
   test_sptrsm_csc.cpp
@@ -247,6 +251,12 @@ if(BUILD_WITH_ELL_TRSV)
   list(APPEND ROCSPARSE_TEST_SOURCES
     test_spsv_ell.cpp
     test_sptrsv_ell.cpp)
+endif()
+
+if(BUILD_WITH_TRSM_REFACTORING)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_dnmat_copy_data.cpp)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_dnmat_transpose.cpp)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_sptrsm.cpp)
 endif()
 
 if(ROCSPARSE_ENABLE_SPMAT_SCALE)
@@ -372,9 +382,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spsm_csr.cpp
 ../testings/testing_spsm_csc.cpp
 ../testings/testing_spsm_coo.cpp
-../testings/testing_sptrsm.cpp
-../testings/testing_dnmat_copy_data.cpp
-../testings/testing_dnmat_transpose.cpp
 ../testings/testing_sptrsm_csr.cpp
 ../testings/testing_sptrsm_csc.cpp
 ../testings/testing_sptrsm_coo.cpp
@@ -421,6 +428,12 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spildlt0.cpp
 rocsparse_test_listeners.cpp
   )
+
+if(BUILD_WITH_TRSM_REFACTORING)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_dnmat_copy_data.cpp)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_dnmat_transpose.cpp)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_sptrsm.cpp)
+endif()
 
 if(BUILD_WITH_ELL_TRSV)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS
