@@ -38,6 +38,11 @@ if(BUILD_WITH_CSC_TRSM)
   add_compile_options(-DROCSPARSE_WITH_CSC_TRSM)
 endif()
 
+if(BUILD_WITH_TRSM_REFACTORING)
+  add_compile_options(-DROCSPARSE_WITH_TRSM_REFACTORING)
+endif()
+
+
 set(ROCSPARSE_BENCHMARK_SOURCES
   client.cpp
   rocsparse_bench_app.cpp
@@ -203,9 +208,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spsm_csr.cpp
 ../testings/testing_spsm_csc.cpp
 ../testings/testing_spsm_coo.cpp
-../testings/testing_dnmat_copy_data.cpp
-../testings/testing_dnmat_transpose.cpp
-../testings/testing_sptrsm.cpp
 ../testings/testing_sptrsm_csr.cpp
 ../testings/testing_sptrsm_csc.cpp
 ../testings/testing_sptrsm_coo.cpp
@@ -238,6 +240,12 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
 )
+
+if(BUILD_WITH_TRSM_REFACTORING)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_dnmat_copy_data.cpp)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_dnmat_transpose.cpp)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_sptrsm.cpp)
+endif()
 
 if(BUILD_WITH_ILDLT0)
   list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spildlt0.cpp)
