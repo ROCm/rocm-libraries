@@ -9,8 +9,7 @@
 #
 #   3742       SwizzleTensor pack-K / GRVW derivation arm.
 #   3789       SwizzleTensor GRVW derivation follow-on.
-#   3856       SwizzleTensorA requires DirectToVgprA reject  (DirectToVgprA=0).
-#   3861-3863  SwizzleTensorB requires DirectToVgprB reject  (DirectToVgprB=0).
+#   LDS-staged SwizzleTensorA/B LSP-multiple-of-MI reject (DirectToVgprA/B=0).
 #   3867       SwizzleTensorB TN-only combined transpose check (always runs
 #              when SwizzleTensorB set).
 #
