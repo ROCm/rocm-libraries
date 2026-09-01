@@ -149,7 +149,7 @@ rocsparse_status rocsparse_sptrsm_buffer_size(rocsparse_handle            handle
 *  supports execution in a hipGraph context. The \ref rocsparse_sptrsm_stage_analysis stage does not support hipGraph.
 *
 *  \note
-*  This routine does not support batched execution.
+*  This routine supports strided batched execution.
 *
 *  @param[in]
 *  handle       handle to the rocSPARSE library context queue.

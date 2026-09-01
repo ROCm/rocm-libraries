@@ -418,13 +418,16 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                           void*                       buffer,
                                           rocsparse_error*            p_error)
 {
-
-    rocsparse_host_assert(A_load_conjugate && op_A != rocsparse_operation_none,
-                          "That's not the supposed configuration");
     //
     // It is assumed that B is transposed and has dimension nrhs x M
     //
     ROCSPARSE_ROUTINE_TRACE;
+
+    RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((A_load_conjugate && op_A != rocsparse_operation_none)
+                                           ? rocsparse_status_internal_error,
+                                           : rocsparse_status_success,
+                                           "That's not the supposed configuration");
+
     const int64_t M = A->rows;
     if(M == 0 || nrhs == 0)
     {
@@ -485,8 +488,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
         return rocsparse_status_success;
     }
 
-    const auto A_batch_count  = (A->batch_stride > 0) ? A->batch_count : 1;
-    const auto A_batch_stride = A->batch_stride;
+    const auto A_batch_count = (A->batch_stride > 0) ? A->batch_count : 1;
 
     // Stream
     int32_t blockdim = 512;
@@ -567,7 +569,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                  A->data_type,
                                  buf,
                                  buf,
-                                 A_batch_stride,
+                                 A->nnz,
                                  trm_info->get_offset_indextype(),
                                  trm_info->get_transposed_row_ptr(),
                                  trm_info->get_transposed_row_ptr(),
@@ -577,8 +579,8 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                  trm_info->get_transposed_col_ind(),
                                  0,
                                  A->descr->base,
-                                 nullptr, //A->descr,
-                                 nullptr); //A->info);
+                                 nullptr,
+                                 nullptr);
 
     if(case_transpose_A)
     {
