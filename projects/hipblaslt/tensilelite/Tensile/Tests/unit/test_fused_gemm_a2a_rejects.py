@@ -142,11 +142,9 @@ def _make_params(iim, arch=_ARCH, mi=None, **overrides):
 
     params = {
         "ProblemType": problem_type,
-        # Present-but-empty so Solution.__init__ builds a *private* copy of the
-        # defaults: with the key absent it aliases the process-global
-        # defaultInternalSupportParams, and the SupportUserGSU clear below would
-        # leak into every later solution in the process.
-        "InternalSupportParams": {},
+        # Seeded, not omitted: an omitted key aliases the process-global
+        # defaultInternalSupportParams, which earlier StreamK solutions mutate.
+        "InternalSupportParams": {"SupportUserGSU": True},
         "ISA": isa,
         "MatrixInstruction": mi,
         "WorkGroup": [16, 16, 1],   # only [2] is consumed; [0]/[1] are derived.
