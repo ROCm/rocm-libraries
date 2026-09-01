@@ -69,7 +69,8 @@ bool GemmWrwBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(problem.HasNonPackedTensors())
         return false;
 
-    return problem.IsDirectionBackwardWrW() && problem.IsLayoutDefault() &&
+    // Layout is asserted by the derived solvers that need it.
+    return problem.IsDirectionBackwardWrW() &&
            !(gemm::IsAnyBufferBf16(xDesc, dyDesc, dwDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(xDesc, dyDesc, dwDesc) && !gemm::IsFp16Supported);
 #else
@@ -115,8 +116,16 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
             miopen::any_of(conv.GetConvPads(), [](auto v) { return v == 0; }) &&
             miopen::any_of(conv.GetConvStrides(), [](auto v) { return v == 1; }))
     {
-        n_gemm_strided_batched_sequental = conv.group_count;
-        n_gemm_runs                      = in_n;
+        // Channel-last collapses the batch into M, so this is one unbatched GEMM.
+        if(problem.IsLayoutNHWC() && conv.group_count == 1)
+        {
+            n_gemm_runs = 1;
+        }
+        else
+        {
+            n_gemm_strided_batched_sequental = conv.group_count;
+            n_gemm_runs                      = in_n;
+        }
     }
 
     auto wti = 0.7; // Memory overhead for WrW is bigger then for Fwd/Bwd.
@@ -175,6 +184,32 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
     return false;
 }
 
+// Budget, not an exact size: hipBLASLt picks Stream-K only when offered scratch, and the amount
+// it needs scales with the tile it chooses.
+static constexpr std::size_t nhwc_wrw_gemm_workspace = std::size_t{32} << 20;
+
+static std::size_t NhwcWrwGemmWorkspace(const ProblemDescription& problem)
+{
+#if MIOPEN_USE_GEMM && MIOPEN_USE_HIPBLASLT
+    if(problem.IsLayoutNHWC() && problem.GetConv().group_count == 1)
+        return nhwc_wrw_gemm_workspace;
+#else
+    std::ignore = problem;
+#endif
+    return 0;
+}
+
+size_t GemmWrw1x1_stride1::GetWorkspaceSize(const ExecutionContext&,
+                                            const ProblemDescription& problem) const
+{
+#if MIOPEN_USE_GEMM
+    return NhwcWrwGemmWorkspace(problem);
+#else
+    std::ignore = problem;
+    return 0;
+#endif
+}
+
 bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
@@ -184,6 +219,13 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
 
     const auto& dwDesc = problem.GetWeights();
     const auto& conv   = problem.GetConv();
+
+    // Casted and f8 are excluded because the channel-last GEMM transposes dy instead of x,
+    // inverting the operand roles the cast types assume.
+    const auto nhwc_pointwise = problem.IsLayoutNHWC() && conv.group_count == 1 &&
+                                !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
+    if(!problem.IsLayoutDefault() && !nhwc_pointwise)
+        return false;
 
     const auto wei_spatial =
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
@@ -253,6 +295,9 @@ ConvSolution GemmWrw1x1_stride1::GetSolution(const ExecutionContext&,
 
     auto solution = ConvSolution{miopenStatusSuccess};
 
+    // Find reports this to the caller, which allocates it for the real call.
+    solution.workspace_sz = NhwcWrwGemmWorkspace(problem);
+
     solution.invoker_factory = [=](const std::vector<Kernel>&) {
         return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
             const auto& conv_params = primitive_params.CastTo<miopen::conv::WrWInvokeParams>();
@@ -265,6 +310,10 @@ ConvSolution GemmWrw1x1_stride1::GetSolution(const ExecutionContext&,
             {
                 MIOPEN_LOG_FUNCTION("groupconv, 1x1");
             }
+            else if(problem.IsLayoutNHWC())
+            {
+                MIOPEN_LOG_FUNCTION("conv, 1x1 channel-last");
+            }
             else
             {
                 MIOPEN_LOG_FUNCTION("conv, 1x1");
@@ -275,6 +324,45 @@ ConvSolution GemmWrw1x1_stride1::GetSolution(const ExecutionContext&,
                 tmp.gfx90a_alt_impl = conv_params.gfx90aFp16alt;
                 return tmp;
             }();
+
+            if(problem.IsLayoutNHWC())
+            {
+                // dw[K, C] = dy^T[K, N*spatial] * x[N*spatial, C]. beta = 0 overwrites dw, so
+                // unlike the per-batch loop below it needs no pre-zeroing and never reads dw
+                // back in low precision.
+                auto desc        = gemm_desc;
+                desc.batch_count = 1;
+                desc.strideA     = 0;
+                desc.strideB     = 0;
+                desc.strideC     = 0;
+                desc.m           = static_cast<int>(wei_k);
+                desc.n           = static_cast<int>(in_c);
+                desc.k           = static_cast<int>(in_n * out_spatial_size);
+                desc.transA      = true;
+                desc.transB      = false;
+                desc.lda         = desc.m;
+                desc.ldb         = desc.n;
+                desc.ldc         = desc.n;
+                desc.alpha       = 1.f;
+                desc.beta        = 0.f;
+
+                constexpr auto backend =
+#if MIOPEN_USE_HIPBLASLT
+                    GemmBackend_t::hipblaslt;
+#else
+                    GemmBackend_t::rocblas;
+#endif
+                const auto ws      = conv_params.workSpace;
+                const auto ws_size = (ws != nullptr) ? conv_params.workSpaceSize : std::size_t{0};
+
+                const auto status =
+                    CallGemm(handle, desc, dy, 0, x, 0, dw, 0, backend, ws, ws_size);
+
+                if(status != miopenStatusSuccess)
+                    MIOPEN_THROW("GemmWrw1x1_stride1 execution failure.");
+
+                return;
+            }
 
             // Zeroing out the output buffer
             float zero = 0.0f;
@@ -465,6 +553,10 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
     }
 
     if(!GemmWrwBase::IsApplicable(context, problem))
+        return false;
+
+    // Everything below goes through Im2Col, which addresses x channel-first.
+    if(!problem.IsLayoutDefault())
         return false;
 
     return !GemmWrw1x1_stride1{}.IsApplicable(context, problem) &&
