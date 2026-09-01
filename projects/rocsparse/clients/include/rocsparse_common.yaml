@@ -416,6 +416,14 @@ All rocsparse_analysis_policy: &all_rocsparse_analysis_policy
 All rocsparse_solve_policy: &all_rocsparse_solve_policy
         rocsparse_solve_policy_auto
 
+All rocsparse_solve_mode: &all_rocsparse_solve_mode
+        [rocsparse_solve_mode_triangular,
+         rocsparse_solve_mode_diagonal]
+
+All rocsparse_diagonal_modifier: &all_rocsparse_diagonal_modifier
+        [rocsparse_diagonal_modifier_none,
+         rocsparse_diagonal_modifier_absolute]
+
 All rocsparse_direction: &all_rocsparse_direction
         [rocsparse_direction_row,
          rocsparse_direction_column]
