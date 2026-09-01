@@ -19,19 +19,17 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "harness/BundleMetadata.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/SupportClaims.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
 
-// Output tensors, keyed by uid. Used both for the engine's computed "actual"
-// outputs and for an expected source (golden from disk, or a reference executor's
-// output). Each set is a distinct allocation so engine and reference never write
-// the same buffers.
 using OutputTensors
     = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
@@ -47,36 +45,10 @@ std::unordered_map<int64_t, void*> buildVariantPack(
     bool useDevice);
 }
 
-// Verifies a bundle's engine output against an expected source chosen by the
-// verification mode (RFC 0010 §4.4):
-//
-//   actual   = the engine (the system under test), run once into fresh buffers.
-//   expected = golden data from disk, OR a reference executor's output.
-//
-// Auto mode fallback chain: golden → GPU ref → CPU ref → SKIP.
-// When golden outputs are present on disk, the comparison uses them directly
-// and no reference executor is run at all.
-//
-// Memory invariants for running engine + a reference off the same inputs:
-//   * INPUT tensors are read-only by both executors and are NEVER mark*Modified().
-//     The engine's rawDeviceData() uploads host->device (state becomes BOTH
-//     valid); a later CPU-ref rawHostData() therefore sees the host copy still
-//     valid and does NOT download — inputs stay intact across both runs.
-//   * OUTPUT buffers are separate ITensor objects per executor (engineOutputs vs
-//     refOutputs), so the two runs cannot stomp each other. Only output buffers
-//     are mark*Modified().
-//   * Virtual (inter-node) tensors are allocated internally by each executor; the
-//     variant packs we build carry only real (input + output) tensors.
+// Fallback chain: golden → GPU ref → CPU ref → SKIP (RFC 0010 §4.4).
+// Inputs are read-only (shared); outputs are separate allocations per executor.
 //
 // TODO(ALMIOPEN-1969 follow-up): Unify graph-init with the non-golden harness.
-//   Stage 1 — Route non-golden ops whose initializeBundle() is plain randomize
-//             (conv, matmul, BN-inference, reduction, rmsnorm-fwd, layernorm,
-//             pointwise) through the fill-inputs switch. Zero behavioral change.
-//   Stage 2 — Migrate structured recipes one op at a time: copy the exact
-//             ranges/seeds/derivation from each non-golden subclass override
-//             into the corresponding fill function, using fillComputed/tensorAt
-//             for derived inputs. Delete each override once its fill fn works.
-//   Stage 3 — Both harnesses share one init pipeline via fillInputs().
 class IntegrationBundleVerificationHarness : public ::testing::Test
 {
 public:
@@ -85,10 +57,13 @@ public:
     {
     }
 
-    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle, std::filesystem::path path)
+    void setBundle(std::shared_ptr<IntegrationTestBundle> bundle,
+                   std::filesystem::path path,
+                   SupportClaimLocator claimLocator = {})
     {
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);
+        _claimLocator = std::move(claimLocator);
 
         if(_bundle != nullptr && _bundle->metadata.seed.has_value())
         {
@@ -127,30 +102,29 @@ protected:
     void TestBody() override
     {
         runComparison();
+        if(!HasFatalFailure() && !IsSkipped())
+        {
+            EXPECT_TRUE(_verified)
+                << "test completed without verifying anything for " << _bundlePath;
+        }
     }
 
-    // Builds the graph, selects an engine, and executes. Throws on unsupported graph (→ SKIP).
     virtual void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack);
-
-    // Runs the named reference executor. Throws ReferenceCapabilityError on capability miss.
     virtual void runReferenceExecutor(ReferenceExecutorType type,
                                       std::unordered_map<int64_t, void*>& variantPack);
-
-    // Constructs the executor object (CpuReferenceGraphExecutorAdapter or
-    // GpuReferenceGraphExecutor) — does not allocate buffers or run anything.
-    // Skipped in auto mode when golden data is present.
     virtual std::unique_ptr<IReferenceGraphExecutor>
         makeReferenceExecutor(ReferenceExecutorType type);
-
-    // Returns the active verification mode. Override in tests to inject a mode
-    // without touching the TestConfig singleton.
     virtual VerificationMode getVerificationMode() const;
-
-    // Skips the test when the bundle's metadata is incompatible with the
-    // current device (VRAM/arch). Virtual so isolated unit tests that don't
-    // exercise hardware guards can override it — production reads from the
-    // TestConfig singleton, which is only initialized by the real test main.
+    virtual bool isEnforcingSupportClaims() const;
     virtual void applyMetadataGuards() const;
+
+    // Virtual so deviceless tests can observe the non-FULL routing decision without
+    // reaching getSharedHandle(). The real implementation needs a device.
+    virtual void enforceAtLevel(EnforcementLevel level);
+
+    // Protected so a stubbed enforceAtLevel() can exit the same way the real one does
+    // when it cannot verify: marks the bundle accounted for, then skips.
+    void skipUnverifiable(const std::string& reason);
 
     InputFillRecipes& inputFillRecipes()
     {
@@ -159,7 +133,9 @@ protected:
 
 private:
     bool _requiresDevice;
+    mutable bool _verified = false;
     std::filesystem::path _bundlePath;
+    SupportClaimLocator _claimLocator;
     std::shared_ptr<IntegrationTestBundle> _bundle;
     InputFillRecipes _inputFillRecipes;
 
@@ -175,52 +151,19 @@ private:
         std::string message;
     };
 
-    // ── top-level dispatch ────────────────────────────────────────────────
     void runComparison();
     void runGoldenMode();
     void runExplicitRefMode(ReferenceExecutorType type);
     void runAutoMode();
+    void runGoldenCheckMode();
 
-    // ── inputs ──────────────────────────────────────────────────────────
     bool ensureInputsAvailable();
-
-    // Fills leaf input tensors for the graph when no golden data exists.
-    //
-    // Phase 1 — allocate: walks the graph's tensor list, skips virtual
-    //   (inter-node) and output tensors, allocates a CPU-side buffer for
-    //   each remaining leaf input tensor (shape/dtype from TensorAttributes).
-    //
-    // Phase 2 — fill: calls fillInputs(), which registers each op's default
-    //   fill recipes into _inputFillRecipes and then fills every leaf input
-    //   as FREE (random values), STRUCTURED (needs specific format), or
-    //   DERIVED (needs another op's output).
-    //
-    // Phase 3 — verify: checks _inputFillRecipes.unfilled() so that every
-    //   leaf input was accounted for and none were refused (STRUCTURED/
-    //   DERIVED). Returns false and SKIPs the test if any leaf was missed
-    //   or refused.
-    //
-    // On success, moves the filled tensors into the bundle so downstream
-    // executors (engine, GPU ref, CPU ref) can upload them to the GPU.
     bool fillBundleInputs();
 
-    // ── buffer allocation + execution ───────────────────────────────────
-    // allocateSentinelOutputs / buildVariantPack prepare the buffers;
-    // runEngine* / runReference* call the executors and capture results.
-    // Outputs are sentinel-filled (NaN) so an unwritten output element is
-    // caught by allClose rather than masquerading as a computed zero.
     OutputTensors allocateSentinelOutputs() const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
                                                         bool useDevice) const;
-    // Runs the engine into fresh output buffers. Returns nullopt if the
-    // engine threw (its message is written to `error`) or raised a fatal
-    // GTest failure (in which case `error` is left empty).
     std::optional<OutputTensors> runEngineCapturingOutputs(std::string& error);
-
-    // Runs the engine and returns its outputs, or nullopt if it could not
-    // run. On nullopt the caller must simply return: this has already
-    // issued the appropriate verdict (a fatal failure propagates as-is,
-    // otherwise the test is SKIPped). Shared preamble for all three modes.
     std::optional<OutputTensors> runEngineOrSkip();
 
     RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,
@@ -228,7 +171,6 @@ private:
     void markOutputsModified(OutputTensors& outputs) const;
     static void markOutputsModifiedFor(OutputTensors& outputs, bool device);
 
-    // ── comparison ──────────────────────────────────────────────────────
     void compareAgainstGolden(OutputTensors& engineOutputs);
     void compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
 
@@ -243,52 +185,11 @@ private:
                              float atol,
                              float rtol) const;
 
-    static void
-        appendTensorDiff(std::ostream& os,
-                         int64_t uid,
-                         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                         hipdnn_data_sdk::utilities::ITensor& expected,
-                         hipdnn_data_sdk::utilities::ITensor& actual,
-                         float atol,
-                         float rtol);
-
-    template <typename T>
-    static void appendFpDiff(std::ostream& os,
-                             int64_t uid,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                             hipdnn_data_sdk::utilities::ITensor& expected,
-                             hipdnn_data_sdk::utilities::ITensor& actual,
-                             float atol,
-                             float rtol);
-
-    // ── reporting ───────────────────────────────────────────────────────
-    // Records the bundle path + reason in the process-wide
-    // UnverifiableBundleReport (printed as a summary after all tests),
-    // then GTEST_SKIP()s this test. The reason is a flat human-readable
-    // string — per-tensor details are concatenated into it by the caller
-    // (e.g., fillBundleInputs()), not stored as structured data.
-    void skipUnverifiable(const std::string& reason);
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);
 
     static std::string
         labelFor(int64_t uid, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs);
-
-    std::string reportHeader(int64_t uid,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                             hipdnn_data_sdk::utilities::ITensor& expected,
-                             float atol,
-                             float rtol) const;
-
-    static std::string dataTypeName(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
-
-    // ── tolerances ──────────────────────────────────────────────────────
-    // Default derivation (max-across-nodes, per-op/per-dtype lookup) and the
-    // TOML per-test override are shared with the graph harness via
-    // harness/tolerance/ToleranceResolver.hpp (tolerance::resolveTolerance),
-    // called directly from compareEach.
 };
 
 } // namespace hipdnn_integration_tests::bundle

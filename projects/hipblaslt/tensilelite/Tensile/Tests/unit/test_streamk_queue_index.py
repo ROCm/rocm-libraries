@@ -338,16 +338,32 @@ def _is_sk_raw_rank_guard(test) -> bool:
 
 
 # ===========================================================================
-# 4. Both dynamic graWorkGroup paths route through the shared _emitQueueIndex,
+# 4. Both dynamic fetch helpers route through the shared _emitQueueIndex,
 #    rather than each inlining its own StreamKIdx shift/shift/sub derivation.
+#    graWorkGroup must call the helper (PAP pop-once) and must not re-inline
+#    the queue pop.
 # ===========================================================================
 class TestSharedHelperRouting:
     @pytest.mark.parametrize(
-        "func", [StreamKDynamic.graWorkGroup, StreamKHybrid.graWorkGroup]
+        "func",
+        [StreamKDynamic._fetchWorkItemAndBroadcast, StreamKHybrid._fetchWorkItemAndBroadcast],
     )
-    def test_grawg_uses_shared_queue_index_helper(self, func):
+    def test_fetch_uses_shared_queue_index_helper(self, func):
         assert "_emitQueueIndex" in _source_of(func), (
             "both SK4 and SK5 must derive the queue index via _emitQueueIndex"
+        )
+
+    @pytest.mark.parametrize(
+        "func", [StreamKDynamic.graWorkGroup, StreamKHybrid.graWorkGroup]
+    )
+    def test_grawg_routes_queue_pop_through_fetch_helper(self, func):
+        src = _source_of(func)
+        assert "_fetchWorkItemAndBroadcast" in src, (
+            "PAP-extracted pop must stay in _fetchWorkItemAndBroadcast; "
+            "graWorkGroup must not inline the queue pop"
+        )
+        assert "_emitQueueIndex" not in src, (
+            "queue-index math belongs in the fetch helper, not graWorkGroup"
         )
 
 

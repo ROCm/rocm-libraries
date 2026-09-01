@@ -397,6 +397,7 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
     ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
+    ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT    = 105,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -587,6 +588,11 @@ struct RocblasltContractionProblem
 
     hipStream_t stream;
     void*       Synchronizer;
+    // Stream-K flag region, private to this (stream, problem index) pair. Not a
+    // constructor parameter: the object API builds the problem before it knows
+    // its stream, so this is assigned once the stream is available rather than
+    // threaded through a 60-argument constructor that every caller spells out.
+    void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
     hipblasLtBatchMode_t batchMode;   
@@ -603,6 +609,11 @@ struct RocblasltContractionProblem
     // Effective sm_count_target after the (pref > desc > handle)
     // precedence resolution. 0 = "use all CUs the device exposes".
     int32_t sm_count_target = 0;
+    // Effective uniform-summation-order request after first-on-wins
+    // (preference true, desc==1, handle==1) resolution. 0 = off (default),
+    // 1 = on. Forwarded into ContractionProblemParameters::setUniformSummationOrder
+    // by tensile_host.cpp.
+    int32_t uniform_summation_order = 0;
 
     // gemm_ex
     // gemm_strided_batched_ex
@@ -671,7 +682,8 @@ struct RocblasltContractionProblem
                                 hipblasLtBatchMode_t   batchMode,
                                 int32_t                bias_stride,
                                 int32_t                streamk_tile_scheduling_ext = 0,
-                                int32_t                sm_count_target         = 0);
+                                int32_t                sm_count_target         = 0,
+                                int32_t                uniform_summation_order = 0);
 };
 
 namespace rocblaslt

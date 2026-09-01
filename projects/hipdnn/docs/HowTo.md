@@ -114,6 +114,32 @@ hipDNN uses FlatBuffers for schema-based data objects to describe graphs and ope
 - Attributes marked as `long` types in graphs are foreign keys to the `uid` in `tensor_attributes`
 - Schema files are located in [`flatbuffers_sdk/schemas/`](../flatbuffers_sdk/schemas/)
 
+#### Cache-key annotations
+
+Graph fields also feed the kernel-ingestor winner cache, which reuses a benchmarked kernel
+ranking across graphs that describe the same work. Annotations in the `.fbs` files decide
+which fields identify that work.
+
+A field participates unless annotated. When adding one, ask whether a kernel measurement
+taken on one graph would still be valid for another differing only in this field:
+
+- Irrelevant to the measurement — annotate `(cache_ignore)`. Names, ids, and routing hints
+  belong here.
+- Holds a tensor uid — annotate `(cache_uid)`, which folds the tensor's position rather than
+  the caller's uid, so renumbering a graph still matches.
+- Otherwise leave it unannotated.
+
+Annotating wrongly is silent in both directions: `(cache_ignore)` on a field that changes the
+work makes two different graphs share a cached kernel, and a missed `(cache_uid)` keys on the
+raw uid, so identical graphs numbered differently never match.
+
+`cachekey_generated.h` is generated from the schemas by `scripts/gen_cache_key.py`, separately
+from the ordinary `flatc` headers. The `cache-key-hipdnn` pre-commit hook regenerates it, and
+CI runs pre-commit on every pull request, so a stale header fails there.
+
+See [Cache-Key Annotations](./AddingNewOperations.md#cache-key-annotations) for the full
+field-policy reference.
+
 ### Configuring Engine Knobs
 
 hipDNN engines support runtime configuration through **knobs** - configurable parameters that control engine behavior, performance tuning, and feature selection.
