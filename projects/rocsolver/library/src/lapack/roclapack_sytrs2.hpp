@@ -157,9 +157,7 @@ static __global__
                 if(ipiv(i) > 0)
                 {
                     auto const alpha = one / A(i, i);
-                    I krow{};
-
-                    scale_row(krow = i, alpha);
+                    scale_row(i, alpha);
                 }
                 else
                 {
@@ -872,8 +870,6 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
 
     bool const is_forward = !is_upper;
     T const alpha = one;
-    Istride const shiftE = 0;
-    I const lde = n;
 
     if(is_upper)
     {
@@ -1136,8 +1132,6 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
     T* const E = reinterpret_cast<T*>(pfree);
     pfree += size_E;
     Istride const strideE = n;
-    Istride const shiftE = 0;
-    I const lde = n;
 
     // ----------------
     // convert matrix A
