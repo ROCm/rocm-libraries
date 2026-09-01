@@ -3590,7 +3590,7 @@ class KernelWriterAssembly(KernelWriter):
           swzBlockSize = swzMorN * swzStride
           vw = kernel[f"VectorWidth{tc}"]
           kPack = tP["swizzlePackK"]
-          laneSize = int(kernel["MatrixInstK"] / 4) * kPack  # the size of one swizzle's lane
+          laneSize = tP["swizzleLaneSize"]  # the size of one swizzle's lane
 
           with self.allocTmpSgpr(2, tag="graTileOffsets_tmpSgprInfo") as tmpSgprInfo:
             swzBlkVWSizeSgpr = tmpSgprInfo.idx
@@ -3724,16 +3724,20 @@ class KernelWriterAssembly(KernelWriter):
         swzMorN = kernel["MatrixInstN"]
       swzStride = tP["swizzleK"]
       vw = kernel[f"VectorWidth{tc}"]
-      kPack = tP["swizzlePackK"]
-      laneSize = int(kernel["MatrixInstK"] / 4) * kPack  # the size of one swizzle's lane
+      laneSize = tP["swizzleLaneSize"]  # the size of one swizzle's lane
       numElmInSwzBlk = swzMorN * swzStride
+      # Below wave size where operands replicate (gfx10/gfx11 WMMA): upper lanes fold
+      # back onto the same addresses.
+      swzLanes = tP["swizzleLanesUsed"]
+      tidMaskComment = "tid" if swzLanes == kernel["WavefrontSize"] \
+          else "tid mod swzLanesUsed(%u), operands replicate across the wave"%swzLanes
 
       # Calculate local index in a swizzled block
       row = self.vgprPool.checkOut(1, tag="graUnrollOffsets_row")
       col = self.vgprPool.checkOut(1, tag="graUnrollOffsets_col")
       tmpVgpr = self.vgprPool.checkOut(1, tag="graUnrollOffsets_tmpVgpr")
       module.addComment0("SWZ-%s: r = swzRow = (tid / swzMorN(%u)) * laneSize(%u)"%(tc, swzMorN, laneSize))
-      module.add(VAndB32(dst=vgpr(v), src0=vgpr("Serial"), src1=(kernel["WavefrontSize"]-1), comment="tid"))
+      module.add(VAndB32(dst=vgpr(v), src0=vgpr("Serial"), src1=(swzLanes-1), comment=tidMaskComment))
       module.add(VLShiftRightB32(dst=vgpr(row), shiftHex=hex(int(log(swzMorN, 2))), src=vgpr(v)))
       module.add(VLShiftLeftB32(dst=vgpr(row), shiftHex=hex(int(log(laneSize, 2))), src=vgpr(row)))
       module.addComment0("SWZ-%s: c = swzCol = [tid mod (swzMorN(%u) / VW(%u))] * VW(%u)"%(tc, swzMorN, vw, vw))
@@ -4050,13 +4054,18 @@ class KernelWriterAssembly(KernelWriter):
         module.addComment0("=============================================================")
     else:
       # swap para and perp
-      for para in range(0, tP["nrc"]):
+      # An operand spanning several loads (gfx11 fp16/bf16) must land in consecutive G2L
+      # registers, since mfmaIter reads it as one contiguous range. Hence the sub-blocks
+      # are innermost. loadsPerLane == 1 reduces this to the plain swap.
+      lpl = tP["swizzleLoadsPerLane"] if tP["isSwizzled"] else 1
+      for paraBase in range(0, tP["nrc"], lpl):
         for sPara in range(0, int(tP["nrcv"]/tP["nrcvpi"])):
           for perp in range(0, tP["nrp"]):
             for sPerp in range(0, tP["nrpv"]):
-              # single loop
-              singleModule, graIdx = self.graFinalOffsetsSingleLoop(kernel, tP, tc, tmp, graIdx, perp, sPerp, para, sPara)
-              module.add(singleModule)
+              for sub in range(0, lpl):
+                # single loop
+                singleModule, graIdx = self.graFinalOffsetsSingleLoop(kernel, tP, tc, tmp, graIdx, perp, sPerp, paraBase + sub, sPara)
+                module.add(singleModule)
 
     self.vgprPool.checkIn(tP["gpr"]["lwoT"])
     tP["gpr"]["lwoT"] = None
