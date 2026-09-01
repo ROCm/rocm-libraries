@@ -1124,3 +1124,46 @@ TEST_F(TestTreeDataAdapter, ModelHashFieldAccepted)
 }
 
 } // namespace
+
+TEST_F(TestTreeDataAdapter, ATreeWhoseParallelArraysDisagreeIsRejected)
+{
+    // gbdt_model.fbs documents node i as indexing every array -- feature_indices[i],
+    // thresholds[i], left_children[i], right_children[i]. Nothing enforced it. The
+    // descent is bounded by left_children.size() and then subscripts the other three
+    // with the same index, so a model whose right_children is shorter reads past the
+    // end of the buffer's vector. FlatBuffers' Verifier does not catch this: each
+    // vector is individually well-formed and inside the buffer, and the verifier has
+    // no notion that these four are meant to be the same length.
+    //
+    // The model artifact is author-controlled input loaded from disk (RFC 0019 §16,
+    // "malformed drop-in pack"), so this is reachable by shipping a crafted or
+    // truncated .uhd.fb.
+    GbdtModelBuilder::TreeSpec ragged;
+    ragged.featureIndices = {0, 0, 0};
+    ragged.thresholds = {1.0, 2.0, 3.0};
+    ragged.leftChildren = {1, -1, -1};
+    ragged.rightChildren = {2}; // shorter than left_children: nodes 1 and 2 read OOB
+    ragged.leafValues = {0.0, 10.0, 20.0};
+    ragged.defaultLeft = {1, 1, 1};
+
+    GbdtModelBuilder builder;
+    const auto buffer = builder.setNumFeatures(1).addTree(ragged).build();
+
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    EXPECT_EQ(adapter, nullptr)
+        << "a model whose node-parallel arrays have different lengths must be refused "
+           "at load, not walked";
+}
+
+TEST_F(TestTreeDataAdapter, AWellFormedTreeStillLoads)
+{
+    // The guard above must not reject honest models: equal-length arrays are the
+    // normal case and every shipped model is one.
+    GbdtModelBuilder builder;
+    const auto buffer
+        = builder.setNumFeatures(1).addTree(makeBinarySplitTree(0, 1.0, 5.0, 9.0)).build();
+
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    ASSERT_NE(adapter, nullptr);
+    EXPECT_GT(adapter->score({2.0}), 0.0);
+}

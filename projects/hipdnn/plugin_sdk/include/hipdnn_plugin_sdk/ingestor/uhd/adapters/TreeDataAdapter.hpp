@@ -220,6 +220,41 @@ inline std::unique_ptr<TreeDataAdapter> TreeDataAdapter::loadFromBuffer(const ui
         return nullptr;
     }
 
+    // The four node-parallel arrays must actually be parallel. gbdt_model.fbs documents
+    // node i as indexing all of them, and the descent below bounds itself by
+    // left_children.size() and then subscripts the other three with that index -- so a
+    // model whose right_children is shorter reads past the end of its vector.
+    //
+    // FlatBuffers' Verifier cannot catch this: each vector is individually well-formed
+    // and inside the buffer, and the verifier has no notion that these four are meant to
+    // be the same length. Checked once here rather than per node, because the descent is
+    // the hot path and RFC 0019 §9 budgets its overhead.
+    if(model->trees() != nullptr)
+    {
+        for(const auto* tree : *model->trees())
+        {
+            if(tree == nullptr || tree->left_children() == nullptr)
+            {
+                continue; // evaluateTree already treats an absent array as a 0.0 tree
+            }
+            const auto nodes = tree->left_children()->size();
+            const auto sizeOf = [](const auto* vector) {
+                return vector == nullptr ? 0U : vector->size();
+            };
+            if(sizeOf(tree->right_children()) != nodes || sizeOf(tree->feature_indices()) != nodes
+               || sizeOf(tree->thresholds()) != nodes)
+            {
+                HIPDNN_SDK_LOG_ERROR(
+                    "TreeDataAdapter: tree has "
+                    << nodes << " left_children but " << sizeOf(tree->right_children())
+                    << " right_children, " << sizeOf(tree->feature_indices())
+                    << " feature_indices and " << sizeOf(tree->thresholds())
+                    << " thresholds; the model artifact is malformed");
+                return nullptr;
+            }
+        }
+    }
+
     const auto numFeatures = static_cast<size_t>(model->num_features());
     const double baseScore = model->base_score();
     const double learningRate = model->learning_rate();
