@@ -330,9 +330,8 @@ Tests:
     - { N: 2, lda: 2, stride_a: 2, incx: 1, batch_count: *c_grid_yz_require_passes }
   alpha_beta: *alpha_range_small
   stride_scale: [ 1 ]
-  batch_count: [ 3 ]
   alpha_beta_stride: true
-  stride_c: [ 2 ] # alpha stride: densely packed (1) and non-unit (2)
+  stride_c: [ 2 ] # alpha stride
   pointer_mode_host: false
   api: [ C_64 ]
   os_flags: [ LINUX ]
