@@ -99,6 +99,18 @@ executions).
 Bit-wise reproducibility requires that one be running the same version of rocFFT, identical ROCm
 stacks (compiler/runtime/driver), and the same GPU model.
 
+
+#### Memory canary tests
+
+rocFFT transforms do not modify data which is not part of the transform - this includes memory which
+is skipped over when the length+batch/stride+dist combination implies that the data layout is
+discontiguous.  We have a number of ad-hoc lengths which verify this behaviour in the checkstride
+accuracy test suite, and manually-specified test cases can verify this with the --checkstride
+command-line option.
+
+In addition, out-of-place complex-to-complex transforms preserve the input data.  There is a testing
+gap for this in rocFFT.
+
 #### Samples
 
 Samples are currently located in a separate repository.  The purpose of the samples repository is
@@ -206,8 +218,6 @@ The goal of pre-commit testing is to determine how a commit will impact performa
 branch after the commit is merged.  Therefore, pre-commit performance testing must test the
 difference in performance between the target branch with and without the commit applied.
 
-TODO: downstream integration testing
-
 Performance tests focus on a different parameter space than the accuracy tests.  For example, while
 it's important that the length-1 transforms perform correctly (accuracy), the transform is actually
 the identity operation, and the highest-performance option for software that needs to perform a
@@ -267,6 +277,17 @@ identify false positives.
 Performance testing is currently not implemented in TheRock due to infrastructure issues.
 
 
+## Other testing infrascturcture
+
+### Kernel test harness
+
+rocFFT provides a kernel test harness, which produces a stand-alone, AOT-compiled harness to enable
+stand-along debugging.  This is enabled by settting the environment variable
+`ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS=1`.  Some intervention is required in order to set the kernel
+launch parameters, which are visible under plan debugging (`ROCFFT_LAYER=8`); this is mostly a
+developer-level test tool, particularly when attempting to determine the layer of the stack involved
+in a bug.
+
 ## Pre-submit / CI Gates
 
 Pre-submit tests currently cover unit tests and accuracy tests for:
@@ -279,7 +300,7 @@ infrasctructure issues in TheRock's CI.  We should do at least smoke tests on al
 performance tests when changes may affect performance.
 
 
-The CI tests in TheRock reduce the test probability to 1% due to performance issues in the CI
+The CI tests in TheRock reduce the test probability to a few % due to performance issues in the CI
 infrastructure, which results in an uncomfortably low number of tests being run.  Previously the
 test probability was at 100%.  This is a gap in testing due to infrastructure issues in TheRock's
 CI.  We should increase this probability to at least 50%, which can be accomplished by increasing
