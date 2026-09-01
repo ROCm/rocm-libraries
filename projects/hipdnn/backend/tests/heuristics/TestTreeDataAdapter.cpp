@@ -14,8 +14,8 @@
  * - Edge cases (empty model, invalid buffer)
  */
 
-#include "heuristics/uhd/adapters/TreeDataAdapter.hpp"
-#include "heuristics/uhd/Sha256.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/TreeDataAdapter.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/Sha256.hpp>
 
 #include "GbdtModelTestBuilder.hpp"
 
@@ -28,8 +28,8 @@
 #include <memory>
 #include <vector>
 
-using hipdnn_backend::heuristics::uhd::TreeDataAdapter;
-using hipdnn_backend::heuristics::uhd::UhdAdapterType;
+using hipdnn_plugin_sdk::ingestor::uhd::TreeDataAdapter;
+using hipdnn_plugin_sdk::ingestor::uhd::UhdAdapterType;
 
 namespace
 {
@@ -1115,7 +1115,7 @@ TEST_F(TestTreeDataAdapter, ModelHashFieldAccepted)
                       .build();
 
     // Compute actual model hash for validation (RFC 0019 §9.2)
-    const std::string modelHash = hipdnn_backend::heuristics::uhd::sha256(buffer.data(), buffer.size());
+    const std::string modelHash = hipdnn_plugin_sdk::ingestor::uhd::sha256(buffer.data(), buffer.size());
 
     // Load with model hash validation enabled
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH, modelHash);

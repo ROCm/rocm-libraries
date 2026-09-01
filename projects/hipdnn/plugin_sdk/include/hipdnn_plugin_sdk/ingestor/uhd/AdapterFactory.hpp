@@ -10,6 +10,7 @@
 
 #include <hipdnn_plugin_sdk/ingestor/uhd/UhdConfig.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/adapters/IUhdAdapter.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/CustomLibraryAdapter.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/adapters/NativeAdapter.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/adapters/TableAdapter.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/adapters/TreeDataAdapter.hpp>
@@ -58,6 +59,23 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
                                           cfg.featuresSignature.size(),
                                           cfg.featuresHash);
         }
+    }
+
+    else if(cfg.adapterType == "custom_library")
+    {
+        // RFC 0019 §7.2's escape hatch. It lived beside the backend's kernel-ranking path and
+        // so was unreachable from here, which meant the adapter kind was implemented and not
+        // delivered. It needs only dlopen, unlike `onnx`, whose runtime deliberately does not
+        // reach every provider's include path.
+        if(!cfg.modelArtifactPath.empty() && !cfg.customLibrarySymbol.empty())
+        {
+            return CustomLibraryAdapter::load(cfg.modelArtifactPath,
+                                              cfg.customLibrarySymbol,
+                                              cfg.featuresSignature.size(),
+                                              cfg.featuresHash);
+        }
+        HIPDNN_SDK_LOG_ERROR("uhd: custom_library needs both a model artifact path and a "
+                             "symbol name; ranking falls back to declared order");
     }
 
     return nullptr;

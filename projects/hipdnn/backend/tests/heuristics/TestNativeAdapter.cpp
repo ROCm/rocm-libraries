@@ -3,14 +3,14 @@
 
 #include <gtest/gtest.h>
 
-#include "heuristics/uhd/NativeScorerRegistry.hpp"
-#include "heuristics/uhd/adapters/NativeAdapter.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/NativeScorerRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/NativeAdapter.hpp>
 
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-namespace hipdnn_backend::heuristics::uhd
+namespace hipdnn_plugin_sdk::ingestor::uhd
 {
 namespace
 {
@@ -129,4 +129,4 @@ TEST(TestNativeAdapter, ZeroFeatureCountSkipsRowValidation)
     EXPECT_DOUBLE_EQ(adapter->score({1.0, 2.0, 3.0, 4.0}), 42.0);
 }
 
-} // namespace hipdnn_backend::heuristics::uhd
+} // namespace hipdnn_plugin_sdk::ingestor::uhd

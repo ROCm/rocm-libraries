@@ -6,16 +6,16 @@
  * @brief Tests for the UHD feature extraction system.
  */
 
-#include "heuristics/uhd/FeatureExtractor.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <unordered_set>
 
-using hipdnn_backend::heuristics::uhd::FeatureExtractionContext;
-using hipdnn_backend::heuristics::uhd::FeatureExtractor;
-using hipdnn_backend::heuristics::uhd::JsonLogicError;
+using hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractionContext;
+using hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractor;
+using hipdnn_plugin_sdk::ingestor::uhd::JsonLogicError;
 
 namespace
 {

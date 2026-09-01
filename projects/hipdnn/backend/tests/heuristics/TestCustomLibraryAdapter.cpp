@@ -13,7 +13,7 @@
  * - Lifecycle (dlopen/dlclose)
  */
 
-#include "heuristics/uhd/adapters/CustomLibraryAdapter.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/CustomLibraryAdapter.hpp>
 
 #include <gtest/gtest.h>
 
@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-using namespace hipdnn_backend::heuristics::uhd;
+using namespace hipdnn_plugin_sdk::ingestor::uhd;
 
 namespace
 {

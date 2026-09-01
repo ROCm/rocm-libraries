@@ -13,7 +13,7 @@
  * - Edge cases (no match, invalid buffer)
  */
 
-#include "heuristics/uhd/adapters/TableAdapter.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/adapters/TableAdapter.hpp>
 
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/table_model_generated.h>
@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-using namespace hipdnn_backend::heuristics::uhd;
+using namespace hipdnn_plugin_sdk::ingestor::uhd;
 namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
 namespace

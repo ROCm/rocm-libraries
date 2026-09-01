@@ -1,11 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "heuristics/uhd/FeatureExtractor.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
 
 #include <gtest/gtest.h>
 
-using namespace hipdnn_backend::heuristics::uhd;
+using namespace hipdnn_plugin_sdk::ingestor::uhd;
 
 class TestDerivedValues : public ::testing::Test
 {

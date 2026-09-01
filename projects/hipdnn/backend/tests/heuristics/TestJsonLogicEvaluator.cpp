@@ -6,16 +6,16 @@
  * @brief Tests for the JsonLogic expression evaluator used by UHD.
  */
 
-#include "heuristics/uhd/JsonLogicEvaluator.hpp"
+#include <hipdnn_plugin_sdk/ingestor/uhd/JsonLogicEvaluator.hpp>
 
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <limits>
 
-using hipdnn_backend::heuristics::uhd::JsonLogicError;
-using hipdnn_backend::heuristics::uhd::JsonLogicEvaluator;
-using hipdnn_backend::heuristics::uhd::VariableContext;
+using hipdnn_plugin_sdk::ingestor::uhd::JsonLogicError;
+using hipdnn_plugin_sdk::ingestor::uhd::JsonLogicEvaluator;
+using hipdnn_plugin_sdk::ingestor::uhd::VariableContext;
 
 namespace
 {

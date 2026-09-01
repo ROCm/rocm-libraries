@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <heuristics/uhd/UhdLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/UhdLoader.hpp>
 
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/uhd_generated.h>
@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-namespace hipdnn_backend::heuristics::uhd
+namespace hipdnn_plugin_sdk::ingestor::uhd
 {
 
 namespace
@@ -196,4 +196,4 @@ TEST(TestUhdLoader, LoadFromFileRoundTrip)
     std::filesystem::remove(tempPath);
 }
 
-} // namespace hipdnn_backend::heuristics::uhd
+} // namespace hipdnn_plugin_sdk::ingestor::uhd

@@ -9,7 +9,7 @@
  * the arch-keyed structure serializes/deserializes correctly.
  */
 
-#include <heuristics/uhd/UhdLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/UhdLoader.hpp>
 
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/uhd_generated.h>
@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-namespace hipdnn_backend::heuristics::uhd
+namespace hipdnn_plugin_sdk::ingestor::uhd
 {
 
 namespace
@@ -230,4 +230,4 @@ TEST(TestUhdLoaderMultiArch, DerivedValuesRoundTrip)
     EXPECT_NE(expr.find("ceil_div"), std::string::npos);
 }
 
-} // namespace hipdnn_backend::heuristics::uhd
+} // namespace hipdnn_plugin_sdk::ingestor::uhd

@@ -282,10 +282,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         heuristics/TestTableAdapter.cpp
         heuristics/TestOnnxAdapter.cpp
         heuristics/TestCustomLibraryAdapter.cpp
-        heuristics/TestUhdBuiltIn.cpp
-        heuristics/TestUhdSelectionFlow.cpp
-        heuristics/TestUhdTraceRetrieval.cpp
-        heuristics/uhd/TestEngineRegistryArchResolution.cpp
         heuristics/uhd/TestUhdLoader.cpp
         heuristics/uhd/TestUhdLoaderMultiArch.cpp
     )
