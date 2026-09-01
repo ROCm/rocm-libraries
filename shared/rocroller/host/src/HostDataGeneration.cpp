@@ -71,8 +71,30 @@ namespace rocRoller::HostNumerics
         {
             switch(type)
             {
+            case DataType::UInt8:
+                return ScalarType::UInt8;
+            case DataType::Int8:
+                return ScalarType::Int8;
+            case DataType::UInt16:
+                return ScalarType::UInt16;
+            case DataType::Int16:
+                return ScalarType::Int16;
+            case DataType::UInt32:
+                return ScalarType::UInt32;
+            case DataType::Int32:
+                return ScalarType::Int32;
+            case DataType::UInt64:
+                return ScalarType::UInt64;
+            case DataType::Int64:
+                return ScalarType::Int64;
             case DataType::Float:
                 return ScalarType::Float32;
+            case DataType::Double:
+                return ScalarType::Float64;
+            case DataType::ComplexFloat:
+                return ScalarType::ComplexFloat32;
+            case DataType::ComplexDouble:
+                return ScalarType::ComplexFloat64;
             case DataType::Half:
                 return ScalarType::Float16;
             case DataType::BFloat16:
@@ -516,7 +538,7 @@ namespace rocRoller::HostNumerics
             initializationA,
             scaleTypeA == DataType::None ? std::nullopt
                                          : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                               scaleTypeA, 1, scaleBlockSize}},
+                                             scaleTypeA, 1, scaleBlockSize}},
             minimum,
             maximum,
             seed + 1);
@@ -525,7 +547,7 @@ namespace rocRoller::HostNumerics
             initializationB,
             scaleTypeB == DataType::None ? std::nullopt
                                          : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                               scaleTypeB, 0, scaleBlockSize}},
+                                             scaleTypeB, 0, scaleBlockSize}},
             minimum,
             maximum,
             seed + 2);

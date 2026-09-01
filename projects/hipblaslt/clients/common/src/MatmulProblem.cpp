@@ -75,7 +75,8 @@ namespace hipblaslt::client
             const int64_t matrixElements
                 = checkedProduct(leadingDimension, columns, "matrix storage size");
             const int64_t allocationElements
-                = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? batchStride
+                = batchCount == 0                                   ? 0
+                  : batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? batchStride
                   : batchStride == 0
                       ? checkedProduct(matrixElements, batchCount, "matrix allocation size")
                   : leadingDimension <= batchStride
@@ -171,9 +172,13 @@ namespace hipblaslt::client
 
             const auto computeScalar = computeTypeToRealDataType(arguments.compute_type);
             if(inputA == HIPBLASLT_DATATYPE_INVALID)
-                inputA = computeScalar;
+                inputA = arguments.a_type == HIP_C_32F || arguments.a_type == HIP_C_64F
+                             ? arguments.a_type
+                             : computeScalar;
             if(inputB == HIPBLASLT_DATATYPE_INVALID)
-                inputB = computeScalar;
+                inputB = arguments.b_type == HIP_C_32F || arguments.b_type == HIP_C_64F
+                             ? arguments.b_type
+                             : computeScalar;
             return {inputA, inputB};
         }
     } // namespace
@@ -206,7 +211,9 @@ namespace hipblaslt::client
     std::vector<MatmulProblem> normalizeMatmulProblems(const Arguments& arguments)
     {
         const int32_t problemCount = std::max(1, arguments.grouped_gemm);
-        const int32_t batchCount   = std::max(1, arguments.batch_count);
+        if(arguments.batch_count < 0)
+            throw std::invalid_argument("Batch count must be non-negative.");
+        const int32_t batchCount = arguments.batch_count;
         if(problemCount > static_cast<int32_t>(MAX_SUPPORTED_NUM_PROBLEMS))
             throw std::invalid_argument("Grouped GEMM count exceeds the Arguments capacity.");
 
