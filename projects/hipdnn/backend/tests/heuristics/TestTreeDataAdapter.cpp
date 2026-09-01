@@ -594,7 +594,7 @@ TEST_F(TestTreeDataAdapter, BatchScoring)
     EXPECT_DOUBLE_EQ(scores[3], 10.0);
 }
 
-// ========== Integration with SelectionEngine ==========
+// ========== Integration with the feature extractor ==========
 
 TEST_F(TestTreeDataAdapter, WorksWithFeatureExtractor)
 {

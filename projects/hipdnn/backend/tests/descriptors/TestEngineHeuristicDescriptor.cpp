@@ -782,15 +782,16 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderWhenNotSet)
     int64_t count = 999;
     ASSERT_NO_THROW(heur->getAttribute(
         HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 0, &count, nullptr));
-    ASSERT_EQ(count, 3);
+    ASSERT_EQ(count, 2);
 
-    std::vector<int64_t> buffer(3);
+    std::vector<int64_t> buffer(2);
     ASSERT_NO_THROW(heur->getAttribute(
-        HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 3, &count, buffer.data()));
-    ASSERT_EQ(count, 3);
+        HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 2, &count, buffer.data()));
+    ASSERT_EQ(count, 2);
+    // The UHD policy used to sit between these two. It ranked kernels where the plugin ABI
+    // can only return engines, so it always reported applied=0 and never affected the chain.
     EXPECT_EQ(buffer[0], hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"));
-    EXPECT_EQ(buffer[1], hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::UHD"));
-    EXPECT_EQ(buffer[2],
+    EXPECT_EQ(buffer[1],
               hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"));
 }
 

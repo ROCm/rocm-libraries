@@ -115,10 +115,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_sources(
         hipdnn_backend_private
         PRIVATE
-        heuristics/uhd/EngineRegistry.cpp
-        heuristics/uhd/SelectionEngine.cpp
-        heuristics/uhd/UhdBuiltIn.cpp
-        heuristics/uhd/adapters/OnnxAdapter.cpp
     )
 endif()
 

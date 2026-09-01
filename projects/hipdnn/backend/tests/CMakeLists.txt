@@ -280,7 +280,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         heuristics/TestTreeDataAdapter.cpp
         heuristics/TestNativeAdapter.cpp
         heuristics/TestTableAdapter.cpp
-        heuristics/TestOnnxAdapter.cpp
         heuristics/TestCustomLibraryAdapter.cpp
         heuristics/uhd/TestUhdLoader.cpp
         heuristics/uhd/TestUhdLoaderMultiArch.cpp
