@@ -14,11 +14,6 @@
 #include <vector>
 
 namespace roc::host_numerics {
-// Derives a reproducible seed for one indexed stream without exposing the
-// generator algorithm used by host-numerics recipes.
-uint64_t deriveDeterministicSeed(uint64_t baseSeed, uint64_t streamIdentifier,
-                                 uint64_t sequenceIndex);
-
 namespace detail {
 struct GenerationRecipeAccess;
 }  // namespace detail
@@ -30,10 +25,6 @@ struct GenerationRecipeSettings {
 
     // Indexed recipes and generateAt use this coordinate-to-index mapping.
     IndexOrder indexOrder = IndexOrder::FirstDimensionFastest;
-
-    // Separates deterministic random streams that share a seed and logical
-    // index. Zero preserves the default generation stream.
-    uint64_t randomDomain = 0;
 };
 
 struct ConstantGenerationParameters {
@@ -321,10 +312,8 @@ class GenerationRecipe {
 
     [[nodiscard]] uint64_t seed() const noexcept;
     [[nodiscard]] IndexOrder indexOrder() const noexcept;
-    [[nodiscard]] uint64_t randomDomain() const noexcept;
     [[nodiscard]] GenerationRecipe withSeed(uint64_t seed) const;
     [[nodiscard]] GenerationRecipe withIndexOrder(IndexOrder order) const;
-    [[nodiscard]] GenerationRecipe withRandomDomain(uint64_t domain) const;
 
    private:
     struct BoundComponent {

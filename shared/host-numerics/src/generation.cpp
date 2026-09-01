@@ -14,11 +14,6 @@
 #include "detail/threading.hpp"
 
 namespace roc::host_numerics {
-uint64_t deriveDeterministicSeed(uint64_t baseSeed, uint64_t streamIdentifier,
-                                 uint64_t sequenceIndex) {
-    return detail::counterRandom(baseSeed, streamIdentifier, sequenceIndex);
-}
-
 namespace {
 void validateIntegerInterval(const UniformIntegerGenerationParameters& parameters) {
     if (parameters.lower > parameters.upper)
@@ -364,10 +359,6 @@ IndexOrder GenerationRecipe::indexOrder() const noexcept {
     return settings_.indexOrder;
 }
 
-uint64_t GenerationRecipe::randomDomain() const noexcept {
-    return settings_.randomDomain;
-}
-
 GenerationRecipe GenerationRecipe::withSeed(uint64_t seed) const {
     GenerationRecipe result = *this;
     result.settings_.seed = seed;
@@ -377,12 +368,6 @@ GenerationRecipe GenerationRecipe::withSeed(uint64_t seed) const {
 GenerationRecipe GenerationRecipe::withIndexOrder(IndexOrder order) const {
     GenerationRecipe result = *this;
     result.settings_.indexOrder = order;
-    return result;
-}
-
-GenerationRecipe GenerationRecipe::withRandomDomain(uint64_t domain) const {
-    GenerationRecipe result = *this;
-    result.settings_.randomDomain = domain;
     return result;
 }
 

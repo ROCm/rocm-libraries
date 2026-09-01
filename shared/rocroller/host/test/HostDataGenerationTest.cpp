@@ -290,15 +290,12 @@ namespace
                                           size_t     blockAxis,
                                           uint32_t   seed)
     {
-        MxDataGeneration data
-            = MxDataGeneration::preserveGeneratedEncoding(GenerationRecipe::realOnly(
-                GenerationRecipe::uniformFiniteEncodedValue(),
-                {
-                    .seed       = seed,
-                    .indexOrder = IndexOrder::FirstDimensionFastest,
-                    .randomDomain
-                    = roc::host_numerics::mx_generation_random_domain_version_1::unboundedData,
-                }));
+        MxDataGeneration data = MxDataGeneration::preserveGeneratedEncoding(
+            GenerationRecipe::realOnly(GenerationRecipe::uniformFiniteEncodedValue(),
+                                       {
+                                           .seed       = seed,
+                                           .indexOrder = IndexOrder::FirstDimensionFastest,
+                                       }));
         MxGenerationProblem problem(std::move(shape), std::move(data));
         problem.dataType         = dataType;
         problem.scaleType        = scaleType;
