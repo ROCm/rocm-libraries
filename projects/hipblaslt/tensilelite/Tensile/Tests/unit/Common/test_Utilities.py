@@ -58,6 +58,7 @@ from Tensile.Common.Utilities import (
     wmmaV3InputVgprLayout,
 )
 
+
 @pytest.fixture
 def mock_openFile():
     with patch("builtins.open", mock_open()) as mock:

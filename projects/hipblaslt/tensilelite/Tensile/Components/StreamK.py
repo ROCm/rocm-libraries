@@ -132,7 +132,7 @@ class XCCMappingOn(XCCMapping):
 
             # sGridC = ceil(grid / xccm)
             sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
-            if writer.isStreamKConstantsToVgprEnabled(kernel):
+            if writer.isStreamKConstantsToVgprEnabled(kernel, "skGrid"):
                 module.add(VReadfirstlaneB32(dst=sgpr(sGrid), src=vgpr(writer.states.skConstVgprs["skGrid"])))
             module.add(SAddU32(dst=sgpr(sGridC), src0=sgpr(sGrid), src1=hex(kernel["StreamKXCCMapping"] - 1), comment="ceil(grid/xccm)"))
             module.add(scalarStaticDivideAndRemainder(qReg=sGridC, rReg=-1, dReg=sGridC, divisor=kernel["StreamKXCCMapping"], tmpSgprRes=sTmpRes, doRemainder=0))
@@ -718,7 +718,7 @@ class StreamK(Component):
         module = Module("StreamK computeTotalIters")
         module.add(self.computeTotalTiles(writer, kernel, dstSgpr))
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if writer.isStreamKConstantsToVgprEnabled(kernel):
+        if writer.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
             module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
         module.add(SMulI32(dst=sgpr(dstSgpr), src0=sgpr(dstSgpr), src1=sgpr(sIpt), comment="totalIters = totalTiles * itersPerTile"))
         writer.releaseStreamKConstSgpr(sIpt)
@@ -726,7 +726,6 @@ class StreamK(Component):
 
     def skTileIndex(self, writer, kernel, sTmp, tPA, tPB, skipLroReset=False):
         module = Module("StreamK skTileIndex")
-        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         # Always reset pointers to handle odd-exit case which moves LRO to the upper bank.
         # Skipped when PAP calls this before the NLL body: the current
@@ -747,12 +746,9 @@ class StreamK(Component):
         # sTmp = tile index
         sMagicNum = writer.acquireStreamKConstSgpr(kernel, "MagicNumberItersPerTile")
         sMagicShift = writer.acquireStreamKConstSgpr(kernel, "MagicShiftItersPerTile")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sMagicNum), src=vgpr(writer.states.skConstVgprs["MagicNumberItersPerTile"])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sMagicShift), src=vgpr(writer.states.skConstVgprs["MagicShiftItersPerTile"])))
-        # SK5: mode bit (30) is already cleared at preLoop. Mask magic add
-        # (bit 31) and the 5-bit shift into a temp. MagicShiftItersPerTile
-        # aliases SKTiles and must keep that overlay.
+        module.add(writer.readbackStreamKConst(kernel, sMagicNum, "MagicNumberItersPerTile"))
+        module.add(writer.readbackStreamKConst(kernel, sMagicShift, "MagicShiftItersPerTile"))
+        # SK5: mode bit (30) already cleared at preLoop; keep magic add + shift.
         if kernel["StreamK"] == 5:
             # PAP calls skTileIndex inside the OptNLL window, where the SGPR pool
             # sits at its high-water mark. Let this scratch temp grow the pool
@@ -772,8 +768,7 @@ class StreamK(Component):
         writer.releaseStreamKConstSgpr(sMagicShift)
         # sTmp+1 = tile start, sTmp+2 = tile end
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+        module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
         module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sTmp), src1=sgpr(sIpt), comment="Tile start iteration"))
         module.add(SAddU32(dst=sgpr(sTmp+2), src0=sgpr(sTmp+1), src1=sgpr(sIpt), comment="Tile end iteration"))
         writer.releaseStreamKConstSgpr(sIpt)
@@ -817,29 +812,20 @@ class StreamK(Component):
     def skExtraIters(self, writer, kernel, sSkExtraIters, sTmp):
         # skExtraIters = skTiles * ItersPerTile - SKItersPerWG * skGrid
         # Use sSkExtraIters/sTmp as readfirstlane destinations to reduce SGPR pressure
-        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
         module = Module("StreamK skExtraIters")
 
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sSkExtraIters), src=vgpr(writer.states.skConstVgprs["skTiles"])))
+        module.add(writer.readbackStreamKConst(kernel, sSkExtraIters, "skTiles"))
         sT = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sT), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
-            skTilesSrc = sSkExtraIters
-        else:
-            skTilesSrc = "skTiles"
+        module.add(writer.readbackStreamKConst(kernel, sT, "ItersPerTile"))
+        skTilesSrc = sSkExtraIters if writer.isStreamKConstantsToVgprEnabled(kernel, "skTiles") else "skTiles"
 
         module.add(SMulI32(dst=sgpr(sSkExtraIters), src0=sgpr(skTilesSrc), src1=sgpr(sT)))
         writer.releaseStreamKConstSgpr(sT)
 
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sTmp), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
+        module.add(writer.readbackStreamKConst(kernel, sTmp, "SKItersPerWG"))
         sT = writer.acquireStreamKConstSgpr(kernel, "skGrid")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sT), src=vgpr(writer.states.skConstVgprs["skGrid"])))
-            skItersPerWgSrc = sTmp
-        else:
-            skItersPerWgSrc = "SKItersPerWG"
+        module.add(writer.readbackStreamKConst(kernel, sT, "skGrid"))
+        skItersPerWgSrc = sTmp if writer.isStreamKConstantsToVgprEnabled(kernel, "SKItersPerWG") else "SKItersPerWG"
 
         module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(skItersPerWgSrc), src1=sgpr(sT)))
         writer.releaseStreamKConstSgpr(sT)
@@ -895,7 +881,6 @@ class StreamK(Component):
         module = Module("StreamK Common computeStoreSrdStart")
         if kernel["StreamKForceDPOnly"]:
             return module
-        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         # Check for parallel reduction
         # Paralell reduction stores to SrdD in split format, fixup happens in post kernel
@@ -910,8 +895,7 @@ class StreamK(Component):
         numDim = len(indices)
 
         sSkt = writer.acquireStreamKConstSgpr(kernel, "skTiles")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(writer.states.skConstVgprs["skTiles"])))
+        module.add(writer.readbackStreamKConst(kernel, sSkt, "skTiles"))
         module.add(SCmpEQU32(src0=sgpr(sSkt), src1=1, comment="split == 1 ?"))
         writer.releaseStreamKConstSgpr(sSkt)
         module.add(SCBranchSCC1(labelName=skSplitSrd.getLabelName(), comment="branch if split == 1"))
@@ -994,7 +978,7 @@ class StreamK(Component):
 
         # Set stagger=0 for partial tiles to avoid using stagger larger than workload
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if writer.isStreamKConstantsToVgprEnabled(kernel):
+        if writer.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
             module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
         module.add(SCmpGtU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
         module.add(SCMovB32(dst=sgpr("StaggerUIter"), src=0, comment="set stagger=0 for partial tiles"))
@@ -1020,7 +1004,7 @@ class StreamK(Component):
         # skip tail loop if StreamK WG not processing final iteration
         # Check if tile finished
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if writer.isStreamKConstantsToVgprEnabled(kernel):
+        if writer.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
             module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
         module.add(SCmpLtU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="Check if WG processes final iteration of tile"))
         writer.releaseStreamKConstSgpr(sIpt)
@@ -1040,7 +1024,7 @@ class StreamK(Component):
         # ItersPerTile (no StreamKLocalStart/End SGPRs to read).
         if kernel["StreamKForceDPOnly"]:
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-            if writer.isStreamKConstantsToVgprEnabled(kernel):
+            if writer.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
                 module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
             module.add(SMovB32(dst=sgpr(loopCounterName), src=sgpr(sIpt), comment="StreamK loop counter = ItersPerTile (DP-only full tile)"))
             writer.releaseStreamKConstSgpr(sIpt)
@@ -1074,7 +1058,7 @@ class StreamK(Component):
                 # tail-loop decision unchanged (no StreamKLocalEnd SGPR to read).
                 if not kernel["StreamKForceDPOnly"]:
                     sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-                    if writer.isStreamKConstantsToVgprEnabled(kernel):
+                    if writer.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
                         module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
                     module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="Check if WG processes final iteration of tile"))
                     writer.releaseStreamKConstSgpr(sIpt)
@@ -1106,7 +1090,6 @@ class StreamK(Component):
             return module
 
         memOrder = Component.StreamKMemoryOrdering.find(writer)
-        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
         skStoreLabel = Label(label=writer.labels.getNameInc("SK_Store"), comment="")
 
         if kernel["StreamKFixupTreeReduction"] == 1:
@@ -1128,8 +1111,7 @@ class StreamK(Component):
             module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
             module.add(SCBranchSCC0(labelName=skFixupTreeLabel.getLabelName(), comment="If we didn't start the tile, always to SK Tree fixup"))
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-            if skConstsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+            module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
             module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="does wg finish tile?"))
             writer.releaseStreamKConstSgpr(sIpt)
             module.add(SCBranchSCC1(labelName=skStoreLabel.getLabelName(), comment="Branch if started and finished tile, go to regular store code"))
@@ -1148,10 +1130,9 @@ class StreamK(Component):
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
             sSkt = writer.acquireStreamKConstSgpr(kernel, "skTiles")
             sIpw = writer.acquireStreamKConstSgpr(kernel, "SKItersPerWG")
-            if skConstsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
-                module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(writer.states.skConstVgprs["skTiles"])))
-                module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
+            module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
+            module.add(writer.readbackStreamKConst(kernel, sSkt, "skTiles"))
+            module.add(writer.readbackStreamKConst(kernel, sIpw, "SKItersPerWG"))
             module.add(self.computeTotalTiles(writer, kernel, tmpSgpr))
             module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr(sSkt), comment="dpTiles = totalTiles - skTiles"))
             writer.releaseStreamKConstSgpr(sSkt)
@@ -1172,8 +1153,7 @@ class StreamK(Component):
             module.add(skFixupCalcPartialIdx)
 
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-            if skConstsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+            module.add(writer.readbackStreamKConst(kernel, sIdx, "StreamKIdx"))
             module.add(SSubU32(dst=sgpr(sPartialIdx), src0=sgpr(sIdx), src1=sgpr(tmpSgpr+2), comment="partialIdx = streamkidx - coopGroupStart"))
             writer.releaseStreamKConstSgpr(sIdx)
 
@@ -1192,7 +1172,7 @@ class StreamK(Component):
             module.add(writer.longBranchScc1(skPartialsLabel, posNeg=1))
             module.add(SLShiftRightB32(dst=sgpr(sPartialIdx), src=sgpr(sPartialIdx), shiftHex=log2(2), comment="sPartialIdx // 2"))
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-            if writer.isStreamKConstantsToVgprEnabled(kernel):
+            if writer.isStreamKConstantsToVgprEnabled(kernel, "StreamKIdx"):
                 module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
             module.add(SAddU32(dst=sgpr(sFlagIdx), src0=sgpr(sIdx), src1=sgpr(sIdxOffset), comment="flagIdx=StreamKIdx+IdxOffset"))
             writer.releaseStreamKConstSgpr(sIdx)
@@ -1200,7 +1180,7 @@ class StreamK(Component):
             # If the flag we're waiting for is past this tile we can finish the fixup step
             # LocalEnd + 1 + (sIdxOffset-1) * SKItersPerWG + (Extras)
             sIpw = writer.acquireStreamKConstSgpr(kernel, "SKItersPerWG")
-            if writer.isStreamKConstantsToVgprEnabled(kernel):
+            if writer.isStreamKConstantsToVgprEnabled(kernel, "SKItersPerWG"):
                 module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
             module.add(SSubU32(dst=sgpr(tmpSgpr+1), src0=sgpr(sIdxOffset), src1=1, comment="Starting on next WG so offset-1"))
             module.add(SMulI32(dst=sgpr(tmpSgpr+2), src0=sgpr(sIpw), src1=sgpr(tmpSgpr+1), comment="Before extra iters"))
@@ -1215,7 +1195,7 @@ class StreamK(Component):
             module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=sgpr("StreamKLocalEnd"), src1=1, comment="Start of next wg"))
             module.add(SAddU32(dst=sgpr(tmpSgpr+2), src0=sgpr(tmpSgpr+0), src1=sgpr(tmpSgpr+2)))
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-            if writer.isStreamKConstantsToVgprEnabled(kernel):
+            if writer.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
                 module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
             module.add(SCmpGtU32(src0=sgpr(tmpSgpr+2), src1=sgpr(sIpt)))
             writer.releaseStreamKConstSgpr(sIpt)
@@ -1284,8 +1264,7 @@ class StreamK(Component):
                 # if we started and finished the tile, regular store code
                 # branch to regular store code, skip fixup step
                 sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-                if skConstsInVgprs:
-                    module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+                module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
                 module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="does wg finish tile?"))
                 module.add(SCBranchSCC1(labelName=skStoreLabel.getLabelName(), comment="Branch if started and finished tile, go to regular store code"))
 
@@ -1293,17 +1272,15 @@ class StreamK(Component):
                 # run fixup code before regular store code
                 sCtaIdx = writer.sgprPool.checkOut(1, "CtaIdx") # self.defineSgpr("CtaIdx", 1)
                 sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-                if skConstsInVgprs:
-                    module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+                module.add(writer.readbackStreamKConst(kernel, sIdx, "StreamKIdx"))
                 module.add(SAddU32(dst=sgpr(sCtaIdx), src0=sgpr(sIdx), src1=1, comment="input partial tile index"))
                 writer.releaseStreamKConstSgpr(sIdx)
 
                 sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd") # self.defineSgpr("CtaEnd", 1)
                 sMagicNum = writer.acquireStreamKConstSgpr(kernel, "MagicNumberItersPerTile")
                 sMagicShift = writer.acquireStreamKConstSgpr(kernel, "MagicShiftItersPerTile")
-                if skConstsInVgprs:
-                    module.add(VReadfirstlaneB32(dst=sgpr(sMagicNum), src=vgpr(writer.states.skConstVgprs["MagicNumberItersPerTile"])))
-                    module.add(VReadfirstlaneB32(dst=sgpr(sMagicShift), src=vgpr(writer.states.skConstVgprs["MagicShiftItersPerTile"])))
+                module.add(writer.readbackStreamKConst(kernel, sMagicNum, "MagicNumberItersPerTile"))
+                module.add(writer.readbackStreamKConst(kernel, sMagicShift, "MagicShiftItersPerTile"))
                 module.add(sMagicDiv2(sgpr(tmpSgpr), sgpr(tmpSgpr+1), sgpr("StreamKIterEnd"), sgpr(sMagicNum), sgpr(sMagicShift), sgpr(tmpSgpr+2)))
                 writer.releaseStreamKConstSgpr(sMagicNum)
                 writer.releaseStreamKConstSgpr(sMagicShift)
@@ -1371,7 +1348,7 @@ class StreamK(Component):
                     sIterCount = writer.sgprPool.checkOut(1, "iterCount")
                     module.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIterCount)) # sIterCount is a temp register
                     sIpw = writer.acquireStreamKConstSgpr(kernel, "SKItersPerWG")
-                    if writer.isStreamKConstantsToVgprEnabled(kernel):
+                    if writer.isStreamKConstantsToVgprEnabled(kernel, "SKItersPerWG"):
                         module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
                     module.add(SAddU32(dst=sgpr(sIterCount), src0=sgpr(sIpw), src1=1, comment="Add extra iter"))
                     module.add(SCmpLtU32(src0=sgpr(sCtaIdx), src1=sgpr(sSkExtraIters), comment="Check if next WG had an extra iteration"))
@@ -1382,7 +1359,7 @@ class StreamK(Component):
                     writer.sgprPool.checkIn(sIterCount)
                 module.add(SAddU32(dst=sgpr(sCtaIdx), src0=sgpr(sCtaIdx), src1=1, comment="next partial tile index"))
                 sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-                if writer.isStreamKConstantsToVgprEnabled(kernel):
+                if writer.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
                     module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
                 module.add(SCmpLtU32(src0=sgpr(sFixupEnd), src1=sgpr(sIpt), comment="done loading partial tiles?"))
                 writer.releaseStreamKConstSgpr(sIpt)
@@ -1444,7 +1421,7 @@ class StreamK(Component):
             partialsModule.add(partialsDeferredLabel)
             for edge in edges:
                 sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-                if writer.isStreamKConstantsToVgprEnabled(kernel):
+                if writer.isStreamKConstantsToVgprEnabled(kernel, "StreamKIdx"):
                     partialsModule.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
                 partialsModule.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx)))
                 writer.releaseStreamKConstSgpr(sIdx)
@@ -1454,7 +1431,7 @@ class StreamK(Component):
             for edge in edges:
                 module.add(partialsLabels[edge])
                 sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-                if writer.isStreamKConstantsToVgprEnabled(kernel):
+                if writer.isStreamKConstantsToVgprEnabled(kernel, "StreamKIdx"):
                     module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
                 module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx)))
                 writer.releaseStreamKConstSgpr(sIdx)
@@ -1777,7 +1754,7 @@ class StreamK(Component):
                 module.add(sk5FlagDone)
             else:
                 sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-                if writer.isStreamKConstantsToVgprEnabled(kernel):
+                if writer.isStreamKConstantsToVgprEnabled(kernel, "StreamKIdx"):
                     module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
                 module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
                 writer.releaseStreamKConstSgpr(sIdx)
@@ -3124,7 +3101,6 @@ class StreamKTwoTileDPFirst(StreamK):
 
     def preLoop(self, writer, kernel):
         module = Module("StreamK TwoTileDPFirst openLoop")
-        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
@@ -3167,7 +3143,7 @@ class StreamKTwoTileDPFirst(StreamK):
                 module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t1),
                                    comment="DP fold: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M"))
 
-        if skConstsInVgprs:
+        if writer.isStreamKConstantsToVgprEnabled(kernel, "StreamKIdx"):
             module.add(VMovB32(dst=vgpr(self._skv(writer, "StreamKIdx")), src=sgpr("WorkGroup0"),
                                comment="Save original StreamK index to VGPR"))
         else:
@@ -3189,9 +3165,8 @@ class StreamKTwoTileDPFirst(StreamK):
         if kernel["StreamKForceDPOnly"]:
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-            if skConstsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
-                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+            module.add(writer.readbackStreamKConst(kernel, sIdx, "StreamKIdx"))
+            module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
             module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr(sIdx), src1=sgpr(sIpt), comment="DP starting iteration"))
             writer.releaseStreamKConstSgpr(sIdx)
             with writer.allocTmpSgpr(1, tag="TotalIters") as sTmpRes:
@@ -3226,8 +3201,7 @@ class StreamKTwoTileDPFirst(StreamK):
         tmpVgpr = writer.vgprPool.checkOut(2, "div")
         tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
         sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+        module.add(writer.readbackStreamKConst(kernel, sIdx, "StreamKIdx"))
         module.add(scalarUInt32DivideAndRemainder(qReg=stmpTileIdx, dReg=sIdx, divReg="SkSplit", rReg=stmpPartialIdx, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="TileIdx = SKIdx // WGsPerTile, PartialIdx = SKIdx % WGsPerTile"))
         writer.releaseStreamKConstSgpr(sIdx)
         tmpVgprRes = None
@@ -3242,9 +3216,8 @@ class StreamKTwoTileDPFirst(StreamK):
         sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters")
         sIpw = writer.acquireStreamKConstSgpr(kernel, "SKItersPerWG")
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+        module.add(writer.readbackStreamKConst(kernel, sIpw, "SKItersPerWG"))
+        module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
         module.add(SMulI32(dst=sgpr(sSkExtraIters), src0=sgpr("SkSplit"), src1=sgpr(sIpw)))
         module.add(SSubU32(dst=sgpr(sSkExtraIters), src0=sgpr(sIpt), src1=sgpr(sSkExtraIters), comment="extraIters = itersPerTile - SkSplit * skItersPerWG"))
 
@@ -3302,9 +3275,8 @@ class StreamKTwoTileDPFirst(StreamK):
         ################
         sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+        module.add(writer.readbackStreamKConst(kernel, sIdx, "StreamKIdx"))
+        module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
         module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr(sIdx), src1=sgpr(sIpt), comment="DP starting iteration (case: DP work to do)"))
         writer.releaseStreamKConstSgpr(sIdx)
         with writer.allocTmpSgpr(1, tag="TotalIters") as sTmpRes:
@@ -3312,8 +3284,7 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(self.computeTotalIters(writer, kernel, sTmp))
             module.add(SMovB32(dst=sgpr("StreamKIterEnd"), src=sgpr(sTmp), comment="DP ending iteration (case: only DP work to do)"))
             sSkt = writer.acquireStreamKConstSgpr(kernel, "skTiles")
-            if skConstsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(writer.states.skConstVgprs["skTiles"])))
+            module.add(writer.readbackStreamKConst(kernel, sSkt, "skTiles"))
             module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sSkt), src1=sgpr(sIpt), comment="Total SK iters"))
             writer.releaseStreamKConstSgpr(sSkt)
             module.add(SCmpLtU32(src0=sgpr(sTmp), src1=sgpr("StreamKIterEnd"), comment="Check if there are DP tiles to do"))
@@ -3329,9 +3300,8 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIter)) # sIter used as tmp
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
             sIpw = writer.acquireStreamKConstSgpr(kernel, "SKItersPerWG")
-            if skConstsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
-                module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
+            module.add(writer.readbackStreamKConst(kernel, sIdx, "StreamKIdx"))
+            module.add(writer.readbackStreamKConst(kernel, sIpw, "SKItersPerWG"))
             module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr(sIdx), src1=sgpr(sIpw), comment="StreamK starting iteration (case: after extra iters)"))
             module.add(SAddU32(dst=sgpr("StreamKIter"), src0=sgpr("StreamKIter"), src1=sgpr(sSkExtraIters), comment="Add extra iters"))
             module.add(SAddU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIter"), src1=sgpr(sIpw), comment="StreamK ending iteration (case: after extra iters)"))
@@ -3348,9 +3318,8 @@ class StreamKTwoTileDPFirst(StreamK):
         sTmp = writer.sgprPool.checkOut(1, "TotalSKIters")
         sSkt = writer.acquireStreamKConstSgpr(kernel, "skTiles")
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(writer.states.skConstVgprs["skTiles"])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+        module.add(writer.readbackStreamKConst(kernel, sSkt, "skTiles"))
+        module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
         module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sSkt), src1=sgpr(sIpt), comment="Total SK iters"))
         writer.releaseStreamKConstSgpr(sSkt)
         writer.releaseStreamKConstSgpr(sIpt)
@@ -3369,7 +3338,6 @@ class StreamKTwoTileDPFirst(StreamK):
 
     def graWorkGroup(self, writer, kernel, tPA, tPB):
         module = Module("StreamK TwoTileDPFirst graWorkGroup")
-        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         # StreamK workgroup mapping. This is short-lived scratch, so grow the pool
         # rather than reject the solution when no 4-register hole is free: MX TDM
@@ -3381,8 +3349,7 @@ class StreamKTwoTileDPFirst(StreamK):
 
         if kernel["StreamKForceDPOnly"]:
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-            if skConstsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+            module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
             module.add(self.computeTotalTiles(writer, kernel, sTmp+3))
             module.add(SMulI32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=sgpr(sIpt), comment="dpSectionSize = totalTiles * ItersPerTile"))
             module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp+3), comment="Make sure there's DP work to do"))
@@ -3393,9 +3360,8 @@ class StreamKTwoTileDPFirst(StreamK):
 
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
             sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
-            if skConstsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
-                module.add(VReadfirstlaneB32(dst=sgpr(sGrid), src=vgpr(writer.states.skConstVgprs["skGrid"])))
+            module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
+            module.add(writer.readbackStreamKConst(kernel, sGrid, "skGrid"))
             module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sGrid), src1=sgpr(sIpt), comment="DP iterations shift"))
             writer.releaseStreamKConstSgpr(sGrid)
             writer.releaseStreamKConstSgpr(sIpt)
@@ -3429,16 +3395,14 @@ class StreamKTwoTileDPFirst(StreamK):
 
         module.add(self.computeTotalTiles(writer, kernel, sTmp+3))
         sSkt = writer.acquireStreamKConstSgpr(kernel, "skTiles")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(writer.states.skConstVgprs["skTiles"])))
+        module.add(writer.readbackStreamKConst(kernel, sSkt, "skTiles"))
         module.add(SSubU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=sgpr(sSkt), comment="dpTiles = totalTiles - skTiles"))
         writer.releaseStreamKConstSgpr(sSkt)
 
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
         sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sGrid), src=vgpr(writer.states.skConstVgprs["skGrid"])))
+        module.add(writer.readbackStreamKConst(kernel, sIpt, "ItersPerTile"))
+        module.add(writer.readbackStreamKConst(kernel, sGrid, "skGrid"))
         module.add(SMulI32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=sgpr(sIpt), comment="dpSectionSize = dpTiles * ItersPerTile"))
 
         # If in DP, add dpShift
@@ -3461,12 +3425,9 @@ class StreamKTwoTileDPFirst(StreamK):
             sIter = skIterRes.idx
             module.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIter)) # sIter used as tmp
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-            if skConstsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
-                module.add(VReadfirstlaneB32(dst=sgpr(sIter), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
-                sItersPerWg = sIter
-            else:
-                sItersPerWg = "SKItersPerWG"
+            module.add(writer.readbackStreamKConst(kernel, sIdx, "StreamKIdx"))
+            module.add(writer.readbackStreamKConst(kernel, sIter, "SKItersPerWG"))
+            sItersPerWg = sIter if writer.isStreamKConstantsToVgprEnabled(kernel, "SKItersPerWG") else "SKItersPerWG"
             module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr(sIdx), src1=sgpr(sItersPerWg), comment="StreamK starting iteration (case: after extra iters)"))
             module.add(SAddU32(dst=sgpr("StreamKIter"), src0=sgpr("StreamKIter"), src1=sgpr(sSkExtraIters), comment="Add extra iters"))
             module.add(SAddU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIter"), src1=sgpr(sItersPerWg), comment="StreamK ending iteration (case: after extra iters)"))
@@ -3509,7 +3470,7 @@ class StreamKTwoTileDPFirst(StreamK):
         skCloseLoopLabel = Label("SK_CloseLoop", "")
         module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if writer.isStreamKConstantsToVgprEnabled(kernel):
+        if writer.isStreamKConstantsToVgprEnabled(kernel, "ItersPerTile"):
             module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
         module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr(sIpt), comment="Skip iterations"))
         writer.releaseStreamKConstSgpr(sIpt)

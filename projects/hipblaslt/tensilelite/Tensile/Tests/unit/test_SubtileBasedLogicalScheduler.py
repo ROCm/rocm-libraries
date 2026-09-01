@@ -15,6 +15,7 @@ Organized by pass:
   12. Integration    — Full pipeline with real instructions
 """
 import pytest
+from types import SimpleNamespace
 from Tensile.Components.Subtile.Kernel import (
     TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4, CD_F32, CD_F32_W32,
 )
@@ -35,6 +36,54 @@ from Tensile.Components.Subtile.LogicalScheduler import (
 from Tensile.Components.Subtile.SubtileGREmit import useDirectToVgprPreSwizzledB
 from unittest.mock import MagicMock
 from rocisa.code import Module
+from rocisa.instruction import SNop
+
+
+def test_plsin_capture_planner_matches_exact_acc_source():
+    sched = LogicalScheduler(make_cfg_256x256_fp4())
+    producer = SimpleNamespace(acc=SimpleNamespace(
+        regName=None, regType='a', regIdx=8, regNum=1))
+    em = SimpleNamespace(opType='mfma', instructions=[producer])
+    anchor = SNop(0)
+    fillers = [SNop(0) for _ in range(17)]
+    readInst = SNop(0)
+    gap = MagicMock()
+    capture = {"pairs": [{
+        "gap": gap,
+        "gapAnchor": anchor,
+        "reads": [(readInst, SimpleNamespace(
+            regName=None, regType='a', regIdx=8, regNum=1))],
+    }]}
+    store = SimpleNamespace(flatitems=lambda: [anchor, *fillers, readInst])
+
+    moved = sched._planCapturedTerminalMfmas(
+        [[[em]]], [capture], store, requiredCycles=17)
+
+    assert moved == 1
+    assert em.instructions == []
+    assert gap.add.call_count == 1
+    assert gap.add.call_args.args[0].acc.regIdx == 8
+
+
+def test_plsin_capture_mapping_failure_does_not_mutate_loop():
+    sched = LogicalScheduler(make_cfg_256x256_fp4())
+    mfma = SimpleNamespace(acc=SimpleNamespace(
+        regName=None, regType='a', regIdx=0, regNum=1))
+    em = SimpleNamespace(opType='mfma', instructions=[mfma])
+    anchor, readInst = SNop(0), SNop(0)
+    capture = {"pairs": [{
+        "gap": MagicMock(),
+        "gapAnchor": anchor,
+        "reads": [(readInst, SimpleNamespace(
+            regName=None, regType='a', regIdx=99, regNum=1))],
+    }]}
+    store = SimpleNamespace(flatitems=lambda: [anchor, readInst])
+
+    moved = sched._planCapturedTerminalMfmas(
+        [[[em]]], [capture], store, requiredCycles=0)
+
+    assert moved == 0
+    assert em.instructions == [mfma]
 
 
 def makeTileInfo(tc, kernel):

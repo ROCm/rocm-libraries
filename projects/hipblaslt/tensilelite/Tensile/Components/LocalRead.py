@@ -1064,7 +1064,7 @@ class LocalReadMFMA(LocalRead):
                         subIterLoadCount += 1
         # Without enableLDSTr
         else:
-            totalLoads = numVectorsPerTile * numReadsPerVector * numReadsPerUnroll * miInputGroup
+            totalLoads = numVectorsPerTile * numReadsPerVector * numReadsPerUnroll * numTilePerInst
             swapBlockSizeSub = (totalLoads * blockWidth)
             if not writer.states.inTailLoop:
                 # divided by numSubTiles for non TailLoop case

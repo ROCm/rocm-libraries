@@ -61,6 +61,7 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
+from Tensile.Common.Utilities import plsinDebugEnv
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -1765,6 +1766,109 @@ class Solution(collections.abc.Mapping):
     return divisorName
 
   ########################################
+  # PostLoopStoreInNll (PLSIN) eligibility gate -- factored out so it can run
+  # UNCONDITIONALLY. assignDerivedParameters short-circuits (returns early) for
+  # solutions loaded from pre-tuned logic files that carry
+  # AssignedDerivedParameters=True; those solutions predate PLSIN and lack the
+  # key entirely, so the original inline gate never ran for them and the fused
+  # store was never enabled on the shipped library. Running this here (both from
+  # the early-return branch and from the normal derivation path) makes PLSIN
+  # eligibility a deterministic function of the already-present solution/problem
+  # parameters, independent of whether the full derivation pass executed.
+  @staticmethod
+  def assignPostLoopStoreInNll(state):
+    # These two keys are absent on solutions tuned before PLSIN existed; default
+    # them (matching GlobalParameters.py) so the gate below can evaluate. The
+    # gate only ever AUTO-DISABLES (never enables something ineligible), so a
+    # defaulted True is safe -- every ineligible config is turned back to False.
+    if "PostLoopStoreInNll" not in state:
+      state["PostLoopStoreInNll"] = True
+    if "PLSINStoreMode" not in state:
+      state["PLSINStoreMode"] = "Weave"
+
+    isa = tuple(state["ISA"])
+
+    if state["PostLoopStoreInNll"]:
+      isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or \
+                 state["ProblemType"]["DataTypeB"].isFloat4()
+      isgfx950 = isa[:2] == (9, 5)
+      destType = state["ProblemType"]["DestDataType"]
+      # TEST-ONLY force: turn PLSIN on for fp4 kernels with an f16 (half) C/D dest
+      # even when only the weave-overlap PROFITABILITY heuristic would auto-disable
+      # it. The structural and register/spill gates below stay enforced, so this can
+      # only ever force NON-SPILL macrotiles on (never past the VGPR/SGPR ceiling).
+      # Unset (default "0") reproduces the shipped library byte-for-byte.
+      # Kept as a compatibility/debug control; schedule depth is now derived by
+      # the generated producer/consumer planner.
+      forcePlsinFp4F16 = (isFloat4
+                          and destType.isHalf()
+                          and plsinDebugEnv("TENSILE_PLSIN_FORCE_FP4_F16", "0") != "0")
+      # The fused store is _emit16bitSubtilePairedStore: it only exists for a
+      # bf16/half dest with HPA on wave64, and not for the StreamK workspace
+      # (MultipleBuffer*) accumulation paths.
+      pairedStoreAvailable = (
+        (destType.isBFloat16() or destType.isHalf()) and
+        state["ProblemType"]["HighPrecisionAccumulate"] and
+        state["WavefrontSize"] != 32 and
+        state["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
+      )
+      # Barrier-free-store precondition: only StoreRemapVectorWidth>0 puts an
+      # s_barrier *inside* the ds_bpermute paired store (LDS remap + barriers) and
+      # uses an entirely different store mechanism, so it stays excluded.
+      barrierFreeStore = (
+        state["StoreRemapVectorWidth"] == 0
+      )
+      # StreamK support: only the non-atomic reduction (SK3/4/5) is eligible.
+      streamKAtomicFree = not (state["StreamK"] and state["StreamKAtomic"])
+      # Spill tiles: MIWaveTile product > 64 spills accumulators into arch VGPRs
+      # and overflows the occ-1 budget under the fused store. MIWaveTile is only
+      # present for EnableMatrixInstruction solutions; guard the lookup.
+      miwt = state.get("MIWaveTile")
+      spillFree = bool(miwt) and len(miwt) == 2 and (miwt[0] * miwt[1] <= 64)
+      # Store-footprint fit: large asymmetric tiles (min>=4 and max>=14) overflow
+      # the arch-VGPR budget and emit out-of-range v>=256.
+      storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
+                           min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
+      streamKFixupSafe = True
+      # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the 102-SGPR
+      # gfx9 ceiling; auto-disable just those.
+      mxBlockScaled = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
+      mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
+                                  min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
+      # Hard structural: the fused store literally cannot be emitted. ALWAYS enforced.
+      structuralFail = ((not isFloat4)
+                        or (not state["UseSubtileImpl"])
+                        or (not isgfx950)
+                        or (not state["EnableMatrixInstruction"])
+                        or (state["PrefetchGlobalRead"] < 1)
+                        or (not state["BufferStore"])
+                        or (not pairedStoreAvailable)
+                        or (not streamKAtomicFree)
+                        or (not barrierFreeStore))
+      # Register / spill budget: the fused store would overflow the arch-VGPR / 102-SGPR
+      # ceiling for this tile. ALWAYS enforced, so the force only ever turns on non-spill
+      # macrotiles (never pushes a tile past the ceiling / emits out-of-range v>=256).
+      registerFail = ((not spillFree)
+                      or (not storeFitsVgpr)
+                      or (not mxBlockScaleSgprFits))
+      # Generated schedule feasibility is decided by LogicalScheduler from exact
+      # producer/consumer ranges. A schedule with no safe group falls back without
+      # extracting terminal MFMAs.
+      profitFail = not streamKFixupSafe
+      if structuralFail or registerFail or (profitFail and not forcePlsinFp4F16):
+        state["PostLoopStoreInNll"] = False
+
+    # PLSIN fuses the D store into the No-Load Loop, so it needs a structural NLL
+    # (PGR >= 1). Defensive re-check.
+    if state["PostLoopStoreInNll"] and state["PrefetchGlobalRead"] < 1:
+      state["PostLoopStoreInNll"] = False
+
+    # PLSINStoreMode only matters when PLSIN is on; canonicalize when disabled so
+    # non-PLSIN kernels are not split into spurious Weave/Lend name variants.
+    if not state.get("PostLoopStoreInNll", False):
+      state["PLSINStoreMode"] = "Weave"
+
+  ########################################
   # assign all derived parameters
   @staticmethod
   def assignDerivedParameters(
@@ -1806,6 +1910,11 @@ class Solution(collections.abc.Mapping):
 
     if "AssignedDerivedParameters" in state:
       if state["AssignedDerivedParameters"]:
+        # Pre-tuned solutions loaded from logic files short-circuit here before
+        # the PLSIN gate would normally run. Evaluate it explicitly so the fused
+        # store is enabled for eligible fp4 subtile kernels even though the rest
+        # of the derivation is (correctly) skipped for already-derived solutions.
+        Solution.assignPostLoopStoreInNll(state)
         return
     state["AssignedDerivedParameters"] = False
 
@@ -4792,6 +4901,11 @@ class Solution(collections.abc.Mapping):
 
     _disableUnsupportedRuntimeStaggerU(state)
 
+    # PostLoopStoreInNll (PLSIN) eligibility. Delegated to a standalone helper so
+    # the exact same gate also runs for already-derived solutions on the
+    # early-return path above (pre-tuned logic-file kernels that predate PLSIN).
+    Solution.assignPostLoopStoreInNll(state)
+
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
     if state["DirectToVgprA"]:
@@ -6229,6 +6343,27 @@ class Solution(collections.abc.Mapping):
       # Turn off ONLL for now
       # TODO: support ONLL if necessary
       state["OptNoLoadLoop"] = 0
+
+    # PostLoopStoreInNll fuses the final D store INTO the No-Load Loop, so it is
+    # meaningless (and codegen-fatal) without an NLL. The subtile emit path builds
+    # a structural NLL whenever PrefetchGlobalRead >= 1 (see build_nll) and never
+    # reads OptNoLoadLoop -- that flag only controls the classic (non-subtile) NLL
+    # and is force-disabled by UseScaleAB above (5602). So gate PLSIN on the actual
+    # structural-NLL condition (PGR >= 1) rather than OptNoLoadLoop; this keeps PLSIN
+    # eligible for UseScaleAB subtile kernels (their scaleA*scaleB is applied via the
+    # fused store's alpha fold, see buildSubtileFusedStore) while still opting out any
+    # kernel that genuinely has no NLL. The main gate above already enforces PGR >= 1,
+    # so this is a defensive re-check.
+    if state["PostLoopStoreInNll"] and state["PrefetchGlobalRead"] < 1:
+      state["PostLoopStoreInNll"] = False
+
+    # PLSINStoreMode (Weave/Lend) only affects the fused store epilogue, so it is
+    # meaningless once PLSIN is disabled. Canonicalize it to the default in that case
+    # so a non-PLSIN kernel is not split into spurious Weave/Lend name variants (the
+    # parameter is in RequiredParameters and thus part of the kernel name). It is also
+    # inert for tiles > 256x256, which LogicalScheduler forces to Lend regardless.
+    if not state.get("PostLoopStoreInNll", False):
+      state["PLSINStoreMode"] = "Weave"
 
     # if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
     #   if state["ProblemType"]["SupportUserArgs"] and state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
