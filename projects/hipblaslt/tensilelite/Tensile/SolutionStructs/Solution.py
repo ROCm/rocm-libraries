@@ -237,7 +237,13 @@ _SUBTILE_STACK_FULL_LINE = 16
 # anyway, since the lines a narrow strip half-uses are finished by other lanes
 # and waves.  So the padding is a certain cost against a capped, partly-redundant
 # benefit; admit it only while it stays a small fraction of the operand.
-_SUBTILE_STACK_MAX_PAD_RATIO = 1.25
+#
+# 4/3 is the smallest cap that admits a 12-tile operand (MT192 on a 16-row MFMA)
+# into the full-line 16-tile stack; 5/4 leaves it on a 4-tile stack and an exact
+# footprint.  Held as a rational because that case sits exactly on the boundary,
+# where a binary float cap decides it on rounding rather than on the ratio.
+_SUBTILE_STACK_MAX_PAD_NUM = 4
+_SUBTILE_STACK_MAX_PAD_DEN = 3
 
 
 def _subtileStackForTile(mtTiles):
@@ -252,7 +258,9 @@ def _subtileStackForTile(mtTiles):
   if mtTiles <= 1:
     return exact
   roundedUp = min(_SUBTILE_STACK_FULL_LINE, 1 << (mtTiles - 1).bit_length())
-  if roundedUp > exact and roundedUp <= mtTiles * _SUBTILE_STACK_MAX_PAD_RATIO:
+  withinPadCap = (roundedUp * _SUBTILE_STACK_MAX_PAD_DEN
+                  <= mtTiles * _SUBTILE_STACK_MAX_PAD_NUM)
+  if roundedUp > exact and withinPadCap:
     return roundedUp
   return exact
 
