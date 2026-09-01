@@ -40,6 +40,17 @@ file(GLOB_RECURSE CODE_GEN_SCRIPTS CONFIGURE_DEPENDS
 # re-run execute_process `generate.py --list_blobs` if any of the codegen scripts change
 set_directory_properties(PROPERTIES CMAKE_CONFIGURE_DEPENDS "${CODE_GEN_SCRIPTS}")
 
+if(BUILD_TESTING)
+  add_test(
+    NAME test_ck_tile_fmha_codegen
+    COMMAND ${Python3_EXECUTABLE} -m unittest codegen.test_fmha_fwd
+  )
+  set_tests_properties(test_ck_tile_fmha_codegen PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    LABELS "test_ck_tile_fmha;CK_TILE_FMHA_TESTS"
+  )
+endif()
+
 list(JOIN INST_TARGETS , FMHA_TARGETS_ARG)
 
 string(REPLACE ";" "," FMHA_FWD_APIS "${FMHA_FWD_ENABLE_APIS}")
