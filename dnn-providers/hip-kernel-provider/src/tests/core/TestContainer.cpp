@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -33,30 +35,33 @@ using namespace hip_kernel_provider::core;
 static_assert(hipdnn_plugin_sdk::HasGetEngineName<Container>::value,
               "Container::getEngineName must match the signature the plugin SDK calls");
 
-/// Engines the provider exposes: one per compiled-in native engine, plus one per
-/// discovered descriptor set, read from the inventory rather than hardcoded so a
-/// newly shipped pack is never silently uncounted.
-static uint32_t expectedEngines()
+/// Engines this build configuration exposes: every compiled-in native engine, plus every
+/// shipped descriptor set. Spelled out here rather than read from the provider inventory,
+/// so an engine that disappears from that inventory fails these tests.
+///
+/// Containment, not equality: the catalog is descriptor-driven, so a build that stages
+/// additional descriptor sets legitimately exposes more engines. These names are a floor.
+static std::vector<std::string> expectedEngineNames()
 {
-    uint32_t expected = 0;
+    std::vector<std::string> names;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-    ++expected;
+    names.emplace_back(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME);
 #endif
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
-    ++expected;
+    names.emplace_back(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME);
 #endif
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
-    ++expected;
+    names.emplace_back(hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME);
 #endif
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    expected += static_cast<uint32_t>(
-        hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets().size());
+    names.emplace_back("hipkernel:ConvFwd");
+    names.emplace_back("hipkernel:Pointwise");
 #endif
-    return expected;
+    return names;
 }
 
-/// Upper bound for the fixed-size buffers below; only needs to be at least
-/// expectedEngines().
+/// Upper bound for the fixed-size buffers below. Raise it when a configuration exposes
+/// more engines than this.
 constexpr uint32_t MAX_EXPECTED_ENGINES = 8;
 
 TEST(TestContainer, ConstructsSuccessfully)
@@ -64,13 +69,41 @@ TEST(TestContainer, ConstructsSuccessfully)
     const Container container;
 }
 
-TEST(TestContainer, CopyEngineIdsReturnsExpectedEngineCount)
+TEST(TestContainer, CopyEngineIdsAdvertisesEveryExpectedEngine)
 {
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
-    auto totalEngines = Container::copyEngineIds(nullptr, 0, numEngines);
+    auto totalEngines
+        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
-    EXPECT_EQ(totalEngines, expectedEngines());
-    EXPECT_EQ(numEngines, expectedEngines());
+    ASSERT_LE(totalEngines, MAX_EXPECTED_ENGINES) << "raise MAX_EXPECTED_ENGINES";
+    EXPECT_EQ(numEngines, totalEngines);
+
+    const auto expectedNames = expectedEngineNames();
+    EXPECT_GE(totalEngines, static_cast<uint32_t>(expectedNames.size()));
+
+    const auto last = engineIds.begin() + static_cast<std::ptrdiff_t>(numEngines);
+    for(const auto& name : expectedNames)
+    {
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
+        EXPECT_NE(std::find(engineIds.begin(), last, engineId), last)
+            << "engine '" << name << "' is not advertised";
+    }
+}
+
+TEST(TestContainer, CopyEngineIdsReportsTheSameCountWithAndWithoutABuffer)
+{
+    uint32_t countedEngines = 0;
+    const auto totalFromCount = Container::copyEngineIds(nullptr, 0, countedEngines);
+
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
+    uint32_t copiedEngines = 0;
+    const auto totalFromCopy
+        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, copiedEngines);
+
+    EXPECT_EQ(countedEngines, totalFromCount);
+    EXPECT_EQ(totalFromCopy, totalFromCount);
+    EXPECT_EQ(copiedEngines, std::min(totalFromCount, MAX_EXPECTED_ENGINES));
 }
 
 TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
@@ -83,8 +116,7 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
     auto totalEngines
         = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
-    EXPECT_EQ(totalEngines, expectedEngines());
-    EXPECT_EQ(numEngines, expectedEngines());
+    EXPECT_EQ(numEngines, totalEngines);
 
     bool containsHipMlopsEngine = false;
     for(const int64_t engine : engineIds)
@@ -278,5 +310,13 @@ TEST(TestContainer, GetAllEngineIds)
 
     auto allEngines = engineManager.getAllEngineIds();
 
-    ASSERT_EQ(allEngines.size(), expectedEngines());
+    const auto expectedNames = expectedEngineNames();
+    ASSERT_GE(allEngines.size(), expectedNames.size());
+
+    for(const auto& name : expectedNames)
+    {
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
+        EXPECT_NE(std::find(allEngines.begin(), allEngines.end(), engineId), allEngines.end())
+            << "engine '" << name << "' is missing from the engine manager";
+    }
 }
