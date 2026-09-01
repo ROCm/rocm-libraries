@@ -524,11 +524,48 @@ if(_hipblaslt_export_targets)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
+    # Static archives expose their private link requirements to consumers.
+    # Derive the package-config dependencies from the targets actually built.
+    set(HIPBLASLT_CONFIG_NEEDS_ZLIB OFF)
+    set(HIPBLASLT_CONFIG_NEEDS_SERIALIZATION OFF)
+
+    if(TARGET tensilelite-host)
+        get_target_property(_tensilelite_host_type tensilelite-host TYPE)
+        if(_tensilelite_host_type STREQUAL "STATIC_LIBRARY")
+            set(HIPBLASLT_CONFIG_NEEDS_ZLIB ON)
+            set(HIPBLASLT_CONFIG_NEEDS_SERIALIZATION ON)
+        endif()
+    endif()
+
+    if(TARGET hipblaslt)
+        get_target_property(_hipblaslt_target_type hipblaslt TYPE)
+        if(_hipblaslt_target_type STREQUAL "STATIC_LIBRARY" AND NOT HIPBLASLT_ENABLE_YAML)
+            set(HIPBLASLT_CONFIG_NEEDS_SERIALIZATION ON)
+        endif()
+    endif()
+
+    set(HIPBLASLT_CONFIG_NEEDS_LLVM OFF)
+    set(HIPBLASLT_CONFIG_USES_MSGPACK_CXX OFF)
+    if(HIPBLASLT_CONFIG_NEEDS_SERIALIZATION)
+        if(HIPBLASLT_ENABLE_YAML)
+            set(HIPBLASLT_CONFIG_NEEDS_LLVM ON)
+        elseif(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
+            set(HIPBLASLT_CONFIG_USES_MSGPACK_CXX ON)
+        endif()
+    endif()
+
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-config.cmake.in"
         "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake"
         @ONLY
     )
+
+    unset(HIPBLASLT_CONFIG_NEEDS_ZLIB)
+    unset(HIPBLASLT_CONFIG_NEEDS_SERIALIZATION)
+    unset(HIPBLASLT_CONFIG_NEEDS_LLVM)
+    unset(HIPBLASLT_CONFIG_USES_MSGPACK_CXX)
+    unset(_tensilelite_host_type)
+    unset(_hipblaslt_target_type)
 endif()
 
 unset(_hipblaslt_export_targets)

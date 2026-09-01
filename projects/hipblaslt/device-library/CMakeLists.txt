@@ -19,11 +19,6 @@ set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE BOOL
     "Emit comments in generated assembly.")
 set(TENSILELITE_OFFLOADBUNDLER "" CACHE FILEPATH
     "Path to clang-offload-bundler.")
-set(TENSILELITE_LIBRARY_FORMAT "msgpack" CACHE STRING
-    "Device library serialization format (msgpack or yaml).")
-set_property(CACHE TENSILELITE_LIBRARY_FORMAT PROPERTY STRINGS msgpack yaml)
-set(Tensile_NO_LAZY_LIBRARY_LOADING OFF CACHE BOOL
-    "Disable lazy loading of device libraries.")
 mark_as_advanced(
     TENSILELITE_BUILD_PARALLEL_LEVEL
     TENSILELITE_KEEP_BUILD_TMP
@@ -33,8 +28,6 @@ mark_as_advanced(
     TENSILELITE_EXPERIMENTAL
     TENSILELITE_ENABLE_ASM_COMMENTS
     TENSILELITE_OFFLOADBUNDLER
-    TENSILELITE_LIBRARY_FORMAT
-    Tensile_NO_LAZY_LIBRARY_LOADING
 )
 
 set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")

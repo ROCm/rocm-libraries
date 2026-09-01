@@ -3,6 +3,8 @@
 
 include(CMakeFindDependencyMacro)
 
+find_dependency(hip)
+
 if(@HIPBLASLT_ENABLE_HOST@)
     find_dependency(hipblas-common)
 endif()
@@ -14,20 +16,21 @@ find_dependency(origami CONFIG
           "${CMAKE_CURRENT_LIST_DIR}/origami"
     NO_DEFAULT_PATH)
 
+if(@HIPBLASLT_CONFIG_NEEDS_ZLIB@)
+    find_dependency(ZLIB)
+endif()
+
+if(@HIPBLASLT_CONFIG_NEEDS_LLVM@)
+    find_dependency(LLVM)
+elseif(@HIPBLASLT_CONFIG_NEEDS_SERIALIZATION@)
+    if(@HIPBLASLT_CONFIG_USES_MSGPACK_CXX@)
+        find_dependency(msgpack-cxx CONFIG)
+    else()
+        find_dependency(msgpackc-cxx CONFIG NAMES msgpackc-cxx msgpack)
+    endif()
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/hipblaslt-targets.cmake")
-
-block(SCOPE_FOR VARIABLES)
-    if(@HIPBLASLT_ENABLE_HOST@ AND NOT TARGET roc::hipblaslt)
-        message(FATAL_ERROR "roc::hipblaslt target is missing")
-    endif()
-
-    if(TARGET roc::hipblaslt)
-        get_target_property(link_libraries roc::hipblaslt INTERFACE_LINK_LIBRARIES)
-        if(link_libraries AND "hip::device" IN_LIST link_libraries)
-            message(FATAL_ERROR "Do not export targets with hip::device as an interface link library")
-        endif()
-    endif()
-endblock()
 
 if(@HIPBLASLT_BUNDLE_PYTHON_DEPS@)
     include("${CMAKE_CURRENT_LIST_DIR}/hipblaslt_codegen.cmake")
