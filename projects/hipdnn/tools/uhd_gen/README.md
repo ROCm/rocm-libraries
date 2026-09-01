@@ -77,6 +77,46 @@ an unqualified descriptor loads, validates, and never once uses the model.
 
 Rename the columns in your CSV to match.
 
+### Constant feature columns are dropped, loudly
+
+A column with one value across the whole input cannot separate one candidate from
+another. `train` detects those before fitting and drops them from
+`features_signature`, naming each one and its value:
+
+```
+WARNING - DROPPED constant feature column kernel.tile_m: every row is 128. It cannot
+separate one candidate from another, so it is NOT in the trained features_signature
+and features_hash is over the smaller set. ...
+```
+
+`features_hash` is computed over the signature that was actually trained, so the
+descriptor loads; `train_manifest.json` records `requested_features`,
+`constant_features` (with values) and `dropped_constant_features`, so the provenance
+says the emitted signature is not the one you typed.
+
+This is the ordinary case, not an edge case: rocKE's attention kernels bake their
+geometry in, so the kernel matcher pins 8 of their 14 fields before ranking begins and
+those 8 can never vary among the candidates the model ranks.
+
+But a CSV cannot tell that apart from the opposite situation — a column that *does*
+vary in the world, sampled at one value because the corpus is thin. Dropping there
+produces a model that cannot generalise, and the fix is a wider corpus, not a smaller
+signature. So:
+
+- pass **`--keep-constant-features`** when you know the corpus is thin. Every requested
+  column stays in the signature, so its hash matches the richer corpus you will retrain
+  on, and the run says which columns it kept and why they inform nothing today;
+- when **two thirds or more** of the requested columns are constant, `train` warns that
+  the proportion looks like a thin corpus and points at the input file. The threshold
+  sits above the 8-of-14 rocKE shape (57%) on purpose: a warning that fires on every
+  normal run is one people learn to ignore;
+- when **every** requested column is constant, `train` fails and names each column with
+  its value. `--keep-constant-features` does not override this — it changes the
+  signature, not the fact that nothing varies. A model over zero varying features scores
+  every candidate identically, and shipping one is worse than shipping none: the engine
+  ranks by a model that cannot discriminate instead of falling back to its declared
+  order.
+
 ### `train` arguments
 
 | Argument | Required | Description |
@@ -95,6 +135,7 @@ Rename the columns in your CSV to match.
 | `--num-boost-round` | No | Max boosting rounds (default: 500) |
 | `--early-stopping` | No | Early stopping patience (default: 50) |
 | `--keep-lgbm` | No | Keep intermediate .lgbm file |
+| `--keep-constant-features` | No | Keep feature columns that never vary in the input (default: drop them from the signature). For a thin corpus, so the signature matches the richer one you will retrain on. |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 
