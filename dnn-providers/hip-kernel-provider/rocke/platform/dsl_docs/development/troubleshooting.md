@@ -3,8 +3,9 @@
 This is the failure-mode catalog for the **engine and build** — the things that
 look like bugs but usually aren't. For debugging a *running kernel* (wrong
 output, hangs, faults, slowness), see the "Debugging Patterns" section of
-[`testing.md`](./testing.md). For the rules behind several of these, see
-[`invariants.md`](./invariants.md).
+[`testing.md`](./testing.md); to put a faulting kernel under a debugger, see
+[`debugging_rocgdb.md`](./debugging_rocgdb.md). For the rules behind several of
+these, see [`invariants.md`](./invariants.md).
 
 > **First rule of this codebase:** when something that should work doesn't, suspect
 > a **stale or mis-flagged build product before you suspect the source**. Almost
@@ -27,11 +28,12 @@ Re-sync (content-verified, not a timestamp/rsync filter) and rebuild. A clean
 build from current source in `/tmp` is the source of truth.
 
 ### The provider build can't find hipDNN headers / `_deps` / `SDPA`
-A by-hand build dropped a required flag. The full set lives in
-[`../../../BUILD.md`](../../../BUILD.md) ("the flags that get
-forgotten") — `-D__HIP_PLATFORM_AMD__`, the generated `build/` include set
-including `_deps`, the SDPA enable, and an explicit fresh `ROCKE_LIB`. Prefer
-`tools/build.sh`, which bakes them all.
+A by-hand build dropped a required flag. The set is `-D__HIP_PLATFORM_AMD__`, the
+generated `build/` include set including `_deps`, the SDPA enable, and an explicit
+fresh `ROCKE_LIB`. For how a provider resolves the engine archive, see
+[`../../BUILD.md`](../../BUILD.md#consuming-the-engine-from-a-provider-plugin);
+letting the engine build fresh (no `-DROCKE_LIB`) is what keeps the archive in
+lockstep with the source.
 
 ### Sanitizer build fails with a `-Wformat-truncation` "null format string"
 This is a known interaction between sanitizer instrumentation and the format
@@ -78,9 +80,13 @@ run_diff --mode ir --canonical --only <family>
   temporaries in source order. See
   [`invariants.md`](./invariants.md#2-the-ir-builder-must-emit-operands-left-to-right).
 
-### `RANGE_DRIFT` on `fmha_appendkv` or `gfx1151_wmma_gemm_iu8_dequant`
-Pre-existing and benign: the C emitter enumerates a slightly wider config range
-than the Python reference; the in-range bytes are identical. Not a failure.
+### `RANGE_DRIFT` on any family
+The two emitters enumerate different config counts: one stopped sampling before
+the other. **This fails the gate.** Identical bytes in the overlapping range do
+not settle the question, because the configs only one side emitted were never
+compared at all. Fix the narrower emitter's config table so both enumerate the
+same range. (`fmha_appendkv` and `gfx1151_wmma_gemm_iu8_dequant` were once
+waived here; both are GREEN now and the waiver is gone with them.)
 
 ### `--check-golden` fails after a change I *meant* to make
 If you intentionally changed what a kernel emits, re-bless the golden **from a

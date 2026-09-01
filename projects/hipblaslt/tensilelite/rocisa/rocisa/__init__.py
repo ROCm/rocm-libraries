@@ -86,8 +86,32 @@ def _import_rocisa():
 # ``rocisa_stinkytofu_adaptor`` shim (a rocisa-shaped facade backed by the
 # stinkytofu Python binding ``_stinkytofu.so``). Anything else (or unset)
 # keeps the original nanobind bindings in ``_rocisa``.
+#
+# When ``ROCISA_BACKEND`` is unset, gfx1250 platforms automatically default
+# to the stinkytofu backend. Set ``ROCISA_BACKEND=rocisa`` to explicitly
+# force the native path on gfx1250.
 
-_BACKEND = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+def _detect_default_backend() -> str:
+    """Return ``"stinkytofu"`` if gfx1250 hardware is detected, else ``""``."""
+    import subprocess as _sp
+    rocmpath = os.environ.get(
+        "TENSILE_ROCM_PATH", os.environ.get("ROCM_PATH", "/opt/rocm")
+    )
+    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
+    if not os.path.exists(enumerator):
+        return ""
+    try:
+        output = _sp.check_output(
+            [enumerator, "-t", "GPU"], timeout=5, stderr=_sp.DEVNULL
+        )
+        if "gfx1250" in output.decode():
+            return "stinkytofu"
+    except Exception:
+        pass
+    return ""
+
+_BACKEND_RAW = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+_BACKEND = _BACKEND_RAW if _BACKEND_RAW else _detect_default_backend()
 
 _ADAPTER_PKG = "rocisa_stinkytofu_adaptor"
 
@@ -166,9 +190,13 @@ def _find_stale_sources(so_path, source_roots, build_dir):
     Extracted from the module-level staleness check so it can be unit-tested
     without requiring a real _rocisa.so or touching actual source files.
     """
+    import math
     from pathlib import Path
 
-    so_mtime = Path(so_path).stat().st_mtime
+    # cmake --install truncates the installed .so's mtime to a whole second, so
+    # a source edited in that same second would read as stale forever. The real
+    # install time is in [t, t+1); compare against the end of that interval.
+    so_mtime = math.floor(Path(so_path).stat().st_mtime) + 1
     build_dir = Path(build_dir).resolve()
     stale = []
     for root in source_roots:
@@ -242,19 +270,21 @@ def _stinkytofu_available() -> "tuple[bool, str]":
     return True, ""
 
 
-def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn) -> bool:
+def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn,
+                     auto_detected=False) -> bool:
     """Decide whether to use the stinkytofu adapter (True) or native rocisa (False).
 
     Emits a warning *only* when the stinkytofu backend was explicitly requested
-    but we have to fall back to native — so an unnoticed silent fallback becomes
-    visible, with a cause-specific reason attached. ``available_fn`` and
-    ``load_fn`` share the same ``(ok, reason)`` contract; the reason is surfaced
-    verbatim so each distinct failure mode produces its own warning. Requesting
-    anything else (or unset) selects native without touching the probes and
-    without warning.
+    (or auto-detected) but we have to fall back to native — so an unnoticed
+    silent fallback becomes visible, with a cause-specific reason attached.
+    ``available_fn`` and ``load_fn`` share the same ``(ok, reason)`` contract;
+    the reason is surfaced verbatim so each distinct failure mode produces its
+    own warning. Requesting anything else (or unset) selects native without
+    touching the probes and without warning.
     """
     if requested != "stinkytofu":
         return False
+    _origin = "auto-detected for gfx1250" if auto_detected else "ROCISA_BACKEND=stinkytofu"
     available, avail_reason = available_fn()
     if not available:
         warn(avail_reason, stacklevel=2)
@@ -262,15 +292,16 @@ def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn) -> bo
     ok, reason = load_fn()
     if not ok:
         warn(
-            f"ROCISA_BACKEND=stinkytofu requested but the adapter failed to load "
-            f"({reason}){_FALLBACK}",
+            f"stinkytofu backend ({_origin}) requested but the adapter failed "
+            f"to load ({reason}){_FALLBACK}",
             stacklevel=2,
         )
         return False
     return True
 
 
-if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter):
+if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter,
+                    auto_detected=(not _BACKEND_RAW)):
     # stinkytofu adapter active; wiring done inside _load_stinkytofu_adapter.
     pass
 else:
@@ -374,3 +405,7 @@ def hasStinkyTofuBackend() -> bool:
 if not hasStinkyTofuBackend():
     def isSupportedByStinkyTofu(version) -> bool:
         return False
+
+    def isMnemonicSupportedByStinkyTofu(mnemonic, version) -> bool:
+        # No StinkyTofu to lower through, so nothing here can reject a mnemonic.
+        return True

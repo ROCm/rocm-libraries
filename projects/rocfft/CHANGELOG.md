@@ -3,7 +3,48 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## Since last release (ROCm 7.14)
+## (Unreleased) rocFFT 1.0.40
+
+### Added
+
+* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+
+* Implemented `rocfft_plan_description_set_load_callback` and `rocfft_plan_description_set_store_callback` APIs, to 
+  allow for user-defined device functions to be called when loading input or storing output of a transform.  These 
+  callback functions are specified during plan creation and allow rocFFT to Just-In-Time (JIT) compile the code into 
+  rocFFT's own kernels.
+
+  Also implemented `rocfft_execution_info_set_load_callback_data` and
+  `rocfft_execution_info_set_store_callback_data` APIs to allow
+  specifying the data pointers for these callbacks, which may differ
+  on each execution.
+
+  These APIs are not currently compatible with transforms that have
+  fields or bricks also specified on the same plan description.  This
+  support will be added in a future release of rocFFT.
+
+* Added support for very large FFTs on gfx1250.
+
+### Deprecations
+
+* The `rocfft_execution_info_set_load_callback` and `rocfft_execution_info_set_store_callback` APIs are now
+  deprecated and will be removed in a future release.  They allow for specifying callbacks as device function
+  pointers at plan execution time, but rocFFT cannot optimize the combined code.  Instead, users should specify JIT
+  callbacks on plan descriptions.
+
+### Resolved issues
+
+* Addressed a cache-reuse issue with RCCL communicators by giving each communicator its own set of streams.
+* Fixed `rocfft_plan_create` hanging when given a zero FFT length, zero batch, or zero dimensions; these
+  now return `rocfft_status_invalid_dimensions` or `rocfft_status_invalid_arg_value`.
+* Fixed `rocfft_execution_info_set_stream` to derive the device from the stream itself instead of assuming the current device.
+
+### Known issues
+
+* Function pointer callbacks specified via `rocfft_execution_info_set_load_callback` or 
+  `rocfft_execution_info_set_store_callback` are not functional on gfx1250 and `rocfft_execute` will fail in this case.
+
+## rocFFT 1.0.39 for ROCm 10.0
 
 ### Optimized
 

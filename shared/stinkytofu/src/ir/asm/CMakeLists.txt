@@ -7,3 +7,5 @@ target_sources(stinkytofu_objs PRIVATE
     StinkyModifiers.cpp
     StinkySignature.cpp
 )
+
+add_subdirectory(ssa)

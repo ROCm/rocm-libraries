@@ -2,13 +2,21 @@
 # SPDX-License-Identifier: MIT
 """Reference convolutions for verify paths.
 
-Two implementations are provided:
+Five forward/backward implementations are provided:
 
-* ``conv_reference``        — torch-based (``F.conv2d`` / ``F.conv3d``), works
+* ``conv_reference``         — torch-based (``F.conv2d`` / ``F.conv3d``), works
   on any GPU target.
 * ``conv_reference_gfx1250`` — hand-written numpy reference for gfx1250.
   Accumulates in float32 with no GPU driver dependency.  Only supports 2-D
   NHWC forward convolution.
+* ``dgrad_reference``        — torch-based backward-data reference via
+  ``torch.nn.grad.conv2d_input``.
+* ``dgrad_reference_gfx1250`` — hand-written numpy reference for gfx1250.
+  Accumulates in float32 with no GPU driver dependency.  Only supports 2-D
+  NHWK/KYXC → NHWC dgrad convolution.
+* ``wgrad_reference_gfx1250`` — hand-written numpy reference for gfx1250.
+  Accumulates in float32 with no GPU driver dependency.  Only supports 2-D
+  NHWC/NHWK → KYXC wgrad convolution.
 """
 
 from __future__ import annotations
@@ -60,6 +68,35 @@ def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
         )
         # KCDHW -> KDHWC (KZYXC)
         return dW_ncdhw.permute(0, 2, 3, 4, 1).contiguous()
+
+
+def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
+    """Compute a float32 reference input gradient for a convolution problem.
+
+    Uses ``torch.nn.grad.conv2d_input`` so the result is numerically identical
+    to what autograd would produce.  The output layout matches the dgrad kernel
+    convention: NHWC for 2-D.
+
+    Args:
+        dY: Output gradient, shape (N, Ho, Wo, K), any dtype.
+        W:  Weight tensor, shape (K, Y, X, C), any dtype.
+        p:  ConvProblem carrying stride/padding/dilation/groups.
+
+    Returns:
+        Input gradient as a float32 torch.Tensor in NHWC layout.
+    """
+    dY_t = dY.float().cuda().permute(0, 3, 1, 2).contiguous()  # NHWK -> NKHW
+    W_t = W.float().cuda().permute(0, 3, 1, 2).contiguous()  # KYXC -> KCYX
+    dX_nchw = torch.nn.grad.conv2d_input(
+        input_size=(p.N, p.C, p.Hi, p.Wi),
+        weight=W_t,
+        grad_output=dY_t,
+        stride=(p.sH, p.sW),
+        padding=(p.pH, p.pW),
+        dilation=(p.dH, p.dW),
+        groups=p.groups,
+    )
+    return dX_nchw.permute(0, 2, 3, 1).contiguous()  # NCHW -> NHWC
 
 
 def conv_reference(
@@ -179,6 +216,149 @@ def conv_reference_gfx1250(
                             out[n, ho, wo, grp * Kg : (grp + 1) * Kg] += b_slice @ a_vec
 
     result = torch.from_numpy(out.astype(np.float32))
+    if out_dtype is not None:
+        result = result.to(out_dtype).float()
+    return result
+
+
+def dgrad_reference_gfx1250(
+    dY: torch.Tensor,
+    W: torch.Tensor,
+    p,
+    out_dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    """Hand-written float32 reference for 2-D NHWK dgrad convolution.
+
+    Implements the input-gradient computation directly in numpy so there is no
+    dependency on torch.nn or any GPU driver.  Accumulation is always in float32.
+
+    Supports grouped convolution (``p.groups > 1``) and arbitrary
+    stride / padding / dilation.  3-D problems are not supported; call
+    ``dgrad_reference`` instead.
+
+    Args:
+        dY: Output gradient, shape ``(N, Ho, Wo, K)``, any dtype.
+        W:  Weight tensor, shape ``(K, Y, X, C)``, any dtype.
+        p:  ``ConvProblem`` instance (carries stride / padding / dilation /
+            groups, Hi, Wi).
+        out_dtype: If given, the fp32 result is cast to this dtype then back to
+            float32.
+
+    Returns:
+        Float32 torch.Tensor of shape ``(N, Hi, Wi, C)`` on CPU.
+    """
+    import numpy as np
+
+    dY_np = dY.float().cpu().numpy()  # (N, Ho, Wo, K)
+    W_np = W.float().cpu().numpy()  # (K, Y, X, C)
+
+    N, Ho, Wo, K = dY_np.shape
+    Hi, Wi = p.Hi, p.Wi
+    g = p.groups
+    C = p.C
+    Cg = C // g  # input channels per group
+    Kg = K // g  # output channels per group
+    if W_np.shape[3] != Cg:
+        raise ValueError(
+            f"expected W last dim Cg={Cg} (=C/groups), got {W_np.shape[3]}"
+        )
+
+    dX = np.zeros((N, Hi, Wi, C), dtype=np.float32)
+    for grp in range(g):
+        w_grp = W_np[grp * Kg : (grp + 1) * Kg]  # (Kg, Y, X, Cg)
+        for n in range(N):
+            for ho in range(Ho):
+                for wo in range(Wo):
+                    dy_vec = dY_np[n, ho, wo, grp * Kg : (grp + 1) * Kg].astype(
+                        np.float32
+                    )  # (Kg,)
+                    for y in range(p.Y):
+                        hi = ho * p.sH - p.pH + y * p.dH
+                        if hi < 0 or hi >= Hi:
+                            continue
+                        for x in range(p.X):
+                            wi = wo * p.sW - p.pW + x * p.dW
+                            if wi < 0 or wi >= Wi:
+                                continue
+                            # w_grp[:, y, x, :] shape: (Kg, Cg)
+                            # dy_vec @ w_grp[:, y, x, :] -> (Cg,)
+                            dX[n, hi, wi, grp * Cg : (grp + 1) * Cg] += dy_vec @ w_grp[
+                                :, y, x, :
+                            ].astype(np.float32)
+
+    result = torch.from_numpy(dX)
+    if out_dtype is not None:
+        result = result.to(out_dtype).float()
+    return result
+
+
+def wgrad_reference_gfx1250(
+    X: torch.Tensor,
+    dY: torch.Tensor,
+    p,
+    out_dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    """Hand-written float32 reference for 2-D KYXC wgrad convolution.
+
+    Implements the weight-gradient computation directly in numpy so there is no
+    dependency on torch.nn or any GPU driver.  Accumulation is always in float32.
+
+    Supports grouped convolution (``p.groups > 1``) and arbitrary
+    stride / padding / dilation.  3-D problems are not supported; call
+    ``wgrad_reference`` instead.
+
+    Args:
+        X:  Input activations, shape ``(N, Hi, Wi, C)``, any dtype.
+        dY: Output gradient, shape ``(N, Ho, Wo, K)``, any dtype.
+        p:  ``ConvProblem`` instance (carries stride / padding / dilation /
+            groups).
+        out_dtype: If given, the fp32 result is cast to this dtype then back to
+            float32.
+
+    Returns:
+        Float32 torch.Tensor of shape ``(K, Y, X, Cg)`` on CPU, where
+        ``Cg = C // groups`` (per-group input channels).
+    """
+    import numpy as np
+
+    X_np = X.float().cpu().numpy()  # (N, Hi, Wi, C)
+    dY_np = dY.float().cpu().numpy()  # (N, Ho, Wo, K)
+
+    N, Hi, Wi, C = X_np.shape
+    _, Ho, Wo, K = dY_np.shape
+    g = p.groups
+    Cg = C // g  # input channels per group
+    Kg = K // g  # output channels per group
+
+    dW = np.zeros((K, p.Y, p.X, Cg), dtype=np.float32)
+    for grp in range(g):
+        x_grp = X_np[:, :, :, grp * Cg : (grp + 1) * Cg]  # (N, Hi, Wi, Cg)
+        for n in range(N):
+            for ho in range(Ho):
+                for wo in range(Wo):
+                    dy_vec = dY_np[n, ho, wo, grp * Kg : (grp + 1) * Kg].astype(
+                        np.float32
+                    )  # (Kg,)
+                    for y in range(p.Y):
+                        hi = ho * p.sH - p.pH + y * p.dH
+                        if hi < 0 or hi >= Hi:
+                            continue
+                        for x in range(p.X):
+                            wi = wo * p.sW - p.pW + x * p.dW
+                            if wi < 0 or wi >= Wi:
+                                continue
+                            x_vec = x_grp[n, hi, wi, :].astype(np.float32)  # (Cg,)
+                            # outer product: (Kg,1) * (1,Cg) -> (Kg, Cg)
+                            dW[
+                                grp * Kg : (grp + 1) * Kg,
+                                y,
+                                x,
+                                :,
+                            ] += (
+                                dy_vec[:, None] * x_vec[None, :]
+                            )
+
+    result = torch.from_numpy(dW)
     if out_dtype is not None:
         result = result.to(out_dtype).float()
     return result

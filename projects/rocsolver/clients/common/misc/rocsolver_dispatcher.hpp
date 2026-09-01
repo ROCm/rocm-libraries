@@ -38,6 +38,7 @@
 #include "common/auxiliary/testing_gecon.hpp"
 #include "common/auxiliary/testing_labrd.hpp"
 #include "common/auxiliary/testing_lacgv.hpp"
+#include "common/auxiliary/testing_lahr2.hpp"
 #include "common/auxiliary/testing_lange.hpp"
 #include "common/auxiliary/testing_larf.hpp"
 #include "common/auxiliary/testing_larfb.hpp"
@@ -57,8 +58,10 @@
 #include "common/auxiliary/testing_ormbr_unmbr.hpp"
 #include "common/auxiliary/testing_ormlx_unmlx.hpp"
 #include "common/auxiliary/testing_ormtr_unmtr.hpp"
+#include "common/auxiliary/testing_ormtr_unmtr_hb2st.hpp"
 #include "common/auxiliary/testing_ormxl_unmxl.hpp"
 #include "common/auxiliary/testing_ormxr_unmxr.hpp"
+#include "common/auxiliary/testing_sb2st_hb2st.hpp"
 #include "common/auxiliary/testing_stebz.hpp"
 #include "common/auxiliary/testing_stedc.hpp"
 #include "common/auxiliary/testing_stedcj.hpp"
@@ -66,8 +69,10 @@
 #include "common/auxiliary/testing_stein.hpp"
 #include "common/auxiliary/testing_steqr.hpp"
 #include "common/auxiliary/testing_sterf.hpp"
+#include "common/auxiliary/testing_sy2sb_he2hb.hpp"
 
 // lapack
+#include "common/lapack/testing_cholqr.hpp"
 #include "common/lapack/testing_gebd2_gebrd.hpp"
 #include "common/lapack/testing_geblttrf_npvt.hpp"
 #include "common/lapack/testing_geblttrs_npvt.hpp"
@@ -122,6 +127,10 @@
 
 // unit
 #include "common/unit/testing_gemm.hpp"
+#include "common/unit/testing_gerand.hpp"
+#include "common/unit/testing_hbrand.hpp"
+#include "common/unit/testing_herand.hpp"
+#include "common/unit/testing_syrand.hpp"
 
 struct str_less
 {
@@ -152,12 +161,14 @@ class rocsolver_dispatcher
             {"larfg_64", testing_larfg<T, int64_t>},
             {"larf", testing_larf<T, rocblas_int>},
             {"larf_64", testing_larf<T, int64_t>},
-            {"larft", testing_larft<T>},
+            {"larft", testing_larft<T, rocblas_int>},
+            {"larft_64", testing_larft<T, int64_t>},
             {"larfb", testing_larfb<T>},
             {"lasr", testing_lasr<T>},
             {"latrd", testing_latrd<T>},
             {"latrd_forsytrd", testing_latrd_forsytrd<T>},
             {"labrd", testing_labrd<T>},
+            {"lahr2", testing_lahr2<T>},
             {"bdsqr", testing_bdsqr<T>},
             {"steqr", testing_steqr<T>},
             {"stedc", testing_stedc<T>},
@@ -229,6 +240,13 @@ class rocsolver_dispatcher
             {"geqrf_batched_64", testing_geqr2_geqrf<true, true, 1, T, int64_t>},
             {"geqrf_strided_batched_64", testing_geqr2_geqrf<false, true, 1, T, int64_t>},
             {"geqrf_ptr_batched_64", testing_geqr2_geqrf<true, false, 1, T, int64_t>},
+            // cholqr
+            {"cholqr", testing_cholqr<false, false, T, rocblas_int>},
+            {"cholqr_batched", testing_cholqr<true, true, T, rocblas_int>},
+            {"cholqr_strided_batched", testing_cholqr<false, true, T, rocblas_int>},
+            {"cholqr_64", testing_cholqr<false, false, T, int64_t>},
+            {"cholqr_batched_64", testing_cholqr<true, true, T, int64_t>},
+            {"cholqr_strided_batched_64", testing_cholqr<false, true, T, int64_t>},
             // gerqf
             {"gerq2", testing_gerq2_gerqf<false, false, 0, T>},
             {"gerq2_batched", testing_gerq2_gerqf<true, true, 0, T>},
@@ -351,6 +369,10 @@ class rocsolver_dispatcher
             {"gemm_64", testing_gemm<false, false, T, int64_t>},
             {"gemm_batched_64", testing_gemm<true, true, T, int64_t>},
             {"gemm_strided_batched_64", testing_gemm<false, true, T, int64_t>},
+            {"gerand", testing_gerand<T>},
+            {"hbrand", testing_hbrand<T>},
+            {"herand", testing_herand<T>},
+            {"syrand", testing_syrand<T>},
         };
 
         // Grab function from the map and execute
@@ -373,6 +395,8 @@ class rocsolver_dispatcher
             {"sterf", testing_sterf<T>},
             {"stebz", testing_stebz<T>},
             {"bdsvdx", testing_bdsvdx<T>},
+            {"sy2sb", testing_sy2sb_he2hb<T, rocblas_int>},
+            {"sy2sb_64", testing_sy2sb_he2hb<T, int64_t>},
             // orgxx
             {"org2r", testing_orgxr_ungxr<T, 0>},
             {"orgqr", testing_orgxr_ungxr<T, 1>},
@@ -391,6 +415,8 @@ class rocsolver_dispatcher
             {"ormlq", testing_ormlx_unmlx<T, 1>},
             {"ormbr", testing_ormbr_unmbr<T>},
             {"ormtr", testing_ormtr_unmtr<T>},
+            {"ormtr_sb2st", testing_ormtr_unmtr_hb2st<T, rocblas_int>},
+            {"ormtr_sb2st_64", testing_ormtr_unmtr_hb2st<T, int64_t>},
             // sytrd
             {"sytd2", testing_sytxx_hetxx<false, false, 0, T>},
             {"sytd2_batched", testing_sytxx_hetxx<true, true, 0, T>},
@@ -398,6 +424,10 @@ class rocsolver_dispatcher
             {"sytrd", testing_sytxx_hetxx<false, false, 1, T>},
             {"sytrd_batched", testing_sytxx_hetxx<true, true, 1, T>},
             {"sytrd_strided_batched", testing_sytxx_hetxx<false, true, 1, T>},
+            {"sy2sb", testing_sy2sb_he2hb<T, rocblas_int>},
+            {"sy2sb_64", testing_sy2sb_he2hb<T, int64_t>},
+            {"sb2st", testing_sb2st_hb2st<T, rocblas_int>},
+            {"sb2st_64", testing_sb2st_hb2st<T, int64_t>},
             // sygst
             {"sygs2", testing_sygsx_hegsx<false, false, 0, T>},
             {"sygs2_batched", testing_sygsx_hegsx<true, true, 0, T>},
@@ -487,6 +517,8 @@ class rocsolver_dispatcher
             // auxiliaries
             {"lacgv", testing_lacgv<T, rocblas_int>},
             {"lacgv_64", testing_lacgv<T, int64_t>},
+            {"he2hb", testing_sy2sb_he2hb<T, rocblas_int>},
+            {"he2hb_64", testing_sy2sb_he2hb<T, int64_t>},
             // ungxx
             {"ung2r", testing_orgxr_ungxr<T, 0>},
             {"ungqr", testing_orgxr_ungxr<T, 1>},
@@ -505,6 +537,8 @@ class rocsolver_dispatcher
             {"unmlq", testing_ormlx_unmlx<T, 1>},
             {"unmbr", testing_ormbr_unmbr<T>},
             {"unmtr", testing_ormtr_unmtr<T>},
+            {"unmtr_hb2st", testing_ormtr_unmtr_hb2st<T, rocblas_int>},
+            {"unmtr_hb2st_64", testing_ormtr_unmtr_hb2st<T, int64_t>},
             // hetrd
             {"hetd2", testing_sytxx_hetxx<false, false, 0, T>},
             {"hetd2_batched", testing_sytxx_hetxx<true, true, 0, T>},
@@ -512,6 +546,10 @@ class rocsolver_dispatcher
             {"hetrd", testing_sytxx_hetxx<false, false, 1, T>},
             {"hetrd_batched", testing_sytxx_hetxx<true, true, 1, T>},
             {"hetrd_strided_batched", testing_sytxx_hetxx<false, true, 1, T>},
+            {"he2hb", testing_sy2sb_he2hb<T, rocblas_int>},
+            {"he2hb_64", testing_sy2sb_he2hb<T, int64_t>},
+            {"hb2st", testing_sb2st_hb2st<T, rocblas_int>},
+            {"hb2st_64", testing_sb2st_hb2st<T, int64_t>},
             // hegst
             {"hegs2", testing_sygsx_hegsx<false, false, 0, T>},
             {"hegs2_batched", testing_sygsx_hegsx<true, true, 0, T>},
