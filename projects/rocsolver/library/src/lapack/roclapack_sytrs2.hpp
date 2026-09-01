@@ -308,6 +308,10 @@ static __global__
     I const jend = std::min(nrhs_arg, jstart + nb);
     I const nrhs = (jend - jstart);
 
+    // -----------------------------------------------------
+    // this thread block will work on columns [jstart, jend)
+    // -----------------------------------------------------
+
     auto idx2D = [](auto i, auto j, auto ld) { return (i + j * static_cast<int64_t>(ld)); };
 
     auto const offsetB = idx2D(0, jstart, ldb);
@@ -316,9 +320,12 @@ static __global__
     // NOTE: each thread block swap nrhs columns locally
     // so check value of nrhs
     // -------------------------------------------
-    if((nrhs == 0) || (n == 0) || (batch_count == 0))
     {
-        return;
+        bool const has_work = (nrhs >= 1) && (n >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return;
+        }
     }
 
     // Fortran 1-based index value
@@ -352,6 +359,14 @@ static __global__
         // --------------------------------------------
 
         auto swap_rows = [=](I const k, I const kp) {
+            assert((1 <= k) && (k <= n));
+            assert((1 <= kp) && (kp <= n));
+
+            if(k == kp)
+            {
+                return;
+            }
+
             for(I j = 1 + ij_start; j <= nrhs; j += ij_inc)
             {
                 swap(B(k, j), B(kp, j));
@@ -465,7 +480,6 @@ static __global__
                     I const kp = -ipiv(k);
                     if((k < n) && (kp == (-ipiv(k + 1))))
                     {
-                        // call_swap(nrhs, &(B(k, 1)), ldb, &(B(kp, 1)), ldb);
                         swap_rows(k, kp);
                     }
                     k = k + 2;
@@ -564,9 +578,12 @@ static __global__
     // NOTE: each thread block swap nrhs columns locally
     // so check value of nrhs
     // -------------------------------------------
-    if((nrhs == 0) || (n == 0) || (batch_count == 0))
     {
-        return;
+        bool const has_work = (nrhs >= 1) && (n >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return;
+        }
     }
 
     // Fortran 1-based index value
@@ -600,6 +617,14 @@ static __global__
         // swap(  B(k,1:nrhs),  B(kp, 1:nrhs) )
         // --------------------------------------------
         auto swap_rows = [=](I const k, I const kp) {
+            assert((1 <= k) && (k <= n));
+            assert((1 <= kp) && (kp <= n));
+
+            if(k == kp)
+            {
+                return;
+            }
+
             for(I j = 1 + ij_start; j <= nrhs; j += ij_inc)
             {
                 swap(B(k, j), B(kp, j));
@@ -710,7 +735,6 @@ static __global__
                     I const kp = -ipiv(k + 1);
                     if(kp == (-ipiv(k)))
                     {
-                        // call_swap(nrhs, &(B(k + 1, 1)), ldb, &(B(kp, 1)), ldb);
                         swap_rows(k + 1, kp);
                     }
                     k = k + 2;
@@ -735,9 +759,12 @@ static rocblas_status apply_pivot_lower(rocblas_handle handle,
                                         Istride const strideP,
                                         I const batch_count)
 {
-    if((n == 0) || (nrhs_arg == 0) || (batch_count == 0))
     {
-        return rocblas_status_success;
+        bool const has_work = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
     }
 
     auto ceildiv = [](auto const n, auto const b) { return ((n <= 0) ? 0 : ((n - 1) / b) + 1); };
@@ -868,7 +895,8 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         return rocblas_status_success;
     }; // end call_trsm
 
-    bool const is_forward = !is_upper;
+    bool const is_forward_step_1 = !is_upper;
+    bool const is_forward_step_2 = !is_forward_step_1;
     T const alpha = one;
 
     if(is_upper)
@@ -879,8 +907,8 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         //        P**t * B
         // ------------------------------------------
 
-        ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
-                                              strideB, ipiv_arg, strideP, batch_count));
+        ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, is_forward_step_1, n, nrhs, B_arg, shiftB,
+                                              ldb, strideB, ipiv_arg, strideP, batch_count));
 
         // --------------------------------------------------
         //    compute (U \P**t * B) -> B    [ (U \P**t * B) ]
@@ -893,7 +921,7 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         //    compute D \ B -> B   [ B \ (U \P**t * B) ]
         // ---------------------------------------------
 
-        ROCBLAS_CHECK(apply_diag_block<T, I>(handle, is_forward, n, nrhs, A_arg, shiftA, lda,
+        ROCBLAS_CHECK(apply_diag_block<T, I>(handle, is_forward_step_1, n, nrhs, A_arg, shiftA, lda,
                                              strideA, ipiv_arg, strideP, E_arg, strideE, B_arg,
                                              shiftB, ldb, strideB, batch_count));
 
@@ -909,8 +937,8 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         //        P * B  [ P * (U**t \ (D \ (U \P**t * B) )) ]
         //        --------------------------------------------
 
-        ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
-                                              strideB, ipiv_arg, strideP, batch_count));
+        ROCBLAS_CHECK(apply_pivot_upper<T, I>(handle, is_forward_step_2, n, nrhs, B_arg, shiftB,
+                                              ldb, strideB, ipiv_arg, strideP, batch_count));
     }
     else
     {
@@ -919,8 +947,8 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         // *
         // *       P**t * B
         // -------------------------------------------
-        ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
-                                              strideB, ipiv_arg, strideP, batch_count));
+        ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, is_forward_step_1, n, nrhs, B_arg, shiftB,
+                                              ldb, strideB, ipiv_arg, strideP, batch_count));
 
         // ---------------------------------------------------
         //    compute (L \P**t * B) -> B    [ (L \P**t * B) ]
@@ -932,7 +960,7 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         // ---------------------------------------------
         //    compute D \ B -> B   [ D \ (L \P**t * B) ]
         // ---------------------------------------------
-        ROCBLAS_CHECK(apply_diag_block<T, I>(handle, is_forward, n, nrhs, A_arg, shiftA, lda,
+        ROCBLAS_CHECK(apply_diag_block<T, I>(handle, is_forward_step_1, n, nrhs, A_arg, shiftA, lda,
                                              strideA, ipiv_arg, strideP, E_arg, strideE, B_arg,
                                              shiftB, ldb, strideB, batch_count));
 
@@ -947,8 +975,8 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         // ----------------------------------------------------
         //         P * B  [ P * (L**t \ (D \ (L \P**t * B) )) ]
         // ----------------------------------------------------
-        ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, is_forward, n, nrhs, B_arg, shiftB, ldb,
-                                              strideB, ipiv_arg, strideP, batch_count));
+        ROCBLAS_CHECK(apply_pivot_lower<T, I>(handle, is_forward_step_2, n, nrhs, B_arg, shiftB,
+                                              ldb, strideB, ipiv_arg, strideP, batch_count));
     }
 
     return (rocblas_status_success);
