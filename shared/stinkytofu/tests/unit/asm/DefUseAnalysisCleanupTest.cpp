@@ -34,7 +34,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/PhiPlacement.hpp"
-#include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
