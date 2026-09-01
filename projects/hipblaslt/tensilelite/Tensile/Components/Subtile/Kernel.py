@@ -978,64 +978,6 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   for i in range(numInst * regsPerInst, totalRegs):
     module.add(tileCopyInst(dst=tileAlias(firstReg + i), src=0, comment="init%s"%(tileInfo.tc)))
 
-def initVgprTilesToZero_mfma_slice(writer, kernel, tileInfo, mfma_indices: list):
-    """Emit only a specific slice of the distributable MFMA zeroing instructions.
-
-    ``mfma_indices`` is a list of 0-based indices into the distributable MFMA pool
-    (i.e. the first numInst-1 MFMAs from each register range; the seed chunk and
-    the final MFMA are not included).  Used by the clustered preloop to place
-    individual MFMA filler ops between buffer_load clusters.
-
-    The caller is responsible for ensuring the seed (v_accvgpr_write × N + SNop)
-    has been emitted before any MFMA that references the zero-source chunk.
-    """
-    if not mfma_indices or not tileInfo or not tileInfo.vgprTiles:
-        return Module()
-    idx_set = set(mfma_indices)
-    module = Module()
-    regsPerInst = 8 if writer.states.asmCaps.get("HasWMMA_AccImmZero", False) else 16
-    instType = InstType.INST_F32 if regsPerInst == 8 else InstType.INST_I8
-    accType  = InstType.INST_F32 if regsPerInst == 8 else InstType.INST_I32
-    variant  = [16, 16, 4, 1]  if regsPerInst == 8 else [32, 32, 16, 1]
-    isAgpr = tileInfo.vgprTiles[0].regList.pool == writer.agprPool
-    tileAlias = vgpr if regsPerInst == 8 else (accvgpr if isAgpr else vgpr)
-    acc2_kwargs = {"acc2_imm": 0} if regsPerInst == 8 else {"acc2": 0}
-
-    # Walk the same reg groups as _zeroRegRange to compute per-group offsets.
-    firstReg, totalRegs, curPool = (tileInfo.vgprTiles[0].regList.indices[0],
-                                    0, tileInfo.vgprTiles[0].regList.pool)
-    groups = []  # list of (firstReg, totalRegs, isAgpr)
-    for tile in tileInfo.vgprTiles:
-        pool = tile.regList.pool
-        numRegs = len(tile.regList.indices)
-        if pool != curPool:
-            groups.append((firstReg, totalRegs, curPool == writer.agprPool))
-            firstReg, totalRegs, curPool = tile.regList.indices[0], numRegs, pool
-        else:
-            totalRegs += numRegs
-    groups.append((firstReg, totalRegs, curPool == writer.agprPool))
-
-    global_idx = 0
-    for (fReg, tRegs, isA) in groups:
-        tA = vgpr if regsPerInst == 8 else (accvgpr if isA else vgpr)
-        numInst = tRegs // regsPerInst
-        if numInst < 2:
-            global_idx += 0
-            continue
-        lastChunkBase = fReg + (numInst - 1) * regsPerInst
-        for i in range(numInst - 1):  # distributable MFMAs (exclude last chunk)
-            if global_idx in idx_set:
-                r = fReg + i * regsPerInst
-                module.add(MFMAInstruction(
-                    instType=instType, accType=accType, variant=variant, mfma1k=False,
-                    acc=tA(r, regsPerInst),
-                    a=tA(lastChunkBase, 2), b=tA(lastChunkBase, 2),
-                    **acc2_kwargs,
-                    comment="initC mfma filler: [%u:%u]" % (r, r + regsPerInst - 1)))
-            global_idx += 1
-    return module
-
-
 def initVgprTilesToZero(writer, kernel, tileInfo):
   """Initialize vgprTiles to zero using MFMA for blocks of 16, scalar writes for remainder.
 

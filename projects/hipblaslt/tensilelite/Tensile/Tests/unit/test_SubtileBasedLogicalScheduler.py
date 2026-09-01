@@ -3200,6 +3200,94 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
+    def test_preloop_filler_interleave_invariants(self):
+        """PreloopGRClusterSize>0 runs _interleave_preloop_filler and must preserve:
+          (a) every buffer_load immediately preceded by its m0-set (atomic pairs);
+          (b) each tensor's SRD advance after all its MT0 loads, before any MT1 load;
+          (c) initD seed zero-source + s_nop precede every distributed MFMA;
+          (d) fast-path load/MFMA/seed-write multiset == the unclustered preloop.
+        """
+        def _emit(cluster):
+            kernel = create_kernel(256, 256, fp4=True)
+            kernel["PreloopGRClusterSize"] = cluster
+            writer, tiA, tiB, sTiA, sTiB, dT = make_writer_and_tileinfos(kernel, fp4=True)
+            cfg = make_cfg_256x256_fp4()
+            sched = LogicalScheduler(cfg)
+            sched.build()
+            sched.allocVgprTiles(writer, tiA, tiB,
+                                 scaleTileInfoA=sTiA, scaleTileInfoB=sTiB)
+            try:
+                sched.populate_instructions(
+                    writer, kernel, tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dT,
+                    scaleTileInfoA=sTiA, scaleTileInfoB=sTiB)
+                return str(sched.emitMainAndExitLoops(writer, kernel))
+            finally:
+                sched.deallocVgprTiles(writer)
+
+        base = _emit(-1)   # unclustered baseline
+        clus = _emit(4)    # clustered / interleaved
+
+        # Fast-path preloop = PRELOOP start .. SBranch PreloopEnd.
+        def _fastpath(asm):
+            return asm[asm.index("PRELOOP start"): asm.index("skip slow-path initC")]
+        pb, pc = _fastpath(base), _fastpath(clus)
+
+        # (a) atomic m0->buffer_load pairs
+        lines = [l.strip() for l in pc.splitlines()
+                 if l.strip() and not l.strip().startswith("/*")]
+        for i, l in enumerate(lines):
+            if "buffer_load_dwordx4" in l:
+                prev = lines[i - 1] if i > 0 else ""
+                assert prev.startswith("s_add_u32 m0") or prev.startswith("s_mov_b32 m0"), \
+                    f"buffer_load not preceded by m0-set: {l}"
+
+        # (b) SRD-A/B advance after all 8 MT0 loads of that tensor, before its MT1 loads
+        srdA, srdB = pc.index("A: advance SRD"), pc.index("B: advance SRD")
+        assert pc[:srdA].count("m0, s[sgprLocalWriteBaseAddrA]") == 8, \
+            "SRD-A advance must follow all 8 MT0 A loads"
+        assert pc[:srdB].count("m0, s[sgprLocalWriteBaseAddrB]") == 8, \
+            "SRD-B advance must follow all 8 MT0 B loads"
+        assert srdA < srdB, "per-tensor SRD windows must be staggered (A before B)"
+
+        # (b') Scale-tensor SRD must follow its OWN MT0 load — regression guard for the
+        # last-cluster window bug (scale loads sit in the final cluster, so their SRD
+        # advance must go to the trailing block, never an earlier gap).
+        if "Scale SRD update: MXSA" in pc:
+            assert pc.index("scaleMXSA: DTL b128 load") < pc.index("Scale SRD update: MXSA"), \
+                "MXSA SRD advance must follow the MXSA MT0 load (wrong-address bug)"
+        if "Scale SRD update: MXSB" in pc:
+            assert pc.index("scaleMXSB: DTL b128 load") < pc.index("Scale SRD update: MXSB"), \
+                "MXSB SRD advance must follow the MXSB MT0 load (wrong-address bug)"
+
+        # (c) seed zero-source (acc240) + s_nop precede the first distributed MFMA
+        assert pc.index("v_accvgpr_write acc240") < pc.index("v_mfma"), \
+            "initD seed zero-source must precede first filler MFMA"
+        assert pc.index("s_nop 1") < pc.index("v_mfma"), \
+            "initD hazard s_nop must precede first filler MFMA"
+
+        # (c') No v_accvgpr_write may appear AFTER any v_mfma — placing any acc write
+        #      after an in-flight MFMA contends for the acc write port and corrupts
+        #      the accumulation result deterministically (hardware data hazard).
+        seen_mfma = False
+        for line in pc.splitlines():
+            s = line.strip()
+            if "v_mfma" in s:
+                seen_mfma = True
+            if seen_mfma and "v_accvgpr_write" in s:
+                raise AssertionError(
+                    f"v_accvgpr_write after v_mfma violates acc write-port hazard: {s}"
+                )
+
+        # (d) instruction multiset conserved vs unclustered
+        def _counts(r):
+            return (r.count("buffer_load_dwordx4"), r.count("v_mfma"),
+                    r.count("v_accvgpr_write"), r.count("advance SRD"))
+        assert _counts(pb) == _counts(pc), \
+            f"clustered multiset must match baseline: {_counts(pb)} vs {_counts(pc)}"
+
+        # slow path still emits a full canonical initC
+        assert clus.count("vgprTiles to zero") >= 1, "slow-path canonical initC missing"
+
     def test_emitMainAndExitLoops_pap_mx_inserts_preloop_skip_and_nll_hooks(self):
         """Subtile PAP is scheduler-owned and applies to MX PRELOOP/NLL paths."""
         kernel = create_kernel(256, 256, fp4=True)

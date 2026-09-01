@@ -3427,266 +3427,181 @@ class LogicalScheduler:
                                        emitter.dtileInfo)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
 
-    # ── Change 2: clustered GR helper ─────────────────────────────────────────
-    @staticmethod
-    def _floor_ceil_slices(items: list, n_buckets: int) -> list:
-        """Split ``items`` into ``n_buckets`` floor/ceil slices."""
-        if n_buckets == 0:
-            return []
-        n = len(items)
-        base, rem = divmod(n, n_buckets)
-        slices, cursor = [], 0
-        for i in range(n_buckets):
-            size = base + (1 if i < rem else 0)
-            slices.append(items[cursor: cursor + size])
-            cursor += size
-        return slices
+    def _interleave_preloop_filler(self, em_list, writer) -> bool:
+        """Instruction-level filler interleave for the fast-path preloop.
 
-    def _expand_gr_placements(self, placements: List['GRPlacement']) -> List['GRPlacement']:
-        """Expand each A/B GRPlacement into one placement per individual buffer_load.
+        Replaces the fragile op-level clustering (_build_clustered_preloop_ops +
+        _inject_lra_filler_into_clustered_preloop) with a single dependency-aware
+        pass that rewrites the already-populated preloop `em_list` in place.
 
-        A single GRPlacement for tensor A may cover N tileIds × K subIterK steps,
-        causing emit_gr() to emit N×K buffer_load instructions in a flat loop.
-        Clustering at GRPlacement granularity therefore groups entire tensors rather
-        than individual loads.
+        It clusters the MT0 buffer_load atoms in groups of PreloopGRClusterSize and
+        distributes GR-independent filler between clusters, respecting real deps:
+          - LRA offset VALU (writer._deferredPreloopLraModules): fully free.
+          - initD zeroing MFMAs: free once all seed (acc) writes precede them.
+          - initD seed writes (all acc writes, incl. zero-source + output tiles) +
+            hazard s_nop: ALL pinned to gap 0. Placing any v_accvgpr_write after a
+            v_mfma contends for the acc write port and deterministically corrupts
+            the accumulation result (hardware data hazard on CDNA).
+          - SRD depops (per-tensor GRIncOp): windowed — placed after that tensor's
+            last MT0 load and before its first MT1 load (staggered per tensor).
 
-        This method decomposes each A/B placement into one placement per (tileId, k)
-        pair so that _build_clustered_preloop_ops operates at individual-load granularity.
-        SA/SB placements already emit a single buffer_load each and are passed through
-        unchanged.
+        Returns True if the interleave ran (caller must then skip the legacy LRA
+        re-injection and use self._canonicalInitCInstrs for the slow-path copy).
 
-        The ordering within each original placement is preserved: tileId outer loop,
-        k inner loop, matching the order emit_gr() uses.
+        Single-DU only; caller gates on cluster_size>0 and max(numUnroll)==1.
+        The canonical initC_overlap EmittedModule is left present but emptied on the
+        fast path; the full initC instruction list is stashed on
+        self._canonicalInitCInstrs for the slow-path duplicate.
         """
-        cfg = self.config
-        result = []
-        for pl in placements:
-            if pl.tensor not in ('A', 'B'):
-                result.append(pl)
-                continue
-            gr = cfg.grA if pl.tensor == 'A' else cfg.grB
-            for tileId in range(pl.tiles.tileId_start, pl.tiles.tileId_end, gr.mn):
-                for k in range(pl.tiles.subIterK_start, pl.tiles.subIterK_end, gr.k):
-                    result.append(GRPlacement(
-                        tensor=pl.tensor,
-                        mtIteration=pl.mtIteration,
-                        tiles=MFMATileRange(k, k + gr.k, tileId, tileId + gr.mn),
-                        subIterK_slot=pl.subIterK_slot,
-                        partition=pl.partition,
-                        unrollId=pl.unrollId,
-                    ))
-        return result
+        from rocisa.instruction import (MFMAInstruction, MXMFMAInstruction,
+                                         CommonInstruction, GlobalReadInstruction)
 
-    def _build_clustered_preloop_ops(
-        self,
-        gr0_ops: list,
-        gr0_depops: list,
-        initC_op,
-        gr1_ops: list,
-        gr1_depops: list,
-        cluster_size: int,
-        lr_tiles: dict,
-        gl2_preloop_ops: list,
-    ) -> list:
-        """Return a flat op list for a fused preloop that interleaves all available
-        GR-independent filler between buffer_load clusters of ``cluster_size``.
+        cluster_size = self._kernel.get("PreloopGRClusterSize", -1) if self._kernel else -1
+        if cluster_size <= 0:
+            return False
 
-        Filler hierarchy — emitted in this order within each inter-cluster gap:
-          1. SRD slice   (gr0_depops, ~12 instr): SRD advances + GR offset swaps,
-                         distributed floor/ceil across all gaps.
-          2. LRA slice   (~74 instr): deferred LR-address VALU from
-                         ``writer._deferredPreloopLraModules``, not available at
-                         build_preloop time — injected later in emitMainAndExitLoops
-                         via _inject_lra_filler_into_clustered_preloop, which inserts
-                         each LRA slice BEFORE the initC_overlap marker at each gap.
-          3. v_mfma      (initC_overlap filler): one InlineModuleOp per gap,
-                         providing MFMA zeroing latency fill.
+        _is_mfma = lambda x: isinstance(x, (MFMAInstruction, MXMFMAInstruction))
+        _is_m0 = lambda x: (isinstance(x, CommonInstruction) and hasattr(x, 'dst')
+                            and getattr(x.dst, 'regType', None) == 'm')
+        _is_load = lambda x: isinstance(x, GlobalReadInstruction)
 
-        Layout per gap (after both build_preloop and emitMainAndExitLoops):
-            [cluster GRs]
-            [SRD slice]          ← distributed from gr0_depops
-            [LRA slice]          ← injected by _inject_lra_filler_into_clustered_preloop
-            [initC_overlap]      ← v_mfma filler (InlineModuleOp)
+        # ── Locate the clustered region: MT0 gr modules, gr_inc modules, initC ──
+        mt0_idx, grinc_idx, initc_i = [], [], None
+        for i, em in enumerate(em_list):
+            lbl = getattr(em.source, 'label', None)
+            if em.opType == 'gr' and getattr(em.source, 'mtIteration', None) == 0:
+                mt0_idx.append(i)
+            elif em.opType == 'gr_inc':
+                grinc_idx.append(i)
+            elif lbl == 'initC_overlap' and initc_i is None:
+                initc_i = i
+        if not mt0_idx or initc_i is None:
+            return False
+        region_start = mt0_idx[0]
+        region_end = initc_i  # inclusive; MT1 grs follow at initc_i+1
 
-        After the last cluster:
-            [SRD remainder]      ← any gr0_depops not distributed into gaps
-            [gr1_depops]         ← MT1 SRD advances (if any)
-            [initC]              ← canonical initC_overlap for slow-path split
-            [WaitGR vmcnt(N_gr1)]
-            [Sync]
-            [LR subIterK=0]
-            [SkipOps]
-        """
-        all_grs = list(gr0_ops) + list(gr1_ops)
-        n     = len(all_grs)
-        n_gr0 = len(gr0_ops)
-
-        # Number of inter-cluster gaps.
-        n_clusters = (n + cluster_size - 1) // cluster_size if cluster_size > 0 else 1
-        n_gaps     = max(0, n_clusters - 1)
-
-        # ── Combined cycle-equalising budget for SRD (priority 1) and MFMA (priority 3) ──
-        #
-        # Goal: make the total cycle cost of each gap as equal as possible, where each
-        # v_mfma counts as mfma_weight (8) cycles and each SRD instruction counts as 1.
-        # LRA (priority 2) is not yet available here; it is injected later by
-        # _inject_lra_filler_into_clustered_preloop using the remaining budget.
-        #
-        # Algorithm: fill gaps greedily with the most expensive item first (MFMA) so
-        # that the fewest possible items are needed per gap before moving to cheaper ones.
-        # Remainder cycles (total % n_gaps) are spread by giving +1 cycle to the first
-        # `rem` gaps — meaning those gaps may get 1 extra SRD instruction.
-        #
-        # Example: 4 gaps, 2 v_mfma (8 cycles each), 16 SRD/other (1 cycle each):
-        #   total = 32, target = 8/gap
-        #   Gap 1: 1 v_mfma (8 cycles) ← full
-        #   Gap 2: 1 v_mfma (8 cycles) ← full
-        #   Gap 3: 8 SRD               ← full
-        #   Gap 4: 8 SRD               ← full
-        n_mfma_dist = getattr(self, '_n_mfma_distributable', 0)
-        mfma_weight = 8
-        n_srd       = len(gr0_depops)
-        srd_pool    = list(gr0_depops)
-
-        srd_slices:  list = [[] for _ in range(n_gaps)]
-        mfma_slices: list = [None] * n_gaps
-
-        if n_gaps > 0:
-            total_cycles  = n_srd + n_mfma_dist * mfma_weight
-            base_c, rem_c = divmod(total_cycles, n_gaps)
-
-            mfma_cursor = 0
-            srd_cursor  = 0
-
-            for g in range(n_gaps):
-                budget = base_c + (1 if g < rem_c else 0)
-
-                # MFMA first: floor(budget / mfma_weight) MFMAs per gap.
-                if n_mfma_dist > mfma_cursor:
-                    n_mfma_g     = min(n_mfma_dist - mfma_cursor, budget // mfma_weight)
-                    mfma_indices = list(range(mfma_cursor, mfma_cursor + n_mfma_g))
-                    mfma_cursor += n_mfma_g
-                    budget      -= n_mfma_g * mfma_weight
-                    if mfma_indices:
-                        def _make_slice_op(indices=mfma_indices):
-                            def _build(emitter, _idx=indices):
-                                from Tensile.Components.Subtile.Kernel import (
-                                    initVgprTilesToZero_mfma_slice)
-                                return initVgprTilesToZero_mfma_slice(
-                                    emitter.writer, emitter.kernel,
-                                    emitter.dtileInfo, _idx)
-                            return InlineModuleOp(build=_build, label="initC_mfma_filler")
-                        mfma_slices[g] = _make_slice_op()
-
-                # SRD second: fill remaining budget with SRD instructions.
-                n_srd_g       = min(n_srd - srd_cursor, budget)
-                srd_slices[g] = srd_pool[srd_cursor: srd_cursor + n_srd_g]
-                srd_cursor   += n_srd_g
-
-        ops: list = []
-        gap_idx = 0
-        for start in range(0, n, cluster_size):
-            chunk = all_grs[start: start + cluster_size]
-            ops.extend(chunk)
-            is_last = (start + cluster_size >= n)
-            if not is_last:
-                # Priority 1: SRD slice.
-                if gap_idx < len(srd_slices):
-                    ops.extend(srd_slices[gap_idx])
-                # Priority 2: LRA slice — injected later by emitMainAndExitLoops
-                # between the SRD and MFMA ops via the 'initC_overlap' marker.
-                # Priority 3: MFMA slice (individual ops) OR full initC_op as fallback.
-                if mfma_slices and mfma_slices[gap_idx] is not None:
-                    ops.append(mfma_slices[gap_idx])
+        # ── Extract MT0 atoms (split each module at m0-update boundaries) ──
+        def _atomize(instrs):
+            atoms, cur = [], []
+            for inst in instrs:
+                if _is_m0(inst) and cur:
+                    atoms.append(cur); cur = [inst]
                 else:
-                    # No distributable MFMAs for this gap; use full initC as marker
-                    # so _inject_lra_filler_into_clustered_preloop can still find it.
-                    ops.append(self._make_initC_op())
-                gap_idx += 1
+                    cur.append(inst)
+            if cur:
+                atoms.append(cur)
+            return atoms
 
-        # After the last cluster: any unallocated SRD (budget didn't fit them) +
-        # gr1 depops, before canonical initC and WaitGR.
-        # For the n_gaps==0 case (single cluster), all SRD was left in srd_pool and
-        # will be injected before wait_gr by the LRA filler (or falls through here).
-        if n_gaps == 0:
-            ops.extend(gr0_depops)
-        ops.extend(gr1_depops)
+        atoms = []  # list of (tensor, [instrs])
+        for i in mt0_idx:
+            t = getattr(em_list[i].source, 'tensor', '')
+            for a in _atomize(list(em_list[i].instructions)):
+                atoms.append((t, a))
+        n_atoms = len(atoms)
+        n_clusters = (n_atoms + cluster_size - 1) // cluster_size
+        n_gaps = max(0, n_clusters - 1)
 
-        # Canonical initC last — 'initC_overlap' label used by emitMainAndExitLoops
-        # to locate the slow-path insertion point.
-        ops.append(initC_op)
+        # ── SRD depop pool, per tensor ──
+        srd_by_tensor = {}
+        for i in grinc_idx:
+            t = getattr(em_list[i].source, 'tensor', '')
+            srd_by_tensor.setdefault(t, []).extend(list(em_list[i].instructions))
 
-        mt1_grs_for_wait = list(gr1_ops)
-        ops.extend([
-            WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs_for_wait)),
-            SyncOp(),
-            *self._make_lr_all_tensors(lr_tiles),
-            SkipOp(compare='LE', value=1, target='NLL'),
-            *gl2_preloop_ops,
-            SkipOp(compare='LE', value=2, target='NGLL'),
-        ])
-        return ops
+        # ── initC split: pinned seed (all acc writes) vs free MFMA ──
+        initc_full = list(em_list[initc_i].instructions)
+        self._canonicalInitCInstrs = list(initc_full)
+        # ALL seed (acc) writes are pinned to gap 0, ahead of every initD MFMA.
+        # A v_accvgpr_write issued after an MFMA — even to a disjoint acc — contends
+        # with the in-flight MFMA for the acc write port and deterministically
+        # corrupts the accumulation (the codebase elsewhere guards the symmetric
+        # MFMA->accvgpr_read latency window). Distributing seed-output writes into
+        # post-MFMA gaps is therefore illegal; free_seed_out stays empty.
+        pinned, free_mfma, free_seed_out = [], [], []
+        for inst in initc_full:
+            if _is_mfma(inst):
+                free_mfma.append(inst)
+            elif isinstance(inst, CommonInstruction) and hasattr(inst, 'dst') \
+                    and getattr(inst.dst, 'regType', None) in ('v', 'acc'):
+                pinned.append(inst)  # seed-source AND seed-output → before first MFMA
+            else:
+                # s_nop / s_wait_alu hazards, comments — keep with pinned lead
+                pinned.append(inst)
 
-    def _inject_lra_filler_into_clustered_preloop(
-        self,
-        em_list: list,
-        lra_modules: list,
-    ) -> None:
-        """Distribute LRA offset instructions (priority 2) into inter-cluster gaps.
+        # ── LRA pool ──
+        lra = list(getattr(writer, '_deferredPreloopLraModules', None) or [])
 
-        Each gap is marked by a filler 'initC_overlap' EmittedModule (all but the
-        last 'initC_overlap' in the list).  LRA slices are inserted BEFORE each
-        marker so the per-gap emission order is:
-            [SRD slice]  →  [LRA slice]  →  [initC_overlap / v_mfma]
+        # ── Per-tensor SRD windows: open at gap after tensor's last MT0 atom ──
+        last_mt0_atom = {}
+        for k, (t, _a) in enumerate(atoms):
+            last_mt0_atom[t] = k
+        # window_open[t] = index of the first inter-cluster gap that lies AFTER
+        # tensor T's last MT0 load (= floor(last_atom / cluster_size)). NOT clamped:
+        # if T's last MT0 load is in the final cluster, window_open >= n_gaps, meaning
+        # no inter-cluster gap is legal — its SRD must go to the trailing block (after
+        # all clusters, still before MT1), which srd_leftover handles.
+        window_open = {t: last_mt0_atom[t] // cluster_size for t in last_mt0_atom}
 
-        If there are no inter-cluster gaps (single cluster), LRA is injected
-        before wait_gr as a single block.
-        """
-        if not lra_modules:
-            return
+        # ── Greedy fill ──
+        gap_fill = [[] for _ in range(n_gaps)]
+        # SRD: place each tensor's whole group in the earliest legal gap of its window.
+        # Tensors whose window opens at/after n_gaps (last MT0 load in the final
+        # cluster, e.g. the scale tensors) are left in srd_by_tensor and emitted in
+        # the trailing block — placing them in any earlier gap would advance Srd{tc}
+        # before that tensor's own MT0 load reads it (wrong-address load).
+        for t in self.tensors:
+            grp = srd_by_tensor.get(t)
+            wo = window_open.get(t, 0)
+            if grp and n_gaps > 0 and wo < n_gaps:
+                gap_fill[wo].extend(grp)
+                srd_by_tensor[t] = []
+        # Cycle budget for the free pools (LRA=1, MFMA=8, seed_out=1).
+        total_cycles = len(lra) + len(free_seed_out) + 8 * len(free_mfma)
+        if n_gaps > 0:
+            base, rem = divmod(total_cycles, n_gaps)
+        for g in range(n_gaps):
+            budget = base + (1 if g < rem else 0)
+            if g == 0:
+                gap_fill[g] = pinned + gap_fill[g]  # pinned lead precedes all MFMA
+                pinned = []
+            while lra and budget > 0:
+                gap_fill[g].append(lra.pop(0)); budget -= 1
+            while free_mfma and budget >= 8:
+                gap_fill[g].append(free_mfma.pop(0)); budget -= 8
+            while free_seed_out and budget > 0:
+                gap_fill[g].append(free_seed_out.pop(0)); budget -= 1
 
-        # Gap markers are either 'initC_overlap' (full initC fallback) or
-        # 'initC_mfma_filler' (individual MFMA op from weighted distribution).
-        # The canonical initC is always the LAST 'initC_overlap' in the list.
-        initC_overlap_indices = [
-            i for i, em in enumerate(em_list)
-            if getattr(em.source, 'label', None) == 'initC_overlap'
-        ]
-        mfma_filler_indices = [
-            i for i, em in enumerate(em_list)
-            if getattr(em.source, 'label', None) == 'initC_mfma_filler'
-        ]
-        if not initC_overlap_indices:
-            return
+        # Leftovers (incl. the single-cluster n_gaps==0 case) → one trailing module
+        # emitted before the (now empty) initC, still ahead of MT1 grs so any
+        # unplaced SRD stays inside its window (window closes at first MT1 load).
+        srd_leftover = [inst for t in self.tensors
+                        for inst in (srd_by_tensor.get(t) or [])]
+        trailing = pinned + srd_leftover + list(free_mfma) + list(lra) + list(free_seed_out)
 
-        # Canonical = last initC_overlap; gap markers = all mfma_fillers + all
-        # non-canonical initC_overlaps, sorted by position.
-        canonical_idx  = initC_overlap_indices[-1]
-        non_canonical  = sorted(initC_overlap_indices[:-1] + mfma_filler_indices)
-        filler_indices = non_canonical
-        n_gaps = len(filler_indices)
+        # ── Rebuild the region in place ──
+        next_id = max((em.moduleId for em in em_list), default=-1) + 1
+        new_region = []
+        for c in range(n_clusters):
+            chunk = atoms[c * cluster_size:(c + 1) * cluster_size]
+            cluster_instrs = [inst for (_t, a) in chunk for inst in a]
+            new_region.append(EmittedModule(moduleId=next_id,
+                                            instructions=cluster_instrs, source=None))
+            next_id += 1
+            if c < n_gaps and gap_fill[c]:
+                new_region.append(EmittedModule(moduleId=next_id,
+                                                instructions=gap_fill[c], source=None))
+                next_id += 1
+        if trailing:
+            new_region.append(EmittedModule(moduleId=next_id,
+                                            instructions=trailing, source=None))
+            next_id += 1
+        # Keep the canonical initC_overlap module present (split asserts on it) but
+        # emptied on the fast path; its full content lives in _canonicalInitCInstrs.
+        initc_mod = em_list[initc_i]
+        initc_mod.instructions = []
+        new_region.append(initc_mod)
 
-        if n_gaps == 0:
-            # Single cluster — inject before wait_gr.
-            wait_idx = next((i for i, em in enumerate(em_list)
-                             if em.opType == 'wait_gr'), len(em_list))
-            new_id = max((em.moduleId for em in em_list), default=-1) + 1
-            em_list.insert(wait_idx, EmittedModule(
-                moduleId=new_id, instructions=list(lra_modules),
-                before=None, source=None))
-            return
-
-        slices = self._floor_ceil_slices(list(lra_modules), n_gaps)
-
-        # Iterate in reverse so earlier insertions don't shift later indices.
-        for gap_rank, fi in enumerate(reversed(filler_indices)):
-            g = n_gaps - 1 - gap_rank
-            if not slices[g]:
-                continue
-            new_id = max((em.moduleId for em in em_list), default=-1) + 1
-            em_list.insert(fi, EmittedModule(
-                moduleId=new_id, instructions=slices[g],
-                before=None, source=None))
+        em_list[region_start:region_end + 1] = new_region
+        return True
 
     def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
@@ -3801,54 +3716,24 @@ class LogicalScheduler:
                 ])
             else:
                 mt1_grs = self._make_preloop_mt1_grs()
-                # Change 3: PreloopGRClusterSize > 0 enables fused clustered preloop.
-                # _kernel is set before build() in populate_instructions so this is
-                # always available here.
-                cluster_size = self._kernel.get("PreloopGRClusterSize", -1) if self._kernel else -1
-                if cluster_size > 0:
-                    # Change 2: use _build_clustered_preloop_ops with per-load atoms.
-                    # Expand A/B placements to one-load atoms so cluster_size counts
-                    # individual buffer_load instructions, not per-tensor placements.
-                    #
-                    # Correctness constraint: SRD depops (GRIncOp) advance the SRD
-                    # base address, so they MUST come after ALL gr0 loads and BEFORE
-                    # ANY gr1 loads. Distributing them between individual gr0 clusters
-                    # would make loads after the advance read from the wrong address.
-                    #
-                    # Architecture: cluster only gr0 atoms (with initC MFMA filler).
-                    # Pass gr1_ops=[] so all_grs contains only gr0 atoms. Then pass
-                    # gr1_depops = SRD-advances + expanded-gr1 so they are emitted in
-                    # order after the last gr0 cluster, preserving the correct sequence:
-                    #   [gr0 clusters] → [SRD advances] → [gr1 loads] → initC → WaitGR
-                    gr0_ops  = self._expand_gr_placements(
-                                   self._make_gr_all_tensors(0, all_tiles))
-                    gr0_deps = self._make_depops_all_tensors(GRIncOp)
-                    gr1_atoms = self._expand_gr_placements(mt1_grs)
-                    ops = self._build_clustered_preloop_ops(
-                        gr0_ops=gr0_ops,
-                        gr0_depops=[],                          # no SRD between gr0 clusters
-                        initC_op=initC_op,
-                        gr1_ops=[],                             # gr1 not in the clustered window
-                        gr1_depops=list(gr0_deps) + gr1_atoms, # SRD → gr1 after last gr0 cluster
-                        cluster_size=cluster_size,
-                        lr_tiles=lr_tiles,
-                        gl2_preloop_ops=gl2_preloop_ops,
-                    )
-                    emitted = self._to_emitted(ops)
-                else:
-                    # Default: GR reorder (Experiment 3) without clustering.
-                    emitted = self._to_emitted([
-                        *self._make_gr_all_tensors(0, all_tiles),
-                        *self._make_depops_all_tensors(GRIncOp),
-                        initC_op,
-                        *mt1_grs,                              # ← moved before WaitGR
-                        WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs)),
-                        SyncOp(),
-                        *self._make_lr_all_tensors(lr_tiles),
-                        SkipOp(compare='LE', value=1, target='NLL'),
-                        *gl2_preloop_ops,
-                        SkipOp(compare='LE', value=2, target='NGLL'),
-                    ])
+                # Emit the clean, unclustered GR-reorder op list. When
+                # PreloopGRClusterSize > 0 (single-DU only), the post-populate pass
+                # _interleave_preloop_filler (called from emitMainAndExitLoops)
+                # rewrites this into clusters with distributed filler at the
+                # INSTRUCTION level, where it can respect per-tensor SRD windows and
+                # the initC seed→MFMA ordering that op-level clustering could not.
+                emitted = self._to_emitted([
+                    *self._make_gr_all_tensors(0, all_tiles),
+                    *self._make_depops_all_tensors(GRIncOp),
+                    initC_op,
+                    *mt1_grs,                              # ← moved before WaitGR
+                    WaitGROp(wait_gr_counts=self._gr1_wait_counts(mt1_grs)),
+                    SyncOp(),
+                    *self._make_lr_all_tensors(lr_tiles),
+                    SkipOp(compare='LE', value=1, target='NLL'),
+                    *gl2_preloop_ops,
+                    SkipOp(compare='LE', value=2, target='NGLL'),
+                ])
 
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
@@ -4751,15 +4636,20 @@ class LogicalScheduler:
         # stays untouched.
         preloop_emitted = copy.deepcopy(self._preloop_emitted)
 
-        # ── Inject LRA filler into clustered-preloop gaps ──────────────────────
-        # When PreloopGRClusterSize is active, _build_clustered_preloop_ops placed
-        # initC_overlap filler markers at each inter-cluster gap.  Now that we have
-        # the populated deepcopy and _lraDeferred is available, distribute the LRA
-        # VALU instructions across those gaps so they execute while loads drain.
+        # ── Instruction-level filler interleave (clustered preloop) ────────────
+        # When PreloopGRClusterSize>0 (single-DU only), rewrite the fast-path preloop
+        # into clusters with dependency-aware distributed filler (LRA + initC MFMA/
+        # seed + windowed SRD). The pass consumes writer._deferredPreloopLraModules
+        # and stashes the full initC on self._canonicalInitCInstrs for the slow path,
+        # so the legacy LRA re-injection below is skipped when it runs.
         _plgrcs = kernel.get("PreloopGRClusterSize", -1)
-        if _plgrcs and _plgrcs > 0 and _lraDeferred and preloop_emitted[0] and preloop_emitted[0][0]:
-            self._inject_lra_filler_into_clustered_preloop(
-                preloop_emitted[0][0], list(_lraDeferred))
+        _single_du = (max(self.config.numUnroll.values())
+                      if self.config.numUnroll else 1) == 1
+        filler_pass_ran = False
+        if (_plgrcs and _plgrcs > 0 and _single_du
+                and preloop_emitted[0] and preloop_emitted[0][0]):
+            filler_pass_ran = self._interleave_preloop_filler(
+                preloop_emitted[0][0], writer)
 
         if not kernel["NoTailLoop"]:
             em_list = preloop_emitted[0][0]
@@ -4777,7 +4667,10 @@ class LogicalScheduler:
                                         comment="K < DepthU: jump to tail loop")
 
             if skipGRForTail:
-                lra_instrs = list(_lraDeferred) if _lraDeferred else []
+                # When the interleave pass ran it already distributed LRA into the
+                # clustered gaps — do NOT re-inject it here (would double-emit).
+                lra_instrs = ([] if filler_pass_ran
+                              else (list(_lraDeferred) if _lraDeferred else []))
 
                 # Fast-path: initC already at init_idx; append LRA offset after initC.
                 if lra_instrs:
@@ -4820,10 +4713,16 @@ class LogicalScheduler:
                     instructions=[skipGRLabel]))
                 next_id += 1
 
-                # Copy already-populated instructions from the fast-path initC.
+                # Copy the canonical initC for the slow path. When the interleave
+                # pass ran it emptied the fast-path initC module (its content was
+                # distributed into gaps) and stashed the full list here.
+                slow_initc = getattr(self, '_canonicalInitCInstrs', None) \
+                    if filler_pass_ran else None
+                if slow_initc is None:
+                    slow_initc = list(em_list[init_idx].instructions)
                 em_list.insert(wait_idx + 1, EmittedModule(
                     moduleId=next_id,
-                    instructions=list(em_list[init_idx].instructions)))
+                    instructions=list(slow_initc)))
                 next_id += 1
 
                 em_list.insert(wait_idx + 2, EmittedModule(
@@ -4847,7 +4746,7 @@ class LogicalScheduler:
         # NoTailLoop fallback: no split exists, so inject lraDeferred before wait_gr
         # in the flat preloop (the only path). skipGRForTail=False implies NoTailLoop=True
         # for any kernel where _lraDeferred is set (PGR=0 kernels never defer LRA).
-        if _lraDeferred and not skipGRForTail:
+        if _lraDeferred and not skipGRForTail and not filler_pass_ran:
             fl = preloop_emitted[0][0]
             drain_idx = next((i for i, em in enumerate(fl)
                               if em.opType == 'wait_gr'), len(fl))
