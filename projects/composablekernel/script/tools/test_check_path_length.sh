@@ -96,6 +96,40 @@ else
     failures=$(( failures + 1 ))
 fi
 
+# --- "." and ".." are resolved, not merely prefixed -------------------------
+# From inside the deep directory, "../f.cpp" is the repository-relative
+# "f.cpp" (5 characters). Prefixing without normalising would measure
+# "<deep_dir>/../f.cpp" instead and reject a path that is well within limits.
+short_at_root="f.cpp"                    # 5 characters, at the repository root
+: > "$WORKDIR/$short_at_root"
+check "..-relative path is normalised before measuring" \
+    0 "$WORKDIR/$deep_dir" "../$short_at_root"
+
+tests=$(( tests + 1 ))
+report=$( cd "$WORKDIR/$deep_dir" && CK_MAX_PATH_LEN=3 "$CHECKER" "../$short_at_root" 2>&1 | head -1 )
+if [[ "$report" == "ERROR: $short_at_root" ]]; then
+    echo "PASS: a normalised ..-path is reported without the .. component"
+else
+    echo "FAIL: a normalised ..-path is reported without the .. component"
+    echo "      expected: ERROR: $short_at_root"
+    echo "      actual:   $report"
+    failures=$(( failures + 1 ))
+fi
+
+# --- absolute paths are measured repository-relative ------------------------
+# The absolute form carries the checkout prefix, which is exactly what this
+# check does not measure; it must be stripped back to the repository-relative
+# path before either limit is applied.
+check "absolute path inside the repository is measured repo-relative" \
+    0 "$WORKDIR" "$WORKDIR/$short_at_root"
+check "absolute path is still measured against the repo-relative limit" \
+    1 "$WORKDIR" "$WORKDIR/$over_limit"
+
+# A path outside the repository has no repository-relative form, so there is
+# nothing meaningful to measure and it is skipped rather than measured at its
+# absolute length.
+check "path outside the repository is skipped" 0 "$WORKDIR" "/etc/hostname"
+
 # --- limits are configurable ------------------------------------------------
 tests=$(( tests + 1 ))
 if ( cd "$WORKDIR" && CK_MAX_PATH_LEN=250 "$CHECKER" "$over_limit" >/dev/null 2>&1 ); then

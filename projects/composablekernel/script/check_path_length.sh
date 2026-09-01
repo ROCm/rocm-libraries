@@ -25,14 +25,16 @@
 # A second, independent limit rejects individual file names over NAME_MAX(255),
 # which no common filesystem (ext4, NTFS, APFS) can store at all.
 #
-# Used both by the Jenkinsfile "Static Checks" stage -- where it is fed the
-# files a pull request adds or renames, so pre-existing long paths do not
-# block unrelated work -- and by developers locally:
+# Used both by the Jenkinsfile "Determine CI Execution" stage -- where
+# check_changed_path_length.sh feeds it the files a pull request adds or
+# renames, so pre-existing long paths do not block unrelated work -- and by
+# developers locally:
 #
 #   git ls-files | xargs script/check_path_length.sh   # audit the whole tree
 #
-# Paths may be given relative to the repository root or to the current
-# directory; both are normalised to repository-relative before measuring.
+# Paths may be given relative to the repository root, relative to the current
+# directory, or absolute; all are normalised to repository-relative before
+# measuring, with "." and ".." components resolved.
 #
 # Usage: ./check_path_length.sh <file1> <file2> ...
 #
@@ -54,6 +56,42 @@ max_name=${CK_MAX_NAME_LEN:-255}
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || repo_root=""
 repo_prefix=$(git rev-parse --show-prefix 2>/dev/null) || repo_prefix=""
 
+# Lexically normalise an absolute path: collapse repeated slashes, drop "."
+# and resolve ".." textually. Textually, not via the filesystem, so a symlink
+# is not dereferenced and a path that does not exist still normalises. Used
+# only when GNU realpath is unavailable.
+lexical_abs() {
+    local part out=()
+    local IFS=/
+    for part in $1; do
+        case $part in
+            '' | .) ;;
+            ..) (( ${#out[@]} )) && unset 'out[${#out[@]}-1]' ;;
+            *)  out+=("$part") ;;
+        esac
+    done
+    printf '/%s' "${out[*]}"
+}
+
+# Map an absolute path to its repository-relative form, resolving "." and ".."
+# without dereferencing symlinks. Returns 1 if the path lies outside the
+# repository, which has no repository-relative form and so cannot be measured.
+repo_relative() {
+    local abs=$1 out
+    # -m: do not require the path to exist. -s: do not resolve symlinks, so a
+    # symlink is measured at the path git records rather than at its target.
+    if ! out=$(realpath -m -s --relative-to="$repo_root" -- "$abs" 2>/dev/null); then
+        abs=$(lexical_abs "$abs")
+        case $abs in
+            "$repo_root")   out=. ;;
+            "$repo_root"/*) out=${abs#"$repo_root"/} ;;
+            *)              return 1 ;;
+        esac
+    fi
+    [[ $out != .. && $out != ../* ]] || return 1
+    printf '%s' "$out"
+}
+
 exit_code=0
 
 for file in "$@"; do
@@ -67,10 +105,27 @@ for file in "$@"; do
     # target does not exist. Git tracks such an entry (mode 120000) like any
     # other, and Windows still has to resolve its path, so a dangling symlink
     # must be measured rather than skipped.
-    if [[ -e "$file" || -L "$file" ]]; then
-        path="${repo_prefix}${file}"
-    elif [[ -n "$repo_root" ]] && [[ -e "${repo_root}/${file}" || -L "${repo_root}/${file}" ]]; then
+    #
+    # The argument is normalised rather than merely prefixed: "../f.cpp" from a
+    # subdirectory is the repository-relative "f.cpp", not "sub/../f.cpp", and
+    # an absolute path inside the repository is measured at its repository-
+    # relative length. Prefixing without normalising over-counts, which can
+    # reject a path that is in fact within the limit.
+    if [[ -z "$repo_root" ]]; then
+        # Outside a git work tree there is nothing to be relative to, so the
+        # argument is measured exactly as given.
+        [[ -e "$file" || -L "$file" ]] || continue
         path="$file"
+    elif [[ -e "$file" || -L "$file" ]]; then
+        # Relative to the current directory, which git reports as repo_prefix.
+        if [[ $file == /* ]]; then
+            abs="$file"
+        else
+            abs="${repo_root}/${repo_prefix}${file}"
+        fi
+        path=$(repo_relative "$abs") || continue
+    elif [[ -e "${repo_root}/${file}" || -L "${repo_root}/${file}" ]]; then
+        path=$(repo_relative "${repo_root}/${file}") || continue
     else
         continue
     fi
