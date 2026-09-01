@@ -361,8 +361,10 @@ cat <<EOF
     --cmake_install               Install minimum cmake version if required.
 
     --cuda, --use-cuda            Build library for CUDA backend (deprecated).
-                                  Sets HIP_PLATFORM=nvidia. Without this flag,
-                                  HIP_PLATFORM defaults to amd.
+                                  Sets HIP_PLATFORM=nvidia and invokes nvcc
+                                  directly (no hipcc dependency). nvcc must be
+                                  on PATH or reachable via --cudapath.
+                                  Without this flag, HIP_PLATFORM defaults to amd.
 
     -d, --dependencies            Build and install external dependencies. Dependencies are to be installed in /usr/local.
                                   This should be done only once (this does not install rocBLAS, rocSolver, or cuda).
