@@ -511,49 +511,21 @@ if tile_n >= 128 and LDS_budget_allows:
 
 ### 10.2 Profiling Checkpoints
 
-**Discovery vs verification.** Use the raw `rocprofv3` / ATT tools below (§11) to
-*discover* which bottleneck you have. Use `rocke.benchmark.perf.tool` to *verify*
-that a change helped: it compares a kernel against its own stored baseline on the
-clock-invariant cycle metric and only reports a change that clears the run-to-run
-noise floor. Do not eyeball TF/s or ms deltas - both move with the GPU clock.
+The measurement path is not GEMM-specific. Follow the operator-agnostic
+[before/after verification workflow](../../optimization_runbook.md#repeatable-beforeafter-verification),
+using `OP=gemm`, a `SHAPE_JSON` containing `M`, `N`, and `K`, and the command that
+launches this kernel. Keep the identity and command unchanged before and after
+each optimization.
 
+Use [WaveScope](../tools/wavescope/README.md) / ATT to diagnose whether GEMM
+stalls, waits, and instruction mix moved as expected. For the GEMM-specific ISA
+check:
 
 ```bash
-# The library path is only needed by your own launch command, not by the tool.
-export ROCKE=<repo>/dnn-providers/hip-kernel-provider/rocke
-export PYTHONPATH=$ROCKE/platform/python:$ROCKE/library
-: "${ARCH:?set ARCH to the GPU being profiled (for example gfx950 or gfx1201)}"
-
-# 1. Benchmark performance, compared against the previous stored run.
-#    Any launch command works; one that prints a `PerfJSON:` line
-#    (rocke.benchmark.perf.perfjson.emit) also contributes wall time and TFLOPS.
-python -m rocke.benchmark.perf.tool profile \
-    --arch "$ARCH" --op gemm --shape '{"M":4096,"N":4096,"K":4096}' \
-    --kernel-name my_gemm --repeats 3 \
-    -- python my_gemm.py
-
-# 2. Disassemble the compiled rocKE HSACO
 /opt/rocm/llvm/bin/llvm-objdump -d --mcpu="$ARCH" kernel.hsaco > kernel.s
-# 3. Count instructions
-python $ROCKE/platform/dsl_docs/optimization/utilities/tools/stage3_extract_isa/count_instructions.py \
+python "$ROCKE/platform/dsl_docs/optimization/utilities/tools/stage3_extract_isa/count_instructions.py" \
     kernel.s
-
-# 4. Check occupancy + register/LDS pressure (no GPU, no profiler: ELF notes)
-python -m rocke.benchmark.perf.tool occupancy kernel.hsaco --arch "$ARCH"
 ```
-
-`profile` prints a bracketed verdict - `[improved]`, `[REGRESSED]`, `[within noise]`,
-or `[no baseline]` on the very first run of an identity - plus the counter panel that
-explains it, and stores the run in `~/.cache/rocke-perf` so the next run pairs
-against it. It exits 1 on `[REGRESSED]`, so a script can gate on it.
-`python -m rocke.benchmark.perf.tool compare --all` reviews the history later;
-`--json` gives an agent the record instead of the text, with the verdict as a
-lowercase `improved` / `regressed` / `within_noise` string.
-
-`occupancy` reads the target ISA out of the code object, so it reports the right
-wave count even if `--arch` is stale; it prints the binary's `target_arch` and warns
-when the two disagree. `--arch` is only the fallback for a binary with no target
-note.
 
 ---
 

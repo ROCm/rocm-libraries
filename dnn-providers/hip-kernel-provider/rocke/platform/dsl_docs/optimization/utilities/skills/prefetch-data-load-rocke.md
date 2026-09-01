@@ -351,41 +351,23 @@ This optimization applies when you see these signals in profiling:
 
 ## Verification
 
-After applying prefetch optimization:
+After applying a prefetch optimization:
 
-1. **Correctness**: Run `run_manifest(verify=True)` to check against reference
-2. **Performance**: `rocke.benchmark.perf.tool profile` before and after, same
-   command both times - it pairs them by `(arch, op, kernel-name, shape)` and prints
-   `[improved]` / `[REGRESSED]` / `[within noise]` on the clock-invariant cycle
-   metric (`[no baseline]` on the first run, which just records the baseline)
-3. **Register pressure**: Verify `vgpr <= 256` (no spills) from
-   `rocke.benchmark.perf.tool occupancy`
-4. **Occupancy**: Verify the same command's `occupancy >= 1` wave/SIMD
-5. **Bottleneck moved as predicted** (MFMA utilization up, VMEM stalls down):
-   `rocprofv3` PMC or ATT, via `/capture-kernel-trace-rocke` - those metrics are not
-   in the perf tool's counter set
+1. **Correctness**: Run `run_manifest(verify=True)` against the reference.
+2. **Performance**: Follow the operator-agnostic
+   [before/after verification workflow](../../optimization_runbook.md#repeatable-beforeafter-verification)
+   with the workload's actual operation, shape, kernel identity, and launch
+   command. Do not use `OP=gemm` unless the workload is a GEMM.
+3. **Register pressure**: Verify `vgpr <= 256` and no spills with
+   `rocke.benchmark.perf.tool occupancy`.
+4. **Occupancy**: Verify the same command reports at least one wave/SIMD.
+5. **Diagnosis**: Recapture in WaveScope and confirm MFMA/WMMA utilization rises
+   or VMEM stalls fall as predicted; these signals are not in the perf tool's
+   counter set.
 
-```bash
-export ROCKE=<repo>/dnn-providers/hip-kernel-provider/rocke
-export PYTHONPATH=$ROCKE/platform/python:$ROCKE/library   # library: for your launcher
-: "${ARCH:?set ARCH to the GPU being profiled (for example gfx950 or gfx1201)}"
-
-# Baseline, then apply the optimization, then re-run the SAME command.
-python -m rocke.benchmark.perf.tool profile \
-    --arch "$ARCH" --op gemm --shape '{"M":4096,"N":4096,"K":4096}' \
-    --kernel-name my_kernel --repeats 3 -- python run_kernel.py
-
-# Registers / LDS / occupancy - ELF notes, so no GPU and no profiler.
-python -m rocke.benchmark.perf.tool occupancy my_kernel.hsaco --arch "$ARCH"
-
-# Review the whole history later.
-python -m rocke.benchmark.perf.tool compare --all
-```
-
-Do not compare raw TF/s or ms across runs: both scale with the GPU clock, so a
-boost-vs-sustained difference reads as an optimization. `compare_rocprof_stats.py`
-is for a DIFFERENT comparison - two distinct kernels (e.g. rocKE vs CK Tile), not a
-kernel against its own baseline.
+Do not compare raw TF/s or milliseconds across runs: both move with GPU clock.
+`compare_rocprof_stats.py` serves a different comparison—two distinct kernels
+(for example, rocKE and CK Tile), not one kernel against its stored baseline.
 
 ## When NOT To Use
 

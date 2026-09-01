@@ -97,30 +97,16 @@ CK DSL provides built-in swizzle patterns via tile descriptor transforms:
 
 ### Step 1: Record a Baseline and Read LDS Usage
 
-```bash
-export ROCKE=<repo>/dnn-providers/hip-kernel-provider/rocke
-export PYTHONPATH=$ROCKE/platform/python:$ROCKE/library   # library: for your launcher
-: "${ARCH:?set ARCH to the GPU being profiled (for example gfx950 or gfx1201)}"
+Follow the operator-agnostic
+[before/after verification workflow](../../optimization_runbook.md#repeatable-beforeafter-verification)
+with the workload's real operation, shape, kernel identity, launch command, and
+HSACO. Do not label a non-GEMM workload as `gemm`.
 
-# LDS bytes + register pressure + occupancy, straight from the ELF notes.
-# No GPU and no profiler needed.
-python -m rocke.benchmark.perf.tool occupancy my_gemm.hsaco --arch "$ARCH"
-
-# Baseline the kernel so the post-optimization run has something to pair with.
-python -m rocke.benchmark.perf.tool profile \
-    --arch "$ARCH" --op gemm --shape '{"M":4096,"N":4096,"K":4096}' \
-    --kernel-name my_gemm --repeats 3 -- python my_gemm.py
-```
-
-Check LDS usage against the limits: 64 KB per CU on gfx942, 160 KB on gfx950.
-`occupancy` takes the ISA from the code object itself (reported as `target_arch`)
-and warns if `--arch` disagrees, so the wave count is right either way. The first
-`profile` of a new kernel name prints `[no baseline]`; that is the baseline being
-recorded, not a failure.
-
-This step *verifies* size and speed. Diagnosing *why* LDS is slow (bank conflicts,
-exposed write latency) is the ATT/PMC work in Steps 2-3 - the perf tool does not
-capture `LDSBankConflict`.
+Inspect `lds_bytes`, register pressure, and occupancy against the target's limits.
+`occupancy` reads the ISA from the code object (reported as `target_arch`) and
+warns if `--arch` disagrees. This verifies size and speed; diagnosing *why* LDS is
+slow (bank conflicts or exposed write latency) is the WaveScope/PMC work below.
+The perf tool does not capture `LDSBankConflict`.
 
 ### Step 2: Analyze ATT Trace
 
@@ -370,22 +356,12 @@ assert summary.max_abs_diff < 1e-2, f"Verification failed: {summary.max_abs_diff
 
 ### 2. Re-profile
 
-```bash
-# Same command as the baseline in Step 1: the tool pairs this run against it.
-python -m rocke.benchmark.perf.tool profile \
-    --arch "$ARCH" --op gemm --shape '{"M":4096,"N":4096,"K":4096}' \
-    --kernel-name my_gemm --repeats 3 -- python my_gemm.py
-```
-
-Read the verdict, not the raw numbers: it compares `busy_cycles` (clock-invariant)
-against the stored baseline and only calls a change real once it clears the noise
-floor. TF/s and ms move with the GPU clock, so a bare before/after of those numbers
-cannot tell an optimization from a boost-clock difference.
-
-- `[improved]` / `[REGRESSED]` / `[within noise]` - the answer (`--json` reports the
-  same verdict as lowercase `improved` / `regressed` / `within_noise`)
-- `lds_bytes` in the panel: should increase if padding was added
-- exit status 1 on `[REGRESSED]`, so a script can gate on it
+Repeat the exact `profile` command used for the baseline. Accept the change only
+when its `[improved]` verdict clears the measured noise floor; `[within noise]`
+does not establish a win. Check the record's `lds_bytes` to confirm the expected
+resource change. See the
+[generic verification workflow](../../optimization_runbook.md#repeatable-beforeafter-verification)
+for verdict, history, and timing-source details.
 
 ### 3. Re-analyze ATT Trace
 
