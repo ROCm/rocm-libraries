@@ -5444,7 +5444,7 @@ namespace TensileLite
                 if(itersPerTile >= 65536 || itersPerWG >= 65536
                    || (tiles * itersPerTile) >= 16777216)
                 {
-                    skGrid = tiles;
+                    skGrid = (tiles >= 16777216) ? cuCount*self.sizeMapping.CUOccupancy : tiles;
                     if(outTreeBoundsFallback)
                         *outTreeBoundsFallback = true;
                 }
