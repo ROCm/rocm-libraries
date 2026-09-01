@@ -41,7 +41,6 @@ from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 import pytest
 
-from Tensile import CUSTOM_KERNEL_PATH
 from Tensile.Common.GlobalParameters import (
     defaultBenchmarkCommonParameters,
     defaultInternalSupportParams,
@@ -139,7 +138,7 @@ class KernelMetadata:
         return self.declaredStaggerU
 
 
-def _readMetadata(name: str, directory: str = CUSTOM_KERNEL_PATH) -> KernelMetadata:
+def _readMetadata(name: str, directory: Optional[str] = None) -> KernelMetadata:
     config = readCustomKernelConfig(name, directory)
     internal = config.get("InternalSupportParams", {})
     return KernelMetadata(

@@ -3346,6 +3346,35 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 }
 #endif
 
+// Points inputs.Synchronizer at the region the chosen solution actually wants.
+//
+// Two consumers share this pointer and they need very different amounts: a
+// Stream-K kernel reads it as one flag per workgroup, a GSU (MBSK) kernel reads
+// it as the reduction area, which is orders of magnitude larger. They cannot
+// both be live in one kernel -- the Stream-K flag path requires
+// streamKAtomic == 0, and that path forces gsu to 1, which rules MBSK out -- so
+// one pointer is enough and only the target changes.
+//
+// It has to stay one pointer. ContractionInputs is exported by more than one
+// ROCm library (hipsparselt embeds its own TensileLite and exports the same
+// symbols), so adding a field to it makes the destructor resolve to a copy
+// compiled against the old layout and corrupts the heap.
+static void bindFlagRegion(const RocblasltContractionProblem&      prob,
+                           const TensileLite::ContractionSolution& solution,
+                           TensileLite::ContractionInputs&         inputs)
+{
+    if(prob.streamKFlags == nullptr)
+        return;
+    if(solution.sizeMapping.streamK <= 0 || solution.sizeMapping.streamKAtomic != 0)
+        return;
+    // outputAmaxD hands the same pointer to the amax counter, which would then
+    // land on top of flag zero. Leave those on the GSU region: no better than
+    // before for that combination, but no worse.
+    if(solution.problemType.outputAmaxD)
+        return;
+    inputs.Synchronizer = prob.streamKFlags;
+}
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
@@ -3403,6 +3432,17 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         int* solutionIndex = (int*)algo->data;
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
+
+        // A Stream-K solution reads these flags as one int per workgroup, and
+        // needs a region nobody else is touching; everything else reads them as
+        // the GSU reduction area, which is far larger and stays shared. The two
+        // never coincide in one kernel, so a single pointer serves both and the
+        // choice is made here, where the solution is finally known.
+        {
+            auto picked = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            if(picked)
+                bindFlagRegion(prob, *picked, data->inputs);
+        }
 
         if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
            || rocblaslt::Debug::Instance().printLogAsMarker()
@@ -3522,7 +3562,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // set XCC=1 to param when this is a fallback solution
             data->problem.setParams().setWGMXCC((isCUFallback ? 1 : 0));
 
-            auto kernels = solution->solve(data->problem, GetTensileInputs(prob), *hardware);
+            // Build the inputs here rather than inline, so the flag pointer can
+            // be pointed at this solution's region before the kernel arguments
+            // are packed. Passing GetTensileInputs(prob) straight in would use
+            // the problem's original pointer and drop the choice.
+            auto skInputs = GetTensileInputs(prob);
+            bindFlagRegion(prob, *solution, skInputs);
+            auto kernels = solution->solve(data->problem, skInputs, *hardware);
             // Remove this after supports getting comgr buffers from hip.
             bool isPreloaded = false;
             if(rocblaslt::Debug::Instance().preload())
@@ -3832,6 +3878,27 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->inputs.workspaceSize = workspaceSizeInBytes;
             data->problem.setWorkspaceSize(workspaceSizeInBytes);
 
+            // The object API learns its stream here, not at create time, and the
+            // flag pointer is baked into the kernel arguments by solve() just
+            // below. If this solution reads the flags as Stream-K, point them at
+            // a region private to this stream so two Gemm objects initialized on
+            // different streams cannot share one.
+            if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
+               && !solution->problemType.outputAmaxD)
+            {
+                void* region = nullptr;
+                if(rocblaslt_status s = handle->streamKFlagsForStream(stream, 0, &region);
+                   s != rocblaslt_status_success)
+                {
+                    log_error(__func__,
+                              "no Stream-K flag region left: this handle has already handed "
+                              "one to c_syncSkStreamSlots distinct streams");
+                    return s;
+                }
+                if(region != nullptr)
+                    data->inputs.Synchronizer = region;
+            }
+
             data->kernels = solution->solve(data->problem, data->inputs, *hardware);
         }
         else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -3908,6 +3975,35 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             {
                 data->problem.gemms[i].setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
                 data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
+            }
+
+            // Grouped GEMM does select Stream-K solutions, so isolation has to
+            // cover the stream as well as the problem index: offsetting by index
+            // alone keeps one grouped call internally safe but still shares the
+            // region with every other stream.
+            if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
+               && !solution->problemType.outputAmaxD)
+            {
+                for(size_t i = 0; i < data->inputs.grouped.size(); i++)
+                {
+                    // SynchronizerSizeCheck refuses every solution that uses
+                    // these flags once the group is wider than the block, so
+                    // problems past it never read the pointer. Give them the
+                    // stream's first region rather than failing a call that runs
+                    // fine without it.
+                    const size_t slot   = i < _rocblaslt_handle::c_syncSkSlotsPerStream ? i : 0;
+                    void*        region = nullptr;
+                    if(rocblaslt_status s = handle->streamKFlagsForStream(stream, slot, &region);
+                       s != rocblaslt_status_success)
+                    {
+                        log_error(__func__,
+                                  "no Stream-K flag region left: this handle has already "
+                                  "handed one to c_syncSkStreamSlots distinct streams");
+                        return s;
+                    }
+                    if(region != nullptr)
+                        data->inputs.grouped[i].Synchronizer = region;
+                }
             }
 
             data->useUserArgs = useUserArgs;
