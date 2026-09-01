@@ -326,6 +326,40 @@ class TestSetup:
 class TestMain:
     """Test main function"""
 
+    def test_main_loads_bundled_known_bugs_only_when_requested(self):
+        """The bundled resource requires the explicit parser sentinel."""
+        from Tensile.TensileLogic.ParseArguments import BUNDLED_KNOWN_BUGS
+        from Tensile.TensileLogic.Run import main
+
+        with patch('Tensile.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
+             patch('Tensile.TensileLogic.Run.load_bundled_known_bugs') as mock_load_bundled, \
+             patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_file, \
+             patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
+             patch('Tensile.TensileLogic.Run.reset_reported_failures'), \
+             patch('warnings.filterwarnings'):
+
+            mock_args = Mock()
+            mock_args.Verbose = 2
+            mock_args.KnownBugs = BUNDLED_KNOWN_BUGS
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                test_file = Path(tmpdir) / "logic.yaml"
+                test_file.write_text("dummy")
+                mock_setup.return_value = (
+                    4, {}, Path(tmpdir), [test_file],
+                    Check(OnlyCustomKernels=False, All=True),
+                    mock_args
+                )
+                known_bugs = frozenset({("logic.yaml", 7)})
+                mock_load_bundled.return_value = known_bugs
+                mock_parallel_map.return_value = [(5, 5, 0, 0, 0)]
+
+                main()
+
+                mock_load_bundled.assert_called_once_with()
+                mock_load_file.assert_not_called()
+                assert mock_parallel_map.call_args.args[0].args[3] == known_bugs
+
     def test_main_basic_execution(self):
         """main should execute full workflow"""
         from Tensile.TensileLogic.Run import main

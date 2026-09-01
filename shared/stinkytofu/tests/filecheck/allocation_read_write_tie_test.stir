@@ -1,0 +1,27 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=s --RegisterAllocationPass=allocator=greedy-compact,classes=s,apply --print-output
+#
+# s_cmov_b32 reads its destination on the path where it does not write it:
+# `s_cmov_b32 d, s` is `if (SCC) d = s`, so on the untaken path d keeps what it
+# already held. HwInstDesc marks that field isReadWrite, and the destination and
+# the source naming the same register must therefore end up in one register --
+# otherwise the untaken path yields whatever was in d rather than the value the
+# IR says it should.
+#
+# The input is written deliberately untied, dest s41 against old-value s40, so
+# the colouring has to bring them together rather than merely preserve them.
+#
+# CHECK-LABEL: @allocation_read_write_tie
+# CHECK: ^entry:
+# CHECK-NEXT: s0, SCC0 = "st.s_sub_u32"(s24, s25)
+#
+# Destination and old-value operand are the same register.
+# CHECK-NEXT: s0 = "st.s_cmov_b32"(0, s0, SCC0)
+#
+# CHECK-NOT: %
+
+st.func @allocation_read_write_tie() {
+^entry:
+  s40, SCC0 = "st.s_sub_u32"(s24, s25) { issueCycles = 1, latencyCycles = 2 }
+  s41 = "st.s_cmov_b32"(0, s40, SCC0) { issueCycles = 1, latencyCycles = 2 }
+  s42 = "st.s_mov_b32"(s41) { issueCycles = 1, latencyCycles = 2 }
+}

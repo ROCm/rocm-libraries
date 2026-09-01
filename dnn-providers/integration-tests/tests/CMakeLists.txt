@@ -67,6 +67,8 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceConvolution.cpp
     gpu-ref/TestGpuFpReferenceSdpa.cpp
     gpu-ref/TestGpuFpReferenceDgrad.cpp
+    gpu-ref/TestGpuFpReferenceLayernormBwd.cpp
+    gpu-ref/TestGpuFpReferenceLayernormFwd.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
     gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp
@@ -76,6 +78,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestShallowDeviceOnlyMigratableMemory.cpp
     gpu-ref/TestShallowGpuTensor.cpp
     gpu-ref/TestGpuFpReferenceCommon.cpp
+    gpu-ref/TestGpuFpReferenceBatchnormFwdInf.cpp
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests
