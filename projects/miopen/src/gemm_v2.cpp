@@ -358,7 +358,9 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                   Data_t C,
                                   std::size_t c_offset,
                                   hipDataType hip_type_C,
-                                  bool skip_batches)
+                                  bool skip_batches,
+                                  Data_t user_workspace,
+                                  std::size_t user_workspace_size)
 {
     HipBLASLtMemoryHandles hipBLASLtHandles;
 
@@ -443,10 +445,11 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
     check_hipblas_status(hipblasLtMatmulDescSetAttribute(
         hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
 
-    /// \todo Need to request additional workspace for optimal gemm performance, and pass down
-    /// workspace size & pointer. --BrianHarrisonAMD June 2024
-    size_t max_workspace_size = 0;
-    void* workspace           = nullptr;
+    /// \todo Callers that do not supply a workspace still get the workspace-free heuristic.
+    /// --BrianHarrisonAMD June 2024
+    size_t max_workspace_size =
+        (user_workspace != nullptr && !gemm_desc.deterministic) ? user_workspace_size : 0;
+    void* workspace = (max_workspace_size != 0) ? user_workspace : nullptr;
     check_hipblas_status(hipblasLtMatmulPreferenceCreate(&hipBLASLtHandles.pref));
     check_hipblas_status(
         hipblasLtMatmulPreferenceSetAttribute(hipBLASLtHandles.pref,
@@ -510,7 +513,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                        std::size_t b_offset,
                                        Data_t C,
                                        std::size_t c_offset,
-                                       bool skip_batches)
+                                       bool skip_batches,
+                                       Data_t user_workspace           = nullptr,
+                                       std::size_t user_workspace_size = 0)
 {
     switch(gemm_desc.dataType)
     {
@@ -533,7 +538,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                             C,
                                                             c_offset,
                                                             HIP_R_16F,
-                                                            skip_batches);
+                                                            skip_batches,
+                                                            user_workspace,
+                                                            user_workspace_size);
     }
     break;
     case miopenBFloat16: {
@@ -547,7 +554,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                                     C,
                                                                     c_offset,
                                                                     HIP_R_16BF,
-                                                                    skip_batches);
+                                                                    skip_batches,
+                                                                    user_workspace,
+                                                                    user_workspace_size);
     }
     break;
     case miopenFloat: {
@@ -561,7 +570,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                               C,
                                                               c_offset,
                                                               HIP_R_32F,
-                                                              skip_batches);
+                                                              skip_batches,
+                                                              user_workspace,
+                                                              user_workspace_size);
     }
     break;
     case miopenFloat8_fnuz: {
@@ -578,7 +589,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                                         C,
                                                                         c_offset,
                                                                         HIP_R_8F_E4M3_FNUZ,
-                                                                        skip_batches);
+                                                                        skip_batches,
+                                                                        user_workspace,
+                                                                        user_workspace_size);
         }
         else
         {
@@ -602,7 +615,9 @@ static void call_miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                                           C,
                                                                           c_offset,
                                                                           HIP_R_8F_E5M2_FNUZ,
-                                                                          skip_batches);
+                                                                          skip_batches,
+                                                                          user_workspace,
+                                                                          user_workspace_size);
 #else
             MIOPEN_THROW(
                 miopenStatusInternalError,
@@ -664,7 +679,9 @@ miopenStatus_t CallGemm(const Handle& handle,
                         std::size_t b_offset,
                         Data_t C,
                         std::size_t c_offset,
-                        GemmBackend_t gemm_backend)
+                        GemmBackend_t gemm_backend,
+                        Data_t workspace,
+                        std::size_t workspace_size)
 {
     MIOPEN_LOG_I2("gemm_desc: " << gemm_desc);
 
@@ -914,7 +931,17 @@ miopenStatus_t CallGemm(const Handle& handle,
     }
     case GemmBackend_t::hipblaslt: {
 #if MIOPEN_USE_HIPBLASLT
-        call_miopen_hipblasLt_gemm(handle, gemm_desc, A, a_offset, B, b_offset, C, c_offset, true);
+        call_miopen_hipblasLt_gemm(handle,
+                                   gemm_desc,
+                                   A,
+                                   a_offset,
+                                   B,
+                                   b_offset,
+                                   C,
+                                   c_offset,
+                                   true,
+                                   workspace,
+                                   workspace_size);
         return miopenStatusSuccess;
 #else
         return miopenStatusNotImplemented;
