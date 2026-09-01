@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/FusedA2AKernArg.hpp>
 
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -1006,7 +1007,10 @@ namespace TensileLite
             // For now grouped gemm is not supported and passes nullptr
             TENSILE_ASSERT_EXC(hardware != nullptr);
 
-            // StreamK workspace + flags
+            // StreamK workspace + flags. Synchronizer has already been pointed
+            // at the per-stream Stream-K region by the host for this solution,
+            // which is what keeps two concurrent Stream-K kernels from clearing
+            // each other's flags.
             args.template append<void const*>("ws", inputs.ws);
             if(sk.reduction == origami::reduction_t::parallel)
                 args.template append<void*>("Flags", nullptr);
@@ -1792,17 +1796,15 @@ namespace TensileLite
             gsuVal = std::min(gsuVal, static_cast<uint32_t>(std::ceil(static_cast<float>(K) / MT2)));
 
         // SynchronizerSizeCheck
+        //
+        // MBSK owns one GSU region, indexed by problem. Bounding usage by the
+        // region size is what makes a solution unable to run past the end of it.
         if(gsuVal > 1 && sizeMapping.globalAccumulation == 3) // MBSK
         {
             uint32_t synchronizerUsage
                 = sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B;
 
-            if (problem.groupedGemm() && (problem.groupedGemmCount() > 1))
-            {
-                gsuVal = synchronizerUsage > (409600 * 16 / problem.groupedGemmCount()) ? 1 : gsuVal;
-            }
-            else
-                gsuVal = synchronizerUsage > (409600 * 16) ? 1 : gsuVal;
+            gsuVal = synchronizerUsage > GsuSynchronizerElements ? 1 : gsuVal;
         }
 
         // Avoid selecting a gsu value that would make launch grid over the limit
@@ -2364,6 +2366,16 @@ namespace TensileLite
             rv.args.append<int64_t>("batchOffsetA", inputs.batchOffsetA);
             rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
         }
+
+        // The fused GEMM+A2A segment follows batchOffsets in the kernel signature.
+        if(problem.fusedGemmA2A())
+            appendFusedSegment(rv.args,
+                               inputs.fusedA2APeers,
+                               inputs.fusedA2ACounter,
+                               inputs.fusedA2AMyRank,
+                               problem.fusedA2AWorld(),
+                               inputs.fusedA2ADrain,
+                               static_cast<uint32_t>(problem.fusedA2AExtent()));
 
         if(problemType.stochasticRounding)
         {
@@ -5820,6 +5832,50 @@ namespace TensileLite
                       > 1)
             {
                 skGrid = tiles;
+            }
+
+            // The flag region holds one int per Stream-K workgroup, indexed by
+            // CTA id ("flag offset based on CTA index" in StreamK.py), so a grid
+            // wider than the region would have workgroups writing past the end
+            // of their own block. Every caller reaches skGrid through here and
+            // this is the last write, so it is the one place the bound has to
+            // hold.
+            //
+            // Only the launches that actually reach the flags are bounded:
+            //
+            //   - atomic and ForceDPOnly kernels never take the pointer at all
+            //     (see the Flags kernarg in singleCallArgs)
+            //   - parallel reduction is passed Flags == nullptr, and the kernel
+            //     branches on that to skip the flag protocol
+            //   - tiles % skGrid == 0 spreads the tiles evenly over the
+            //     workgroups, so no partial tiles exist to fix up. This is the
+            //     same test the workspace sizing uses to decide whether partials
+            //     exist, and it is what excludes every data-parallel path: they
+            //     all arrive at skGrid == tiles, whether from K == 0, from the
+            //     tree-fixup bound above, or from the data-parallel debug knob.
+            //
+            // Clamping outside those cases would shrink a grid that has no flag
+            // region to overrun, and against the data-parallel fallbacks it
+            // would do real harm: the tree-fixup bound sets skGrid = tiles
+            // precisely to leave Stream-K behind, and cutting that back would
+            // return the launch to the K-split it was escaping. No current part
+            // reaches the bound on the paths that are checked; gfx950 has 256
+            // CUs and picks 224.
+            const bool usesFlagRegion = self.sizeMapping.streamKAtomic == 0
+                                        && self.sizeMapping.streamKForceDPOnly == 0
+                                        && reductionStrat != origami::reduction_t::parallel
+                                        && skGrid > 0 && (tiles % skGrid) != 0;
+
+            if(usesFlagRegion && skGrid > static_cast<size_t>(StreamKFlagElements))
+            {
+                if(Debug::Instance().printPropertyEvaluation())
+                {
+                    std::cerr << "TensileLite::DEBUG: kernel '" << self.kernelName
+                              << "' StreamK grid " << skGrid << " exceeds the "
+                              << StreamKFlagElements << "-entry flag region (tiles=" << tiles
+                              << "); clamping the grid to " << StreamKFlagElements << ".\n";
+                }
+                skGrid = StreamKFlagElements;
             }
 
             return skGrid;

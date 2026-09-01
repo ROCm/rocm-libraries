@@ -38,6 +38,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
@@ -63,11 +64,15 @@
 #include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyUnreachableBlockElimPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
+#include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
+#include "stinkytofu/transforms/ssa/ReplayLegacyColoringPass.hpp"
+#include "stinkytofu/transforms/ssa/SSADestruction.hpp"
 
 using namespace stinkytofu;
 
@@ -157,8 +162,41 @@ const std::vector<PassInfo> availablePasses = {
          return createBuildUseDefChainPass(clearExisting, includePseudo);
      }},
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
+    // Erases blocks not reachable from the entry along CFG successor edges.
+    // Run after CFGBuilderPass / LongBranchLoweringPass; an incomplete CFG
+    // would make this delete live targets.
+    {"StinkyUnreachableBlockElimPass",
+     [](const auto&) { return createStinkyUnreachableBlockElimPass(); }},
+    // Discards physical-register PHIs and def-use chains. Lifting rejects a
+    // leftover analysis PHI, so this runs immediately before
+    // LiftAsmRegistersToSSAPass rather than inside it.
+    {"RemoveDefUseAnalysisPass", [](const auto&) { return createRemoveDefUseAnalysisPass(); }},
+    // LiftAsmRegistersToSSAPass accepts:
+    //   strictLiveIns  — reject a read with no reaching definition instead of
+    //                    inferring a function live-in
+    //   noVerify       — skip attached SSA verification after construction
+    {"LiftAsmRegistersToSSAPass",
+     [](const std::vector<std::string>& args) {
+         LiftAsmRegistersToSSAOptions options;
+         options.allowInferredLiveIns = !hasPassArg(args, "strictLiveIns");
+         options.verify = !hasPassArg(args, "noVerify");
+         return createLiftAsmRegistersToSSAPass(options);
+     }},
+    // ReplayLegacyColoringPass lowers attached SSA back to the registers it was
+    // lifted from. Lift followed by replay must not change the program.
+    {"ReplayLegacyColoringPass", [](const auto&) { return createReplayLegacyColoringPass(); }},
+    // DumpStinkyModulePass accepts:
+    //   ssaForm  — print attached SSA values instead of physical registers
+    //   stdout   — print to stdout instead of dump_module.stir
     {"DumpStinkyModulePass",
-     [](const auto&) { return createDumpStinkyModulePass({.stirPath = "dump_module.stir"}); }},
+     [](const std::vector<std::string>& args) {
+         const bool toStdout = hasPassArg(args, "stdout");
+         DumpStinkyModulePassConfig config;
+         config.stirPath = toStdout ? std::string{} : "dump_module.stir";
+         config.stirToStdout = toStdout;
+         config.printerOptions.ssaForm = hasPassArg(args, "ssaForm");
+         return createDumpStinkyModulePass(std::move(config));
+     }},
     {"DumpMemTokenIRStructurePass",
      [](const auto&) {
          return createDumpMemTokenIRStructurePass({.path = "dump_memtoken_ir_structure.txt"});
