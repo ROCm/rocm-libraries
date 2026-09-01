@@ -443,22 +443,18 @@ rocblas_local_handle::rocblas_local_handle()
 
 rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
 {
+    // These guards restore the previous environment on destruction. Because they are members,
+    // they are destroyed even if this constructor throws below (e.g. rocblas_create_handle
+    // failing), which a restore in ~rocblas_local_handle() would not be.
     if(arg.use_hipblaslt >= 0)
     {
-        auto hipblaslt_env = getenv("ROCBLAS_USE_HIPBLASLT");
-        if(hipblaslt_env)
-            m_hipblaslt_saved_status = std::string(hipblaslt_env);
-        m_hipblaslt_env_set = true;
-        setenv("ROCBLAS_USE_HIPBLASLT", std::to_string(arg.use_hipblaslt).c_str(), true);
+        m_hipblaslt_env.emplace("ROCBLAS_USE_HIPBLASLT",
+                                std::to_string(arg.use_hipblaslt).c_str());
     }
 
     if(arg.graph_test)
     {
-        auto stream_order_env = getenv("ROCBLAS_STREAM_ORDER_ALLOC");
-        if(stream_order_env)
-            m_stream_order_saved_status = std::string(stream_order_env);
-        m_stream_order_env_set = true;
-        setenv("ROCBLAS_STREAM_ORDER_ALLOC", "1", true);
+        m_stream_order_env.emplace("ROCBLAS_STREAM_ORDER_ALLOC", "1");
     }
 
     auto status = rocblas_create_handle(&m_handle);
@@ -529,17 +525,11 @@ rocblas_local_handle::~rocblas_local_handle()
         PRINT_IF_HIP_ERROR((hipFree)(m_memory));
     }
 
-    if(m_hipblaslt_env_set)
-    {
-        setenv("ROCBLAS_USE_HIPBLASLT", m_hipblaslt_saved_status.c_str(), true);
-    }
-
     rocblas_destroy_handle(m_handle);
 
-    if(m_stream_order_env_set)
-    {
-        setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
-    }
+    // m_hipblaslt_env / m_stream_order_env restore the environment when they are destroyed,
+    // which happens after this body returns (members are destroyed in reverse declaration
+    // order, and they are declared first).
 }
 
 void rocblas_local_handle::rocblas_stream_begin_capture()

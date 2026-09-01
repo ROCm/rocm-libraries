@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -109,17 +110,59 @@ void rocblas_parallel_initialize(int parallel_devices);
 extern thread_local std::unique_ptr<std::function<void(rocblas_handle)>> t_set_stream_callback;
 
 /* ============================================================================================ */
+/*! \brief  Sets an environment variable for the lifetime of this object, restoring the previous
+ *          value -- or unsetting it, if it had none -- on destruction.
+ *
+ *  This is a *member* of rocblas_local_handle rather than plain code in its constructor body
+ *  for a specific reason: if a constructor throws from its body, the enclosing object's
+ *  destructor is NOT run, but the destructors of its already-constructed members ARE.
+ *  Performing the restore in ~rocblas_local_handle() therefore leaks the variable
+ *  process-wide whenever rocblas_create_handle() fails, poisoning every subsequent test in
+ *  the same process.
+ */
+class scoped_env_var
+{
+    std::string m_name;
+    std::string m_old_value;
+    bool        m_had_old_value{false};
+
+public:
+    scoped_env_var(const char* name, const char* value)
+        : m_name(name)
+    {
+        const char* old = getenv(name);
+        m_had_old_value = (old != nullptr);
+        if(m_had_old_value)
+            m_old_value = old;
+        setenv(name, value, true);
+    }
+
+    ~scoped_env_var()
+    {
+        if(m_had_old_value)
+            setenv(m_name.c_str(), m_old_value.c_str(), true);
+        else
+            unsetenv(m_name.c_str()); // was not set before: unset, do not leave it empty
+    }
+
+    scoped_env_var(const scoped_env_var&) = delete;
+    scoped_env_var(scoped_env_var&&)      = delete;
+    scoped_env_var& operator=(const scoped_env_var&) = delete;
+    scoped_env_var& operator=(scoped_env_var&&) = delete;
+};
+
+/* ============================================================================================ */
 /*! \brief  local handle which is automatically created and destroyed  */
 class rocblas_local_handle
 {
+    // Declared first => destroyed last, i.e. after m_handle has been released.
+    std::optional<scoped_env_var> m_hipblaslt_env;
+    std::optional<scoped_env_var> m_stream_order_env;
+
     rocblas_handle m_handle{nullptr};
     void*          m_memory{nullptr};
     hipStream_t    m_graph_stream{nullptr};
     hipStream_t    m_old_stream{nullptr};
-    std::string    m_hipblaslt_saved_status    = "";
-    std::string    m_stream_order_saved_status = "";
-    bool           m_hipblaslt_env_set{false};
-    bool           m_stream_order_env_set{false};
 
     void rocblas_stream_begin_capture();
     void rocblas_stream_end_capture();
