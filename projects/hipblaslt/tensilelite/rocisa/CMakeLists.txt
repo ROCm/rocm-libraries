@@ -167,30 +167,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                     set(STINKYTOFU_BUILD_PYTHON OFF CACHE BOOL
                         "Build StinkyTofu Python bindings" FORCE)
                 endif()
-                block()
-                    if(NOT ROCISA_STANDALONE)
-                        # hipBLASLt owns the installed codegen payload. Let
-                        # stinkytofu's native install rules join its devel
-                        # component instead of copying the same library here.
-                        set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME devel)
-                    endif()
-                    add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
-                endblock()
-                if(NOT ROCISA_STANDALONE)
-                    # EXCLUDE_FROM_ALL also omits a subdirectory's install
-                    # script from its parent. Keep the build private while
-                    # retaining stinkytofu as the native owner of the
-                    # production install rules. The child script contains
-                    # explicit tools/runtime components too, so force only
-                    # its devel rules while it is included.
-                    install(CODE
-                        "set(_stinkytofu_install_component \"\${CMAKE_INSTALL_COMPONENT}\")
-set(CMAKE_INSTALL_COMPONENT devel)
-include(\"${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/cmake_install.cmake\")
-set(CMAKE_INSTALL_COMPONENT \"\${_stinkytofu_install_component}\")
-unset(_stinkytofu_install_component)"
-                        COMPONENT devel)
-                endif()
+                add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
                 set(_stinkytofu_from_subdirectory TRUE)
             else()
                 message(FATAL_ERROR "stinkytofu not found via find_package or sibling directory")
@@ -217,6 +194,15 @@ unset(_stinkytofu_install_component)"
         set(_stinkytofu_shared TRUE)
     else()
         set(_stinkytofu_shared FALSE)
+    endif()
+
+    if(NOT ROCISA_STANDALONE AND _stinkytofu_from_subdirectory AND _stinkytofu_shared)
+        # hipBLASLt owns the private runtime needed by its installed _rocisa.
+        # Keep the SONAME link needed by the loader, but do not publish
+        # StinkyTofu's headers, export targets, or CMake package.
+        install(TARGETS stinkytofu
+            LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel NAMELINK_SKIP
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT devel)
     endif()
 
     target_link_libraries(_rocisa PUBLIC roc::origami)
