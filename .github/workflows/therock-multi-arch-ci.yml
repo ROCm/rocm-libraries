@@ -18,6 +18,10 @@ name: TheRock Multi-Arch CI
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
   pull_request:
     types:
       - opened
@@ -131,8 +135,8 @@ jobs:
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
             --github-repo "${{ github.repository }}" \
-            --base-sha "${{ github.event.pull_request.base.sha }}" \
-            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
+            --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
 
   setup:
