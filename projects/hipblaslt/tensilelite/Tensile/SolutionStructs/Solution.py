@@ -281,6 +281,20 @@ def _validateSubtileGRKPartition(state, printRejectionReason):
              "whole strips nor shares one"
              % (tc, perWaveMTiles, stack))
       return False
+    # A shared strip is addressed as a whole number of per-wave MFMA windows, so
+    # the strip height has to divide by the wave's MIWaveTile.  perWaveMTiles
+    # above is the padded share, which can hide the misalignment: a 24-tile dim
+    # over 4 waves pads to 8 and looks clean against a strip of 16, while the
+    # wave actually owns 6 and straddles the strip boundary.
+    miWaveTile = int(state["MIWaveTile"][0 if tc == 'A' else 1])
+    wavesPerStrip = max(1, stack // perWaveMTiles) if perWaveMTiles else 1
+    if wavesPerStrip > 1 and miWaveTile and stack % miWaveTile != 0:
+      reject(state, printRejectionReason,
+             "UseSubtileImpl=1 shares an LDS strip on tensor %s between waves whose "
+             "MIWaveTile %d does not divide the strip of %d, so a wave's MFMA tiles "
+             "cross the strip boundary"
+             % (tc, miWaveTile, stack))
+      return False
     loadRatioGR = tileInfo.loadRatioGR
     localSubtileGrid = tileInfo.localSubtileGrid
     if _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):

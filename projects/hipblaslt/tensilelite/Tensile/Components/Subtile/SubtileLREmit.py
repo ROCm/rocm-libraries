@@ -788,10 +788,32 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
     else:
       module.add(VLShiftRightB32(dst=vgpr(wv), shiftHex=hex(mWaves.bit_length() - 1),
                  src=vgpr(wv), comment="%s: waveIdN = waveId / %d" % (tc, mWaves)))
+    # A shared strip holds wavesPerStrip waves' M windows and no more, so the
+    # axis id splits: its low bits pick the window inside the strip, its high
+    # bits pick the strip.  With one strip the high part is zero and this is the
+    # plain axisId*perWaveBytes.
+    strips = int(tileInfo.globalSubtileGrid[0])
+    stripVgpr = None
+    if wavesPerStrip > 1 and strips > 1:
+      stripVgpr = writer.vgprPool.checkOut(1, tag="_lraTileAssignment_tlu_strip")
+      module.add(VLShiftRightB32(dst=vgpr(stripVgpr),
+                 shiftHex=hex(wavesPerStrip.bit_length() - 1), src=vgpr(wv),
+                 comment="%s: strip = axisId / %u" % (tc, wavesPerStrip)))
+      module.add(VAndB32(dst=vgpr(wv), src0=vgpr(wv), src1=hex(wavesPerStrip - 1),
+                 comment="%s: window = axisId %% %u" % (tc, wavesPerStrip)))
     tmpS = writer.sgprPool.checkOut(1, tag="_lraTileAssignment_tlu_wave_s", preventOverflow=False)
     module.add(SMovB32(dst=sgpr(tmpS), src=hex(perWaveBytes), comment="%s: LDS wave stride" % tc))
     module.add(VMulLOU32(dst=vgpr(wv), src0=sgpr(tmpS), src1=vgpr(wv),
                comment="%s: wave LDS strip base = axisId*%d" % (tc, perWaveBytes)))
+    if stripVgpr is not None:
+      stripBytes = int(stripStrideBytes(tileInfo))
+      module.add(SMovB32(dst=sgpr(tmpS), src=hex(stripBytes),
+                 comment="%s: LDS bytes per strip" % tc))
+      module.add(VMulLOU32(dst=vgpr(stripVgpr), src0=sgpr(tmpS), src1=vgpr(stripVgpr),
+                 comment="%s: strip * %u" % (tc, stripBytes)))
+      module.add(VAddU32(dst=vgpr(wv), src0=vgpr(wv), src1=vgpr(stripVgpr),
+                 comment="%s: + strip LDS offset" % tc))
+      writer.vgprPool.checkIn(stripVgpr)
     writer.sgprPool.checkIn(tmpS)
     module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(wv),
                comment="%s: + per-wave LDS strip offset" % tc))
