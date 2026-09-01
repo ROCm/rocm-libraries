@@ -293,21 +293,26 @@ TEST(TestConvFwdPack, ShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes)
 {
     const auto& set = loadedSet("hipkernel:ConvFwd");
 
-    ASSERT_EQ(set.packs.size(), 1U);
-    const auto& kernels = set.packs.front().kernels;
-    ASSERT_EQ(kernels.size(), 3U);
+    ASSERT_EQ(distinctPackIdCount(set), 1U);
+    for(const auto& pack : set.packs)
+    {
+        const auto& kernels = pack.kernels;
+        ASSERT_EQ(kernels.size(), 3U) << pack.name;
 
-    const auto describes = [&kernels](int64_t blockSize, const std::string& dtype) {
-        return std::any_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
-            return std::get<int64_t>(kernel.metadata.at(std::string(BLOCK_SIZE_FIELD))) == blockSize
-                   && std::get<std::string>(kernel.metadata.at(std::string(DTYPE_FIELD))) == dtype
-                   && kernel.source.symbol == "ConvFwd";
-        });
-    };
+        const auto describes = [&kernels](int64_t blockSize, const std::string& dtype) {
+            return std::any_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+                return std::get<int64_t>(kernel.metadata.at(std::string(BLOCK_SIZE_FIELD)))
+                           == blockSize
+                       && std::get<std::string>(kernel.metadata.at(std::string(DTYPE_FIELD)))
+                              == dtype
+                       && kernel.source.symbol == "ConvFwd";
+            });
+        };
 
-    EXPECT_TRUE(describes(64, "FLOAT"));
-    EXPECT_TRUE(describes(256, "FLOAT"));
-    EXPECT_TRUE(describes(64, "HALF"));
+        EXPECT_TRUE(describes(64, "FLOAT")) << pack.name;
+        EXPECT_TRUE(describes(256, "FLOAT")) << pack.name;
+        EXPECT_TRUE(describes(64, "HALF")) << pack.name;
+    }
 }
 
 TEST(TestConvFwdPack, ExposesBlockSizeAsTheOneKnob)
@@ -429,13 +434,16 @@ TEST(TestConvFwdPack, PinsThePackedConvSource)
 {
     const auto& set = loadedSet("hipkernel:ConvFwd");
 
-    ASSERT_EQ(set.packs.size(), 1U);
-    ASSERT_FALSE(set.packs.front().kernels.empty());
-    for(const auto& kernel : set.packs.front().kernels)
+    ASSERT_EQ(distinctPackIdCount(set), 1U);
+    for(const auto& pack : set.packs)
     {
-        EXPECT_EQ(kernel.source.kind, hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK);
-        EXPECT_FALSE(kernel.source.library.empty()) << kernel.name;
-        EXPECT_EQ(kernel.source.symbol, "ConvFwd");
+        ASSERT_FALSE(pack.kernels.empty()) << pack.name;
+        for(const auto& kernel : pack.kernels)
+        {
+            EXPECT_EQ(kernel.source.kind, hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK);
+            EXPECT_FALSE(kernel.source.library.empty()) << kernel.name;
+            EXPECT_EQ(kernel.source.symbol, "ConvFwd");
+        }
     }
 }
 

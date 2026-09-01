@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -45,7 +46,7 @@ TEST(TestPointwisePacks, EachPackShipsThreeKernelsCoveringTwoBlockSizesAndTwoDat
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
 
-    ASSERT_EQ(set.packs.size(), 3U);
+    ASSERT_EQ(distinctPackIdCount(set), 3U);
     for(const auto& pack : set.packs)
     {
         const auto& kernels = pack.kernels;
@@ -80,6 +81,25 @@ TEST(TestPointwisePacks, EveryKernelNamesItsPacksEmbeddedSource)
             EXPECT_EQ(kernel.source.sourceFile, "Pointwise" + operation + ".cpp");
             EXPECT_EQ(kernel.source.entryPoint, "Pointwise" + operation);
         }
+    }
+}
+
+/// The authored packs claim every architecture. The packer stamps each emitted copy with
+/// the architecture of the shard directory it writes it into. originDirectory is that
+/// directory, so the two must agree pack by pack.
+TEST(TestPointwisePacks, EveryPackNamesTheArchitectureItWasPackedFor)
+{
+    const auto& set = loadedSet("hipkernel:Pointwise");
+
+    ASSERT_FALSE(set.packs.empty());
+    for(const auto& pack : set.packs)
+    {
+        ASSERT_FALSE(pack.arch.empty()) << pack.name;
+        ASSERT_FALSE(pack.kernels.empty()) << pack.name;
+        EXPECT_EQ(
+            pack.arch,
+            std::vector<std::string>{pack.kernels.front().originDirectory.filename().string()})
+            << pack.name;
     }
 }
 

@@ -5,8 +5,10 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -107,6 +109,21 @@ inline const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet(std::string_v
                                  + "'");
     }
     return *match;
+}
+
+/// How many distinct pack ids @p set holds.
+///
+/// The packer emits one copy of a pack per architecture. Every copy keeps the authored
+/// pack id. Count the ids to get the number of authored packs. That count does not
+/// change with the number of architectures.
+inline std::size_t distinctPackIdCount(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set)
+{
+    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> ids;
+    for(const auto& pack : set.packs)
+    {
+        ids.insert(pack.id);
+    }
+    return ids.size();
 }
 
 /// KMD fields both reference packs vary along. Shared because the *schema* shape is
