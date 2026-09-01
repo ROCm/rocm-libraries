@@ -262,14 +262,9 @@
 #endif
 
 // LLVM is switching the AMDGPU f16 builtin signatures from __fp16 to _Float16.
-// TODO: correct this clang version check once that change lands; the cutoff below is a
-// guess and compilers before it still declare those builtins with __fp16.
+// Temporarily hardcode this macro to 0 until a reliable compiler signature is available.
 #ifndef CK_TILE_USE_LLVM_BUILTIN_FLOAT16
-#if defined(__clang_major__) && __clang_major__ >= 24
-#define CK_TILE_USE_LLVM_BUILTIN_FLOAT16 1
-#else
 #define CK_TILE_USE_LLVM_BUILTIN_FLOAT16 0
-#endif
 #endif
 
 // SPIR-V constexpr handling: variables that depend on compile-time architecture
