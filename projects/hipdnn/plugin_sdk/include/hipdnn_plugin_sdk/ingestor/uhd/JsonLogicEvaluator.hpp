@@ -10,12 +10,14 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/CategoricalEncoding.hpp>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -105,8 +107,15 @@ public:
     static nlohmann::json parse(const std::string& jsonStr);
 
     /// Evaluate an expression against a variable context.
+    ///
+    /// When `expr` is a bare `$namespace.field` reference whose binding is a string,
+    /// the field's category is resolved through CategoricalEncoding.hpp (RFC 0019 §6.5)
+    /// so `dtype`, `layout` and their kin can be features at all. Every other numeric
+    /// context still refuses a string.
+    ///
     /// @returns The result as a double (for feature extraction).
-    /// @throws JsonLogicError on evaluation failure.
+    /// @throws JsonLogicError on evaluation failure, on a string that is not an encoded
+    ///         category, and on a value a known category has no code for.
     double evaluateDouble(const nlohmann::json& expr, const VariableContext& ctx) const;
 
     /// Evaluate an expression to a generic value.
@@ -254,7 +263,41 @@ inline nlohmann::json JsonLogicEvaluator::parse(const std::string& jsonStr)
 inline double JsonLogicEvaluator::evaluateDouble(const nlohmann::json& expr,
                                           const VariableContext& ctx) const
 {
-    return toDouble(evaluate(expr, ctx));
+    const Value value = evaluate(expr, ctx);
+
+    // RFC 0019 §6.5: a features_signature entry naming a string-valued field is the one
+    // numeric context where a string is not a type error. It is a category, and
+    // CategoricalEncoding.hpp says which number it is -- globally, so `dtype="fp16"`
+    // is the same feature value whichever engine asked (§11.3).
+    //
+    // Deliberately here and not in toDouble. toDouble is *every* operator's numeric
+    // context, so encoding there would also make {"+": ["$kernel.dtype", 1]} succeed --
+    // arithmetic on a category, which has no meaning and must keep failing. Only the
+    // signature entry itself is a place a category legitimately becomes a number.
+    if(const auto* text = std::get_if<std::string>(&value); text != nullptr && expr.is_string())
+    {
+        const std::string_view category
+            = categoryOfReference(expr.get_ref<const nlohmann::json::string_t&>());
+        if(const auto code = encodeCategorical(category, *text); code.has_value())
+        {
+            return *code;
+        }
+        if(isKnownCategory(category))
+        {
+            // Distinct from toDouble's blanket type error on purpose. The category is
+            // one we encode, so this is a value the fixed table has never been told
+            // about -- a catalog that moved past what any model was trained on. Scoring
+            // it would put an unseen kernel on the same axis as seen ones; refusing
+            // makes the gap visible at the signature entry that has the problem.
+            throw JsonLogicError("Categorical value \"" + *text + "\" has no code in category '"
+                                 + std::string(category)
+                                 + "'. Append it to CATEGORICAL_ENCODING_TABLE in "
+                                   "CategoricalEncoding.hpp and mirror it in "
+                                   "tools/uhd_gen/features.py; existing codes must not move.");
+        }
+    }
+
+    return toDouble(value);
 }
 
 inline JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& expr,

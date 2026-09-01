@@ -18,10 +18,57 @@ import lightgbm as lgb
 import numpy as np
 from sklearn.model_selection import GroupKFold
 
+from .features import encode_feature_value
+
 if TYPE_CHECKING:
     import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def build_feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> np.ndarray:
+    """Turn the raw benchmark-log columns into the float matrix LightGBM trains on.
+
+    The log carries raw values: a string field such as `kernel.dtype` arrives as the
+    string `"fp16"`, not a number. This is the training side of RFC 0019 §6.5 -- every
+    string-valued column is encoded through the fixed table in features.py, which is
+    the same table the C++ runtime reads, so a split threshold learned here means the
+    same data type when the runtime recomputes the feature.
+
+    Applied unconditionally, with nothing for the caller to select. The mapping is
+    global and fixed, so a switch could only ever produce a model whose numbers
+    disagree with what the runtime will compute.
+
+    An unencodable value raises. Dropping the column, coercing it, or handing the
+    string to LightGBM as a pandas `category` would each yield a model that trains and
+    saves and then cannot be reproduced at inference -- the runtime throws on exactly
+    this string, so training has to as well.
+    """
+    if not feature_cols:
+        raise ValueError("no feature columns; there is nothing to train on")
+
+    columns = []
+    for name in feature_cols:
+        series = df[name]
+        # numpy kinds b/i/u/f are the numeric ones. Object, string and pandas
+        # `category` all report something else, and `category` in particular is what
+        # pandas would quietly hand LightGBM as an integer code of its own choosing --
+        # first-seen order, per DataFrame, which is precisely the encoding RFC 0019
+        # §6.5 rules out.
+        if getattr(series.dtype, "kind", "O") in "biuf":
+            columns.append(series.to_numpy(dtype=np.float64))
+            continue
+
+        reference = f"${name}"
+        encoded = np.empty(len(series), dtype=np.float64)
+        for row, raw in enumerate(series):
+            try:
+                encoded[row] = encode_feature_value(reference, raw)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"feature column {name!r}, row {row}: {error}") from error
+        columns.append(encoded)
+
+    return np.column_stack(columns)
 
 
 def train_model(
@@ -40,7 +87,8 @@ def train_model(
     problem leakage (same problem appearing in both train and validation).
 
     Args:
-        df: DataFrame with feature columns and target column.
+        df: DataFrame with feature columns and target column, holding raw logged
+            values -- string-valued columns are encoded here, not by the caller.
         feature_cols: List of column names to use as features.
         target_col: Name of target column (e.g., "tflops").
         group_cols: Optional columns for GroupKFold grouping.
@@ -52,7 +100,7 @@ def train_model(
     Returns:
         Trained LightGBM Booster.
     """
-    X = df[feature_cols].values
+    X = build_feature_matrix(df, feature_cols)
     y = np.log1p(df[target_col].values)
 
     if params is None:
