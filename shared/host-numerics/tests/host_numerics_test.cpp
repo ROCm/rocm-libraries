@@ -1586,15 +1586,6 @@ void testStridedAndOffsetViews() {
 void testGenerationAndComparison() {
     using namespace roc::host_numerics;
 
-    require(deriveDeterministicSeed(7, 3, 11) == deriveDeterministicSeed(7, 3, 11),
-            "Deterministic seed derivation is not repeatable.");
-    require(deriveDeterministicSeed(7, 3, 11) != deriveDeterministicSeed(7, 3, 12),
-            "Deterministic seed derivation does not vary by sequence index.");
-    require(deriveDeterministicSeed(0, 0, 0) == 0x6e789e6aa1b965f4ULL &&
-                deriveDeterministicSeed(7, 3, 11) == 0xf6dd3a1482c56d3fULL &&
-                deriveDeterministicSeed(42, 9, 123456789) == 0x91a0834ef3c62df8ULL,
-            "Deterministic seed derivation sequence changed.");
-
     const GenerationRecipe binaryGeneration = GenerationRecipe::realOnly(
         GenerationRecipe::candidateSet({.values = {-1.0, 1.0}}), {.seed = 42});
     Tensor a(ScalarType::Float32, Shape{32});

@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <roc/host_numerics/generation.hpp>
 
 namespace hipblaslt::host_numerics
 {
@@ -14,8 +13,6 @@ namespace hipblaslt::host_numerics
 
     namespace initialization
     {
-        inline constexpr uint64_t sequenceSeedSalt = 0x484950424c41534cULL;
-
         enum class OperandSequence : uint64_t
         {
             MatrixA = 0,
@@ -26,7 +23,7 @@ namespace hipblaslt::host_numerics
 
         inline uint64_t seedForSequence(uint64_t seed, uint64_t sequence)
         {
-            return roc::host_numerics::deriveDeterministicSeed(seed, sequenceSeedSalt, sequence);
+            return seed + sequence;
         }
 
         inline uint64_t seedForSequence(uint64_t seed, OperandSequence sequence)

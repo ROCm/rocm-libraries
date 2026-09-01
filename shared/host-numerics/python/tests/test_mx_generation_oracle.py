@@ -16,10 +16,8 @@ import roc_host_numerics as hv
 
 
 MASK64 = (1 << 64) - 1
-MX_DATA_RANDOM_DOMAIN = 0x3F84D5B5B5470917
-MX_NORMAL_RANDOM_DOMAIN = 0x9216D5D98979FB1B
+GENERATION_REAL_RANDOM_DOMAIN = 0
 MX_BOUNDED_SCALE_RANDOM_DOMAIN = 0xA24BAED4963EE407
-MX_UNBOUNDED_DATA_RANDOM_DOMAIN = 0xD1B54A32D192ED03
 MX_UNBOUNDED_SCALE_RANDOM_DOMAIN = 0x94D049BB133111EB
 TWO_PI = 6.28318530717958647692528676655900576
 
@@ -126,22 +124,18 @@ class Recipe:
     integer_upper: int = 1
 
     def native(self, shape, seed):
-        def recipe(component, random_domain=MX_DATA_RANDOM_DOMAIN):
+        def recipe(component):
             return hv.GenerationRecipe.real_only(
                 component,
                 hv.GenerationRecipeSettings(
                     seed=seed,
                     index_order=hv.IndexOrder.FirstDimensionFastest,
-                    random_domain=random_domain,
                 ),
             )
 
         if self.kind is RecipeKind.UNBOUNDED:
             return (
-                recipe(
-                    hv.GenerationRecipe.uniform_finite_encoded_value(),
-                    MX_UNBOUNDED_DATA_RANDOM_DOMAIN,
-                ),
+                recipe(hv.GenerationRecipe.uniform_finite_encoded_value()),
                 hv.MxDataQuantization.PreserveGeneratedEncoding,
                 None,
                 hv.MxScaleGenerationMode.RandomFinite,
@@ -225,8 +219,7 @@ class Recipe:
                         hv.NormalGenerationParameters(
                             self.mean, self.standard_deviation
                         )
-                    ),
-                    MX_NORMAL_RANDOM_DOMAIN,
+                    )
                 ),
                 hv.MxDataQuantization.Nearest,
                 None,
@@ -495,11 +488,13 @@ def generated_value(case, row, column, logical_index):
     recipe = case.data
     kind = recipe.kind
     if kind is RecipeKind.BOUNDED:
-        unit = indexed_uniform_unit(case.seed, MX_DATA_RANDOM_DOMAIN, logical_index)
+        unit = indexed_uniform_unit(
+            case.seed, GENERATION_REAL_RANDOM_DOMAIN, logical_index
+        )
         return recipe.lower + unit * (recipe.upper - recipe.lower)
     if kind is RecipeKind.BOUNDED_ALTERNATING_SIGN:
         magnitude = recipe.maximum_magnitude * indexed_uniform_unit(
-            case.seed, MX_DATA_RANDOM_DOMAIN, logical_index
+            case.seed, GENERATION_REAL_RANDOM_DOMAIN, logical_index
         )
         return magnitude if logical_index % 2 == 0 else -magnitude
     if kind is RecipeKind.IDENTITY:
@@ -528,20 +523,24 @@ def generated_value(case, row, column, logical_index):
     if kind is RecipeKind.TYPE_INFINITY:
         return math.inf
     if kind is RecipeKind.TRIGONOMETRIC:
-        unit = indexed_uniform_unit(case.seed, MX_DATA_RANDOM_DOMAIN, logical_index)
+        unit = indexed_uniform_unit(
+            case.seed, GENERATION_REAL_RANDOM_DOMAIN, logical_index
+        )
         return math.cos(TWO_PI * unit)
     if kind is RecipeKind.NORMAL:
         first_index = logical_index * 2
-        first = indexed_uniform_unit(case.seed, MX_NORMAL_RANDOM_DOMAIN, first_index)
+        first = indexed_uniform_unit(
+            case.seed, GENERATION_REAL_RANDOM_DOMAIN, first_index
+        )
         second = indexed_uniform_unit(
-            case.seed, MX_NORMAL_RANDOM_DOMAIN, first_index + 1
+            case.seed, GENERATION_REAL_RANDOM_DOMAIN, first_index + 1
         )
         standard_normal = math.sqrt(-2.0 * math.log(first)) * math.cos(TWO_PI * second)
         return recipe.mean + recipe.standard_deviation * standard_normal
     if kind is RecipeKind.UNIFORM_INTEGER:
         return indexed_uniform_integer(
             case.seed,
-            MX_DATA_RANDOM_DOMAIN,
+            GENERATION_REAL_RANDOM_DOMAIN,
             logical_index,
             recipe.integer_lower,
             recipe.integer_upper,
@@ -648,7 +647,7 @@ def expected_mx(case):
                 logical_index = row + column * rows
                 physical_index = row + column * leading_dimension
                 candidate_index = counter_random(
-                    case.seed, MX_UNBOUNDED_DATA_RANDOM_DOMAIN, logical_index
+                    case.seed, GENERATION_REAL_RANDOM_DOMAIN, logical_index
                 ) % len(finite_data_candidates)
                 data_raw = finite_data_candidates[candidate_index]
                 physical_raw[physical_index] = data_raw

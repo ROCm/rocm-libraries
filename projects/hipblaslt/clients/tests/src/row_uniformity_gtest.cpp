@@ -70,8 +70,8 @@ namespace
     // than refused by the launch gate.
     constexpr size_t kMaxHeuristicCandidates = 4;
     constexpr size_t kMaxSweepCandidates     = 30;
-    constexpr uint64_t kOperandARandomDomain = 0;
-    constexpr uint64_t kOperandBRandomDomain = 1;
+    constexpr uint64_t kOperandASeedOffset     = 0;
+    constexpr uint64_t kOperandBSeedOffset     = 1;
 
     bool gpuAvailable()
     {
@@ -298,17 +298,15 @@ namespace
     // largest possible accumulator stays far below FLT_MAX and the smallest
     // product far above the smallest normal, so neither overflow nor denormal
     // flush can occur.
-    roc::host_numerics::Tensor generateWideRangeOperand(hipDataType type,
-                                                        size_t      elementCount,
-                                                        uint64_t    seed,
-                                                        uint64_t    randomDomain)
+    roc::host_numerics::Tensor
+        generateWideRangeOperand(hipDataType type, size_t elementCount, uint64_t seed)
     {
         using namespace roc::host_numerics;
         const auto recipe = GenerationRecipe::realOnly(
             GenerationRecipe::randomEncodedExponent({.lowerUnbiasedExponent = -12,
                                                      .upperUnbiasedExponent = 12,
                                                      .sourceType            = ScalarType::Float32}),
-            {.seed = seed, .randomDomain = randomDomain});
+            {.seed = seed});
         return generate(hostNumericsOperandType(type), Shape{elementCount}, recipe);
     }
 
@@ -324,12 +322,10 @@ namespace
                 return leftStorage.size() == rightStorage.size()
                        && std::equal(leftStorage.begin(), leftStorage.end(), rightStorage.begin());
             };
-            const auto a
-                = generateWideRangeOperand(type, elementCount, seed, kOperandARandomDomain);
+            const auto a = generateWideRangeOperand(type, elementCount, seed + kOperandASeedOffset);
             const auto aRepeat
-                = generateWideRangeOperand(type, elementCount, seed, kOperandARandomDomain);
-            const auto b
-                = generateWideRangeOperand(type, elementCount, seed, kOperandBRandomDomain);
+                = generateWideRangeOperand(type, elementCount, seed + kOperandASeedOffset);
+            const auto b = generateWideRangeOperand(type, elementCount, seed + kOperandBSeedOffset);
 
             EXPECT_TRUE(sameStorage(a, aRepeat));
             EXPECT_FALSE(sameStorage(a, b));
@@ -740,9 +736,9 @@ namespace
             const uint64_t seed = 0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k);
 
             m_aVector = generateWideRangeOperand(
-                m_problem.abType, static_cast<size_t>(k), seed, kOperandARandomDomain);
+                m_problem.abType, static_cast<size_t>(k), seed + kOperandASeedOffset);
             m_hostB = generateWideRangeOperand(
-                m_problem.abType, static_cast<size_t>(k * n), seed, kOperandBRandomDomain);
+                m_problem.abType, static_cast<size_t>(k * n), seed + kOperandBSeedOffset);
 
             const auto bStorage = m_hostB.rawEncodedBackingStorage();
             if(hipMemcpy(m_deviceB, bStorage.data(), bStorage.size(), hipMemcpyHostToDevice)
