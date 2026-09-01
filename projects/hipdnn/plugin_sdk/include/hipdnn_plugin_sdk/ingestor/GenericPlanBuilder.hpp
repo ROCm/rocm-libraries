@@ -341,11 +341,22 @@ public:
         // The callback is the write-back channel, already bound to the key: it captures
         // the state manager by reference, which the engine owns and which strictly
         // outlives every plan it hands out.
-        // benchmarkId is the graph half of the winner key, not the whole key: the device
-        // half is constant for a process, and the exporter needs to group rows by problem.
-        // Hex so the value survives a log grep unambiguously.
+        // benchmarkId is the graph half of the winner key and deviceId the device half.
+        // Both are logged, and neither is the whole key: an exporter needs to group rows
+        // by problem, and a problem is (graph, device) exactly as the winner cache keys
+        // it. The device half is constant within one process but NOT across a corpus
+        // merged from several machines, nor across a sweep spanning two GPUs; grouping on
+        // the graph alone there would silently take RFC 0019.13 §11.2's per-problem oracle
+        // across devices and understate every regret figure computed from it.
+        //
+        // Taken from winnerKey.device rather than re-derived from DeviceProperties here:
+        // one notion of "which GPU", so a log line and a cache entry can never disagree
+        // about whether two rows came from the same device.
+        // Hex so both values survive a log grep unambiguously.
         std::ostringstream benchmarkId;
         benchmarkId << std::hex << winnerKey.graph.hash();
+        std::ostringstream deviceId;
+        deviceId << std::hex << winnerKey.device.hash();
 
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
@@ -353,7 +364,8 @@ public:
             [&stateManager = _stateManager, winnerKey](const std::vector<RankedEntry>& ranking) {
                 stateManager.recordWinner(winnerKey, ranking);
             },
-            benchmarkId.str()));
+            benchmarkId.str(),
+            deviceId.str()));
     }
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
@@ -451,13 +463,15 @@ private:
         makeBenchmarkPlan(std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates,
                           const THandle& handle,
                           typename BenchmarkPlan<THandle>::RecordRankingFn recordRanking,
-                          std::string benchmarkId) const
+                          std::string benchmarkId,
+                          std::string deviceId) const
     {
         return std::make_unique<BenchmarkPlan<THandle>>(std::move(candidates),
                                                         handle,
                                                         _timer,
                                                         std::move(recordRanking),
-                                                        std::move(benchmarkId));
+                                                        std::move(benchmarkId),
+                                                        std::move(deviceId));
     }
 
     /// An arch-independent pack (empty `arch` list, itself legal) passes `archSupports`

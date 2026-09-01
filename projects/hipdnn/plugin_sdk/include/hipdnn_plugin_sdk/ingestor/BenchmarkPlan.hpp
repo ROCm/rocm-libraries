@@ -140,15 +140,28 @@ public:
     ///        sweep. Opaque on purpose: this class knows nothing about graphs, and the
     ///        caller already holds the key that identifies one. Empty means unidentified,
     ///        which is what a test double or a direct construction gets.
+    /// @param deviceIdentity Opaque identity for the device the sweep ran on, echoed the
+    ///        same way. Opaque for the same reason as @p benchmarkId, and threaded from
+    ///        the same caller: this class must not learn to read `DeviceProperties`, or a
+    ///        second notion of "which GPU" would exist that can disagree with the winner
+    ///        cache's. Present because the problem a row belongs to is (graph, device),
+    ///        not graph alone -- the winner cache keys on both. Without it a corpus merged
+    ///        across machines collapses rows that belong to different problems, and the
+    ///        RFC 0019.13 §11.2 oracle `v*(p)` becomes a minimum taken across devices, so
+    ///        every regret figure derived from it is understated. Empty means
+    ///        unidentified and omits the field entirely, leaving the record byte-identical
+    ///        to what a test double or a direct construction produced before.
     BenchmarkPlan(std::vector<Candidate> candidates,
                   const THandle& handle,
                   Timer timer = {},
                   RecordRankingFn recordRanking = {},
-                  std::string benchmarkId = {})
+                  std::string benchmarkId = {},
+                  std::string deviceIdentity = {})
         : _candidates(std::move(candidates))
         , _timer(timer ? std::move(timer) : makeHipEventTimer())
         , _recordRanking(std::move(recordRanking))
         , _benchmarkId(std::move(benchmarkId))
+        , _deviceIdentity(std::move(deviceIdentity))
     {
         if(_candidates.empty())
         {
@@ -477,8 +490,17 @@ protected:
     /// The fields every candidate record carries, however it ended, plus whatever
     /// features the candidate was handed.
     ///
-    /// `event` is the grep handle an exporter selects on; `benchmark` groups the rows of
-    /// one sweep, since a process can benchmark several graphs and the lines interleave.
+    /// `event` is the grep handle an exporter selects on; `benchmark` and `device`
+    /// together group the rows of one problem, since a process can benchmark several
+    /// graphs and the lines interleave, and a corpus can be merged from several machines.
+    /// Both halves are needed because the winner cache keys on both: the same graph on
+    /// two GPUs is two problems with two different best kernels, and grouping on
+    /// `benchmark` alone would let RFC 0019.13 §11.2's oracle be a minimum taken across
+    /// devices -- wrong in the flattering direction, and silently so.
+    ///
+    /// `device` is omitted rather than emitted empty when unidentified, so a test double
+    /// or a direct construction produces exactly the record it produced before this field
+    /// existed, and an exporter can tell "no device identity" from "the empty device".
     ///
     /// The features go in first and the envelope over the top, so the envelope always
     /// wins: a payload that somehow carried a `kernel` key would otherwise overwrite the
@@ -489,6 +511,10 @@ protected:
         nlohmann::json record = candidate.features;
         record["event"] = "ingestor.benchmark.candidate";
         record["benchmark"] = _benchmarkId;
+        if(!_deviceIdentity.empty())
+        {
+            record["device"] = _deviceIdentity;
+        }
         record["kernel"] = toString(candidate.kernelId);
         record["pack"] = toString(candidate.packId);
         record["dispatch"] = toString(candidate.dispatchId);
@@ -499,6 +525,7 @@ protected:
     Timer _timer;
     RecordRankingFn _recordRanking;
     std::string _benchmarkId;
+    std::string _deviceIdentity;
     size_t _workspaceBytes = 0;
     mutable std::atomic<size_t> _chosen{NOT_RESOLVED};
     mutable std::mutex _mutex;

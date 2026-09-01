@@ -30,6 +30,7 @@ def _ok(
     min_ms: float,
     avg_ms: float = None,
     features: dict | None = None,
+    device: str | None = None,
 ) -> str:
     record = {
         "event": CANDIDATE_EVENT,
@@ -44,12 +45,22 @@ def _ok(
         "robust_mean_ms": min_ms,
         "iters": 7,
     }
+    # Omitted rather than emitted empty when absent, matching the runtime: a log
+    # collected before BenchmarkPlan carried a device identity has no such key, and
+    # the exporter has to keep working on it. Every default-argument caller below is
+    # therefore also a regression test for that older shape.
+    if device is not None:
+        record["device"] = device
     record.update(features or {})
     return json.dumps(record)
 
 
 def _failed(
-    benchmark: str, kernel: str, reason: str, features: dict | None = None
+    benchmark: str,
+    kernel: str,
+    reason: str,
+    features: dict | None = None,
+    device: str | None = None,
 ) -> str:
     record = {
         "event": CANDIDATE_EVENT,
@@ -60,6 +71,8 @@ def _failed(
         "status": "failed",
         "reason": reason,
     }
+    if device is not None:
+        record["device"] = device
     record.update(features or {})
     return json.dumps(record)
 
@@ -298,16 +311,116 @@ class TestFeatureColumns:
     def test_the_envelope_columns_are_never_mistaken_for_features(
         self, tmp_path: Path
     ):
-        """`kernel` is identity; `kernel.dtype` is a feature. One dot apart."""
+        """`kernel` is identity; `kernel.dtype` is a feature. One dot apart.
+
+        `device` is the same pairing: the dotless envelope column naming which GPU
+        the row was measured on, sitting beside the `device.*` property columns
+        §8.3 lists as features. The dot rule has to keep them apart in both
+        directions -- an identity discovered as a feature would be fitted against,
+        and a property mistaken for the envelope would be dropped from the header.
+        """
         log = _write_log(
             tmp_path / "sweep.log",
-            [_ok("g", "k1", 0.02, features={"kernel.dtype": "fp16"})],
+            [
+                _ok(
+                    "g",
+                    "k1",
+                    0.02,
+                    features={"kernel.dtype": "fp16", "device.cu_count": 304},
+                    device="dev-a",
+                )
+            ],
         )
 
         stats = convert([log], tmp_path / "out.csv")
 
-        assert stats.feature_keys == {"kernel.dtype"}
-        assert _read_csv(tmp_path / "out.csv")[0]["kernel"] == "k1"
+        assert stats.feature_keys == {"kernel.dtype", "device.cu_count"}
+        row = _read_csv(tmp_path / "out.csv")[0]
+        assert row["kernel"] == "k1"
+        assert row["device"] == "dev-a"
+        assert row["device.cu_count"] == "304"
+
+
+class TestDeviceIdentity:
+    """The device half of the problem identity (RFC 0019.13 §11.2).
+
+    The runtime keys its winner cache on (graph, device) because the same graph on
+    two GPUs is two problems with two different best kernels. A corpus merged from
+    several machines that carries only the graph collapses those rows, so the
+    per-problem oracle `v*(p)` becomes a minimum taken across devices and every
+    regret figure computed from it is understated -- silently, and flatteringly.
+    """
+
+    def test_the_device_column_is_in_the_envelope_beside_the_benchmark(
+        self, tmp_path: Path
+    ):
+        log = _write_log(tmp_path / "sweep.log", [_ok("g", "k1", 0.02, device="dev-a")])
+
+        convert([log], tmp_path / "out.csv")
+
+        with open(tmp_path / "out.csv", encoding="utf-8", newline="") as handle:
+            header = next(csv.reader(handle))
+        assert header == list(ENVELOPE_COLUMNS)
+        assert "device" in ENVELOPE_COLUMNS
+        # Dotless, so the feature rule cannot claim it however the envelope is
+        # reordered later.
+        assert "." not in "device"
+
+    def test_the_device_reaches_the_row_that_was_measured_on_it(self, tmp_path: Path):
+        log = _write_log(
+            tmp_path / "sweep.log",
+            [_ok("g", "k1", 0.02, device="dev-a"), _ok("g", "k1", 0.05, device="dev-b")],
+        )
+
+        convert([log], tmp_path / "out.csv")
+
+        rows = _read_csv(tmp_path / "out.csv")
+        assert [row["device"] for row in rows] == ["dev-a", "dev-b"]
+        # Same graph, same kernel, different device: two problems, not one measured
+        # twice. Grouping on `benchmark` alone would make 0.05 look like a slow
+        # repeat of 0.02 and hand the oracle a minimum across devices.
+        assert [row["benchmark"] for row in rows] == ["g", "g"]
+
+    def test_a_failed_pair_still_says_which_device_it_failed_on(self, tmp_path: Path):
+        log = _write_log(
+            tmp_path / "sweep.log",
+            [_failed("g", "k2", "launch-not-timed", device="dev-a")],
+        )
+
+        convert([log], tmp_path / "out.csv")
+
+        row = _read_csv(tmp_path / "out.csv")[0]
+        assert row["is_valid"] == "False"
+        assert row["device"] == "dev-a"
+        assert row["benchmark"] == "g"
+
+    def test_one_graph_on_two_devices_counts_as_two_problems(self, tmp_path: Path):
+        log = _write_log(
+            tmp_path / "sweep.log",
+            [_ok("g", "k1", 0.02, device="dev-a"), _ok("g", "k1", 0.05, device="dev-b")],
+        )
+
+        stats = convert([log], tmp_path / "out.csv")
+
+        assert len(stats.problems) == 2
+
+    def test_a_log_from_before_the_field_existed_leaves_the_column_empty(
+        self, tmp_path: Path
+    ):
+        """The column is present and empty, never absent and never invented.
+
+        Logs already collected have no `device` key. Dropping the column would
+        break every reader that selects it by name; filling it with a placeholder
+        would look like a real identity and let a consumer group on it without
+        noticing. Empty is the one value that reads as "unidentified".
+        """
+        log = _write_log(tmp_path / "sweep.log", [_ok("g", "k1", 0.02)])
+
+        convert([log], tmp_path / "out.csv")
+
+        row = _read_csv(tmp_path / "out.csv")[0]
+        assert "device" in row
+        assert row["device"] == ""
 
 
 class TestProvenance:
