@@ -1167,6 +1167,10 @@ class Solution(collections.abc.Mapping):
         numSubIterK = 1
       else:
         numSubIterK = 2
+      # An MX scale local read covers 2 scale MMA tiles in K, so the scales need
+      # two MatrixInstK per DepthU however few the data side needs.
+      if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
+        numSubIterK = max(numSubIterK, 2)
       duUnit = numSubIterK * state["MatrixInstK"] * state["LocalSplitU"]
       if state["DepthU"] == -1:
         state["DepthU"] = duUnit
