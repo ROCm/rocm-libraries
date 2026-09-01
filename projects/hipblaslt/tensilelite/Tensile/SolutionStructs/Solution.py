@@ -1080,6 +1080,15 @@ class Solution(collections.abc.Mapping):
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 
+    if isgfx1250 and state["ProblemType"].get("OutputAmaxD", False):
+        reject(state, printRejectionReason, "OutputAmaxD not supported on gfx1250: SAtomicDec has no rocisa->ISA mapping")
+
+    if isgfx1250 and state["ProblemType"].get("UseInitialStridesCD", False):
+        reject(state, printRejectionReason, "UseInitialStridesCD not supported on gfx1250: conversion/beta-clear kernel cannot pass initial stride params yet")
+
+    if isgfx1250 and not state["ProblemType"].get("StridedBatched", True):
+        reject(state, printRejectionReason, "General (pointer-array) batched not supported on gfx1250: loadBatchedAddress emits duplicate CFG labels and the general-batched conversion kernel is not implemented")
+
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
