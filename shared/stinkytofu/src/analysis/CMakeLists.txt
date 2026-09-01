@@ -2,5 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 add_subdirectory(asm)
+add_subdirectory(ssa)
 add_subdirectory(controlflow)
 add_subdirectory(logical)
