@@ -201,6 +201,64 @@ void log_info(const char* func, H head, Ts&&... xs)
     log_base(rocblaslt_layer_mode_log_info, func, head, std::forward<Ts>(xs)...);
 }
 
+/**
+ * A tuning lifecycle event, which stays visible without a log level.
+ *
+ * Tuning blocks its caller for minutes the first time it meets a shape, so the
+ * few events that explain that pause have to reach a user who never turned
+ * library logging on. This routes rather than adding a second channel: with the
+ * info bit set the message goes through log_info like every other diagnostic,
+ * and only without it is the bare line written here. A level-4 run therefore
+ * cannot print the same event twice.
+ *
+ * The sink is the logger's own stream whenever it has one, so levels 1-3 still
+ * honour HIPBLASLT_LOG_FILE rather than splitting one process's output between
+ * the file and stderr. get_logger_os() is null only when no level or mask was
+ * set at all, since LoggerSingleton opens the stream exactly then.
+ *
+ * open_log_stream is deliberately never called from here. Opening the file on
+ * demand would create and truncate it for a process that asked for tuning but
+ * not for logging.
+ *
+ * Whether tuning is on at all is checked by the callers, not here. Reading the
+ * mode needs UserDrivenTuningParser.hpp and through it Tensile, and this header
+ * is included by most of the library, so the dependency would run the wrong way.
+ * Every caller is already inside a mode test: the announcement returns early in
+ * off mode, and the lifecycle events sit behind tuning.writes().
+ *
+ * Swallows sink failures instead of propagating them. open_log_stream enables
+ * exceptions on the log file, so a full or erroring HIPBLASLT_LOG_FILE makes
+ * every write throw. These particular writes happen in places that cannot
+ * survive that: the load announcement runs from a scope guard's destructor and
+ * the closing summary from a static one, where an escaping exception terminates
+ * the process, and the start/outcome lines run inside hipblasLtMatmul, where it
+ * would turn a logging problem into a failed GEMM. A broken sink also has
+ * nowhere left to report the breakage to.
+ */
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
+inline void log_tuning_lifecycle(const char* func, const std::string& body)
+{
+    try
+    {
+        const std::string full = "tuning-cache: " + body;
+
+        // Outside the lock: log_base takes log_mutex itself.
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            log_info(func, full);
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::ostream*               os = get_logger_os();
+        *(os ? os : &std::cerr) << full << std::endl;
+    }
+    catch(...)
+    {
+    }
+}
+#endif // HIPBLASLT_ENABLE_TUNING_CACHE
+
 // if trace logging is turned on with
 // (handle->layer_mode & rocblaslt_layer_mode_log_api) == true
 // then

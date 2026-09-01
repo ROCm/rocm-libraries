@@ -6157,7 +6157,10 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.print_solution_found)
             {
-                if(arg.print_kernel_info)
+                // Resolve the name whenever a tuning run is capturing results,
+                // not only for --print_kernel_info: the winner's name is taken
+                // from best_s_name below, which is fed from here.
+                if(arg.print_kernel_info || tuningEnv)
                 {
                     if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
                     {
@@ -6171,6 +6174,22 @@ void testing_matmul_with_bias(const Arguments& arg,
                             solutionName = groupedGemmVec[0].getSolutionName();
                             kernelName   = groupedGemmVec[0].getKernelName();
                         }
+
+                        // The ext accessor names every kernel the solution
+                        // launches, joined by "; ", which is useful to read but
+                        // is not an identifier. A solution with a separate
+                        // beta-scale or Stream-K cleanup kernel therefore
+                        // records a name the library can never reproduce, since
+                        // replay compares against getKernelNameFromAlgoIndex and
+                        // gets the single main kernel. Such an entry is rejected
+                        // on its first use and the shape looks permanently
+                        // untuned, so anything destined for the tuning file goes
+                        // through the algo accessor instead.
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
+                        if(tuningEnv)
+                            kernelName = hipblaslt_ext::getKernelNameFromAlgo(
+                                handle, heuristicResult[sol].algo);
+#endif
                     }
                     else
                     {
@@ -6236,7 +6255,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 cuNum    = std::to_string(deviceProps.multiProcessorCount);
             }
 
-            if(arg.print_kernel_info)
+            // Same reason as the per-candidate loop above.
+            if(arg.print_kernel_info || tuningEnv)
             {
                 solutionName = best_s_name;
                 kernelName   = best_k_name;

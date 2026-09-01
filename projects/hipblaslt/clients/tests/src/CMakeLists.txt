@@ -18,6 +18,15 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
 )
 
+# The tuning cache tests link test-only exports that only exist when the
+# feature is compiled in, so the source is added rather than guarded inside.
+if(HIPBLASLT_ENABLE_TUNING_CACHE)
+    target_sources(hipblaslt-test
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tuning_cache_test.cpp
+    )
+endif()
+
 # NOTE: secure_env_gtest.cpp (ROCM-26729) intentionally includes the header-only
 # rocblaslt_secure_env.hpp by relative path rather than via a target include
 # directory. Adding the internal rocblaslt/src/include dir to hipblaslt-test

@@ -2,6 +2,64 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.4.2 for ROCm 10.1.0
+
+### Added
+
+* Runtime tuning cache, built only with `-DHIPBLASLT_ENABLE_TUNING_CACHE=ON`.
+  A default build does not contain the feature and ignores its environment
+  variables, so nothing in this entry reaches a stock ROCm install. When
+  it is built in, `HIPBLASLT_TUNING_MODE=off|cache|tune` and
+  `HIPBLASLT_TUNING_CACHE_PATH=<file>` let the library benchmark candidate
+  kernels for an unseen problem at its first `hipblasLtMatmul`, record the
+  winner, and replay that choice in later runs, removing the separate
+  `hipblaslt-bench` step that offline tuning requires. Entries record the
+  kernel name next to the solution index and are validated one at a time at
+  replay, so a rebuild that moves kernels drops only the rows it invalidated
+  rather than the whole file. `HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE` bounds
+  the resulting stall at five minutes per problem by default; a search the
+  ceiling stops keeps its best candidate, marked incomplete, and a later run
+  with a higher ceiling finishes the search and replaces it. See
+  `docs/reference/env-variables.rst` for the remaining variables.
+
+### Changed
+
+* A tuning file written by a different build of hipBLASLt is no longer applied.
+  `HIPBLASLT_TUNING_OVERRIDE_FILE` records solution indices, which are positions
+  in one build's kernel library, and the build-version line at the top of the
+  file previously produced only a log message when it did not match: the file
+  was used regardless, so it could run kernels it was never tuned on.
+  Entries are now checked individually and dropped when they cannot be
+  trusted, and the affected problems fall back to normal kernel selection.
+  Regenerate the tuning file against the build you are running to recover the
+  tuned choices.
+
+### Resolved issues
+
+* Offline tuning replayed the wrong kernel for any problem with more than one
+  recorded entry. The replay loop reused a single vector across entries and
+  always read element `[0]`, so the second and later entries for a key were
+  validated and launched against the first entry's solution.
+* Solution index `0` in a tuning file was rejected outright, despite being a
+  valid index that is present in the shipped logic.
+* `*returnAlgoCount` was read uninitialised when an override satisfied a
+  single-algo request, and then used to scan one element past the end of the
+  caller's array.
+* Concurrent GEMMs sharing a tuning file could race on it. The override map
+  handed out its iterators after releasing the lock that protected them, so
+  every caller walked the map unlocked.
+* A tuning file that yielded no usable rows was re-read and re-parsed on every
+  heuristic call instead of once, adding that cost to every GEMM.
+* The `hipblaslt_ext` solution-name lookup (`getSolutionName()`) returned null
+  for a RocRoller solution. It dereferenced the solution pointer without a null
+  check and lacked the RocRoller short-name branch that the equivalent
+  kernel-name accessor already had, so an encoded RocRoller index reached the
+  Tensile lookup and found nothing.
+* The logger's destructor called `close()` on the log file, which throws out of
+  a destructor and terminates the process at exit when the log file has failed,
+  for example on a full disk. Reproducible with `HIPBLASLT_LOG_LEVEL=4` and a
+  failing `HIPBLASLT_LOG_FILE`.
+
 ## hipBLASLt 1.4.1 for ROCm 7.14
 
 ### Added
