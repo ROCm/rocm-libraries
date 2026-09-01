@@ -1816,6 +1816,31 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Either GSU or StreamK must be enabled")
       return
 
+    if state["ProblemType"]["FusedGemmA2A"]:
+      if isa[:2] not in ((9, 4), (9, 5)):
+        reject(state, printRejectionReason,
+               "FusedGemmA2A requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "
+               "packet layout is gfx9 only)")
+        return
+      if not state["ProblemType"]["DestDataType"].isBFloat16():
+        reject(state, printRejectionReason, "FusedGemmA2A only supports a bf16 D")
+        return
+      if state["StreamK"] != 0:
+        reject(state, printRejectionReason, "FusedGemmA2A requires StreamK=0 (data-parallel carrier)")
+        return
+      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
+      if mt0 not in (128, 256) or mt1 not in (128, 256):
+        reject(state, printRejectionReason, "FusedGemmA2A supports MacroTile0/1 in {128, 256}")
+        return
+      if state["GlobalSplitU"] != 1:
+        reject(state, printRejectionReason,
+               "FusedGemmA2A requires GlobalSplitU=1 (the DRAIN owner is elected "
+               "against NumWorkGroups0*NumWorkGroups1; any other GSU can multiply "
+               "the arriving work-group count -- GSU=-1 resolves at runtime -- so "
+               "the election may fire early)")
+        return
+      state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for the last-WG election
+
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")
       return

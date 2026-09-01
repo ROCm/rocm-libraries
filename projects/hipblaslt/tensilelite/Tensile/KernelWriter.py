@@ -452,6 +452,11 @@ class StateValues:
 
     self.nonPostLoopSgpr = []
 
+    # FusedGemmA2A store dispatch mode (codegen-time): "BOTH" emits the per-store
+    # runtime gate + both push/local versions (default, unchanged behavior);
+    # "PUSH"/"LOCAL" emit only that single version (gate hoisted to caller).
+    self.fusedA2ADispatchMode = "BOTH"
+
     self.preloadGuard = []
     self.tmpvgpr = {}
     self.freeSgprVarPool = set()
@@ -9538,6 +9543,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.defineSgpr("NumWorkGroups0", 1)
     self.defineSgpr("NumWorkGroups1", 1)
+
+    # Persistent copy of the grid-wide WG count for the counter3 last-WG election;
+    # latched in graWorkGroup because NumWorkGroups0/1 can be borrowed as temps later.
+    if kernel["ProblemType"]["FusedGemmA2A"]:
+      self.defineSgpr("FusedTotalWGs", 1)
+      # Counter-block base, loaded once in the prologue. Every region is reached
+      # from it by immediate offset (FusedA2ACounterSentinel.hpp).
+      # Aligned to 2 because S_ATOMIC_INC takes SBASE as an SGPR pair with the low
+      # address bit omitted from the encoding.
+      self.defineSgpr("FusedCounterPtr", 2, 2)
+      # n_shard = FusedAM / FusedW, divided once in the prologue (W is not a
+      # power of two, so this is a real u32 divide, not a shift).
+      self.defineSgpr("FusedNShard", 1)
+      # ceil(N / MT1), needed by both the counter3 address and the handshake's
+      # counter index; latched so the two do not each recompute it.
+      self.defineSgpr("FusedTokenTiles", 1)
+      # Offset of this WG's peer group within the kernarg segment. Every pointer
+      # the epilogue needs for that peer is an immediate off it, so the SDMA
+      # emitters do no address arithmetic of their own.
+      self.defineSgpr("FusedPeerGroupPtr", 1)
 
     # Calculate numSgpr preload
     self.states.preloadGuard = []

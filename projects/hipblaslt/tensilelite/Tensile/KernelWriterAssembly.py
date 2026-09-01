@@ -76,7 +76,7 @@ from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
-from .Components.GlobalWriteBatch import GlobalWriteBatchWriter
+from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
@@ -91,7 +91,8 @@ from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTe
 from Tensile.Common.DataType import DataType
 from Tensile.Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
-from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk
+from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
+  FusedA2AWgRemap
 
 from Tensile.KernelWriter import KernelWriter, ABMatrixInfo
 from Tensile.SolutionStructs.Naming import getKernelFileBase
@@ -3386,6 +3387,22 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SpaceFillingCurveWalk(self, kernel, sgprWGM))
     else:
       module.add(DefaultWGM(self, kernel, sgprWGM))
+
+    # Resolving &counter3 here makes the per-work-group tally in the epilogue a bare
+    # atomic on a register pair rather than a kernarg load it has to wait on.
+    #
+    # The product counts SURVIVING work-groups: ClusterDim != [1,1] rounds the grid
+    # up host-side, but those padded work-groups s_endpgm in the prologue
+    # (clusterPadEarlyExit).
+    if kernel["ProblemType"]["FusedGemmA2A"]:
+      from .Components.GlobalWriteBatch import emitFusedA2ACounterPtrLatch, \
+        emitFusedA2ANShardLatch
+      module.add(FusedA2AWgRemap(self, kernel))
+      module.add(SMulI32(dst=sgpr("FusedTotalWGs"), src0=sgpr("NumWorkGroups0"),
+                         src1=sgpr("NumWorkGroups1"),
+                         comment="FusedTotalWGs = NumWorkGroups0 * NumWorkGroups1 (counter3 election target)"))
+      emitFusedA2ACounterPtrLatch(module, self, "FusedCounterPtr", "FusedTokenTiles")
+      emitFusedA2ANShardLatch(module, self, "FusedNShard")
 
     return module
 
@@ -16467,29 +16484,78 @@ class KernelWriterAssembly(KernelWriter):
                   next_firing_per_batch[_bIdx] = _d
                   break
 
-        for batchIdx in range(0, numBatchesCLS):
-          elementStartIdx = batchIdx * numElementsPerBatch
-          elementStopIdx = min( elementStartIdx + numElementsPerBatch, len(element) )
-          elementsThisBatch = element[elementStartIdx:elementStopIdx]
-          #print("BATCH[%u/%u]: element[%u:%u] VGPRs=%u" % (batchIdx, numBatches, elementStartIdx, elementStopIdx,ss.numVgprsPerElement ))
-          # elementVgprs can be large and should be perfectly tuned to the number of available
-          # VGPRS.  We do not want to accidentally overflow and grow the pool here:
+        # The store batch loop mutates `ss` (StoreState) and `biasLocalBarrierInit`.
+        # For FusedGemmA2A we regenerate the loop body TWICE (PUSH + LOCAL) under a
+        # single hoisted runtime gate, so factor the body into a closure that returns
+        # a Module (rather than adding directly to actLoopModule) and can be replayed
+        # from the same codegen-state after an explicit ss/biasLocalBarrierInit reset.
+        def _emit_batch_loop():
+          nonlocal biasLocalBarrierInit
+          m = Module("storeBatchLoop")
+          # codeAccVgprRead / codeMulAlpha are consumed in-place (popFirstItem) by
+          # globalWriteBatch. For the FusedGemmA2A two-pass replay each pass must start
+          # from an unconsumed queue, so take a per-pass deepcopy.
+          passAccVgprRead = deepcopy(codeAccVgprRead) if codeAccVgprRead is not None else None
+          passMulAlpha    = deepcopy(codeMulAlpha) if codeMulAlpha is not None else None
+          for batchIdx in range(0, numBatchesCLS):
+            elementStartIdx = batchIdx * numElementsPerBatch
+            elementStopIdx = min( elementStartIdx + numElementsPerBatch, len(element) )
+            elementsThisBatch = element[elementStartIdx:elementStopIdx]
+            #print("BATCH[%u/%u]: element[%u:%u] VGPRs=%u" % (batchIdx, numBatches, elementStartIdx, elementStopIdx,ss.numVgprsPerElement ))
+            # elementVgprs can be large and should be perfectly tuned to the number of available
+            # VGPRS.  We do not want to accidentally overflow and grow the pool here:
 
-          if kernel["StoreRemapVectorWidth"]:
-            #Indication if this batch is last batch for this column block shape
-            self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
+            if kernel["StoreRemapVectorWidth"]:
+              #Indication if this batch is last batch for this column block shape
+              self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
 
-          # Primer uses the next real row jump; boundary delta may be 0 (mid-row).
-          _next_firing_rowInc = next_firing_per_batch[batchIdx]
-          _direct_next_rowInc = next_rowInc_per_batch[batchIdx] if batchIdx < numBatches else 0
-          actLoopModule.add(self.globalWriteBatch(kernel, tPA, tPB, activation, ss, batchIdx, \
-              applyAlpha, beta, edge, atomic, gwvw, atomicW, \
-              elementsThisBatch, self.vgprs.addrE, self.vgprs.addrD, self.vgprs.addrC, self.vgprs.addrBias, \
-              self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
-              biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
-              activationTypeStr, elementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, numBatches, \
-              _next_firing_rowInc, _direct_next_rowInc))
-          biasLocalBarrierInit = True
+            # Primer uses the next real row jump; boundary delta may be 0 (mid-row).
+            _next_firing_rowInc = next_firing_per_batch[batchIdx]
+            _direct_next_rowInc = next_rowInc_per_batch[batchIdx] if batchIdx < numBatches else 0
+            m.add(self.globalWriteBatch(kernel, tPA, tPB, activation, ss, batchIdx, \
+                applyAlpha, beta, edge, atomic, gwvw, atomicW, \
+                elementsThisBatch, self.vgprs.addrE, self.vgprs.addrD, self.vgprs.addrC, self.vgprs.addrBias, \
+                self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
+                biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
+                activationTypeStr, elementSgprs, tmpSgpr, passAccVgprRead, passMulAlpha, factorDim, numBatches, \
+                _next_firing_rowInc, _direct_next_rowInc))
+            biasLocalBarrierInit = True
+          return m
+
+        if kernel["ProblemType"]["FusedGemmA2A"]:
+          # Hoist the PUSH/local dispatch gate out of the per-store body: emit ONE
+          # runtime gate, then the whole store body twice -- once with only the PUSH
+          # version (mode "PUSH"), once with only the local version (mode "LOCAL").
+          # Between the two passes, roll back the codegen-time StoreState (ss) and
+          # biasLocalBarrierInit to the batch-loop start so the LOCAL pass regenerates
+          # identical addresses/waitcnts from the same starting state.
+          localLabel = Label(self.labels.getNameInc("fusedA2A_hoist_local"),
+                             "fused-A2A hoisted: WG>=AM_tiles -> local")
+          afterLabel = Label(self.labels.getNameInc("fusedA2A_hoist_after"),
+                             "fused-A2A hoisted: after PUSH/local")
+          emitFusedA2AGate(actLoopModule, self, localLabel.getLabelName())
+          # self.states outlives this call, so a mid-pass raise would otherwise leak
+          # "PUSH"/"LOCAL" into a subsequent kernel.
+          try:
+            # PUSH pass
+            self.states.fusedA2ADispatchMode = "PUSH"
+            actLoopModule.add(_emit_batch_loop())
+            actLoopModule.add(SBranch(labelName=afterLabel.getLabelName(), comment="skip local store"))
+            # Roll back codegen-time state so the LOCAL pass regenerates from the
+            # batch-loop start. firstBatch and biasLocalBarrierInit are outside
+            # resetState()'s remit, so restore them here.
+            ss.resetState()
+            ss.firstBatch = True
+            biasLocalBarrierInit = False
+            actLoopModule.add(localLabel)
+            # LOCAL pass
+            self.states.fusedA2ADispatchMode = "LOCAL"
+            actLoopModule.add(_emit_batch_loop())
+            actLoopModule.add(afterLabel)
+          finally:
+            self.states.fusedA2ADispatchMode = "BOTH"
+        else:
+          actLoopModule.add(_emit_batch_loop())
 
         # SRVW+CLS: check in the offset vgpr after the last store batch.
         if kernel["StoreRemapVectorWidth"] and kernel["CompactLoopStore"] and getattr(self, "compactLoopStoreVgpr", -1) != -1:
@@ -16939,13 +17005,14 @@ class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
   def addStore(self, kernel, ss, tc: str, addrCalc, sumIdx, tmpS01, edge, elementIdx=None, batchIdx=None,
-               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore"):
+               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False):
     """
     Add stores for the element with addrCalc and sumIdx.
     tmpS01 is a single :temp sGPR
 
     CompactLoopStore: elementIdx lets elt0 (rowInc==0) seed incrementToNextRow.
     overrideAfterPrimerRows is the next emitting elt's rowInc (0 = no override).
+    forceSlc forces slc on the D store regardless of NonTemporalD; tc == 'D' only.
     """
     module = Module("addStore sumIdx %s"%(str(sumIdx)))
     if self.do["GlobalWrite"]:
@@ -16963,6 +17030,7 @@ class KernelWriterAssembly(KernelWriter):
       if tc == 'D':
         isGlc, isSlc, isNT, scope, th, nv = decodeNonTemporal(
             self.states.asmCaps, kernel["NonTemporalD"], _temporalHint(kernel, "D"), _nonVolatile(kernel, "D"))
+        isSlc = bool(isSlc or forceSlc)
         bps = self.states.bpeCexternal * ss.cfg.gwvw
         rpv = self.states.bpeCexternal * ss.cfg.gwvw / self.states.bpr
 
