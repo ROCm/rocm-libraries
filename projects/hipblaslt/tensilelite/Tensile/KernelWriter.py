@@ -237,6 +237,11 @@ class StateValues:
   # True while RAP emits the reuse copy, which must not move A/MXSA at all: the
   # data it needs is already sitting in the resident registers.
   rapDropAResidentLoads: bool            = False
+  # True while PAP's next-tile prefetch is being emitted, which is the one window
+  # where WorkGroup2 names the next tile rather than the current one. The A
+  # silencing above has to relax there: the next tile may be in another batch, and
+  # then it runs the fill copy, which expects A to have been prefetched.
+  rapInPapNextTilePrefetch: bool         = False
   # Diagnostic carried alongside overflowedResources == 9.
   rapStoreNeutralityMsg: str             = ""
   numVgprBufferPackA: int                = 0
@@ -5610,6 +5615,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # balanced. Gated on StreamKMulticast (only ever set on the StreamK=3
           # component), so the emitted code is unchanged for every other path.
           if streamKMulticast(kernel):
+            skComponent = Component.StreamK.find(self)
             module.add(skComponent.streamKMulticastProloguePrefetchHandshake(self, kernel))
           # For UnrollLoopSwapGlobalReadOrder, we also need to swap ds write A/B order.
           # In scheduling, we always schedule lwa first then lwb second,
@@ -6238,6 +6244,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # reuses them. Only the compute half is duplicated -- the store is the bulk
       # of the kernel and stays shared, which keeps the instruction cache footprint
       # roughly unchanged.
+      skComponent = Component.StreamK.find(self)
+      # Record which batch the fill below loads A for. Read here, at the loop head,
+      # because graWorkGroup advances StreamKIter past this tile and PAP goes on to
+      # overwrite WorkGroup2 with the next tile's, so neither survives the section.
+      module.add(skComponent.rapTileBatch(self, kernel, "RAPResidentBatch"))
       snapshot = self.rapSnapshotEmitterState(kernel, tensorParametersA, tensorParametersB)
       self.states.rapDeferSgprUndef = True
       pack = self._persistentComputeSection(kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
@@ -6252,6 +6263,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(SCBranchSCC1(labelName=storeJoin.getLabelName(),
                               comment="RAP: first tile skips the reuse copy"))
       module.add(Label("RAP_IterN", ""))
+      # A is indexed by the batch, so the resident copy only serves tiles in the
+      # batch it was filled from. This copy has no A loads to supply any other, so
+      # send a tile that crossed a batch boundary through the fill copy instead --
+      # it pays one tile's worth of reloads and leaves A resident for the tiles
+      # after it. Ahead of everything else in the section: StreamKIter still names
+      # this tile and nothing has claimed WorkGroup* for it, so the loop head can
+      # take it from the top.
+      with self.allocTmpSgpr(1, tag="RAPBatchGuard") as sBatch:
+        module.add(skComponent.rapTileBatch(self, kernel, sBatch.idx))
+        module.add(SCmpEQU32(src0=sgpr(sBatch.idx), src1=sgpr("RAPResidentBatch"),
+                             comment="RAP: is the resident A this tile's batch?"))
+        module.add(self.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1,
+                                       comment="RAP: batch changed, refill A"))
       module.add(loopComponent.reinitWaveIdx(self, kernel))
       self.rapRestoreEmitterState(kernel, tensorParametersA, tensorParametersB, snapshot)
       # From here on A and its scales come from the resident registers, so the
@@ -10016,6 +10040,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         requiredUnalignedSgprVar.append("StreamKTileID")
       if self.isPrefetchAcrossPersistentEnabled(kernel):
         requiredUnalignedSgprVar.append("SkPrefetchPrimed")
+      # The batch the resident A registers were filled from. A is indexed by the
+      # batch as well as by M and K, so a tile in another batch needs a different
+      # A and the reuse copy carries no loads to supply it. Persistent because one
+      # persistent iteration writes it and a later one reads it.
+      if kernel["ReuseAcrossPersistent"]:
+        requiredUnalignedSgprVar.append("RAPResidentBatch")
       # SrdWS is the 4-aligned StreamK workspace SRD, used only by the
       # partials/fixup reduction path. Under StreamKForceDPOnly there are no
       # partials/fixup: computeStoreSrdStartCommon and storeBranchesCommon
