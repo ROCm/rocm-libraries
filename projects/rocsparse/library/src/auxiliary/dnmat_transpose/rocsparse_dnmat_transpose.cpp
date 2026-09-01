@@ -162,7 +162,7 @@ namespace rocsparse
         {
 
             for(I batch_index = hipBlockIdx_y; batch_index < batch_count;
-                batch_index += hipBlockDim_y)
+                batch_index += hipGridDim_y)
             {
 
                 if(batch_index < batch_count)
@@ -191,7 +191,7 @@ namespace rocsparse
         case rocsparse_order_row:
         {
             for(I batch_index = hipBlockIdx_y; batch_index < batch_count;
-                batch_index += hipBlockDim_y)
+                batch_index += hipGridDim_y)
             {
                 if(batch_index < batch_count)
                 {
@@ -227,7 +227,7 @@ namespace rocsparse
         static constexpr uint32_t BM = 8;
 
         dim3 gdim((source->rows - 1) / BN + 1,
-                  std::min(target->batch_count, static_cast<int64_t>(8192)));
+                  std::min(target->batch_count, static_cast<int64_t>(65536)));
         dim3 tdim(BN * BM);
 
         const T* alpha_const_values
@@ -272,7 +272,7 @@ namespace rocsparse
     {
         switch(T_datatype)
         {
-
+            // LCOV_EXCL_START
         case rocsparse_datatype_f16_r:
             return launch<I, _Float16>;
         case rocsparse_datatype_i32_r:
@@ -285,6 +285,8 @@ namespace rocsparse
             return launch<I, uint8_t>;
         case rocsparse_datatype_bf16_r:
             return launch<I, rocsparse_bfloat16>;
+            // LCOV_EXCL_STOP
+
         case rocsparse_datatype_f32_r:
             return launch<I, float>;
         case rocsparse_datatype_f64_r:
@@ -368,8 +370,7 @@ rocsparse_status rocsparse::dnmat_transpose(rocsparse_handle            handle,
         }
 
         const rocsparse_indextype I_indextype
-            = (source->rows <= std::numeric_limits<int32_t>::max()
-               && source->cols <= std::numeric_limits<int32_t>::max())
+            = ((source->rows * source->cols) <= std::numeric_limits<int32_t>::max())
                   ? rocsparse_indextype_i32
                   : rocsparse_indextype_i64;
         auto f = find(I_indextype, source->data_type);

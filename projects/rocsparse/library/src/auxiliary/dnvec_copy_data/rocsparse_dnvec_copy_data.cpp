@@ -98,7 +98,8 @@ namespace rocsparse
         const auto    alpha_mode   = (alpha) ? alpha->pointer_mode : rocsparse_pointer_mode_device;
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::dnvec_copy_data_kernel<1024, I, T>),
-            dim3(((source->size - 1) / 1024 + 1)),
+            dim3(((source->size - 1) / 1024 + 1),
+                 std::min(target->batch_count, static_cast<int64_t>(65536))),
             dim3(1024),
             0,
             handle->stream,
@@ -131,6 +132,7 @@ namespace rocsparse
     {
         switch(T_datatype)
         {
+            // LCOV_EXCL_START
         case rocsparse_datatype_f16_r:
             return dnvec_copy_data_kernel_launch<I, _Float16>;
         case rocsparse_datatype_i32_r:
@@ -143,6 +145,7 @@ namespace rocsparse
             return dnvec_copy_data_kernel_launch<I, uint8_t>;
         case rocsparse_datatype_bf16_r:
             return dnvec_copy_data_kernel_launch<I, rocsparse_bfloat16>;
+            // LCOV_EXCL_STOP
         case rocsparse_datatype_f32_r:
             return dnvec_copy_data_kernel_launch<I, float>;
         case rocsparse_datatype_f64_r:
