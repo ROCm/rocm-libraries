@@ -26,7 +26,7 @@
 // whether or not <hip/hip_runtime.h> is pulled in first.
 
 #ifndef HIPRAND_C_COMPILE_FN
-#error "define HIPRAND_C_COMPILE_FN before including c_compile_body.h"
+    #error "define HIPRAND_C_COMPILE_FN before including c_compile_body.h"
 #endif
 
 int HIPRAND_C_COMPILE_FN(void);

@@ -26,7 +26,7 @@
 // real definitions regardless of include order -- see ROCM-28020.
 
 #ifndef ROCRAND_C_COMPILE_FN
-#error "define ROCRAND_C_COMPILE_FN before including c_compile_body.h"
+    #error "define ROCRAND_C_COMPILE_FN before including c_compile_body.h"
 #endif
 
 int ROCRAND_C_COMPILE_FN(void);

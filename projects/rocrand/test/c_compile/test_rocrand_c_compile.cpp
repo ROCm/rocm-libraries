@@ -26,11 +26,10 @@
 // fallback typedefs collide with HIP (ROCM-28020). This driver additionally
 // links and runs them so the checks also appear as CTest cases. Each function
 // returns the rocRAND version (> 0) on success, or -1 on failure.
-extern "C"
-{
-    int rocrand_c_compile_rocrand_only(void);
-    int rocrand_c_compile_rocrand_then_hip(void);
-    int rocrand_c_compile_hip_then_rocrand(void);
+extern "C" {
+int rocrand_c_compile_rocrand_only(void);
+int rocrand_c_compile_rocrand_then_hip(void);
+int rocrand_c_compile_hip_then_rocrand(void);
 }
 
 TEST(rocrand_c_compile_tests, rocrand_header_only)

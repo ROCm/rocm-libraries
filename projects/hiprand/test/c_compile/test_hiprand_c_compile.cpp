@@ -26,11 +26,10 @@
 // include orders. This driver additionally links and runs them so the checks
 // also appear as CTest cases. Each function returns the hipRAND version (> 0)
 // on success, or -1 on failure.
-extern "C"
-{
-    int hiprand_c_compile_hiprand_only(void);
-    int hiprand_c_compile_hiprand_then_hip(void);
-    int hiprand_c_compile_hip_then_hiprand(void);
+extern "C" {
+int hiprand_c_compile_hiprand_only(void);
+int hiprand_c_compile_hiprand_then_hip(void);
+int hiprand_c_compile_hip_then_hiprand(void);
 }
 
 TEST(hiprand_c_compile_tests, hiprand_header_only)
