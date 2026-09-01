@@ -6,7 +6,7 @@
 """
 GPU correctness tests for TensorQuant GEMM dispatcher.
 
-Requires a gfx942 or gfx950 GPU and hipcc in PATH.  Skipped automatically when neither
+Requires a gfx942, gfx950 or gfx1250 GPU and hipcc in PATH.  Skipped automatically when neither
 is available (pytest.skip) so CI without a GPU still passes.
 
 Tests:
@@ -69,8 +69,8 @@ def _detect_gfx_arch() -> str:
 _GFX_ARCH = _detect_gfx_arch()
 # TensorQuant fp8/bf8 kernels use CK CompV3 pipelines that require native fp8 hardware.
 # gfx90a (MI200 series) lacks native fp8 support and produces incorrect results.
-# Only gfx942 (MI300X) and gfx950 (MI350X) are validated.
-_SUPPORTED_ARCHES = ("gfx942", "gfx950")
+# Only gfx942 (MI300X), gfx950 (MI350X) and gfx1250 (MI400) are validated.
+_SUPPORTED_ARCHES = ("gfx942", "gfx950", "gfx1250")
 
 requires_gpu = pytest.mark.skipif(
     not (_has_hipcc() and _GFX_ARCH in _SUPPORTED_ARCHES),
@@ -296,7 +296,10 @@ TESTS = [
 def main():
     parser = argparse.ArgumentParser(
         description="TensorQuant GPU correctness tests")
-    parser.add_argument("--gfx", default="gfx950")
+    # Default to the arch of the GPU we are actually on. A hardcoded default builds a
+    # gfx950 image on any other device, which then aborts with "device kernel image is
+    # invalid" (or is rejected by the .so's compile-vs-runtime arch guard).
+    parser.add_argument("--gfx", default=None)
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
@@ -306,6 +309,12 @@ def main():
         format="%(levelname)s: %(message)s",
     )
 
+    gfx = args.gfx or _GFX_ARCH
+    if not gfx:
+        log.error("no GPU detected and --gfx not given")
+        return 1
+    log.info("Target arch: %s", gfx)
+
     out_dir = args.output_dir or Path(tempfile.mkdtemp(prefix="tensorquant_gpu_test_"))
     log.info("Kernel output dir: %s", out_dir)
 
@@ -313,7 +322,7 @@ def main():
     for name, fn in TESTS:
         log.info("--- Running %s ---", name)
         try:
-            status, detail = fn(out_dir, args.gfx)
+            status, detail = fn(out_dir, gfx)
         except Exception as exc:
             status, detail = "FAIL", f"{name}: exception: {exc}"
         results.append((name, status, detail))

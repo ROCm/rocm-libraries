@@ -49,8 +49,8 @@ if _codegen_dir not in sys.path:
 # their name builders, and keeps the shared tile/trait defaults in one place so this
 # module's default_*_config() cannot drift from the codegen's _default_config().
 from codegen_common import (  # noqa: E402
-    ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
     ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS,
+    rowcol_tensor_quant_default_tile,
     make_tensorquant_kernel_name,
 )
 
@@ -664,7 +664,7 @@ def _default_config(dtype: str, gfx_arch: str) -> TensorQuantKernelConfig:
         pipeline=traits["pipeline"],
         epilogue=traits["epilogue"],
         scheduler=traits["scheduler"],
-        **ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
+        **rowcol_tensor_quant_default_tile(gfx_arch),
         pad_m=traits["pad_m"],
         pad_n=traits["pad_n"],
         pad_k=traits["pad_k"],

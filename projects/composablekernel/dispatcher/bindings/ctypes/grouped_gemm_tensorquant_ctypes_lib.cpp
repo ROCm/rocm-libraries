@@ -77,7 +77,7 @@ static std::atomic<int> g_ref_count{0};
 // Architectures this bridge is known to work on. These fp8/bf8 CompV3 kernels need
 // native FP8, so gfx90a is deliberately absent -- it compiles but produces NaN.
 // Enabling a new target is a one-line addition here plus a CMake arch entry.
-static constexpr const char* kSupportedArchs[] = {"gfx942", "gfx950"};
+static constexpr const char* kSupportedArchs[] = {"gfx942", "gfx950", "gfx1250"};
 
 // True if `arch` starts with any entry of kSupportedArchs. Prefix-matching, because
 // hipDeviceProp_t::gcnArchName carries feature suffixes (e.g. "gfx942:sramecc+:xnack-").
