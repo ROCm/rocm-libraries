@@ -2412,14 +2412,8 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
 
   version_str = os.environ.get("ROCM_VERSION")
   if not version_str:
-    # Prefer the pip-installed rocm_sdk version if available, as it reflects
-    # the actual installed package rather than any system-wide ROCm install.
-    try:
-      import rocm_sdk
-      version_str = rocm_sdk.__version__
-    except ImportError:
-      pass
-  if not version_str:
+    # Note: Python ROCm SDK (pip) version detection is intentionally omitted
+    # here; it will be handled by PR #11023 with proper feature-gating.
     for root in [os.environ.get("ROCM_PATH"), os.environ.get("HIP_PATH"), "/opt/rocm"]:
       if root:
         try:
@@ -2428,6 +2422,10 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
         except OSError:
           continue
   if version_str:
+    # Strip pre-release suffixes before storing (e.g. "0a20260813" -> "0")
+    # so that nightly version strings like "10.1.0a20260813" are handled correctly.
+    parts = version_str.split(".")[:3]
+    version_str = ".".join(re.match(r'\d+', p.split("-")[0]).group() for p in parts)
     globalParameters["HipClangVersion"] = version_str
     tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
   else:

@@ -25,7 +25,7 @@
 from os import name as os_name
 from os import environ
 from pathlib import Path
-from re import search, IGNORECASE
+from re import match, search, IGNORECASE
 from shlex import split
 from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
@@ -86,20 +86,16 @@ def get_rocm_version() -> SemanticVersion:
     otherwise falls back to reading .info/version from ROCM_PATH, HIP_PATH,
     or /opt/rocm.
 
+    Note: Python ROCm SDK (pip) version detection is intentionally omitted here;
+    it will be handled by PR #11023 with proper feature-gating once the
+    infrastructure is in place.
+
     Raises:
         RuntimeError: If the version cannot be determined.
     Return:
         ROCm SemanticVersion
     """
     version_str = environ.get("ROCM_VERSION")
-    if not version_str:
-        # Prefer the pip-installed rocm_sdk version if available, as it reflects
-        # the actual installed package rather than any system-wide ROCm install.
-        try:
-            import rocm_sdk
-            version_str = rocm_sdk.__version__
-        except ImportError:
-            pass
     if not version_str:
         for root in [environ.get("ROCM_PATH"), environ.get("HIP_PATH"), "/opt/rocm"]:
             if root:
@@ -111,7 +107,10 @@ def get_rocm_version() -> SemanticVersion:
     if not version_str:
         raise RuntimeError("Failed to get ROCm version: ROCM_VERSION not set and "
                            ".info/version not found in ROCM_PATH, HIP_PATH, or /opt/rocm")
-    return SemanticVersion(*[int(c.split("-")[0]) for c in version_str.split(".")[:3]])
+    # Strip pre-release suffixes before parsing (e.g. "0a20260813" -> "0", "1rc2" -> "1")
+    # so that nightly/alpha version strings like "10.1.0a20260813" parse correctly.
+    return SemanticVersion(*[int(match(r'\d+', c.split("-")[0]).group())
+                             for c in version_str.split(".")[:3]])
 
 
 class Component:
