@@ -9,6 +9,17 @@ Documentation for hipFFT is available at
 
 * Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
 
+* Implemented `hipfftXtSetJITCallback` API, to allow for user-defined device functions to be called when loading
+  input or storing output of a transform.  These callback functions are specified after a plan is allocated with
+  `hipfftCreate` but before the plan is initialized with one of the `MakePlan` functions.  The backend FFT library
+  will Just-In-Time (JIT) compile the code into its own kernels.
+
+  On AMD platforms, the device function is provided as SPIR-V.  On CUDA platforms, the device function is provided as
+  LTO-IR fatbin.
+
+  These APIs are not currently compatible with multi-GPU transforms.  This
+  support will be added in a future release of hipFFT.
+
 ### Changed
 
 * Modified the rocFFT backend's implementation details of hipFFT so that cuFFT backend's
@@ -18,6 +29,13 @@ Documentation for hipFFT is available at
   (in-place only) and all batched transforms (in-place and out-of-place).
   Multi-device, unbatched one-dimensional transforms remain unimplemented pending
   further analyses of the exact behavior(s) to be matched.
+
+### Deprecations
+
+* The `hipfftXtSetCallback` and `hipfftXtClearCallback` APIs are now deprecated and will be removed in a future
+  release.  They allow for specifying callbacks as device function pointers at plan execution time, but rocFFT cannot
+  optimize the combined code.  Instead, users should specify JIT callbacks with `hipfftXtSetJITCallback` before
+  initializing the plan.
 
 ### Resolved issues
 

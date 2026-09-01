@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights
+ * Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights
  * reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -58,6 +58,16 @@ DISABLE_WARNING_IGNORED_ATTRIBUTES
 #include <hip/hip_complex.h>
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
+
+#if defined(__cplusplus) && __cplusplus >= 201402L
+#define HIPFFT_DEPRECATED_MSG(msg) [[deprecated(msg)]]
+#elif defined(__GNUC__)
+#define HIPFFT_DEPRECATED_MSG(msg) __attribute__((deprecated(msg)))
+#elif defined(_MSC_VER)
+#define HIPFFT_DEPRECATED_MSG(msg) __declspec(deprecated(msg))
+#else // no-op
+#define HIPFFT_DEPRECATED_MSG(msg)
+#endif
 
 #ifdef __cplusplus
 #include <cstddef>
