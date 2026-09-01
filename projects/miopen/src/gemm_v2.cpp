@@ -451,27 +451,52 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
         (user_workspace != nullptr && !gemm_desc.deterministic) ? user_workspace_size : 0;
     void* workspace = (max_workspace_size != 0) ? user_workspace : nullptr;
     check_hipblas_status(hipblasLtMatmulPreferenceCreate(&hipBLASLtHandles.pref));
-    check_hipblas_status(
-        hipblasLtMatmulPreferenceSetAttribute(hipBLASLtHandles.pref,
-                                              HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                              &max_workspace_size,
-                                              sizeof(max_workspace_size)));
 
-    const int requestSolutions = 1;
+    constexpr int requestSolutions = 8;
     hipblasLtMatmulHeuristicResult_t heuristicResult[requestSolutions];
-    int returnedAlgoCount = 0;
-    check_hipblas_status(hipblasLtMatmulAlgoGetHeuristic(handle.HipblasLtHandle().get(),
-                                                         hipBLASLtHandles.matmul,
-                                                         hipBLASLtHandles.matA,
-                                                         hipBLASLtHandles.matB,
-                                                         hipBLASLtHandles.matC,
-                                                         hipBLASLtHandles.matD,
-                                                         hipBLASLtHandles.pref,
-                                                         requestSolutions,
-                                                         heuristicResult,
-                                                         &returnedAlgoCount));
 
-    if(returnedAlgoCount == 0)
+    // The chosen algorithm's own workspace requirement is what gets handed to hipblasLtMatmul
+    // below, so it has to be checked against the buffer the caller actually allocated rather
+    // than trusted to respect the budget the preference asked for.
+    const auto first_fitting_algo = [&](std::size_t budget) {
+        check_hipblas_status(
+            hipblasLtMatmulPreferenceSetAttribute(hipBLASLtHandles.pref,
+                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                  &budget,
+                                                  sizeof(budget)));
+        int count = 0;
+        check_hipblas_status(hipblasLtMatmulAlgoGetHeuristic(handle.HipblasLtHandle().get(),
+                                                             hipBLASLtHandles.matmul,
+                                                             hipBLASLtHandles.matA,
+                                                             hipBLASLtHandles.matB,
+                                                             hipBLASLtHandles.matC,
+                                                             hipBLASLtHandles.matD,
+                                                             hipBLASLtHandles.pref,
+                                                             requestSolutions,
+                                                             heuristicResult,
+                                                             &count));
+        for(int i = 0; i < count; ++i)
+        {
+            if(heuristicResult[i].workspaceSize <= budget)
+                return i;
+        }
+        return -1;
+    };
+
+    int chosen_algo = first_fitting_algo(max_workspace_size);
+
+    // A workspace is an offer, not a requirement, so a problem whose solutions all want more than
+    // was granted still runs on the workspace-free set.
+    if(chosen_algo < 0 && max_workspace_size != 0)
+    {
+        MIOPEN_LOG_I2("hipBLASLt: no solution fits " << max_workspace_size
+                                                     << " bytes, retrying without a workspace");
+        max_workspace_size = 0;
+        workspace          = nullptr;
+        chosen_algo        = first_fitting_algo(0);
+    }
+
+    if(chosen_algo < 0)
     {
         MIOPEN_THROW(miopenStatusInternalError,
                      "no solution found for hipBLASLt hipBLASLtHandles.matmul");
@@ -483,6 +508,10 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
     const void* bData = static_cast<const DataTypeAB*>(B) + b_offset;
     const void* cData = static_cast<const DataTypeC*>(C) + c_offset;
     void* dData       = static_cast<DataTypeC*>(C) + c_offset;
+
+    // hipblasLtMatmul wants the size the chosen algorithm asked for, not the whole budget on
+    // offer. Handing it the budget makes large-K solutions fail with an internal error.
+    const std::size_t algo_workspace_size = heuristicResult[chosen_algo].workspaceSize;
 
     {
         HipEventProfiler profiler(handle);
@@ -498,9 +527,9 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                              hipBLASLtHandles.matC,
                                              dData,
                                              hipBLASLtHandles.matD,
-                                             &heuristicResult[0].algo,
+                                             &heuristicResult[chosen_algo].algo,
                                              workspace,
-                                             max_workspace_size,
+                                             algo_workspace_size,
                                              handle.GetStream()));
     }
 }
