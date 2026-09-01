@@ -4,6 +4,38 @@ Build-time UKD/KMD/KDP -> kpack packaging. Provider-internal (`tools/hkp_pack.py
 see `python/hkp_pack/` for the pipeline itself and `examples/descriptors/` for a
 real, minimal authored source root.
 
+## Build speed: put the comgr cache on local storage
+
+Packing a rocKE descriptor set is dominated by lowering each kernel through
+`libamd_comgr`, which caches its results on disk. That cache defaults to
+**`~/.cache/comgr`**, so on a machine whose home directory is a network filesystem
+every lookup is a network round trip and packing slows by an order of magnitude.
+Point it somewhere local:
+
+```bash
+export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache   # RAM disk or local disk
+```
+
+Measured packing a 2,711-kernel gfx942 set at 32 workers, varying only the cache:
+13 s warm on tmpfs, 47 s cold on tmpfs, 597 s warm on a network home. A cold local
+cache beat a warm network one by more than 10x, so on a network home the cache costs
+more than it saves. `AMD_COMGR_CACHE=0` disables caching outright, which is a
+diagnostic rather than a fix.
+
+Two knobs belong to the packer itself:
+
+| Variable | Effect |
+|---|---|
+| `HKP_PACK_JOBS` | Prewarm worker count. Defaults to `min(32, ncpu)`; `1` forces the serial path for a clean traceback. |
+| `HKP_PACK_TIMING` | Set to `1` to print the per-phase split (`prewarm` / `walk` / `assemble`) instead of one opaque total. |
+
+`HKP_PACK_TIMING=1` is the way to find out where a slow pack is actually spending
+time before reaching for either knob:
+
+```
+hkp_pack[timing] gfx942 TOTAL=41.33s prewarm=40.45s walk=0.47s assemble=0.41s other=0.00s serial=2%
+```
+
 ## Running the tests
 
 ```bash

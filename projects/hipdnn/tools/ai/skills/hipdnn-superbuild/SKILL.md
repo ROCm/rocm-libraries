@@ -111,6 +111,14 @@ Summarize:
 
 ## Notes
 
+- **Build speed — comgr cache location.** When the build packs kernels (the
+  hip-kernel-provider's descriptor packaging), the dominant cost is lowering each kernel
+  through `libamd_comgr`, which caches results at `~/.cache/comgr` by default. If the home
+  directory is on a network filesystem, every lookup is a network round trip and packing
+  slows by an order of magnitude — a *cold* cache on local storage beats a *warm* one on a
+  network home by more than 10x. Export `AMD_COMGR_CACHE_DIR` to a RAM disk or local disk
+  (e.g. `/tmp/comgr-cache`) before building. Add `HKP_PACK_TIMING=1` to have the packer
+  print its per-phase split when a pack looks slow.
 - `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is left in place for interactive users and `tools/dnn-benchmarking/setup.ps1`. Keep the two in sync.
 - `comgr_stage.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` app-local and emits a diagnostic when `C:\Windows\System32\amd_comgr.dll` is present (it shadows PATH and is why the app-local copy is needed).
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.

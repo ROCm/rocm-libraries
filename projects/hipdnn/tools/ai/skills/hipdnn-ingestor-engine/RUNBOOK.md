@@ -976,8 +976,25 @@ PYTHONPATH=$PROVIDER/descriptor-packaging/python:$PROVIDER/rocke/library:$PROVID
 ```
 Produces:      a packed tree that loads, plus a clean desk check
 Gate:          5a count printed; 5b skipped=False; 5c success:true, 0 ERROR; 5d clean
-Typical time:  30 minutes, plus pack time (comgr can take minutes per arch)
+Typical time:  30 minutes, plus pack time (comgr lowering dominates; see below)
 ```
+
+**Before running 5b, put the comgr cache on local storage.** comgr caches its
+compilation results at `~/.cache/comgr` by default, and on a machine whose home is a
+network filesystem every lookup is a network round trip — packing a few thousand
+kernels goes from tens of seconds to tens of minutes. This is the difference between
+"pack time" being a coffee break and being the whole afternoon:
+
+```bash
+export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache   # RAM disk or local disk
+export HKP_PACK_TIMING=1                      # print the per-phase split
+```
+
+Measured on a 2,711-kernel set at 32 workers: 13 s warm on tmpfs, 47 s cold on tmpfs,
+597 s warm on a network home. A *cold* local cache beats a *warm* networked one by
+more than 10x. With `HKP_PACK_TIMING=1` the packer reports where the time went
+(`prewarm` is the parallel comgr lowering, `walk` and `assemble` are serial), so a
+slow pack is diagnosable instead of merely slow.
 
 Each proves something different. Run all three.
 
