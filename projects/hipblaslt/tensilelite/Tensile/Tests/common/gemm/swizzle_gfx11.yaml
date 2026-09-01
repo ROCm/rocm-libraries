@@ -1,0 +1,225 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1200, skip-gfx1201, skip-gfx1250] # gfx11 WMMA only
+
+# Tensor swizzling on gfx11 WMMA. Separate from the gfx942 swizzleA/swizzleB configs
+# because those fork LocalReadVectorWidth over [2,4,8], all rejected here: gfx10/gfx11
+# WMMA replicate operands across the wave, so MIInputPerThread is MatrixInstK (16).
+#
+# fp16/bf16 cover a lane operand (32 bytes) wider than one buffer_load_dwordx4.
+#
+# Keep K a multiple of 32 and AssertSummationElementMultiple pinning DepthU so
+# NoTailLoop holds -- the WMMA + DirectToVgpr tail loop is still wave64-only and does
+# not assemble on gfx11. Sizes with a K remainder are out of scope.
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 1073741824
+  DataInitTypeA: 21
+  DataInitTypeB: 21
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  BoundsCheck: 0
+  SyncsPerBenchmark: 0
+
+BenchmarkProblems:
+
+  ########################################
+  # HHS TN SWIZZLED_B
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      SwizzleTensorB: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # [MI_M, MI_N, MI_K, MI_B, BlockM, MIWaveTileM, MIWaveTileN, MIWaveGroupM, MIWaveGroupN]
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  4, 1,  1, 4] # MT =  64x64,  one N tile per wave
+          - [16, 16, 16, 1,  1,  4, 2,  1, 4] # MT =  64x128, two N tiles per wave
+        - WavefrontSize: [32]
+        - WorkGroup:
+          - [16, 8, 1] # 128 threads = 4 waves x 32
+        - AssertSummationElementMultiple: [32]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1]
+        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - DirectToVgprB: [True]
+        - UseSgprForGRO: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 1024, 1, 512]
+          - Exact: [512, 160, 1, 256]
+
+  ########################################
+  # BBS TN SWIZZLED_B
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      SwizzleTensorB: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  4, 1,  1, 4] # MT =  64x64
+          - [16, 16, 16, 1,  1,  4, 2,  1, 4] # MT =  64x128
+        - WavefrontSize: [32]
+        - WorkGroup:
+          - [16, 8, 1]
+        - AssertSummationElementMultiple: [32]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1]
+        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - DirectToVgprB: [True]
+        - UseSgprForGRO: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 1024, 1, 512]
+
+  ########################################
+  # I8II TN SWIZZLED_B
+  # loadsPerLane == 1: one lane operand is exactly one buffer_load_dwordx4.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I
+      ComputeDataType: I
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      SwizzleTensorB: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  4, 2,  1, 4] # MT =  64x128
+        - WavefrontSize: [32]
+        - WorkGroup:
+          - [16, 8, 1]
+        - AssertSummationElementMultiple: [64]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1]
+        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - DirectToVgprB: [True]
+        - UseSgprForGRO: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 1024, 1, 512]
+
+  ########################################
+  # HHS TN SWIZZLED_A
+  # MIWaveTileA 4 gives NumLoadsPerpendicularA 4: operand spanning two loads *and*
+  # several tiles in the free dimension, which ordered G2L registers wrongly before.
+  # A and B cannot both be DirectToVgpr, so B stays plain here.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      SwizzleTensorA: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # MT 64x128 with DirectToVgprA needs 267 VGPRs, over the 256 budget.
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  4, 1,  1, 4] # MT =  64x64
+        - WavefrontSize: [32]
+        - WorkGroup:
+          - [16, 8, 1]
+        - AssertSummationElementMultiple: [32]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1]
+        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - DirectToVgprA: [True]
+        - UseSgprForGRO: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 1024, 1, 512]
