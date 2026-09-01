@@ -22,6 +22,7 @@ add_executable(
     utilities/TestCpuFpReferenceRMSNorm.cpp
     utilities/TestCpuFpReferenceResampleFwd.cpp
     utilities/TestCpuFpReferenceSdpa.cpp
+    utilities/TestCpuFpReferenceSdpaRagged.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceLayernormBackward.cpp

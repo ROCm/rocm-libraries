@@ -146,7 +146,23 @@ private:
             return detail::GpuRMSNormBwdSignatureKey(node, tensorMap, node.compute_data_type());
 
         case NodeAttrs::SdpaAttributes:
+        {
+            // Ragged (RFC-0014: packed [B,H,S,D] + ragged_offset) SDPA nodes carry a
+            // ragged_offset_tensor_uid on their Q primary and use a distinct packed reference; dense
+            // nodes go to GpuSdpaFwdSignatureKey. The two keys are separate registry buckets, so this
+            // is the single dispatch point they share.
+            const auto* sdpaAttributes = node.attributes_as_SdpaAttributes();
+            if(sdpaAttributes != nullptr)
+            {
+                const auto qIt = tensorMap.find(sdpaAttributes->q_tensor_uid());
+                if(qIt != tensorMap.end() && qIt->second != nullptr
+                   && qIt->second->ragged_offset_tensor_uid().has_value())
+                {
+                    return detail::GpuSdpaRaggedFwdSignatureKey(node, tensorMap);
+                }
+            }
             return detail::GpuSdpaFwdSignatureKey(node, tensorMap);
+        }
 
         // Node types with no GPU plan yet - throw descriptive error
         case NodeAttrs::BatchnormInferenceAttributes:
