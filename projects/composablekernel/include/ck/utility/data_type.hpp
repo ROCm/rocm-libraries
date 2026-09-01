@@ -36,7 +36,7 @@ using bhalf_t = ushort;
 #endif
 using half_t = _Float16;
 // element type used to spell the operands of the AMDGPU f16 builtins
-#if CK_USE_LLVM_BUILTIN_FP16
+#if CK_USE_LLVM_BUILTIN_FLOAT16
 using llvm_half_t = _Float16;
 #else
 using llvm_half_t = __fp16;

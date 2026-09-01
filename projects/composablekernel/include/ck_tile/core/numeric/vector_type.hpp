@@ -70,7 +70,7 @@ using fp16x32_t = _Float16 __attribute__((ext_vector_type(32)));
 using fp16x64_t = _Float16 __attribute__((ext_vector_type(64)));
 
 // Element type used to spell the operands of the AMDGPU f16 builtins.
-#if CK_TILE_USE_LLVM_BUILTIN_FP16
+#if CK_TILE_USE_LLVM_BUILTIN_FLOAT16
 using llvm_fp16_t = _Float16;
 #else
 using llvm_fp16_t = __fp16;
