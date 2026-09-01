@@ -22,33 +22,68 @@
 #
 ################################################################################
 
-from . import CUSTOM_KERNEL_PATH
+from .resources import custom_kernel_names, custom_kernel_text
 from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
 import yaml
 
 import os
 
+
 def isCustomKernelConfig(config):
     return "CustomKernelName" in config and config["CustomKernelName"]
 
-def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):
-    return os.path.join(directory, (name + ".s"))
+def supportsUserSgprKernargPreload(rocmVersion):
+    """Return whether a ROCm version passes TensileLite's preload gate.
 
-def getAllCustomKernelNames(directory=CUSTOM_KERNEL_PATH):
+    AMD's ROCm 6.0 compiler branch added descriptor and codegen support in
+    September 2023 for feature-enabled targets. HIP recorded 6.0.32650 on
+    September 29, and hipBLASLt adopted it as its 6.x floor on October 6.
+    That floor is historical compatibility policy, not a complete capability
+    test: target ISA, assembler, and firmware also matter.
+
+    HIP's patch field is a build number, not globally monotonic. Official
+    ROCm 7 releases can report a patch below 32650, so later major releases
+    remain eligible. A locally built ROCm 6.x toolchain reporting a low build
+    (for example, 6.4.0) remains ambiguous and is treated as unsupported.
+    """
+    return rocmVersion.major > 6 or (
+        rocmVersion.major == 6 and rocmVersion.patch >= 32650
+    )
+def getAllCustomKernelNames(directory=None):
+    if directory is None:
+        return custom_kernel_names()
     # Sorted in alphabetical order so that custom-kernel enumeration (notably the CustomKernels: ["*"]
     # wildcard) does not depend on os.listdir order, which varies with the
     # filesystem and with how the package was installed.
     return sorted(fname[:-2] for fname in os.listdir(directory) if fname.endswith(".s"))
 
-def getCustomKernelContents(name, directory=CUSTOM_KERNEL_PATH):
+def getCustomKernelContents(name, directory=None):
+    if directory is None:
+        try:
+            return custom_kernel_text(name)
+        except ValueError:
+            raise
+        except Exception as error:
+            raise RuntimeError(f"Failed to find custom kernel: {name}") from error
     try:
-        with open(getCustomKernelFilepath(name, directory)) as f:
+        with open(os.path.join(directory, f"{name}.s")) as f:
             return f.read()
-    except:
-        raise RuntimeError("Failed to find custom kernel: {}".format(os.path.join(directory, name)))
+    except Exception as error:
+        raise RuntimeError(
+            f"Failed to find custom kernel: {os.path.join(directory, name)}"
+        ) from error
 
-def getCustomKernelConfigAndAssembly(name, directory=CUSTOM_KERNEL_PATH):
+def getCustomKernelSource(name, rocmVersion, directory=None):
+    contents = getCustomKernelContents(name, directory)
+    if supportsUserSgprKernargPreload(rocmVersion):
+        return contents
+    return "".join(
+        line
+        for line in contents.splitlines(keepends=True)
+        if "amdhsa_user_sgpr_kernarg_preload" not in line
+    )
+def getCustomKernelConfigAndAssembly(name, directory=None):
     contents  = getCustomKernelContents(name, directory)
     config = "\n"    #Yaml configuration properties
     assembly = ""
@@ -61,7 +96,7 @@ def getCustomKernelConfigAndAssembly(name, directory=CUSTOM_KERNEL_PATH):
 
     return (config, assembly)
 
-def readCustomKernelConfig(name, directory=CUSTOM_KERNEL_PATH):
+def readCustomKernelConfig(name, directory=None):
     rawConfig, _ = getCustomKernelConfigAndAssembly(name, directory)
     try:
         return yaml.safe_load(rawConfig)["custom.config"]
@@ -69,7 +104,7 @@ def readCustomKernelConfig(name, directory=CUSTOM_KERNEL_PATH):
         raise RuntimeError("Failed to read configuration for custom kernel: {0}\nDetails:\n{1}".format(name, e))
 
 def getCustomKernelConfig(
-    kernelName: str, internalSupportParams: dict, directory: str = CUSTOM_KERNEL_PATH
+    kernelName: str, internalSupportParams: dict, directory: str = None
 ) -> dict:
     """
     Retrieves and validates the configuration for a custom kernel.
@@ -77,7 +112,8 @@ def getCustomKernelConfig(
     Args:
         kernelName: The name of the custom kernel.
         internalSupportParams: A dictionary of internal support parameters to be merged with the kernel configuration.
-        directory: The directory where custom kernel files are located. Defaults to CUSTOM_KERNEL_PATH.
+        directory: Optional directory where custom kernel files are located.
+            Defaults to bundled package resources.
 
     Returns:
         dict: The validated configuration dictionary for the custom kernel.

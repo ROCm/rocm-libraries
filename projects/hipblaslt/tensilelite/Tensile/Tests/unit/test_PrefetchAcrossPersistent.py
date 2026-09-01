@@ -18,7 +18,7 @@ from rocisa.register import RegisterPool
 import Tensile.KernelWriter as kw_module
 from Tensile.KernelWriter import KernelWriter
 import Tensile.KernelWriterAssembly as kwa_module
-from Tensile.Components.StreamK import StreamKTwoTileDPFirst
+from Tensile.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
 from Tensile.Common.GlobalParameters import defaultSolution, globalParameters
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
 from Tensile.Common.Types import IsaInfo, IsaVersion, SemanticVersion
@@ -174,6 +174,7 @@ class _SetupNewTilePapTdmWriter:
             asmCaps={"HasTDM": True},
             kernel={"TDMInst": 3, "TDMPlusLdsBuf": 0},
             waveIdxReleasedAfterStagger=False,
+            tdmParityPackedInArgType=False,
         )
         self.do = {"executeToInitEnd": False}
         self.dontAppendCode = False
@@ -232,6 +233,12 @@ class _SetupNewTilePapTdmWriter:
 
     def releaseWaveIdxAfterStagger(self, kernel):
         return kwa_module.KernelWriterAssembly.releaseWaveIdxAfterStagger(self, kernel)
+
+    def hoistWaveParityWrapUSel(self, kernel, tpa, tpb):
+        return self._module("hoistWaveParityWrapUSel")
+
+    def packTdmParityIntoArgType(self, kernel):
+        return self._module("packTdmParityIntoArgType")
 
     def declareStaggerParms(self, kernel):
         return self._module("declareStaggerParms")
@@ -373,6 +380,9 @@ class _ClassicPapWrapperWriter:
 
 
 class _StubStreamK:
+    def papHasNextPersistentIteration(self, writer, kernel, skipLabel):
+        return _module_with_comment("papHasNextPersistentIteration", "unit: has next persistent iteration")
+
     def prefetchAcrossPersistentSetupNextTile(self, writer, kernel, tpa, tpb, skipLroReset=False):
         return _module_with_comment("prefetchAcrossPersistentSetupNextTile", "unit: setup next tile")
 
@@ -584,10 +594,10 @@ def _pap_solution_config(**overrides):
     return config
 
 
-def _pap_solution(**overrides):
+def _pap_solution(*, rocm_version=SemanticVersion(6, 4, 0), **overrides):
     assembler = SimpleNamespace(
         code_object_version="default",
-        rocm_version=SemanticVersion(6, 4, 0),
+        rocm_version=rocm_version,
     )
     return Solution(
         _pap_solution_config(**overrides),
@@ -715,6 +725,57 @@ def test_pap_is_valid_solution_parameter():
 def test_solution_validation_accepts_minimal_pap_tdm_contract():
     assert _pap_solution()["Valid"] is True
 
+@pytest.mark.parametrize(
+    "rocm_version, expected_preload",
+    [
+        pytest.param(SemanticVersion(6, 0, 32649), False, id="rocm_6_before_floor"),
+        pytest.param(SemanticVersion(6, 0, 32650), True, id="rocm_6_at_floor"),
+        pytest.param(SemanticVersion(7, 1, 25424), True, id="rocm_7_low_build"),
+    ],
+)
+def test_solution_applies_preload_gate_from_assembler_version(
+    rocm_version, expected_preload
+):
+    solution = _pap_solution(
+        rocm_version=rocm_version,
+        PreloadKernArgs=True,
+    )
+
+    assert solution["Valid"] is True
+    assert solution["PreloadKernArgs"] is expected_preload
+
+
+def test_solution_validation_accepts_pap_streamk_dynamic():
+    # PAP is allowed for StreamK==4 (StreamKDynamic) in addition to StreamK==3.
+    # The validation gate accepts StreamK in (3, 4, 5); every other PAP axis
+    # restriction is StreamK-agnostic and still applies. TDM is disabled here
+    # (TDMInst=0): the TDM+PAP twin gate is intentionally kept SK3-only, so
+    # SK4 PAP is supported for the non-TDM path only.
+    assert _pap_solution(StreamK=4, TDMInst=0)["Valid"] is True
+
+
+def test_solution_validation_rejects_pap_streamk_dynamic_with_tdm(capsys):
+    # The TDM + PAP twin gate is deliberately NOT relaxed for SK4: TDM+PAP
+    # remains StreamK==3 only.
+    assert _pap_solution(StreamK=4, TDMInst=3)["Valid"] is False
+    assert "TDM + PrefetchAcrossPersistent requires StreamK == 3" in capsys.readouterr().out
+
+
+def test_solution_validation_accepts_pap_streamk_hybrid():
+    # PAP is allowed for StreamK==5 (StreamKHybrid) in addition to StreamK==3
+    # and StreamK==4. The validation gate accepts StreamK in (3, 4, 5). A
+    # single PAP-enabled SK5 kernel is correct for BOTH runtime sub-paths
+    # (static SK3-like and dynamic SK4-like) via StreamKHybridMode dispatch.
+    # TDM is disabled here (TDMInst=0): the TDM+PAP twin gate is intentionally
+    # kept SK3-only, so SK5 PAP is supported for the non-TDM path.
+    assert _pap_solution(StreamK=5, TDMInst=0)["Valid"] is True
+
+
+def test_solution_validation_rejects_pap_streamk_hybrid_with_tdm(capsys):
+    # The TDM + PAP twin gate is deliberately NOT relaxed for SK5: TDM+PAP
+    # remains StreamK==3 only (hybrid TDM+PAP deferred).
+    assert _pap_solution(StreamK=5, TDMInst=3)["Valid"] is False
+    assert "TDM + PrefetchAcrossPersistent requires StreamK == 3" in capsys.readouterr().out
 
 @pytest.mark.parametrize(
     "overrides, reason",
@@ -825,11 +886,19 @@ def test_setup_new_tile_releases_waveidx_after_stagger_for_wave_separated_tdm(mo
         assert "calculateStagger_A" in module_names
         assert "calculateStagger_B" in module_names
         # The release is not the plain undefineSgpr emitted on the non-stagger path;
-        # it goes through releaseWaveIdxAfterStagger, which also latches the state
-        # that flips every later parity site to the Serial recompute.
+        # it goes through releaseWaveIdxAfterStagger after packing parity into
+        # ArgType bit 8. Later sites use that packed bit, not a live WaveIdx.
         assert "undefineSgpr_WaveIdx" not in module_names
         assert "ReleaseWaveIdxAfterStagger" in module_names
+        assert "hoistWaveParityWrapUSel" in module_names
+        assert "packTdmParityIntoArgType" in module_names
         assert module_names.index("calculateStagger_B") < module_names.index(
+            "hoistWaveParityWrapUSel"
+        )
+        assert module_names.index("hoistWaveParityWrapUSel") < module_names.index(
+            "packTdmParityIntoArgType"
+        )
+        assert module_names.index("packTdmParityIntoArgType") < module_names.index(
             "ReleaseWaveIdxAfterStagger"
         )
         assert writer.states.waveIdxReleasedAfterStagger is True
@@ -1059,3 +1128,87 @@ def test_streamk_pap_next_tile_setup_applies_wgm_remap(
     assert tile_index < index_to_wg
     assert index_to_wg < wgm_remap
     assert writer.states.WGMTransformLevels == expected_transform_levels
+
+
+def test_streamk3_pap_has_next_persistent_iteration_uses_streamkiter_compare():
+    # The PAP "is there a next persistent iteration?" predicate is now a
+    # StreamK-component seam. The static StreamK variants (SK3 TwoTileDPFirst,
+    # and the SK3/static path of SK5) keep the historical
+    # StreamKIter >= StreamKIterEnd compare + skip branch, byte-for-byte, so
+    # relaxing the seam for SK4 (StreamKDynamic) does not perturb SK3 codegen.
+    from rocisa.code import Label
+
+    skip_label = Label("SK_SkipNllPAP_unit", "")
+    module = StreamKTwoTileDPFirst().papHasNextPersistentIteration(
+        writer=None, kernel={}, skipLabel=skip_label
+    )
+    rendered = str(module)
+    assert "s_cmp_ge_u32 s[sgprStreamKIter], s[sgprStreamKIterEnd]" in rendered
+    assert "No next persistent iteration" in rendered
+    assert "s_cbranch_scc1 label_SK_SkipNllPAP_unit" in rendered
+
+
+class _PapFetchWriter:
+    def __init__(self):
+        self.labels = _StubLabels()
+        self.sgprPool = RegisterPool(
+            0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False
+        )
+
+
+def _fake_fetch(self, writer, kernel, preventOverflow=True, uniqueLabels=False):
+    sidx = writer.sgprPool.checkOut(1, "workItemIdx")
+    return _module_with_comment("fakeFetch", "unit: queue pop"), sidx
+
+
+def test_sk4_pap_has_next_primes_before_drain_check(monkeypatch):
+    # SK4 PAP must stash SkNextWorkItem and set SkPrefetchPrimed before the
+    # TotalItems drain compare so the back-edge never re-pops a termination token.
+    monkeypatch.setattr(StreamKDynamic, "_fetchWorkItemAndBroadcast", _fake_fetch)
+    from rocisa.code import Label
+
+    skip_label = Label("SK_SkipNllPAP_sk4", "")
+    module = StreamKDynamic().papHasNextPersistentIteration(
+        _PapFetchWriter(), {"StreamK": 4}, skip_label
+    )
+    rendered = str(module)
+    primed = rendered.find("s[sgprSkPrefetchPrimed]")
+    drain = rendered.find("s[sgprTotalItems]")
+    assert primed != -1 and drain != -1 and primed < drain
+    assert "s[sgprSkNextWorkItem]" in rendered
+
+
+def test_sk5_pap_has_next_dispatches_static_and_dynamic(monkeypatch):
+    # SK5 PAP is a runtime hybrid: mode==0 keeps the SK3 StreamKIter compare;
+    # mode!=0 reuses the SK4 pop-and-prime handoff.
+    monkeypatch.setattr(StreamKHybrid, "_fetchWorkItemAndBroadcast", _fake_fetch)
+    from rocisa.code import Label
+
+    skip_label = Label("SK_SkipNllPAP_sk5", "")
+    module = StreamKHybrid().papHasNextPersistentIteration(
+        _PapFetchWriter(), {"StreamK": 5}, skip_label
+    )
+    rendered = str(module)
+    assert "s[sgprStreamKHybridMode]" in rendered
+    assert "s[sgprStreamKIter]" in rendered
+    assert "s[sgprSkPrefetchPrimed]" in rendered
+    assert "s[sgprSkNextWorkItem]" in rendered
+
+
+def test_sk4_pap_setup_next_tile_uses_stashed_work_item(monkeypatch):
+    monkeypatch.setattr(
+        StreamKDynamic,
+        "_computeNextTileIdentity",
+        lambda self, writer, kernel, sidx, tpa, tpb: _module_with_comment(
+            "computeNextTileIdentity", "unit: tile identity"
+        ),
+    )
+    module = StreamKDynamic().prefetchAcrossPersistentSetupNextTile(
+        _PapFetchWriter(),
+        {"StreamK": 4},
+        {"tensorChar": "A"},
+        {"tensorChar": "B"},
+    )
+    rendered = str(module)
+    assert "s[sgprSkNextWorkItem]" in rendered
+    assert "unit: tile identity" in rendered
