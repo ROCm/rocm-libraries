@@ -53,6 +53,13 @@ must match miopen.h, the _impl declaration's signature must match it too (modulo
 the suffix), and each stub must forward to its own _impl symbol and nothing
 else. No artifact may carry an entry the public header does not.
 
+Each stub must also open with MIOPEN_WRAPPER_DISPATCH naming itself. The macro's
+own runtime assert cannot cover this: it is compiled out under NDEBUG, it never
+fires for a stub nothing calls, and a stub missing the macro entirely has no
+assert to fire at all. Such a stub silently loses the ability to ever route to
+hipDNN, which is invisible until the entry point joins the forwarding set and
+keeps running MIOpen anyway.
+
 The provider mirror lives in a sibling project that a MIOpen-only checkout does
 not ship, so it is the one artifact that can be skipped. It is skipped only once
 git confirms the commit under test does not track it -- being absent from a
@@ -319,6 +326,19 @@ Every public entry point must be spelled identically in all five places:
 Update the private files and the provider's mirror to match the public header.
 Do not edit miopen.h to match them -- that changes the public C API.""".rstrip()
 
+DISPATCH_REMEDY = """
+Every stub in src/private/wrapper.cpp must open with the dispatch macro, passing
+its own function token:
+  extern "C" miopenStatus_t miopenFoo(<params>)
+  {
+      MIOPEN_WRAPPER_DISPATCH(miopenFoo);
+      return miopenFoo_impl(<args>);
+  }
+Pass the token, never a string and never a neighbouring stub's name. A stub
+without the macro can never route to hipDNN, and nothing else reports that: the
+macro's assert needs the macro to be there, and is compiled out under NDEBUG in
+any case.""".rstrip()
+
 RANGE_REMEDY = """
 Each miopenConvolution*GetWorkSpaceSizeRange entry point is spelled by hand in
 three places, because it is exported without being declared in miopen.h:
@@ -352,6 +372,14 @@ RANGE_ENTRY_POINTS = frozenset(
         "miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange",
     }
 )
+
+# Stubs that must NOT carry MIOPEN_WRAPPER_DISPATCH, and why. The macro returns
+# forward_to_hipdnn's miopenStatus_t, so a stub returning anything else cannot
+# host it. Exemptions are checked in both directions: an exempt stub that grows
+# the macro fails here rather than failing to compile somewhere less obvious.
+DISPATCH_EXEMPT = {
+    "miopenGetErrorString": "returns const char*, not miopenStatus_t",
+}
 
 
 # --------------------------------------------------------------------------
@@ -388,6 +416,9 @@ DECL_RE = re.compile(
     r"(?P<ret>.*?)(?P<name>miopen[A-Za-z0-9_]*)\s*\((?P<params>[^()]*)\)"
 )
 IMPL_CALL_RE = re.compile(r"\b(miopen[A-Za-z0-9_]*_impl)\s*\(")
+DISPATCH_RE = re.compile(
+    r"\bMIOPEN_WRAPPER_DISPATCH\s*\(\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\)"
+)
 # A declarator for one of the range entry points, in either of the two forms it
 # is written in: a declaration ending in ';' and a definition followed by its
 # body's '{'.
@@ -562,18 +593,26 @@ def parse_range_prototypes(source: str, what: str) -> dict[str, tuple[str, ...]]
 
 def parse_wrapper(
     source: str,
-) -> tuple[dict[str, tuple[str, ...]], dict[str, set[str]]]:
-    """Collect the wrapper's stub prototypes and the _impl symbols each one calls."""
+) -> tuple[dict[str, tuple[str, ...]], dict[str, set[str]], dict[str, list[str]]]:
+    """Collect each stub's prototype, the _impl symbols it calls, and its
+    MIOPEN_WRAPPER_DISPATCH arguments.
+
+    Dispatches stay an ordered list rather than a set so that a stub carrying the
+    macro twice is visible as such instead of collapsing into a correct-looking
+    single entry.
+    """
     text = strip_comments(source)
     protos: dict[str, tuple[str, ...]] = {}
     forwards: dict[str, set[str]] = {}
+    dispatches: dict[str, list[str]] = {}
     for match in WRAPPER_DEF_RE.finditer(text):
         name, sig = parse_prototype(match.group("decl"), "wrapper")
         if name in protos:
             raise AbiError(f"duplicate definition of {name} in wrapper")
         protos[name] = sig
         forwards[name] = set(IMPL_CALL_RE.findall(match.group("body")))
-    return protos, forwards
+        dispatches[name] = DISPATCH_RE.findall(match.group("body"))
+    return protos, forwards, dispatches
 
 
 def parse_renames(source: str, what: str = "rename header") -> dict[str, str]:
@@ -880,6 +919,49 @@ def check_wrapper_forwards(forwards: dict[str, set[str]]) -> bool:
     return False
 
 
+def check_wrapper_dispatch(dispatches: dict[str, list[str]]) -> bool:
+    """Assert every stub opens with MIOPEN_WRAPPER_DISPATCH naming itself."""
+    findings: list[str] = []
+    for name, args in sorted(dispatches.items()):
+        exempt_reason = DISPATCH_EXEMPT.get(name)
+        if exempt_reason is not None:
+            if args:
+                findings.append(
+                    f"  {name} carries MIOPEN_WRAPPER_DISPATCH but is exempt"
+                    f" ({exempt_reason}); drop the macro or the exemption"
+                )
+        elif not args:
+            findings.append(f"  {name} has no MIOPEN_WRAPPER_DISPATCH")
+        elif len(args) > 1:
+            findings.append(
+                f"  {name} has {len(args)} MIOPEN_WRAPPER_DISPATCH calls"
+                f" ({', '.join(args)}); expected exactly one"
+            )
+        elif args[0] != name:
+            findings.append(
+                f"  {name} dispatches as {args[0]}; expected {name}."
+                " A stub cloned from its neighbour keeps the neighbour's name"
+            )
+    # An exemption for a stub that no longer exists has stopped documenting
+    # anything, and would silently excuse the name if it ever came back.
+    exempt = sorted(DISPATCH_EXEMPT.keys() & dispatches.keys())
+    for name in sorted(DISPATCH_EXEMPT.keys() - dispatches.keys()):
+        findings.append(
+            f"  {name} is exempt from MIOPEN_WRAPPER_DISPATCH but has no stub;"
+            " drop the exemption"
+        )
+    if not findings:
+        print(
+            f"PASS: all {len(dispatches) - len(exempt)} routable wrapper stubs"
+            f" dispatch under their own name ({len(exempt)} exempt)"
+        )
+        return True
+    print("FAIL: wrapper stubs are not all routable through the dispatch seam:")
+    for line in findings:
+        print(line)
+    return False
+
+
 # --------------------------------------------------------------------------
 # Subcommands
 # --------------------------------------------------------------------------
@@ -1047,7 +1129,7 @@ def cmd_check_headers(args) -> int:
         raise AbiError("no MIOPEN_EXPORT declarations found in miopen.h")
     impl = parse_declarations(impl_source, EXTERN_C_ANCHOR_RE, "miopen_impl.h")
     renames = parse_renames(rename_source)
-    wrapper, forwards = parse_wrapper(wrapper_source)
+    wrapper, forwards, dispatches = parse_wrapper(wrapper_source)
 
     # The private declarations carry the suffix; strip it so every comparison
     # below is against the public header under one common set of names. An
@@ -1067,6 +1149,9 @@ def cmd_check_headers(args) -> int:
     ok &= check_entry_point_set(set(public), set(wrapper), "wrapper.cpp")
     ok &= check_prototypes(public, wrapper, "wrapper.cpp")
     ok &= check_wrapper_forwards(forwards)
+    # Kept out of ``ok`` until the remedies are printed: a routing defect is not
+    # the five-artifact drift HEADERS_REMEDY talks about and has its own fix.
+    dispatch_ok = check_wrapper_dispatch(dispatches)
     provider_missing = False
     if provider_source is None:
         provider_missing = args.require_provider
@@ -1101,10 +1186,13 @@ def cmd_check_headers(args) -> int:
 
     if not headers_ok:
         print(HEADERS_REMEDY)
+    if not dispatch_ok:
+        print(DISPATCH_REMEDY)
     if not range_ok:
         print(RANGE_REMEDY)
     if provider_missing:
         print(PROVIDER_REMEDY)
+    ok &= dispatch_ok
     ok &= range_ok
     # A skipped file is not a checked one. Folding this in last keeps it out of
     # the two remedies above, which are about mismatches rather than readability.
