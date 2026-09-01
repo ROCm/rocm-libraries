@@ -52,7 +52,7 @@ BEGIN
             VALUE "InternalName",     "rocsolver"
             VALUE "LegalCopyright",   "Copyright (C) @ROCSOLVER_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc."
             VALUE "OriginalFilename", "rocsolver.dll"
-            VALUE "ProductName",      "AMD ROCm rocSOLVER @rocsolver_VERSION_MAJOR@.@rocsolver_VERSION_MINOR@"
+            VALUE "ProductName",      "AMD ROCm rocSOLVER @rocsolver_VERSION_MAJOR@.@rocsolver_VERSION_MINOR@ (@rocsolver_VERSION_TWEAK@)"
             VALUE "ProductVersion",   "@rocsolver_VERSION_MAJOR@.@rocsolver_VERSION_MINOR@.@rocsolver_VERSION_PATCH@.0"
             VALUE "Comments",         "Git commit: @rocsolver_VERSION_COMMIT_ID@"
         END

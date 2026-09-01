@@ -47,7 +47,7 @@ BEGIN
             VALUE "InternalName",     "hipsolver"
             VALUE "LegalCopyright",   "Copyright (C) @HIPSOLVER_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc."
             VALUE "OriginalFilename", "hipsolver.dll"
-            VALUE "ProductName",      "AMD ROCm hipSOLVER @hipsolver_VERSION_MAJOR@.@hipsolver_VERSION_MINOR@"
+            VALUE "ProductName",      "AMD ROCm hipSOLVER @hipsolver_VERSION_MAJOR@.@hipsolver_VERSION_MINOR@ (@hipsolver_VERSION_TWEAK@)"
             VALUE "ProductVersion",   "@hipsolver_VERSION_MAJOR@.@hipsolver_VERSION_MINOR@.@hipsolver_VERSION_PATCH@.0"
             VALUE "Comments",         "Git commit: @hipsolver_VERSION_COMMIT_ID@"
         END
