@@ -37,6 +37,18 @@ CANDIDATE_EVENT = "ingestor.benchmark.candidate"
 # by name and leaves order arbitrary, so this is only for readability.
 ENVELOPE_COLUMNS = (
     "benchmark",
+    # The device half of the problem identity, beside the graph half it is only half of.
+    # The runtime keys its winner cache on (graph, device) because the same graph on two
+    # GPUs is two problems with two different best kernels; a corpus merged from several
+    # machines, or one sweep spanning two devices, therefore has to be grouped on both.
+    # Grouping on `benchmark` alone would take RFC 0019.13 §11.2's per-problem oracle
+    # `v*(p)` across devices, making every regret figure derived from it too small --
+    # silently, and in the flattering direction.
+    #
+    # Dotless like every other envelope column, so FEATURE_KEY_MARKER below still sorts
+    # it as envelope rather than discovering it as a feature. It sits beside the `device.*`
+    # feature columns exactly as `kernel` sits beside `kernel.*`: identity, then properties.
+    "device",
     "kernel",
     "pack",
     "dispatch",
@@ -132,10 +144,18 @@ def row_from_record(record: dict, provenance: SweepProvenance) -> dict[str, Any]
     §8.3 rule 6 wants the timing columns empty when `is_valid` is False, so a
     zero can never be read as a measurement of zero. It keeps its features, though:
     a pair that could not run is a row the corpus needs placed in feature space.
+
+    Identity includes the device: a failed candidate still belongs to a specific
+    problem on a specific device, so `device` is written on every row exactly like
+    `benchmark`. Empty when the record carries none, which is what a log collected
+    before the runtime emitted the field looks like -- distinguishable from a real
+    identity, so a consumer can degrade deliberately rather than silently grouping
+    every machine's rows together (RFC 0019.13 §11.2).
     """
     succeeded = record.get("status") == "ok"
     row: dict[str, Any] = {
         "benchmark": record.get("benchmark", ""),
+        "device": record.get("device", ""),
         "kernel": record.get("kernel", ""),
         "pack": record.get("pack", ""),
         "dispatch": record.get("dispatch", ""),
@@ -187,7 +207,11 @@ def convert(
         with open(log_path, encoding="utf-8", errors="replace") as handle:
             for record in iter_candidate_records(handle, stats):
                 row = row_from_record(record, provenance)
-                stats.problems.add(row["benchmark"])
+                # The pair, not the graph alone: a problem is (graph, device), so a
+                # corpus merged from two machines has twice the problems, not the same
+                # ones twice. Counting on `benchmark` alone would under-report exactly
+                # where the RFC 0019.13 §11.2 oracle would be conflated.
+                stats.problems.add((row["benchmark"], row["device"]))
                 stats.feature_keys.update(key for key, _ in feature_items(record))
                 if row["is_valid"] == "True":
                     stats.valid += 1

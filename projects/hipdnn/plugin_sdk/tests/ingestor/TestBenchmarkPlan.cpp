@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -25,6 +26,7 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceKey.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
@@ -632,14 +634,16 @@ inline TestBenchmarkPlan makeDeterministicPlan(std::vector<TestBenchmarkPlan::Ca
                                                std::vector<std::optional<double>> times,
                                                TestBenchmarkPlan::RecordRankingFn recordRanking
                                                = {},
-                                               std::string benchmarkId = {})
+                                               std::string benchmarkId = {},
+                                               std::string deviceIdentity = {})
 {
     auto timer = makeDeterministicTimer(candidates, std::move(times));
     return {std::move(candidates),
             handle,
             std::move(timer),
             std::move(recordRanking),
-            std::move(benchmarkId)};
+            std::move(benchmarkId),
+            std::move(deviceIdentity)};
 }
 
 std::vector<TestBenchmarkPlan::Candidate> threeCandidates()
@@ -829,7 +833,7 @@ TEST(TestIngestorBenchmarkPlan, EveryTimedCandidateIsLoggedAsAParsableRecord)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     const auto plan = makeDeterministicPlan(
-        threeCandidates(), handle, {5.0, 1.0, 3.0}, {}, "deadbeef");
+        threeCandidates(), handle, {5.0, 1.0, 3.0}, {}, "deadbeef", "d15ea5e");
 
     plan.execute(handle, nullptr, 0U, nullptr);
 
@@ -841,6 +845,10 @@ TEST(TestIngestorBenchmarkPlan, EveryTimedCandidateIsLoggedAsAParsableRecord)
         EXPECT_EQ(record["benchmark"], "deadbeef")
             << "rows of one sweep must be groupable; a process benchmarks several graphs "
                "and their lines interleave";
+        EXPECT_EQ(record["device"], "d15ea5e")
+            << "a problem is (graph, device), exactly as the winner cache keys it: without "
+               "the device half, a corpus merged across machines takes RFC 0019.13 §11.2's "
+               "per-problem oracle across devices and understates every regret figure";
         EXPECT_EQ(record["status"], "ok");
         EXPECT_EQ(record["pack"], toString(testId(0xF0)));
         EXPECT_EQ(record["dispatch"], toString(testId(0xD0)));
@@ -892,8 +900,8 @@ TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedToTimeIsStillLogged)
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
-    const auto plan
-        = makeDeterministicPlan(threeCandidates(), handle, {5.0, std::nullopt, 3.0}, {}, "cafe");
+    const auto plan = makeDeterministicPlan(
+        threeCandidates(), handle, {5.0, std::nullopt, 3.0}, {}, "cafe", "d15ea5e");
 
     plan.execute(handle, nullptr, 0U, nullptr);
 
@@ -906,6 +914,11 @@ TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedToTimeIsStillLogged)
     ASSERT_NE(failed, records.end()) << "the untimeable candidate must still be reported";
     EXPECT_EQ((*failed)["kernel"], toString(testId(0x02)));
     EXPECT_EQ((*failed)["reason"], "launch-not-timed");
+    EXPECT_EQ((*failed)["benchmark"], "cafe");
+    EXPECT_EQ((*failed)["device"], "d15ea5e")
+        << "a candidate that could not run still belongs to a specific problem on a "
+           "specific device; an unattributable failed row can only be dropped, which "
+           "biases the corpus towards the kernels that happened to work";
     EXPECT_FALSE(failed->contains("min_ms")) << "a failed row carries no timings to mistake "
                                                 "for a measurement";
 }
@@ -978,10 +991,12 @@ TEST(TestIngestorBenchmarkPlan, ACandidatesFeatureValuesAppearInItsRecordVerbati
 
 TEST(TestIngestorBenchmarkPlan, ACandidateWithNoFeaturesLogsExactlyTheRecordItAlwaysDid)
 {
-    // A test double and a direct construction hand over no payload, and neither may see
-    // the record grow a key. Asserted as the whole key set, not as an absence of the two
-    // keys the test above used: a stray "features": {} wrapper would pass that weaker
-    // check and still break every consumer reading columns by name.
+    // A test double and a direct construction hand over no payload and no device
+    // identity, and neither may see the record grow a key. Asserted as the whole key set,
+    // not as an absence of the two keys the test above used: a stray "features": {}
+    // wrapper, or a `device` emitted as "" when unidentified, would pass that weaker
+    // check and still break every consumer reading columns by name -- an empty device is
+    // a device, and grouping on it would merge every unidentified sweep into one problem.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
@@ -1068,7 +1083,7 @@ private:
     std::string _symbol;
 };
 
-TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsOwnProblemAndKernelFeatures)
+TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsFeaturesAndTheDeviceItRanOn)
 {
     // The bootstrap case, and the only one that matters: this engine ships no UHD, no
     // features_signature and no model -- a NativeKernelHeuristic orders the catalog. A
@@ -1125,6 +1140,10 @@ TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsOwnProblemAndKerne
     const auto records = candidateRecords(recorder);
     ASSERT_EQ(records.size(), 3U);
 
+    std::ostringstream expectedDeviceFold;
+    expectedDeviceFold << std::hex << DeviceKey{testDeviceProperties()}.hash();
+    const auto expectedDeviceIdentity = expectedDeviceFold.str();
+
     std::vector<int64_t> blockSizes;
     for(const auto& record : records)
     {
@@ -1135,6 +1154,16 @@ TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsOwnProblemAndKerne
         ASSERT_TRUE(record.contains("kernel.block_size"));
         blockSizes.push_back(record["kernel.block_size"].get<int64_t>());
         EXPECT_TRUE(record["kernel.dtype"].is_string());
+
+        // The device half of the winner key, spelled the same way -- not a second
+        // notion of "which GPU" derived independently here. Recomputing the fold from
+        // the resolver's own properties is the point of the assertion: if the builder
+        // ever composed the identity from, say, the arch string alone, this would still
+        // read as "a device" while two parts differing only in compute units collapsed
+        // to one problem, which is precisely the conflation RFC 0019.13 §11.2's oracle
+        // must not suffer.
+        EXPECT_EQ(record["device"].get<std::string>(), expectedDeviceIdentity)
+            << "the logged device identity must agree with the winner cache's DeviceKey";
     }
 
     EXPECT_THAT(blockSizes, ::testing::UnorderedElementsAre(64, 64, 256))
