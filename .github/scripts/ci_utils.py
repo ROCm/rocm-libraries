@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import time
+import uuid
 from typing import Callable, Iterable, Mapping, Tuple, Type, TypeVar
 
 F = TypeVar("F", bound=Callable[..., object])
@@ -73,7 +74,13 @@ def set_github_output(outputs: Mapping[str, str]):
         return
     with open(output_file, "a") as f:
         for k, v in outputs.items():
-            f.write(f"{k}={v}\n")
+            if "\n" in v:
+                # Multiline values require the heredoc delimiter syntax; a random
+                # delimiter avoids collisions with the value's own content.
+                delimiter = f"ghadelimiter_{uuid.uuid4()}"
+                f.write(f"{k}<<{delimiter}\n{v}\n{delimiter}\n")
+            else:
+                f.write(f"{k}={v}\n")
 
 
 def append_step_summary(summary: str):

@@ -1,0 +1,2 @@
+# Python dependencies for running the hipThreads lit test suite.
+lit==18.1.8

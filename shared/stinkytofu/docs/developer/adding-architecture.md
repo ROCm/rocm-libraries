@@ -11,6 +11,7 @@ Adding a new architecture involves:
 2. Creating the architecture folder with `.def` files and `.cpp` (Step 3)
 3. Updating generated-file lists: Config.h.in, tablegen CMakeLists, RocisaArchInfo (Step 4)
 4. Implementing Rocisa-related header (Step 5)
+5. Pipeline and allocation-rules TUs for a new ISA triple (Step 6 and 7)
 
 **Instruction definitions and costs** are in `.def` files; tablegen generates `*_init.inc`, `*_costs.inc`. The `defineGfxXXXInsts` and cost application are **auto-generated** from `GfxArchDefines_block.inc.in` and the `DEF_ARCH` block. You only provide the maps in `GfxXXX.cpp`.
 
@@ -237,6 +238,12 @@ void BackendRegistry::registerAllBackends() {
 
 Finally, add the source file to `src/pipeline/backend/CMakeLists.txt`.
 
+### Step 7: Allocation rules (new ISA triple)
+
+A new triple needs a rules TU even if the table is empty at first — that is how a stepping shares its parent's rows with no duplicate, and how a later rule is one row rather than a policy edit. Copy `src/transforms/asm/ra/target/Gfx1250AllocationRules.cpp`, key on the same literal triple style `{major, minor, stepping}`, add the source to that directory's `CMakeLists.txt`, and add the anchor to `AllocationRulesRegistry::registerAll()`.
+
+How to fill in a row, Off → Audit → Active, and example rows are [register allocation](register-allocation.md) section 14. Skip this for a stepping of an existing chip: the registry is keyed by triple, so Gfx1250v0 picks up Gfx1250's table the same way it picks up the pipeline.
+
 ---
 
 ## Summary Checklist
@@ -256,6 +263,7 @@ Finally, add the source file to `src/pipeline/backend/CMakeLists.txt`.
   - [ ] Create `src/pipeline/backend/GfxYourArchBackend.cpp` with pipeline, registrar, and anchor function
   - [ ] Add anchor call to `BackendRegistry::registerAllBackends()` in `BackendRegistry.cpp`
   - [ ] Add source to `src/pipeline/backend/CMakeLists.txt`
+  - [ ] Create `src/transforms/asm/ra/target/GfxYourArchAllocationRules.cpp`, add it to that `CMakeLists.txt`, and add the anchor to `AllocationRulesRegistry::registerAll()`
 - [ ] Rebuild and test:
   ```bash
   cd build && cmake .. && cmake --build . -j && ctest -j
