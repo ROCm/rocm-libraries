@@ -220,6 +220,7 @@ rocsparse_status rocsparse::dnvec_copy_data(rocsparse_handle            handle,
                                                                target->size,
                                                                hipMemcpyDeviceToDevice,
                                                                handle->stream));
+                return rocsparse_status_success;
             }
         }
         else if((target->batch_stride >= target->size) && (source->batch_stride >= source->size))
