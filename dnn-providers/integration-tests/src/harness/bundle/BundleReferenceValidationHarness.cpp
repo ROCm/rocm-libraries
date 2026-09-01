@@ -3,17 +3,15 @@
 
 #include "harness/bundle/BundleReferenceValidationHarness.hpp"
 
-#include <sstream>
+#include <string>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 
+#include "harness/BundleMetadata.hpp"
 #include "harness/IReferenceExecutors.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TestConfig.hpp"
-#include "harness/TomlGuards.hpp"
+#include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/ReferenceOpCoverage.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
@@ -35,6 +33,23 @@ void BundleReferenceValidationHarness::SetUp()
 
     ASSERT_NE(_bundle, nullptr) << "No bundle set";
 
+    // Machine capability, not engine opinion: a bundle that wants more VRAM than
+    // this card has, or an arch it was never meant for, cannot be validated here by
+    // anyone. Checked before the no-skip contract, which is about verification.
+    //
+    // The TOML skip list is deliberately NOT consulted. It lives in an engine's own
+    // config file, so it says which graphs that engine may sit out — no engine is
+    // involved here, and our golden data does not get to opt out.
+    if(auto reason
+       = checkVramRequirement(_bundle->metadata, TestConfig::get().getCurrentDeviceVramMb()))
+    {
+        GTEST_SKIP() << *reason;
+    }
+    if(auto reason = checkArchCompatibility(_bundle->metadata, TestConfig::get().getCurrentArch()))
+    {
+        GTEST_SKIP() << *reason;
+    }
+
     // Registration only creates a test when both hold, so a violation here is a
     // registration bug rather than a property of the data.
     ASSERT_TRUE(_bundle->hasGoldenOutputs)
@@ -46,15 +61,7 @@ void BundleReferenceValidationHarness::SetUp()
 OutputTensors BundleReferenceValidationHarness::allocateOutputs() const
 {
     auto wrapper = _bundle->graphWrapper();
-    const auto& tensorAttrMap = wrapper.getTensorMap();
-
-    OutputTensors outputs;
-    for(const int64_t uid : _bundle->outputTensorUids)
-    {
-        outputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttrMap.at(uid));
-        outputs[uid]->fillWithSentinelValue();
-    }
-    return outputs;
+    return detail::allocateSentinelOutputs(wrapper.getTensorMap(), _bundle->outputTensorUids);
 }
 
 // Only an executor that actually wants device pointers gets them; the enum a
@@ -107,57 +114,37 @@ void BundleReferenceValidationHarness::TestBody()
 
     // Tell each tensor which side now holds the fresh data, or the comparison reads
     // the stale copy.
-    for(auto& [uid, tensor] : referenceOutputs)
-    {
-        static_cast<void>(uid);
-        if(useDevice())
-        {
-            tensor->markDeviceModified();
-        }
-        else
-        {
-            tensor->markHostModified();
-        }
-    }
+    detail::markOutputsModified(referenceOutputs, useDevice());
 
     auto wrapper = _bundle->graphWrapper();
-    const auto& tensorAttrMap = wrapper.getTensorMap();
 
-    for(const int64_t uid : _bundle->outputTensorUids)
+    // Golden data is the expectation here, and the reference output is what is being
+    // judged — the opposite assignment from the engine harness, where golden is the
+    // oracle. Same comparison either way, so it is the same code.
+    const ExpectedTensorLookup goldenFor
+        = [this](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
+        return *_bundle->tensors->at(uid);
+    };
+
+    // defaultTolerance(), never resolveTolerance(): a TOML override belongs to an
+    // engine and must not loosen the gate on our own data.
+    const auto toleranceFor = [&wrapper](hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+        const float value = tolerance::defaultTolerance(wrapper, dataType);
+        return ComparisonTolerance{value, value};
+    };
+
+    const std::string contextLine = "Golden data validation ("
+                                    + std::string(referenceLabel(_referenceType))
+                                    + "): " + _bundlePath.string();
+
+    for(const auto& mismatch : bundle::compareOutputs(wrapper,
+                                                      _bundle->outputTensorUids,
+                                                      referenceOutputs,
+                                                      goldenFor,
+                                                      toleranceFor,
+                                                      contextLine))
     {
-        const auto* attrs = tensorAttrMap.at(uid);
-        const auto dataType = attrs->data_type();
-
-        float atol = 0.0f;
-        float rtol = 0.0f;
-        tolerance::resolveTolerance(wrapper, dataType, currentTestName(), atol, rtol);
-
-        auto& computed = *referenceOutputs.at(uid);
-        auto& golden = *_bundle->tensors->at(uid);
-
-        auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, atol, rtol);
-        if(validator->allClose(golden, computed))
-        {
-            continue;
-        }
-
-        const auto* name = attrs->name();
-        const std::string label
-            = (name != nullptr && !name->empty()) ? name->str() : ("uid=" + std::to_string(uid));
-
-        hipdnn_test_sdk::utilities::ComparisonContext ctx;
-        ctx.contextLine = "Golden data validation (" + std::string(referenceLabel(_referenceType))
-                          + "): " + _bundlePath.string();
-        ctx.tensorLabel = label + " (UID " + std::to_string(uid) + ", output)";
-        ctx.dtypeName = hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
-        ctx.atol = atol;
-        ctx.rtol = rtol;
-
-        std::ostringstream report;
-        report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, golden);
-        hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(
-            report, dataType, label, golden, computed, atol, rtol);
-        ADD_FAILURE() << report.str();
+        ADD_FAILURE() << mismatch.report;
     }
 }
 

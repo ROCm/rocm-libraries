@@ -379,7 +379,8 @@ can become an engine run.
 | engine involved | yes | **no** |
 | support claims | queried and enforced | **not linked in** |
 | verification modes | `auto` / `golden` / `gpu` / `cpu` | n/a |
-| skip path | yes (no oracle, engine declines, TOML skip) | no *verification* skip — every `_GpuRef` test skips on a deviceless runner |
+| skip path | yes (no oracle, engine declines, TOML skip) | no *verification* skip; skips only when the machine cannot host it — no device, too little VRAM, wrong arch |
+| TOML config | engine's own `config/<ENGINE>.toml`: skip list and tolerance overrides both apply | **none** — an engine's config cannot skip or loosen a check on our own data |
 | device | yes | GPU reference only; the CPU one is host-only |
 | ctest registration | per provider, via `add_external_integration_test_target()` | once, via `add_integration_test_target()` |
 | suite name | `{tier}_{Op}_{Topology}` | `…_CpuRef` / `…_GpuRef` |
@@ -392,10 +393,18 @@ Registration is the gate, not a runtime verification skip: a test is created onl
 when the bundle has golden data **and** every node type in its graph is inside
 that reference's required-op set (`ReferenceOpCoverage.hpp`). Given both, a
 reference that cannot run the graph is a gap in the reference, so it fails rather
-than skips. The one exception is device availability, checked before that gate:
-`SetUp()` calls `SKIP_IF_NO_DEVICES()`, same as the engine harness, so every
-`_GpuRef` test skips on a runner with no device. The CPU reference needs no
-device and never takes this path.
+than skips. The exceptions are all machine capability, checked before that gate:
+`SetUp()` calls `SKIP_IF_NO_DEVICES()` and applies the bundle's VRAM and arch
+guards, same as the engine harness. A bundle nobody on this machine could run is
+not a gap in the reference. The CPU reference needs no device, so it never takes
+the first of those paths.
+
+What `SetUp()` deliberately does **not** consult is the TOML skip list, and the
+comparison uses `tolerance::defaultTolerance()` rather than `resolveTolerance()`.
+Both of those read an engine's own config file, so both describe how far *that
+engine* may drift. Our golden data does not get to opt out of a check, and no
+engine's tolerance may loosen one: reference output tracks golden data closely at
+all times, or the data is wrong.
 
 Bundles outside a reference's op set are simply absent from its suite, and the
 counts are printed at registration so the gap is visible rather than silent:

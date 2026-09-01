@@ -13,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <gmock/gmock.h>
 
@@ -189,6 +190,9 @@ TEST_F(TestErrorPaths, RefCrashFails)
             throw std::runtime_error("stub: ref crashed on supported op");
         });
 
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(mocks.reporter, refErrors);
+
     ::testing::TestPartResultArray results;
     runCapturing(mocks,
                  loadBundle("ref_crash", /*includeGoldenOutput=*/false),
@@ -197,6 +201,9 @@ TEST_F(TestErrorPaths, RefCrashFails)
 
     EXPECT_TRUE(testing_support::anyFailed(results))
         << "A generic ref exception must route to RUNTIME_ERROR and FAIL the test";
+    ASSERT_EQ(refErrors.size(), 1U)
+        << "A crashing reference must publish exactly one reference error";
+    EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("stub: ref crashed on supported op"));
 }
 
 TEST_F(TestErrorPaths, AdapterTranslatesNotApplicableToCapabilityError)

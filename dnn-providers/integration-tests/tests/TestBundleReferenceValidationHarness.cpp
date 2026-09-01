@@ -1,19 +1,21 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// BundleReferenceValidationHarness had zero unit coverage before this file: the
-// only line naming it in the test tree was the CMakeLists.txt entry that compiles
-// it. Two behaviours are worth pinning here: the SetUp() guards that turn a
-// registration bug into a named failure instead of a silent skip, and useDevice()
-// asking the injected executor rather than trusting the registration enum.
+// BundleReferenceValidationHarness is the sole gate on our checked-in golden data
+// and, by design, has no verification skip path — so every way it can decline to
+// check something has to be a loud failure. This file pins that: the SetUp()
+// guards, useDevice() asking the injected executor rather than trusting the
+// registration enum, and each branch of TestBody().
 
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -21,6 +23,7 @@
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
 #include "ScratchDirectory.hpp"
+#include "harness/ReferenceCapabilityError.hpp"
 #include "harness/bundle/BundleReferenceValidationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "mocks/MockReferenceExecutors.hpp"
@@ -62,14 +65,34 @@ protected:
     }
 
     // Runs SetUp() the way GTest would, capturing every disposition it issues.
-    // TestBody() is deliberately not called here: these two cases assert on the
-    // registration guard itself, not on what a passing run looks like.
     static void driveSetUp(BundleReferenceValidationHarness& harness,
                            ::testing::TestPartResultArray* results)
     {
         const ::testing::ScopedFakeTestPartResultReporter reporter(
             ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
         harness.SetUp();
+    }
+
+    // SetUp() then TestBody(), the way GTest's own runner drives a test: TestBody()
+    // is skipped when SetUp() already issued a skip.
+    static void drive(BundleReferenceValidationHarness& harness,
+                      ::testing::TestPartResultArray* results)
+    {
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
+        harness.SetUp();
+        if(!testing_support::anySkipped(*results))
+        {
+            harness.TestBody();
+        }
+    }
+
+    // Gives a harness a bundle that has golden data. The harness itself is built by
+    // each case: ::testing::Test is non-copyable, so it cannot be handed back.
+    void setGoldenBundle(BundleReferenceValidationHarness& harness)
+    {
+        harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true),
+                          _tempDir / "Bundle");
     }
 };
 
@@ -191,6 +214,128 @@ TEST_F(TestBundleReferenceValidationHarness,
     // What this pins is requiresDeviceMemory() being asked at all (the
     // EXPECT_CALL above) and the device allocation/read-back path completing
     // without throwing.
+}
+
+// Registration promised this reference covers every node type in the graph, so a
+// reference that then says it cannot run it is a gap in the reference. It must be
+// loud: a skip here is a bundle nobody checked.
+TEST_F(TestBundleReferenceValidationHarness, InapplicableReferenceFailsRatherThanSkips)
+{
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(false));
+    EXPECT_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundle(harness);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_NE(testing_support::allMessages(results).find("is required to support this graph"),
+              std::string::npos)
+        << testing_support::allMessages(results);
+}
+
+// Same contract by the other route: the reference accepts the graph up front and
+// then throws a capability error once it looks properly. Still a gap, still loud.
+TEST_F(TestBundleReferenceValidationHarness, CapabilityErrorFromTheReferenceFails)
+{
+    ON_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t, const VariantPack&) {
+            throw ReferenceCapabilityError("stub: no plan for this shape");
+        });
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundle(harness);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_NE(testing_support::allMessages(results).find("stub: no plan for this shape"),
+              std::string::npos);
+}
+
+// A reference that breaks outright is reported with its own message, not folded
+// into the capability case — the two mean different things to whoever fixes it.
+TEST_F(TestBundleReferenceValidationHarness, ReferenceThatThrowsIsReportedWithItsMessage)
+{
+    ON_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t, const VariantPack&) {
+            throw std::runtime_error("stub: reference exploded");
+        });
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundle(harness);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("stub: reference exploded"),
+              std::string::npos);
+}
+
+// The green path, and the mismatch path beside it: a reference whose output equals
+// the golden data passes, and one that drifts fails naming the tensor. Together
+// they pin that the comparison is actually consulted rather than assumed.
+TEST_F(TestBundleReferenceValidationHarness, MatchingReferenceOutputPasses)
+{
+    ON_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t, const VariantPack& variantPack) {
+            auto* ptr = static_cast<float*>(variantPack.at(fixtures::K_OUTPUT_UID));
+            std::fill(ptr, ptr + fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
+        });
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundle(harness);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestBundleReferenceValidationHarness, DriftedReferenceOutputFailsNamingTheTensor)
+{
+    ON_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t, const VariantPack& variantPack) {
+            auto* ptr = static_cast<float*>(variantPack.at(fixtures::K_OUTPUT_UID));
+            std::fill(ptr, ptr + fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE + 100.0f);
+        });
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundle(harness);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    ASSERT_TRUE(testing_support::anyFailed(results));
+
+    // One failure per drifted tensor, and this bundle has exactly one output.
+    int failures = 0;
+    for(int i = 0; i < results.size(); ++i)
+    {
+        if(results.GetTestPartResult(i).failed())
+        {
+            ++failures;
+        }
+    }
+    EXPECT_EQ(failures, 1) << testing_support::allMessages(results);
+
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("Golden data validation"), std::string::npos) << messages;
+    EXPECT_NE(messages.find("UID " + std::to_string(fixtures::K_OUTPUT_UID)), std::string::npos)
+        << messages;
 }
 
 // NOLINTEND(readability-identifier-naming)

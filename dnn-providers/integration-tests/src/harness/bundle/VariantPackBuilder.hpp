@@ -35,4 +35,19 @@ VariantPack buildVariantPack(
     const std::vector<int64_t>& outputTensorUids,
     bool useDevice);
 
+/// The output buffers one bundle is run into, each prefilled with the sentinel
+/// value so a tensor nobody wrote is visibly untouched rather than plausibly zero.
+///
+/// Shared for the same reason buildVariantPack() is: both harnesses allocate the
+/// same buffers from the same attributes, and two copies of that would drift.
+OutputTensors allocateSentinelOutputs(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorAttributes,
+    const std::vector<int64_t>& outputTensorUids);
+
+/// Tell each tensor which side now holds the fresh data. Without it the comparison
+/// reads the stale copy — silently, and in whichever direction is wrong.
+void markOutputsModified(OutputTensors& outputs, bool device);
+
 } // namespace hipdnn_integration_tests::bundle::detail

@@ -356,6 +356,14 @@ TEST_F(TestSupportClaimEnforcement, MismatchDemotesTheClaimToFailedInUse)
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_EQ(onlyVerdict(verdicts), SupportVerdict::CLAIM_FAILED_IN_USE);
+
+    // The comparison is the one producer allowed to hand back a message-less
+    // failure, because it has already put a per-tensor diff on the record. If it
+    // ever stops marking the outcome as reported, the reporter says so instead of
+    // letting the run go quiet — and this is where that shows up.
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_EQ(messages.find("with no message"), std::string::npos) << messages;
+    EXPECT_NE(messages.find("Comparison FAILED"), std::string::npos) << messages;
 }
 
 // The regression this rework exists for. The engine executed the graph, then the
@@ -398,7 +406,9 @@ TEST_F(TestSupportClaimEnforcement, ReferenceErrorDoesNotDemoteTheClaim)
 
     ::testing::TestPartResultArray results;
     std::vector<SupportResult> verdicts;
+    std::vector<std::string> refErrors;
     testing_support::captureVerdicts(_mocks.reporter, verdicts);
+    testing_support::captureReferenceErrors(_mocks.reporter, refErrors);
 
     ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
         .WillByDefault(Return(observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)})));
@@ -415,6 +425,13 @@ TEST_F(TestSupportClaimEnforcement, ReferenceErrorDoesNotDemoteTheClaim)
     EXPECT_TRUE(testing_support::anyFailed(results))
         << "a broken reference must still fail the test";
     EXPECT_EQ(onlyVerdict(verdicts), SupportVerdict::CLAIM_ACCEPTED);
+
+    // The reference-error report is what tells an operator the reference, not the
+    // engine, is what broke. Without this the claim verdict above is the only
+    // published signal, and it deliberately says nothing about the reference.
+    ASSERT_EQ(refErrors.size(), 1u);
+    EXPECT_NE(refErrors.front().find("stub: reference exploded"), std::string::npos)
+        << refErrors.front();
 }
 
 // Confirmation is measured against the depth the bundle declares, not against a
@@ -615,14 +632,21 @@ TEST_F(TestSupportClaimEnforcement, EngineFailureBeforePlansBuiltReachedNothing)
 // A graph that would not open is already failing on the graph. Reporting an
 // unqueried sidecar on top of it sends a reader after an enforcement gap that is
 // not there — enforcement would not have "passed without checking", it failed.
+//
+// One fault, one message: the build failure is reported once, by the outcome, and
+// the claim query stays silent about it.
 TEST_F(TestSupportClaimEnforcement, UnreadableGraphIsNotReportedAsAnUnqueriedSidecar)
 {
     using ::testing::_;
 
     ::testing::TestPartResultArray results;
     std::vector<CoverageUpdate> coverage;
+    std::vector<SupportResult> verdicts;
     testing_support::captureCoverage(_mocks.reporter, coverage);
+    testing_support::captureVerdicts(_mocks.reporter, verdicts);
 
+    ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
+        .WillByDefault(::testing::Return(observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)})));
     ON_CALL(_mocks.engineRunner, openGraph(_, _))
         .WillByDefault([](const IntegrationTestBundle&, const std::optional<LoadedEngine>&) {
             return testing_support::buildErrorSession("stub: truncated graph buffer");
@@ -637,9 +661,29 @@ TEST_F(TestSupportClaimEnforcement, UnreadableGraphIsNotReportedAsAnUnqueriedSid
     ASSERT_EQ(coverage.size(), 1u);
     EXPECT_FALSE(coverage.front().missedQuery);
     EXPECT_FALSE(coverage.front().queried);
+    EXPECT_TRUE(coverage.front().notOpened)
+        << "an unopened graph is its own coverage case, not a filtered-out bundle";
+
+    // The observer is never consulted for a graph that did not open, so the only
+    // verdict here is the one the harness had before the query — left accepted,
+    // because a graph that would not load says nothing about the engine's claim.
+    EXPECT_TRUE(verdicts.empty());
+
+    // Exactly one failure, from the outcome. Two would mean the claim path started
+    // narrating the same fault again.
+    int failures = 0;
+    for(int i = 0; i < results.size(); ++i)
+    {
+        if(results.GetTestPartResult(i).failed())
+        {
+            ++failures;
+        }
+    }
+    EXPECT_EQ(failures, 1) << testing_support::allMessages(results);
 
     const std::string messages = testing_support::allMessages(results);
-    EXPECT_NE(messages.find("from_binary failed"), std::string::npos);
+    EXPECT_NE(messages.find("from_binary failed"), std::string::npos) << messages;
+    EXPECT_NE(messages.find("stub: truncated graph buffer"), std::string::npos) << messages;
     EXPECT_EQ(messages.find("never queried"), std::string::npos) << messages;
 }
 

@@ -27,9 +27,11 @@ CoverageUpdate coverageFor(const SupportObservation& observation, bool enforceme
     // — the verdict tallies look the same for both, and only one of them means the
     // cell is covered.
     update.noApplicableClaim = read && !observation.hasApplicableClaim();
+    // The graph never opened, so the query was impossible rather than skipped.
+    update.notOpened = enforcementExpected && observation.sidecar == SidecarState::NOT_QUERIED;
     // NONE with enforcement expected means a sidecar is sitting there and nothing
-    // looked at it, which is a harness bug. NOT_QUERIED is the honest case — the
-    // graph never opened — and is already reported where it happened.
+    // looked at it, which is a harness bug. NOT_QUERIED is the honest case, already
+    // reported where it happened.
     update.missedQuery = enforcementExpected && observation.sidecar == SidecarState::NONE;
     return update;
 }
@@ -74,13 +76,25 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
        << "  (accepted = engine advertises support; confirmed = the run reached the "
           "depth this bundle's enforcement_level declares)\n";
 
+    // A graph that never opened ran and failed; it is not a graph the filter left
+    // out. Subtracted before the remainder is attributed, so the filter line counts
+    // only bundles that genuinely never ran.
+    if(coverage.graphsNotOpened > 0)
+    {
+        os << "  " << coverage.graphsNotOpened
+           << " claim-bearing graph(s) could not be opened, so their claims could not "
+              "be checked;\n"
+              "  those tests are already failing on the graph itself.\n";
+    }
+
     // Discovery counts every claim-bearing bundle; only selected tests run. A
     // selected one cannot go unqueried — the harness fails the test if its sidecar
-    // was never read — so the whole remainder is attributable to the filter and is
-    // named as such rather than left as a bare mismatch a reader has to interpret.
-    if(coverage.graphsWithClaims > coverage.graphsQueried)
+    // was never read — so the remainder is attributable to the filter and is named
+    // as such rather than left as a bare mismatch a reader has to interpret.
+    const size_t accountedFor = coverage.graphsQueried + coverage.graphsNotOpened;
+    if(coverage.graphsWithClaims > accountedFor)
     {
-        os << "  " << (coverage.graphsWithClaims - coverage.graphsQueried)
+        os << "  " << (coverage.graphsWithClaims - accountedFor)
            << " claim-bearing graph(s) were discovered but not selected to run "
               "(--gtest_filter);\n"
               "  their claims are unenforced by this run.\n";

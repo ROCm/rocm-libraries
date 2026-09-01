@@ -66,13 +66,11 @@ SupportObservation
 
     if(!session.buildError.empty())
     {
-        // ADD_FAILURE rather than ASSERT: this runs before runComparison(), which
-        // reports the same build failure as an outcome; asserting here would hide it.
-        ADD_FAILURE() << "from_binary failed: " << session.buildError;
-
-        // NOT_QUERIED, not the default NONE: there is a sidecar here — enforcement
-        // would not be on otherwise — and calling it unqueried would report an
-        // enforcement gap on top of a graph that never opened.
+        // Silent on purpose: runComparison() reports this same build failure as the
+        // test's outcome, and one fault deserves one message. NOT_QUERIED rather
+        // than the default NONE so the coverage rules can tell "the query was
+        // impossible" from "a sidecar sat there and nothing looked at it" — the
+        // second is a harness bug, this is not.
         return SupportObservation{SidecarState::NOT_QUERIED, {}};
     }
 
@@ -128,11 +126,17 @@ void IntegrationBundleVerificationHarness::reportOutcome(const VerificationOutco
     case OutcomeStatus::SKIPPED:
         GTEST_SKIP() << outcome.message;
     case OutcomeStatus::FAILED:
-        // An empty message means the failure is already on the record with more
-        // detail than this could add — per-tensor diffs from the comparison.
         if(!outcome.message.empty())
         {
             FAIL() << outcome.message;
+        }
+        // A silent return is honest only for the one producer that promises the
+        // detail is already on the record. Anything else reaching here is a failure
+        // with nothing to say, and a bare failure beats a green run.
+        if(!outcome.alreadyReported)
+        {
+            FAIL() << "verification failed at " << toString(outcome.depth) << " ("
+                   << toString(outcome.origin) << ") with no message";
         }
         return;
     default:
@@ -437,15 +441,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs() const
 {
     const auto wrapper = _bundle->graphWrapper();
-    const auto& tensorAttrMap = wrapper.getTensorMap();
-
-    OutputTensors outputs;
-    for(const int64_t uid : _bundle->outputTensorUids)
-    {
-        outputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttrMap.at(uid));
-        outputs[uid]->fillWithSentinelValue();
-    }
-    return outputs;
+    return detail::allocateSentinelOutputs(wrapper.getTensorMap(), _bundle->outputTensorUids);
 }
 
 std::unordered_map<int64_t, void*>
@@ -540,29 +536,13 @@ IntegrationBundleVerificationHarness::RefRunResult
         return {RefStatus::RUNTIME_ERROR, e.what()};
     }
 
-    markOutputsModifiedFor(refOutputs, useDevice);
+    detail::markOutputsModified(refOutputs, useDevice);
     return {RefStatus::RAN, {}};
 }
 
 void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& outputs) const
 {
-    markOutputsModifiedFor(outputs, _deps.policy.useDevice());
-}
-
-void IntegrationBundleVerificationHarness::markOutputsModifiedFor(OutputTensors& outputs,
-                                                                  bool device)
-{
-    for(auto& [uid, tensor] : outputs)
-    {
-        if(device)
-        {
-            tensor->markDeviceModified();
-        }
-        else
-        {
-            tensor->markHostModified();
-        }
-    }
+    detail::markOutputsModified(outputs, _deps.policy.useDevice());
 }
 
 // ---- comparison ------------------------------------------------------------

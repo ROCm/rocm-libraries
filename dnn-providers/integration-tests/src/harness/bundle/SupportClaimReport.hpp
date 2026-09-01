@@ -29,6 +29,11 @@ struct SupportClaimCoverage
     // difference between "this cell is claimed and holds" and "nobody ever said",
     // which the verdict counts alone cannot show.
     size_t graphsWithNoApplicableClaim = 0;
+    // Claim-bearing graphs whose graph never opened, so the query was impossible
+    // rather than skipped. Counted apart from graphsQueried because they are the
+    // one shortfall the summary must not attribute to --gtest_filter: the test ran,
+    // and it is already failing on the graph itself.
+    size_t graphsNotOpened = 0;
 };
 
 // Process-wide because the harness reaches this from inside a test body built by a
@@ -42,6 +47,7 @@ struct CoverageUpdate
 {
     bool queried = false; ///< bump graphsQueried
     bool noApplicableClaim = false; ///< bump graphsWithNoApplicableClaim
+    bool notOpened = false; ///< bump graphsNotOpened
     /// A sidecar exists and enforcement is on, but the query never happened. The
     /// run-level guard only fires when *no* graph anywhere was queried, so a partial
     /// gap needs its own signal; this one fails the individual test.

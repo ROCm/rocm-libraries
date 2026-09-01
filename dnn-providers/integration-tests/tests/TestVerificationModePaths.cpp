@@ -11,7 +11,9 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
@@ -113,6 +115,18 @@ protected:
             .WillByDefault(Throw(ReferenceCapabilityError("stub: no GPU ref plan")));
         writeReferenceOutput(_mocks.cpuReference, fixtures::K_OUTPUT_VALUE);
     }
+
+    /// GPU throws a real error (not a capability miss); CPU matches. Exercises
+    /// AUTO's RUNTIME_ERROR branch, which is distinct from a capability miss: it
+    /// must publish a reference error before falling through to CPU.
+    void useGpuErrorCpuMatchReference()
+    {
+        using ::testing::_;
+        using ::testing::Throw;
+        ON_CALL(_mocks.gpuReference, execute(_, _, _))
+            .WillByDefault(Throw(std::runtime_error("stub: GPU ref crashed")));
+        writeReferenceOutput(_mocks.cpuReference, fixtures::K_OUTPUT_VALUE);
+    }
 };
 
 } // namespace
@@ -147,8 +161,16 @@ TEST_F(TestVerificationModePathsFixture, AutoWithGoldenMismatchFails)
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefSucceedsPasses)
 {
+    using ::testing::ReturnRef;
     useMatchingEngine();
     useMatchingReference();
+
+    // AUTO tries GPU first when there is no golden data; both stubs return the
+    // golden value, so only pinning the dispatch itself catches a swapped order.
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU))
+        .Times(1)
+        .WillRepeatedly(ReturnRef(_mocks.gpuReference));
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU)).Times(0);
 
     ::testing::TestPartResultArray results;
     runCapturing(
@@ -160,8 +182,20 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefSucceedsPasses)
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefMissFallsThroughToCpu)
 {
+    using ::testing::ReturnRef;
     useMatchingEngine();
     useGpuMissCpuMatchReference();
+
+    // GPU must be consulted before CPU is tried. The "GPU miss" stub throws a
+    // capability error either way, so only the call sequence — not the pass/fail
+    // outcome — can catch a swapped dispatch order.
+    {
+        ::testing::InSequence seq;
+        EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU))
+            .WillOnce(ReturnRef(_mocks.gpuReference));
+        EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU))
+            .WillOnce(ReturnRef(_mocks.cpuReference));
+    }
 
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("auto_fallthrough", /*includeGoldenOutput=*/false),
@@ -184,6 +218,30 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenBothRefsMissSkips)
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
+}
+
+// The other GPU miss form: a real runtime error, not a capability miss. AUTO
+// still falls through to CPU and passes, but unlike a plain capability miss it
+// must be loud about it — a reference error naming the GPU failure is published
+// before CPU ever runs.
+TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefRuntimeErrorFallsThroughToCpu)
+{
+    useMatchingEngine();
+    useGpuErrorCpuMatchReference();
+
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(_mocks.reporter, refErrors);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(loadBundle("auto_ref_runtime_error", /*includeGoldenOutput=*/false),
+                 VerificationMode::AUTO,
+                 &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    ASSERT_EQ(refErrors.size(), 1U);
+    EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("GPU reference errored"));
+    EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("stub: GPU ref crashed"));
 }
 
 // ── GOLDEN mode ─────────────────────────────────────────────────────────────
@@ -244,8 +302,16 @@ TEST_F(TestVerificationModePathsFixture, GoldenModeDoesNotFallBackToAReference)
 
 TEST_F(TestVerificationModePathsFixture, DeviceModeRefSucceedsPasses)
 {
+    using ::testing::ReturnRef;
     useMatchingEngine();
     useMatchingReference();
+
+    // Explicit GPU mode must dispatch the GPU executor, never CPU — both stubs
+    // return the golden value, so a wrong dispatch would otherwise pass unnoticed.
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU))
+        .Times(1)
+        .WillRepeatedly(ReturnRef(_mocks.gpuReference));
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU)).Times(0);
 
     ::testing::TestPartResultArray results;
     runCapturing(
@@ -272,8 +338,16 @@ TEST_F(TestVerificationModePathsFixture, DeviceModeCapabilityMissSkips)
 
 TEST_F(TestVerificationModePathsFixture, CpuModeRefSucceedsPasses)
 {
+    using ::testing::ReturnRef;
     useMatchingEngine();
     useMatchingReference();
+
+    // Explicit CPU mode must dispatch the CPU executor, never GPU — both stubs
+    // return the golden value, so a wrong dispatch would otherwise pass unnoticed.
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU))
+        .Times(1)
+        .WillRepeatedly(ReturnRef(_mocks.cpuReference));
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU)).Times(0);
 
     ::testing::TestPartResultArray results;
     runCapturing(

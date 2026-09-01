@@ -119,26 +119,38 @@ struct VerificationOutcome
     FailureOrigin origin = FailureOrigin::NONE;
 
     /// Skip reason or failure text, ready to print.
-    ///
-    /// Empty on a FAILED outcome means the failure is already on the gtest record
-    /// with more detail than this could add — per-tensor diffs, or an ASSERT inside
-    /// the executor — so repeating it would report one bug twice.
     std::string message;
+
+    /// This failure is already on the gtest record, in more detail than `message`
+    /// could add — the per-tensor diffs from the comparison.
+    ///
+    /// A flag rather than "message is empty" because emptiness is a property every
+    /// producer has by accident and only one has on purpose. Overloading it means an
+    /// error state with nothing to say reports nothing at all, which is the silent
+    /// pass this harness exists to rule out. Only alreadyReported() sets it.
+    bool alreadyReported = false;
 
     static VerificationOutcome passed(VerificationDepth depth)
     {
-        return {OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}};
+        return {OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}, false};
     }
 
     static VerificationOutcome skipped(VerificationDepth depth, std::string message)
     {
-        return {OutcomeStatus::SKIPPED, depth, FailureOrigin::NONE, std::move(message)};
+        return {OutcomeStatus::SKIPPED, depth, FailureOrigin::NONE, std::move(message), false};
     }
 
     static VerificationOutcome
         failed(VerificationDepth depth, FailureOrigin origin, std::string message)
     {
-        return {OutcomeStatus::FAILED, depth, origin, std::move(message)};
+        return {OutcomeStatus::FAILED, depth, origin, std::move(message), false};
+    }
+
+    /// A failure whose detail is already on the record. The caller MUST have issued
+    /// at least one gtest failure before building this.
+    static VerificationOutcome alreadyReportedFailure(VerificationDepth depth, FailureOrigin origin)
+    {
+        return {OutcomeStatus::FAILED, depth, origin, {}, true};
     }
 };
 

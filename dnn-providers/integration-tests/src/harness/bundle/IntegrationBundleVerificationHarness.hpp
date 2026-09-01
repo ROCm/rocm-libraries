@@ -268,7 +268,6 @@ private:
     RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
-    static void markOutputsModifiedFor(OutputTensors& outputs, bool device);
 
     VerificationOutcome compareAgainstGolden(OutputTensors& engineOutputs);
     VerificationOutcome compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
@@ -279,12 +278,14 @@ private:
                                        const ExpectedTensorLookup& expectedFor);
 
     // VERIFIED either way: the oracle ran and the outputs were examined. A mismatch
-    // carries no message because the per-tensor diffs are already on the record.
+    // carries no message because compareAgainst() has already put one failure per
+    // drifted tensor on the record — the only place in this harness where that is
+    // true, and so the only caller of alreadyReportedFailure().
     static VerificationOutcome comparisonOutcome(bool allMatched)
     {
         return allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
-                          : VerificationOutcome::failed(
-                                VerificationDepth::VERIFIED, FailureOrigin::COMPARISON, {});
+                          : VerificationOutcome::alreadyReportedFailure(VerificationDepth::VERIFIED,
+                                                                        FailureOrigin::COMPARISON);
     }
 
     void recordRefError(const std::string& reason);

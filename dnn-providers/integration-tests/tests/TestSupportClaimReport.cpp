@@ -12,6 +12,7 @@
 using hipdnn_integration_tests::bundle::coverageFor;
 using hipdnn_integration_tests::bundle::printSupportClaimSummary;
 using hipdnn_integration_tests::bundle::SidecarState;
+using hipdnn_integration_tests::bundle::SupportClaimCoverage;
 using hipdnn_integration_tests::bundle::supportClaimCoverage;
 using hipdnn_integration_tests::bundle::SupportClaimVerdicts;
 using hipdnn_integration_tests::bundle::SupportObservation;
@@ -484,6 +485,28 @@ TEST(TestSupportClaimCoverageRules, UnopenedGraphIsUncoveredButNotAHarnessBug)
     EXPECT_FALSE(update.queried);
     EXPECT_FALSE(update.missedQuery);
     EXPECT_FALSE(update.noApplicableClaim);
+    EXPECT_TRUE(update.notOpened) << "the shortfall must be attributable to the graph, "
+                                     "not left for the summary to blame on --gtest_filter";
+}
+
+// Its own counter, so the summary can subtract it before attributing the rest of
+// the shortfall to --gtest_filter. A graph that never opened did run.
+TEST(TestSupportClaimSummary, UnopenedGraphsAreNotBlamedOnTheFilter)
+{
+    SupportClaimCoverage coverage;
+    coverage.graphsFound = 4;
+    coverage.graphsWithClaims = 4;
+    coverage.graphsQueried = 3;
+    coverage.graphsNotOpened = 1;
+
+    std::ostringstream os;
+    printSupportClaimSummary(coverage, SupportClaimVerdicts::get(), os);
+    const std::string out = os.str();
+
+    EXPECT_NE(out.find("could not be opened"), std::string::npos) << out;
+    EXPECT_EQ(out.find("--gtest_filter"), std::string::npos)
+        << "every claim-bearing graph is accounted for, so nothing is the filter's doing\n"
+        << out;
 }
 
 // NOLINTEND(readability-identifier-naming)

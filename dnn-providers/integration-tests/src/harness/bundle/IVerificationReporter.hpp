@@ -53,6 +53,10 @@ public:
         {
             supportClaimCoverage().graphsWithNoApplicableClaim++;
         }
+        if(update.notOpened)
+        {
+            supportClaimCoverage().graphsNotOpened++;
+        }
     }
 
     void recordVerdict(const SupportResult& record) override

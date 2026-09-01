@@ -5,6 +5,7 @@
 
 #include <set>
 
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 
 namespace hipdnn_integration_tests::bundle::detail
@@ -43,6 +44,37 @@ VariantPack buildVariantPack(
     }
 
     return variantPack;
+}
+
+OutputTensors allocateSentinelOutputs(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorAttributes,
+    const std::vector<int64_t>& outputTensorUids)
+{
+    OutputTensors outputs;
+    for(const int64_t uid : outputTensorUids)
+    {
+        outputs[uid]
+            = hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes.at(uid));
+        outputs[uid]->fillWithSentinelValue();
+    }
+    return outputs;
+}
+
+void markOutputsModified(OutputTensors& outputs, bool device)
+{
+    for(auto& [uid, tensor] : outputs)
+    {
+        if(device)
+        {
+            tensor->markDeviceModified();
+        }
+        else
+        {
+            tensor->markHostModified();
+        }
+    }
 }
 
 } // namespace hipdnn_integration_tests::bundle::detail
