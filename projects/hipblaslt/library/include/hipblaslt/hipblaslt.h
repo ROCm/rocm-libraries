@@ -180,15 +180,17 @@ typedef enum {
 typedef struct hipblasLtFusedEpilogueDescriptor* hipblasLtFusedEpilogueDescriptor_t;
 
 /*! \ingroup types_module
- *  \brief Opaque, library-populated handoff descriptor for the decomposed RMSNorm flow.
+ *  \brief Opaque handoff descriptor for the decomposed RMSNorm flow.
  *
  *  \details
  *  Used only by the decomposed flow: the producer stage
  *  (``HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS``) writes the finalized consumer scale,
  *  and the consumer stage (``HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY``) reads it in the
- *  GEMM2 epilogue. The caller creates one descriptor, sets the same handle on both fused-epilogue
- *  chains through ``HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS``, and destroys it after both calls.
- *  The full ``HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM`` flow does not use this descriptor.
+ *  GEMM2 epilogue. The caller creates one descriptor, supplies its device buffer with
+ *  ``hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer``, sets the same handle on both
+ *  fused-epilogue chains through ``HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS``, and destroys the
+ *  descriptor after both calls. The caller owns the device buffer. The full
+ *  ``HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM`` flow does not use this descriptor.
  */
 typedef struct hipblasLtFusedEpilogueRMSNormDescriptor* hipblasLtFusedEpilogueRMSNormDescriptor_t;
 
@@ -906,7 +908,7 @@ hipblasStatus_t hipblasLtFusedEpilogueDestroy(hipblasLtFusedEpilogueDescriptor_t
  *  \brief Create an opaque RMSNorm handoff descriptor for the decomposed RMSNorm flow.
  *
  *  \details
- *  Allocates the library-populated object that links the decomposed producer
+ *  Allocates the object that links the decomposed producer
  *  (\ref HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS) and consumer
  *  (\ref HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY) matmul calls. Set the returned handle
  *  on both fused-epilogue handles via \ref HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS, keep it alive
@@ -924,10 +926,37 @@ hipblasStatus_t
     hipblasLtFusedEpilogueRMSNormDescriptorCreate(hipblasLtFusedEpilogueRMSNormDescriptor_t* desc);
 
 /*! \ingroup library_module
+ *  \brief Set the caller-owned device buffer used by an RMSNorm handoff descriptor.
+ *
+ *  \details
+ *  The decomposed producer writes one FP32 value per output row and batch. Therefore, the
+ *  required buffer size is ``M * batchCount * sizeof(float)``, where ``M`` and ``batchCount``
+ *  come from the producer D matrix layout. The buffer must remain valid and unmodified from the
+ *  producer call until all work submitted by the consumer call has completed. The descriptor
+ *  does not take ownership of the buffer.
+ *
+ *  @param[in]
+ *  desc  An RMSNorm handoff descriptor.
+ *  @param[in]
+ *  buffer  Non-null pointer to caller-owned device memory.
+ *  @param[in]
+ *  sizeInBytes  Size of \p buffer in bytes.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS If the buffer was set.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p desc or \p buffer is NULL, or if
+ *  \p sizeInBytes is zero. A later producer matmul also returns this status when the supplied
+ *  buffer is smaller than its required size.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
+    hipblasLtFusedEpilogueRMSNormDescriptor_t desc, void* buffer, size_t sizeInBytes);
+
+/*! \ingroup library_module
  *  \brief Destroy an RMSNorm handoff descriptor.
  *
  *  @param[in]
- *  desc  A handle created by \ref hipblasLtFusedEpilogueRMSNormDescriptorCreate.
+ *  desc  A handle created by \ref hipblasLtFusedEpilogueRMSNormDescriptorCreate. Destroying the
+ *  handle does not free the caller-owned handoff buffer.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS If the handle was destroyed.
  */

@@ -384,11 +384,10 @@ struct hipblasLtFusedEpilogueRMSNormDescriptor
     // FP32 rstd, tightly packed [M * batch]. M and batch are implicit in the consumer GEMM2
     // problem, which must match the producer for the decomposed flow.
     void* per_row_scale = nullptr;
-    // Set after the producer reduction has populated per_row_scale.
+    size_t per_row_scale_size = 0;
+    // Set when a caller supplies per_row_scale. The producer and consumer run on the same stream,
+    // so the consumer can be submitted after the producer without host synchronization.
     bool populated = false;
-    // True when the library allocated per_row_scale (producer path) and must free it on destroy.
-    // False when a caller/test provided the buffer via the test-only hook.
-    bool owns_scale = false;
 };
 
 // Definition of the opaque handle declared in hipblaslt.h. Owns the composed list of
@@ -531,32 +530,6 @@ extern "C++" bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueD
         out.rmsStatsPopulated = desc->rmsnorm_stats->populated;
     }
     return true;
-}
-
-// Test-only: inject a caller-provided device rstd buffer into the decomposed handoff so the
-// consumer (Kernel 3 RstdScale) path can be exercised independently of the producer.
-// Not part of the public API.
-extern "C++" HIPBLASLT_EXPORT bool rocblaslt_rmsnorm_handoff_set_scale_for_testing(
-    hipblasLtFusedEpilogueRMSNormDescriptor* desc, void* per_row_scale)
-{
-    if(desc == nullptr)
-        return false;
-    if(desc->owns_scale && desc->per_row_scale != nullptr && desc->per_row_scale != per_row_scale)
-        static_cast<void>(hipFree(desc->per_row_scale));
-    desc->per_row_scale = per_row_scale;
-    desc->populated     = (per_row_scale != nullptr);
-    desc->owns_scale    = false;
-    return true;
-}
-
-// Test-only: read back the device rstd buffer that the library auto-allocates for a producer.
-// Not part of the public API.
-extern "C++" HIPBLASLT_EXPORT void* rocblaslt_rmsnorm_handoff_get_scale_for_testing(
-    hipblasLtFusedEpilogueRMSNormDescriptor* desc)
-{
-    if(desc == nullptr)
-        return nullptr;
-    return desc->per_row_scale;
 }
 
 hipblasStatus_t hipblasLtFusedEpilogueCreate(hipblasLtFusedEpilogueDescriptor_t* desc)
@@ -754,14 +727,23 @@ hipblasStatus_t
     hipblasLtFusedEpilogueRMSNormDescriptorDestroy(hipblasLtFusedEpilogueRMSNormDescriptor_t desc)
 try
 {
-    if(desc != nullptr && desc->owns_scale && desc->per_row_scale != nullptr)
-        static_cast<void>(hipFree(desc->per_row_scale));
     delete desc;
     return HIPBLAS_STATUS_SUCCESS;
 }
 catch(...)
 {
     return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
+    hipblasLtFusedEpilogueRMSNormDescriptor_t desc, void* buffer, size_t sizeInBytes)
+{
+    if(desc == nullptr || buffer == nullptr || sizeInBytes == 0)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    desc->per_row_scale      = buffer;
+    desc->per_row_scale_size = sizeInBytes;
+    desc->populated          = true;
+    return HIPBLAS_STATUS_SUCCESS;
 }
 
 hipblasStatus_t hipblasLtMatmulDescSetAttribute(hipblasLtMatmulDesc_t           matmulDesc,
@@ -1082,35 +1064,30 @@ try
                 rocblaslt::Debug::Instance().markerStop();
                 return HIPBLAS_STATUS_INVALID_VALUE;
             }
-            // Decomposed producer: the library owns the per-row rstd handoff buffer. Allocate it
-            // tight (FP32 [rows*batch], no padding) on the first producer call if the caller has
-            // not provided one. The producer's row_rstd reduction writes exactly one float per row
-            // (grid = tokensM workgroups) and the consumer GEMM2 reads it through a ScaleAlphaVec
-            // SRD bounded to SizeI/SizeJ = M rows, so neither side accesses past rows. Freed on
-            // descriptor destroy.
-            if(partialStats && fused->rmsnorm_stats != nullptr
-               && fused->rmsnorm_stats->per_row_scale == nullptr)
+            // Decomposed producer: validate the caller-owned FP32 [rows*batch] handoff buffer.
+            // The producer's row_rstd reduction writes exactly one float per row, and the consumer
+            // reads it through a ScaleAlphaVec SRD bounded to the same row count.
+            if(partialStats)
             {
-                auto*          dlay       = (rocblaslt_matrix_layout)matD;
-                const uint64_t rows  = dlay ? dlay->m : 0;
-                const int32_t  batch = dlay ? dlay->batch_count : 1;
-                void*          scale = nullptr;
-                if(dlay == nullptr || rows == 0 || batch <= 0)
+                auto*         dlay  = (rocblaslt_matrix_layout)matD;
+                const uint64_t rows = dlay ? dlay->m : 0;
+                const int32_t batch = dlay ? dlay->batch_count : 1;
+                if(dlay == nullptr || rows == 0 || batch <= 0 || fused->rmsnorm_stats == nullptr
+                   || fused->rmsnorm_stats->per_row_scale == nullptr)
                 {
                     rocblaslt::Debug::Instance().markerStop();
                     return HIPBLAS_STATUS_INVALID_VALUE;
                 }
-                if(hipMalloc(&scale, rows * static_cast<size_t>(batch) * sizeof(float))
-                   == hipSuccess)
+                const size_t batchCount = static_cast<size_t>(batch);
+                const size_t requiredSize
+                    = static_cast<size_t>(rows) * batchCount * sizeof(float);
+                if(fused->rmsnorm_stats->per_row_scale_size < requiredSize)
                 {
-                    fused->rmsnorm_stats->per_row_scale = scale;
-                    fused->rmsnorm_stats->populated     = true;
-                    fused->rmsnorm_stats->owns_scale    = true;
-                }
-                else
-                {
+                    log_error(__func__,
+                              "decomposed RMSNorm handoff buffer is smaller than M * batchCount "
+                              "* sizeof(float)");
                     rocblaslt::Debug::Instance().markerStop();
-                    return HIPBLAS_STATUS_ALLOC_FAILED;
+                    return HIPBLAS_STATUS_INVALID_VALUE;
                 }
             }
         }

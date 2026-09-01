@@ -397,15 +397,17 @@ hipblasStatus_t hipblasLtFusedEpilogueDestroy(hipblasLtFusedEpilogueDescriptor_t
 ```
 
 The decomposed flow additionally uses an opaque **RMSNorm handoff descriptor**. Like
-`hipblasLtFusedEpilogueDescriptor_t`, it is an opaque handle, but it is library-populated rather
-than user-configured: the caller only creates it, passes it into the producer and consumer calls,
-and destroys it, never setting or reading its fields directly.
+`hipblasLtFusedEpilogueDescriptor_t`, it is an opaque handle. The caller supplies its device
+buffer, passes the descriptor into the producer and consumer calls, and destroys the descriptor
+after both calls.
 
 ```c
 typedef struct hipblasLtFusedEpilogueRMSNormDescriptor* hipblasLtFusedEpilogueRMSNormDescriptor_t;
 
 hipblasStatus_t hipblasLtFusedEpilogueRMSNormDescriptorCreate(
     hipblasLtFusedEpilogueRMSNormDescriptor_t* desc);
+hipblasStatus_t hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
+    hipblasLtFusedEpilogueRMSNormDescriptor_t desc, void* buffer, size_t sizeInBytes);
 hipblasStatus_t hipblasLtFusedEpilogueRMSNormDescriptorDestroy(
     hipblasLtFusedEpilogueRMSNormDescriptor_t desc);
 ```
@@ -477,8 +479,8 @@ These attributes apply to full RMSNorm and the decomposed producer/consumer stag
 | Attribute                                | Type                                        | Stage                       | Meaning                                                                                    |
 |------------------------------------------|---------------------------------------------|-----------------------------|--------------------------------------------------------------------------------------------|
 | `HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA` | `void*`                                     | RMSNorm / partial stats     | Non-null device pointer to gamma, length `N`                                               |
-| `HIPBLASLT_FUSED_EPILOGUE_RMSNORM_EPS`   | `float`                                     | RMSNorm / partial stats     | Epsilon inside the rsqrt                                                                   |
-| `HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS` | `hipblasLtFusedEpilogueRMSNormDescriptor_t` | partial stats / scale apply | Opaque handoff object; producer writes it, consumer reads it (same object on both handles) |
+| `HIPBLASLT_FUSED_EPILOGUE_RMSNORM_EPS`   | `float`                                     | RMSNorm / partial stats     | Epsilon inside the rsqrt                                                                    |
+| `HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS` | `hipblasLtFusedEpilogueRMSNormDescriptor_t` | partial stats / scale apply | Opaque handoff object with a caller-owned FP32 buffer; producer writes it and consumer reads it |
 
 For the full flow, `gamma` and `eps` are set on the single `RMSNorm` handle and no handoff
 descriptor is created: the library derives `1/d` and the tiling metadata from the selected
@@ -672,6 +674,12 @@ A-side representation; see section 5.3.3.
 // Handoff object shared by the producer and consumer matmul calls.
 hipblasLtFusedEpilogueRMSNormDescriptor_t stats;
 hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats);
+// Caller-owned device storage: one FP32 scale for each producer output row and batch.
+// Allocate it before stream capture when the matmul pair is captured in a HIP graph.
+size_t stats_bytes = M * batch_count * sizeof(float);
+void* d_stats;
+hipMalloc(&d_stats, stats_bytes);
+hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, d_stats, stats_bytes);
 
 // GEMM1 producer: residual add + gamma + partial RMSNorm stats.
 hipblasLtFusedEpilogueDescriptor_t prod;
@@ -738,6 +746,7 @@ hipblasLtMatmulDescSetAttribute(matmulDesc2, HIPBLASLT_MATMUL_DESC_A_SCALE_POINT
 hipblasLtFusedEpilogueDestroy(prod);
 hipblasLtFusedEpilogueDestroy(cons);
 hipblasLtFusedEpilogueRMSNormDescriptorDestroy(stats);
+hipFree(d_stats);
 ```
 
 ### 5.5 Datatype requirements
@@ -820,20 +829,20 @@ by the handoff descriptor and is validated by the selected GEMM2 solution.
 - A new opaque builder object (`hipblasLtFusedEpilogueDescriptor_t`) is introduced; it is
   attached to the existing `hipblasLtMatmulDesc_t` via a single attribute. The matmul
   descriptor stores only a non-owning pointer. The decomposed flow adds one more opaque handle
-  type (`hipblasLtFusedEpilogueRMSNormDescriptor_t`) that is only passed across calls, never
-  inspected by the caller.
+  type (`hipblasLtFusedEpilogueRMSNormDescriptor_t`) that carries a caller-owned device buffer
+  across calls without exposing its fields.
 - `hipblasLtMatmulPreference_t` is unchanged. Workspace and SM-count hints apply as usual.
-  Neither flow has caller-allocated normalization buffers. In the full flow, `partialBuf` and any
-  synchronizer/flag buffer are transient and drawn from the matmul preference workspace for the
-  single call; Kernel 2 applies the row scale to `D` in place, so no per-row-scale buffer is
-  materialized. In the decomposed flow, the handoff descriptor owns or records only the finalized
-  RMSNorm row scale `rstd` used by GEMM2. The optional MX/block-quantized flow also writes a
-  producer scale tensor through `REQUANT_MX_SCALE_POINTER`. That tensor is activation
-  quantization metadata; the caller supplies the same tensor to GEMM2 as its A-side matrix scale.
-  The producer's `partialBuf` scratch and any synchronizer/flag buffer remain internal, transient
-  workspace sized through the workspace-size query.
-- On the codegen side, the ordinary GEMM kernels for both flows come from a single TensileLite
-  option (`FusedEpilogues = 1`) that bundles the optional-residual, RMSNorm-producer, and
+  In the full flow, `partialBuf` and any synchronizer/flag buffer are transient and drawn from the
+  matmul preference workspace for the single call; Kernel 2 applies the row scale to `D` in place,
+  so no per-row-scale buffer is materialized. In the decomposed flow, the caller supplies the
+  persistent FP32 consumer-scale buffer through the handoff descriptor. The optional
+  MX/block-quantized flow also writes a producer scale tensor through
+  `REQUANT_MX_SCALE_POINTER`. That tensor is activation quantization metadata; the caller
+  supplies the same tensor to GEMM2 as its A-side matrix scale. The producer's `partialBuf`
+  scratch and any synchronizer/flag buffer remain internal, transient workspace sized through
+  the workspace-size query.
+- On the codegen side, the ordinary GEMM kernels for both flows come from a single
+  TensileLite option (`FusedEpilogues = 1`) that bundles the optional-residual, RMSNorm-producer, and
   RMSNorm-scale-apply epilogue options and selects among them at runtime. The MX/block-quantized
   producer uses a K1 epilogue that computes local block amax, encodes the UE8M0 scale tensor, and
   stores E4M3 `q(h2)` in 32x1 hidden/K blocks. GEMM2 consumes this output directly as its MX A

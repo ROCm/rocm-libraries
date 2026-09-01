@@ -408,9 +408,7 @@ namespace
     //       launchRmsNormReduceApply(inputs.D, h);
     //   } else {                             // decomposed follow-up: reduce and return the scale
     //       auto* stats = fused->rmsnorm_stats;
-    //       stats->per_row_scale = deviceAlloc(M * problem.batchCount() * sizeof(float)); // tight, owned by descriptor
-    //       stats->populated = true;         // consumer derives M/batch from its own GEMM2 problem
-    //       launchRmsNormReduceReturn(stats->per_row_scale, h);
+    //       launchRmsNormReduceReturn(stats->per_row_scale, h); // caller-owned FP32[M * batch]
     //   }
     //
     // The consumer (RMSNORM_SCALE_APPLY / GEMM2) reads fused->rmsnorm_stats->per_row_scale and
