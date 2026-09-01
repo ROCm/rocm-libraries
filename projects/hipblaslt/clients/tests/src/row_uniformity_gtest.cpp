@@ -2342,9 +2342,17 @@ namespace
         ASSERT_GT(3200u, static_cast<size_t>(TensileLite::StreamKFlagElements));
         ASSERT_LE(solution->partialTileSize(3200), problem.workspaceSize());
 
+        // With the mode off the F-star search never runs, so nothing narrows g0
+        // to a uniform grid. The post-selection clamp is untouched and still has
+        // the last write, and it fires on exactly this shape (g0 exceeds the
+        // region and tiles % g0 != 0), so the launch is handed the bound itself.
+        // 2048 is not a multiple of the tile count -- it is the ragged split the
+        // clamped case at the end of this test re-derives, and the shape
+        // selecting under the bound exists to avoid.
         EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
-                  3200u)
-            << "mode off: the fixed grid stands";
+                  static_cast<size_t>(TensileLite::StreamKFlagElements))
+            << "mode off: no snap, so the fixed grid is cut back only by the "
+               "post-selection flag clamp";
 
         problem.setParams().setUniformSummationOrder(true);
         const size_t grid
@@ -2361,7 +2369,7 @@ namespace
             split, tiles, I, grid, solution->internalArgsSupport.perTileExtraIters))
             << "grid=" << grid << " must pack row-uniformly";
 
-        // What clamping after selection would have produced instead.
+        // What clamping after selection produces instead -- the mode-off grid above.
         const TensileLite::StreamKStaticSplit clamped = TensileLite::streamKStaticSplit(
             tiles, I, TensileLite::StreamKFlagElements, 1, false);
         EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(
