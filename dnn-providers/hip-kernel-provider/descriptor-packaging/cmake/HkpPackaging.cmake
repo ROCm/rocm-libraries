@@ -178,8 +178,15 @@ function(hkp_wire_pack_step)
     # child folder retriggers the pack step. The packer itself walks recursively
     # (load_flat_input uses rglob), so a flat glob here would drop the
     # dependency edge for every nested descriptor.
+    #
+    # `.bin` is not a descriptor and the packer never globs for it -- it reaches
+    # it only through `tree_data.artifact`. It is listed here anyway because
+    # retraining a heuristic rewrites the model and its descriptor and nothing
+    # else, and without the edge the pack step would keep shipping the previous
+    # model.
     file(GLOB_RECURSE _source_inputs CONFIGURE_DEPENDS
-         "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp")
+         "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp"
+         "${ARG_SOURCE_ROOT}/*.fb" "${ARG_SOURCE_ROOT}/*.bin")
 
     # Editing the tool's own sources must retrigger the pack step, else the
     # artifacts go stale against the current pipeline code. The resolved

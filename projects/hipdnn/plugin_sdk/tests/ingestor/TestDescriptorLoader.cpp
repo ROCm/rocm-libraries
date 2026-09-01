@@ -194,8 +194,8 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
          {{"version", "1.0"},
           {"id", heuristicId},
           {"name", "selector"},
-          {"kind", "native"},
-          {"payload", SCORE_SYMBOL}}},
+          {"adapter", "native"},
+          {"native", {{"symbol", SCORE_SYMBOL}}}}},
         {".ued.json",
          {{"version", "1.0"},
           {"id", engineId},
@@ -350,7 +350,15 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     EXPECT_EQ(set.engine.name, "test:complete");
     EXPECT_EQ(set.schema.fields.size(), 2u);
     ASSERT_TRUE(set.heuristic.has_value());
-    EXPECT_EQ(set.heuristic->payload, SCORE_SYMBOL);
+    EXPECT_EQ(set.heuristic->nativeSymbol, SCORE_SYMBOL);
+    // A MODEL payload is a path relative to the .uhd.json that declared it, so the
+    // descriptor has to carry that directory -- nothing downstream can recover it.
+    EXPECT_EQ(set.heuristic->baseDir, dir.path());
+    // And the tree it was found under, which is the boundary that path may not cross.
+    // Resolution and containment are different questions: baseDir answers the first,
+    // treeRoot the second, and a nested descriptor legitimately climbs out of its own
+    // folder while nothing may climb out of the tree.
+    EXPECT_EQ(set.heuristic->treeRoot, dir.path());
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
     ASSERT_EQ(set.packs.size(), 1u);
@@ -1266,6 +1274,260 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseHeuristicIsMissing)
     EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
+namespace
+{
+
+/// Turns the set's UHD into a MODEL one naming @p payload, and writes the tree.
+///
+/// Returns the directory, so a case can create or withhold the artifact afterwards.
+/// Every case below differs only in whether that file exists and where it resolves.
+std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
+                                             const std::string& engineName,
+                                             const std::string& payload)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    heuristic["objective"] = "max";
+    heuristic["tree_data"] = {{"artifact", payload}};
+    writeDocuments(root, documents);
+    return root;
+}
+
+void writeArtifact(const std::filesystem::path& path)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::binary) << "\0\0\0\0HUHD";
+}
+
+} // namespace
+
+/// A MODEL UHD whose artifact shipped loads with the engine intact.
+///
+/// The baseline the two failure cases below are read against: without it, "the engine
+/// survived" proves nothing, because an engine that never had a model survives too.
+TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_present"));
+    writeModelHeuristicSet(dir.path(), "test:model_present", "model.bin");
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->adapter, UhdAdapter::TREE_DATA);
+    EXPECT_EQ(sets.front().heuristic->modelArtifactPath, "model.bin");
+}
+
+/// The whole RFC 0019 §4 header survives the parse, `derived` included.
+///
+/// These fields used to live in a FlatBuffer the loader never opened, so nothing here
+/// could be wrong. They are the descriptor's own now, and every one of them changes what
+/// the heuristic computes: a dropped `derived` entry silently removes a feature the model
+/// was trained on, and a dropped `score` block silently relabels the units a caller
+/// compares across engines.
+TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_header"));
+
+    auto documents = makeSetDocuments('1', "test:model_header");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")",
+                                                             R"("$derived.tiles_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    // max with a calibrated score: the pair a cross-engine consumer may act on, and the
+    // one combination where `calibrated` is not its default, so the boolean parse is real.
+    heuristic["objective"] = "max";
+    heuristic["derived"] = nlohmann::json::array(
+        {{{"name", "tiles_m"}, {"expression", R"({"ceil_div": ["$q.M", "$kernel.tile_m"]})"}}});
+    heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    const auto& parsed = *sets.front().heuristic;
+
+    EXPECT_EQ(parsed.objective, "max");
+    ASSERT_EQ(parsed.featuresSignature.size(), 2u);
+    EXPECT_EQ(parsed.featuresSignature[1], R"("$derived.tiles_m")");
+    EXPECT_EQ(parsed.featuresHash, "sha256:unchecked");
+    ASSERT_EQ(parsed.derived.size(), 1u);
+    EXPECT_EQ(parsed.derived.front().name, "tiles_m");
+    EXPECT_EQ(parsed.derived.front().expression, R"({"ceil_div": ["$q.M", "$kernel.tile_m"]})");
+    EXPECT_EQ(parsed.score.units, "tflops");
+    EXPECT_TRUE(parsed.score.calibrated);
+    EXPECT_EQ(parsed.score.transform, "log1p");
+}
+
+/// A cost-target UHD is ordinary: `min` on an uncalibrated score parses and is kept.
+///
+/// The direction is the author's to choose, because only they know what their model
+/// predicts -- a model fitted on TFLOPS ranks descending, one fitted on latency ascending.
+/// Neither is a fallback for the other, and dropping `min` on the floor would silently
+/// invert every ranking a latency model produces.
+TEST(TestDescriptorLoader, KeepsAMinimisingObjectiveOnAnUncalibratedScore)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("objective_min"));
+
+    auto documents = makeSetDocuments('1', "test:objective_min");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    heuristic["objective"] = "min";
+    heuristic["score"] = {{"units", "latency_ms"}, {"calibrated", false}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->objective, "min");
+    EXPECT_FALSE(sets.front().heuristic->score.calibrated);
+}
+
+/// `min` with a calibrated score is a load error, not a preference.
+///
+/// RFC 0019 §11.3 defines cross-engine comparison on an absolute throughput metric, which
+/// is higher-wins by construction. A descriptor claiming both asks two engines to be
+/// ranked against each other while reporting their scores in opposite directions. Caught
+/// at parse (RFC 0019.13 §15.1): at comparison time the symptom is an inverted choice
+/// between two engines, with nothing left to attribute it to.
+TEST(TestDescriptorLoader, RejectsAMinimisingObjectiveOnACalibratedScore)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("objective_clash"));
+
+    auto documents = makeSetDocuments('1', "test:objective_clash");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    heuristic["objective"] = "min";
+    heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    EXPECT_TRUE(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "calibrated"));
+}
+
+/// A `derived` that is not a list of name/expression objects is a parse error.
+///
+/// The expression language is the one place an author writes code into a descriptor, and
+/// a malformed entry that parsed as absent would drop a feature rather than report one.
+TEST(TestDescriptorLoader, RejectsAMalformedDerivedEntry)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bad_derived"));
+
+    auto documents = makeSetDocuments('1', "test:bad_derived");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    heuristic["objective"] = "max";
+    heuristic["derived"] = nlohmann::json::array({"tiles_m"});
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    EXPECT_TRUE(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "derived"));
+}
+
+/// A missing artifact drops the engine and says why.
+///
+/// RFC 0019 §5 permits degrading to declared order instead, and this used to. Dropping
+/// is the deliberate choice: an engine that quietly ranks by priority is
+/// indistinguishable from one that never had a model, so the packaging bug that lost the
+/// file resurfaces months later as an unattributable performance regression. A dropped
+/// engine fails where the fault is.
+///
+/// The diagnostic is asserted for its content, not its wording -- it is the only thing
+/// telling an operator which file to go looking for.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseModelArtifactIsAbsentAndReportsIt)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_absent"));
+    writeModelHeuristicSet(dir.path(), "test:model_absent", "never_packaged.bin");
+
+    EXPECT_TRUE(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "never_packaged.bin"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "which is absent"));
+}
+
+/// A payload resolving outside the descriptor tree drops the engine.
+///
+/// The one MODEL failure that is not a deployment accident. The artifact is
+/// author-controlled input (RFC 0019 §16, "Drop-in trust"), so a payload climbing out of
+/// the tree is an attempt to make the loader open a file the tree does not own --
+/// degrading around it would mean honouring the rest of a descriptor that just tried it.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseModelArtifactEscapesTheTree)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_escapes"));
+    const auto tree = dir.path() / "tree";
+    writeModelHeuristicSet(tree, "test:model_escapes", "../outside.bin");
+    // Present, so the case is containment and not absence: without the file, the
+    // existence check would reject it too and prove nothing about the boundary.
+    writeArtifact(dir.path() / "outside.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(tree);
+
+    EXPECT_TRUE(sets.empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "outside the descriptor tree"));
+}
+
+/// A nested descriptor may climb out of its own folder, but not out of the tree.
+///
+/// The case that makes the boundary treeRoot rather than baseDir. Production ships one
+/// arch shard per directory with shared content at the shard root, so `../shared/x` is
+/// the normal way two packs reference one artifact. Anchoring containment on the
+/// descriptor's own folder would reject every nested descriptor -- the defect
+/// IngestorKernelCode.hpp already had to fix for kernel `library` paths.
+TEST(TestDescriptorLoader, AcceptsAModelArtifactAboveTheDescriptorButInsideTheTree)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_nested"));
+    writeModelHeuristicSet(dir.path() / "pack", "test:model_nested", "../shared/model.bin");
+    writeArtifact(dir.path() / "shared" / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:model_nested");
+}
+
 TEST(TestDescriptorLoader, DropsEveryEngineClaimingTheSameEngineId)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("id_collision"));
@@ -1512,7 +1774,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredScoreSymbo
     writeDocuments(dir.path(), makeSetDocuments('1', "test:score_check_sibling"));
 
     auto unregistered = makeSetDocuments('2', "test:unregistered_score");
-    documentOfType(unregistered, ".uhd.json")["payload"] = "descriptorloader.absent";
+    documentOfType(unregistered, ".uhd.json")["native"]["symbol"] = "descriptorloader.absent";
     writeDocuments(dir.path(), unregistered);
 
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
