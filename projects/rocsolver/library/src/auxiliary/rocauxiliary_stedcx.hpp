@@ -150,8 +150,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_SETRANGE_THDS)
                         const rocblas_stride strideE,
                         S* WW,
                         const rocblas_stride strideW,
-                        rocblas_int* splitsA,
+                        rocblas_int* ninterA,
                         S* workA,
+                        S* interA,
                         const S eps,
                         const S ssfmin)
 {
@@ -161,16 +162,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_SETRANGE_THDS)
     const int bdim = hipBlockDim_x;
     S* D = DD + bid * strideD;
     S* E = EE + bid * strideE;
-    rocblas_int* splits = splitsA + bid * (5 * n + 2);
+    rocblas_int* ninter = ninterA + bid * (3 * n);
+    S* bounds = workA + bid * (2 * n + 2);
+    S* inter = interA + bid * (2 * n);
     S* W = WW + bid * strideW;
-    S* bounds = workA + bid * (4 * n + 2);
     
     // workspace
-    rocblas_int* ninter = splits + n + 2;
     S* pivmin = bounds + 2;
     S* Esqr = pivmin + 1;
     S* Dcpy = Esqr + n - 1;
-    S* inter = Dcpy + n;
 
     // make copy of D for future use if necessary
     if(range == rocblas_erange_index)
@@ -436,8 +436,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
                             const rocblas_int ldv,
                             const rocblas_stride strideV,
                             const rocblas_int batch_count,
-                            rocblas_int* splitsA,
+                            rocblas_int* ninterA,
                             S* workA,
+                            S* interA,
                             const S eps)
 {
     // batch instance
@@ -448,16 +449,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     S* W = WW + bid * strideW;
     T* V = load_ptr_batch<T>(VV, bid, shiftV, strideV);
     rocblas_int* nev = nevA + bid;
-    rocblas_int* splits = splitsA + bid * (5 * n + 2);
+    rocblas_int* ninter = ninterA + bid * (3 * n);
+    S* bounds = workA + bid * (2 * n + 2);
+    S* inter = interA + bid * (2 * n);
+
     // workspace
-    rocblas_int* ninter = splits + n + 2;
     rocblas_int* idd = ninter + 2 * n;
-    // range bounds
-    S* bounds = workA + bid * (4 * n + 2);
     S* pmin = bounds + 2;
     S* Esqr = pmin + 1;
     S* Dcpy = Esqr + n - 1;
-    S* inter = Dcpy + n;
 
     // aux variables
     S tmp, tmp2;
@@ -1757,8 +1757,8 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
                                          const rocblas_stride strideC,
                                          rocblas_int* info,
                                          const rocblas_int batch_count,
+                                         S* work,
                                          S* work_stack,
-                                         S* work_steqr,
                                          S* tempvect,
                                          S* tempgemm,
                                          S* tmpz,
@@ -1828,9 +1828,9 @@ print_device_matrix(std::cout,"E",1,n-1,E,1);
     // find range for partial decomposition
     ROCSOLVER_LAUNCH_KERNEL(stedcx_setrange_kernel, dim3(1, batch_count), dim3(STEDCX_SETRANGE_THDS), 0,
                             stream, erange, n, vl, vu, il, iu, D, strideD, E, strideE, W, strideW,
-                            splits, work_stack, eps, ssfmin);
+                            splits, work, work_stack, eps, ssfmin);
 
-print_device_matrix(std::cout,"bounds",1,n+2,work_stack,1);
+print_device_matrix(std::cout,"bounds",1,n+2,work,1);
 
     // 1. divide phase
     //-----------------------------
@@ -1907,7 +1907,7 @@ print_device_matrix(std::cout,"C",n,n,C,ldc);
     // Synthesize the results for given range (discard values and vectors out of range)
     ROCSOLVER_LAUNCH_KERNEL((stedcx_synthesis_kernel<T>), dim3(1, batch_count), dim3(STEDCX_BDIM), 0,
                             stream, erange, n, il, iu, D, strideD, nev, W, strideW, 
-                            C, shiftC, ldc, strideC, batch_count, splits, work_stack, eps);
+                            C, shiftC, ldc, strideC, batch_count, splits, work, work_stack, eps);
 
     // eigenvectors C <- C*tempvect
 //    local_gemm<BATCHED, STRIDED, T>(handle, n, C, shiftC, ldc, strideC, tempvect, tempgemm,
