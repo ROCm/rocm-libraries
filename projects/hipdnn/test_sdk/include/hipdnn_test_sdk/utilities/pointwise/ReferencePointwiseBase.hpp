@@ -211,6 +211,12 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL:
             policy.executeBinaryBroadcast(input1, input2, output, pointwise::Multiply{});
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MAX_OP:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Max{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MIN_OP:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Min{});
+            break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GT:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::CompareGreater<ComputeType>{});

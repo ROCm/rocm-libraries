@@ -1,15 +1,18 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <algorithm>
 #include <cmath>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseErrorClassification.hpp>
+#include <limits>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
@@ -108,6 +111,74 @@ protected:
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_3));
 
         auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBinaryMaxOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<OutputType> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::MAX_OP, output, input1, input2);
+
+        Tensor<OutputType> expected({1, 1, 1, 4});
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(std::max(TEST_VALUE_3, TEST_VALUE_1)), 0, 0, 0, 0);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(std::max(TEST_VALUE_1, TEST_VALUE_3)), 0, 0, 0, 1);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(std::max(TEST_VALUE_2, TEST_VALUE_2)), 0, 0, 0, 2);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(std::max(-TEST_VALUE_1, TEST_VALUE_4)), 0, 0, 0, 3);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::MAX_OP, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBinaryMinOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<OutputType> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::MIN_OP, output, input1, input2);
+
+        Tensor<OutputType> expected({1, 1, 1, 4});
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(std::min(TEST_VALUE_3, TEST_VALUE_1)), 0, 0, 0, 0);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(std::min(TEST_VALUE_1, TEST_VALUE_3)), 0, 0, 0, 1);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(std::min(TEST_VALUE_2, TEST_VALUE_2)), 0, 0, 0, 2);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(std::min(-TEST_VALUE_1, TEST_VALUE_4)), 0, 0, 0, 3);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::MIN_OP, TEST_VALUE_4);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -571,6 +642,86 @@ protected:
         }
 
         auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 103.0f);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBroadcast2Dx1DMax()
+    {
+        Tensor<Input1Type> input1({3, 4}); // [M,N] = [3,4]
+        Tensor<Input2Type> input2({4}); // [N] = [4]
+        Tensor<OutputType> output({3, 4}); // Output: [3,4]
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>((m * 10) + n)), m, n);
+            }
+        }
+
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::MAX_OP, output, input1, input2);
+
+        Tensor<OutputType> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto input1Val = static_cast<float>((m * 10) + n);
+                auto input2Val = static_cast<float>((n + 1) * 10);
+                expected.setHostValue(
+                    safeTestTypeCast<OutputType>(std::max(input1Val, input2Val)), m, n);
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::MAX_OP, 40.0f);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBroadcast2Dx1DMin()
+    {
+        Tensor<Input1Type> input1({3, 4}); // [M,N] = [3,4]
+        Tensor<Input2Type> input2({4}); // [N] = [4]
+        Tensor<OutputType> output({3, 4}); // Output: [3,4]
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>((m * 10) + n)), m, n);
+            }
+        }
+
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>((n + 1) * 10)), n);
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::MIN_OP, output, input1, input2);
+
+        Tensor<OutputType> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto input1Val = static_cast<float>((m * 10) + n);
+                auto input2Val = static_cast<float>((n + 1) * 10);
+                expected.setHostValue(
+                    safeTestTypeCast<OutputType>(std::min(input1Val, input2Val)), m, n);
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::MIN_OP, 40.0f);
         auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
@@ -1559,6 +1710,16 @@ TYPED_TEST(CpuReferencePointwiseFixture, BinarySubtractOperation)
     this->testBinarySubtractOperation();
 }
 
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryMaxOperation)
+{
+    this->testBinaryMaxOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryMinOperation)
+{
+    this->testBinaryMinOperation();
+}
+
 TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddOperationSanityValidation)
 {
     this->testBinaryAddOperationSanityValidation();
@@ -1613,6 +1774,16 @@ TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast4Dx4D)
 TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcastComplexND)
 {
     this->testBroadcastComplexND();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast2Dx1DMax)
+{
+    this->testBroadcast2Dx1DMax();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast2Dx1DMin)
+{
+    this->testBroadcast2Dx1DMin();
 }
 
 TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast5D)

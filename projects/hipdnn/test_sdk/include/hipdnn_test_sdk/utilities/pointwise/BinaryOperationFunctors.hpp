@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <hipdnn_data_sdk/types.hpp>
@@ -47,6 +48,28 @@ struct Multiply
     {
         auto result = static_cast<ComputeType>(x0) * static_cast<ComputeType>(x1);
         return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct Max
+{
+    template <typename X0, typename X1>
+    OutputType operator()(const X0& x0, const X1& x1) const
+    {
+        return static_cast<OutputType>(
+            std::max(static_cast<ComputeType>(x0), static_cast<ComputeType>(x1)));
+    }
+};
+
+template <typename ComputeType = float, typename OutputType = ComputeType>
+struct Min
+{
+    template <typename X0, typename X1>
+    OutputType operator()(const X0& x0, const X1& x1) const
+    {
+        return static_cast<OutputType>(
+            std::min(static_cast<ComputeType>(x0), static_cast<ComputeType>(x1)));
     }
 };
 
