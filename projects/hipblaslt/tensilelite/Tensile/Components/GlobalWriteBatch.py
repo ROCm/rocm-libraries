@@ -388,10 +388,12 @@ class GlobalWriteBatchWriter:
     assert self._checkAtomicPreconditions()
     module = Module(self.moduleName)
     self._prolog(module)
-    # The bias/SAV drain barrier ordering is a multi-DU-only hardening that
-    # prevents cross-wave LDS corruption from ds_bpermute. Multi-DU emits the
-    # drain+barrier before the _emitAdd subtile stores; non-multi-DU emits
-    # _emitAdd first.
+    # The bias/SAV drain ordering prevents store-side LDS traffic from racing
+    # cross-wave epilogue reads. Multi-DU emits the drain+barrier before
+    # _emitAdd; non-multi-DU emits _emitAdd first.  The gfx950 permlane16 store
+    # has no LDS traffic, so its single-DU path keeps the read drain but does
+    # not need the following workgroup barrier.  Keep the barrier for multi-DU
+    # until its cross-wave read completion is independently proven.
     isMultiDU = isSubtileMultiDU(self.kernel)
     drainBiasSav = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
@@ -400,7 +402,8 @@ class GlobalWriteBatchWriter:
       self._emitAdd(module)
     if drainBiasSav:
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
-      module.add(SBarrier(comment="sync waves before subtile paired stores"))
+      if isMultiDU or not getattr(self, "_permlane16Active", False):
+        module.add(SBarrier(comment="sync waves before subtile paired stores"))
     if isMultiDU:
       self._emitAdd(module)
     self._epilog(module)
