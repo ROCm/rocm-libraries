@@ -58,6 +58,39 @@ def isSubtileMultiDU(kernel) -> bool:
     du = kernel["DepthU"]
     return kernel.get("_DepthUA", du) < du or kernel.get("_DepthUB", du) < du
 
+
+def _parsePlsinDebugEnv():
+    """Parse TENSILE_PLSIN_DEBUG umbrella into a {name: value} map."""
+    raw = os.environ.get("TENSILE_PLSIN_DEBUG", "")
+    parsed = {}
+    for pair in raw.split(";"):
+        if not pair.strip():
+            continue
+        key, sep, value = pair.partition("=")
+        if sep:
+            parsed[key.strip()] = value
+    return parsed
+
+
+def plsinDebugEnv(name: str, default=None):
+    """Read one PLSIN TEST-ONLY override from TENSILE_PLSIN_DEBUG umbrella."""
+    return _parsePlsinDebugEnv().get(name, default)
+
+
+def preloopCoverInterleaveEnabled() -> bool:
+    """True when the preloop cover-interleave prototype is active."""
+    return os.environ.get("TENSILE_PRELOOP_COVER_INTERLEAVE", "0") != "0"
+
+
+def preloopCoverInterleaveLevel() -> int:
+    """Granularity of preloop cover-interleave prototype (0=off, 1=coarse, 2=per-load)."""
+    raw = os.environ.get("TENSILE_PRELOOP_COVER_INTERLEAVE", "0")
+    try:
+        return int(raw)
+    except ValueError:
+        return 1 if raw != "0" else 0
+
+
 # Global
 _global_ti = rocIsa.getInstance()
 

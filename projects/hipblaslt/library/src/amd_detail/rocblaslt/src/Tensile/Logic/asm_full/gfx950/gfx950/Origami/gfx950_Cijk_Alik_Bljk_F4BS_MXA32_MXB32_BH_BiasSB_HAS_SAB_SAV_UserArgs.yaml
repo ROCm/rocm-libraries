@@ -1,7 +1,7 @@
-- {MinimumRequiredVersion: 5.0.0}
+- MinimumRequiredVersion: 5.0.0
 - gfx950
 - gfx950
-- [Device 75a0]
+- - Device 75a0
 - Activation: true
   ActivationComputeDataType: 0
   ActivationNoGuard: false
@@ -10,7 +10,9 @@
   AssignedDerivedParameters: true
   Batched: true
   BetaOnlyUseBias: false
-  BiasDataTypeList: [0, 7]
+  BiasDataTypeList:
+  - 0
+  - 7
   BiasSrc: D
   ComplexConjugateA: false
   ComplexConjugateB: false
@@ -33,21 +35,44 @@
   Index01MXSA: 0
   Index01MXSB: 1
   Index1: 1
-  IndexAssignmentsA: [3, 0, 2]
-  IndexAssignmentsB: [3, 1, 2]
-  IndexAssignmentsLD: [4, 5, 6, 7]
-  IndexAssignmentsMXSA: [3, 0, 2]
-  IndexAssignmentsMXSB: [3, 1, 2]
-  IndexAssignmentsMetadata: [3, 0, 2]
+  IndexAssignmentsA:
+  - 3
+  - 0
+  - 2
+  IndexAssignmentsB:
+  - 3
+  - 1
+  - 2
+  IndexAssignmentsLD:
+  - 4
+  - 5
+  - 6
+  - 7
+  IndexAssignmentsMXSA:
+  - 3
+  - 0
+  - 2
+  IndexAssignmentsMXSB:
+  - 3
+  - 1
+  - 2
+  IndexAssignmentsMetadata:
+  - 3
+  - 0
+  - 2
   IndexUnroll: 3
   IndexUnrollA: 0
   IndexUnrollB: 0
   IndexUnrollM: 0
   IndexUnrollMXSA: 0
   IndexUnrollMXSB: 0
-  IndicesBatch: [2]
-  IndicesFree: [0, 1]
-  IndicesSummation: [3]
+  IndicesBatch:
+  - 2
+  IndicesFree:
+  - 0
+  - 1
+  IndicesSummation:
+  - 3
   MXBlockA: 32
   MXBlockB: 32
   MacDataTypeA: 21
@@ -151,11 +176,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -223,7 +256,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -232,8 +271,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [2, 2]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 2
+    - 2
     MIWaveTileA: 2
     MIWaveTileB: 2
     MIWaveTileMXSA: 2
@@ -253,7 +296,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -299,16 +346,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -338,7 +391,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 2
     ThreadTileA: 8
@@ -383,12 +438,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -471,11 +532,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x128x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -543,7 +612,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -552,8 +627,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [4, 4]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 4
+    - 4
     MIWaveTileA: 4
     MIWaveTileB: 4
     MIWaveTileMXSA: 4
@@ -573,7 +652,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -619,16 +702,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -658,7 +747,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 4
     ThreadTileA: 16
@@ -703,12 +794,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -791,11 +888,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT192x192x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_6_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -863,7 +968,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -872,8 +983,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [6, 6]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 6
+    - 6
     MIWaveTileA: 6
     MIWaveTileB: 6
     MIWaveTileMXSA: 6
@@ -893,7 +1008,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -939,16 +1058,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -978,7 +1103,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 24
     ThreadTile1: 6
     ThreadTileA: 24
@@ -1023,12 +1150,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -1111,11 +1244,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -1183,7 +1324,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -1192,8 +1339,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [8, 8]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 8
+    - 8
     MIWaveTileA: 8
     MIWaveTileB: 8
     MIWaveTileMXSA: 8
@@ -1213,7 +1364,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -1259,16 +1414,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -1298,7 +1459,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 32
     ThreadTile1: 8
     ThreadTileA: 32
@@ -1343,12 +1506,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -1431,11 +1600,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x128x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -1503,7 +1680,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -1512,8 +1695,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [2, 4]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 2
+    - 4
     MIWaveTileA: 2
     MIWaveTileB: 4
     MIWaveTileMXSA: 2
@@ -1533,7 +1720,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -1579,16 +1770,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -1618,7 +1815,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 4
     ThreadTileA: 8
@@ -1663,12 +1862,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -1751,11 +1956,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x64x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -1823,7 +2036,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -1832,8 +2051,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [4, 2]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 4
+    - 2
     MIWaveTileA: 4
     MIWaveTileB: 2
     MIWaveTileMXSA: 4
@@ -1853,7 +2076,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -1899,16 +2126,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -1938,7 +2171,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 2
     ThreadTileA: 16
@@ -1983,12 +2218,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -2071,11 +2312,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x192x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_6_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -2143,7 +2392,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -2152,8 +2407,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [2, 6]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 2
+    - 6
     MIWaveTileA: 2
     MIWaveTileB: 6
     MIWaveTileMXSA: 2
@@ -2173,7 +2432,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -2219,16 +2482,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -2258,7 +2527,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 6
     ThreadTileA: 8
@@ -2303,12 +2574,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -2391,11 +2668,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT192x64x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -2463,7 +2748,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -2472,8 +2763,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [6, 2]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 6
+    - 2
     MIWaveTileA: 6
     MIWaveTileB: 2
     MIWaveTileMXSA: 6
@@ -2493,7 +2788,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -2539,16 +2838,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -2578,7 +2883,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 24
     ThreadTile1: 2
     ThreadTileA: 24
@@ -2623,12 +2930,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -2711,11 +3024,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_8_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -2783,7 +3104,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -2792,8 +3119,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [2, 8]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 2
+    - 8
     MIWaveTileA: 2
     MIWaveTileB: 8
     MIWaveTileMXSA: 2
@@ -2813,7 +3144,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -2859,16 +3194,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -2898,7 +3239,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 8
     ThreadTileA: 8
@@ -2943,12 +3286,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -3031,11 +3380,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x64x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -3103,7 +3460,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -3112,8 +3475,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [8, 2]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 8
+    - 2
     MIWaveTileA: 8
     MIWaveTileB: 2
     MIWaveTileMXSA: 8
@@ -3133,7 +3500,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -3179,16 +3550,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -3218,7 +3595,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 32
     ThreadTile1: 2
     ThreadTileA: 32
@@ -3263,12 +3642,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -3351,11 +3736,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x192x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_6_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -3423,7 +3816,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -3432,8 +3831,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [4, 6]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 4
+    - 6
     MIWaveTileA: 4
     MIWaveTileB: 6
     MIWaveTileMXSA: 4
@@ -3453,7 +3856,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -3499,16 +3906,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -3538,7 +3951,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 6
     ThreadTileA: 16
@@ -3583,12 +3998,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -3671,11 +4092,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT192x128x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -3743,7 +4172,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -3752,8 +4187,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [6, 4]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 6
+    - 4
     MIWaveTileA: 6
     MIWaveTileB: 4
     MIWaveTileMXSA: 6
@@ -3773,7 +4212,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -3819,16 +4262,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -3858,7 +4307,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 24
     ThreadTile1: 4
     ThreadTileA: 24
@@ -3903,12 +4354,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -3991,11 +4448,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_8_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -4063,7 +4528,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -4072,8 +4543,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [4, 8]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 4
+    - 8
     MIWaveTileA: 4
     MIWaveTileB: 8
     MIWaveTileMXSA: 4
@@ -4093,7 +4568,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -4139,16 +4618,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -4178,7 +4663,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 8
     ThreadTileA: 16
@@ -4223,12 +4710,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -4311,11 +4804,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x128x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -4383,7 +4884,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -4392,8 +4899,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [8, 4]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 8
+    - 4
     MIWaveTileA: 8
     MIWaveTileB: 4
     MIWaveTileMXSA: 8
@@ -4413,7 +4924,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -4459,16 +4974,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -4498,7 +5019,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 32
     ThreadTile1: 4
     ThreadTileA: 32
@@ -4543,12 +5066,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -4631,11 +5160,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT192x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_8_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -4703,7 +5240,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -4712,8 +5255,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [6, 8]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 6
+    - 8
     MIWaveTileA: 6
     MIWaveTileB: 8
     MIWaveTileMXSA: 6
@@ -4733,7 +5280,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -4779,16 +5330,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -4818,7 +5375,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 24
     ThreadTile1: 8
     ThreadTileA: 24
@@ -4863,12 +5422,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -4951,11 +5516,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x192x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_6_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -5023,7 +5596,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -5032,8 +5611,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [8, 6]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 8
+    - 6
     MIWaveTileA: 8
     MIWaveTileB: 6
     MIWaveTileMXSA: 8
@@ -5053,7 +5636,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -5099,16 +5686,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -5138,7 +5731,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 32
     ThreadTile1: 6
     ThreadTileA: 32
@@ -5183,12 +5778,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -5271,11 +5872,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x320x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_10_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -5343,7 +5952,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -5352,8 +5967,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [2, 10]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 2
+    - 10
     MIWaveTileA: 2
     MIWaveTileB: 10
     MIWaveTileMXSA: 2
@@ -5373,7 +5992,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -5419,16 +6042,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -5458,7 +6087,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 10
     ThreadTileA: 8
@@ -5503,12 +6134,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -5591,11 +6228,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT320x64x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT10_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -5663,7 +6308,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -5672,8 +6323,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [10, 2]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 10
+    - 2
     MIWaveTileA: 10
     MIWaveTileB: 2
     MIWaveTileMXSA: 10
@@ -5693,7 +6348,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -5739,16 +6398,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -5778,7 +6443,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 40
     ThreadTile1: 2
     ThreadTileA: 40
@@ -5823,12 +6490,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -5911,11 +6584,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x384x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_12_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -5983,7 +6664,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -5992,8 +6679,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [2, 12]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 2
+    - 12
     MIWaveTileA: 2
     MIWaveTileB: 12
     MIWaveTileMXSA: 2
@@ -6013,7 +6704,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -6059,16 +6754,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -6098,7 +6799,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 12
     ThreadTileA: 8
@@ -6143,12 +6846,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -6231,11 +6940,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT384x64x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT12_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -6303,7 +7020,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -6312,8 +7035,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [12, 2]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 12
+    - 2
     MIWaveTileA: 12
     MIWaveTileB: 2
     MIWaveTileMXSA: 12
@@ -6333,7 +7060,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -6379,16 +7110,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -6418,7 +7155,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 48
     ThreadTile1: 2
     ThreadTileA: 48
@@ -6463,12 +7202,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -6551,11 +7296,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x512x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_16_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -6623,7 +7376,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -6632,8 +7391,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [2, 16]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 2
+    - 16
     MIWaveTileA: 2
     MIWaveTileB: 16
     MIWaveTileMXSA: 2
@@ -6653,7 +7416,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -6699,16 +7466,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -6738,7 +7511,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 16
     ThreadTileA: 8
@@ -6783,12 +7558,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -6871,11 +7652,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT512x64x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT16_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -6943,7 +7732,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -6952,8 +7747,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [16, 2]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 16
+    - 2
     MIWaveTileA: 16
     MIWaveTileB: 2
     MIWaveTileMXSA: 16
@@ -6973,7 +7772,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -7019,16 +7822,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -7058,7 +7867,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 64
     ThreadTile1: 2
     ThreadTileA: 64
@@ -7103,12 +7914,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -7191,11 +8008,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x320x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_10_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -7263,7 +8088,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -7272,8 +8103,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [4, 10]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 4
+    - 10
     MIWaveTileA: 4
     MIWaveTileB: 10
     MIWaveTileMXSA: 4
@@ -7293,7 +8128,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -7339,16 +8178,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -7378,7 +8223,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 10
     ThreadTileA: 16
@@ -7423,12 +8270,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -7511,11 +8364,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT320x128x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT10_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -7583,7 +8444,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -7592,8 +8459,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [10, 4]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 10
+    - 4
     MIWaveTileA: 10
     MIWaveTileB: 4
     MIWaveTileMXSA: 10
@@ -7613,7 +8484,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -7659,16 +8534,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -7698,7 +8579,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 40
     ThreadTile1: 4
     ThreadTileA: 40
@@ -7743,12 +8626,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -7831,11 +8720,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x384x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_12_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -7903,7 +8800,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -7912,8 +8815,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [4, 12]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 4
+    - 12
     MIWaveTileA: 4
     MIWaveTileB: 12
     MIWaveTileMXSA: 4
@@ -7933,7 +8840,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -7979,16 +8890,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -8018,7 +8935,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 12
     ThreadTileA: 16
@@ -8063,12 +8982,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -8151,11 +9076,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT384x128x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT12_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -8223,7 +9156,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -8232,8 +9171,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [12, 4]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 12
+    - 4
     MIWaveTileA: 12
     MIWaveTileB: 4
     MIWaveTileMXSA: 12
@@ -8253,7 +9196,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -8299,16 +9246,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -8338,7 +9291,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 48
     ThreadTile1: 4
     ThreadTileA: 48
@@ -8383,12 +9338,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -8471,11 +9432,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT320x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT10_8_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -8543,7 +9512,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -8552,8 +9527,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [10, 8]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 10
+    - 8
     MIWaveTileA: 10
     MIWaveTileB: 8
     MIWaveTileMXSA: 10
@@ -8573,7 +9552,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -8619,16 +9602,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -8658,7 +9647,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 40
     ThreadTile1: 8
     ThreadTileA: 40
@@ -8703,12 +9694,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -8791,11 +9788,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x320x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_10_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -8863,7 +9868,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -8872,8 +9883,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [8, 10]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 8
+    - 10
     MIWaveTileA: 8
     MIWaveTileB: 10
     MIWaveTileMXSA: 8
@@ -8893,7 +9908,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -8939,16 +9958,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -8978,7 +10003,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 32
     ThreadTile1: 10
     ThreadTileA: 32
@@ -9023,12 +10050,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -9111,11 +10144,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT64x448x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_14_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -9183,7 +10224,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -9192,8 +10239,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [2, 14]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 2
+    - 14
     MIWaveTileA: 2
     MIWaveTileB: 14
     MIWaveTileMXSA: 2
@@ -9213,7 +10264,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -9259,16 +10314,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -9298,7 +10359,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 14
     ThreadTileA: 8
@@ -9343,12 +10406,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -9431,11 +10500,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT448x64x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT14_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -9503,7 +10580,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -9512,8 +10595,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [14, 2]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 14
+    - 2
     MIWaveTileA: 14
     MIWaveTileB: 2
     MIWaveTileMXSA: 14
@@ -9533,7 +10620,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -9579,16 +10670,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -9618,7 +10715,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 56
     ThreadTile1: 2
     ThreadTileA: 56
@@ -9663,12 +10762,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -9751,11 +10856,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x448x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_14_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -9823,7 +10936,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -9832,8 +10951,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [4, 14]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 4
+    - 14
     MIWaveTileA: 4
     MIWaveTileB: 14
     MIWaveTileMXSA: 4
@@ -9853,7 +10976,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -9899,16 +11026,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -9938,7 +11071,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 14
     ThreadTileA: 16
@@ -9983,12 +11118,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -10071,11 +11212,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT448x128x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT14_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -10143,7 +11292,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -10152,8 +11307,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [14, 4]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 14
+    - 4
     MIWaveTileA: 14
     MIWaveTileB: 4
     MIWaveTileMXSA: 14
@@ -10173,7 +11332,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -10219,16 +11382,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -10258,7 +11427,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 56
     ThreadTile1: 4
     ThreadTileA: 56
@@ -10303,12 +11474,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -10391,11 +11568,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT192x384x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_12_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -10463,7 +11648,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -10472,8 +11663,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [6, 12]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 6
+    - 12
     MIWaveTileA: 6
     MIWaveTileB: 12
     MIWaveTileMXSA: 6
@@ -10493,7 +11688,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -10539,16 +11738,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -10578,7 +11783,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 24
     ThreadTile1: 12
     ThreadTileA: 24
@@ -10623,12 +11830,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -10711,11 +11924,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT384x192x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT12_6_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -10783,7 +12004,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -10792,8 +12019,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [12, 6]
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 12
+    - 6
     MIWaveTileA: 12
     MIWaveTileB: 6
     MIWaveTileMXSA: 12
@@ -10813,7 +12044,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -10859,16 +12094,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -10898,7 +12139,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 48
     ThreadTile1: 6
     ThreadTileA: 48
@@ -10943,12 +12186,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
+    WorkGroup:
+    - 32
+    - 8
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -11031,11 +12280,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x32x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -11103,7 +12360,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -11112,8 +12375,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [4, 1]
-    MIWaveTile: [2, 2]
+    MIWaveGroup:
+    - 4
+    - 1
+    MIWaveTile:
+    - 2
+    - 2
     MIWaveTileA: 2
     MIWaveTileB: 2
     MIWaveTileMXSA: 2
@@ -11133,7 +12400,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -11179,16 +12450,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -11218,7 +12495,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 2
     ThreadTileA: 8
@@ -11263,12 +12542,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [64, 4, 1]
+    WorkGroup:
+    - 64
+    - 4
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -11351,11 +12636,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT128x96x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_6_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -11423,7 +12716,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -11432,8 +12731,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [4, 1]
-    MIWaveTile: [2, 6]
+    MIWaveGroup:
+    - 4
+    - 1
+    MIWaveTile:
+    - 2
+    - 6
     MIWaveTileA: 2
     MIWaveTileB: 6
     MIWaveTileMXSA: 2
@@ -11453,7 +12756,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -11499,16 +12806,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -11538,7 +12851,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 6
     ThreadTileA: 8
@@ -11583,12 +12898,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [64, 4, 1]
+    WorkGroup:
+    - 64
+    - 4
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -11671,11 +12992,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x32x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -11743,7 +13072,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -11752,8 +13087,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [4, 1]
-    MIWaveTile: [4, 2]
+    MIWaveGroup:
+    - 4
+    - 1
+    MIWaveTile:
+    - 4
+    - 2
     MIWaveTileA: 4
     MIWaveTileB: 2
     MIWaveTileMXSA: 4
@@ -11773,7 +13112,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -11819,16 +13162,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -11858,7 +13207,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 2
     ThreadTileA: 16
@@ -11903,12 +13254,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [64, 4, 1]
+    WorkGroup:
+    - 64
+    - 4
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -11991,11 +13348,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x96x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_6_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -12063,7 +13428,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -12072,8 +13443,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [4, 1]
-    MIWaveTile: [4, 6]
+    MIWaveGroup:
+    - 4
+    - 1
+    MIWaveTile:
+    - 4
+    - 6
     MIWaveTileA: 4
     MIWaveTileB: 6
     MIWaveTileMXSA: 4
@@ -12093,7 +13468,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -12139,16 +13518,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -12178,7 +13563,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 6
     ThreadTileA: 16
@@ -12223,12 +13610,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [64, 4, 1]
+    WorkGroup:
+    - 64
+    - 4
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -12311,11 +13704,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x160x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_10_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -12383,7 +13784,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -12392,8 +13799,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [4, 1]
-    MIWaveTile: [4, 10]
+    MIWaveGroup:
+    - 4
+    - 1
+    MIWaveTile:
+    - 4
+    - 10
     MIWaveTileA: 4
     MIWaveTileB: 10
     MIWaveTileMXSA: 4
@@ -12413,7 +13824,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -12459,16 +13874,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -12498,7 +13919,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 10
     ThreadTileA: 16
@@ -12543,12 +13966,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [64, 4, 1]
+    WorkGroup:
+    - 64
+    - 4
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -12631,11 +14060,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x288x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_18_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -12703,7 +14140,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -12712,8 +14155,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [4, 1]
-    MIWaveTile: [4, 18]
+    MIWaveGroup:
+    - 4
+    - 1
+    MIWaveTile:
+    - 4
+    - 18
     MIWaveTileA: 4
     MIWaveTileB: 18
     MIWaveTileMXSA: 4
@@ -12733,7 +14180,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -12779,16 +14230,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -12818,7 +14275,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 16
     ThreadTile1: 18
     ThreadTileA: 16
@@ -12863,12 +14322,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [64, 4, 1]
+    WorkGroup:
+    - 64
+    - 4
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -12951,11 +14416,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT384x32x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -13023,7 +14496,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -13032,8 +14511,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [4, 1]
-    MIWaveTile: [6, 2]
+    MIWaveGroup:
+    - 4
+    - 1
+    MIWaveTile:
+    - 6
+    - 2
     MIWaveTileA: 6
     MIWaveTileB: 2
     MIWaveTileMXSA: 6
@@ -13053,7 +14536,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -13099,16 +14586,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -13138,7 +14631,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 24
     ThreadTile1: 2
     ThreadTileA: 24
@@ -13183,12 +14678,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [64, 4, 1]
+    WorkGroup:
+    - 64
+    - 4
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -13271,11 +14772,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT384x96x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_6_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -13343,7 +14852,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -13352,8 +14867,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [4, 1]
-    MIWaveTile: [6, 6]
+    MIWaveGroup:
+    - 4
+    - 1
+    MIWaveTile:
+    - 6
+    - 6
     MIWaveTileA: 6
     MIWaveTileB: 6
     MIWaveTileMXSA: 6
@@ -13373,7 +14892,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -13419,16 +14942,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -13458,7 +14987,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 24
     ThreadTile1: 6
     ThreadTileA: 24
@@ -13503,12 +15034,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [64, 4, 1]
+    WorkGroup:
+    - 64
+    - 4
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -13591,11 +15128,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT512x32x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -13663,7 +15208,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -13672,8 +15223,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [4, 1]
-    MIWaveTile: [8, 2]
+    MIWaveGroup:
+    - 4
+    - 1
+    MIWaveTile:
+    - 8
+    - 2
     MIWaveTileA: 8
     MIWaveTileB: 2
     MIWaveTileMXSA: 8
@@ -13693,7 +15248,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -13739,16 +15298,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -13778,7 +15343,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 32
     ThreadTile1: 2
     ThreadTileA: 32
@@ -13823,12 +15390,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [64, 4, 1]
+    WorkGroup:
+    - 64
+    - 4
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -13911,11 +15484,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x128x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -13983,7 +15564,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -13992,8 +15579,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [1, 4]
-    MIWaveTile: [2, 2]
+    MIWaveGroup:
+    - 1
+    - 4
+    MIWaveTile:
+    - 2
+    - 2
     MIWaveTileA: 2
     MIWaveTileB: 2
     MIWaveTileMXSA: 2
@@ -14013,7 +15604,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -14059,16 +15654,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -14098,7 +15699,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 2
     ThreadTileA: 8
@@ -14143,12 +15746,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
+    WorkGroup:
+    - 16
+    - 16
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -14231,11 +15840,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT96x128x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_2_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -14303,7 +15920,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -14312,8 +15935,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [1, 4]
-    MIWaveTile: [6, 2]
+    MIWaveGroup:
+    - 1
+    - 4
+    MIWaveTile:
+    - 6
+    - 2
     MIWaveTileA: 6
     MIWaveTileB: 2
     MIWaveTileMXSA: 6
@@ -14333,7 +15960,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -14379,16 +16010,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -14418,7 +16055,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 24
     ThreadTile1: 2
     ThreadTileA: 24
@@ -14463,12 +16102,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
+    WorkGroup:
+    - 16
+    - 16
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -14551,11 +16196,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -14623,7 +16276,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -14632,8 +16291,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [1, 4]
-    MIWaveTile: [2, 4]
+    MIWaveGroup:
+    - 1
+    - 4
+    MIWaveTile:
+    - 2
+    - 4
     MIWaveTileA: 2
     MIWaveTileB: 4
     MIWaveTileMXSA: 2
@@ -14653,7 +16316,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -14699,16 +16366,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -14738,7 +16411,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 4
     ThreadTileA: 8
@@ -14783,12 +16458,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
+    WorkGroup:
+    - 16
+    - 16
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -14871,11 +16552,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT96x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -14943,7 +16632,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -14952,8 +16647,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [1, 4]
-    MIWaveTile: [6, 4]
+    MIWaveGroup:
+    - 1
+    - 4
+    MIWaveTile:
+    - 6
+    - 4
     MIWaveTileA: 6
     MIWaveTileB: 4
     MIWaveTileMXSA: 6
@@ -14973,7 +16672,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -15019,16 +16722,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -15058,7 +16767,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 24
     ThreadTile1: 4
     ThreadTileA: 24
@@ -15103,12 +16814,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
+    WorkGroup:
+    - 16
+    - 16
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -15191,11 +16908,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT160x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT10_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -15263,7 +16988,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -15272,8 +17003,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [1, 4]
-    MIWaveTile: [10, 4]
+    MIWaveGroup:
+    - 1
+    - 4
+    MIWaveTile:
+    - 10
+    - 4
     MIWaveTileA: 10
     MIWaveTileB: 4
     MIWaveTileMXSA: 10
@@ -15293,7 +17028,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -15339,16 +17078,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -15378,7 +17123,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 40
     ThreadTile1: 4
     ThreadTileA: 40
@@ -15423,12 +17170,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
+    WorkGroup:
+    - 16
+    - 16
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -15511,11 +17264,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT288x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT18_4_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -15583,7 +17344,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -15592,8 +17359,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [1, 4]
-    MIWaveTile: [18, 4]
+    MIWaveGroup:
+    - 1
+    - 4
+    MIWaveTile:
+    - 18
+    - 4
     MIWaveTileA: 18
     MIWaveTileB: 4
     MIWaveTileMXSA: 18
@@ -15613,7 +17384,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -15659,16 +17434,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -15698,7 +17479,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 72
     ThreadTile1: 4
     ThreadTileA: 72
@@ -15743,12 +17526,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
+    WorkGroup:
+    - 16
+    - 16
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -15831,11 +17620,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x384x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_6_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -15903,7 +17700,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -15912,8 +17715,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [1, 4]
-    MIWaveTile: [2, 6]
+    MIWaveGroup:
+    - 1
+    - 4
+    MIWaveTile:
+    - 2
+    - 6
     MIWaveTileA: 2
     MIWaveTileB: 6
     MIWaveTileMXSA: 2
@@ -15933,7 +17740,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -15979,16 +17790,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -16018,7 +17835,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 6
     ThreadTileA: 8
@@ -16063,12 +17882,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
+    WorkGroup:
+    - 16
+    - 16
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -16151,11 +17976,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT32x512x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_8_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -16223,7 +18056,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -16232,8 +18071,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [1, 4]
-    MIWaveTile: [2, 8]
+    MIWaveGroup:
+    - 1
+    - 4
+    MIWaveTile:
+    - 2
+    - 8
     MIWaveTileA: 2
     MIWaveTileB: 8
     MIWaveTileMXSA: 2
@@ -16253,7 +18096,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -16299,16 +18146,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -16338,7 +18191,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 8
     ThreadTile1: 8
     ThreadTileA: 8
@@ -16383,12 +18238,18 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
+    WorkGroup:
+    - 16
+    - 16
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
@@ -16471,11 +18332,19 @@
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
     GuaranteeNoPartialMetadata: true
-    ISA: [9, 5, 0]
+    ISA:
+    - 9
+    - 5
+    - 0
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT96x384x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_6_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -16543,7 +18412,13 @@
     LoopUnroll: 256
     MFMA_BF16_1K: false
     MIArchVgpr: false
-    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
     MIInputPerThread: 32
     MIInputPerThreadA: 32
     MIInputPerThreadB: 32
@@ -16552,8 +18427,12 @@
     MIInputPerThreadMetadata: 32
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
-    MIWaveGroup: [1, 4]
-    MIWaveTile: [6, 6]
+    MIWaveGroup:
+    - 1
+    - 4
+    MIWaveTile:
+    - 6
+    - 6
     MIWaveTileA: 6
     MIWaveTileB: 6
     MIWaveTileMXSA: 6
@@ -16573,7 +18452,11 @@
     MatrixInstK: 128
     MatrixInstM: 16
     MatrixInstN: 16
-    MatrixInstruction: [16, 16, 128, 1]
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
     MaxLDS: 163840
     MaxOccupancy: 40
     MbskPrefetchMethod: 0
@@ -16619,16 +18502,22 @@
     NumTotalPackedLoadsMXSB: -1
     NumWaveSplitK: 1
     OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: true
     SFCWGM:
-    - [1, 1]
-    - [1, 1]
+    - - 1
+      - 1
+    - - 1
+      - 1
     ScheduleGROverBarrier: 0
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -16658,7 +18547,9 @@
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: 0
     TailloopInNll: false
-    ThreadTile: [1, 1]
+    ThreadTile:
+    - 1
+    - 1
     ThreadTile0: 24
     ThreadTile1: 6
     ThreadTileA: 24
@@ -16703,12 +18594,374 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [16, 16, 1]
+    WorkGroup:
+    - 16
+    - 16
+    - 1
     WorkGroupMapping: 16
     WorkGroupMappingXCC: 2
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, 0]
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
+    _DepthU: 256
+    _DepthUA: 256
+    _DepthUB: 256
+    _DepthUMXSA: 8
+    _DepthUMXSB: 8
+    _DepthUMetadata: 256
+    _GlobalAccumulation: PartialsBuffer
+    _UseSgprForGRO: 0
+    _VectorStore: 1
+    _WorkspaceSizePerElemBias: 0
+    _WorkspaceSizePerElemC: 4
+    _staggerStrideShift: 0
+    enableGLTrA: false
+    enableGLTrB: false
+    enableLDSTrA: false
+    enableLDSTrB: false
+    enableLDSTrMXSA: false
+    enableLDSTrMXSB: false
+    numSubTiles: 1
+    reorderGRInstForDTVA: false
+    reorderGRInstForDTVB: false
+    tailLoopOptA: false
+    tailLoopOptB: false
+    tailLoopOptMXSA: false
+    tailLoopOptMXSB: false
+  - 1LDSBuffer: 0
+    ActivationAlt: false
+    ActivationFuncCall: false
+    ActivationFused: true
+    AdaptiveGemm: 0
+    AssertAIGreaterThanEqual: -1
+    AssertAILessThanEqual: -1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertSummationElementMultiple: 32
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: false
+    BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_SAtYMzz-BQJ3m1dlJ1VM-z0wGBL8Dm9m=
+    BufferLoad: true
+    BufferStore: true
+    CUCount: null
+    CUOccupancy: -1
+    ClusterLocalRead: 1
+    CodeObjectVersion: '4'
+    ConvertAfterDS: false
+    CustomKernelName: ''
+    DebugStreamK: 0
+    DepthU: 256
+    DirectToLds: 1
+    DirectToLdsA: true
+    DirectToLdsB: true
+    DirectToLdsMXSA: true
+    DirectToLdsMXSB: true
+    DirectToVgprA: false
+    DirectToVgprB: false
+    DirectToVgprMXSA: false
+    DirectToVgprMXSB: false
+    DirectToVgprSparseMetadata: false
+    DtlPlusLdsBuf: 0
+    EdgeType: ShiftPtr
+    EnableF32XdlMathOp: false
+    EnableMatrixInstruction: true
+    ExpandPointerSwap: false
+    ExpertSchedulingMode: 0
+    ExtraLatencyForLR: 0
+    ExtraMiLatencyLeft: -1
+    ForceDisableShadowInit: false
+    ForceUnrollSubIter: false
+    GlobalReadPerMfma: 1.0
+    GlobalReadVectorWidthA: 32
+    GlobalReadVectorWidthB: 32
+    GlobalReadVectorWidthMXSA: 4
+    GlobalReadVectorWidthMXSB: 4
+    GlobalSplitU: 0
+    GlobalSplitUAlgorithm: MultipleBuffer
+    GlobalSplitUCoalesced: false
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: -1
+    GroupLoadStore: false
+    GuaranteeNoPartialA: true
+    GuaranteeNoPartialB: true
+    GuaranteeNoPartialMetadata: true
+    ISA:
+    - 9
+    - 5
+    - 0
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
+    Kernel: true
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
+    LDSTrInst: false
+    LSCA: -1
+    LSCB: -1
+    LSCMXSA: 8
+    LSCMXSB: 8
+    LSPA: -1
+    LSPB: -1
+    LSPMXSA: 128
+    LSPMXSB: 128
+    LVCA: -1
+    LVCB: -1
+    LVCMXSA: 2
+    LVCMXSB: 2
+    LVPA: -1
+    LVPB: -1
+    LVPMXSA: 32
+    LVPMXSB: 32
+    LdsBlockSizePerPadA: 0
+    LdsBlockSizePerPadB: 0
+    LdsBlockSizePerPadMXSA: 0
+    LdsBlockSizePerPadMXSB: 0
+    LdsBlockSizePerPadMetadata: 0
+    LdsBytesNoAmax: 139264
+    LdsInitCVgprs: false
+    LdsNumBytes: 139264
+    LdsNumElementsAlignedA: 32768
+    LdsNumElementsAlignedB: 32768
+    LdsNumElementsAlignedMXSA: 2048
+    LdsNumElementsAlignedMXSB: 2048
+    LdsNumElementsAlignedMetadata: 0
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 69632
+    LdsOffsetB: 36864
+    LdsOffsetB_Blk: 106496
+    LdsOffsetBias: 0
+    LdsOffsetBiasGSU: 0
+    LdsOffsetBiasNonGSU: 0
+    LdsOffsetMXSA: 32768
+    LdsOffsetMXSA_Blk: 102400
+    LdsOffsetMXSB: 34816
+    LdsOffsetMXSB_Blk: 104448
+    LdsOffsetMetadata: 36864
+    LdsOffsetMetadata_Blk: 106496
+    LdsPadA: 0
+    LdsPadB: 0
+    LdsPadMXSA: 0
+    LdsPadMXSB: 0
+    LdsPadMetadata: 0
+    LocalReadVectorWidth: -1
+    LocalReadVectorWidthA: -1
+    LocalReadVectorWidthB: -1
+    LocalReadVectorWidthMXSA: 1
+    LocalReadVectorWidthMXSB: 1
+    LocalSplitU: 1
+    LocalSplitUReuseLDS: 1
+    LocalWritePerMfma: -1
+    LocalWriteUseSgprA: true
+    LocalWriteUseSgprB: true
+    LocalWriteUseSgprMXSA: true
+    LocalWriteUseSgprMXSB: true
+    LoopIters: 2
+    LoopUnroll: 256
+    MFMA_BF16_1K: false
+    MIArchVgpr: false
+    MIBlock:
+    - 16
+    - 16
+    - 128
+    - 1
+    - 1
+    - 1
+    MIInputPerThread: 32
+    MIInputPerThreadA: 32
+    MIInputPerThreadB: 32
+    MIInputPerThreadMXSA: 1
+    MIInputPerThreadMXSB: 1
+    MIInputPerThreadMetadata: 32
+    MIOutputVectorWidth: 4
+    MIRegPerOut: 1
+    MIWaveGroup:
+    - 2
+    - 2
+    MIWaveTile:
+    - 8
+    - 8
+    MIWaveTileA: 8
+    MIWaveTileB: 8
+    MIWaveTileMXSA: 8
+    MIWaveTileMXSB: 8
+    MIWaveTileMetadata: 0
+    MacroTile0: 256
+    MacroTile1: 256
+    MacroTileA: 256
+    MacroTileB: 256
+    MacroTileMXSA: 256
+    MacroTileMXSB: 256
+    MagicDivAlg: 2
+    MathClocksUnrolledLoop: 0
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstBN: 1
+    MatrixInstK: 128
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MatrixInstruction:
+    - 16
+    - 16
+    - 128
+    - 1
+    MaxLDS: 163840
+    MaxOccupancy: 40
+    MbskPrefetchMethod: 0
+    MfmaInitCVgprs: false
+    MinGRIncPerMfma: 3
+    NoLdsWriteCode: true
+    NoReject: false
+    NoTailLoop: false
+    NonDTLTailLoopA: true
+    NonDTLTailLoopB: true
+    NonDTLTailLoopMXSA: true
+    NonDTLTailLoopMXSB: true
+    NonTemporal: -1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NonTemporalD: 4
+    NonTemporalE: 0
+    NonTemporalMXSA: 0
+    NonTemporalMXSB: 0
+    NonTemporalMetadata: 0
+    NonTemporalWS: 0
+    NumElementsPerBatchStore: 0
+    NumElementsPerThread: 256
+    NumGlobalWriteVectorsPerThread: 256
+    NumLdsBlk: 2
+    NumLoadsA: 8
+    NumLoadsB: 8
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsCoalescedMXSA: 1
+    NumLoadsCoalescedMXSB: 1
+    NumLoadsMXSA: 2
+    NumLoadsMXSB: 2
+    NumLoadsPerpendicularA: 8
+    NumLoadsPerpendicularB: 8
+    NumLoadsPerpendicularMXSA: 2
+    NumLoadsPerpendicularMXSB: 2
+    NumThreads: 256
+    NumTotalPackedLoadsA: -1
+    NumTotalPackedLoadsB: -1
+    NumTotalPackedLoadsMXSA: -1
+    NumTotalPackedLoadsMXSB: -1
+    NumWaveSplitK: 1
+    OptNoLoadLoop: 1
+    PackedC0IdxChars:
+    - I
+    PackedC0IndicesX:
+    - 0
+    PackedC1IdxChars:
+    - J
+    PackedC1IndicesX:
+    - 1
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 1
+    PreloadKernArgs: true
+    SFCWGM:
+    - - 1
+      - 1
+    - - 1
+      - 1
+    ScheduleGROverBarrier: 0
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 3
+    ScheduleLocalWrite: 1
+    SolutionIndex: 3
+    SolutionNameMin: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs_MT256x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM32_CLR1_CADS0_DTLA1_DTLB1_DTVA0_DTVB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB0_LBSPPM0_LPA0_LPB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM16_WGMXCC2_WGMXCCGn1
+    SourceSwap: true
+    SpaceFillingAlgo: []
+    StaggerU: 0
+    StaggerUMapping: 0
+    StaggerUStride: 0
+    StorePriorityOpt: false
+    StoreRemapVectorWidth: 0
+    StoreSwapAddr: true
+    StoreSyncOpt: 0
+    StoreVectorWidth: -1
+    StreamK: 3
+    StreamKAtomic: 0
+    StreamKFixupTreeReduction: 0
+    StreamKXCCMapping: 0
+    SubGroup0: 8
+    SubGroup1: 32
+    SubGroupA: 8
+    SubGroupB: 32
+    SubGroupMXSA: 8
+    SubGroupMXSB: 32
+    SuppressNoLoadLoop: false
+    SwapGlobalReadOrder: 0
+    TailloopInNll: false
+    ThreadTile:
+    - 1
+    - 1
+    ThreadTile0: 32
+    ThreadTile1: 8
+    ThreadTileA: 32
+    ThreadTileB: 8
+    ThreadTileMXSA: 32
+    ThreadTileMXSB: 8
+    TransposeLDS: 1
+    TransposeLDSMetadata: -1
+    ULSGRODoubleG2L: 0
+    UnrollLoopSwapGlobalReadOrder: 0
+    UnrollMajorLDSA: true
+    UnrollMajorLDSB: true
+    UnrollMajorLDSMXSA: true
+    UnrollMajorLDSMXSB: true
+    Use64bShadowLimit: false
+    Use64bShadowLimitMX: false
+    UseCustomMainLoopSchedule: 0
+    UseDirect32XEmulation: false
+    UseDot2F32XEmulation: false
+    UseDotInstruction: false
+    UseF32XEmulation: false
+    UseGeneralizedNLCOneA: false
+    UseGeneralizedNLCOneB: false
+    UseGeneralizedNLCOneMXSA: false
+    UseGeneralizedNLCOneMXSB: false
+    UseGeneralizedNLCOneMetadata: false
+    UseInstOffsetForGRO: 0
+    UseMFMAF32XEmulation: false
+    UsePLRPack: 0
+    UseSgprForGRO: -1
+    UseSubtileImpl: true
+    Valid: true
+    VectorStore: -1
+    VectorWidthA: -1
+    VectorWidthB: -1
+    VectorWidthMXSA: 1
+    VectorWidthMXSB: 1
+    WaveSeparateGlobalReadA: 0
+    WaveSeparateGlobalReadB: 0
+    WaveSeparateGlobalReadMXSA: 0
+    WaveSeparateGlobalReadMXSB: 0
+    WaveSeparateGlobalReadMetadata: 0
+    WaveSplitK: false
+    WavefrontSize: 64
+    WorkGroup:
+    - 32
+    - 8
+    - 1
+    WorkGroupMapping: 16
+    WorkGroupMappingXCC: 2
+    WorkGroupMappingXCCGroup: -1
+    WorkGroupReduction: false
+    WorkspaceCheck:
+    - 4
+    - 0
+    - 0
     _DepthU: 256
     _DepthUA: 256
     _DepthUB: 256
