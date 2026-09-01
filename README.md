@@ -12,9 +12,9 @@ Welcome to the ROCm Libraries super-repo. This repository consolidates multiple 
 
 ### TheRock CI Status
 
-TheRock CI performs multi-component testing on top of builds leveraging [TheRock](https://github.com/ROCm/TheRock) build system.
+TheRock CI performs multi-component testing on top of builds leveraging the [TheRock](https://github.com/ROCm/TheRock) build system.
 
-[![TheRock CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci.yml/badge.svg?branch=develop&event=push)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci.yml?query=branch%3Adevelop+event%3Apush) [![TheRock CI Nightly](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci-nightly.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci-nightly.yml?query=branch%3Adevelop)
+[![TheRock Multi-Arch CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci.yml/badge.svg?branch=develop&event=push)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci.yml?query=branch%3Adevelop+event%3Apush) [![TheRock Multi-Arch Nightly CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci-nightly.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci-nightly.yml?query=branch%3Adevelop)
 
 ### Component Migration and Legacy CI Status
 
