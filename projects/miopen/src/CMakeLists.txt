@@ -207,15 +207,12 @@ set( MIOpen_Source
     solver/conv/conv_asm_implicit_gemm_wrw_v4r1_dynamic.cpp
     solver/conv/conv_bin_wino3x3U.cpp
     solver/conv/conv_bin_winoRxS.cpp
-    solver/conv/conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp
     solver/conv/conv_direct_naive_conv.cpp
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
     solver/conv/conv_direct_naive_conv_wrw.cpp
 
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1.cpp
-    solver/conv/conv_hip_implicit_gemm_bwd_v1r1_xdlops.cpp
-    solver/conv/conv_hip_implicit_gemm_bwd_v4r1.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v4r1_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r1.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r4.cpp
@@ -597,6 +594,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
 
         kernels/MIOpenConvFFT.cpp
         kernels/MIOpenRNNHiddenStateUpdate.cpp
+        kernels/MIOpenRNNFusedInference.cpp
         kernels/bugzilla_34765_detect.s
         kernels/dummy_kernel.s
         kernels/conv3x3.s
@@ -947,6 +945,16 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
 endif()
 
 # ---- implementation-target configuration ----
+
+# Leave AMDGPU device code uninstrumented under a host UBSan build (see the detection in the
+# top-level CMakeLists.txt). -Xarch_device scopes -fno-sanitize=undefined to the device
+# sub-compile only, so host code keeps UBSan. Applied as a target option on the MIOpen library
+# only, not a directory-wide add_compile_options, so it does not touch host tools, tests,
+# driver, or fin. SHELL: keeps the two tokens together and un-deduplicated.
+if(MIOPEN_DISABLE_DEVICE_UBSAN)
+    target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+endif()
 
 # Add dependency on inlined rocrand header if it was created
 if(TARGET inline_rocrand_header)
