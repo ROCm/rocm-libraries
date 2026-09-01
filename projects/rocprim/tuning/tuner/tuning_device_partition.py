@@ -43,10 +43,10 @@ class TunerPartition(BaseTuner):
         params["ipt"] = list(range(4, max_items + 1, 1))
         return params
 
-    def _get_key_type(self) -> str:
+    def _get_key_type_name(self) -> str:
         return "data_type"
 
-    def _get_value_type(self) -> str:
+    def _get_value_type_name(self) -> str:
         return ""
 
     def _get_restrictions(

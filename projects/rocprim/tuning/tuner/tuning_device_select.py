@@ -54,6 +54,6 @@ class TunerSelect(BaseTuner):
 
         return validate
 
-    def _get_key_type(self) -> str:
+    def _get_key_type_name(self) -> str:
         return "data_type"
 

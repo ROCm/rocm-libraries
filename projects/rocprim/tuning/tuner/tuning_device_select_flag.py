@@ -34,7 +34,7 @@ class Tuner(TunerSelect):
     def _get_default_args(cls) -> TunerArgs:
         return TunerArgs(algo_full_name="device_select_flag")
 
-    def _get_value_type(self) -> str:
+    def _get_value_type_name(self) -> str:
         return ""
 
     def tune_all(self) -> None:
