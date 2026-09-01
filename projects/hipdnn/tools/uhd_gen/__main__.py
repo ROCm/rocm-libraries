@@ -3,12 +3,13 @@
 # SPDX-License-Identifier: MIT
 """UHD Generation Tool CLI.
 
-Two subcommands, one per stage of RFC 0019.13's pipeline that exists today:
+Three subcommands, one per stage of RFC 0019.13's pipeline that exists today:
 
     export-benchmarks   ingestor benchmark log -> §8.3 training CSV
     train               training CSV -> UHD descriptor + model artifact
+    promote             install that pair into a descriptor tree and point a UED at it
 
-Collect and train:
+Collect, train and install:
 
     HIPDNN_LOG_LEVEL=info HIPDNN_LOG_FILE=sweep.log <run the graphs you care about>
 
@@ -23,8 +24,16 @@ Collect and train:
         --descriptor-name pointwise \\
         --name "Pointwise UHD"
 
+    python -m uhd_gen promote \\
+        --model-dir ./uhd_output \\
+        --descriptor-tree ./descriptors \\
+        --engine hipkernel:pointwise
+
 Features must be namespace-qualified (`q.`, `kernel.`, `device.`); an unqualified
 name produces a descriptor that loads but never scores.
+
+Without the `promote` step the engine keeps its previous `heuristic` id and the new
+model is never consulted -- silently, since ranking by priority is a valid state.
 """
 from __future__ import annotations
 
@@ -40,6 +49,7 @@ import pandas as pd
 from .benchmark_log import main as benchmark_log_main
 from .features import build_features_signature, compute_features_hash
 from .lgbm_to_flatbuffer import convert
+from .promote import add_promote_arguments, run_promote
 from .train_uhd import train_model
 
 logging.basicConfig(
@@ -97,6 +107,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_train_arguments(train)
 
+    promote = subparsers.add_parser(
+        "promote",
+        help="install a trained UHD into a descriptor tree and point a UED at it",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_promote_arguments(promote)
+
     # export-benchmarks parses its own argv tail, so it is split off before the
     # main parser sees flags it does not declare.
     if argv is None:
@@ -105,6 +122,8 @@ def main(argv: list[str] | None = None) -> int:
         return benchmark_log_main(argv[1:])
 
     args = parser.parse_args(argv)
+    if args.command == "promote":
+        return run_promote(args)
     return _run_train(args)
 
 
@@ -206,11 +225,56 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
             "heuristic by that suffix, so a bare 'uhd.json' is invisible to it."
         ),
     )
+    parser.add_argument(
+        "--uhd-id",
+        dest="uhd_id",
+        default=None,
+        help=(
+            "UUID for the emitted descriptor instead of a fresh one. Pass the id the "
+            "engine's UED already names and a retrain needs no descriptor edit at all: "
+            "the pair is simply overwritten in place."
+        ),
+    )
+
+
+def _resolve_uhd_id(requested: str | None) -> str:
+    """The descriptor's identity: the caller's id, or a fresh one.
+
+    A typo'd id is not caught anywhere downstream -- it becomes the descriptor's
+    identity, the UED points at the id the author meant, nothing resolves, and the
+    engine loads with no heuristic. That is precisely the silence --uhd-id exists to
+    end, so it is rejected here instead.
+    """
+    if requested is None:
+        return str(uuid.uuid4())
+    try:
+        parsed = uuid.UUID(requested)
+    except (ValueError, AttributeError, TypeError) as error:
+        raise ValueError(
+            f"--uhd-id {requested!r} is not a UUID ({error}); the UED's `heuristic` "
+            "field is resolved by id, so a malformed one would leave the engine with "
+            "no heuristic and no error"
+        ) from error
+    canonical = str(parsed)
+    if canonical != requested:
+        # Braced/urn/undashed spellings parse, but the descriptor is written canonical.
+        # Say so, or the id in the file quietly differs from the one that was typed.
+        logger.warning("--uhd-id %r normalized to canonical form %s", requested, canonical)
+    return canonical
 
 
 def _run_train(args: argparse.Namespace) -> int:
     input_path = Path(args.input)
     output_dir = Path(args.output_dir)
+
+    # Before the output directory exists and long before training spends minutes: a bad
+    # id is an argument error, and finding it after the model is written wastes the run.
+    try:
+        uhd_id = _resolve_uhd_id(args.uhd_id)
+    except ValueError as error:
+        logger.error("%s", error)
+        return 1
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Loading data from %s", input_path)
@@ -292,7 +356,7 @@ def _run_train(args: argparse.Namespace) -> int:
         lgbm_path.unlink()
         logger.info("Removed intermediate %s", lgbm_path)
 
-    uhd_id = str(uuid.uuid4())
+    # `uhd_id` was resolved at entry, from --uhd-id or a fresh uuid4.
     stem = args.descriptor_name
 
     # The whole UHD, in the descriptor. RFC 0019 §4 always specified JSON; an earlier
@@ -356,7 +420,9 @@ def _run_train(args: argparse.Namespace) -> int:
     print(f"  features hash:  {features_hash}")
     print(
         "\nThe engine's UED must name this heuristic by id:\n"
-        f'  "heuristic": "{uhd_id}"'
+        f'  "heuristic": "{uhd_id}"\n'
+        "\nInstall the pair and write that id for you:\n"
+        f"  python -m uhd_gen promote --model-dir {output_dir} --descriptor-tree <TREE>"
     )
 
     return 0

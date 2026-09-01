@@ -8,7 +8,8 @@ This tool takes benchmark timing data and produces:
 1. A trained LightGBM model
 2. A FlatBuffer model artifact (`model.bin`) for `TreeDataAdapter`
 3. A UHD descriptor (`<stem>.uhd.json`) for `DescriptorLoader` (RFC 0019 §4)
-4. A human-readable UHD JSON (`uhd.json`)
+
+…and then installs that pair into a descriptor tree, pointing an engine's UED at it.
 
 ## Installation
 
@@ -17,18 +18,45 @@ cd projects/hipdnn/tools/uhd_gen
 pip install -e .
 ```
 
-## Usage
+## The pipeline
+
+```
+  sweep  ->  export-benchmarks  ->  train  ->  promote
+   |              |                   |          |
+   |              |                   |          `- writes the UED's "heuristic" id
+   |              |                   `- <stem>.uhd.json + model.bin
+   |              `- §8.3 training CSV
+   `- ingestor benchmark log
+```
 
 ```bash
-# Input CSV must have feature columns and a target column (default: tflops)
-python -m uhd_gen \
-    --input benchmark_results.csv \
+# 1. sweep: run the graphs you care about with benchmark logging on
+HIPDNN_LOG_LEVEL=info HIPDNN_LOG_FILE=sweep.log <run your graphs>
+
+# 2. export-benchmarks: log -> the §8.3 training CSV
+python -m uhd_gen export-benchmarks sweep.log -o bench.csv
+
+# 3. train: CSV -> descriptor + model artifact
+python -m uhd_gen train \
+    --input bench.csv \
     --features q.M q.N q.K kernel.tile_m kernel.tile_n kernel.tile_k device.cu_count \
     --target tflops \
     --group-by q.M q.N q.K \
     --output-dir ./uhd_output \
+    --descriptor-name gemm \
     --name "GEMM UHD"
+
+# 4. promote: install the pair beside the engine's UED and write its heuristic id
+python -m uhd_gen promote \
+    --model-dir ./uhd_output \
+    --descriptor-tree ./descriptors \
+    --engine hipkernel:gemm
 ```
+
+**Step 4 is not optional.** Until a UED's `heuristic` field names the new UHD's id,
+`DescriptorLoader` resolves nothing and the engine ranks its kernels by priority then
+descriptor id — a perfectly valid state that logs no error. The only symptom of a
+skipped promote is that the model "did nothing".
 
 ### Feature columns must be namespace-qualified
 
@@ -49,7 +77,7 @@ an unqualified descriptor loads, validates, and never once uses the model.
 
 Rename the columns in your CSV to match.
 
-### Arguments
+### `train` arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
@@ -62,9 +90,45 @@ Rename the columns in your CSV to match.
 | `--group-by` | No | Columns for GroupKFold CV |
 | `--output-dir` | Yes | Output directory |
 | `--name` | No | UHD display name |
+| `--descriptor-name` | No | Stem for the emitted descriptor (default: `heuristic`), producing `<stem>.uhd.json` |
+| `--uhd-id` | No | Reuse this UUID as the descriptor's id instead of minting a fresh one |
 | `--num-boost-round` | No | Max boosting rounds (default: 500) |
 | `--early-stopping` | No | Early stopping patience (default: 50) |
 | `--keep-lgbm` | No | Keep intermediate .lgbm file |
+| `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
+| `--model-version` | No | Semantic version embedded in the model metadata |
+
+`--uhd-id` makes retraining a no-edit operation: pass the id the engine's UED already
+names and the pair is simply overwritten in place. A value that is not a UUID is
+rejected before training starts — a typo'd id becomes the descriptor's *identity*, so
+the UED would point at an id nothing defines and the engine would load with no
+heuristic and no error.
+
+### `promote` arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--model-dir` | Yes | The `train --output-dir` result: one `<stem>.uhd.json` plus its artifact |
+| `--descriptor-tree` | Yes | Tree holding the engine's `<name>.ued.json`; searched recursively |
+| `--engine` | If ambiguous | The UED's `name` (e.g. `hipkernel:pointwise_model`) |
+| `--dry-run` | No | Print the plan, write nothing |
+
+`promote` copies the descriptor and its artifact into the UED's own directory and sets
+that UED's `heuristic` to the new UHD's id, rewriting only that one line.
+
+It validates everything before writing anything, and refuses rather than half-succeed:
+
+- the descriptor's `id` must parse as a UUID, and its `tree_data.artifact` must exist
+  next to it — installing a descriptor without its model makes the loader drop the
+  engine outright, which is worse than the stale model it replaced;
+- with more than one UED in the tree, `--engine` is **required**. Promoting into the
+  wrong engine fails twice over: the engine you retrained keeps its old model, and one
+  you never touched starts ranking with a model trained for a different kernel set.
+  Both load cleanly and report nothing, so this is never guessed;
+- overwriting a *different* UHD that happens to share the destination filename warns
+  loudly, and is refused outright when another UED still names the id being replaced.
+  Same for an artifact another installed descriptor points at — give the model a
+  distinct `--descriptor-name` instead.
 
 ## Input Format
 
@@ -94,7 +158,7 @@ df["arith_intensity"] = 2 * df["M"] * df["N"] * df["K"] / (
 
 ## Output
 
-The tool generates:
+`train` generates:
 
 ```
 output_dir/
@@ -109,7 +173,15 @@ output_dir/
 path relative to that file, so the directory relocates as a unit.
 
 The engine's UED has to name the heuristic by id. `train` prints the id it
-generated and records it in `train_manifest.json`.
+generated and records it in `train_manifest.json`; `promote` writes it into the UED
+for you, and installs the pair next to it:
+
+```
+descriptor_tree/
+├── <engine>.ued.json   # "heuristic": "<the new UHD's id>"   <- the one line promote edits
+├── <stem>.uhd.json     # copied from output_dir/
+└── model.bin           # copied from output_dir/
+```
 
 ## Generated FlatBuffers bindings
 
