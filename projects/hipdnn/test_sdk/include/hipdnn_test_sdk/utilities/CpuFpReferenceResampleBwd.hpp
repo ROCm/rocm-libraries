@@ -23,15 +23,15 @@ public:
               class DxDataType = DyDataType,
               class ComputeDataType = float,
               class IndexDataType = int32_t>
-    static void backward(const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
-                         hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
-                         const std::vector<int64_t>& prePadding,
-                         const std::vector<int64_t>& stride,
-                         const std::vector<int64_t>& window,
-                         hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode,
-                         hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode,
-                         const hipdnn_data_sdk::utilities::TensorBase<IndexDataType>* index
-                         = nullptr)
+    static void
+        backward(const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
+                 hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
+                 const std::vector<int64_t>& prePadding,
+                 const std::vector<int64_t>& stride,
+                 const std::vector<int64_t>& window,
+                 hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode,
+                 [[maybe_unused]] hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode,
+                 const hipdnn_data_sdk::utilities::TensorBase<IndexDataType>* index = nullptr)
     {
         const auto& dyDims = dy.dims();
         const auto& dxDims = dx.dims();
@@ -154,7 +154,6 @@ public:
         parallelFunc(std::thread::hardware_concurrency());
 
         dx.memory().markHostModified();
-        static_cast<void>(paddingMode);
     }
 
 private:

@@ -164,7 +164,7 @@ TEST(TestResampleBwdGraphBuilder, PreservesIndexTensorPresence)
 
 TEST(TestResampleBwdPlanBuilder, IsApplicableIndexTensorPresence)
 {
-    auto builder = createValidResampleBwdGraph(false);
+    auto builder = createValidResampleBwdGraph(false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const ResampleBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET>
@@ -175,7 +175,7 @@ TEST(TestResampleBwdPlanBuilder, IsApplicableIndexTensorPresence)
     EXPECT_TRUE(noIndexBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
     EXPECT_FALSE(indexBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
 
-    auto indexBuilderFbb = createValidResampleBwdGraph(true);
+    auto indexBuilderFbb = createValidResampleBwdGraph(true, ResampleMode::MAXPOOL);
     const GraphWrapper indexGraph(indexBuilderFbb.GetBufferPointer(), indexBuilderFbb.GetSize());
     EXPECT_FALSE(noIndexBuilder.isApplicable(indexGraph.getNode(0), indexGraph.getTensorMap()));
     EXPECT_TRUE(indexBuilder.isApplicable(indexGraph.getNode(0), indexGraph.getTensorMap()));

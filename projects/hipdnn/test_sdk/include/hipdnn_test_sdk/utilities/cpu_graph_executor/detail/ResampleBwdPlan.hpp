@@ -167,6 +167,11 @@ public:
             {
                 return false;
             }
+
+            if(mode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
+            {
+                return false;
+            }
         }
         else
         {

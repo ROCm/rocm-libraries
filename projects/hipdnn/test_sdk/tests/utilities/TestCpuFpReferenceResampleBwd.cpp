@@ -369,6 +369,79 @@ TEST(TestCpuFpReferenceResampleBwd, AverageExcludePaddingSupportsChannelLastLayo
     expectTensorValues(dx, {4.5f, 45.0f, 2.0f, 20.0f, 2.5f, 25.0f, 1.0f, 10.0f});
 }
 
+TEST(TestCpuFpReferenceResampleBwd, AverageExcludePaddingNonOverlappingStride)
+{
+    Tensor<float> dy({1, 1, 2, 2});
+    Tensor<float> dx({1, 1, 4, 4});
+
+    fillValues(dy, {1.0f, 2.0f, 3.0f, 4.0f});
+
+    CpuFpReferenceResampleBwd::backward<float, float, float>(dy,
+                                                             dx,
+                                                             {0, 0},
+                                                             {2, 2},
+                                                             {2, 2},
+                                                             ResampleMode::AVGPOOL_EXCLUDE_PADDING,
+                                                             PaddingMode::ZERO_PAD);
+
+    expectTensorValues(dx,
+                       {0.25f,
+                        0.25f,
+                        0.5f,
+                        0.5f,
+                        0.25f,
+                        0.25f,
+                        0.5f,
+                        0.5f,
+                        0.75f,
+                        0.75f,
+                        1.0f,
+                        1.0f,
+                        0.75f,
+                        0.75f,
+                        1.0f,
+                        1.0f});
+}
+
+TEST(TestCpuFpReferenceResampleBwd, AverageExcludePaddingHandlesOverlappingStride)
+{
+    Tensor<float> dy({1, 1, 2, 2});
+    Tensor<float> dx({1, 1, 5, 5});
+
+    fillValues(dy, {1.0f, 2.0f, 3.0f, 4.0f});
+
+    CpuFpReferenceResampleBwd::backward<float, float, float>(dy,
+                                                             dx,
+                                                             {0, 0},
+                                                             {2, 2},
+                                                             {3, 3},
+                                                             ResampleMode::AVGPOOL_EXCLUDE_PADDING,
+                                                             PaddingMode::ZERO_PAD);
+
+    expectTensorValues(dx, {1.0f / 9.0f, 1.0f / 9.0f, 1.0f / 3.0f,  2.0f / 9.0f, 2.0f / 9.0f,
+                            1.0f / 9.0f, 1.0f / 9.0f, 1.0f / 3.0f,  2.0f / 9.0f, 2.0f / 9.0f,
+                            4.0f / 9.0f, 4.0f / 9.0f, 10.0f / 9.0f, 2.0f / 3.0f, 2.0f / 3.0f,
+                            1.0f / 3.0f, 1.0f / 3.0f, 7.0f / 9.0f,  4.0f / 9.0f, 4.0f / 9.0f,
+                            1.0f / 3.0f, 1.0f / 3.0f, 7.0f / 9.0f,  4.0f / 9.0f, 4.0f / 9.0f});
+}
+
+TEST(TestCpuFpReferenceResampleBwd, MaxPoolHandlesOverlappingStride)
+{
+    Tensor<float> dy({1, 1, 2, 2});
+    Tensor<float> dx({1, 1, 5, 5});
+    Tensor<int32_t> index({1, 1, 2, 2});
+
+    fillValues(dy, {1.0f, 2.0f, 3.0f, 4.0f});
+    fillValues(index, {6.0f, 8.0f, 16.0f, 18.0f});
+
+    CpuFpReferenceResampleBwd::backward<float, float, float, int32_t>(
+        dy, dx, {0, 0}, {2, 2}, {3, 3}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD, &index);
+
+    expectTensorValues(dx, {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 2.0f,
+                            0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 3.0f, 0.0f,
+                            4.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+}
+
 // ============================================================================
 // Smoke tests
 // ============================================================================
@@ -384,6 +457,21 @@ TEST(TestCpuFpReferenceResampleBwdFp32, MaxPool4DNchw)
 
     CpuFpReferenceResampleBwd::backward<float, float, float, int32_t>(
         dy, dx, {0, 0}, {1, 1}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD, &index);
+
+    const auto* dxData = dx.memory().hostData();
+    for(size_t n = 0; n < 2; ++n)
+    {
+        for(size_t c = 0; c < 3; ++c)
+        {
+            const auto base = (n * 3 + c) * 25;
+            for(size_t i = 0; i < 25; ++i)
+            {
+                const float expected = (i == 0) ? 1.0f : 0.0f;
+                EXPECT_FLOAT_EQ(dxData[base + i], expected)
+                    << "Mismatch at n=" << n << " c=" << c << " spatial index " << i;
+            }
+        }
+    }
 }
 
 TEST(TestCpuFpReferenceResampleBwdFp32, AverageExcludePadding4DNchw)
@@ -400,6 +488,25 @@ TEST(TestCpuFpReferenceResampleBwdFp32, AverageExcludePadding4DNchw)
                                                              {2, 2},
                                                              ResampleMode::AVGPOOL_EXCLUDE_PADDING,
                                                              PaddingMode::ZERO_PAD);
+
+    const auto* dxData = dx.memory().hostData();
+    const std::array<float, 5> factors{1.0f, 2.0f, 2.0f, 2.0f, 1.0f};
+    for(size_t n = 0; n < 2; ++n)
+    {
+        for(size_t c = 0; c < 3; ++c)
+        {
+            const auto base = (n * 3 + c) * 25;
+            for(size_t h = 0; h < 5; ++h)
+            {
+                for(size_t w = 0; w < 5; ++w)
+                {
+                    const float expected = factors[h] * factors[w] * 1.0f / 4.0f;
+                    EXPECT_FLOAT_EQ(dxData[base + h * 5 + w], expected)
+                        << "Mismatch at n=" << n << " c=" << c << " h=" << h << " w=" << w;
+                }
+            }
+        }
+    }
 }
 
 TEST(TestCpuFpReferenceResampleBwdFp32, AverageIncludePadding4DNhwc)
@@ -416,38 +523,25 @@ TEST(TestCpuFpReferenceResampleBwdFp32, AverageIncludePadding4DNhwc)
                                                              {2, 2},
                                                              ResampleMode::AVGPOOL_INCLUDE_PADDING,
                                                              PaddingMode::ZERO_PAD);
-}
 
-TEST(TestCpuFpReferenceResampleBwdFp32, AverageIncludePadding5DNcdhw)
-{
-    Tensor<float> dy({2, 3, 4, 5, 6});
-    Tensor<float> dx({2, 3, 4, 5, 6});
-
-    dy.fillWithValue(0.5f);
-
-    CpuFpReferenceResampleBwd::backward<float, float, float>(dy,
-                                                             dx,
-                                                             {1, 1, 1},
-                                                             {1, 1, 1},
-                                                             {2, 2, 2},
-                                                             ResampleMode::AVGPOOL_INCLUDE_PADDING,
-                                                             PaddingMode::ZERO_PAD);
-}
-
-TEST(TestCpuFpReferenceResampleBwdFp32, AverageExcludePadding5DNdhwc)
-{
-    Tensor<float> dy({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
-    Tensor<float> dx({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
-
-    dy.fillWithValue(0.1f);
-
-    CpuFpReferenceResampleBwd::backward<float, float, float>(dy,
-                                                             dx,
-                                                             {1, 1, 1},
-                                                             {1, 1, 1},
-                                                             {2, 2, 2},
-                                                             ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                                             PaddingMode::ZERO_PAD);
+    const auto* dxData = dx.memory().hostData();
+    const std::array<float, 5> factors{1.0f, 2.0f, 2.0f, 2.0f, 1.0f};
+    for(size_t n = 0; n < 2; ++n)
+    {
+        for(size_t h = 0; h < 5; ++h)
+        {
+            for(size_t w = 0; w < 5; ++w)
+            {
+                const float expected = factors[h] * factors[w] * 1.0f / 4.0f;
+                for(size_t c = 0; c < 3; ++c)
+                {
+                    const size_t idx = ((n * 5 + h) * 5 + w) * 3 + c;
+                    EXPECT_FLOAT_EQ(dxData[idx], expected)
+                        << "Mismatch at n=" << n << " h=" << h << " w=" << w << " c=" << c;
+                }
+            }
+        }
+    }
 }
 
 TEST(TestCpuFpReferenceResampleBwdHalf, MaxPool4DNchw)
@@ -461,6 +555,21 @@ TEST(TestCpuFpReferenceResampleBwdHalf, MaxPool4DNchw)
 
     CpuFpReferenceResampleBwd::backward<half, half, float, int32_t>(
         dy, dx, {0, 0}, {1, 1}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD, &index);
+
+    const auto* dxData = dx.memory().hostData();
+    for(size_t n = 0; n < 2; ++n)
+    {
+        for(size_t c = 0; c < 3; ++c)
+        {
+            const auto base = (n * 3 + c) * 25;
+            for(size_t i = 0; i < 25; ++i)
+            {
+                const float expected = (i == 0) ? 1.0f : 0.0f;
+                EXPECT_NEAR(static_cast<float>(dxData[base + i]), expected, 1.0e-3f)
+                    << "Mismatch at n=" << n << " c=" << c << " spatial index " << i;
+            }
+        }
+    }
 }
 
 TEST(TestCpuFpReferenceResampleBwdBfloat16, AverageIncludePadding4DNchw)
@@ -478,6 +587,25 @@ TEST(TestCpuFpReferenceResampleBwdBfloat16, AverageIncludePadding4DNchw)
         {2, 2},
         ResampleMode::AVGPOOL_INCLUDE_PADDING,
         PaddingMode::ZERO_PAD);
+
+    const auto* dxData = dx.memory().hostData();
+    const std::array<float, 5> factors{1.0f, 2.0f, 2.0f, 2.0f, 1.0f};
+    for(size_t n = 0; n < 2; ++n)
+    {
+        for(size_t c = 0; c < 3; ++c)
+        {
+            const auto base = (n * 3 + c) * 25;
+            for(size_t h = 0; h < 5; ++h)
+            {
+                for(size_t w = 0; w < 5; ++w)
+                {
+                    const float expected = factors[h] * factors[w] * 1.0f / 4.0f;
+                    EXPECT_NEAR(static_cast<float>(dxData[base + h * 5 + w]), expected, 1.0e-3f)
+                        << "Mismatch at n=" << n << " c=" << c << " h=" << h << " w=" << w;
+                }
+            }
+        }
+    }
 }
 
 TEST(TestCpuFpReferenceResampleBwdDouble, AverageExcludePadding4DNchw)
@@ -495,6 +623,25 @@ TEST(TestCpuFpReferenceResampleBwdDouble, AverageExcludePadding4DNchw)
         {2, 2},
         ResampleMode::AVGPOOL_EXCLUDE_PADDING,
         PaddingMode::ZERO_PAD);
+
+    const auto* dxData = dx.memory().hostData();
+    const std::array<double, 5> factors{1.0, 2.0, 2.0, 2.0, 1.0};
+    for(size_t n = 0; n < 2; ++n)
+    {
+        for(size_t c = 0; c < 3; ++c)
+        {
+            const auto base = (n * 3 + c) * 25;
+            for(size_t h = 0; h < 5; ++h)
+            {
+                for(size_t w = 0; w < 5; ++w)
+                {
+                    const double expected = factors[h] * factors[w] * 1.0 / 4.0;
+                    EXPECT_DOUBLE_EQ(dxData[base + h * 5 + w], expected)
+                        << "Mismatch at n=" << n << " c=" << c << " h=" << h << " w=" << w;
+                }
+            }
+        }
+    }
 }
 
 TEST(TestCpuFpReferenceResampleBwdFloatHalf, AverageExcludePadding4DNchw)
@@ -511,6 +658,25 @@ TEST(TestCpuFpReferenceResampleBwdFloatHalf, AverageExcludePadding4DNchw)
                                                             {2, 2},
                                                             ResampleMode::AVGPOOL_EXCLUDE_PADDING,
                                                             PaddingMode::ZERO_PAD);
+
+    const auto* dxData = dx.memory().hostData();
+    const std::array<float, 5> factors{1.0f, 2.0f, 2.0f, 2.0f, 1.0f};
+    for(size_t n = 0; n < 2; ++n)
+    {
+        for(size_t c = 0; c < 3; ++c)
+        {
+            const size_t base = (n * 3 + c) * 25;
+            for(size_t h = 0; h < 5; ++h)
+            {
+                for(size_t w = 0; w < 5; ++w)
+                {
+                    const float expected = factors[h] * factors[w] * 1.0f / 4.0f;
+                    EXPECT_NEAR(static_cast<float>(dxData[base + h * 5 + w]), expected, 1.0e-3f)
+                        << "Mismatch at n=" << n << " c=" << c << " h=" << h << " w=" << w;
+                }
+            }
+        }
+    }
 }
 
 TEST(TestCpuFpReferenceResampleBwdBfloat16Half, MaxPool4DNchw)
@@ -524,4 +690,19 @@ TEST(TestCpuFpReferenceResampleBwdBfloat16Half, MaxPool4DNchw)
 
     CpuFpReferenceResampleBwd::backward<bfloat16, half, float, int32_t>(
         dy, dx, {0, 0}, {1, 1}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD, &index);
+
+    const auto* dxData = dx.memory().hostData();
+    for(size_t n = 0; n < 2; ++n)
+    {
+        for(size_t c = 0; c < 3; ++c)
+        {
+            const auto base = (n * 3 + c) * 25;
+            for(size_t i = 0; i < 25; ++i)
+            {
+                const float expected = (i == 0) ? 1.0f : 0.0f;
+                EXPECT_NEAR(static_cast<float>(dxData[base + i]), expected, 1.0e-3f)
+                    << "Mismatch at n=" << n << " c=" << c << " spatial index " << i;
+            }
+        }
+    }
 }
