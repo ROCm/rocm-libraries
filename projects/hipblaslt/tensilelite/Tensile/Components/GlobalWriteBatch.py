@@ -82,8 +82,10 @@ def _plsinStoreGate(name: str, default: bool = False) -> bool:
 #   store data path is unchanged.
 PLSIN_STORE_HOIST_ADDR = _plsinStoreGate("PLSIN_STORE_HOIST_ADDR", default=True)
 # Component C: replace `ds_bpermute x4 + s_waitcnt + v_permlane32_swap x2` with the
-#   AITER two-`v_permlane16_swap` shuffle.  Changes the cross-lane assembly AND the
-#   per-lane store row address; correctness must be proven on hardware (norm==0).
+#   AITER two-`v_permlane16_swap` shuffle for every eligible gfx950 paired dwordx4
+#   store (PLSIN and normal post-loop, full and partial tiles).  Orphan/scalar
+#   stores use a separate, already LDS-free path.  Changes the cross-lane assembly
+#   AND the per-lane store row address; correctness must be proven on hardware.
 PLSIN_STORE_PERMLANE16 = _plsinStoreGate("PLSIN_STORE_PERMLANE16", default=True)
 # Component A: when Bias/ScaleAlphaVec are proven identity at runtime (null pointers),
 #   take a direct ACC->bf16 path that skips the bias/SAV LDS reads and packed FMAs.
@@ -1680,19 +1682,17 @@ class GlobalWriteBatchWriter:
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
         "UseSubtileImpl 16bit optimized store requires BufferStore=1"
-      # Compute ds_permute partner-lane address for 16bit dwordx4 paired-subtile stores.
-      # vtmp1 = lane_id, vtmp2 = partner_lane_id (for ds_permute forward scatter)
-      # After v_permlane32_swap + v_permlane16_swap + exec masking:
-      #   each lane ends up with the lane_id of the partner that will scatter data to it.
-      # vPermAddr = partner_lane_id * 4  (byte address for ds_permute_b32)
+      # The AITER mapping is specific to the gfx950 wave64 MI16 paired-store
+      # geometry.  Keep the established ds_bpermute implementation everywhere
+      # else; those kernels may not have v_permlane16_swap or the same lane layout.
+      self._permlane16Active = (
+        PLSIN_STORE_PERMLANE16
+        and tuple(self.kernel["ISA"]) == (9, 5, 0)
+        and self.kernel.get("MatrixInstM") == 16
+      )
       vPermAddr = self.cvtVgprStruct.vgprPermAddr
       vTmp = self.cvtVgprStruct.vgprBf16Temp  # reuse scratch temp before it's used for mask init
-      # Component C is restricted to the full-tile fused store (no align8 exec mask,
-      # no scalar fallback).  The guarded/edge path keeps the proven ds_bpermute +
-      # align8 machinery, whose mask is derived for that lane layout.  This setup
-      # block runs per globalWriteElements emission, so _fusedFullTileNoGuards()
-      # here matches the store sites emitted from the same call.
-      if PLSIN_STORE_PERMLANE16 and self._fusedFullTileNoGuards():
+      if self._permlane16Active:
         # Component C: the AITER two-`v_permlane16_swap` shuffle needs no ds_bpermute,
         # so the partner-lane address is dead.  Repurpose the vPermAddr slot to hold
         # the per-lane-group row-byte delta that compensates the permlane16 lane
@@ -3045,7 +3045,8 @@ class GlobalWriteBatchWriter:
     pendingInc = None
     prevN = -1
 
-    # SubtileBpermutePipelining (quest): depth-2 double-buffered transpose pipeline.
+    # SubtileBpermutePipelining (quest): depth-2 double-buffered transpose pipeline
+    # for architectures that retain the LDS shuffle.
     #
     # The single-buffer path fully exposes each group's ds_bpermute LDS round-trip
     # (s_waitcnt lgkmcnt(0), ~50-70 cyc/group).  Here we rotate the 4-VGPR pack buffer
@@ -3054,13 +3055,17 @@ class GlobalWriteBatchWriter:
     # Group N's wait is then hidden behind N+1's issue, and the wait drains only to
     # dscnt=4 (N+1's four ds_bpermute still in flight) instead of 0.
     #
-    # Buffer 0 reuses the pre-allocated cvtVgprStruct scratch (also used by the guarded
-    # boundary body and scalar stores, which are mutually exclusive with this interior
-    # body at runtime).  Buffer 1 is drawn from the STORE-phase dead VGPR pool.
-    pipePack1 = self.parentWriter.vgprPool.checkOutAligned(4, 2, tag="subtilePipePack1")
-    pipeAddr1 = self.parentWriter.vgprPool.checkOut(1, tag="subtilePipeAddr1")
-    packBuf = [self.cvtVgprStruct.vgprBf16Temp, pipePack1]
-    addrBuf = [self.cvtVgprStruct.vgprAddrScratch, pipeAddr1]
+    # gfx950 permlane16 is synchronous VALU and has no LDS round trip to hide, so
+    # emit its paired stores directly and avoid allocating the second pipeline
+    # buffer.  Unsupported configurations keep the established pipeline.
+    usePermlane16 = getattr(self, "_permlane16Active", False)
+    pipePack1 = None
+    pipeAddr1 = None
+    if not usePermlane16:
+      pipePack1 = self.parentWriter.vgprPool.checkOutAligned(4, 2, tag="subtilePipePack1")
+      pipeAddr1 = self.parentWriter.vgprPool.checkOut(1, tag="subtilePipeAddr1")
+      packBuf = [self.cvtVgprStruct.vgprBf16Temp, pipePack1]
+      addrBuf = [self.cvtVgprStruct.vgprAddrScratch, pipeAddr1]
     pipeK = 0
     pending = None  # (packVgpr, addrVgpr, globalOffset, tt0) issued but not yet committed
 
@@ -3070,8 +3075,13 @@ class GlobalWriteBatchWriter:
         mod.add(self._emitPairedStoreCommit(pending[0], pending[1], pending[2], pending[3], dscnt))
         pending = None
 
-    def issuePaired(pairAddrCalc, sumIdx0, sumIdx1, tt0):
+    def issuePaired(pairAddrCalc, sumIdx0, sumIdx1, tt0, blockIdxN):
       nonlocal pipeK, pending
+      if usePermlane16:
+        mod.add(self._emit16bitSubtilePairedStore(
+          pairAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0,
+          blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+        return
       buf = pipeK % 2
       issueMod, globalOffset = self._emitPairedStoreIssue(packBuf[buf], addrBuf[buf],
                                                           pairAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0)
@@ -3107,7 +3117,7 @@ class GlobalWriteBatchWriter:
           partnerAddrCalc = self.ss.elementAddr[partnerElementIdx]
           sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
           sumIdx1 = self.ss.elementSumIdx[elementIdx]
-          issuePaired(partnerAddrCalc, sumIdx0, sumIdx1, tt0 - 1)
+          issuePaired(partnerAddrCalc, sumIdx0, sumIdx1, tt0 - 1, blockIdxN)
         else:
           flushAtTransition(blockIdxN)
           # Scalar store reuses buffer 0 (cvtVgprStruct scratch); drain the pipeline first.
@@ -3133,8 +3143,9 @@ class GlobalWriteBatchWriter:
     if pendingInc is not None:
       mod.add(pendingInc)
 
-    self.parentWriter.vgprPool.checkIn(pipePack1)
-    self.parentWriter.vgprPool.checkIn(pipeAddr1)
+    if pipePack1 is not None:
+      self.parentWriter.vgprPool.checkIn(pipePack1)
+      self.parentWriter.vgprPool.checkIn(pipeAddr1)
     return mod
 
   def _emit16bitSubtilePairedStore(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, interior: bool = False) -> Module:
@@ -3148,8 +3159,9 @@ class GlobalWriteBatchWriter:
     therefore contains consecutive pairs with identical (tt1, tt0): sba=0 first
     (even elementIdx), sba=1 second (odd elementIdx).
 
-    Converts 8 f32 accvgprs (4 from sba=0, 4 from sba=1) to 16bit, shuffles them
-    across wave halves via ds_bpermute + v_permlane32_swap_b32, then issues
+    Converts 8 f32 accvgprs (4 from sba=0, 4 from sba=1) to 16bit.  Eligible
+    gfx950 wave64 MI16 stores use two v_permlane16_swap_b32 instructions; other
+    configurations retain ds_bpermute + v_permlane32_swap_b32.  It then issues
     1 × buffer_store_dwordx4 at the sba=0 element's address.  The cvtVgpr block
     is 2-aligned (64-bit) in KWA so vgprBf16Temp satisfies the dwordx4 alignment.
 
@@ -3161,12 +3173,9 @@ class GlobalWriteBatchWriter:
       tt0:          thread-tile M index (same for both sba=0 and sba=1).
     """
     module = Module("16bitSubtilePairedStore")
-    # Composed from a Phase1 (issue) + Phase2 (consume) split at the s_waitcnt
-    # lgkmcnt boundary so the PostLoopStoreInNll NLL injector can interleave MFMAs
-    # between the two phases to hide the ~88-cycle ds_bpermute LDS latency.  Called
-    # back-to-back here (the post-loop store path), the emitted instruction stream
-    # is identical to the original monolithic store: Phase2 defaults to
-    # s_waitcnt lgkmcnt(0).
+    # Composed from Phase1 (pack/address) + Phase2 (shuffle/store).  On the fallback
+    # LDS path the split lets PLSIN interleave MFMAs across the ~88-cycle
+    # ds_bpermute latency; the gfx950 permlane16 path has no lgkmcnt dependency.
     module.add(self._emit16bitSubtilePairedStorePhase1(
       addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN,
       interior=interior))
@@ -3201,8 +3210,7 @@ class GlobalWriteBatchWriter:
 
     Emits, with NO s_barrier and NO buffer_store:
       * 4x v_cvt_pk_*_f32  : pack 8 f32 accvgprs (sba=0 + sba=1) into vPack+0..+3
-      * 4x ds_bpermute_b32 : gather partner lane-group dwords; this opens the
-                             ~88-cycle LDS latency window the caller hides with MFMAs
+      * fallback only: 4x ds_bpermute_b32 to gather partner lane-group dwords
       * address compute    : adjusted D store address into vgprAddrScratch, plus the
                              (optional) align8 partial-block exec mask into tmpS01,
                              overlapped with the in-flight ds_bpermute
@@ -3246,8 +3254,8 @@ class GlobalWriteBatchWriter:
     packF32pair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"sba=1 tt0={tt0}[0:1]")
     packF32pair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"sba=1 tt0={tt0}[2:3]")
 
-    # ds_bpermute issue, then compute the adjusted D address into vgprAddrScratch
-    # while the ds_bpermute results are in-flight.  addrDVgpr holds the M-byte offset
+    # Compute the adjusted D address into vgprAddrScratch (overlapping the
+    # ds_bpermute on the fallback path).  addrDVgpr holds the M-byte offset
     # in bpeCexternal units; scale to bpeCexternalGSU1 (16bit=2 bytes) then add
     # lane_group*8 so the dwordx4 store lands at the correct row.  addrDVgpr and
     # vgprPermAddr are left unchanged — vgprAddrScratch is dedicated scratch.
@@ -3255,7 +3263,7 @@ class GlobalWriteBatchWriter:
     bpeDest = self.parentWriter.states.bpeCexternalGSU1
     addrScaleShift = int(log2(bpeCurr // bpeDest)) if bpeCurr > bpeDest else 0
     # The align8 exec mask only narrows the buffer_store_dwordx4 below (it is applied in
-    # Phase2, AFTER the permlane32_swap pair, so it plays no part in the lane assembly).
+    # Phase2, AFTER either shuffle, so it plays no part in the lane assembly).
     # In the full-tile fused store every block is fully interior -> the mask is all-ones,
     # so both the compute here and the apply/restore in Phase2 are elided. The interior
     # peel body reaches the same conclusion per-block via `interior`. Phase2 uses the SAME
@@ -3265,13 +3273,11 @@ class GlobalWriteBatchWriter:
     useAlign8 = (self.parentWriter.states.storeAlign8 and not interior
                  and not self._fusedFullTileNoGuards())
 
-    # Component C (PLSIN_STORE_PERMLANE16): the AITER shuffle assembles the eight
-    # rows with two v_permlane16_swap (Phase2) and needs no LDS round-trip, so the
-    # four ds_bpermute and their s_waitcnt are dropped.  vPermAddr becomes dead.
-    # Restricted to the full-tile fused store (see setup note): the guarded/edge
-    # path keeps ds_bpermute + its align8 mask.
-    self._permlane16Active = PLSIN_STORE_PERMLANE16 and self._fusedFullTileNoGuards()
-    if not self._permlane16Active:
+    # Component C: the AITER shuffle assembles the eight rows with two
+    # v_permlane16_swap instructions in Phase2 and needs no LDS round-trip.
+    # The align8 mask is computed from output geometry and applied after the
+    # shuffle, so guarded partial paired stores use the same mask machinery.
+    if not getattr(self, "_permlane16Active", False):
       module.addComment1("ds_bpermute in-place: gather packed dwords from partner lane-group")
       for k in range(4):
         module.add(DSBPermuteB32(dst=vgpr(vPack+k), src0=vgpr(vPermAddr), src1=vgpr(vPack+k),
@@ -3326,12 +3332,12 @@ class GlobalWriteBatchWriter:
     """Phase 2 (consume) of the paired dwordx4 store — see _emit16bitSubtilePairedStore.
 
     Emits, with NO s_barrier:
-      * s_waitcnt lgkmcnt(N) : drain this pair's 4 ds_bpermute.  N defaults to 0
+      * fallback only, s_waitcnt lgkmcnt(N): drain this pair's 4 ds_bpermute.  N defaults to 0
                                (monolithic post-loop store).  The NLL injector passes
                                pending_lgkm (outstanding LDS ops incl. this pair's 4
                                bpermutes), so N = pending_lgkm - 4 drains exactly this
                                pair without over-waiting on unrelated operand ds_reads.
-      * 2x v_permlane32_swap_b32 : assemble 8 consecutive M-rows into vPack+0..+3
+      * 2x v_permlane16_swap_b32 (gfx950) or v_permlane32_swap_b32 (fallback)
       * buffer_store_dwordx4     : write 8 16bit values (2-aligned src)
       * s_nop 0                  : load-bearing WAR fence — the next pair's Phase 1
                                    cvt must not overwrite vPack before the store has
