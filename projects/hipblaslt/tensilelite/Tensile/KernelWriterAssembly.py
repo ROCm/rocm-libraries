@@ -19594,6 +19594,7 @@ class KernelWriterAssembly(KernelWriter):
     # Group 3 aliases Group 2; skip the redundant alias-side zero-init.
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), tc == "Metadata"))
+    mod.add(comp.generalBatchDeref(self, kernel, tP, f"Address{tc}"))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
     clusterComp = ClusterLoadTDM.find(self)
     if clusterComp:
