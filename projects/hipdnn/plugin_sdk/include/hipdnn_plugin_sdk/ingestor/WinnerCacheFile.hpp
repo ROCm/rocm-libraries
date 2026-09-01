@@ -52,12 +52,12 @@ constexpr const char* WINNER_LINE_PACK_ID_FIELD = "pack_id";
 constexpr const char* WINNER_LINE_DISPATCH_ID_FIELD = "dispatch_id";
 constexpr const char* WINNER_LINE_TIME_MS_FIELD = "time_ms";
 constexpr const char* WINNER_LINE_FORMAT_FIELD = "v";
-/// Bump whenever the meaning of ANY field on a record line changes, INCLUDING the payload
-/// GraphContentKey::toJson() produces. The shard's first line is the data_sdk version string, whose
-/// tweak component is the git short hash -- but two builds made from source archives both stamp
-/// "<semver>.unknown" and share a shard directory, so the first line alone does not separate them.
-/// This field is the independent stamp, and it is per-line, so a foreign line appended to an
-/// otherwise valid shard is skipped instead of parsed.
+/// Bump when a record line's fields keep their shape but a meaning underneath one of them
+/// changes (decode would still succeed, just on a different interpretation than what was
+/// written). A change to GraphContentKey's own shape does not need a bump: it changes the key
+/// fromJson() produces, so an old line simply misses lookup instead of being misparsed --
+/// self-correcting. This field is the independent per-line stamp: a foreign line (wrong
+/// version) appended to an otherwise valid shard is skipped instead of parsed.
 constexpr int WINNER_LINE_FORMAT_VERSION = 1;
 
 /// True if @p arch is usable verbatim as a path component: a non-empty run of ASCII
