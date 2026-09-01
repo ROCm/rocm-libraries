@@ -87,7 +87,6 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     Variable tid_hor_lds{"tid_hor_lds", "unsigned int"};
     Variable tid_hor_pp{"tid_hor_pp", "unsigned int"};
-    Variable offset_tid_hor{"offset_tid_hor", "unsigned int"};
 
     Variable block_idx_pp{"block_idx_pp", "unsigned int"};
 
@@ -257,7 +256,6 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
             offset_pp,
             offset + Parens(offset / lengths[1]) * (lengths[1] * pp_factors_prod - lengths[1])
                 + batch * stride[dim]);
-        stmts += Declaration(offset_tid_hor, offset_pp + tid_hor_pp * stride[1]);
 
         stmts += Assign{transform,
                         tile_index * transforms_per_block_unscaled
@@ -329,8 +327,10 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
             };
 
             for(unsigned int i = 0; i < length / stripmine_h; ++i)
-                tmp_stmts += Assign{lds_complex[offset_tile_wlds(i)],
-                                    LoadGlobal{buf, offset_tid_hor + offset_tile_rbuf(i)}};
+                tmp_stmts += Assign{
+                    lds_complex[offset_tile_wlds(i)],
+                    LoadGlobal{buf,
+                               Parens{offset_pp + tid_hor_pp * stride[1]} + offset_tile_rbuf(i)}};
 
             stmts += CommentLines{
                 "no intrinsic when load to lds. FIXME- check why use nested branch is better"};
@@ -389,7 +389,8 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         auto stripmine_h = workgroup_size / stripmine_w;
 
         auto offset_tile_wbuf = [&](unsigned int i) {
-            return offset_tid_hor + (thread_pp + i * stripmine_h) * stride0;
+            return Parens{offset_pp + tid_hor_pp * stride[1]}
+                   + (thread_pp + i * stripmine_h) * stride0;
         };
         auto offset_tile_rlds = [&](unsigned int i) {
             return tid_hor_lds * stride_lds + (thread_lds + i * stripmine_h * max_factor_pp) * 1;
