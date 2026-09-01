@@ -39,9 +39,9 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, MXMFMAInstruction, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64
+  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
 from rocisa.register import RegisterPool
-from rocisa.enum import RegisterType, DataTypeEnum
+from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
 
 from .KernelWriterModules import *
 
@@ -11581,6 +11581,13 @@ class Assert():
             SOrSaveExecBX = SOrSaveExecB64 if self.wavefrontSize == 64 else SOrSaveExecB32
             module.add(SOrSaveExecBX(dst=sgpr("SaveExecMask",self.laneSGPRCount), src=0, \
                 comment="assert: saved execmask"))
+            # true16: 16-bit compares need a .l/.h suffix on their vgpr operands.
+            # Tag .l on NoSDWA (no-op on legacy); only vgpr operands are tagged.
+            if inst.__name__.endswith(("I16", "U16", "F16")):
+                if getattr(val0, "regType", None) == "v":
+                    val0 = t16(val0, HighBitSel.LOW)
+                if getattr(val1, "regType", None) == "v":
+                    val1 = t16(val1, HighBitSel.LOW)
             module.add(inst(dst=VCC(), src0=val0, src1=val1, comment="v_cmp")) # type: ignore
             module.add(self.assertCommon(vtmp, cookie))
             module.add(SOrSaveExecBX(dst=VCC(), src=sgpr("SaveExecMask",self.laneSGPRCount), \

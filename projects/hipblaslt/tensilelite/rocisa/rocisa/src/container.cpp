@@ -564,16 +564,6 @@ void init_containers(nb::module_ m)
                  new(&self) rocisa::VOP3PModifiers(std::get<0>(t), std::get<1>(t), std::get<2>(t));
              });
 
-    nb::class_<rocisa::True16Modifiers, rocisa::Container>(m_con, "True16Modifiers")
-        .def(nb::init<const rocisa::HighBitSel>(),
-             nb::arg("high_bit")  = -1)
-        .def("__str__", &rocisa::True16Modifiers::toString)
-        .def("__deepcopy__", [](const rocisa::True16Modifiers& self, nb::dict&) { return rocisa::True16Modifiers(self); })
-        .def("__getstate__", [](const rocisa::True16Modifiers& self) { return std::make_tuple(self.high_bit); })
-        .def("__setstate__", [](rocisa::True16Modifiers& self, std::tuple<const rocisa::HighBitSel> t) {
-            new(&self) rocisa::True16Modifiers(std::get<0>(t));
-        });
-    
     nb::class_<rocisa::EXEC, rocisa::Container>(m_con, "EXEC")
         .def(nb::init<bool>(), nb::arg("setHi") = false)
         .def("__str__", &rocisa::EXEC::toString)
@@ -676,6 +666,9 @@ void init_containers(nb::module_ m)
         .def("getCompleteRegName", &rocisa::RegisterContainer::getCompleteRegName)
         .def("splitRegContainer", &rocisa::RegisterContainer::splitRegContainer)
         .def("setMsb", &rocisa::RegisterContainer::setMsb)
+        .def("setHalfSelect", &rocisa::RegisterContainer::setHalfSelect, nb::arg("sel"))
+        .def("lo", &rocisa::RegisterContainer::lo)
+        .def("hi", &rocisa::RegisterContainer::hi)
         .def(
             "__eq__",
             [](const rocisa::RegisterContainer& self, nb::object other) {

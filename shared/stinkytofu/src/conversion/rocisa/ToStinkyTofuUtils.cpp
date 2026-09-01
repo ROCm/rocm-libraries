@@ -658,41 +658,49 @@ void handleSWaitLoadcntModifiers(StinkyInstruction* stinkyInst,
     }
 }
 
-/// Helper to handle VCvt instruction True16 modifiers
-void handleVCvtTrue16Modifiers(StinkyInstruction* stinkyInst,
-                               const rocisa::VCvtInstruction* vcvtInst) {
-    if (vcvtInst->true16.empty()) {
+/// Derive true16 ".l"/".h" selects from operand halfSelect and attach a
+/// True16Modifiers so the suffixes survive lowering.
+void attachTrue16ModifiersFromOperands(StinkyInstruction* stinkyInst,
+                                       const std::shared_ptr<rocisa::Container>& dst,
+                                       const std::shared_ptr<rocisa::Container>& dst1,
+                                       const std::vector<InstructionInput>& srcs) {
+    // rocisa and stinkytofu share the same HighBitSel values (NONE=-1, LOW=0, HIGH=1).
+    auto regHalf = [](const rocisa::Container* cont) -> stinkytofu::HighBitSel {
+        auto* reg = dynamic_cast<const rocisa::RegisterContainer*>(cont);
+        if (reg && reg->halfSelect.has_value()) {
+            return static_cast<stinkytofu::HighBitSel>(static_cast<int>(*reg->halfSelect));
+        }
+        return stinkytofu::HighBitSel::NONE;
+    };
+    auto inputHalf = [&](const InstructionInput& in) -> stinkytofu::HighBitSel {
+        if (auto pptr = std::get_if<std::shared_ptr<rocisa::Container>>(&in)) {
+            return regHalf(pptr->get());
+        }
+        return stinkytofu::HighBitSel::NONE;
+    };
+
+    stinkytofu::HighBitSel dst0 = regHalf(dst.get());
+    stinkytofu::HighBitSel dstHi = regHalf(dst1.get());
+    std::vector<stinkytofu::HighBitSel> srcSels;
+    for (const auto& src : srcs) {
+        srcSels.push_back(inputHalf(src));
+    }
+
+    // No operand tagged -> legacy / non-true16 op; emit no true16 modifier.
+    bool any = dst0 != stinkytofu::HighBitSel::NONE || dstHi != stinkytofu::HighBitSel::NONE;
+    for (auto s : srcSels) {
+        any = any || s != stinkytofu::HighBitSel::NONE;
+    }
+    if (!any) {
         return;
     }
 
-    // Convert rocisa::True16Modifiers to stinkytofu True16Modifiers
-    // rocisa uses indices: DST=0, DST1=1, SRC0=2, SRC1=3, ...
-    stinkytofu::HighBitSel dst0 = stinkytofu::HighBitSel::NONE;
-    stinkytofu::HighBitSel dst1 = stinkytofu::HighBitSel::NONE;
-    std::vector<stinkytofu::HighBitSel> srcs;
-
-    for (size_t i = 0; i < vcvtInst->true16.size(); ++i) {
-        stinkytofu::HighBitSel highBit =
-            static_cast<stinkytofu::HighBitSel>(static_cast<int>(vcvtInst->true16[i].high_bit));
-
-        if (i == 0)  // DST
-        {
-            dst0 = highBit;
-        } else if (i == 1)  // DST1
-        {
-            dst1 = highBit;
-        } else  // SRC0, SRC1, ...
-        {
-            srcs.push_back(highBit);
-        }
-    }
-
     // Assert that source count is within the 2-bit encoding limit (max 6 sources)
-    assert(srcs.size() <= 6 &&
+    assert(srcSels.size() <= 6 &&
            "True16Modifiers: source count must be <= 6 for uint16_t 2-bit encoding");
 
     stinkyInst->addModifier<stinkytofu::True16Modifiers>(
-        stinkytofu::True16Modifiers(dst0, dst1, srcs));
+        stinkytofu::True16Modifiers(dst0, dstHi, srcSels));
 }
 
 /// Add modifiers to StinkyInstruction (DS, FLAT, MUBUF, SMEM, WaitCnt, DelayAlu)
@@ -752,11 +760,17 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             TRY_ADD_MOD(CommonInstruction, sdwa, stinkytofu::SDWAModifiers, convertSDWAModifiers)
             TRY_ADD_MOD(CommonInstruction, dpp, stinkytofu::DPPModifiers, convertDPPModifiers)
 
+            // true16: 16-bit operands carry their half-word select as a .l/.h suffix
+            // on the register. Attach generically; no-op when no operand is tagged,
+            // so packed (v_pk_*) and 32-bit ops are unaffected.
+            HANDLE_INST_TYPE(rocisa::CommonInstruction,
+                             attachTrue16ModifiersFromOperands(stinkyInst, typedInst->dst,
+                                                               typedInst->dst1, typedInst->srcs))
+
             // VOP/SOP instructions - these can overlap with CommonInstruction base class
             HANDLE_INST_TYPE(rocisa::MXMFMAInstruction, handleMXMFMAModifiers(stinkyInst, itemToString(inst)))
             else HANDLE_INST_TYPE(rocisa::MFMAInstruction, handleMFMAModifiers(stinkyInst, itemToString(inst)))
             else HANDLE_INST_TYPE(rocisa::SMFMAInstruction, handleSMFMAModifiers(stinkyInst, itemToString(inst)))
-            else HANDLE_INST_TYPE(rocisa::VCvtInstruction, handleVCvtTrue16Modifiers(stinkyInst, typedInst))
 
             // Control/Synchronization instructions, separate from VOP/SOP
             else HANDLE_INST_TYPE(rocisa::SDelayAlu,
