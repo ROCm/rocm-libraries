@@ -75,7 +75,9 @@ const auto& GetTestParamsNhwc()
     static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
         p.SetTolerance(Gpu::gfx90A, miopenHalf, 2.0f);
-        p.SetTolerance(Gpu::gfx90A, miopenFloat, 2.0f);
+        // The 14x14 fp32 case reduces over k = 784 and measures 1.17 eps on both gfx90a and
+        // gfx1151, against the 1.0 eps default.
+        p.SetTolerance(Gpu::All, miopenFloat, 2.0f);
         return p;
     }();
     return params;
