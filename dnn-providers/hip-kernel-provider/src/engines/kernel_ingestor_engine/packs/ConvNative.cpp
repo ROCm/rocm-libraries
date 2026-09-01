@@ -558,14 +558,29 @@ private:
     const compilation::KpackKernelLoader& _kpackLoader;
 };
 
+} // namespace
+
+compilation::KpackModuleCache& convFwdKpackModuleCache()
+{
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
+void resetConvFwdModuleCache()
+{
+    convFwdKpackModuleCache().clear();
+}
+
+namespace
+{
+
 /// This pack's dispatch handler, process-lifetime: the registry holds a non-owning
 /// pointer to it, but a provider's Container is created and destroyed per handle, so
-/// it (and the compiler, loader and module cache it holds) must outlive every Container.
+/// it (and the compiler and loader it holds) must outlive every Container.
 const ConvFwdDispatchHandler& convFwdDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
-    static compilation::KpackModuleCache s_moduleCache;
-    static const compilation::KpackKernelLoader s_kpackLoader(s_moduleCache);
+    static const compilation::KpackKernelLoader s_kpackLoader(convFwdKpackModuleCache());
     static const ConvFwdDispatchHandler s_dispatchHandler(s_kernelCompiler, s_kpackLoader);
     return s_dispatchHandler;
 }

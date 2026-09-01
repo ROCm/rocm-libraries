@@ -46,6 +46,7 @@ void resetPointwiseModuleCache();
 
 /// @see packs/ConvNative.cpp
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvFwdModuleCache();
 
 /// Drops every pack's cached kpack modules, so the next dispatch re-reads its archive
 /// from disk.
