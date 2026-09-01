@@ -158,21 +158,20 @@ namespace rocRoller::HostNumerics
             inputs.a,
             inputs.b,
             inputs.c,
-            runtimeScaleA ? std::move(runtimeScaleA)
-                          : (inputs.scaleA
-                                 ? std::optional<roc::host_numerics::Tensor>(inputs.scaleA)
+            runtimeScaleA
+                ? std::move(runtimeScaleA)
+                : (inputs.scaleA ? std::optional<roc::host_numerics::Tensor>(inputs.scaleA)
                                  : std::nullopt),
-            runtimeScaleB ? std::move(runtimeScaleB)
-                          : (inputs.scaleB
-                                 ? std::optional<roc::host_numerics::Tensor>(inputs.scaleB)
+            runtimeScaleB
+                ? std::move(runtimeScaleB)
+                : (inputs.scaleB ? std::optional<roc::host_numerics::Tensor>(inputs.scaleB)
                                  : std::nullopt),
             scaleBlockSize,
             alpha,
             beta);
     }
 
-    roc::host_numerics::Tensor
-        computeHostReference(roc::host_numerics::GemmProblem const& problem)
+    roc::host_numerics::Tensor computeHostReference(roc::host_numerics::GemmProblem const& problem)
     {
         using namespace roc::host_numerics;
 
@@ -180,8 +179,8 @@ namespace rocRoller::HostNumerics
         if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
             throw std::overflow_error("rocRoller host GEMM output stride exceeds ptrdiff_t.");
         GemmOutputOptions output;
-        output.layout = Layout(Shape{rows, problem.b.values.shape()[1]},
-                               {1, static_cast<ptrdiff_t>(rows)});
+        output.layout
+            = Layout(Shape{rows, problem.b.values.shape()[1]}, {1, static_cast<ptrdiff_t>(rows)});
         return referenceGemmWithBlasBackend(problem, output).output;
     }
 

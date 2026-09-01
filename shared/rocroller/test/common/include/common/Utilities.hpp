@@ -207,8 +207,8 @@ namespace rocRoller
     }
 
     template <typename F6x16>
-        requires(CIsAnyOf<F6x16, FP6x16, BF6x16>) //
-    inline void SetIdentityMatrix(std::vector<F6x16>& mat, size_t cols, size_t rows)
+    requires(CIsAnyOf<F6x16, FP6x16, BF6x16>) //
+        inline void SetIdentityMatrix(std::vector<F6x16>& mat, size_t cols, size_t rows)
     {
         std::fill(mat.begin(), mat.end(), F6x16()); // zero out the matrix
 

@@ -148,10 +148,10 @@ namespace rocRoller::Client::GEMMClient
                                                                scaleBlockSize,
                                                                problemParams.alpha,
                                                                problemParams.beta);
-        const auto floatReference = computeHostReference(referenceProblem);
-        const auto                 hostReference    = convertHostReference<D>(floatReference);
-        const auto acceptableError = acceptableGEMMError<A, B, D>(problemParams.k, arch.target());
-        const auto comparison      = compareHostReference(
+        const auto floatReference   = computeHostReference(referenceProblem);
+        const auto hostReference    = convertHostReference<D>(floatReference);
+        const auto acceptableError  = acceptableGEMMError<A, B, D>(problemParams.k, arch.target());
+        const auto comparison       = compareHostReference(
             hostOutputTensor<D>(std::span<const D>(hostD), problemParams.m, problemParams.n),
             hostOutputTensor<D>(
                 std::span<const D>(hostReference), problemParams.m, problemParams.n),
@@ -304,7 +304,7 @@ namespace rocRoller::Client::GEMMClient
             // The preSwizzle helper assumes column-major; so we swap sizes here.
             std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
             std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-            hostAForKernel = roc::host_numerics::amd_gpu_layout::preSwizzle(
+            hostAForKernel                         = roc::host_numerics::amd_gpu_layout::preSwizzle(
                 hostA, swappedSizes, {}, swappedPreTileSize);
         }
 
