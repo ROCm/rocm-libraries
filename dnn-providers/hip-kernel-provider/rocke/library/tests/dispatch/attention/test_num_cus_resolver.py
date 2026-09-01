@@ -84,7 +84,7 @@ def test_gfx942_fallback_off_box():
 
 
 def test_gfx950_device_query():
-    """gfx950 on a gfx950 box -> the live CU count (~256 on MI350-class)."""
+    """gfx950 on a gfx950 box -> the live CU count (256 on a 256-CU part)."""
     p = _Patch()
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx950")
@@ -142,7 +142,7 @@ def test_explicit_caller_wins_any_arch():
         p.restore()
 
 
-def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0):
+def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0, arch=None):
     return UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -157,6 +157,7 @@ def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0):
         use_sinks=False,
         num_cus=num_cus,
         target_ctas=tctas,
+        arch=arch,
     )
 
 
@@ -190,6 +191,19 @@ def test_target_ctas_threaded_through_problem():
     prob2 = A._problem(_req(num_cus=200, target_ctas=0))
     assert prob2.target_ctas == 0  # unset => auto
     assert prob2._effective_target_ctas == 800  # 200*4
+
+
+def test_problem_lowercases_arch_for_the_clamp():
+    """_problem normalizes req.arch to lowercase. The segment clamp compares
+    against lowercase arch literals ("gfx942"/"gfx950"), so a mixed-case request
+    arch must not silently skip the clamp on the dispatch path."""
+    for raw in ("GFX950", "Gfx950", "gfx950"):
+        assert A._problem(_req(num_cus=200, arch=raw)).arch == "gfx950", raw
+    # Driven through _problem + _num_segments, request casing must not change the
+    # segment count: both normalize to gfx950 and take the same clamp.
+    p_mixed = A._problem(_req(num_cus=256, arch="GFX950"))
+    p_lower = A._problem(_req(num_cus=256, arch="gfx950"))
+    assert au._num_segments(p_mixed) == au._num_segments(p_lower)
 
 
 def test_segments_bounded_after_bump():
@@ -260,6 +274,48 @@ def test_gfx950_segments_conservatively_clamped():
             s120 = au._num_segments(_prob(120, **c))
             s256 = au._num_segments(_prob(256, **c))
             assert s120 == s256, f"gfx950 over-split {c}: {s120} -> {s256}"
+    finally:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.restore()
+
+
+def test_gfx950_partition_floors_to_120():
+    """A partitioned gfx950 (CPX / NPS4) reports the PARTITION CU count (~32).
+    The resolver floors to the legacy 120 baseline so the routing target never
+    drops below 480 and flips already-3D shapes back to 2D."""
+    p = _Patch()
+    try:
+        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx950")
+        p.attr(AC, "_device_num_cus", lambda: 32)  # a CPX/NPS4 partition
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 120
+        # A full-device count is above the floor and passes through unchanged.
+        p.attr(AC, "_device_num_cus", lambda: 256)
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 256
+    finally:
+        p.restore()
+
+
+def test_segment_clamp_keys_on_request_arch():
+    """The split-KV clamp keys on the arch the problem TARGETS, not the running
+    box. When ``problem.arch`` is set the running-box resolver is never consulted,
+    so an off-box build targeting one arch can't pick up another arch's clamp."""
+    p = _Patch()
+    calls = {"n": 0}
+
+    def _spy():
+        calls["n"] += 1
+        return "gfx950"  # the running box
+
+    shape = dict(nq=32, nk=4, D=64, kv=32768, batch=1)
+    try:
+        au._RESOLVED_ATTENTION_ARCH = None
+        p.attr(au, "_resolve_attention_arch", _spy)
+        # problem.arch set -> resolver is never consulted.
+        au._num_segments(_prob(256, arch="gfx942", **shape))
+        assert calls["n"] == 0, "running-box arch consulted despite problem.arch set"
+        # problem.arch unset -> falls back to the running-box resolver.
+        au._num_segments(_prob(256, **shape))
+        assert calls["n"] >= 1, "running-box resolver not used as fallback"
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
         p.restore()

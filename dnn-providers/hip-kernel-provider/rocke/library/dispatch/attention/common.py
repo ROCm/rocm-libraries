@@ -220,7 +220,14 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
             if get_device_arch() == arch:
                 cus = _device_num_cus()
                 if cus and cus > 0:
-                    return cus
+                    # Floor at the legacy 120 baseline. On a partitioned device
+                    # (CPX / NPS4) the query returns the PARTITION's CU count
+                    # (~32), which would drop the routing target below the 480
+                    # pre-bump baseline -- flipping already-3D shapes back to 2D
+                    # (the opposite of this resolver's intent) and breaking the
+                    # _num_segments clamp's byte-identical no-op guarantee. Never
+                    # resolve below the baseline.
+                    return max(cus, 120)
         except Exception:
             pass
     return 120
@@ -242,6 +249,7 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         use_sinks=bool(req.use_sinks),
         num_cus=_resolve_num_cus(req),
         target_ctas=int(req.target_ctas),
+        arch=req.arch.lower(),
     )
 
 

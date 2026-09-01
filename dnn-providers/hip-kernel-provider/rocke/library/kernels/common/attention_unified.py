@@ -123,6 +123,12 @@ class UnifiedAttentionProblem:
     # cache; 0 means "unknown" (assume small / fast i32 path). The
     # dispatcher fills this from the K tensor when available.
     num_kv_blocks: int = 0
+    # Target arch this problem is BUILT for (threaded from the dispatch request).
+    # When set, the split-KV segment clamp keys on it instead of the running-box
+    # arch (``_resolve_attention_arch``), so an off-box tuner/benchmark passing an
+    # explicit ``num_cus`` while targeting one arch never picks up another arch's
+    # clamp. ``None`` => fall back to the running-box arch (unchanged behaviour).
+    arch: Optional[str] = None
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -2594,7 +2600,7 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
 
 
 # Reference CU count for the split-KV segment clamp below. This is NOT the device
-# count (routing resolves that live, per AICK-1722); it is the tuned pre-bump
+# count (routing resolves that live); it is the tuned pre-bump
 # baseline -- the segment count the formula produced at the historical num_cus=120
 # -- used only as the safe ceiling so raising num_cus cannot over-split 3D shapes.
 _PRE_BUMP_CUS = 120
@@ -2619,12 +2625,16 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
+    # Key the clamp on the arch this problem targets when the dispatcher threaded
+    # it through; fall back to the running-box arch otherwise. This keeps an
+    # off-box build targeting one arch from picking up another arch's clamp.
+    arch = problem.arch or _resolve_attention_arch()
     # Routing uses the device CU count (num_cus*4) so under-filled grids flip
     # 2D->3D; but the split-KV segment count must stay bounded, else the reduce
     # round-trip over-splits 3D shapes. The PRE-BUMP baseline (segments the same
     # formula produced at the reference num_cus=120 -> target=480) is the
     # universally-safe ceiling: clamping to it can never do worse than shipped.
-    if _resolve_attention_arch() == "gfx942" and problem.sliding_window == 0:
+    if arch == "gfx942" and problem.sliding_window == 0:
         pre_bump = _pre_bump_segments(problem)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
@@ -2650,7 +2660,7 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             # is unmeasured -> clamp to the pre-bump baseline so the routing bump can
             # never over-split prefill (identical to the shipped num_cus=120 split).
             return min(segments, pre_bump)
-    if _resolve_attention_arch() == "gfx950" and problem.sliding_window == 0:
+    if arch == "gfx950" and problem.sliding_window == 0:
         # CONSERVATIVE gfx950 clamp: bound EVERY already-3D shape to the pre-bump
         # (num_cus=120 -> target 480) baseline split. This guarantees the routing
         # bump never over-splits an already-3D shape (byte-identical to the legacy
