@@ -38,6 +38,7 @@
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
@@ -78,6 +79,7 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     // addRegistersToInstruction() in ToStinkyTofuUtils.cpp.
     std::vector<StinkyRegister> destRegs;
     std::vector<StinkyRegister> srcRegs;
+    std::optional<AttachedSSA> attachedSSA_;
 
     StinkyInstruction(const HwInstDesc* mcid)
         : IRBase(IRType::StinkyTofu),
@@ -86,7 +88,9 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
           latencyCycles(mcid->latency),
           coIssueWindow(mcid->coIssueWindow) {}
 
-    ~StinkyInstruction() override = default;
+    ~StinkyInstruction() override {
+        clearAttachedSSA();
+    }
 
    public:
     void addSrcReg(const StinkyRegister& srcReg) {
@@ -227,6 +231,20 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
         destRegs.resize(size);
     }
 
+    bool hasAttachedSSA() const {
+        return attachedSSA_.has_value();
+    }
+    void attachSSA(AttachedSSA ssa);
+    void clearAttachedSSA();
+
+    size_t getNumSSAResults() const;
+    StinkySSAValue* getSSAResult(size_t i) const;
+    size_t getNumSSAOperands() const;
+    StinkyOpOperand* getSSAOperand(size_t i);
+    const StinkyOpOperand* getSSAOperand(size_t i) const;
+    StinkySSAValue* getSSAOperandValue(size_t i) const;
+    void setSSAOperandValue(size_t i, StinkySSAValue* v);
+
     /**
      * @brief Clone this instruction (deep copy)
      *
@@ -258,8 +276,8 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
             cloned->modifiers.push_back(mod->clone());
         }
 
-        // Note: users/sources are intentionally NOT copied
-        // These are dependency tracking and should be rebuilt if needed
+        // Note: users/sources and attached SSA are intentionally NOT copied.
+        // Def-use chains and SSA use-lists must be rebuilt or reattached.
 
         return cloned;
     }
@@ -448,6 +466,11 @@ inline bool isBufferMemStore(const StinkyInstruction& inst) {
     return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst);
 }
 
+inline bool isVmemTexStore(const StinkyInstruction& inst) {
+    return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst) ||
+           isGlobalStoreAsyncFromLds(inst);
+}
+
 /// Check if instruction is a scheduling fence pseudo-instruction.
 /// Fences emit no assembly but carry MemTokenData ordering constraints.
 inline bool isFence(const StinkyInstruction& inst) {
@@ -544,9 +567,11 @@ inline bool isAsyncMemOp(const StinkyInstruction& inst) {
     return isGlobalStoreAsyncFromLds(inst);
 }
 
-inline bool isVMem(const StinkyInstruction& inst) {
+// Vector memory outside the DS and FLAT classes.
+inline bool isVmemTex(const StinkyInstruction& inst) {
     return isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) ||
-           isGLOBALOrAtomic(inst) || isAsyncMemOp(inst);
+           isGLOBALOrAtomic(inst) || isAsyncMemOp(inst) || isGlobalPrefetch(inst) ||
+           isTensorLoad(inst);
 }
 
 inline bool isDSRead(const StinkyInstruction& inst) {
