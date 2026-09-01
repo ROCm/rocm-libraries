@@ -13,7 +13,10 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
@@ -33,6 +36,23 @@ namespace hipdnn_plugin_sdk::ingestor
 /// A caller's requested value for each knob it explicitly set, keyed by KMD field
 /// name.
 using KnobFilter = std::map<std::string, int64_t>;
+
+namespace detail
+{
+
+/// One MetadataValue as the JSON value it already is: an int stays an int, a string
+/// stays a string, an int list stays a list.
+///
+/// Verbatim on purpose. Turning `"float16"` into an ordinal here would bake one encoding
+/// into the training corpus that every later reader would have to guess and undo, and
+/// RFC 0019 §7 puts categorical encoding in the feature extractor, which is the only
+/// place that knows the signature the encoding has to agree with.
+inline nlohmann::json metadataValueToJson(const MetadataValue& value)
+{
+    return std::visit([](const auto& held) { return nlohmann::json(held); }, value);
+}
+
+} // namespace detail
 
 /// What a `TSettings` used with GenericPlanBuilder must carry, grouped so a second
 /// provider embeds one member rather than replicating loose fields by name.
@@ -305,7 +325,8 @@ public:
                      std::make_unique<GenericPlan<THandle>>(
                          _stateManager.getDispatchDetails(kernel), context, catalog.bound),
                      kernel.packId,
-                     kernel.dispatchId});
+                     kernel.dispatchId,
+                     candidateFeatures(catalog.bound, kernel)});
             }
             catch(const std::exception& error)
             {
@@ -388,6 +409,35 @@ public:
     }
 
 private:
+    /// Every feature value that describes one benchmarked (problem, kernel) pair: the
+    /// tokens graph matching bound for the problem, and the kernel's own KMD metadata.
+    ///
+    /// This is where the knowledge lives -- BenchmarkPlan holds the MatchContext and the
+    /// KernelDefinition for nothing, and teaching it to reach into a graph would cost it
+    /// the opacity its benchmarkId comment exists to protect.
+    ///
+    /// Keys are the UHD namespaces with the `$` dropped, so a signature entry
+    /// `"$q.seqlen"` names the exported column `q.seqlen` and no translation table sits
+    /// between the sweep and the trainer.
+    ///
+    /// Built for every sweep, whatever the engine ships. Gating this on a UHD being
+    /// present would make the corpus collectable only by a build that already has the
+    /// model the corpus exists to train.
+    static nlohmann::json candidateFeatures(const BoundTokens& bound,
+                                            const KernelDefinition& kernel)
+    {
+        nlohmann::json features = nlohmann::json::object();
+        for(const auto& [token, value] : bound)
+        {
+            features["q." + token] = detail::metadataValueToJson(value);
+        }
+        for(const auto& [field, value] : kernel.metadata)
+        {
+            features["kernel." + field] = detail::metadataValueToJson(value);
+        }
+        return features;
+    }
+
     /// The seam for a deterministic test timer is the constructor's `timer` parameter,
     /// not this factory: tests exercise this exact code path rather than overriding it.
     std::unique_ptr<IPlan<THandle>>
