@@ -21,7 +21,7 @@ makes it testable in isolation and keeps it next to the geometry
 
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 from ...Common import roundUpToNearestMultiple
 from .Kernel import TileInfo, selectABGeometry, selectDGeometry, selectMXScaleGeometry
@@ -44,16 +44,6 @@ _MX_SCALE_OPERANDS = ('MXSA', 'MXSB')
 def mxBlockOf(kernel: dict, tc: str) -> int:
   """MXBlock size for operand 'A'/'B' (0 when that operand carries no scales)."""
   return kernel["ProblemType"].get("MXBlock%s" % tc, 0)
-
-
-def hasMXScales(kernel: dict) -> bool:
-  """True when *both* operands carry MX scales.
-
-  The scale regions are sized as a pair, so a kernel with scales on one side
-  only gets no scale region here.  `initSubtileInfos` still builds a TileInfo
-  per scaled operand independently, which is the looser condition.
-  """
-  return all(mxBlockOf(kernel, tc) > 0 for tc in _AB_OPERANDS)
 
 
 def selectGRSubtileShape(kernel: dict, tc: str) -> Tuple[int, int]:
@@ -111,27 +101,6 @@ def initSubtileInfos(writer, kernel: dict):
       initSubtileInfo(writer, kernel, 'MXS%s' % tc)
 
 
-def _stripBytes(tileInfo, macroTile: int) -> int:
-  """Payload of one operand: its subtile strips plus the pads written between them."""
-  numStrips = int(tileInfo.globalSubtileGrid[0] * tileInfo.globalSubtileGrid[1])
-  tdmRowPad = int(tileInfo.ldsRowPadBytes) * macroTile
-  swizzlePad = swizzlePadPerStrip(tileInfo) * numStrips
-  return int(numStrips * tileInfo.subtileSize) + tdmRowPad + swizzlePad
-
-
-def _writeGroupBytes(tileInfo) -> int:
-  """Bytes one DTL write group covers, or 0 when a write cannot span subtiles.
-
-  A region is measured in subtiles but filled by write groups, so a trailing
-  partial group would spill into the next operand unless the region is a whole
-  number of groups.  At most one subtile per write there is nothing to round.
-  """
-  subtilesPerWrite = tileInfo.loadRatioGR
-  if subtilesPerWrite <= 1:
-    return 0
-  return int(math.ceil(subtilesPerWrite) * tileInfo.subtileSize)
-
-
 def subtileRegionSize(tileInfo, macroTile: int, ldsRowBankSize: int) -> int:
   """Bytes reserved for one operand's subtile strips, including alignment.
 
@@ -139,10 +108,20 @@ def subtileRegionSize(tileInfo, macroTile: int, ldsRowBankSize: int) -> int:
   16x1 stack, where A stacks 16 MFMA-M tiles per strip and B only 2 -- charging
   B the A granularity would round B's 2KB of strips up to A's 16KB.
   """
-  # Floor at an LDS bank row so the bank-conflict swizzle maps the same way in
-  # B's region as it does in A's.
-  alignment = max(_writeGroupBytes(tileInfo), int(ldsRowBankSize))
-  return roundUpToNearestMultiple(_stripBytes(tileInfo, macroTile), alignment)
+  numStrips = int(tileInfo.globalSubtileGrid[0] * tileInfo.globalSubtileGrid[1])
+  payload = (int(numStrips * tileInfo.subtileSize)
+             + int(tileInfo.ldsRowPadBytes) * macroTile
+             + swizzlePadPerStrip(tileInfo) * numStrips)
+
+  # A region is measured in subtiles but filled by DTL write groups, so a
+  # trailing partial group would spill into the next operand unless the region
+  # is a whole number of groups.  At most one subtile per write, nothing to
+  # round.  Floor at an LDS bank row either way, so the bank-conflict swizzle
+  # maps the same way in B's region as it does in A's.
+  subtilesPerWrite = tileInfo.loadRatioGR
+  writeGroupBytes = (int(math.ceil(subtilesPerWrite) * tileInfo.subtileSize)
+                     if subtilesPerWrite > 1 else 0)
+  return roundUpToNearestMultiple(payload, max(writeGroupBytes, int(ldsRowBankSize)))
 
 
 def _mxScaleRegionSize(tileInfo, kernel: dict) -> int:
@@ -165,15 +144,6 @@ class SubtileLdsLayout:
     return self.offsets.get(tc, default)
 
 
-def _packRegions(sizes: List[Tuple[str, int]]) -> SubtileLdsLayout:
-  """Place each region at the next free byte, in order."""
-  layout = SubtileLdsLayout()
-  for tc, size in sizes:
-    layout.offsets[tc] = layout.totalSize
-    layout.totalSize += size
-  return layout
-
-
 def computeLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
   """Lay out A, B and (when present) the MX scale regions in LDS."""
   archCaps = writer.states.archCaps
@@ -182,10 +152,18 @@ def computeLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
 
   sizes = [(tc, subtileRegionSize(tileInfoOf(writer, tc), macroTiles[tc], ldsRowBankSize))
            for tc in _AB_OPERANDS]
-  if hasMXScales(kernel):
+  # Scale regions are sized as a pair, so scales on one side only get no region
+  # here -- initSubtileInfos builds a TileInfo per scaled operand regardless.
+  if all(mxBlockOf(kernel, tc) > 0 for tc in _AB_OPERANDS):
     sizes += [(tc, _mxScaleRegionSize(tileInfoOf(writer, tc), kernel))
               for tc in _MX_SCALE_OPERANDS]
-  return _packRegions(sizes)
+
+  # Each region starts at the next free byte, in order.
+  layout = SubtileLdsLayout()
+  for tc, size in sizes:
+    layout.offsets[tc] = layout.totalSize
+    layout.totalSize += size
+  return layout
 
 
 def applyLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
