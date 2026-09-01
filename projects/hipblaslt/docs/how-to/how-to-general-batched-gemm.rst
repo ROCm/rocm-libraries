@@ -112,7 +112,7 @@ Quick comparison
    :header: "Feature", "Strided batched", "General batched"
    :widths: 30, 35, 35
 
-   "Batch mode value (``hipblasltBatchMode_t``)", "``0`` (``HIPBLASLT_BATCH_MODE_STRIDED``)", "``1`` (``HIPBLASLT_BATCH_MODE_POINTER_ARRAY``)"
+   "Batch mode value (``hipblasLtBatchMode_t``)", "``0`` (``HIPBLASLT_BATCH_MODE_STRIDED``)", "``1`` (``HIPBLASLT_BATCH_MODE_POINTER_ARRAY``)"
    "Memory layout", "Single contiguous buffer", "Separate allocations"
    "Stride attributes", "Required (uniform stride)", "Not used"
    "Setup complexity", "Simple", "Moderate (pointer arrays on device)"
