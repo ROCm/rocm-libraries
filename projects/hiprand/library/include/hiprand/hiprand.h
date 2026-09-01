@@ -23,10 +23,6 @@
 
 #include <hip/hip_runtime.h>
 
-#if defined(__cplusplus)
-    #include <hip/hip_fp16.h>
-#endif
-
 /** \addtogroup hiprandhost
  *
  *  @{
