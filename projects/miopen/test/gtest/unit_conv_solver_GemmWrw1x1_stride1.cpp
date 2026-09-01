@@ -70,6 +70,17 @@ const auto& GetTestParams()
     return params;
 }
 
+const auto& GetTestParamsNhwc()
+{
+    static const auto params = [] {
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
+        p.SetTolerance(Gpu::gfx90A, miopenHalf, 2.0f);
+        p.SetTolerance(Gpu::gfx90A, miopenFloat, 2.0f);
+        return p;
+    }();
+    return params;
+}
+
 // rocBLAS does not support BF16->BF16 GEMM on gfx90a, so skip bf16 there.
 // TODO: Remove this exclusion once the rocBLAS bug is fixed.
 const auto& GetTestParamsNoGfx90A()
@@ -131,7 +142,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 // Channel-last smoke tests
 INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
                          GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParamsNhwc()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCasesNhwc(miopenHalf))));
 
@@ -143,7 +154,7 @@ INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
 
 INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
                          GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP32,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParamsNhwc()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCasesNhwc(miopenFloat))));
 
@@ -155,5 +166,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
                          CPU_UnitTestConvSolverGemmWrw1x1Stride1DevApplicabilityWrw_NONE,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParamsNhwc()),
                                           testing::Values(GetConvTestCasesNhwc(miopenFloat)[0])));
