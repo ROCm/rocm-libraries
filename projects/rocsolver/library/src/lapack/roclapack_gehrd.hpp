@@ -54,22 +54,22 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS2* BS2) gehrd_sub_Y_kernel(const I nro
                                                                      const rocblas_stride strideY,
                                                                      const I batch_count)
 {
-    I row = blockIdx.x * blockDim.x + threadIdx.x;
-    I col = blockIdx.y * blockDim.y + threadIdx.y;
-    I bid = blockIdx.z;
+    const I row_start = blockIdx.x * blockDim.x + threadIdx.x;
+    const I col_start = blockIdx.y * blockDim.y + threadIdx.y;
+    const I bid_start = blockIdx.z;
 
-    I const row_inc = blockDim.x * gridDim.x;
-    I const col_inc = blockDim.y * gridDim.y;
-    I const bid_inc = gridDim.z;
+    const I row_inc = blockDim.x * gridDim.x;
+    const I col_inc = blockDim.y * gridDim.y;
+    const I bid_inc = gridDim.z;
 
-    for(; bid < batch_count; bid += bid_inc)
+    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
     {
         T* __restrict__ A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
         const T* __restrict__ Y = load_ptr_batch<T>(YA, bid, 0, strideY);
 
-        for(; col < nb_cols; col += col_inc)
+        for(I col = col_start; col < nb_cols; col += col_inc)
         {
-            for(; row < nrows; row += row_inc)
+            for(I row = row_start; row < nrows; row += row_inc)
             {
                 A[idx2D(row, col, lda)] -= Y[idx2D(row, col, ldy)];
             }
