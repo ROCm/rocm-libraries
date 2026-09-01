@@ -63,13 +63,6 @@ CK Tile small-op counterparts (Tier 1)
  transpose` block transpose with
  LDS-staged bank-padded layout.
 
-
-Linear-attention family
- - `build_gdn_state_scan` : gated-delta-rule / KDA chunked state
- scan (the "K5" stage). gfx942-specific:
- transposes `k` on the LDS store side
- because CDNA3 has no `ds_read_*_tr_*`.
-
 Each builder ships with a matching `_signature(spec)` and `_grid(...)`
 helper for use with :class:`rocke.runtime.launcher.KernelLauncher`.
 End-to-end parity vs torch reference for all of these is exercised by
@@ -392,14 +385,4 @@ from .common.grouped_gemm import (  # noqa: F401
 from .common.gemm_policy import (  # noqa: F401
     GemmPipelinePolicy,
     ValidationResult,
-)
-
-# Linear-attention family
-from .gfx942.gdn_state_scan import (  # noqa: F401
-    GdnStateScanSpec,
-    build_gdn_state_scan,
-    gdn_state_scan_grid,
-    gdn_state_scan_signature,
-    is_valid_config as is_valid_gdn_state_scan_config,
-    is_valid_spec as is_valid_gdn_state_scan_spec,
 )

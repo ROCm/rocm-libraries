@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Host builder for the split-path chunkwise KDA forward on gfx942.
 
 Two kernels: :func:`build_kda_chunk_prep` builds the six per-chunk tiles, one
@@ -141,15 +143,11 @@ def launch_packed(spec, q, k, v, g, beta, h0=None):
     B, H, T, DK = q.shape
     DV = v.shape[-1]
     C = spec.tile.chunk
-    qf, kf, vf, gf, bf, BH, NC, parts = _pack_v_partitions(
-        spec, q, k, v, g, beta
-    )
+    qf, kf, vf, gf, bf, BH, NC, parts = _pack_v_partitions(spec, q, k, v, g, beta)
     nt = BH * parts * NC
     ws = prep_mod.alloc_tiles(nt, prep_spec_of(spec))
     o = torch.empty(nt, C * spec.head_v, dtype=torch.bfloat16, device=q.device)
-    ht = torch.zeros(
-        BH * parts, spec.head_v, DK, dtype=torch.float32, device=q.device
-    )
+    ht = torch.zeros(BH * parts, spec.head_v, DK, dtype=torch.float32, device=q.device)
     h0t = _pack_initial_state(spec, h0, parts)
     run_split(
         spec,
@@ -228,15 +226,11 @@ def bench(
     DK, DV = spec.head_k, logical_head_v
     q, k, v, g, beta = make_inputs(B, H, T, DK, DV)
     C = spec.tile.chunk
-    qf, kf, vf, gf, bf, BH, NC, parts = _pack_v_partitions(
-        spec, q, k, v, g, beta
-    )
+    qf, kf, vf, gf, bf, BH, NC, parts = _pack_v_partitions(spec, q, k, v, g, beta)
     nt = BH * parts * NC
     ws = prep_mod.alloc_tiles(nt, prep_spec_of(spec))
     o = torch.empty(nt, C * spec.head_v, dtype=torch.bfloat16, device="cuda")
-    ht = torch.zeros(
-        BH * parts, spec.head_v, DK, dtype=torch.float32, device="cuda"
-    )
+    ht = torch.zeros(BH * parts, spec.head_v, DK, dtype=torch.float32, device="cuda")
     scale = DK**-0.5
 
     def do_prep():

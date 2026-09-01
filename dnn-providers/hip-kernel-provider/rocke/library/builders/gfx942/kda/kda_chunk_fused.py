@@ -1,3 +1,5 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Host builder for the fused chunkwise KDA forward on gfx942.
 
 Builds, validates and benchmarks :func:`build_kda_chunk_fused`: one workgroup
@@ -10,10 +12,13 @@ algebra with the kernel: the kernel evaluates the chunkwise factorization,
 while the oracle just walks the gated delta rule one token at a time. Agreement
 therefore tests the factorization itself, not only its implementation.
 
-Run directly for a parity sweep plus a benchmark::
+Run directly for a parity sweep plus a benchmark, or emit HSACO +
+manifest for ``rocke.run_manifest`` / ``benchmark.remote_test``::
 
     python kda_chunk_fused.py                 # parity + bench
     python kda_chunk_fused.py --no-check      # bench only
+    python -m builders.gfx942.kda.kda_chunk_fused \\
+        --no-verify --output-dir /tmp/kda --m 2 --n 4 --k 256
 """
 
 from __future__ import annotations
@@ -234,14 +239,12 @@ def launch_packed(spec, q, k, v, g, beta, h0=None):
     """Run dense ``[B,H,T,D]`` inputs through gfx942 V partitions."""
     B, H, T, DK = q.shape
     DV = v.shape[-1]
-    qf, kf, vf, gf, bf, BH, NC, parts = _pack_v_partitions(
-        spec, q, k, v, g, beta
-    )
+    qf, kf, vf, gf, bf, BH, NC, parts = _pack_v_partitions(spec, q, k, v, g, beta)
     nt = BH * parts * NC
-    o = torch.empty(nt, spec.tile.chunk * spec.head_v, dtype=torch.bfloat16, device=q.device)
-    ht = torch.zeros(
-        BH * parts, spec.head_v, DK, dtype=torch.float32, device=q.device
+    o = torch.empty(
+        nt, spec.tile.chunk * spec.head_v, dtype=torch.bfloat16, device=q.device
     )
+    ht = torch.zeros(BH * parts, spec.head_v, DK, dtype=torch.float32, device=q.device)
     h0t = _pack_initial_state(spec, h0, parts)
     run_fused(
         spec,
@@ -303,15 +306,11 @@ def check(
 def bench(spec, B, H, T, warmup=10, iters=30, logical_head_v=128):
     DK, DV = spec.head_k, logical_head_v
     q, k, v, g, beta = make_inputs(B, H, T, DK, DV)
-    qf, kf, vf, gf, bf, BH, NC, parts = _pack_v_partitions(
-        spec, q, k, v, g, beta
-    )
+    qf, kf, vf, gf, bf, BH, NC, parts = _pack_v_partitions(spec, q, k, v, g, beta)
     C = spec.tile.chunk
     nt = BH * parts * NC
     o = torch.empty(nt, C * spec.head_v, dtype=torch.bfloat16, device="cuda")
-    ht = torch.zeros(
-        BH * parts, spec.head_v, DK, dtype=torch.float32, device="cuda"
-    )
+    ht = torch.zeros(BH * parts, spec.head_v, DK, dtype=torch.float32, device="cuda")
     args = (
         spec,
         qf,
@@ -345,6 +344,19 @@ def main():
     ap.add_argument("--v-splits", type=int, default=2)
     ap.add_argument("--sb", type=int, default=8)
     ap.add_argument("--no-check", action="store_true")
+    ap.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="alias of --no-check; remote_test build passes this",
+    )
+    ap.add_argument(
+        "--output-dir",
+        default=None,
+        help="write HSACO + manifest.json for rocke.run_manifest",
+    )
+    ap.add_argument("--m", type=int, default=None, help="B (remote-test --shape)")
+    ap.add_argument("--n", type=int, default=None, help="H (remote-test --shape)")
+    ap.add_argument("--k", type=int, default=None, help="T (remote-test --shape)")
     ap.add_argument("--iters", type=int, default=30)
     args = ap.parse_args()
 
@@ -366,9 +378,49 @@ def main():
     if not ok:
         return 1
 
+    mnk = (args.m, args.n, args.k)
+    if any(x is not None for x in mnk) and not all(x is not None for x in mnk):
+        print("--m/--n/--k (B/H/T) must be passed together", file=sys.stderr)
+        return 2
+    if all(x is not None for x in mnk):
+        default_shape = (int(args.m), int(args.n), int(args.k))
+    else:
+        default_shape = tuple(int(x) for x in args.check_shape.split("x"))
+
+    skip_check = args.no_check or args.no_verify
+
+    if args.output_dir:
+        from pathlib import Path
+
+        from rocke.helpers.manifest import write_artifact
+
+        try:
+            from .manifest import make_kda_fused_manifest
+        except ImportError:  # script invocation from this directory
+            from manifest import make_kda_fused_manifest
+
+        art = compile_kernel(
+            build_kda_chunk_fused(spec),
+            arch="gfx942",
+            backend="python",
+            capture_ir_text=False,
+        )
+        manifest = make_kda_fused_manifest(
+            artifact=art,
+            spec=spec,
+            args_signature=kda_chunk_fused_signature(spec),
+            logical_head_v=args.dv,
+            default_shape=default_shape,
+        )
+        out = Path(args.output_dir)
+        write_artifact(art, out, manifest, write_ir_text=False, write_llvm_text=True)
+        print(f"wrote artifact to {out}")
+        if skip_check:
+            return 0
+
     worst = 0.0
-    if not args.no_check:
-        B, H, T = (int(x) for x in args.check_shape.split("x"))
+    if not skip_check:
+        B, H, T = default_shape
         for gate_low in (-0.1, -0.5, -2.0, -5.0):
             for with_h0 in (False, True):
                 if with_h0 and not spec.has_initial_state:
@@ -385,6 +437,9 @@ def main():
                         logical_head_v=args.dv,
                     ),
                 )
+
+    if args.output_dir:
+        return 0 if worst <= 3e-2 else 1
 
     for s in args.shapes.split(","):
         B, H, T = (int(x) for x in s.split("x"))

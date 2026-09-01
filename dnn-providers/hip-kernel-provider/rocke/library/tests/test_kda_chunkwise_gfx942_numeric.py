@@ -32,9 +32,7 @@ def _gpu_ready() -> bool:
 
 pytestmark = [
     pytest.mark.gpu,
-    pytest.mark.skipif(
-        not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"
-    ),
+    pytest.mark.skipif(not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"),
 ]
 
 GATES = (-0.1, -0.5, -2.0, -5.0)
@@ -101,12 +99,8 @@ def test_split_and_fused_agree_bitwise():
 
     B, H, T, DK, DV = 2, 4, 256, 128, 128
     q, k, v, g, beta = fused.make_inputs(B, H, T, DK, DV)
-    out_s, state_s = split.launch_packed(
-        KdaChunkScanSpec(), q, k, v, g, beta
-    )
-    out_f, state_f = fused.launch_packed(
-        KdaChunkFusedSpec(), q, k, v, g, beta
-    )
+    out_s, state_s = split.launch_packed(KdaChunkScanSpec(), q, k, v, g, beta)
+    out_f, state_f = fused.launch_packed(KdaChunkFusedSpec(), q, k, v, g, beta)
     torch.cuda.synchronize()
     assert torch.equal(out_s, out_f)
     assert torch.equal(state_s, state_f)
@@ -123,9 +117,7 @@ def test_fused_input_prefetch_is_bitwise_identical():
     base = KdaChunkFusedSpec(prefetch_inputs=False)
     prefetched = KdaChunkFusedSpec(prefetch_inputs=True)
     out_b, state_b = fused.launch_packed(base, q, k, v, g, beta)
-    out_p, state_p = fused.launch_packed(
-        prefetched, q, k, v, g, beta
-    )
+    out_p, state_p = fused.launch_packed(prefetched, q, k, v, g, beta)
     torch.cuda.synchronize()
     assert torch.equal(out_b, out_p)
     assert torch.equal(state_b, state_p)

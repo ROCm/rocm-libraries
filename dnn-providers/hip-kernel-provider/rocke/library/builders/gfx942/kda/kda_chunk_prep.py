@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Host-side builder for the chunkwise KDA per-chunk tile kernel
 (``kernels/gfx942/kda_chunkwise.py``).
 

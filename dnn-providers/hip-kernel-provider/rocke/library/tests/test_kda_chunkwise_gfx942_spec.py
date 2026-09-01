@@ -19,6 +19,12 @@ from kernels.gfx942.kda_chunkwise import (
     is_valid_fused_spec,
     is_valid_scan_spec,
     is_valid_spec,
+    kda_chunk_fused_grid,
+    kda_chunk_fused_signature,
+    kda_chunk_prep_grid,
+    kda_chunk_prep_signature,
+    kda_chunk_scan_grid,
+    kda_chunk_scan_signature,
 )
 
 ARCH = "gfx942"
@@ -85,32 +91,24 @@ class TestPrepSpec:
         ],
     )
     def test_structural_rejections(self, kwargs, needle):
-        ok, why = is_valid_spec(
-            KdaChunkPrepSpec(tile=_tile(**kwargs)), arch=ARCH
-        )
+        ok, why = is_valid_spec(KdaChunkPrepSpec(tile=_tile(**kwargs)), arch=ARCH)
         assert not ok
         assert needle in why
 
     def test_c32_exceeds_gfx942_lds(self):
-        spec = KdaChunkPrepSpec(
-            tile=_tile(chunk=32, tile_atom_m=16, scan_atom_m=16)
-        )
+        spec = KdaChunkPrepSpec(tile=_tile(chunk=32, tile_atom_m=16, scan_atom_m=16))
         ok, why = is_valid_spec(spec, arch=ARCH)
         assert not ok
         assert "LDS" in why
 
     def test_invalid_dtype(self):
-        assert not is_valid_spec(
-            KdaChunkPrepSpec(dtype="fp16"), arch=ARCH
-        )[0]
+        assert not is_valid_spec(KdaChunkPrepSpec(dtype="fp16"), arch=ARCH)[0]
 
 
 class TestFusedSpec:
     def test_full_dv128_workgroup_is_rejected(self):
         """gfx942 uses two DV64 workgroups rather than one DV128 group."""
-        ok, why = is_valid_fused_spec(
-            KdaChunkFusedSpec(head_v=128), arch=ARCH
-        )
+        ok, why = is_valid_fused_spec(KdaChunkFusedSpec(head_v=128), arch=ARCH)
         assert not ok
         assert "head_v" in why
 
@@ -120,29 +118,24 @@ class TestFusedSpec:
         assert not ok
         assert "prefetch_inputs=False" in why
 
+
 class TestScanSpec:
     def test_scan_uses_one_lds_residency(self):
         spec = KdaChunkScanSpec()
         assert spec.min_occupancy == 1
         assert spec.lds_bytes() <= LDS_LIMIT
-        ok, why = is_valid_scan_spec(
-            KdaChunkScanSpec(min_occupancy=2), arch=ARCH
-        )
+        ok, why = is_valid_scan_spec(KdaChunkScanSpec(min_occupancy=2), arch=ARCH)
         assert not ok
         assert "workgroups per CU" in why
 
     def test_wave_partition_must_cover_value_slice(self):
-        ok, why = is_valid_scan_spec(
-            KdaChunkScanSpec(head_v=128), arch=ARCH
-        )
+        ok, why = is_valid_scan_spec(KdaChunkScanSpec(head_v=128), arch=ARCH)
         assert not ok
         assert "head_v" in why
 
     @pytest.mark.parametrize("kwargs", [{"pad_dk": 4}, {"pad_cb": 4}])
     def test_staging_alignment(self, kwargs):
-        ok, why = is_valid_scan_spec(
-            KdaChunkScanSpec(tile=_tile(**kwargs)), arch=ARCH
-        )
+        ok, why = is_valid_scan_spec(KdaChunkScanSpec(tile=_tile(**kwargs)), arch=ARCH)
         assert not ok
         assert "8" in why
 
@@ -171,3 +164,87 @@ def test_names_are_distinct_and_encode_gfx942_geometry():
         assert "dk128" in name
         assert "dv64" in name
         assert "c16" in name
+
+
+def _sig_names(signature) -> list[str]:
+    return [arg["name"] for arg in signature]
+
+
+@pytest.mark.parametrize(
+    "builder, spec, signature_fn, expected",
+    [
+        (
+            build_kda_chunk_prep,
+            KdaChunkPrepSpec(),
+            kda_chunk_prep_signature,
+            [
+                "q_ptr",
+                "k_ptr",
+                "g_ptr",
+                "beta_ptr",
+                "a_ptr",
+                "gk_ptr",
+                "gq_ptr",
+                "aqk_ptr",
+                "kt_ptr",
+                "dec_ptr",
+                "scale",
+            ],
+        ),
+        (
+            build_kda_chunk_scan,
+            KdaChunkScanSpec(),
+            kda_chunk_scan_signature,
+            [
+                "a_ptr",
+                "gk_ptr",
+                "gq_ptr",
+                "aqk_ptr",
+                "kt_ptr",
+                "dec_ptr",
+                "v_ptr",
+                "o_ptr",
+                "h0_ptr",
+                "ht_ptr",
+                "nc",
+            ],
+        ),
+        (
+            build_kda_chunk_fused,
+            KdaChunkFusedSpec(),
+            kda_chunk_fused_signature,
+            [
+                "q_ptr",
+                "k_ptr",
+                "g_ptr",
+                "beta_ptr",
+                "v_ptr",
+                "o_ptr",
+                "h0_ptr",
+                "ht_ptr",
+                "scale",
+                "nc",
+            ],
+        ),
+    ],
+)
+def test_kernel_params_match_published_signature(builder, spec, signature_fn, expected):
+    """CPU lane: ABI names, not GPU values.
+
+    Catches a builder that adds a kernarg without updating the launcher
+    signature. Numeric coverage for B>1 / multi-head stays in
+    ``test_kda_chunkwise_gfx942_numeric.py``.
+    """
+    kernel = builder(spec)
+    names = _sig_names(signature_fn(spec))
+    assert names == expected
+    assert [param.name for param in kernel.params] == names
+
+
+def test_grids_scale_with_batch_heads_and_chunks():
+    """Prep is one workgroup per chunk; scan/fused are one per (batch, head)."""
+    b, h, nc = 2, 4, 16
+    bh, num_tiles = b * h, b * h * nc
+    assert kda_chunk_prep_grid(KdaChunkPrepSpec(), num_tiles) == (num_tiles, 1, 1)
+    assert kda_chunk_scan_grid(KdaChunkScanSpec(), bh) == (bh, 1, 1)
+    assert kda_chunk_fused_grid(KdaChunkFusedSpec(), bh) == (bh, 1, 1)

@@ -4,8 +4,8 @@
 """Golden LLVM-IR stability test for the gfx942 KDA kernel family.
 
 The fixture pins the Python-lowered LLVM IR for the C16 raw-input
-prep/scan/fused kernels and the BT64 prepared state-scan/fused kernels.  This is
-a CPU-only test: it does not require a GPU or comgr.
+prep, scan, and fused kernels. This is a CPU-only test: it does not require a
+GPU or comgr.
 
 Run or re-bless from ``rocke/library``::
 
@@ -48,62 +48,10 @@ def _cases() -> dict[str, Callable]:
         build_kda_chunk_prep,
         build_kda_chunk_scan,
     )
-    from rocke.instances.gfx942.gdn_state_scan import (
-        GdnStateScanSpec,
-        build_gdn_state_scan,
-    )
-
-    def gdn_k5():
-        return build_gdn_state_scan(
-            GdnStateScanSpec(
-                K=128,
-                V=128,
-                H=12,
-                Hg=12,
-                BV=16,
-                USE_G=False,
-                USE_GK=True,
-                USE_INITIAL_STATE=False,
-                STORE_FINAL_STATE=False,
-                OUTPUT_DTYPE_BF16=True,
-                PREFETCH_K_EARLY=True,
-            )
-        )
-
-    def gdn_fused(*, bv: int, nr_split: int):
-        return build_gdn_state_scan(
-            GdnStateScanSpec(
-                K=128,
-                V=128,
-                H=12,
-                Hg=12,
-                BT=64,
-                BV=bv,
-                USE_G=False,
-                USE_GK=True,
-                USE_INITIAL_STATE=False,
-                STORE_FINAL_STATE=False,
-                SAVE_NEW_VALUE=False,
-                STORE_H=False,
-                IS_VARLEN=False,
-                WU_CONTIGUOUS=True,
-                OUTPUT_DTYPE_BF16=True,
-                NR_SPLIT=nr_split,
-                LDS_SWIZZLE=True,
-                PREFETCH=True,
-                XCD_REMAP=True,
-                COMPUTE_OUTPUT=True,
-                SCALE=128**-0.5,
-            )
-        )
 
     return {
-        "kda_gfx942/c16_prep_default": lambda: build_kda_chunk_prep(
-            KdaChunkPrepSpec()
-        ),
-        "kda_gfx942/c16_scan_default": lambda: build_kda_chunk_scan(
-            KdaChunkScanSpec()
-        ),
+        "kda_gfx942/c16_prep_default": lambda: build_kda_chunk_prep(KdaChunkPrepSpec()),
+        "kda_gfx942/c16_scan_default": lambda: build_kda_chunk_scan(KdaChunkScanSpec()),
         "kda_gfx942/c16_scan_initial_state": lambda: build_kda_chunk_scan(
             KdaChunkScanSpec(has_initial_state=True)
         ),
@@ -112,16 +60,6 @@ def _cases() -> dict[str, Callable]:
         ),
         "kda_gfx942/c16_fused_initial_state": lambda: build_kda_chunk_fused(
             KdaChunkFusedSpec(has_initial_state=True)
-        ),
-        "kda_gfx942/bt64_k5_gk_bv16": gdn_k5,
-        "kda_gfx942/bt64_fused_gk_bv16": lambda: gdn_fused(
-            bv=16, nr_split=1
-        ),
-        "kda_gfx942/bt64_fused_gk_bv32": lambda: gdn_fused(
-            bv=32, nr_split=1
-        ),
-        "kda_gfx942/bt64_fused_gk_bv64w8": lambda: gdn_fused(
-            bv=64, nr_split=2
         ),
     }
 

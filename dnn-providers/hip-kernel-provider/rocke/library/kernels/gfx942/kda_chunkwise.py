@@ -1,8 +1,14 @@
-"""Chunkwise gated delta-rule linear attention (KDA) prefill kernels for gfx942.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Chunkwise Kimi Delta Attention (KDA) prefill kernels for gfx942.
 
-KDA is a gated delta-rule linear attention: a per-channel decay gate plus a
-delta-rule state write, evaluated chunkwise so the token-serial recurrence
-collapses into a handful of dense matmuls per chunk.
+KDA is gated-delta-rule linear attention with a per-channel decay gate and a
+delta-rule write strength ``beta``. This file is the gfx942 prefill path
+only: tokens are grouped into chunks so the token-serial recurrence collapses
+into dense matmuls. It is not the Gated DeltaNet (GDN) K5/K6 scan, and it is
+not a KDA decode kernel.
+
+The kernels are gfx942-only. Validators reject any other ``arch``.
 
 Contract
 --------
@@ -88,6 +94,16 @@ LOG2E = 1.4426950408889634
 EXP2_CLAMP = 126.0
 
 _DTYPE_IR = {"bf16": BF16}
+# Declared coverage, exported so a dispatch candidate can state what it serves
+# by importing these rather than transcribing them. The validators below read
+# the same names, so the two cannot drift apart.
+KDA_DTYPES: Tuple[str, ...] = tuple(sorted(_DTYPE_IR))
+# The only chunk lengths the emitted tile-atom schedules cover.
+KDA_CHUNK_SIZES: Tuple[int, ...] = (16, 32)
+# One workgroup owns this many value channels. gfx942 cannot hold a DV=128
+# state mirror plus the C16 tile builder under the LDS ceiling, so a logical
+# head is split into this many channels per workgroup on the host side.
+KDA_PARTITION_HEAD_V = 64
 # gfx942 has 64 KiB LDS per CU. The kernel uses at most one workgroup's share;
 # the host-side V partition manufactures additional workgroups instead of
 # relying on two LDS-heavy workgroups being resident together.
@@ -103,11 +119,7 @@ _SCAN_ATOMS = {
 
 def _solve_atom(chunk: int) -> MfmaAtom:
     """Return the legal gfx942 atom for the blocked triangular rank update."""
-    return (
-        MfmaAtom.bf16_16x16x16()
-        if chunk == 16
-        else MfmaAtom.bf16_32x32x8()
-    )
+    return MfmaAtom.bf16_16x16x16() if chunk == 16 else MfmaAtom.bf16_32x32x8()
 
 
 class _LdsTile:
@@ -385,8 +397,11 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx942") -> Tuple[bool, s
             f"unsupported tile_atom_m {t.tile_atom_m}; " f"have {sorted(_SCAN_ATOMS)}"
         )
     atom = spec.atom
-    if t.chunk not in (16, 32):
-        return False, "chunk must be 16 or 32 for the emitted tile-atom schedules"
+    if t.chunk not in KDA_CHUNK_SIZES:
+        return False, (
+            f"chunk must be one of {list(KDA_CHUNK_SIZES)} for the emitted "
+            "tile-atom schedules"
+        )
     if t.chunk % atom.m or t.chunk % atom.n:
         return False, (f"tile atom ({atom.m}x{atom.n}) must divide chunk ({t.chunk})")
     panels = (t.chunk // atom.m) * (t.chunk // atom.n)
@@ -518,9 +533,7 @@ class _ChunkCtx:
         self.lane = lane = b.mod(self.tid, b.const_i32(64))
         self.lane_m = b.mod(lane, b.const_i32(self.atom.m))
         self.lane_h = lane_h = b.div(lane, b.const_i32(self.atom.m))
-        self.frag_k_off = b.mul(
-            lane_h, b.const_i32(self.atom.a_per_lane)
-        )
+        self.frag_k_off = b.mul(lane_h, b.const_i32(self.atom.a_per_lane))
 
         self.c_clamp = b.const_f32(-EXP2_CLAMP)
         self.c_log2e = b.const_f32(LOG2E)
@@ -2551,10 +2564,14 @@ def kda_chunk_prep_signature(spec: KdaChunkPrepSpec):
 
 __all__ = [
     "EXP2_CLAMP",
+    "KDA_CHUNK_SIZES",
+    "KDA_DTYPES",
+    "KDA_PARTITION_HEAD_V",
     "KdaChunkFusedSpec",
     "KdaChunkPrepSpec",
     "KdaChunkScanSpec",
     "KdaTileSpec",
+    "LDS_LIMIT",
     "LOG2E",
     "build_kda_chunk_fused",
     "build_kda_chunk_prep",
