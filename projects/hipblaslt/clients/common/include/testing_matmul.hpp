@@ -351,25 +351,6 @@ void dumpBuffer(const char* title, hipDataType To, HipHostBuffer& buf, size_t M,
     return;
 }
 
-inline roc::host_numerics::Layout
-    hostReferenceBatchLayout(const hipblaslt::client::MatmulMatrix& matrix,
-                             size_t                                 rows,
-                             size_t                                 columns,
-                             hipblasOperation_t                     operation,
-                             size_t                                 batch,
-                             bool                                   separateBatchStorage)
-{
-    const ptrdiff_t rowStride
-        = operation == HIPBLAS_OP_N ? 1 : matrix.layout.stride(1);
-    const ptrdiff_t columnStride
-        = operation == HIPBLAS_OP_N ? matrix.layout.stride(1) : 1;
-    const std::array<size_t, 3> batchCoordinates{0, 0, batch};
-    const ptrdiff_t offset = separateBatchStorage ? 0
-                                                  : matrix.layout.elementOffset(batchCoordinates);
-    return roc::host_numerics::Layout(
-        roc::host_numerics::Shape{rows, columns}, {rowStride, columnStride}, offset);
-}
-
 std::vector<hipblaslt::host_numerics::MatmulValidationCase::PointwiseTolerance>
     matmulValidationTolerances(const Arguments&                                  arg,
                                std::span<const hipblaslt::client::MatmulProblem> matmulProblems,
@@ -421,6 +402,9 @@ void testing_matmul(const Arguments& arg)
     arg_revised.aux_type   = dataTypes.auxiliary;
 
     const auto matmulProblems = hipblaslt::client::normalizeMatmulProblems(arg_revised);
+
+    if(arg.batch_count == 0)
+        return;
 
     // Set the values of flush, rotating size, cold_iters and hot_iters only for internal use
     hipblasltSetFlushValue(arg.flush);
@@ -2841,13 +2825,14 @@ void testing_matmul_with_bias(const Arguments&                                  
                                              size_t                                 rows,
                                              size_t                                 columns,
                                              hipblasOperation_t                     operation,
-                                             bool                                   separateStorage) {
-                    return hostReferenceBatchLayout(matrix,
-                                                    rows,
-                                                    columns,
-                                                    operation,
-                                                    static_cast<size_t>(batchIdx),
-                                                    separateStorage);
+                                             bool separateStorage) {
+                    return hipblaslt::host_numerics::referenceBatchLayout(
+                        matrix,
+                        rows,
+                        columns,
+                        operation,
+                        static_cast<size_t>(batchIdx),
+                        separateStorage);
                 };
                 const auto hostBufferTensor = [&](std::vector<HipHostBuffer>&          buffers,
                                                   hipDataType                          type,

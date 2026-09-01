@@ -53,6 +53,26 @@ namespace
                && bytes(first) == bytes(second);
     }
 
+    void testScalarTypeMappings()
+    {
+        const std::array mappings{
+            std::pair{DataType::UInt8, ScalarType::UInt8},
+            std::pair{DataType::Int8, ScalarType::Int8},
+            std::pair{DataType::UInt16, ScalarType::UInt16},
+            std::pair{DataType::Int16, ScalarType::Int16},
+            std::pair{DataType::UInt32, ScalarType::UInt32},
+            std::pair{DataType::Int32, ScalarType::Int32},
+            std::pair{DataType::UInt64, ScalarType::UInt64},
+            std::pair{DataType::Int64, ScalarType::Int64},
+            std::pair{DataType::Float, ScalarType::Float32},
+            std::pair{DataType::Double, ScalarType::Float64},
+            std::pair{DataType::ComplexFloat, ScalarType::ComplexFloat32},
+            std::pair{DataType::ComplexDouble, ScalarType::ComplexFloat64},
+        };
+        for(auto const& [source, expected] : mappings)
+            require(hostScalarType(source) == expected, "Ordinary scalar type mapping mismatch.");
+    }
+
     GeneratedGEMMInputs generate(TensorDescriptor const&   descriptorA,
                                  TensorDescriptor const&   descriptorB,
                                  TensorDescriptor const&   descriptorC,
@@ -413,6 +433,7 @@ int main()
     // Random byte sequences intentionally differ from the legacy mt19937/OpenMP
     // generator. The migration contract is stable indexed seeds, modes, bounds,
     // layouts, packed encodings, and natural scale order.
+    testScalarTypeMappings();
     testLayoutAndSeedOffsets();
     testAllInitializationModes();
     testPackedStorageBytes();
