@@ -336,11 +336,13 @@ class TestMain:
              patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_file, \
              patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
              patch('Tensile.TensileLogic.Run.reset_reported_failures'), \
+             patch('Tensile.TensileLogic.Run.check_corpus_invariants') as mock_corpus_check, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
             mock_args.Verbose = 2
             mock_args.KnownBugs = BUNDLED_KNOWN_BUGS
+            mock_args.Architecture = "all"
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 test_file = Path(tmpdir) / "logic.yaml"
@@ -352,6 +354,7 @@ class TestMain:
                 )
                 known_bugs = frozenset({("logic.yaml", 7)})
                 mock_load_bundled.return_value = known_bugs
+                mock_corpus_check.return_value = []
                 mock_parallel_map.return_value = [(5, 5, 0, 0, 0)]
 
                 main()
