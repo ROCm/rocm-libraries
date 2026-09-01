@@ -80,7 +80,7 @@ try
     if(!mem)
         return rocblas_status_memory_error;
 
-    void* const work = static_cast<void*>(em[0]);
+    void* const work = static_cast<void*>(mem[0]);
 
 #ifdef NDEBUG
 #else
