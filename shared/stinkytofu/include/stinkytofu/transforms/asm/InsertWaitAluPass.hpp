@@ -36,12 +36,12 @@ class ModulePass;
 /// entry drain when run on a callable function. Used by stinkytofu-opt single-pass
 /// mode and unit tests.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(
-    bool enableESM2TrackValuVsrc = false);
+    bool enableESM2TrackValuVsrc = false, bool enableSkipHiddenXdlVaVdst = false);
 
 /// Whole-kernel driver: full analysis on the entry function, then the conservative
 /// call-boundary drain on every callee. Reserves a seam for future caller<->callee
 /// analysis.
 STINKYTOFU_EXPORT std::unique_ptr<ModulePass> createInsertWaitAluModulePass(
-    bool enableESM2TrackValuVsrc = false);
+    bool enableESM2TrackValuVsrc = false, bool enableSkipHiddenXdlVaVdst = false);
 
 }  // namespace stinkytofu

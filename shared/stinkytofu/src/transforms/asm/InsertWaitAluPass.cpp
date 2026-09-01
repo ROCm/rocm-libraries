@@ -52,6 +52,14 @@ using namespace stinkytofu;
 // Gate for the ESM2 VALU source-operand VA_VDST stamp (the src-operand WAR hazard).
 bool g_enableESM2TrackValuVsrc = false;
 
+// When true, skip the va_vdst wait for an XDL(WMMA)-produced hazard once at least
+// kXdlVaVdstHideWmmas WMMA have been issued between the producer and the consumer:
+// that many intervening WMMA fully hide the WMMA result latency, so the wait is
+// redundant. Counts ONLY XDL(WMMA) followers (the XDL pipe UB) -- interleaved plain
+// VALU bump other pipes and never lift this count.
+bool g_enableESM2SkipHiddenXdlVaVdst = false;
+constexpr unsigned kXdlVaVdstHideWmmas = 12;
+
 // TEMP HACK gate. When true, suppress the va_vdst wait for the VGPR-source (RAW)
 // hazard of GLOBAL-family memory ops and global_prefetch — the "valu writes VGPR,
 // global op / prefetch reads it" case. global_prefetch does not carry IF_GLOBALLoad,
@@ -443,7 +451,17 @@ class WaitcntBrackets {
     unsigned vaFollowers(const VgprStamp& s) const {
         unsigned f = ~0u;
         for (int p = 0; p < NUM_VA_PIPE; ++p) {
-            if (s.vaOrd[p] && s.vaOrd[p] > vaPipeLB[p]) f = std::min(f, vaPipeUB[p] - s.vaOrd[p]);
+            if (s.vaOrd[p] && s.vaOrd[p] > vaPipeLB[p]) {
+                unsigned followers = vaPipeUB[p] - s.vaOrd[p];
+                // >=kXdlVaVdstHideWmmas WMMA between an XDL producer and the consumer
+                // hide the WMMA result latency -- the producer has retired, so its
+                // va_vdst wait is redundant. Skip only the XDL pipe; never a real
+                // wait from another pipe.
+                if (g_enableESM2SkipHiddenXdlVaVdst && p == PIPE_XDL &&
+                    followers >= kXdlVaVdstHideWmmas)
+                    continue;
+                f = std::min(f, followers);
+            }
         }
         return f;
     }
@@ -660,8 +678,10 @@ class InsertWaitAluPassImpl : public Pass {
     VGPRHalfKeyer keyer{};
 
    public:
-    explicit InsertWaitAluPassImpl(bool enableESM2TrackValuVsrc) {
+    explicit InsertWaitAluPassImpl(bool enableESM2TrackValuVsrc,
+                                   bool enableSkipHiddenXdlVaVdst = false) {
         g_enableESM2TrackValuVsrc = enableESM2TrackValuVsrc;
+        g_enableESM2SkipHiddenXdlVaVdst = enableSkipHiddenXdlVaVdst;
     }
 
    private:
@@ -1044,8 +1064,10 @@ char InsertWaitAluPassImpl::ID = 0;
 // future callee<->caller analysis.
 class InsertWaitAluModulePass : public ModulePass {
    public:
-    explicit InsertWaitAluModulePass(bool enableESM2TrackValuVsrc)
-        : enableESM2TrackValuVsrc(enableESM2TrackValuVsrc) {}
+    explicit InsertWaitAluModulePass(bool enableESM2TrackValuVsrc,
+                                     bool enableSkipHiddenXdlVaVdst = false)
+        : enableESM2TrackValuVsrc(enableESM2TrackValuVsrc),
+          enableSkipHiddenXdlVaVdst(enableSkipHiddenXdlVaVdst) {}
 
     const char* getName() const override {
         return "InsertWaitAluModulePass";
@@ -1053,7 +1075,7 @@ class InsertWaitAluModulePass : public ModulePass {
 
     PreservedAnalyses run(StinkyAsmModule& M, PassContext& passCtx,
                           ModuleAnalysisManager& /*MAM*/) override {
-        InsertWaitAluPassImpl impl(enableESM2TrackValuVsrc);
+        InsertWaitAluPassImpl impl(enableESM2TrackValuVsrc, enableSkipHiddenXdlVaVdst);
         AnalysisManager AM;
         registerAllAnalyses(AM);
 
@@ -1073,15 +1095,20 @@ class InsertWaitAluModulePass : public ModulePass {
 
    private:
     bool enableESM2TrackValuVsrc;
+    bool enableSkipHiddenXdlVaVdst;
 };
 
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertWaitAluPass(bool enableESM2TrackValuVsrc) {
-    return std::make_unique<InsertWaitAluPassImpl>(enableESM2TrackValuVsrc);
+std::unique_ptr<Pass> createInsertWaitAluPass(bool enableESM2TrackValuVsrc,
+                                              bool enableSkipHiddenXdlVaVdst) {
+    return std::make_unique<InsertWaitAluPassImpl>(enableESM2TrackValuVsrc,
+                                                   enableSkipHiddenXdlVaVdst);
 }
-std::unique_ptr<ModulePass> createInsertWaitAluModulePass(bool enableESM2TrackValuVsrc) {
-    return std::make_unique<InsertWaitAluModulePass>(enableESM2TrackValuVsrc);
+std::unique_ptr<ModulePass> createInsertWaitAluModulePass(bool enableESM2TrackValuVsrc,
+                                                          bool enableSkipHiddenXdlVaVdst) {
+    return std::make_unique<InsertWaitAluModulePass>(enableESM2TrackValuVsrc,
+                                                     enableSkipHiddenXdlVaVdst);
 }
 }  // namespace stinkytofu
