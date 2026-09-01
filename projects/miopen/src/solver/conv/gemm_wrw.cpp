@@ -448,26 +448,32 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
                                    std::multiplies<std::size_t>()) *
                    conv.group_count;
 
-    // Point-output wrw: no Im2Col workspace; bf16 batch>1 uses fp32 dw accum only.
+    // Point-output wrw needs no Im2Col buffer, and no fp32 accumulator either: it contracts the
+    // whole batch in a single GEMM whose summation stays in the fp32 accumulator and rounds once
+    // on store. What it does want is scratch for Stream-K, since the reduction is the batch and
+    // the output only K by C*Z*Y*X.
     if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
-        ws_size = 0;
+    {
+#if MIOPEN_USE_HIPBLASLT
+        // Budget, not an exact size: hipBLASLt picks Stream-K only when offered scratch, and the
+        // amount it needs scales with the tile it chooses.
+        constexpr std::size_t point_output_wrw_gemm_workspace = std::size_t{32} << 20;
+
+        return point_output_wrw_gemm_workspace;
+#else
+        return 0;
+#endif
+    }
 
     // For bf16: extra workspace for fp32 accumulation buffer (same shape as dw)
     const auto in_n            = problem.GetBatchSize();
     const auto need_fp32_accum = (dyDesc.GetType() == miopenBFloat16) && (in_n > 1);
     if(need_fp32_accum)
     {
+        // Use padded layout: im2col buffer at offset 0, fp32 accum buffer at offset ws_size
+        // (aligned to 256 bytes)
         const auto fp32_accum_size = GetTypeSize(miopenFloat) * dwDesc.GetElementSize();
-        if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
-        {
-            ws_size = fp32_accum_size;
-        }
-        else
-        {
-            // Use padded layout: im2col buffer at offset 0, fp32 accum buffer at offset ws_size
-            // (aligned to 256 bytes)
-            ws_size = ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size;
-        }
+        ws_size                    = ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size;
     }
 
     if(ws_size > handle.GetMaxMemoryAllocSize())
@@ -548,9 +554,8 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
         if(gemm::IsAnyBufferFp16(xDesc, dyDesc, dwDesc) && !gemm::IsFp16Supported)
             return false;
 
-        if(problem.IsBfp16() && problem.GetBatchSize() > 1)
-            return GetWorkspaceSize(context, problem) > 0;
-
+        // The workspace is a Stream-K budget rather than a requirement, so bf16 no longer has to
+        // check for one: without it the GEMM is slower but still correct.
         return true;
     }
 
@@ -636,8 +641,6 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
     const auto fp32_accum_offset = [&]() {
         if(!use_fp32_accum)
             return std::size_t{0};
-        if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
-            return std::size_t{0};
         return (im2col_ws_size + 255) & ~std::size_t{255};
     }();
 
@@ -681,7 +684,10 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                 MIOPEN_LOG_FUNCTION("convolution, non 1x1");
             }
 
-            if(workspace_req > 0 && (workspace == nullptr || workspace_size < workspace_req))
+            // Point-output asks for a Stream-K budget rather than a buffer it has to have, so it
+            // runs with whatever Find granted, including nothing.
+            if(!miopen::conv::IsWrwPointOutputStrideEqFilter(problem) && workspace_req > 0 &&
+               (workspace == nullptr || workspace_size < workspace_req))
             {
                 MIOPEN_THROW("Not enough workspace for GemmWrwUniversal. (" +
                              std::to_string(workspace_size) + " < " +
@@ -697,19 +703,11 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
             // Point-output wrw: dW[K,C*Z*Y*X] = dY^T[K,N] * X[N,C*Z*Y*X].
             if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
             {
-                float time = 0;
-
                 // The single GEMM below contracts the whole batch (k = N) with beta = 0, so it
                 // overwrites all K * C*Z*Y*X elements of the destination without reading it.
                 // That needs no pre-zeroing, unlike the accumulating per-batch loop further
-                // down, which relies on beta = 1.
-                Data_t accum_buf = dw;
-                if(use_fp32_accum)
-                {
-                    accum_buf =
-                        static_cast<Data_t>(static_cast<char*>(workspace) + fp32_accum_offset);
-                }
-
+                // down, which relies on beta = 1. For the same reason bf16 needs no fp32 output
+                // buffer: the batch is summed inside the fp32 accumulator and rounded once.
                 auto single_gemm_desc        = gemm_desc;
                 single_gemm_desc.batch_count = 1;
                 single_gemm_desc.strideA     = 0;
@@ -733,40 +731,23 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                     GemmBackend_t::rocblas;
 #endif
 
-                // The fp32-accumulation overload of CallGemm is rocBLAS-only.
-                const auto gemm_status =
-                    use_fp32_accum
-                        ? CallGemm(handle,
-                                   single_gemm_desc,
-                                   dy,
-                                   0,
-                                   x,
-                                   0,
-                                   accum_buf,
-                                   0,
-                                   miopenFloat,
-                                   GemmBackend_t::rocblas)
-                        : CallGemm(
-                              handle, single_gemm_desc, dy, 0, x, 0, dw, 0, point_output_backend);
+                const auto ws      = conv_params.workSpace;
+                const auto ws_size = (ws != nullptr) ? conv_params.workSpaceSize : std::size_t{0};
+
+                const auto gemm_status = CallGemm(handle,
+                                                  single_gemm_desc,
+                                                  dy,
+                                                  0,
+                                                  x,
+                                                  0,
+                                                  dw,
+                                                  0,
+                                                  point_output_backend,
+                                                  ws,
+                                                  ws_size);
                 if(gemm_status != miopenStatusSuccess)
                     MIOPEN_THROW("GemmWrwUniversal point-output GEMM execution failure.");
 
-                if(handle.IsProfilingEnabled())
-                    time += handle.GetKernelTime();
-
-                if(use_fp32_accum)
-                {
-                    TensorDescriptor fp32Desc(miopenFloat, dw_lengths, dw_strides);
-                    CastTensor(handle, &lowp_quant, false, fp32Desc, accum_buf, dwDesc_, dw, 0, 0);
-                    if(handle.IsProfilingEnabled())
-                        time += handle.GetKernelTime();
-                }
-
-                if(handle.IsProfilingEnabled())
-                {
-                    handle.ResetKernelTime();
-                    handle.AccumKernelTime(time);
-                }
                 return;
             }
 
