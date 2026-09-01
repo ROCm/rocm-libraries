@@ -235,6 +235,50 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
     cmake --install .
 
 #============================================================================
+# ARTIFACT: Install a prebuilt TheRock base by downloading the multi-arch
+# nightly release tarball instead of compiling TheRock from source. Trades the
+# fragile, multi-hour source build for a single ~minutes tarball download; CK
+# and MIOpen are still built from THIS repo's own source, unchanged.
+#============================================================================
+FROM base AS artifact_therock
+
+ARG THEROCK_GIT_HASH=default
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install boto3 pyzstd
+
+RUN git clone https://github.com/ROCm/TheRock.git
+
+WORKDIR /TheRock
+
+RUN git sparse-checkout set build_tools cmake && \
+    if [ "$THEROCK_GIT_HASH" != "default" ]; then \
+        echo "Checking out specific hash: $THEROCK_GIT_HASH"; \
+        git fetch --depth 1 origin $THEROCK_GIT_HASH; \
+        git checkout FETCH_HEAD; \
+    else \
+        echo "Using default branch"; \
+    fi
+
+# TheRock publishes a single multi-arch nightly release tarball
+# (therock-dist-linux-multiarch-<version>.tar.gz) containing every gfx family's
+# libraries plus the lib/run/dev components (only the test component is omitted).
+# Installing it lays /opt/rocm out exactly like the source build -- in particular
+# lib/rocblas/library/ is flat, with one TensileLibrary_lazy_<arch>.dat per arch --
+# so no per-arch install loop, rocBLAS accumulate, or subdir-flatten fixup is
+# needed (all of which the earlier per-component artifact approach required).
+# Because "dev" is included, the CMake package configs (ROCMConfig.cmake,
+# rocblasConfig.cmake, ...) that CK's and MIOpen's find_package() calls rely on
+# are present with no supplementary fetch. The tarball is served from an anonymous
+# S3 bucket, so no GITHUB_TOKEN / GitHub API rate-limit workaround is required, and
+# --latest-release auto-selects the newest nightly by its embedded date. The
+# tarball is arch-agnostic (contains all families); THEROCK_ASIC still selects
+# which archs CK and MIOpen build for in the downstream stages.
+RUN python build_tools/install_rocm_from_artifacts.py \
+        --latest-release --amdgpu-family multiarch --output-dir /opt/rocm
+
+#============================================================================
 # REGULAR: Use the pre-built ROCm image from TheRock to build the rest of
 # the MIOpen environment
 #============================================================================
@@ -261,7 +305,10 @@ ADD miopen/dev-requirements.txt /dev-requirements.txt
 
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
 # Composable Kernel install separated from rbuild
-# Remove components that are already built by TheRock.
+# Remove components that are already built by TheRock. nlohmann-json is stripped
+# because the multi-arch nightly tarball's /opt/rocm already ships it (dev
+# component); otherwise rbuild's cget install fails linking it into the prefix
+# ("Failed to link .../nlohmann_jsonConfigVersion.cmake -> /opt/rocm/...").
 RUN cd / && \
     sed -i '/composablekernel/d; /half/d; /nlohmann/d' /requirements.txt && \
     if [ "$USE_FIN" = "ON" ]; then \

@@ -305,7 +305,7 @@ The easiest way to build MIOpen is via Docker. Building the MIOpen Docker image 
 docker buildx version
 ```
 
-The Dockerfile supports two build modes controlled by the `BUILD_TYPE` build argument:
+The Dockerfile supports three build modes controlled by the `BUILD_TYPE` build argument:
 
 ### Option 1: Using a prebuilt ROCm/TheRock image (default)
 
@@ -322,9 +322,35 @@ docker buildx build \
   ../../projects/.
 ```
 
-### Option 2: Building ROCm/TheRock from source (nightly)
+### Option 2: Installing ROCm/TheRock from the prebuilt nightly tarball
 
-This path clones and builds TheRock from source before building the MIOpen environment in a single step. Use this when you need to build against a specific TheRock commit or when no prebuilt image is available:
+This path downloads TheRock's multi-arch nightly release tarball
+(`therock-dist-linux-multiarch-<version>.tar.gz`, which bundles every gfx family plus the
+lib/run/dev components) instead of building TheRock from source, then builds CK and MIOpen on
+top exactly as in the other modes. This is what nightly CI uses (`buildTheRockDockerImage()`):
+much faster and less prone to breaking on unrelated TheRock source-build changes than Option 3.
+The tarball is fetched from an anonymous S3 bucket, so no GitHub token or CI run ID is needed;
+`--latest-release` (used in the Dockerfile) auto-selects the newest nightly by its embedded date.
+
+`THEROCK_ASIC` still selects which archs CK and MIOpen build for; the ROCm base itself is
+arch-agnostic (the tarball already contains all families). `THEROCK_GIT_HASH` is optional and
+only pins the version of TheRock's `build_tools` installer script (not the downloaded ROCm).
+
+```shell
+docker buildx build \
+  --load \
+  --target miopen \
+  --tag miopen-image:gfx1101 \
+  --build-arg BUILD_TYPE=artifact \
+  --build-arg PREFIX=/opt/rocm \
+  --build-arg THEROCK_ASIC=gfx1101 \
+  -f ../../projects/miopen/Dockerfile \
+  ../../projects/.
+```
+
+### Option 3: Building ROCm/TheRock from source
+
+This path clones and builds TheRock from source before building the MIOpen environment in a single step. Use this when you need to build against a specific TheRock commit and no matching CI artifacts/prebuilt image are available, or when validating TheRock source changes directly:
 
 ```shell
 docker buildx build \

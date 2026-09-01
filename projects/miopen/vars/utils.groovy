@@ -273,8 +273,9 @@ def getDockerImageName(dockerArgs)
     return image
 }
 
-// Builds rocm/miopen:therock-<shortHash> from source; returns {image, fullHash, shortHash, skip}.
-// Skips if :therock already carries this hash; reuses the hash-tagged image if it exists.
+// Builds rocm/miopen:therock-<YYYYMMDD> from TheRock's multi-arch nightly release tarball;
+// returns {image, fullHash, shortHash, skip}. Reuses today's date-tagged image if it already
+// exists in the registry (same-day re-run) instead of rebuilding.
 def buildTheRockDockerImage(Map conf=[:])
 {
     env.DOCKER_BUILDKIT=1
@@ -284,7 +285,10 @@ def buildTheRockDockerImage(Map conf=[:])
 
     def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1201" // multiarch builds
 
-    // Read the TheRock hash from the ci-env action (single source of truth).
+    // Pin TheRock's build_tools (the install_rocm_from_artifacts.py installer) to the ref tracked
+    // in the ci-env action, so the tooling that downloads the nightly tarball is reproducible.
+    // The prebuilt ROCm itself comes from the newest multi-arch nightly release (--latest-release
+    // in the Dockerfile), which is date-rolled and not tied to this ref.
     def theRockHash = sh(
         script: """
             grep -A 2 'therock-ref:' ${env.WORKSPACE}/.github/actions/ci-env/action.yml \
@@ -296,51 +300,30 @@ def buildTheRockDockerImage(Map conf=[:])
     ).trim()
 
     def shortHash   = theRockHash.take(7)
-    def hashedImage = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock-${shortHash}"
+    // The nightly tarball rolls daily and its version embeds the date, so tag the base by date.
+    // This also lines up with the dev image's multiarch_dev_<date> convention.
+    def date        = new Date().format('yyyyMMdd')
+    def hashedImage = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock-${date}"
 
-    // Check whether this hash is already live on :therock via its baked-in label.
-    // Pull and inspect are separated so that docker pull stdout does not contaminate the captured label.
-    def lastPromotedHash = ""
-    try {
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
-            lastPromotedHash = sh(
-                script: """
-                    docker inspect \
-                        --format '{{ index .Config.Labels "therock.git.hash" }}' \
-                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
-                """.stripIndent(),
-                returnStdout: true
-            ).trim()
-        }
-    } catch (Exception e) {
-        echo "Could not read label from existing :therock image (first-time run?): ${e.message}"
-    }
-
-    if (lastPromotedHash == theRockHash) {
-        echo "TheRock hash ${shortHash} is already promoted to :therock - skipping build."
-        return [image: null, fullHash: theRockHash, shortHash: shortHash, skip: true]
-    }
-    echo "New TheRock hash detected: ${theRockHash} (previously promoted: '${lastPromotedHash ?: 'none'}')"
-
-    // Reuse the hash-tagged image if a previous nightly already built it.
+    // Reuse today's date-tagged base if a prior run already built it (same-day re-run).
     def imageAlreadyBuilt = false
     withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
         def rc = sh(script: "docker manifest inspect ${hashedImage} > /dev/null 2>&1", returnStatus: true)
         imageAlreadyBuilt = (rc == 0)
     }
     if (imageAlreadyBuilt) {
-        echo "Hash-tagged image ${hashedImage} already exists - reusing without rebuild."
+        echo "Date-tagged image ${hashedImage} already exists - reusing without rebuild."
     } else {
-        echo "Hash-tagged image ${hashedImage} not found - will build now."
+        echo "Date-tagged image ${hashedImage} not found - will build now."
     }
 
     if (!imageAlreadyBuilt) {
         def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
                          "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
                          "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
-                         "--build-arg BUILD_TYPE=build " +
+                         "--build-arg BUILD_TYPE=artifact " +
                          "--label therock.git.hash=${theRockHash} " +
+                         "--label therock.nightly.tag=${date} " +
                          "--target update_therock " +
                          " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
 
@@ -354,6 +337,9 @@ def buildTheRockDockerImage(Map conf=[:])
         def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min " +
                               "--cache-from type=registry,ref=${cacheRef} "
 
+        // The nightly tarball is served from an anonymous S3 bucket, so no GITHUB_TOKEN build
+        // secret is needed (the earlier per-component artifact path required one for the GitHub
+        // Actions API rate limit).
         try {
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 sh """
