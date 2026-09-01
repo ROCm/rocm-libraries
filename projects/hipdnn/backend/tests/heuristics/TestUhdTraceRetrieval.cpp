@@ -10,9 +10,12 @@
  */
 
 #include "heuristics/uhd/EngineRegistry.hpp"
+#include "heuristics/uhd/FeatureExtractor.hpp"
 #include "heuristics/uhd/SelectionEngine.hpp"
 #include "heuristics/uhd/UhdBuiltIn.hpp"
 #include "plugin/HeuristicPlugin.hpp"
+
+#include "GbdtModelTestBuilder.hpp"
 
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_plugin_sdk/HeuristicsPluginApi.h>
@@ -22,8 +25,11 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
+#include <system_error>
+#include <vector>
 
 using namespace hipdnn_backend::heuristics::uhd;
 using hipdnn_backend::plugin::HeuristicPlugin;
@@ -270,6 +276,236 @@ TEST_F(TestUhdTraceRetrieval, TraceJsonCachedAcrossMultipleCalls)
     EXPECT_STREQ(traceJson1, traceJson2);
 
     // Cleanup
+    _plugin->destroyPolicyDescriptor(desc);
+    _plugin->destroyHandle(handle);
+}
+
+// ========== Kernel ranking published through the trace (RFC 0019 §2, §13) ==========
+//
+// The kernel ranking is what the UHD actually computes, and the heuristic plugin ABI
+// returns engine IDs only. It therefore rides the trace channel as `ranked_kernel_ids`.
+
+/// Kernel every declared order puts first: lowest priority value, lowest id, first
+/// registered. Only a model that disagrees with priority can rank it second.
+constexpr int64_t KERNEL_DECLARED_FIRST = 7;
+
+/// Kernel the model puts first: highest priority value, so it lands on the tree's
+/// high-scoring side.
+constexpr int64_t KERNEL_MODEL_FIRST = 9;
+
+constexpr int64_t ENGINE_WITH_MODEL = 400;
+constexpr int64_t ENGINE_WITHOUT_UHD = 401;
+constexpr int64_t ENGINE_UNREGISTERED = 402;
+
+KernelCandidate makeCandidate(int64_t kernelId, int64_t priority)
+{
+    KernelCandidate k;
+    k.kernelId = kernelId;
+    k.priority = priority;
+    return k;
+}
+
+/// Fixture backed by a real tree_data artifact. static_order would not do: it ranks by
+/// declared precedence, so a ranking it produced could not distinguish "the model's
+/// order was preserved" from "the fallback's order was preserved".
+class TestUhdRankedKernelIds : public TestUhdTraceRetrieval
+{
+protected:
+    void SetUp() override
+    {
+        TestUhdTraceRetrieval::SetUp();
+        // Name the artifact after the running test so parallel suites don't collide.
+        const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+        _modelPath = (std::filesystem::temp_directory_path()
+                      / ("uhd_ranking_test_" + std::string(info != nullptr ? info->name() : "unknown")
+                         + ".bin"))
+                         .string();
+    }
+
+    void TearDown() override
+    {
+        std::error_code ec;
+        std::filesystem::remove(_modelPath, ec);
+        TestUhdTraceRetrieval::TearDown();
+    }
+
+    /// Register a tree_data engine whose model inverts the priority order: the tree
+    /// splits on $kernel.priority and scores the high-priority-value side best, so with
+    /// objective=max the model's ranking is the reverse of the priority, id and
+    /// registration orders, which all agree with each other here.
+    void registerPriorityInvertingEngine(int64_t engineId)
+    {
+        namespace uhd_test = hipdnn_backend::heuristics::uhd::testing;
+
+        const std::vector<std::string> signature = {"$kernel.priority"};
+        const auto hash = FeatureExtractor::computeHash(signature);
+
+        uhd_test::GbdtModelTestBuilder::TreeSpec split;
+        split.featureIndices = {0, 0, 0};
+        split.thresholds = {7.0, 0.0, 0.0};
+        split.leftChildren = {1, -1, -1};
+        split.rightChildren = {2, -1, -1};
+        split.leafValues = {0.0, 1.0, 5.0}; // priority <= 7 scores 1.0, above scores 5.0
+        split.defaultLeft = {1, 1, 1};
+
+        uhd_test::GbdtModelTestBuilder builder;
+        builder.setNumFeatures(static_cast<int32_t>(signature.size()))
+            .setFeaturesHash(hash)
+            .setModelVersion("v1.2.3")
+            .addTree(split);
+        ASSERT_TRUE(builder.buildToFile(_modelPath));
+
+        EngineEntry entry;
+        entry.engineId = engineId;
+        entry.uhdConfig.uhdId = "ranking-uhd";
+        entry.uhdConfig.adapterType = "tree_data";
+        entry.uhdConfig.featuresSignature = signature;
+        entry.uhdConfig.featuresHash = hash;
+        entry.uhdConfig.objective = "max";
+        entry.uhdConfig.modelArtifactPath = _modelPath;
+        entry.candidates = {makeCandidate(KERNEL_DECLARED_FIRST, 1),
+                            makeCandidate(KERNEL_MODEL_FIRST, 20)};
+
+        ASSERT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
+    }
+
+    /// Register the same two candidates under a static_order UHD, which ranks by
+    /// priority then id — the exact opposite of the model above.
+    static void registerPriorityOrderedEngine(int64_t engineId)
+    {
+        EngineEntry entry;
+        entry.engineId = engineId;
+        entry.uhdConfig.uhdId = "declared-uhd";
+        entry.uhdConfig.adapterType = "static_order";
+        entry.uhdConfig.staticOrderFields = {"priority", "id"};
+        entry.uhdConfig.objective = "max";
+        entry.candidates = {makeCandidate(KERNEL_DECLARED_FIRST, 1),
+                            makeCandidate(KERNEL_MODEL_FIRST, 20)};
+
+        ASSERT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
+    }
+
+    static std::vector<int64_t> rankedKernelIds(const nlohmann::json& trace)
+    {
+        return trace.at("ranked_kernel_ids").get<std::vector<int64_t>>();
+    }
+
+    std::string _modelPath;
+};
+
+TEST_F(TestUhdRankedKernelIds, TraceCarriesRankingInModelOrder)
+{
+    registerPriorityInvertingEngine(ENGINE_WITH_MODEL);
+
+    auto handle = _plugin->createHandle();
+    ASSERT_NE(handle, nullptr);
+    auto desc = _plugin->createPolicyDescriptor(handle, UHD_POLICY_ID);
+    ASSERT_NE(desc, nullptr);
+
+    const std::array<int64_t, 1> engineIds = {ENGINE_WITH_MODEL};
+    _plugin->setEngineIds(desc, engineIds.data(), engineIds.size());
+    _plugin->finalize(desc);
+
+    const char* traceJson = nullptr;
+    ASSERT_EQ(uhdAbi().policyGetTrace(desc, ENGINE_WITH_MODEL, &traceJson),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    const auto trace = nlohmann::json::parse(traceJson);
+
+    // Without this the next assertion could pass on a degraded selection that merely
+    // happened to agree with the model.
+    ASSERT_TRUE(trace.at("used_model").get<bool>())
+        << "selection degraded, so the order below would be the fallback's: "
+        << trace.dump();
+
+    const std::vector<int64_t> modelOrder = {KERNEL_MODEL_FIRST, KERNEL_DECLARED_FIRST};
+    EXPECT_EQ(rankedKernelIds(trace), modelOrder)
+        << "priority, id and registration order all rank " << KERNEL_DECLARED_FIRST
+        << " first; only the model ranks " << KERNEL_MODEL_FIRST << " first";
+
+    _plugin->destroyPolicyDescriptor(desc);
+    _plugin->destroyHandle(handle);
+}
+
+TEST_F(TestUhdRankedKernelIds, EnginesWithoutARankingStayInThePlanAndCarryNone)
+{
+    registerPriorityInvertingEngine(ENGINE_WITH_MODEL);
+
+    // Registered, but with no UHD at all: selection resolves nothing to rank with, so
+    // it produces no ordering (RFC 0019 §6 step 6 fails open — the engine survives).
+    EngineEntry bare;
+    bare.engineId = ENGINE_WITHOUT_UHD;
+    bare.candidates = {makeCandidate(11, 3)};
+    ASSERT_NO_THROW(EngineRegistry::instance().registerEngine(bare));
+
+    auto handle = _plugin->createHandle();
+    ASSERT_NE(handle, nullptr);
+    auto desc = _plugin->createPolicyDescriptor(handle, UHD_POLICY_ID);
+    ASSERT_NE(desc, nullptr);
+
+    // ENGINE_UNREGISTERED is absent from the registry entirely.
+    const std::vector<int64_t> engineIds
+        = {ENGINE_UNREGISTERED, ENGINE_WITH_MODEL, ENGINE_WITHOUT_UHD};
+    _plugin->setEngineIds(desc, engineIds.data(), engineIds.size());
+    _plugin->finalize(desc);
+
+    EXPECT_EQ(_plugin->getSortedEngineIds(desc), engineIds)
+        << "storing a ranking must not change which engines execute, or in what order";
+
+    const char* traceJson = nullptr;
+    EXPECT_EQ(uhdAbi().policyGetTrace(desc, ENGINE_UNREGISTERED, &traceJson),
+              HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+
+    ASSERT_EQ(uhdAbi().policyGetTrace(desc, ENGINE_WITHOUT_UHD, &traceJson),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    const auto bareTrace = nlohmann::json::parse(traceJson);
+    EXPECT_FALSE(bareTrace.contains("ranked_kernel_ids"))
+        << "no ordering was produced, so none may be reported: " << bareTrace.dump();
+
+    // The ranked engine still reports its ranking, so the two above were skipped
+    // individually rather than the whole store going missing.
+    ASSERT_EQ(uhdAbi().policyGetTrace(desc, ENGINE_WITH_MODEL, &traceJson),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    const std::vector<int64_t> modelOrder = {KERNEL_MODEL_FIRST, KERNEL_DECLARED_FIRST};
+    EXPECT_EQ(rankedKernelIds(nlohmann::json::parse(traceJson)), modelOrder);
+
+    _plugin->destroyPolicyDescriptor(desc);
+    _plugin->destroyHandle(handle);
+}
+
+TEST_F(TestUhdRankedKernelIds, RefinalizeDoesNotServeTheRankingFromTheCachedTrace)
+{
+    // The trace JSON is cached per engine id, and a descriptor may be finalized again
+    // after its engine's UHD is replaced (RFC 0019 §9.2). A cache entry serialized
+    // before that would report the previous run's ranking for the current one.
+    registerPriorityInvertingEngine(ENGINE_WITH_MODEL);
+
+    auto handle = _plugin->createHandle();
+    ASSERT_NE(handle, nullptr);
+    auto desc = _plugin->createPolicyDescriptor(handle, UHD_POLICY_ID);
+    ASSERT_NE(desc, nullptr);
+
+    const std::array<int64_t, 1> engineIds = {ENGINE_WITH_MODEL};
+    _plugin->setEngineIds(desc, engineIds.data(), engineIds.size());
+    _plugin->finalize(desc);
+
+    const char* traceJson = nullptr;
+    ASSERT_EQ(uhdAbi().policyGetTrace(desc, ENGINE_WITH_MODEL, &traceJson),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    const std::vector<int64_t> modelOrder = {KERNEL_MODEL_FIRST, KERNEL_DECLARED_FIRST};
+    ASSERT_EQ(rankedKernelIds(nlohmann::json::parse(traceJson)), modelOrder);
+
+    EngineRegistry::instance().clear();
+    registerPriorityOrderedEngine(ENGINE_WITH_MODEL);
+
+    _plugin->setEngineIds(desc, engineIds.data(), engineIds.size());
+    _plugin->finalize(desc);
+
+    ASSERT_EQ(uhdAbi().policyGetTrace(desc, ENGINE_WITH_MODEL, &traceJson),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    const std::vector<int64_t> declaredOrder = {KERNEL_DECLARED_FIRST, KERNEL_MODEL_FIRST};
+    EXPECT_EQ(rankedKernelIds(nlohmann::json::parse(traceJson)), declaredOrder)
+        << "the second finalize ranked by declared priority; the cache served the first";
+
     _plugin->destroyPolicyDescriptor(desc);
     _plugin->destroyHandle(handle);
 }

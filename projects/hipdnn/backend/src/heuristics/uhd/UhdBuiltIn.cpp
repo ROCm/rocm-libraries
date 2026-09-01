@@ -87,6 +87,13 @@ struct PolicyDescriptor
 
     // RFC 0019 §13: Selection traces per engine for observability
     std::unordered_map<int64_t, SelectionTrace> traces;
+
+    // The kernel ranking is the UHD's actual product (RFC 0019 §2), and the heuristic
+    // plugin ABI carries engine IDs only. It is kept here and published through the
+    // trace channel, which already reaches callers by engine id, so the ranking is
+    // retrievable without an ABI change and without altering which engines execute.
+    std::unordered_map<int64_t, std::vector<int64_t>> rankedKernelIds;
+
     std::unordered_map<int64_t, std::string> traceJsonCache; // Serialized JSON per engine
 
     explicit PolicyDescriptor(Handle* h)
@@ -409,6 +416,11 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
         d->sortedEngineIds.clear();
         d->sortedEngineIds.reserve(d->candidateEngineIds.size());
 
+        // This finalize recomputes every trace and ranking, so serialized copies from a
+        // previous one must not be handed out: a string cached before this run would
+        // report the earlier ranking for the same engine id.
+        d->traceJsonCache.clear();
+
         for(const auto engineId : d->candidateEngineIds)
         {
             d->sortedEngineIds.push_back(engineId);
@@ -430,9 +442,10 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
             // neither outcome may affect the engine's presence above.
             if(result.hasOrdering())
             {
-                // The kernel ranking is computed but has nowhere to go: the heuristic
-                // plugin ABI carries engine IDs only.
-                // TODO(RFC-0017): Extend API to return per-engine kernel ranking.
+                // The ranking has no ABI slot of its own — the plugin ABI carries
+                // engine IDs only — so it is kept in descriptor state and published
+                // through policyGetTrace's JSON, which is already keyed by engine id.
+                d->rankedKernelIds[engineId] = result.sortedKernelIds;
 
                 // Report on trace.usedModel, not `applied`. An engine with no
                 // candidates completes with applied=true but never builds an adapter,
@@ -481,6 +494,11 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
             }
             else
             {
+                // Drop any ranking a previous finalize left for this engine: the trace
+                // above was refreshed unconditionally, so keeping the old ids would
+                // publish a ranking that contradicts the trace explaining its absence.
+                d->rankedKernelIds.erase(engineId);
+
                 UHD_LOG(HIPDNN_SEV_WARN,
                         "policyFinalize: engine %lld produced no ranking (uhd=%s): %s",
                         static_cast<long long>(engineId),
@@ -496,10 +514,11 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
         // run and its vendor precedence would be replaced by raw input order — a
         // worse ordering, asserted by a policy that computed no ordering at all.
         //
-        // The kernel ranking above is the UHD's actual product, and the plugin ABI
-        // cannot carry it yet. Until it can, the honest answer to "did you order these
-        // engines?" is no. Flip this once the ABI returns per-engine kernel rankings
-        // (TODO(RFC-0017)); the engine list is already populated correctly for it.
+        // The kernel ranking above is the UHD's actual product, and it reaches callers
+        // through policyGetTrace rather than this return value, which answers only
+        // "did you order these engines?" — and the honest answer is no. Flip this once
+        // the ABI returns per-engine kernel rankings (TODO(RFC-0017)); the engine list
+        // is already populated correctly for it.
         *outApplied = 0;
         d->finalized = true;
         return HIPDNN_PLUGIN_STATUS_SUCCESS;
@@ -614,6 +633,15 @@ hipdnnPluginStatus_t policyGetTrace(hipdnnHeuristicPolicyDescriptor_t desc,
             j["features_hash_config"] = trace.featuresHashConfig;
         }
         j["features_hash_match"] = trace.featuresHashMatch;
+
+        // The kernel ranking, in model order (best first). This is the only route a
+        // caller has to it: policyGetSortedEngineIds carries engine IDs, and the
+        // ranking is per engine. Absent when selection produced no ordering.
+        const auto rankIt = d->rankedKernelIds.find(engineId);
+        if(rankIt != d->rankedKernelIds.end())
+        {
+            j["ranked_kernel_ids"] = rankIt->second;
+        }
 
         // Cache the JSON string
         d->traceJsonCache[engineId] = j.dump();
