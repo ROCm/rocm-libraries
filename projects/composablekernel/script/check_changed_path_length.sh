@@ -2,12 +2,20 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Runs check_path_length.sh over the files a change adds, modifies or renames.
+# Runs check_path_length.sh over the files a change adds or renames.
 #
-# Scoped to changed files rather than the whole tree because the tree already
-# carries paths over the limit; unrelated work must not be blocked by them, and
-# new paths are what we need to keep short. Deletions are excluded
-# (--diff-filter=AMR) so removing a long path always passes.
+# Scoped to added and renamed files rather than the whole tree because the tree
+# already carries paths over the limit, and new paths are what we need to keep
+# short (--diff-filter=AR).
+#
+# Modifications are deliberately excluded. A pull request that merely edits a
+# pre-existing long file must not be forced into a rename project it did not
+# sign up for: over the last year that would have ambushed a copyright-header
+# sweep touching 385 long files, among others. Additions and renames catch every
+# case where the backlog actually grows -- including the file that caused
+# ROCM-29381, which was added, not modified.
+#
+# Deletions are excluded too, so removing a long path always passes.
 #
 # This wrapper exists so that failure to determine *which* files changed is a
 # hard error rather than a silent pass. Inlined in the Jenkins stage as
@@ -75,7 +83,7 @@ trap 'rm -f "$changed"' EXIT
 # Pathspec '.' limits the diff to the directory this is run from
 # (projects/composablekernel in the Jenkins stage); git still emits
 # repository-relative paths, which is what the checker measures.
-git diff -z --name-only --diff-filter=AMR "$merge_base" HEAD -- . > "$changed"
+git diff -z --name-only --diff-filter=AR "$merge_base" HEAD -- . > "$changed"
 
 # xargs reports a failing child as 123; normalise it so the three exit codes
 # documented above stay distinct.

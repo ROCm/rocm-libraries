@@ -40,6 +40,14 @@ mkdir -p "$UP/script"
 cp "$SCRIPT_DIR/check_path_length.sh" "$SCRIPT_DIR/check_changed_path_length.sh" "$UP/script/"
 chmod +x "$UP/script/"*.sh
 echo base > "$UP/base.txt"
+
+# A long path that is already on develop before any branch exists, so the tests
+# below can distinguish "pre-existing" from "newly added".
+PREEXISTING_DIR="p$(printf 'z%.0s' $(seq 1 230))"
+mkdir -p "$UP/$PREEXISTING_DIR"
+echo original > "$UP/$PREEXISTING_DIR/f.cpp"
+PREEXISTING="$PREEXISTING_DIR/f.cpp"
+
 git -C "$UP" add -A
 git_q -C "$UP" commit --quiet -m base
 
@@ -107,7 +115,33 @@ check "long path in an earlier commit is still caught" 1 develop
 # --- deleting a long path is not blocked ------------------------------------
 git -C "$REPO" rm --quiet -r "$(dirname "$over")"
 git_q -C "$REPO" commit --quiet -m "remove the long path"
-check "deleting a long path passes (--diff-filter=AMR excludes deletions)" 0 develop
+check "deleting a long path passes (--diff-filter=AR excludes deletions)" 0 develop
+
+# --- MODIFYING a pre-existing long file is not blocked ----------------------
+# The point of --diff-filter=AR. A change that merely edits a file that was
+# already too long must not be forced into a rename project. Guard against a
+# regression back to AMR.
+git -C "$REPO" checkout --quiet -b modify-only origin/develop
+echo "edited" >> "$REPO/$PREEXISTING"
+git -C "$REPO" add -A
+git_q -C "$REPO" commit --quiet -m "edit a pre-existing long file"
+check "modifying a pre-existing long file passes" 0 develop
+
+# --- but RENAMING it to another long path is still blocked ------------------
+# Renames are in scope: the author is already changing the name, so this is the
+# moment to make it short.
+git -C "$REPO" checkout --quiet -b rename-long origin/develop
+git -C "$REPO" mv "$PREEXISTING" "${PREEXISTING%.cpp}_renamed.cpp"
+git_q -C "$REPO" commit --quiet -m "rename a long path to another long path"
+check "renaming a long path to another long path is rejected" 1 develop
+
+# --- renaming a long path to a SHORT one is the fix, and must pass ----------
+git -C "$REPO" checkout --quiet -b rename-short origin/develop
+git -C "$REPO" mv "$PREEXISTING" short_after_rename.cpp
+git_q -C "$REPO" commit --quiet -m "shorten a long path"
+check "renaming a long path to a short one passes" 0 develop
+
+git -C "$REPO" checkout --quiet feature
 
 # --- the base branch can also come from the environment ---------------------
 tests=$(( tests + 1 ))

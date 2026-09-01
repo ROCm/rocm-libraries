@@ -26,7 +26,7 @@
 # which no common filesystem (ext4, NTFS, APFS) can store at all.
 #
 # Used both by the Jenkinsfile "Static Checks" stage -- where it is fed the
-# files a pull request adds or modifies, so pre-existing long paths do not
+# files a pull request adds or renames, so pre-existing long paths do not
 # block unrelated work -- and by developers locally:
 #
 #   git ls-files | xargs script/check_path_length.sh   # audit the whole tree

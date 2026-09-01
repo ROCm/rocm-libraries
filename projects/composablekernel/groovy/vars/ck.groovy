@@ -1351,10 +1351,12 @@ def runStaticChecks() {
     // absolute path stays under the Windows MAX_PATH of 260; ninja's Stat() does
     // not honour LongPathsEnabled, so an over-long source path fails the build.
     //
-    // Scoped to the files this change adds, modifies or renames rather than the
-    // whole tree: the tree already carries paths over the limit, and unrelated
-    // work must not be blocked by them. New paths are what we need to keep short.
-    // Deletions are excluded (--diff-filter=AMR) so removing a long path passes.
+    // Scoped to the files this change adds or renames (--diff-filter=AR) rather
+    // than the whole tree: the tree already carries paths over the limit, and
+    // unrelated work must not be blocked by them. New paths are what we need to
+    // keep short. Modifications are excluded on purpose, so a PR that merely
+    // edits a pre-existing long file is not forced into a rename project.
+    // Deletions are excluded too, so removing a long path always passes.
     //
     // The diff itself lives in check_changed_path_length.sh, not inline here: a
     // `git diff ... | xargs` pipeline returns xargs's status, so a base ref that
