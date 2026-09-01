@@ -521,9 +521,8 @@ struct GenerationRecipeAccess {
             recipe.complexPolicy_);
     }
 
-    static uint64_t randomDomain(const GenerationRecipe& recipe,
-                                 const GenerationRecipe::BoundComponent& component) {
-        return recipe.settings_.randomDomain ^ component.randomDomain;
+    static uint64_t randomDomain(const GenerationRecipe::BoundComponent& component) {
+        return component.randomDomain;
     }
 
     static double generatedNumericalValue(const GenerationRecipe& recipe,
@@ -533,9 +532,8 @@ struct GenerationRecipeAccess {
         if (component.component.isRaw())
             throw std::invalid_argument(
                 "Raw generation recipe does not produce a numerical value.");
-        return generationValue(component.component, recipe.settings_.seed,
-                               randomDomain(recipe, component), indices, shape, logicalIndex,
-                               destinationType);
+        return generationValue(component.component, recipe.settings_.seed, randomDomain(component),
+                               indices, shape, logicalIndex, destinationType);
     }
 
     static uint64_t generatedRawValue(const GenerationRecipe& recipe,
@@ -545,7 +543,7 @@ struct GenerationRecipeAccess {
         if (!component.component.isRaw())
             throw std::invalid_argument("Numerical generation recipe does not produce raw bits.");
         return rawGenerationValue(component.component, recipe.settings_.seed,
-                                  randomDomain(recipe, component), indices, shape, logicalIndex,
+                                  randomDomain(component), indices, shape, logicalIndex,
                                   destinationType);
     }
 
@@ -558,8 +556,8 @@ struct GenerationRecipeAccess {
 
         const ptrdiff_t elementOffset = destination.layout().elementOffset(indices);
         const uint64_t raw =
-            rawGenerationValue(bound.component, recipe.settings_.seed, randomDomain(recipe, bound),
-                               indices, destination.shape(), logicalIndex, destination.type());
+            rawGenerationValue(bound.component, recipe.settings_.seed, randomDomain(bound), indices,
+                               destination.shape(), logicalIndex, destination.type());
         const uint64_t offsetBits = bitOffset(destination.type(), elementOffset);
         if (bits <= 32) {
             writePackedBits(destination.rawEncodedBackingStorage(), offsetBits, bits,
@@ -594,31 +592,28 @@ struct GenerationRecipeAccess {
                     if (policy.real.component.isRaw())
                         throw std::invalid_argument(
                             "Raw generation does not support complex output.");
-                    const double value =
-                        generationValue(policy.real.component, recipe.settings_.seed,
-                                        randomDomain(recipe, policy.real), indices,
-                                        destination.shape(), logicalIndex, destination.type());
+                    const double value = generationValue(
+                        policy.real.component, recipe.settings_.seed, randomDomain(policy.real),
+                        indices, destination.shape(), logicalIndex, destination.type());
                     destination.storeFrom(indices, std::complex<double>(value, 0.0));
                 } else if constexpr (std::is_same_v<Policy, GenerationRecipe::ReplicatedPolicy>) {
                     if (policy.value.component.isRaw())
                         throw std::invalid_argument(
                             "Raw generation does not support complex output.");
-                    const double value =
-                        generationValue(policy.value.component, recipe.settings_.seed,
-                                        randomDomain(recipe, policy.value), indices,
-                                        destination.shape(), logicalIndex, destination.type());
+                    const double value = generationValue(
+                        policy.value.component, recipe.settings_.seed, randomDomain(policy.value),
+                        indices, destination.shape(), logicalIndex, destination.type());
                     destination.storeFrom(indices, std::complex<double>(value, value));
                 } else {
                     if (policy.real.component.isRaw() || policy.imaginary.component.isRaw())
                         throw std::invalid_argument(
                             "Raw generation does not support complex output.");
-                    const double realValue =
-                        generationValue(policy.real.component, recipe.settings_.seed,
-                                        randomDomain(recipe, policy.real), indices,
-                                        destination.shape(), logicalIndex, destination.type());
+                    const double realValue = generationValue(
+                        policy.real.component, recipe.settings_.seed, randomDomain(policy.real),
+                        indices, destination.shape(), logicalIndex, destination.type());
                     const double imaginaryValue =
                         generationValue(policy.imaginary.component, recipe.settings_.seed,
-                                        randomDomain(recipe, policy.imaginary), indices,
+                                        randomDomain(policy.imaginary), indices,
                                         destination.shape(), logicalIndex, destination.type());
                     destination.storeFrom(indices, std::complex<double>(realValue, imaginaryValue));
                 }

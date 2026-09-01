@@ -30,12 +30,11 @@ void registerGenerationBindings(nb::module_& module) {
 
     nb::class_<GenerationRecipeSettings>(
         module, "GenerationRecipeSettings",
-        "Seed, logical index order, and random domain shared by one immutable recipe.")
-        .def(nb::init<uint64_t, IndexOrder, uint64_t>(), "seed"_a = uint64_t{0},
-             "index_order"_a = IndexOrder::FirstDimensionFastest, "random_domain"_a = uint64_t{0})
+        "Seed and logical index order shared by one immutable recipe.")
+        .def(nb::init<uint64_t, IndexOrder>(), "seed"_a = uint64_t{0},
+             "index_order"_a = IndexOrder::FirstDimensionFastest)
         .def_rw("seed", &GenerationRecipeSettings::seed)
-        .def_rw("index_order", &GenerationRecipeSettings::indexOrder)
-        .def_rw("random_domain", &GenerationRecipeSettings::randomDomain);
+        .def_rw("index_order", &GenerationRecipeSettings::indexOrder);
 
     nb::class_<ConstantGenerationParameters>(module, "ConstantGenerationParameters",
                                              "One numerical value for constant generation.")
@@ -172,10 +171,8 @@ void registerGenerationBindings(nb::module_& module) {
                     "settings"_a = GenerationRecipeSettings{})
         .def_prop_ro("seed", &GenerationRecipe::seed)
         .def_prop_ro("index_order", &GenerationRecipe::indexOrder)
-        .def_prop_ro("random_domain", &GenerationRecipe::randomDomain)
         .def("with_seed", &GenerationRecipe::withSeed, "seed"_a)
-        .def("with_index_order", &GenerationRecipe::withIndexOrder, "index_order"_a)
-        .def("with_random_domain", &GenerationRecipe::withRandomDomain, "random_domain"_a);
+        .def("with_index_order", &GenerationRecipe::withIndexOrder, "index_order"_a);
 
     module.def("generate_tensor",
                static_cast<Tensor (*)(ScalarType, Shape, const GenerationRecipe&)>(&generate),

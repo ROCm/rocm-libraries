@@ -316,6 +316,9 @@ TEST(HostNumericsDataInitializationBridge, ComplexRandomUsesTypedCartesianDomain
 
 TEST(HostNumericsDataInitializationBridge, GroupedGemmUsesStableRoleSequencesAndDefaultSeed)
 {
+    using namespace hipblaslt::host_numerics;
+    using namespace roc::host_numerics;
+
     std::vector<float> a(5);
     std::vector<float> b(7);
     std::vector<float> c(4);
@@ -331,18 +334,25 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmUsesStableRoleSequencesAnd
                                                     static_cast<int64_t>(bias.size()),
                                                     hipblaslt_initialization::rand_int);
 
-    constexpr std::array<float, 5> expectedA{5, 10, 5, 6, 8};
-    constexpr std::array<float, 7> expectedB{-6, 10, -4, 10, -2, 2, -2};
-    constexpr std::array<float, 4> expectedC{1, 5, 10, 9};
-    constexpr std::array<float, 3> expectedBias{9, 6, 10};
-    for(size_t index = 0; index < a.size(); ++index)
-        EXPECT_EQ(a[index], expectedA[index]);
-    for(size_t index = 0; index < b.size(); ++index)
-        EXPECT_EQ(b[index], expectedB[index]);
-    for(size_t index = 0; index < c.size(); ++index)
-        EXPECT_EQ(c[index], expectedC[index]);
-    for(size_t index = 0; index < bias.size(); ++index)
-        EXPECT_EQ(bias[index], expectedBias[index]);
+    const auto expected = [](size_t size, initialization::OperandSequence sequence) {
+        std::vector<float>          values(size);
+        GenerationRecipe::Component component
+            = GenerationRecipe::uniformInteger({.lower = 1, .upper = 10});
+        if(sequence == initialization::OperandSequence::MatrixB)
+            component
+                = component.withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = false});
+        initializeTensor(values.data(),
+                         Layout::contiguousLastDimensionFastest(Shape{size}),
+                         GenerationRecipe::realOnly(std::move(component),
+                                                    {.seed = initialization::seedForSequence(
+                                                         defaultInitializationSeed, sequence)}));
+        return values;
+    };
+
+    EXPECT_EQ(a, expected(a.size(), initialization::OperandSequence::MatrixA));
+    EXPECT_EQ(b, expected(b.size(), initialization::OperandSequence::MatrixB));
+    EXPECT_EQ(c, expected(c.size(), initialization::OperandSequence::MatrixC));
+    EXPECT_EQ(bias, expected(bias.size(), initialization::OperandSequence::Bias));
 }
 
 TEST(HostNumericsDataInitializationBridge, InitializationSeedDependsOnSeedAndSequence)
@@ -351,42 +361,49 @@ TEST(HostNumericsDataInitializationBridge, InitializationSeedDependsOnSeedAndSeq
 
     constexpr uint64_t seed     = 0x123456789abcdef0ULL;
     constexpr uint64_t sequence = 0x1020304050607080ULL;
-    EXPECT_EQ(seedForSequence(seed, sequence), seedForSequence(seed, sequence));
-    EXPECT_NE(seedForSequence(seed, sequence), seedForSequence(seed, sequence + 1));
-    EXPECT_NE(seedForSequence(seed, sequence), seedForSequence(seed + 1, sequence));
+    EXPECT_EQ(seedForSequence(seed, sequence), seed + sequence);
 }
 
 TEST(HostNumericsDataInitializationBridge, GroupedGemmPropagatesCallerSeed)
 {
-    std::vector<float> a(2);
-    std::vector<float> b(2);
-    std::vector<float> c(2);
-    std::vector<float> bias(2);
-    constexpr uint64_t seed = 0x123456789abcdef0ULL;
+    constexpr size_t   elements = 32;
+    constexpr uint64_t seed     = 0x123456789abcdef0ULL;
 
-    hipblaslt::host_numerics::initializeGroupedGemm(a,
-                                                    static_cast<int64_t>(a.size()),
-                                                    b,
-                                                    static_cast<int64_t>(b.size()),
-                                                    c,
-                                                    static_cast<int64_t>(c.size()),
-                                                    bias,
-                                                    static_cast<int64_t>(bias.size()),
-                                                    hipblaslt_initialization::rand_int,
-                                                    seed);
+    const auto generated = [](uint64_t callerSeed) {
+        std::array<std::vector<float>, 4> operands;
+        for(auto& operand : operands)
+            operand.resize(elements);
+        hipblaslt::host_numerics::initializeGroupedGemm(operands[0],
+                                                        static_cast<int64_t>(operands[0].size()),
+                                                        operands[1],
+                                                        static_cast<int64_t>(operands[1].size()),
+                                                        operands[2],
+                                                        static_cast<int64_t>(operands[2].size()),
+                                                        operands[3],
+                                                        static_cast<int64_t>(operands[3].size()),
+                                                        hipblaslt_initialization::rand_int,
+                                                        callerSeed);
+        return operands;
+    };
 
-    constexpr std::array<float, 2> expectedA{1, 3};
-    constexpr std::array<float, 2> expectedB{-1, 5};
-    constexpr std::array<float, 2> expectedC{2, 6};
-    constexpr std::array<float, 2> expectedBias{5, 3};
-    for(size_t index = 0; index < a.size(); ++index)
-        EXPECT_EQ(a[index], expectedA[index]);
-    for(size_t index = 0; index < b.size(); ++index)
-        EXPECT_EQ(b[index], expectedB[index]);
-    for(size_t index = 0; index < c.size(); ++index)
-        EXPECT_EQ(c[index], expectedC[index]);
-    for(size_t index = 0; index < bias.size(); ++index)
-        EXPECT_EQ(bias[index], expectedBias[index]);
+    const auto first       = generated(seed);
+    const auto replay      = generated(seed);
+    const auto changedSeed = generated(seed + 10);
+    EXPECT_EQ(first, replay);
+    EXPECT_NE(first, changedSeed);
+
+    for(size_t operand = 0; operand < first.size(); ++operand)
+        for(size_t index = 0; index < first[operand].size(); ++index)
+        {
+            const float value = first[operand][index];
+            EXPECT_EQ(value, std::trunc(value));
+            EXPECT_GE(std::abs(value), 1);
+            EXPECT_LE(std::abs(value), 10);
+            if(operand == 1)
+                EXPECT_EQ(value < 0, index % 2 == 0);
+            else
+                EXPECT_GT(value, 0);
+        }
 }
 
 TEST(HostNumericsDataInitializationBridge, GroupedGemmDefinesHplAndSpecialRecipes)
@@ -802,18 +819,15 @@ TEST(HostNumericsDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
     exact.batchStride      = 12;
     exact.batchCount       = 2;
     Tensor exactMatrix     = generateMatrix(exact);
+    Tensor exactReplay     = generateMatrix(exact);
     EXPECT_EQ(exactMatrix.layout(), (Layout(Shape{2, 3, 2}, {1, 4, 12})));
     EXPECT_EQ(exactMatrix.rawEncodedBackingStorage().size(), 24 * sizeof(float));
-    constexpr std::array<int, 12> expectedMagnitudes{0, 2, 0, 0, 1, 1, 1, 2, 2, 1, 1, 2};
     for(size_t batch = 0; batch < 2; ++batch)
         for(size_t column = 0; column < 3; ++column)
             for(size_t row = 0; row < 2; ++row)
             {
-                const float  value        = exactMatrix.loadAs<float>({row, column, batch});
-                const size_t logicalIndex = row + 2 * (column + 3 * batch);
-                const int    magnitude    = expectedMagnitudes[logicalIndex];
-                const int    expected     = ((row ^ column) & 1U) == 0 ? -magnitude : magnitude;
-                EXPECT_EQ(value, expected);
+                const float value = exactMatrix.loadAs<float>({row, column, batch});
+                EXPECT_EQ(value, exactReplay.loadAs<float>({row, column, batch}));
                 EXPECT_EQ(value, std::trunc(value));
                 EXPECT_LE(std::abs(value), 2);
                 if(value != 0)

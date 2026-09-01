@@ -143,14 +143,12 @@ namespace hipblaslt::host_numerics
                                           float                    maximum,
                                           uint32_t                 seed)
         {
-            auto recipe = [&](GenerationRecipe::Component component,
-                              uint64_t randomDomain = mx_generation_random_domain_version_1::data) {
+            auto recipe = [&](GenerationRecipe::Component component) {
                 return GenerationRecipe::realOnly(
                     std::move(component),
                     {
-                        .seed         = seed,
-                        .indexOrder   = IndexOrder::FirstDimensionFastest,
-                        .randomDomain = randomDomain,
+                        .seed       = seed,
+                        .indexOrder = IndexOrder::FirstDimensionFastest,
                     });
             };
 
@@ -172,11 +170,9 @@ namespace hipblaslt::host_numerics
             case hipblaslt_initialization::zero:
                 return MxDataGeneration::quantize(recipe(GenerationRecipe::zero()));
             case hipblaslt_initialization::norm_dist:
-                return MxDataGeneration::quantize(recipe(
-                    GenerationRecipe::normal(
-                        {.mean              = 0.0,
-                         .standardDeviation = dataType == ScalarType::Float4E2M1 ? 5.0 : 1.0}),
-                    mx_generation_random_domain_version_1::normal));
+                return MxDataGeneration::quantize(recipe(GenerationRecipe::normal(
+                    {.mean              = 0.0,
+                     .standardDeviation = dataType == ScalarType::Float4E2M1 ? 5.0 : 1.0})));
             case hipblaslt_initialization::rand_int:
             {
                 std::pair<int, int> range{1, 10};
