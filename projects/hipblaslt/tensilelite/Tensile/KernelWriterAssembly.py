@@ -64,7 +64,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
   VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
-  VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
+  VLShiftLeftB64, VLShiftLeftOrB32, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
   VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
   GlobalLoadB32, GlobalLoadB64, GlobalLoadB96, GlobalLoadB128, GlobalLoadD16B16, GlobalLoadD16HIB16, \
@@ -3585,6 +3585,44 @@ class KernelWriterAssembly(KernelWriter):
       else:
         if not tP["isSwizzled"]:
           module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["tReg"]), comment="gro%s%s_%u"%(tP["tensorChar"], tP["tileChar"], 0) ))
+        elif not kernel["DirectToVgpr%s"%tc]:
+          # LDS-staged: tReg is a plain tile index m; only the address is redirected.
+          #   addr_tile(m) = (m / swzMorN) * (numKr * swzBlockSize)   [block along M]
+          #                + (m % swzMorN) * laneSize                 [row inside block]
+          # An address, not an index: the two terms have different coefficients, so
+          # no single stride downstream can linearise it, and numKr depends on K so
+          # the block coefficient is runtime. laneSize divides both terms and is
+          # applied once with a fused add-shift.
+          #
+          # A local m works because the macro-tile base is swzMorN-aligned and the
+          # SRD already carries the same block-major wg*MT*align(K, swizzleK).
+          swzMorN = kernel["MatrixInstM"] if tP["isA"] else kernel["MatrixInstN"]
+          swzStride = tP["swizzleK"]
+          laneSize = tP["swizzleLaneSize"]
+          swzBlockSize = swzMorN * swzStride
+          module.addComment0("SWZ-%s: gro%s%s_0 = [(m/%u)*numKr*%u + m%%%u] * laneSize(%u)"
+                             %(tc, tP["tensorChar"], tP["tileChar"], swzMorN, swzMorN, swzMorN, laneSize))
+          # Outlives this block: the increment loop below consumes it. Wave-uniform,
+          # so it stays scalar.
+          swzStepSgpr = self.sgprPool.checkOut(1, tag="graTileOffsets_swz_step")
+          tmpV = self.vgprPool.checkOut(1, tag="graTileOffsets_swz_tmp")
+          module.add(SAddU32(sgpr(swzStepSgpr), sgpr("SizesSum"), swzStride-1, comment="align K to %u"%swzStride))
+          module.add(SLShiftRightB32(dst=sgpr(swzStepSgpr), src=sgpr(swzStepSgpr), shiftHex=hex(log2(swzStride)),
+                                     comment="numKr = align(K,%u) / %u"%(swzStride, swzStride)))
+          module.add(SMulI32(dst=sgpr(swzStepSgpr), src0=sgpr(swzStepSgpr), src1=hex(swzMorN),
+                             comment="blkStride = numKr * %u, in laneSize(%u) units"%(swzMorN, laneSize)))
+          module.add(VLShiftRightB32(dst=vgpr(tmpV), shiftHex=hex(log2(swzMorN)), src=vgpr(tP["gpr"]["tReg"]),
+                                     comment="m / %u"%swzMorN))
+          module.add(VMulLOU32(dst=vgpr(tmpV), src0=sgpr(swzStepSgpr), src1=vgpr(tmpV), comment="* blkStride"))
+          module.add(VAndB32(dst=vgpr(v), src0=hex(swzMorN-1), src1=vgpr(tP["gpr"]["tReg"]), comment="m %% %u"%swzMorN))
+          module.add(VAddLShiftLeftU32(dst=vgpr(v), shiftHex=hex(log2(laneSize)), src0=vgpr(tmpV), src1=vgpr(v),
+                                       comment="gro%s%s_0 = (block + row) * laneSize(%u)"%(tP["tensorChar"], tP["tileChar"], laneSize)))
+          # m advances by LSP between perpendicular loads, and the validator pins
+          # LSP to a multiple of swzMorN, so the step is a whole number of blocks.
+          if tP["nrt"] > 1:
+            module.add(SMulI32(dst=sgpr(swzStepSgpr), src0=sgpr(swzStepSgpr), src1=hex((stride // swzMorN) * laneSize),
+                               comment="per-load step = (LSP(%u)/%u) blocks * laneSize(%u)"%(stride, swzMorN, laneSize)))
+          self.vgprPool.checkIn(tmpV)
         else:
           lsu = kernel["LocalSplitU"] # localSplitU
           if tP["isA"]:
@@ -3649,6 +3687,9 @@ class KernelWriterAssembly(KernelWriter):
         if not tP["isSwizzled"]:
           module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=strideValue, \
             src1=vgpr(v+l-1), comment="gro%s%s_%u += %s"%(tP["tensorChar"], tP["tileChar"], l, strideIdx) ))
+        elif not kernel["DirectToVgpr%s"%tc]:
+          module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=sgpr(swzStepSgpr), \
+            src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u += LSP blocks"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
         # swizzle
         else:
           # VW > 1
@@ -3660,7 +3701,10 @@ class KernelWriterAssembly(KernelWriter):
             module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=vgpr(swzBlkVWSizeVgpr), \
               src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
       if tP["isSwizzled"]:
-        self.vgprPool.checkIn(swzBlkVWSizeVgpr)
+        if not kernel["DirectToVgpr%s"%tc]:
+          self.sgprPool.checkIn(swzStepSgpr)
+        else:
+          self.vgprPool.checkIn(swzBlkVWSizeVgpr)
 
       # TODO- check for swizzle
       if numExtraPackedOffsetsPerTile:
@@ -3704,6 +3748,20 @@ class KernelWriterAssembly(KernelWriter):
     tc = tP["tensorChar"]
     if kernel["_UseSgprForGRO"]:
       tP["gpr"]["unrollOffsets"] = tP["gpr"]["uReg"]
+    # A block's swzMorN rows sit between consecutive k groups, so for laneSize-
+    # aligned k (guaranteed by GRVW == laneSize) the offset is exactly k*swzMorN.
+    elif tP["isSwizzled"] and not kernel["DirectToVgpr%s"%tc]:
+      numUnrollOffsets = tP["nru"]
+      tP["gpr"]["unrollOffsets"] = self.vgprPool.checkOut(numUnrollOffsets, "unrollOffsets", self.states.preventVgprOverflowDuringNewTile)
+      v = tP["gpr"]["unrollOffsets"]
+      swzMorN = kernel["MatrixInstM"] if tP["isA"] else kernel["MatrixInstN"]
+      module.addComment0("SWZ-%s: gro%s%s_0 = k * swzMorN(%u)"%(tc, tP["tensorChar"], self.states.unrollChar, swzMorN))
+      module.add(VLShiftLeftB32(dst=vgpr(v), shiftHex=hex(log2(swzMorN)), src=vgpr(tP["gpr"]["uReg"])))
+      # Coalesced loads step k by LSC, so the offset steps by LSC*swzMorN.
+      step = kernel[tP["lsc"]] * swzMorN
+      for l in range(1, tP["nru"]):
+        module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=hex(step), src1=vgpr(v+l-1),
+                             comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], self.states.unrollChar, l)))
     # swizzle
     elif tP["isSwizzled"]:
       numUnrollOffsets = tP["nru"]
@@ -4064,7 +4122,7 @@ class KernelWriterAssembly(KernelWriter):
       # An operand spanning several loads (gfx11 fp16/bf16) must land in consecutive G2L
       # registers, since mfmaIter reads it as one contiguous range. Hence the sub-blocks
       # are innermost. loadsPerLane == 1 reduces this to the plain swap.
-      lpl = tP["swizzleLoadsPerLane"] if tP["isSwizzled"] else 1
+      lpl = tP["swizzleLoadsPerLane"] if (tP["isSwizzled"] and kernel["DirectToVgpr%s"%tc]) else 1
       for paraBase in range(0, tP["nrc"], lpl):
         for sPara in range(0, int(tP["nrcv"]/tP["nrcvpi"])):
           for perp in range(0, tP["nrp"]):
@@ -5489,9 +5547,16 @@ class KernelWriterAssembly(KernelWriter):
     # DTV case, use tlu path
     isDTVAB = (tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]
     isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
-    isSwizzledOrTr = tP["isSwizzled"] or isTr
+    # Only the DirectToVgpr path wants the swizzle-native, wave-based tile
+    # assignment: it exists so the loaded registers are already in matrix-
+    # instruction order for DirectToVgpr. LDS staging keeps the ordinary
+    # (tile, unroll) assignment, so tReg/uReg must come from the normal
+    # path here and only the global *address* is redirected (graTileOffsets /
+    # graUnrollOffsets).
+    isSwizzledDTV = tP["isSwizzled"] and kernel["DirectToVgpr%s"%tc]
+    isSwizzledOrTr = isSwizzledDTV or isTr
     swizzledOrTrName = ""
-    if tP["isSwizzled"]:
+    if isSwizzledDTV:
       swizzledOrTrName = "SwizzleTensor%s" % tc
     elif isTr:
       swizzledOrTrName = "GLTr%s"%tc
@@ -5536,7 +5601,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, kernel["WavefrontSize"], tmpVgprRes))
 
       # Calc numKr
-      if tP["isSwizzled"]:
+      if isSwizzledDTV:
         tmp = self.sgprPool.checkOut(1, tag="lwaTileAssignment_isSwizzled_tmp")
         numKr = sgpr(tmp)
         swzStride = tP["swizzleK"]
@@ -5567,7 +5632,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(VAndB32(dst=vgpr(qReg), src0=hex(WvG_N-1), src1=vgpr(qReg), comment="%s: LSU Case: wave_id (along_N) %%= MIWG[1]"%(swizzledOrTrName)))
         module.add(VMulU32U24(dst=vgpr(qReg), src0=numKr, src1=vgpr(qReg), comment="%s: wave_id (along_N) *= numKr"%(swizzledOrTrName)))
 
-      if tP["isSwizzled"]:
+      if isSwizzledDTV:
         self.sgprPool.checkIn(tmp)
       elif isTr:
         module.add(VBfeU32(dst=vgpr(tmp), src0=vgpr(dividendReg), src1=int(tP["bpeGR"])+1, src2=1, comment="%s: offset for the right half of the tile"%(swizzledOrTrName)))
@@ -5638,6 +5703,41 @@ class KernelWriterAssembly(KernelWriter):
           comment="LSU Offset: offset += lsuoffset" ))
         self.vgprPool.checkIn(wave_id)
 
+    elif tP["isSwizzled"] and not kernel["DirectToVgpr%s"%tc]:
+      # LDS-staged: assign lanes in swizzle order so a wave's global read is one
+      # contiguous run -- lane L takes row L%swzMorN and k-group L/swzMorN, giving
+      # 16 rows x 16 elements = 512 B on gfx11 wave32 with bf16.
+      #
+      # Serial already holds that decomposition, since WavefrontSize is
+      # swzMorN*kGroupsPerWave and the validator pins mBlocks and kGroupsPerWave to
+      # powers of two:
+      #   [0,lgM) lane%M | [lgM,lgW) lane/M | [lgW,lgW+lgB) wave%B | [lgW+lgB,) wave/B
+      # so m and k are each two of those fields concatenated.
+      #
+      # qReg/rReg stay ordinary (m, k) indices, so the swizzled global address and
+      # the LDS write address both derive from them unchanged. rReg is left in
+      # laneSize units for the shared "unroll *= glvw" below; glvw == laneSize.
+      swzMorN = kernel["MatrixInstM"] if tP["isA"] else kernel["MatrixInstN"]
+      kGroupsPerWave = kernel["WavefrontSize"] // swzMorN
+      mBlocks = kernel[tP["lsp"]] // swzMorN
+      lgM, lgW = log2(swzMorN), log2(kernel["WavefrontSize"])
+      lgB, lgG = log2(mBlocks), log2(kGroupsPerWave)
+      module.addComment0("SWZ-%s: lane -> (row = L%%%u, kgroup = L/%u), %u kgroup(s)/wave"
+                         %(tc, swzMorN, swzMorN, kGroupsPerWave))
+      tmpV = self.vgprPool.checkOut(1, tag="lwaTileAssignment_swz_tmp")
+      module.add(VAndB32(dst=vgpr(tmpV), src0=hex(swzMorN-1), src1=vgpr(dividendReg),
+                         comment="lane %% swzMorN(%u)"%swzMorN))
+      module.add(VBfeU32(dst=vgpr(qReg), src0=vgpr(dividendReg), src1=lgW, src2=lgB,
+                         comment="waveId %% mBlocks(%u)"%mBlocks))
+      module.add(VLShiftLeftOrB32(dst=vgpr(qReg), shiftHex=hex(lgM), src0=vgpr(qReg), src1=vgpr(tmpV),
+                                  comment="SWZ: tile index m"))
+      module.add(VBfeU32(dst=vgpr(tmpV), src0=vgpr(dividendReg), src1=lgM, src2=lgG,
+                         comment="lane / swzMorN(%u)"%swzMorN))
+      module.add(VLShiftRightB32(dst=vgpr(rReg), shiftHex=hex(lgW+lgB), src=vgpr(dividendReg),
+                                 comment="waveId / mBlocks(%u)"%mBlocks))
+      module.add(VLShiftLeftOrB32(dst=vgpr(rReg), shiftHex=hex(lgG), src0=vgpr(rReg), src1=vgpr(tmpV),
+                                  comment="SWZ: unroll index k / laneSize"))
+      self.vgprPool.checkIn(tmpV)
     else:
       module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpVgprRes))
 
