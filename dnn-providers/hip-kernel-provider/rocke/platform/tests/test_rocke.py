@@ -6464,7 +6464,13 @@ class TestExtendedHelperBuilds(unittest.TestCase):
         b.global_atomic_add_pk_bf16(ptr, idx, b.zero_vec(BF16, 2))
         b.ret()
         ll = lower_kernel_to_llvm(b.kernel)
-        self.assertIn("@llvm.amdgcn.global.atomic.fadd.v2bf16", ll)
+        # There is no llvm.amdgcn.global.atomic.fadd.v2bf16 in the shipping ROCm
+        # LLVM; the packed-bf16 atomic goes through a generic atomicrmw plus the
+        # AMDGPU memory-model metadata that selects global_atomic_pk_add_bf16.
+        self.assertIn("atomicrmw fadd ptr addrspace(1)", ll)
+        self.assertIn("<2 x bfloat>", ll)
+        self.assertIn("amdgpu.no.fine.grained.memory", ll)
+        self.assertNotIn("@llvm.amdgcn.global.atomic.fadd.v2bf16", ll)
 
     def test_umul_hi_i32_lowers_via_zext_mul_lshr_trunc(self):
         from rocke.core.ir import I32, IRBuilder
