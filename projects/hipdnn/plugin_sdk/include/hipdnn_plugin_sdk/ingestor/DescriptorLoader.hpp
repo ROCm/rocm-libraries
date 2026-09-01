@@ -774,6 +774,21 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
         }
     }
 
+    // A calibrated score is comparable across engines, and RFC 0019 §11.3 defines that
+    // comparison on an absolute throughput metric -- necessarily higher-wins. A UHD
+    // claiming both is not expressing a preference a consumer could honour: it asks two
+    // engines to be ranked against each other while reporting their scores in opposite
+    // directions. Rejected at parse (RFC 0019.13 §15.1) rather than at comparison time,
+    // where the symptom would be an inverted cross-engine choice with nothing to blame.
+    //
+    // `min` on an uncalibrated score is ordinary and stays legal: a model trained on
+    // latency ranks ascending and simply declines cross-engine comparison.
+    if(heuristic.objective == "min" && heuristic.score.calibrated)
+    {
+        fail("UHD declares objective 'min' with a calibrated score in " + where
+             + "; a calibrated score is cross-engine comparable and must be 'max'");
+    }
+
     parseHeuristicBody(root, heuristic, where);
     return heuristic;
 }
