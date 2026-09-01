@@ -44,7 +44,8 @@ namespace
         storage.reserve(values.size());
         for(uint8_t value : values)
             storage.push_back(static_cast<std::byte>(value));
-        return Tensor::takeOwnershipOfEncodedBackingStorage(ScalarType::E8M0, Layout::contiguousLastDimensionFastest(shape), std::move(storage));
+        return Tensor::takeOwnershipOfEncodedBackingStorage(
+            ScalarType::E8M0, Layout::contiguousLastDimensionFastest(shape), std::move(storage));
     }
 
     void testUnscaledReference()
@@ -143,7 +144,7 @@ namespace
 
         const std::array<uint8_t, 1> singleScaleA{128};
         const std::array<uint8_t, 1> singleScaleB{130};
-        auto singleScaleProblem
+        auto                         singleScaleProblem
             = makeHostReferenceProblem(inputs,
                                        hostScaleTensor(DataType::E8M0, singleScaleA, 1, 4, 4),
                                        hostScaleTensor(DataType::E8M0, singleScaleB, 1, 4, 4),

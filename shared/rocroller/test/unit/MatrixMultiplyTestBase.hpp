@@ -116,7 +116,7 @@ namespace MatrixMultiplyTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f32_16x16x4_f32);
             }
 
-            if((isF8<TA> || isF8<TB>) && (wave_k >= 64))
+            if((isF8<TA> || isF8<TB>)&&(wave_k >= 64))
             {
                 REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4,
                                         GPUCapability::HasWMMA_f8f6f4);
@@ -433,16 +433,16 @@ namespace MatrixMultiplyTest
                     ASSERT_FALSE(scaleB);
                 }
                 auto referenceProblem = HostNumerics::makeHostReferenceProblem(
-                    HostNumerics::hostTensor(
-                        descA,
-                        A,
-                        scaleA ? HostNumerics::DataTypeInterpretation::BlockScaled
-                               : HostNumerics::DataTypeInterpretation::Unscaled),
-                    HostNumerics::hostTensor(
-                        descB,
-                        B,
-                        scaleB ? HostNumerics::DataTypeInterpretation::BlockScaled
-                               : HostNumerics::DataTypeInterpretation::Unscaled),
+                    HostNumerics::hostTensor(descA,
+                                             A,
+                                             scaleA
+                                                 ? HostNumerics::DataTypeInterpretation::BlockScaled
+                                                 : HostNumerics::DataTypeInterpretation::Unscaled),
+                    HostNumerics::hostTensor(descB,
+                                             B,
+                                             scaleB
+                                                 ? HostNumerics::DataTypeInterpretation::BlockScaled
+                                                 : HostNumerics::DataTypeInterpretation::Unscaled),
                     HostNumerics::hostTensor(descD, c_C),
                     std::move(referenceScaleA),
                     std::move(referenceScaleB),
@@ -682,15 +682,15 @@ namespace MatrixMultiplyTest
 
                 std::vector<TD> c_C(M * N, TD{});
 
-                auto referenceProblem = HostNumerics::makeHostReferenceProblem(
-                    HostNumerics::hostTensor(descA, A),
-                    HostNumerics::hostTensor(descB, B),
-                    HostNumerics::hostTensor(descD, c_C),
-                    std::nullopt,
-                    std::nullopt,
-                    0,
-                    1.0f,
-                    0.0f);
+                auto referenceProblem
+                    = HostNumerics::makeHostReferenceProblem(HostNumerics::hostTensor(descA, A),
+                                                             HostNumerics::hostTensor(descB, B),
+                                                             HostNumerics::hostTensor(descD, c_C),
+                                                             std::nullopt,
+                                                             std::nullopt,
+                                                             0,
+                                                             1.0f,
+                                                             0.0f);
                 auto c_D = HostNumerics::convertHostReference<TD>(
                     HostNumerics::computeHostReference(referenceProblem));
 
@@ -837,15 +837,15 @@ namespace MatrixMultiplyTest
                 ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                auto referenceProblem = HostNumerics::makeHostReferenceProblem(
-                    HostNumerics::hostTensor(descA, A),
-                    HostNumerics::hostTensor(descB, B),
-                    HostNumerics::hostTensor(descC, C),
-                    std::nullopt,
-                    std::nullopt,
-                    0,
-                    1.0f,
-                    1.0f);
+                auto referenceProblem
+                    = HostNumerics::makeHostReferenceProblem(HostNumerics::hostTensor(descA, A),
+                                                             HostNumerics::hostTensor(descB, B),
+                                                             HostNumerics::hostTensor(descC, C),
+                                                             std::nullopt,
+                                                             std::nullopt,
+                                                             0,
+                                                             1.0f,
+                                                             1.0f);
                 auto c_D = HostNumerics::convertHostReference<T>(
                     HostNumerics::computeHostReference(referenceProblem));
 
