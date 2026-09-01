@@ -50,7 +50,7 @@ from .benchmark_log import main as benchmark_log_main
 from .features import build_features_signature, compute_features_hash
 from .lgbm_to_flatbuffer import convert
 from .promote import add_promote_arguments, run_promote
-from .train_uhd import train_model
+from .train_uhd import find_constant_feature_columns, train_model
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,6 +74,20 @@ _COST_METRIC_MARKERS = (
     "error",
     "loss",
 )
+
+#: Fraction of the requested feature set that, being constant, stops looking like
+#: pinned knobs and starts looking like a thin corpus.
+#:
+#: 2/3 is picked against the case this tool exists for: a rocKE attention corpus has 8
+#: of 14 kernel fields pinned by the kernel matcher before ranking begins -- 57%, the
+#: ORDINARY reading -- so a threshold at or below that would fire on every normal run
+#: and be learned as noise, which is worse than not warning at all. 2/3 clears it with
+#: margin and still catches the shapes that really are suspicious (2 of 3, 3 of 4).
+#:
+#: The proportion is a smell, not a diagnosis: nothing in a CSV distinguishes
+#: pinned-by-construction from under-sampled, so the message says which two readings
+#: are possible and points at the corpus rather than asserting one.
+CONSTANT_FEATURE_WARN_FRACTION = 2 / 3
 
 
 def _looks_like_cost_metric(target: str) -> bool:
@@ -138,6 +152,16 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         nargs="+",
         help="Feature column names to train on",
+    )
+    parser.add_argument(
+        "--keep-constant-features",
+        action="store_true",
+        dest="keep_constant_features",
+        help="Keep feature columns that never vary in the input. By default such a "
+        "column is dropped from features_signature: it cannot separate candidates, and "
+        "it costs a feature extraction per candidate score at runtime. Pass this when "
+        "the column does vary in the world and this corpus is merely thin, so the "
+        "signature matches the richer corpus you intend to retrain on.",
     )
     parser.add_argument(
         "--target",
@@ -305,6 +329,70 @@ def _run_train(args: argparse.Namespace) -> int:
         logger.error("Missing target column: %s", args.target)
         return 1
 
+    # RFC 0019 §7.2: features_hash is computed over the signature actually trained, so
+    # the drop decision has to happen here, before training and before the signature is
+    # built -- not as a post-hoc edit of either.
+    constants = find_constant_feature_columns(df, args.features)
+    constant_listing = ", ".join(f"{name}={value!r}" for name, value in constants)
+    features = list(args.features)
+    dropped: list[str] = []
+
+    if constants and len(constants) == len(args.features):
+        # Fails with the override too. The flag chooses a signature; it cannot make a
+        # column vary, and the degenerate model is the same either way.
+        logger.error(
+            "Every requested feature column is constant in %s, so there is nothing to "
+            "train on: %s. A model over columns that never vary scores every candidate "
+            "identically; shipping one is worse than shipping none, because the engine "
+            "would rank by a model that cannot discriminate instead of falling back to "
+            "its declared order. --keep-constant-features does not help -- it changes "
+            "the signature, not the fact that no column varies. Widen the corpus, or "
+            "pass --features that vary in it.",
+            input_path,
+            constant_listing,
+        )
+        return 1
+
+    if constants:
+        if args.keep_constant_features:
+            logger.warning(
+                "KEPT %d constant feature column(s) at --keep-constant-features: %s. "
+                "They stay in features_signature so the hash matches the richer corpus "
+                "you intend to retrain on, but they inform nothing in this model and "
+                "cost a feature extraction per candidate score at runtime.",
+                len(constants),
+                constant_listing,
+            )
+        else:
+            for name, value in constants:
+                logger.warning(
+                    "DROPPED constant feature column %s: every row is %r. It cannot "
+                    "separate one candidate from another, so it is NOT in the trained "
+                    "features_signature and features_hash is over the smaller set. If "
+                    "this column does vary in the world and this corpus is merely thin, "
+                    "retrain with --keep-constant-features -- better, widen the corpus.",
+                    name,
+                    value,
+                )
+            dropped = [name for name, _ in constants]
+            features = [name for name in args.features if name not in set(dropped)]
+
+        if len(constants) / len(args.features) >= CONSTANT_FEATURE_WARN_FRACTION:
+            logger.warning(
+                "%d of %d requested feature columns are constant (%.0f%%, at or above "
+                "the %.0f%% thin-corpus threshold). Kernels that bake their geometry in "
+                "pin knobs by construction, and a pinned knob really is uninformative -- "
+                "but nothing in a CSV tells that apart from a corpus that only ever "
+                "sampled one value, and for a thin corpus dropping is the WRONG fix. "
+                "Check that %s spans the problems and kernels you expect to rank before "
+                "trusting this model.",
+                len(constants),
+                len(args.features),
+                100.0 * len(constants) / len(args.features),
+                100.0 * CONSTANT_FEATURE_WARN_FRACTION,
+                input_path,
+            )
+
     if args.objective == "max" and _looks_like_cost_metric(args.target):
         logger.warning(
             "Target '%s' looks like a cost metric but --objective is 'max', so the "
@@ -313,7 +401,7 @@ def _run_train(args: argparse.Namespace) -> int:
             args.target,
         )
 
-    logger.info("Training on features: %s", args.features)
+    logger.info("Training on features: %s", features)
     logger.info("Target column: %s (objective: %s)", args.target, args.objective)
     if args.group_by:
         logger.info("GroupKFold columns: %s", args.group_by)
@@ -325,7 +413,7 @@ def _run_train(args: argparse.Namespace) -> int:
     try:
         model = train_model(
             df,
-            args.features,
+            features,
             args.target,
             args.group_by,
             num_boost_round=args.num_boost_round,
@@ -339,7 +427,7 @@ def _run_train(args: argparse.Namespace) -> int:
     model.save_model(str(lgbm_path))
     logger.info("Saved LightGBM model to %s", lgbm_path)
 
-    features_signature = build_features_signature(args.features)
+    features_signature = build_features_signature(features)
     features_hash = compute_features_hash(features_signature)
     fb_path = output_dir / "model.bin"
     convert(
@@ -394,7 +482,13 @@ def _run_train(args: argparse.Namespace) -> int:
 
     manifest = {
         "uhd_id": uhd_id,
-        "features": args.features,
+        # What was asked for and what was trained, separately: a manifest that recorded
+        # only one of them would hide that the emitted signature is not the caller's.
+        "requested_features": list(args.features),
+        "features": features,
+        "constant_features": [{"column": name, "value": value} for name, value in constants],
+        "dropped_constant_features": dropped,
+        "keep_constant_features": bool(args.keep_constant_features),
         "features_signature": features_signature,
         "features_hash": features_hash,
         "target": args.target,
@@ -418,6 +512,8 @@ def _run_train(args: argparse.Namespace) -> int:
     print(f"  descriptor:     {descriptor_path}")
     print(f"  model artifact: {fb_path} ({model.num_trees()} trees)")
     print(f"  features hash:  {features_hash}")
+    if dropped:
+        print(f"  dropped (constant): {', '.join(dropped)}")
     print(
         "\nThe engine's UED must name this heuristic by id:\n"
         f'  "heuristic": "{uhd_id}"\n'

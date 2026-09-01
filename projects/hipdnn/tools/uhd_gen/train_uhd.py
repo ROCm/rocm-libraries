@@ -12,6 +12,7 @@ hipDNN's UHD system. Key differences:
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING
 
 import lightgbm as lgb
@@ -69,6 +70,58 @@ def build_feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> np.ndarra
         columns.append(encoded)
 
     return np.column_stack(columns)
+
+
+def _python_scalar(value):
+    """A pandas/numpy cell as a plain Python scalar.
+
+    The values reported here are also written into train_manifest.json. `np.int64` and
+    friends are not JSON-serialisable, so leaving them boxed would raise TypeError at
+    the manifest write -- after training has already spent its minutes -- and lose the
+    run. Non-finite floats become null for the same reason: `json.dump` would emit the
+    Python-only `NaN` literal, which no other JSON reader accepts.
+    """
+    item = value.item() if hasattr(value, "item") else value
+    if isinstance(item, float) and not math.isfinite(item):
+        return None
+    return item
+
+
+def find_constant_feature_columns(
+    df: pd.DataFrame, feature_cols: list[str]
+) -> list[tuple[str, object]]:
+    """The requested feature columns that never vary, paired with their one value.
+
+    A column with a single value across the corpus cannot separate one candidate from
+    another: every tree split on it would be degenerate. Carrying it anyway bloats
+    features_signature, changes features_hash, and buys a feature extraction per
+    candidate score at runtime (RFC 0019 §7.2) for no ranking signal at all.
+
+    Detection only. What to do about it is a policy question this cannot answer: a
+    column is constant either *by construction* -- the kernel matcher pinned it, as
+    rocKE's attention kernels pin 8 of their 14 fields, and it can never vary among the
+    candidates the model will rank -- or because the *corpus* is thin, in which case the
+    column does vary in the world and dropping it yields a model that cannot generalise.
+    A CSV cannot tell the two apart, so the caller decides (see --keep-constant-features
+    in __main__.py) and this function refuses to guess.
+
+    Returned in the caller's requested order so messages and the manifest read the way
+    the --features list was typed.
+    """
+    if df.empty:
+        # No rows observed, so no column has been seen to vary or not. Reporting all of
+        # them constant here would turn an empty corpus into a misleading "your features
+        # are useless" report instead of the empty-corpus failure it actually is.
+        return []
+
+    constants = []
+    for name in feature_cols:
+        series = df[name]
+        # dropna=False: a column of all-NaN is constant too, and a column of one value
+        # plus NaN genuinely varies -- the runtime would see two different cells.
+        if series.nunique(dropna=False) <= 1:
+            constants.append((name, _python_scalar(series.iloc[0])))
+    return constants
 
 
 def train_model(
