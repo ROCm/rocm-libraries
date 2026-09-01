@@ -25,6 +25,7 @@
  * ************************************************************************ */
 
 #include "check_numerics_matrix.hpp"
+#include "check_synchronizer.hpp"
 #include "definitions.h"
 #include "handle.h"
 #include "rocblaslt_mat_utils.hpp"
@@ -243,6 +244,9 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
 
     if(st == rocblaslt_status_success)
     {
+        // No-op unless HIPBLASLT_CHECK_SYNCHRONIZER is set.
+        hipblaslt_check_synchronizer_scan(handle, stream, "rocblaslt_matmul_impl");
+
         const uint32_t call_id = hipblaslt_check_numerics_begin_call(handle);
         if(call_id != 0)
         {
@@ -726,7 +730,9 @@ rocblaslt_status
                                         matmul_descr[i]->act0,
                                         matmul_descr[i]->act1,
                                         0,
-                                        (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
+                                        (char*)handle->Synchronizer
+                                            + (hipblaslt_synchronizer_ints_per_gemm * i
+                                               * sizeof(int)),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
@@ -1404,7 +1410,9 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
+                                        (char*)handle->Synchronizer
+                                            + (hipblaslt_synchronizer_ints_per_gemm * i
+                                               * sizeof(int)),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,

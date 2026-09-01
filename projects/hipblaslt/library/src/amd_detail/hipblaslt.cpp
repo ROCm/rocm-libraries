@@ -161,8 +161,9 @@ try
     // TODO: Synchronizer size pass into predicate SynchronizerSizeCheck
     // 1K just for small size now, need to cal corner case if support all situations
     void* d_Synchronizer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&d_Synchronizer, 16 * 409600 * sizeof(int)));
-    CHECK_HIP_ERROR(hipMemset(d_Synchronizer, 0, sizeof(int) * 16 * 409600));
+    constexpr size_t synchronizer_bytes = hipblaslt_synchronizer_ints * sizeof(int);
+    CHECK_HIP_ERROR(hipMalloc(&d_Synchronizer, synchronizer_bytes));
+    CHECK_HIP_ERROR(hipMemset(d_Synchronizer, 0, synchronizer_bytes));
 
     err = hipGetDevice(&deviceId);
     if(err == hipSuccess)

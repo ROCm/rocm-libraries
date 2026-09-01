@@ -149,6 +149,7 @@ def _set_all_gp(monkeypatch):
         "NumBenchmarks": 1,
         "NumElementsToValidate": 0,
         "NumElementsToValidateWinner": -1,
+        "CheckSynchronizer": False,
         "EnqueuesPerSync": 1,
         "MaxEnqueuesPerSync": -1,
         "SyncsPerBenchmark": 1,
@@ -510,6 +511,19 @@ class TestWriteClientConfigIniPlain:
                                  "NumElementsToValidateWinner": -1,
                              })
         assert "num-elements-to-validate=-1" in content
+
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_check_synchronizer_reaches_the_client(self, tmp_path, monkeypatch, enabled):
+        """CheckSynchronizer must always be emitted, in both states.
+
+        The check is on by default at both ends, so a dropped or renamed
+        parameter would not disable it -- it would leave CheckSynchronizer
+        False unhonoured, silently scanning the configs that opt out.
+        """
+        pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
+        content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT,
+                             extra_gp={"CheckSynchronizer": enabled})
+        assert f"check-synchronizer={enabled}" in content
 
     def test_print_tensor_flags_written_when_set(self, tmp_path, monkeypatch):
         """Lines 667-686: PrintTensor* flags written to INI when enabled."""

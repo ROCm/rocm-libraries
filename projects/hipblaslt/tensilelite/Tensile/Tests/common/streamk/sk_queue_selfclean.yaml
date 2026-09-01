@@ -1,0 +1,81 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Regression guard for the per-XCD work-queue self-reset. Only the Synchronizer
+# dirty-buffer check can catch a regression here: the residue corrupts a later
+# launch, not this one, so the results of this config stay correct either way.
+#
+# A queue counter's atomic_inc auto-reset bound assumes queue q receives exactly
+# W_q = distribute(skGrid, q) home fetches, which holds only while the value
+# feeding `% numQueues` densely covers [0, skGrid). Two settings below break
+# that: WorkGroupMappingXCC -1 introduces a remap that is not count-preserving,
+# and the sizes give a tile count that does not block evenly over the queues.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # NumXCD is 8 only on gfx942/gfx950; elsewhere the single queue is trivially balanced
+
+GlobalParameters:
+  # Mode 1 = dynamic sub-path; mode 0 (static) has no work queue.
+  StreamKHybridMode: [1]
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  MaxWorkspaceSize: 134217728
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  SleepPercent: 50
+
+BenchmarkProblems:
+
+  - # SGEMM NT - dynamic work queue, both SK4 and the SK5 dynamic sub-path
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [4, 5]
+        - 1LDSBuffer: [1]
+        - DepthU: [16]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - GlobalSplitU: [0]
+        - LocalReadVectorWidth: [1]
+        # MT 128x128.
+        - MatrixInstruction:
+          - [32, 32, 2, 1, 1, 2,2, 2,2]
+        - MIArchVgpr: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - TransposeLDS: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WorkGroupMapping: [1]
+        # -1 = auto-WGM; host resolves it to NUM_XCD (8) at launch.
+        - WorkGroupMappingXCC: [-1]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # 20, 9 and 42 tiles; none divisible by the 8 queues.
+          - Exact: [640, 512, 1, 512]
+          - Exact: [384, 384, 1, 256]
+          - Exact: [768, 896, 1, 256]
