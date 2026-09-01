@@ -1254,7 +1254,15 @@ def _tluCoopWaveId(writer, kernel, module, tileInfo, dst):
   perStrip = max(1, int(getattr(tileInfo, "grWavesPerStrip", 1)))
   kSplit = max(1, coop // perStrip)
   if kSplit <= 1:
-    return _tluWaveAxisId(writer, kernel, module, tc, dst)
+    ok = _tluWaveAxisId(writer, kernel, module, tc, dst)
+    # The index is a position inside one strip, so it wraps at perStrip.  Only
+    # when a single strip spans every axis wave is that the axis id itself; with
+    # more than one strip the axis waves past the first group repeat the same
+    # positions in the next strip, which _tluStripIdx then steps to.
+    if ok and perStrip > 1:
+      module.add(VAndB32(dst=vgpr(dst), src0=vgpr(dst), src1=hex(perStrip - 1),
+                 comment="%s: position within the strip (axisId %% %u)" % (tc, perStrip)))
+    return ok
   # index = (axisId % perStrip) * kSplit + otherId, a bijection onto [0, coop).
   wavesize = kernel["WavefrontSize"]
   mWaves = kernel["MIWaveGroup"][0]
@@ -1286,6 +1294,26 @@ def _tluCoopWaveId(writer, kernel, module, tileInfo, dst):
   return True
 
 
+def _tluStripIdx(writer, kernel, module, tc, ti, dst):
+  """Which free-dim strip this wave's fetch group owns, into dst.
+
+  grWavesPerStrip axis waves share a strip; the axis waves past that own the
+  next strip along the free dim.  Returns False when the free dim is a single
+  strip, so callers can skip the step.
+  """
+  strips = int(ti.globalSubtileGrid[0])
+  perStrip = max(1, int(getattr(ti, "grWavesPerStrip", 1)))
+  if strips <= 1 or perStrip <= 1:
+    return False
+  assert perStrip & (perStrip - 1) == 0, \
+         "grWavesPerStrip must be a power of two to shift, got %u" % perStrip
+  if not _tluWaveAxisId(writer, kernel, module, tc, dst):
+    return False
+  module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=hex(perStrip.bit_length() - 1),
+             src=vgpr(dst), comment="%s: strip = axisId / %u" % (tc, perStrip)))
+  return True
+
+
 def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
   """VGPR holding this wave's free-dim (M/N) global byte offset, or None.
 
@@ -1312,10 +1340,11 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
     writer.vgprPool.checkIn(dst)
     return _tluKSliceGlobalOffset(writer, kernel, module, tileInfo) if wavesPerStrip <= 1 else None
   if wavesPerStrip > 1:
-    # Shared strip: it already spans every axis-wave's free-dim
-    # extent, so waves do not step along the free dim -- they share the strip
-    # and split its K rows.  Wave a starts at K row a*kRowsPerWave.  K is the
-    # strided dim for NT, so this needs the runtime K stride.
+    # Shared strip: the waves sharing one split its K rows, so wave a starts at
+    # K row a*kRowsPerWave.  K is the strided dim for NT, so this needs the
+    # runtime K stride.  A strip does not span the whole free dim when the tile
+    # takes more than one, so the fetch groups past the first also step along it
+    # -- that step is added after the K term, which is in bytes by then.
     # Units must match what the per-lane GR offset walks:
     #  - col_scatter: the load index IS the K column (col = col_group*N + L), so
     #    a wave owning numGRPerSubtile consecutive loads starts that many K
@@ -1340,6 +1369,20 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
     module.add(vectorMultiplyBpe(dst, dst, float(tileInfo.bpe),
           comment="%s: elements -> bytes" % tc))
     writer.sgprPool.checkIn(tmpS)
+    stripVgpr = writer.vgprPool.checkOut(1, tag="_tluWaveAxisStrip_%s" % tc)
+    if _tluStripIdx(writer, kernel, module, tc, tileInfo, stripVgpr):
+      subtileM = int(tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0])
+      stripBytes = int(subtileM * tileInfo.bpe)
+      tmpS2 = writer.sgprPool.checkOut(1, tag="_tluWaveAxisStrip_s_%s" % tc,
+                                       preventOverflow=False)
+      module.add(SMovB32(dst=sgpr(tmpS2), src=hex(stripBytes),
+            comment="%s: free-dim bytes per strip" % tc))
+      module.add(VMulLOU32(dst=vgpr(stripVgpr), src0=sgpr(tmpS2), src1=vgpr(stripVgpr),
+            comment="%s: strip * %u" % (tc, stripBytes)))
+      module.add(VAddU32(dst=vgpr(dst), src0=vgpr(dst), src1=vgpr(stripVgpr),
+            comment="%s: + free-dim strip offset" % tc))
+      writer.sgprPool.checkIn(tmpS2)
+    writer.vgprPool.checkIn(stripVgpr)
     return dst
   localSub0 = int(tileInfo.localSubtileGrid[0])
   subtileM = int(tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0])
@@ -1712,10 +1755,11 @@ def _grDTLInitBase_tlu(writer, kernel, module, tc, ti):
   wavesPerStrip = int(getattr(ti, "grWavesPerStrip", 1))
   coopWaves = int(getattr(ti, "grCoopWaves", 1))
   if wavesPerStrip > 1:
-    # Shared strip: the fetching waves all write into the SAME strip, each
-    # owning a contiguous run of DTL load-blocks (its share of the strip's K
-    # rows).  numGRPerSubtile is already the per-wave load count, and one load
-    # block occupies wavesize*loadWidth bytes plus the swizzle pad.
+    # Shared strip: the waves sharing one write into it at a contiguous run of
+    # DTL load-blocks each (its share of the strip's K rows).  numGRPerSubtile is
+    # already the per-wave load count, and one load block occupies
+    # wavesize*loadWidth bytes plus the swizzle pad.  Groups owning a later strip
+    # add its stride below, matching the free-dim step on the global side.
     blkBytes = grLoadBlockBytes(kernel["WavefrontSize"], ti)
     perWaveBytes = int(ti.numGRPerSubtile * blkBytes)
   else:
@@ -1734,7 +1778,20 @@ def _grDTLInitBase_tlu(writer, kernel, module, tc, ti):
     module.add(VMulLOU32(dst=vgpr(wv), src0=sgpr(tmpS), src1=vgpr(wv),
                comment="%s: wave LDS base = axisId*%d" % (tc, perWaveBytes)))
     writer.sgprPool.checkIn(tmpS)
-    if wavesPerStrip <= 1:
+    if wavesPerStrip > 1:
+      st = writer.vgprPool.checkOut(1, tag="_grDTLInit_tlu_strip_%s" % tc)
+      if _tluStripIdx(writer, kernel, module, tc, ti, st):
+        tmpS2 = writer.sgprPool.checkOut(1, tag="_grDTLInit_tlu_strip_s_%s" % tc,
+                                         preventOverflow=False)
+        module.add(SMovB32(dst=sgpr(tmpS2), src=hex(int(stripStride)),
+                   comment="%s: LDS bytes per strip" % tc))
+        module.add(VMulLOU32(dst=vgpr(st), src0=sgpr(tmpS2), src1=vgpr(st),
+                   comment="%s: strip * %u" % (tc, int(stripStride))))
+        module.add(VAddU32(dst=vgpr(wv), src0=vgpr(wv), src1=vgpr(st),
+                   comment="%s: + strip LDS offset" % tc))
+        writer.sgprPool.checkIn(tmpS2)
+      writer.vgprPool.checkIn(st)
+    else:
       _grDTLAddKSlice(writer, kernel, module, tc, ti, wv)
     module.add(SNop(waitState=0, comment="wait for VGPR"))
     module.add(VReadfirstlaneB32(dst=sgpr(base), src=vgpr(wv),
