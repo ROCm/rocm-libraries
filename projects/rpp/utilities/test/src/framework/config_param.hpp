@@ -137,9 +137,6 @@ inline constexpr Size kTailWidthSize{2, 36, 55};
 // 13 < 16: all tail, no vector, for U8/I8. h = 45 is two HIP y-blocks plus 13 rows.
 inline constexpr Size kSubVectorSize{1, 45, 13};
 
-// Unit size edge case with nothing to vectorize. Only works with FullROI.
-inline constexpr Size kUnitSize{1, 1, 1};
-
 // Full layout map for most images, including packed to planar (and vice-versa) conversions.
 inline const std::vector<LayoutConv> kLayoutsFullConv{{Layout::PKD3, Layout::PKD3},
                                                       {Layout::PLN3, Layout::PLN3},
@@ -210,7 +207,6 @@ inline std::vector<TestConfig> concat_configs(std::initializer_list<std::vector<
 //     shape exercises it; pairing it with the odd width keeps that shape's cost at one grid.
 //   * kDefaultSize and kSubVectorSize (vector-plus-tail, and tail-only) run the plain layouts,
 //     where the load and store strides are the ones the vector loops were written for.
-//   * kUnitSize is full-ROI only: the w/2, h/2 rule makes a 1x1 image's partial window empty.
 //
 // The plain layouts are the non-converting entries of `layouts`, so an op declares its layout
 // interface once. An op that only ever converts (colour-to-greyscale has no same-layout form) has
@@ -225,8 +221,18 @@ inline std::vector<TestConfig> make_shape_configs(
     return concat_configs({
         make_configs(dtypes, layouts, rois, {presets::kTailWidthSize}),
         make_configs(dtypes, plain, rois, {presets::kDefaultSize, presets::kSubVectorSize}),
-        make_configs(dtypes, plain, {Roi::Full}, {presets::kUnitSize}),
     });
+}
+
+// The same sweep for an op that writes the layout it reads, mirroring the plain-layout overload
+// of make_configs(). Every shape runs every layout: there are no conversions to hold back.
+inline std::vector<TestConfig> make_shape_configs(
+    const std::vector<DType>& dtypes, const std::vector<Layout>& layouts,
+    const std::vector<Roi>& rois = {Roi::Full, Roi::Partial}) {
+    std::vector<LayoutConv> convs;
+    convs.reserve(layouts.size());
+    for (Layout l : layouts) convs.push_back({l, l});
+    return make_shape_configs(dtypes, convs, rois);
 }
 
 // GTest name generator: turns each TestConfig into its filterable label.

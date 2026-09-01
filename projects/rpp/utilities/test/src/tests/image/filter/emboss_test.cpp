@@ -131,13 +131,7 @@ TEST_P(EmbossTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Filter, EmbossTest,
     ::testing::ValuesIn(with_params<EmbossParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial}),
+        make_shape_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv),
         {EmbossParams{1.0f, 3}, EmbossParams{1.0f, 5}, EmbossParams{2.0f, 3},
          EmbossParams{2.0f, 5}})),
     op_config_name<EmbossParams>);

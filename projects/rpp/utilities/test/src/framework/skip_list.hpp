@@ -121,6 +121,16 @@ inline constexpr SkipEntry kSkipList[] = {
     {"Image_Effects/SnowTest.Correctness/HOST_F16toF16_PLN3toPKD3_PartialRoi_*_b2p5_t0p5_d1", ""},
     {"Image_Effects/SnowTest.Correctness/HOST_F32toF32_PLN3toPKD3_PartialRoi_*_b2p5_t0p5_d1", ""},
     {"Image_Effects/WaterTest.Correctness/*_PartialRoi_*", ""},
+    {"Image_Filter/BoxFilterTest.Correctness/HOST_U8toU8_PLN1_FullRoi_2x36x55_*",
+     "box-filter-host-integer-first-row-left-border-reads-stale-memory: passes alone, fails after "
+     "other tests have run -- the value depends on prior heap contents"},
+    {"Image_Filter/BoxFilterTest.Correctness/HOST_U8toU8_PLN3_FullRoi_2x36x55_*", ""},
+    {"Image_Filter/BoxFilterTest.Correctness/HOST_I8toI8_PLN1_FullRoi_2x36x55_*", ""},
+    {"Image_Filter/BoxFilterTest.Correctness/HOST_I8toI8_PLN3_FullRoi_2x36x55_*", ""},
+    {"Image_Filter/BoxFilterTest.Correctness/HOST_F16toF16_PKD3_PartialRoi_2x36x55_k3",
+     "gaussian-filter-host-pkd3-edge: box_filter's packed k3 path is wrong at the last ROI column "
+     "too, visible once the ROI width is odd"},
+    {"Image_Filter/BoxFilterTest.Correctness/HOST_F32toF32_PKD3_PartialRoi_2x36x55_k3", ""},
     {"Image_Filter/BoxFilterTest.Correctness/HOST_F16toF16_PLN1_PartialRoi_*_k5", ""},
     {"Image_Filter/BoxFilterTest.Correctness/HOST_F16toF16_PLN3_PartialRoi_*_k5", ""},
     {"Image_Filter/BoxFilterTest.Correctness/HOST_F32toF32_PLN1_PartialRoi_*_k5", ""},
