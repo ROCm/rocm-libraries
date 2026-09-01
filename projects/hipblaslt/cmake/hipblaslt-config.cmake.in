@@ -6,7 +6,13 @@ include(CMakeFindDependencyMacro)
 if(@HIPBLASLT_ENABLE_HOST@)
     find_dependency(hipblas-common)
 endif()
-find_dependency(origami)
+# Origami is bundled with hipBLASLt, not distributed as an independent ROCm
+# package. Resolve the co-installed config even when the caller supplies only
+# hipblaslt_DIR instead of the whole prefix in CMAKE_PREFIX_PATH.
+find_dependency(origami CONFIG
+    PATHS "${CMAKE_CURRENT_LIST_DIR}/../origami"
+          "${CMAKE_CURRENT_LIST_DIR}/origami"
+    NO_DEFAULT_PATH)
 
 include("${CMAKE_CURRENT_LIST_DIR}/hipblaslt-targets.cmake")
 

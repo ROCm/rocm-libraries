@@ -167,7 +167,30 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                     set(STINKYTOFU_BUILD_PYTHON OFF CACHE BOOL
                         "Build StinkyTofu Python bindings" FORCE)
                 endif()
-                add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
+                block()
+                    if(NOT ROCISA_STANDALONE)
+                        # hipBLASLt owns the installed codegen payload. Let
+                        # stinkytofu's native install rules join its devel
+                        # component instead of copying the same library here.
+                        set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME devel)
+                    endif()
+                    add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
+                endblock()
+                if(NOT ROCISA_STANDALONE)
+                    # EXCLUDE_FROM_ALL also omits a subdirectory's install
+                    # script from its parent. Keep the build private while
+                    # retaining stinkytofu as the native owner of the
+                    # production install rules. The child script contains
+                    # explicit tools/runtime components too, so force only
+                    # its devel rules while it is included.
+                    install(CODE
+                        "set(_stinkytofu_install_component \"\${CMAKE_INSTALL_COMPONENT}\")
+set(CMAKE_INSTALL_COMPONENT devel)
+include(\"${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/cmake_install.cmake\")
+set(CMAKE_INSTALL_COMPONENT \"\${_stinkytofu_install_component}\")
+unset(_stinkytofu_install_component)"
+                        COMPONENT devel)
+                endif()
                 set(_stinkytofu_from_subdirectory TRUE)
             else()
                 message(FATAL_ERROR "stinkytofu not found via find_package or sibling directory")
@@ -248,17 +271,25 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         BUILD_RPATH "${_st_lib_dir}"
     )
     if(_stinkytofu_from_subdirectory AND _stinkytofu_shared)
-        # Source-built sibling: no installed libstinkytofu exists, so the wheel carries
-        # its own copy next to _rocisa and loads it from there.
-        set_target_properties(_rocisa PROPERTIES INSTALL_RPATH "$ORIGIN")
-        # Windows has no RPATH; copy stinkytofu.dll next to _rocisa.pyd so the loader
-        # finds it at runtime.
-        if(WIN32)
-            add_custom_command(TARGET _rocisa POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_FILE:stinkytofu::stinkytofu>
-                    $<TARGET_FILE_DIR:_rocisa>
-            )
+        if(ROCISA_STANDALONE)
+            # A wheel cannot assume a ROCm-prefix stinkytofu exists, so carry
+            # the source-built library beside _rocisa.
+            set_target_properties(_rocisa PROPERTIES INSTALL_RPATH "$ORIGIN")
+            # Windows has no RPATH; copy stinkytofu.dll next to _rocisa.pyd so
+            # the loader finds it at runtime.
+            if(WIN32)
+                add_custom_command(TARGET _rocisa POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        $<TARGET_FILE:stinkytofu::stinkytofu>
+                        $<TARGET_FILE_DIR:_rocisa>
+                )
+            endif()
+        else()
+            # hipBLASLt installs the source-built library through stinkytofu's
+            # native rules in ${CMAKE_INSTALL_LIBDIR}. Keep $ORIGIN first for
+            # the self-contained test artifact and reach that library dir from
+            # lib/hipblaslt/rocisa in the production layout.
+            set_target_properties(_rocisa PROPERTIES INSTALL_RPATH "$ORIGIN:$ORIGIN/../..")
         endif()
     elseif(_stinkytofu_shared AND ROCISA_INCLUDE_BUILD_INFO)
         # Dev/editable find_package build: libstinkytofu is installed to a temp
@@ -368,29 +399,11 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
     endif()
 
-    if(HIPBLASLT_BUNDLE_PYTHON_DEPS
-            AND NOT ROCISA_STANDALONE
-            AND PROJECT_NAME STREQUAL "hipblaslt")
+    if(HIPBLASLT_BUNDLE_PYTHON_DEPS AND NOT ROCISA_STANDALONE)
         set(_rocisa_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa")
         install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
             DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
-        if(_stinkytofu_from_subdirectory AND BUILD_SHARED_LIBS)
-            # Bundled shared stinkytofu: vendor it next to _rocisa. On Linux
-            # _rocisa's INSTALL_RPATH=$ORIGIN (set above) resolves it; on Windows
-            # the loader searches the module's own directory (registered via
-            # os.add_dll_directory() in __init__.py), so the DLL must sit here too.
-            # hipBLASLt packaging is component-scoped (COMPONENT devel); stinkytofu's
-            # own install is Unspecified-component, so it would otherwise be dropped.
-            install(FILES $<TARGET_FILE:stinkytofu::stinkytofu>
-                DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
-            if(NOT WIN32)
-                # Linux soname symlink (libstinkytofu.so.0); _rocisa's DT_NEEDED
-                # references it. Invalid for a Windows .dll, so guarded.
-                install(FILES $<TARGET_SONAME_FILE:stinkytofu::stinkytofu>
-                    DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
-            endif()
-        endif()
     endif()
 
     # Example plugin — the target only exists when stinkytofu is configured with
