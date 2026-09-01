@@ -179,8 +179,8 @@ jobs:
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
       ref: users/geomin12/stage-reuse-fix
-      # Pass external repo info for stage-impact analysis, including changed_files for path filtering
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}","changed_files":${{ needs.configure.outputs.changed_files }}}'
+      # Pass external repo info for stage-impact analysis
+      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
