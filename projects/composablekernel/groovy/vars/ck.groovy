@@ -1356,14 +1356,16 @@ def runStaticChecks() {
     // work must not be blocked by them. New paths are what we need to keep short.
     // Deletions are excluded (--diff-filter=AMR) so removing a long path passes.
     //
-    // Pathspec '.' limits the diff to projects/composablekernel; git still emits
-    // repository-relative paths, which is what the checker measures.
-    def changedFiles = """(if [ -n "\$CHANGE_ID" ]; then \
-        git diff -z --name-only --diff-filter=AMR "origin/\$CHANGE_TARGET...HEAD" -- .; \
-    else \
-        git diff -z --name-only --diff-filter=AMR "\$(git merge-base HEAD origin/develop 2>/dev/null || echo HEAD~1)" HEAD -- .; \
-    fi)"""
-    checks << """${changedFiles} | xargs -0 -r script/check_path_length.sh"""
+    // The diff itself lives in check_changed_path_length.sh, not inline here: a
+    // `git diff ... | xargs` pipeline returns xargs's status, so a base ref that
+    // does not resolve produced no files and still reported success. The script
+    // resolves the base explicitly and fails loudly when it cannot.
+    //
+    // The base branch is interpolated by Groovy rather than read from the
+    // container's environment, so the check does not depend on CHANGE_TARGET
+    // surviving into the docker step.
+    def baseBranch = env.CHANGE_TARGET ?: "develop"
+    checks << """script/check_changed_path_length.sh ${baseBranch}"""
 
     buildAndTest(
         setup_args: "NO_CK_BUILD",

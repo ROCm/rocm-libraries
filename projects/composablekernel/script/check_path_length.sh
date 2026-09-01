@@ -62,9 +62,14 @@ for file in "$@"; do
 
     # Prefer the current-directory reading (matches shell semantics); fall back
     # to treating the argument as already repository-relative.
-    if [[ -e "$file" ]]; then
+    #
+    # -L as well as -e: -e dereferences, so it is false for a symlink whose
+    # target does not exist. Git tracks such an entry (mode 120000) like any
+    # other, and Windows still has to resolve its path, so a dangling symlink
+    # must be measured rather than skipped.
+    if [[ -e "$file" || -L "$file" ]]; then
         path="${repo_prefix}${file}"
-    elif [[ -n "$repo_root" && -e "${repo_root}/${file}" ]]; then
+    elif [[ -n "$repo_root" ]] && [[ -e "${repo_root}/${file}" || -L "${repo_root}/${file}" ]]; then
         path="$file"
     else
         continue

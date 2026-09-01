@@ -142,6 +142,34 @@ else
     failures=$(( failures + 1 ))
 fi
 
+# --- symlinks are measured, dangling or not ---------------------------------
+# -e dereferences, so it is false for a symlink whose target is missing. Git
+# tracks such an entry (mode 120000) like any other and Windows still has to
+# resolve its path, so it must be measured rather than skipped.
+make_symlink_of_length() {
+    local target=$1 link_target=$2
+    local dir="s" file="l.cpp"
+    local pad=$(( target - ${#file} - 1 - ${#dir} ))
+    (( pad >= 0 )) || { echo "target $target too small" >&2; return 1; }
+    dir="${dir}$(printf 'y%.0s' $(seq 1 "$pad"))"
+    mkdir -p "$WORKDIR/$dir"
+    ln -sf "$link_target" "$WORKDIR/$dir/$file"
+    echo "$dir/$file"
+}
+
+dangling_over=$(make_symlink_of_length 201 "./no_such_target")
+resolving_over=$(make_symlink_of_length 202 "/etc/hostname")
+dangling_under=$(make_symlink_of_length 50 "./no_such_target")
+
+check "over-limit dangling symlink is rejected"  1 "$WORKDIR" "$dangling_over"
+check "over-limit resolving symlink is rejected" 1 "$WORKDIR" "$resolving_over"
+check "under-limit dangling symlink is accepted" 0 "$WORKDIR" "$dangling_under"
+
+# A genuinely absent path is still skipped: -L is false for it, so the
+# behaviour the sibling checks rely on is unchanged.
+check "nonexistent path is still skipped after the symlink fix" \
+    0 "$WORKDIR" "also/does/not/exist.cpp"
+
 # --- outside a git work tree, arguments are measured as given ---------------
 NONGIT=$(mktemp -d)
 trap 'rm -rf "$WORKDIR" "$NONGIT"' EXIT
