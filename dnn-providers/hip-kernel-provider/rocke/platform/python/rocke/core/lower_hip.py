@@ -518,9 +518,11 @@ class _Lowerer:
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
         ptr, idx = op.operands
-        vec = int(op.attrs["vec"])
-        elem_name = op.attrs.get("elem_type", "f16")
-        prefix = _vec_prefix(elem_name, "global_load_vN")
+        # Reinterpret to the result's real HIP vector type (i32xN / f32xN /
+        # i8xN / ...), not a hard-coded f16x default -- the elem-prefix guess
+        # mis-typed every non-f16/bf16 vector load (see smem_store_vN, which
+        # already carries the full map).
+        vec_ty = _type_to_hip(op.result.type)
         self._emit(
             f"{vec_ty} {_name(op.result)} = "
             f"*reinterpret_cast<const {vec_ty}*>({_name(ptr)} + {_name(idx)});"
@@ -2052,9 +2054,9 @@ class _Lowerer:
 
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands
-        n = int(op.attrs["vec"])
-        elem_name = op.attrs.get("elem_type", "f16")
-        prefix = _vec_prefix(elem_name, "global_store_vN")
+        # Reinterpret to the stored value's real HIP vector type, not a
+        # hard-coded f16x default (which mis-typed every non-f16/bf16 store).
+        vec_ty = _type_to_hip(val.type)
         self._emit(
             f"*reinterpret_cast<{vec_ty}*>({_name(ptr)} + {_name(idx)}) = "
             f"{_name(val)};"
