@@ -30,9 +30,14 @@ hsaco        : bytes      # HSA code object
 timings      : Dict[str, float]   # per-stage ms
 pass_stats   : PassStats          # constants_folded, common_subexpressions, dead_ops_removed
 isa          : str
+codegen_policy : CodegenPolicy    # validated backend policy used for this object
 kernel_name  : str
 hsaco_bytes  : int
 ```
+
+Scheduler selection is a typed per-kernel policy rather than an arbitrary
+`compile_kernel(options=...)` escape hatch. See
+[`../optimization/scheduler-policy.md`](../optimization/scheduler-policy.md).
 
 Timing keys:
 
