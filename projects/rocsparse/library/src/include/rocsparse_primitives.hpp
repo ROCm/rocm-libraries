@@ -260,7 +260,10 @@ namespace rocsparse
     template <typename K>
     inline radix_sort_pairs_buffer_size_t find_V(rocsparse_indextype V)
     {
-        switch(V)
+        // Switch over the integer value: the deprecated u16 index type is
+        // conditionally removed from the enum, so a cast case label would
+        // otherwise trip -Wswitch (see rocsparse_indextype_utils.hpp).
+        switch(static_cast<int>(V))
         {
 
         case rocsparse_indextype_i32:
@@ -282,7 +285,7 @@ namespace rocsparse
     inline radix_sort_pairs_buffer_size_t find_radix_sort_pairs_buffer_size(rocsparse_indextype K,
                                                                             rocsparse_indextype V)
     {
-        switch(K)
+        switch(static_cast<int>(K))
         {
 
         case rocsparse_indextype_i32:

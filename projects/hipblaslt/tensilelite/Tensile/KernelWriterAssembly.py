@@ -4794,11 +4794,7 @@ class KernelWriterAssembly(KernelWriter):
     moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
     moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
     # Load and apply batch offset for General Batched GEMM
-    # gfx1250: skip the batch-offset apply. The load references KernArgAddress
-    # after the UserArgs/grouped prologue has relocated it, so the fixed soffset
-    # reads the wrong kernarg word and corrupts the SRD. Fall back to the
-    # pre-offset wait-only path here until the base-relative fix lands.
-    if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
+    if not kernel["ProblemType"]["GroupedGemm"]:
       batchOffsetKernArgOffset = self.states.batchOffsetAKernArgOffset if tc == "A" else self.states.batchOffsetBKernArgOffset
       moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr(stmp, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%tc))
       moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
@@ -13591,9 +13587,7 @@ class KernelWriterAssembly(KernelWriter):
               # (not the GSU workspace), so the offset is correctly applied here. When GSU>1 the
               # routing branches to the strided/workspace path and skips this block; the PostGSU
               # conversion kernel applies the offset when it writes the final result to C/D.
-              # gfx1250: skip the batch-offset apply (see computeLoadSrd A/B note);
-              # the KernArgAddress-relative load is unsafe after prologue relocation.
-              if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
+              if not kernel["ProblemType"]["GroupedGemm"]:
                 batchOffsetKernArgOffset = self.states.batchOffsetCKernArgOffset if mat == "C" else self.states.batchOffsetDKernArgOffset
                 module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%mat))
                 module.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
@@ -13696,9 +13690,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SAddCU32(dst=sgpr(tmpsgpr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
     module.add(SLoadB64(dst=sgpr("SrdTD", 2), base=sgpr(tmpsgpr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
     # Load and apply batch offset for General Batched GEMM (dstD) as necessary.
-    # gfx1250: skip the batch-offset apply (see computeLoadSrd A/B note);
-    # the KernArgAddress-relative load is unsafe after prologue relocation.
-    if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
+    if not kernel["ProblemType"]["GroupedGemm"]:
       module.add(SLoadB64(dst=sgpr(tmpsgpr3, 2), base=sgpr("KernArgAddress", 2), soffset=hex(self.states.batchOffsetDKernArgOffset), comment="Load batchOffsetD from kernel args"))
       module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address and batchOffsetD Load"))
       module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpsgpr3+0), comment="Apply batchOffsetD to SrdTD (low)"))
@@ -18249,6 +18241,23 @@ class KernelWriterAssembly(KernelWriter):
       names.append("StreamKLocalEnd")
     if len(kernel["SpaceFillingAlgo"]):
       names.append("StreamKTileID")
+    # SK4 (StreamKDynamic) derives the next-tile identity from a work-queue pop
+    # and, unlike static StreamK, overwrites StreamKTileIdx/StreamKPartialIdx
+    # while doing so. The current tile's fixup/store phase reads those (see
+    # StreamK.py skFixupStep / globalWriteBatch), so they must be checkpointed
+    # and restored around the borrowed next-tile identity.
+    #
+    # SK5 (StreamKHybrid) aliases StreamKIter/StreamKIterEnd onto the same
+    # physical SGPRs as StreamKTileIdx/StreamKPartialIdx (see the SK5 RegSet
+    # block). Checkpoint the idx names only; listing both the iter and idx
+    # names would save/restore the same registers twice. On the dynamic
+    # sub-path these regs hold the tile/partial index that the next-tile
+    # identity overwrites (restore required); on the static sub-path they hold
+    # StreamKIter/StreamKIterEnd, which next-tile setup only reads, so the
+    # save/restore is a no-op. One list covers both sub-paths.
+    if kernel["StreamK"] in (4, 5):
+      names.append("StreamKTileIdx")
+      names.append("StreamKPartialIdx")
     return names
 
   @contextmanager
@@ -18285,22 +18294,23 @@ class KernelWriterAssembly(KernelWriter):
     if not self.isPrefetchAcrossPersistentEnabled(kernel):
       return module
 
+    skComponent = Component.StreamK.find(self)
     skipLabel = Label(self.labels.getNameInc("SK_SkipNllPAP"), "")
     # Parallel reduction (no synchronizer): WGs do not advance across tiles.
     # Under StreamKForceDPOnly the reduction is always forced to the tree path
     # (Synchronizer always non-null, AddressFlags != 0 invariant), so this
-    # parallel-reduction skip never fires; fold it out and keep only the
-    # StreamKIter >= StreamKIterEnd (last-tile) check.
+    # parallel-reduction skip never fires; fold it out.
     if not kernel["StreamKForceDPOnly"]:
       module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip PAP"))
       module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
-    module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
-    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
+    # Variant-specific "is there a next persistent iteration?" predicate. SK3
+    # (and the SK3/static path of SK5) compares StreamKIter/StreamKIterEnd; SK4
+    # (StreamKDynamic) and SK5-dynamic override against the work-queue pop.
+    module.add(skComponent.papHasNextPersistentIteration(self, kernel, skipLabel))
 
     if not skipBarrier:
       module.add(SBarrier(comment="PAP: sync before next-tile prefetch"))
 
-    skComponent = Component.StreamK.find(self)
     with self.allocPapTileIdentitySgprs(kernel) as prevTile:
       module.add(self.papCheckpointCurrentTileIdentity(kernel, prevTile))
       module.add(skComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))

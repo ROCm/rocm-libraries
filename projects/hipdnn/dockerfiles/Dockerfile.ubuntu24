@@ -401,7 +401,21 @@ RUN for tool in /usr/bin/llvm*-20; do \
         fi \
     done
 
-RUN python3 -m pip install --break-system-packages pre-commit
+# msgpack/zstandard: runtime deps of rocm_kpack, which the hip-kernel-provider's
+# descriptor-packaging step (HIPDNN_ENABLE_KERNEL_INGESTOR=ON) imports from the
+# base interpreter. rocm_kpack ships as a source tree (vendored into the ROCm
+# artifact this stage installs, at /opt/rocm-kpack/python), not an installed
+# wheel, so pip never pulls its declared deps automatically; without this,
+# configuring with the kernel ingestor enabled fails with
+# "ModuleNotFoundError: No module named 'msgpack'".
+#
+# pytest: the same descriptor-packaging step registers its 165-case pytest
+# suite (descriptor-packaging/tests/) as two ctest entries. Without pytest,
+# HkpPackaging.cmake doesn't fail configure -- it silently registers both
+# entries DISABLED ("hkp: pytest not importable by ... python3; registering
+# descriptor-packaging pytest tests as DISABLED"), so the whole suite goes
+# quietly unexercised instead of erroring.
+RUN python3 -m pip install --break-system-packages pre-commit 'msgpack>=1.0.0' 'zstandard>=0.20.0' pytest
 
 # uhd_gen's training dependencies (RFC 0019 §13).
 #

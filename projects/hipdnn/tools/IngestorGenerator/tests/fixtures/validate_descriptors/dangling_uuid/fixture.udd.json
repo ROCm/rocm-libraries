@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "1af24c85-7f0f-4274-9a5d-df285eeb921d",
+  "name": "fixture dispatch",
+  "dispatch_symbol": "hipkernel.fixture.dispatch"
+}

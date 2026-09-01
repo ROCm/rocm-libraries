@@ -1,0 +1,10 @@
+{
+  "version": "0.1",
+  "id": "kmd-attention",
+  "name": "Attention metadata",
+  "fields": [
+    { "name": "family", "type": "string" },
+    { "name": "batch", "type": "int" },
+    { "name": "head_size", "type": "int" }
+  ]
+}
