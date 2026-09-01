@@ -786,8 +786,13 @@ def _writeSingleSolutionLogic(document, solution, path):
     only["SolutionIndex"] = 0
     if isinstance(trimmed, dict):
         trimmed["Solutions"] = [only]
-        # The exact-match table indexes into the solution list we just emptied.
-        trimmed.pop("ExactLogic", None)
+        # The exact-match table indexes into the solution list this replaces, so
+        # its entries have to go.  The key itself has to stay: for Equality,
+        # GridBased and Range logic prepareLibraryLogicDict() reads
+        # data["ExactLogic"] unconditionally, so dropping the key raises
+        # KeyError.  Emptying it is what the positional branch below already
+        # does to the same table, which sits at index 7.
+        trimmed["ExactLogic"] = []
     else:
         trimmed[5] = [only]
         for i in range(6, len(trimmed)):
