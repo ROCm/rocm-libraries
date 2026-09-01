@@ -2460,7 +2460,7 @@ def SrdUpperValue(isa):  # noqa: N802 (matches rocisa public API)
     if hasattr(isa, "major"):
         major = int(isa.major)
         minor = int(isa.minor)
-        stepping = int(isa.stepping)
+        stepping = int(getattr(isa, "stepping", None) or getattr(isa, "patch", 0))
     else:
         major = int(isa[0])
         minor = int(isa[1])
