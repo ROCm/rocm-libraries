@@ -419,6 +419,12 @@ validParameters = { # we need to make sure this matches develop
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
+    # StreamK persistent loop: keep the whole K extent of A (and its MX scales)
+    # resident in VGPRs across persistent iterations, so every tile after the
+    # first reuses them instead of re-issuing the global->LDS and LDS->VGPR
+    # traffic. Only valid when every tile a workgroup visits shares the same A,
+    # which the emitted size predicates enforce.
+    "ReuseAcrossPersistent": [0, 1],
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support
