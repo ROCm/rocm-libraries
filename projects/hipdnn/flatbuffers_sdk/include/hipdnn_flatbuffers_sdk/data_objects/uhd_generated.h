@@ -20,6 +20,14 @@ struct UhdDerivedEntry;
 struct UhdDerivedEntryBuilder;
 struct UhdDerivedEntryT;
 
+struct UhdCategoricalValue;
+struct UhdCategoricalValueBuilder;
+struct UhdCategoricalValueT;
+
+struct UhdCategoricalField;
+struct UhdCategoricalFieldBuilder;
+struct UhdCategoricalFieldT;
+
 struct UhdScoreMetadata;
 struct UhdScoreMetadataBuilder;
 struct UhdScoreMetadataT;
@@ -30,6 +38,10 @@ struct UHDT;
 
 bool operator==(const UhdDerivedEntryT &lhs, const UhdDerivedEntryT &rhs);
 bool operator!=(const UhdDerivedEntryT &lhs, const UhdDerivedEntryT &rhs);
+bool operator==(const UhdCategoricalValueT &lhs, const UhdCategoricalValueT &rhs);
+bool operator!=(const UhdCategoricalValueT &lhs, const UhdCategoricalValueT &rhs);
+bool operator==(const UhdCategoricalFieldT &lhs, const UhdCategoricalFieldT &rhs);
+bool operator!=(const UhdCategoricalFieldT &lhs, const UhdCategoricalFieldT &rhs);
 bool operator==(const UhdScoreMetadataT &lhs, const UhdScoreMetadataT &rhs);
 bool operator!=(const UhdScoreMetadataT &lhs, const UhdScoreMetadataT &rhs);
 bool operator==(const UHDT &lhs, const UHDT &rhs);
@@ -182,6 +194,187 @@ inline ::flatbuffers::Offset<UhdDerivedEntry> CreateUhdDerivedEntryDirect(
 
 ::flatbuffers::Offset<UhdDerivedEntry> CreateUhdDerivedEntry(::flatbuffers::FlatBufferBuilder &_fbb, const UhdDerivedEntryT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
+struct UhdCategoricalValueT : public ::flatbuffers::NativeTable {
+  typedef UhdCategoricalValue TableType;
+  std::string value{};
+  int32_t code = 0;
+};
+
+/// @brief Score metadata for UHD predictions.
+///
+/// Describes the units and calibration of scores for cross-engine comparison.
+/// One string value of a categorical field and the code the model was trained with
+/// (RFC 0019 §6.5).
+struct UhdCategoricalValue FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef UhdCategoricalValueT NativeTableType;
+  typedef UhdCategoricalValueBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_VALUE = 4,
+    VT_CODE = 6
+  };
+  const ::flatbuffers::String *value() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_VALUE);
+  }
+  ::flatbuffers::String *mutable_value() {
+    return GetPointer<::flatbuffers::String *>(VT_VALUE);
+  }
+  int32_t code() const {
+    return GetField<int32_t>(VT_CODE, 0);
+  }
+  bool mutate_code(int32_t _code = 0) {
+    return SetField<int32_t>(VT_CODE, _code, 0);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffsetRequired(verifier, VT_VALUE) &&
+           verifier.VerifyString(value()) &&
+           VerifyField<int32_t>(verifier, VT_CODE, 4) &&
+           verifier.EndTable();
+  }
+  UhdCategoricalValueT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(UhdCategoricalValueT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<UhdCategoricalValue> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UhdCategoricalValueT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct UhdCategoricalValueBuilder {
+  typedef UhdCategoricalValue Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_value(::flatbuffers::Offset<::flatbuffers::String> value) {
+    fbb_.AddOffset(UhdCategoricalValue::VT_VALUE, value);
+  }
+  void add_code(int32_t code) {
+    fbb_.AddElement<int32_t>(UhdCategoricalValue::VT_CODE, code, 0);
+  }
+  explicit UhdCategoricalValueBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<UhdCategoricalValue> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<UhdCategoricalValue>(end);
+    fbb_.Required(o, UhdCategoricalValue::VT_VALUE);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<UhdCategoricalValue> CreateUhdCategoricalValue(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> value = 0,
+    int32_t code = 0) {
+  UhdCategoricalValueBuilder builder_(_fbb);
+  builder_.add_code(code);
+  builder_.add_value(value);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<UhdCategoricalValue> CreateUhdCategoricalValueDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const char *value = nullptr,
+    int32_t code = 0) {
+  auto value__ = value ? _fbb.CreateString(value) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateUhdCategoricalValue(
+      _fbb,
+      value__,
+      code);
+}
+
+::flatbuffers::Offset<UhdCategoricalValue> CreateUhdCategoricalValue(::flatbuffers::FlatBufferBuilder &_fbb, const UhdCategoricalValueT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct UhdCategoricalFieldT : public ::flatbuffers::NativeTable {
+  typedef UhdCategoricalField TableType;
+  std::string field{};
+  std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValueT>> values{};
+  UhdCategoricalFieldT() = default;
+  UhdCategoricalFieldT(const UhdCategoricalFieldT &o);
+  UhdCategoricalFieldT(UhdCategoricalFieldT&&) FLATBUFFERS_NOEXCEPT = default;
+  UhdCategoricalFieldT &operator=(UhdCategoricalFieldT o) FLATBUFFERS_NOEXCEPT;
+};
+
+/// The value -> code map for one string-valued field, e.g. `$kernel.dtype`.
+///
+/// Explicit rather than implicit: §6.5 rules out an ordinal by declaration order, a hash of
+/// the string, and the underlying enum value, because each changes silently when a schema is
+/// edited or a pack is rebuilt. Only a table can be diffed and version-checked.
+struct UhdCategoricalField FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef UhdCategoricalFieldT NativeTableType;
+  typedef UhdCategoricalFieldBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_FIELD = 4,
+    VT_VALUES = 6
+  };
+  const ::flatbuffers::String *field() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_FIELD);
+  }
+  ::flatbuffers::String *mutable_field() {
+    return GetPointer<::flatbuffers::String *>(VT_FIELD);
+  }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValue>> *values() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValue>> *>(VT_VALUES);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValue>> *mutable_values() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValue>> *>(VT_VALUES);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffsetRequired(verifier, VT_FIELD) &&
+           verifier.VerifyString(field()) &&
+           VerifyOffset(verifier, VT_VALUES) &&
+           verifier.VerifyVector(values()) &&
+           verifier.VerifyVectorOfTables(values()) &&
+           verifier.EndTable();
+  }
+  UhdCategoricalFieldT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(UhdCategoricalFieldT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<UhdCategoricalField> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UhdCategoricalFieldT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct UhdCategoricalFieldBuilder {
+  typedef UhdCategoricalField Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_field(::flatbuffers::Offset<::flatbuffers::String> field) {
+    fbb_.AddOffset(UhdCategoricalField::VT_FIELD, field);
+  }
+  void add_values(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValue>>> values) {
+    fbb_.AddOffset(UhdCategoricalField::VT_VALUES, values);
+  }
+  explicit UhdCategoricalFieldBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<UhdCategoricalField> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<UhdCategoricalField>(end);
+    fbb_.Required(o, UhdCategoricalField::VT_FIELD);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<UhdCategoricalField> CreateUhdCategoricalField(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> field = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValue>>> values = 0) {
+  UhdCategoricalFieldBuilder builder_(_fbb);
+  builder_.add_values(values);
+  builder_.add_field(field);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<UhdCategoricalField> CreateUhdCategoricalFieldDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const char *field = nullptr,
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValue>> *values = nullptr) {
+  auto field__ = field ? _fbb.CreateString(field) : 0;
+  auto values__ = values ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValue>>(*values) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateUhdCategoricalField(
+      _fbb,
+      field__,
+      values__);
+}
+
+::flatbuffers::Offset<UhdCategoricalField> CreateUhdCategoricalField(::flatbuffers::FlatBufferBuilder &_fbb, const UhdCategoricalFieldT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
 struct UhdScoreMetadataT : public ::flatbuffers::NativeTable {
   typedef UhdScoreMetadata TableType;
   std::string units{};
@@ -189,9 +382,6 @@ struct UhdScoreMetadataT : public ::flatbuffers::NativeTable {
   std::string transform{};
 };
 
-/// @brief Score metadata for UHD predictions.
-///
-/// Describes the units and calibration of scores for cross-engine comparison.
 struct UhdScoreMetadata FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef UhdScoreMetadataT NativeTableType;
   typedef UhdScoreMetadataBuilder Builder;
@@ -300,6 +490,7 @@ struct UHDT : public ::flatbuffers::NativeTable {
   std::string model_artifact_path{};
   std::string model_hash{};
   std::vector<std::string> static_order_fields{};
+  std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalFieldT>> categorical_encoding{};
   std::string custom_library_symbol{};
   std::string native_symbol{};
   UHDT() = default;
@@ -335,8 +526,9 @@ struct UHD FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_MODEL_ARTIFACT_PATH = 20,
     VT_MODEL_HASH = 22,
     VT_STATIC_ORDER_FIELDS = 24,
-    VT_CUSTOM_LIBRARY_SYMBOL = 26,
-    VT_NATIVE_SYMBOL = 28
+    VT_CATEGORICAL_ENCODING = 26,
+    VT_CUSTOM_LIBRARY_SYMBOL = 28,
+    VT_NATIVE_SYMBOL = 30
   };
   /// Unique identifier (UUID/GUID).
   const ::flatbuffers::String *id() const {
@@ -422,6 +614,14 @@ struct UHD FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *mutable_static_order_fields() {
     return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_STATIC_ORDER_FIELDS);
   }
+  /// RFC 0019 §6.5. Absent when no feature reads a string field. Covered by
+  /// `features_hash`, so editing it invalidates the contract rather than passing silently.
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalField>> *categorical_encoding() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalField>> *>(VT_CATEGORICAL_ENCODING);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalField>> *mutable_categorical_encoding() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalField>> *>(VT_CATEGORICAL_ENCODING);
+  }
   /// For CUSTOM_LIBRARY adapter: symbol name of the scorer function in the .so.
   const ::flatbuffers::String *custom_library_symbol() const {
     return GetPointer<const ::flatbuffers::String *>(VT_CUSTOM_LIBRARY_SYMBOL);
@@ -463,6 +663,9 @@ struct UHD FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyOffset(verifier, VT_STATIC_ORDER_FIELDS) &&
            verifier.VerifyVector(static_order_fields()) &&
            verifier.VerifyVectorOfStrings(static_order_fields()) &&
+           VerifyOffset(verifier, VT_CATEGORICAL_ENCODING) &&
+           verifier.VerifyVector(categorical_encoding()) &&
+           verifier.VerifyVectorOfTables(categorical_encoding()) &&
            VerifyOffset(verifier, VT_CUSTOM_LIBRARY_SYMBOL) &&
            verifier.VerifyString(custom_library_symbol()) &&
            VerifyOffset(verifier, VT_NATIVE_SYMBOL) &&
@@ -511,6 +714,9 @@ struct UHDBuilder {
   void add_static_order_fields(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> static_order_fields) {
     fbb_.AddOffset(UHD::VT_STATIC_ORDER_FIELDS, static_order_fields);
   }
+  void add_categorical_encoding(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalField>>> categorical_encoding) {
+    fbb_.AddOffset(UHD::VT_CATEGORICAL_ENCODING, categorical_encoding);
+  }
   void add_custom_library_symbol(::flatbuffers::Offset<::flatbuffers::String> custom_library_symbol) {
     fbb_.AddOffset(UHD::VT_CUSTOM_LIBRARY_SYMBOL, custom_library_symbol);
   }
@@ -542,11 +748,13 @@ inline ::flatbuffers::Offset<UHD> CreateUHD(
     ::flatbuffers::Offset<::flatbuffers::String> model_artifact_path = 0,
     ::flatbuffers::Offset<::flatbuffers::String> model_hash = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> static_order_fields = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalField>>> categorical_encoding = 0,
     ::flatbuffers::Offset<::flatbuffers::String> custom_library_symbol = 0,
     ::flatbuffers::Offset<::flatbuffers::String> native_symbol = 0) {
   UHDBuilder builder_(_fbb);
   builder_.add_native_symbol(native_symbol);
   builder_.add_custom_library_symbol(custom_library_symbol);
+  builder_.add_categorical_encoding(categorical_encoding);
   builder_.add_static_order_fields(static_order_fields);
   builder_.add_model_hash(model_hash);
   builder_.add_model_artifact_path(model_artifact_path);
@@ -574,6 +782,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHDDirect(
     const char *model_artifact_path = nullptr,
     const char *model_hash = nullptr,
     const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *static_order_fields = nullptr,
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalField>> *categorical_encoding = nullptr,
     const char *custom_library_symbol = nullptr,
     const char *native_symbol = nullptr) {
   auto id__ = id ? _fbb.CreateString(id) : 0;
@@ -585,6 +794,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHDDirect(
   auto model_artifact_path__ = model_artifact_path ? _fbb.CreateString(model_artifact_path) : 0;
   auto model_hash__ = model_hash ? _fbb.CreateString(model_hash) : 0;
   auto static_order_fields__ = static_order_fields ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*static_order_fields) : 0;
+  auto categorical_encoding__ = categorical_encoding ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalField>>(*categorical_encoding) : 0;
   auto custom_library_symbol__ = custom_library_symbol ? _fbb.CreateString(custom_library_symbol) : 0;
   auto native_symbol__ = native_symbol ? _fbb.CreateString(native_symbol) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateUHD(
@@ -600,6 +810,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHDDirect(
       model_artifact_path__,
       model_hash__,
       static_order_fields__,
+      categorical_encoding__,
       custom_library_symbol__,
       native_symbol__);
 }
@@ -645,6 +856,100 @@ inline ::flatbuffers::Offset<UhdDerivedEntry> CreateUhdDerivedEntry(::flatbuffer
       _fbb,
       _name,
       _expression);
+}
+
+
+inline bool operator==(const UhdCategoricalValueT &lhs, const UhdCategoricalValueT &rhs) {
+  return
+      (lhs.value == rhs.value) &&
+      (lhs.code == rhs.code);
+}
+
+inline bool operator!=(const UhdCategoricalValueT &lhs, const UhdCategoricalValueT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline UhdCategoricalValueT *UhdCategoricalValue::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<UhdCategoricalValueT>(new UhdCategoricalValueT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void UhdCategoricalValue::UnPackTo(UhdCategoricalValueT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = value(); if (_e) _o->value = _e->str(); }
+  { auto _e = code(); _o->code = _e; }
+}
+
+inline ::flatbuffers::Offset<UhdCategoricalValue> UhdCategoricalValue::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UhdCategoricalValueT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateUhdCategoricalValue(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<UhdCategoricalValue> CreateUhdCategoricalValue(::flatbuffers::FlatBufferBuilder &_fbb, const UhdCategoricalValueT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const UhdCategoricalValueT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _value = _fbb.CreateString(_o->value);
+  auto _code = _o->code;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateUhdCategoricalValue(
+      _fbb,
+      _value,
+      _code);
+}
+
+
+inline bool operator==(const UhdCategoricalFieldT &lhs, const UhdCategoricalFieldT &rhs) {
+  return
+      (lhs.field == rhs.field) &&
+      (lhs.values.size() == rhs.values.size() && std::equal(lhs.values.cbegin(), lhs.values.cend(), rhs.values.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValueT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValueT> const &b) { return (a == b) || (a && b && *a == *b); }));
+}
+
+inline bool operator!=(const UhdCategoricalFieldT &lhs, const UhdCategoricalFieldT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline UhdCategoricalFieldT::UhdCategoricalFieldT(const UhdCategoricalFieldT &o)
+      : field(o.field) {
+  values.reserve(o.values.size());
+  for (const auto &values_ : o.values) { values.emplace_back((values_) ? new hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValueT(*values_) : nullptr); }
+}
+
+inline UhdCategoricalFieldT &UhdCategoricalFieldT::operator=(UhdCategoricalFieldT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(field, o.field);
+  std::swap(values, o.values);
+  return *this;
+}
+
+inline UhdCategoricalFieldT *UhdCategoricalField::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<UhdCategoricalFieldT>(new UhdCategoricalFieldT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void UhdCategoricalField::UnPackTo(UhdCategoricalFieldT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = field(); if (_e) _o->field = _e->str(); }
+  { auto _e = values(); if (_e) { _o->values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->values[_i]) { _e->Get(_i)->UnPackTo(_o->values[_i].get(), _resolver); } else { _o->values[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValueT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->values.resize(0); } }
+}
+
+inline ::flatbuffers::Offset<UhdCategoricalField> UhdCategoricalField::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UhdCategoricalFieldT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateUhdCategoricalField(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<UhdCategoricalField> CreateUhdCategoricalField(::flatbuffers::FlatBufferBuilder &_fbb, const UhdCategoricalFieldT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const UhdCategoricalFieldT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _field = _fbb.CreateString(_o->field);
+  auto _values = _o->values.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalValue>> (_o->values.size(), [](size_t i, _VectorArgs *__va) { return CreateUhdCategoricalValue(*__va->__fbb, __va->__o->values[i].get(), __va->__rehasher); }, &_va ) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateUhdCategoricalField(
+      _fbb,
+      _field,
+      _values);
 }
 
 
@@ -706,6 +1011,7 @@ inline bool operator==(const UHDT &lhs, const UHDT &rhs) {
       (lhs.model_artifact_path == rhs.model_artifact_path) &&
       (lhs.model_hash == rhs.model_hash) &&
       (lhs.static_order_fields == rhs.static_order_fields) &&
+      (lhs.categorical_encoding.size() == rhs.categorical_encoding.size() && std::equal(lhs.categorical_encoding.cbegin(), lhs.categorical_encoding.cend(), rhs.categorical_encoding.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalFieldT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalFieldT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.custom_library_symbol == rhs.custom_library_symbol) &&
       (lhs.native_symbol == rhs.native_symbol);
 }
@@ -730,6 +1036,8 @@ inline UHDT::UHDT(const UHDT &o)
         native_symbol(o.native_symbol) {
   derived.reserve(o.derived.size());
   for (const auto &derived_ : o.derived) { derived.emplace_back((derived_) ? new hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntryT(*derived_) : nullptr); }
+  categorical_encoding.reserve(o.categorical_encoding.size());
+  for (const auto &categorical_encoding_ : o.categorical_encoding) { categorical_encoding.emplace_back((categorical_encoding_) ? new hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalFieldT(*categorical_encoding_) : nullptr); }
 }
 
 inline UHDT &UHDT::operator=(UHDT o) FLATBUFFERS_NOEXCEPT {
@@ -744,6 +1052,7 @@ inline UHDT &UHDT::operator=(UHDT o) FLATBUFFERS_NOEXCEPT {
   std::swap(model_artifact_path, o.model_artifact_path);
   std::swap(model_hash, o.model_hash);
   std::swap(static_order_fields, o.static_order_fields);
+  std::swap(categorical_encoding, o.categorical_encoding);
   std::swap(custom_library_symbol, o.custom_library_symbol);
   std::swap(native_symbol, o.native_symbol);
   return *this;
@@ -769,6 +1078,7 @@ inline void UHD::UnPackTo(UHDT *_o, const ::flatbuffers::resolver_function_t *_r
   { auto _e = model_artifact_path(); if (_e) _o->model_artifact_path = _e->str(); }
   { auto _e = model_hash(); if (_e) _o->model_hash = _e->str(); }
   { auto _e = static_order_fields(); if (_e) { _o->static_order_fields.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->static_order_fields[_i] = _e->Get(_i)->str(); } } else { _o->static_order_fields.resize(0); } }
+  { auto _e = categorical_encoding(); if (_e) { _o->categorical_encoding.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->categorical_encoding[_i]) { _e->Get(_i)->UnPackTo(_o->categorical_encoding[_i].get(), _resolver); } else { _o->categorical_encoding[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalFieldT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->categorical_encoding.resize(0); } }
   { auto _e = custom_library_symbol(); if (_e) _o->custom_library_symbol = _e->str(); }
   { auto _e = native_symbol(); if (_e) _o->native_symbol = _e->str(); }
 }
@@ -792,6 +1102,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHD(::flatbuffers::FlatBufferBuilder &_f
   auto _model_artifact_path = _o->model_artifact_path.empty() ? 0 : _fbb.CreateString(_o->model_artifact_path);
   auto _model_hash = _o->model_hash.empty() ? 0 : _fbb.CreateString(_o->model_hash);
   auto _static_order_fields = _o->static_order_fields.size() ? _fbb.CreateVectorOfStrings(_o->static_order_fields) : 0;
+  auto _categorical_encoding = _o->categorical_encoding.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdCategoricalField>> (_o->categorical_encoding.size(), [](size_t i, _VectorArgs *__va) { return CreateUhdCategoricalField(*__va->__fbb, __va->__o->categorical_encoding[i].get(), __va->__rehasher); }, &_va ) : 0;
   auto _custom_library_symbol = _o->custom_library_symbol.empty() ? 0 : _fbb.CreateString(_o->custom_library_symbol);
   auto _native_symbol = _o->native_symbol.empty() ? 0 : _fbb.CreateString(_o->native_symbol);
   return hipdnn_flatbuffers_sdk::data_objects::CreateUHD(
@@ -807,6 +1118,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHD(::flatbuffers::FlatBufferBuilder &_f
       _model_artifact_path,
       _model_hash,
       _static_order_fields,
+      _categorical_encoding,
       _custom_library_symbol,
       _native_symbol);
 }

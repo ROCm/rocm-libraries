@@ -1076,6 +1076,28 @@ inline void hashAppend(Hasher& hasher, const ConvolutionBwdAttributes* value, co
         }
     }
     hasher.raw(static_cast<int64_t>(value->conv_mode()));
+    {
+        const auto* text = value->umd_flops();
+        hasher.raw(static_cast<uint32_t>(text == nullptr ? 0 : text->size()));
+        if(text != nullptr)
+        {
+            for(char character : *text)
+            {
+                hasher.tag(static_cast<uint8_t>(character));
+            }
+        }
+    }
+    {
+        const auto* text = value->umd_bytes();
+        hasher.raw(static_cast<uint32_t>(text == nullptr ? 0 : text->size()));
+        if(text != nullptr)
+        {
+            for(char character : *text)
+            {
+                hasher.tag(static_cast<uint8_t>(character));
+            }
+        }
+    }
 }
 
 inline bool logicallyEqual(const ConvolutionBwdAttributes* a, const ConvolutionBwdAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -1172,6 +1194,30 @@ inline bool logicallyEqual(const ConvolutionBwdAttributes* a, const ConvolutionB
     {
         return false;
     }
+    {
+        const auto* aText = a->umd_flops();
+        const auto* bText = b->umd_flops();
+        if((aText == nullptr) != (bText == nullptr))
+        {
+            return false;
+        }
+        if(aText != nullptr && aText->string_view() != bText->string_view())
+        {
+            return false;
+        }
+    }
+    {
+        const auto* aText = a->umd_bytes();
+        const auto* bText = b->umd_bytes();
+        if((aText == nullptr) != (bText == nullptr))
+        {
+            return false;
+        }
+        if(aText != nullptr && aText->string_view() != bText->string_view())
+        {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -1227,6 +1273,28 @@ inline void hashAppend(Hasher& hasher, const ConvolutionFwdAttributes* value, co
         }
     }
     hasher.raw(static_cast<int64_t>(value->conv_mode()));
+    {
+        const auto* text = value->umd_flops();
+        hasher.raw(static_cast<uint32_t>(text == nullptr ? 0 : text->size()));
+        if(text != nullptr)
+        {
+            for(char character : *text)
+            {
+                hasher.tag(static_cast<uint8_t>(character));
+            }
+        }
+    }
+    {
+        const auto* text = value->umd_bytes();
+        hasher.raw(static_cast<uint32_t>(text == nullptr ? 0 : text->size()));
+        if(text != nullptr)
+        {
+            for(char character : *text)
+            {
+                hasher.tag(static_cast<uint8_t>(character));
+            }
+        }
+    }
 }
 
 inline bool logicallyEqual(const ConvolutionFwdAttributes* a, const ConvolutionFwdAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -1323,6 +1391,30 @@ inline bool logicallyEqual(const ConvolutionFwdAttributes* a, const ConvolutionF
     {
         return false;
     }
+    {
+        const auto* aText = a->umd_flops();
+        const auto* bText = b->umd_flops();
+        if((aText == nullptr) != (bText == nullptr))
+        {
+            return false;
+        }
+        if(aText != nullptr && aText->string_view() != bText->string_view())
+        {
+            return false;
+        }
+    }
+    {
+        const auto* aText = a->umd_bytes();
+        const auto* bText = b->umd_bytes();
+        if((aText == nullptr) != (bText == nullptr))
+        {
+            return false;
+        }
+        if(aText != nullptr && aText->string_view() != bText->string_view())
+        {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -1378,6 +1470,28 @@ inline void hashAppend(Hasher& hasher, const ConvolutionWrwAttributes* value, co
         }
     }
     hasher.raw(static_cast<int64_t>(value->conv_mode()));
+    {
+        const auto* text = value->umd_flops();
+        hasher.raw(static_cast<uint32_t>(text == nullptr ? 0 : text->size()));
+        if(text != nullptr)
+        {
+            for(char character : *text)
+            {
+                hasher.tag(static_cast<uint8_t>(character));
+            }
+        }
+    }
+    {
+        const auto* text = value->umd_bytes();
+        hasher.raw(static_cast<uint32_t>(text == nullptr ? 0 : text->size()));
+        if(text != nullptr)
+        {
+            for(char character : *text)
+            {
+                hasher.tag(static_cast<uint8_t>(character));
+            }
+        }
+    }
 }
 
 inline bool logicallyEqual(const ConvolutionWrwAttributes* a, const ConvolutionWrwAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -1473,6 +1587,30 @@ inline bool logicallyEqual(const ConvolutionWrwAttributes* a, const ConvolutionW
     if(a->conv_mode() != b->conv_mode())
     {
         return false;
+    }
+    {
+        const auto* aText = a->umd_flops();
+        const auto* bText = b->umd_flops();
+        if((aText == nullptr) != (bText == nullptr))
+        {
+            return false;
+        }
+        if(aText != nullptr && aText->string_view() != bText->string_view())
+        {
+            return false;
+        }
+    }
+    {
+        const auto* aText = a->umd_bytes();
+        const auto* bText = b->umd_bytes();
+        if((aText == nullptr) != (bText == nullptr))
+        {
+            return false;
+        }
+        if(aText != nullptr && aText->string_view() != bText->string_view())
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -2076,6 +2214,28 @@ inline void hashAppend(Hasher& hasher, const MatmulAttributes* value, const UidC
     hashAppend(hasher, canon(value->a_tensor_uid()));
     hashAppend(hasher, canon(value->b_tensor_uid()));
     hashAppend(hasher, canon(value->c_tensor_uid()));
+    {
+        const auto* text = value->umd_flops();
+        hasher.raw(static_cast<uint32_t>(text == nullptr ? 0 : text->size()));
+        if(text != nullptr)
+        {
+            for(char character : *text)
+            {
+                hasher.tag(static_cast<uint8_t>(character));
+            }
+        }
+    }
+    {
+        const auto* text = value->umd_bytes();
+        hasher.raw(static_cast<uint32_t>(text == nullptr ? 0 : text->size()));
+        if(text != nullptr)
+        {
+            for(char character : *text)
+            {
+                hasher.tag(static_cast<uint8_t>(character));
+            }
+        }
+    }
 }
 
 inline bool logicallyEqual(const MatmulAttributes* a, const MatmulAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -2099,6 +2259,30 @@ inline bool logicallyEqual(const MatmulAttributes* a, const MatmulAttributes* b,
     if(aCanon(a->c_tensor_uid()) != bCanon(b->c_tensor_uid()))
     {
         return false;
+    }
+    {
+        const auto* aText = a->umd_flops();
+        const auto* bText = b->umd_flops();
+        if((aText == nullptr) != (bText == nullptr))
+        {
+            return false;
+        }
+        if(aText != nullptr && aText->string_view() != bText->string_view())
+        {
+            return false;
+        }
+    }
+    {
+        const auto* aText = a->umd_bytes();
+        const auto* bText = b->umd_bytes();
+        if((aText == nullptr) != (bText == nullptr))
+        {
+            return false;
+        }
+        if(aText != nullptr && aText->string_view() != bText->string_view())
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -3251,6 +3435,28 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
     hasher.raw(static_cast<int64_t>(value->diagonal_alignment()));
     hasher.raw(static_cast<int64_t>(value->mma_core_mode()));
     hasher.raw(static_cast<int64_t>(value->implementation()));
+    {
+        const auto* text = value->umd_flops();
+        hasher.raw(static_cast<uint32_t>(text == nullptr ? 0 : text->size()));
+        if(text != nullptr)
+        {
+            for(char character : *text)
+            {
+                hasher.tag(static_cast<uint8_t>(character));
+            }
+        }
+    }
+    {
+        const auto* text = value->umd_bytes();
+        hasher.raw(static_cast<uint32_t>(text == nullptr ? 0 : text->size()));
+        if(text != nullptr)
+        {
+            for(char character : *text)
+            {
+                hasher.tag(static_cast<uint8_t>(character));
+            }
+        }
+    }
 }
 
 inline bool logicallyEqual(const SdpaAttributes* a, const SdpaAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -3618,6 +3824,30 @@ inline bool logicallyEqual(const SdpaAttributes* a, const SdpaAttributes* b, con
     if(a->implementation() != b->implementation())
     {
         return false;
+    }
+    {
+        const auto* aText = a->umd_flops();
+        const auto* bText = b->umd_flops();
+        if((aText == nullptr) != (bText == nullptr))
+        {
+            return false;
+        }
+        if(aText != nullptr && aText->string_view() != bText->string_view())
+        {
+            return false;
+        }
+    }
+    {
+        const auto* aText = a->umd_bytes();
+        const auto* bText = b->umd_bytes();
+        if((aText == nullptr) != (bText == nullptr))
+        {
+            return false;
+        }
+        if(aText != nullptr && aText->string_view() != bText->string_view())
+        {
+            return false;
+        }
     }
     return true;
 }

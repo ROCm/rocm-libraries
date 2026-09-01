@@ -46,6 +46,23 @@ enum UhdAdapter : byte {
 /// @brief Score metadata for UHD predictions.
 ///
 /// Describes the units and calibration of scores for cross-engine comparison.
+/// One string value of a categorical field and the code the model was trained with
+/// (RFC 0019 §6.5).
+table UhdCategoricalValue {
+    value: string (required);
+    code: int32;
+}
+
+/// The value -> code map for one string-valued field, e.g. `$kernel.dtype`.
+///
+/// Explicit rather than implicit: §6.5 rules out an ordinal by declaration order, a hash of
+/// the string, and the underlying enum value, because each changes silently when a schema is
+/// edited or a pack is rebuilt. Only a table can be diffed and version-checked.
+table UhdCategoricalField {
+    field: string (required);
+    values: [UhdCategoricalValue];
+}
+
 table UhdScoreMetadata {
     /// Score units (e.g., "tflops", "ms", "relative").
     units: string;
@@ -109,6 +126,10 @@ table UHD {
 
     /// For STATIC_ORDER adapter: field names to sort by in order (e.g., ["priority", "id"]).
     static_order_fields: [string];
+
+    /// RFC 0019 §6.5. Absent when no feature reads a string field. Covered by
+    /// `features_hash`, so editing it invalidates the contract rather than passing silently.
+    categorical_encoding: [UhdCategoricalField];
 
     /// For CUSTOM_LIBRARY adapter: symbol name of the scorer function in the .so.
     custom_library_symbol: string;

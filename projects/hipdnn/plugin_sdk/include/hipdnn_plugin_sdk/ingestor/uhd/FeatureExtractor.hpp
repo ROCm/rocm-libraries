@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -150,7 +151,9 @@ public:
     /// bare and pre-quoted spellings of a reference agree. Order is significant —
     /// RFC 0019 §7.2 requires the signature to match training exactly, so a permuted
     /// signature must not produce a matching hash.
-    static std::string computeHash(const std::vector<std::string>& signature);
+    static std::string computeHash(
+        const std::vector<std::string>& signature,
+        const std::map<std::string, std::map<std::string, int32_t>>& categoricalEncoding = {});
 
     /// Get the hash of this extractor's signature.
     const std::string& getSignatureHash() const
@@ -549,7 +552,9 @@ inline std::vector<std::string>
     return ctx.getMissingVars(_varRefs);
 }
 
-inline std::string FeatureExtractor::computeHash(const std::vector<std::string>& signature)
+inline std::string FeatureExtractor::computeHash(
+    const std::vector<std::string>& signature,
+    const std::map<std::string, std::map<std::string, int32_t>>& categoricalEncoding)
 {
     // Canonical form is the parsed signature dumped as compact JSON, matching Python's
     // json.dumps(signature, separators=(",", ":")) in tools/uhd_gen. Parsing first means
@@ -577,6 +582,29 @@ inline std::string FeatureExtractor::computeHash(const std::vector<std::string>&
         // parse() -- a bare "$ref" is lifted straight to a JSON string -- so it has to
         // be converted here or it escapes as a raw nlohmann type.
         throw JsonLogicError("features_signature cannot be serialized: " + std::string(e.what()));
+    }
+
+    // RFC 0019 §6.3: the hash fingerprints the *resolved* feature contract -- the
+    // canonicalized signature and the categorical encoding -- so editing the encoding
+    // invalidates the contract instead of passing silently. §6.5 makes the point directly:
+    // "features_hash does not catch it because the signature text is unchanged."
+    //
+    // Appended only when there is an encoding, so a UHD that reads no string field hashes
+    // exactly as it did before this field existed. Every shipped model is such a UHD, and
+    // changing their hashes would invalidate contracts that are in fact intact.
+    if(!categoricalEncoding.empty())
+    {
+        nlohmann::json encoding = nlohmann::json::object();
+        for(const auto& [field, codes] : categoricalEncoding)
+        {
+            for(const auto& [value, code] : codes)
+            {
+                encoding[field][value] = code;
+            }
+        }
+        // std::map is key-sorted and nlohmann's default object is too, so both sides render
+        // the same bytes without an explicit sort.
+        serialized += "|" + encoding.dump();
     }
 
     const std::string fullHash = sha256(serialized);

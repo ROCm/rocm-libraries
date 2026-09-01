@@ -521,6 +521,40 @@ TEST_F(TestFeatureExtractor, HashMatchesGeneratorForBareReferences)
     EXPECT_EQ(FeatureExtractor::computeHash(signature), "sha256:fe9d0487031089e0");
 }
 
+TEST_F(TestFeatureExtractor, HashMatchesGeneratorForACategoricalEncoding)
+{
+    // RFC 0019 §6.3 puts categorical_encoding inside the fingerprint. The expected value is
+    // whatever tools/uhd_gen produces for the same inputs -- if these two ever disagree, a
+    // model trains under one encoding and loads under another with no error, which is the
+    // silent divergence §6.5 describes.
+    const std::map<std::string, std::map<std::string, int32_t>> encoding{
+        {"$kernel.dtype", {{"fp16", 0}, {"fp32", 1}}}};
+
+    EXPECT_EQ(FeatureExtractor::computeHash({"\"$kernel.dtype\""}, encoding),
+              "sha256:ad7b1aef147b1197");
+}
+
+TEST_F(TestFeatureExtractor, AnAbsentEncodingHashesExactlyAsBefore)
+{
+    // Every model shipped so far reads no string field. Folding the encoding in must not
+    // rehash them: their contracts are intact, and a changed hash would refuse them at load.
+    EXPECT_EQ(FeatureExtractor::computeHash({"\"$q.batch\""}, {}),
+              FeatureExtractor::computeHash({"\"$q.batch\""}));
+    EXPECT_EQ(FeatureExtractor::computeHash({"\"$q.batch\""}, {}), "sha256:611513da8e8614b2");
+}
+
+TEST_F(TestFeatureExtractor, SwappingTwoCodesBreaksTheContract)
+{
+    // The case the signature text cannot express: same features, different meaning.
+    const std::map<std::string, std::map<std::string, int32_t>> one{
+        {"$kernel.dtype", {{"fp16", 0}, {"fp32", 1}}}};
+    const std::map<std::string, std::map<std::string, int32_t>> swapped{
+        {"$kernel.dtype", {{"fp16", 1}, {"fp32", 0}}}};
+
+    EXPECT_NE(FeatureExtractor::computeHash({"\"$kernel.dtype\""}, one),
+              FeatureExtractor::computeHash({"\"$kernel.dtype\""}, swapped));
+}
+
 TEST_F(TestFeatureExtractor, HashMatchesGeneratorForPrequotedReference)
 {
     EXPECT_EQ(FeatureExtractor::computeHash({"\"$q.batch\""}), "sha256:611513da8e8614b2");

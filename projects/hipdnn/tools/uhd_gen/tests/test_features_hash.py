@@ -240,3 +240,42 @@ def test_booleans_are_not_treated_as_numbers():
     """bool subclasses int in Python; the validator must not fall into the numeric
     branch for True/False."""
     assert compute_features_hash(["true"]) != compute_features_hash(["false"])
+
+
+# --- RFC 0019 §6.3: the encoding is part of the fingerprint -------------------------------
+
+def test_an_absent_encoding_hashes_exactly_as_before():
+    """Every model shipped so far reads no string field. Rehashing them would invalidate
+    contracts that are intact, so absent and empty must both be no-ops."""
+    signature = ['"$kernel.tile_m"', '"$q.seqlen"']
+    baseline = compute_features_hash(signature)
+    assert compute_features_hash(signature, None) == baseline
+    assert compute_features_hash(signature, {}) == baseline
+
+
+def test_changing_the_encoding_changes_the_hash():
+    """§6.5: 'features_hash does not catch it because the signature text is unchanged.'
+    That is the hole this closes -- same signature, different meaning."""
+    signature = ['"$kernel.dtype"']
+    one = compute_features_hash(signature, {"$kernel.dtype": {"fp16": 0, "fp32": 1}})
+    two = compute_features_hash(signature, {"$kernel.dtype": {"fp16": 1, "fp32": 0}})
+    assert one != two, "swapping two codes must break the contract check"
+    assert one != compute_features_hash(signature)
+
+
+def test_the_encoding_is_order_independent():
+    """A dict literal's order is not part of the contract; the codes are. The C++ side holds
+    this in a std::map, so both must render key-sorted."""
+    signature = ['"$kernel.dtype"']
+    a = compute_features_hash(signature, {"$kernel.dtype": {"fp32": 1, "fp16": 0}})
+    b = compute_features_hash(signature, {"$kernel.dtype": {"fp16": 0, "fp32": 1}})
+    assert a == b
+
+
+def test_adding_a_field_to_the_encoding_changes_the_hash():
+    signature = ['"$kernel.dtype"', '"$kernel.pipeline"']
+    one = compute_features_hash(signature, {"$kernel.dtype": {"fp16": 0}})
+    two = compute_features_hash(
+        signature, {"$kernel.dtype": {"fp16": 0}, "$kernel.pipeline": {"intrawave": 0}}
+    )
+    assert one != two

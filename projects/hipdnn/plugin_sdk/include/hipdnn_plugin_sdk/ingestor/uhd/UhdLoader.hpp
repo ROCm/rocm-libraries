@@ -125,6 +125,27 @@ inline std::optional<UhdConfig>
 
     config.uhdId = uhd->id()->str();
     config.featuresHash = uhd->features_hash()->str();
+
+    // RFC 0019 §6.5. Absent in every UHD written before the field existed, and absent in any
+    // whose features read no string field; both must behave exactly as they did.
+    if(uhd->categorical_encoding() != nullptr)
+    {
+        for(const auto* field : *uhd->categorical_encoding())
+        {
+            if(field == nullptr || field->field() == nullptr || field->values() == nullptr)
+            {
+                continue;
+            }
+            auto& codes = config.categoricalEncoding[field->field()->str()];
+            for(const auto* entry : *field->values())
+            {
+                if(entry != nullptr && entry->value() != nullptr)
+                {
+                    codes[entry->value()->str()] = entry->code();
+                }
+            }
+        }
+    }
     config.objective = uhd->objective()->str();
 
     // Validate objective value
