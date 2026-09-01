@@ -748,6 +748,17 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                           number<log2_floor(row_dwords) - 1>{});
     }
 
+    // Double-buffering Q/dO is a trade, not a free win: measured +3.2% on nomask
+    // at a low core clock and ~0 at boost, against about -1.3% on causal across
+    // four batches on two machines. Causal has the mask VALU to cover the
+    // transfer already, so only the unmasked instance takes it -- and only that
+    // instance pays the 36,800 B.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseQDOPrefetch()
+    {
+        return CK_TILE_FMHA_BWD_PREFETCH_QDO && !Problem::FmhaMask::IsMasking;
+    }
+
     // Base of the second Q/dO pair, used when the pipeline double-buffers them.
     // Appended past everything else so the existing layout is byte-identical.
     template <typename Problem>
@@ -769,11 +780,9 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t single = GetSmemSizeStaged<Problem>() +
                                    GetSmemSizeKGradAcc<Problem>() +
                                    GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
-#if CK_TILE_FMHA_BWD_PREFETCH_QDO
-        return single + GetSmemSizeQ<Problem>() + GetSmemSizeOGrad<Problem>();
-#else
-        return single;
-#endif
+        return single + (UseQDOPrefetch<Problem>()
+                             ? GetSmemSizeQ<Problem>() + GetSmemSizeOGrad<Problem>()
+                             : 0);
     }
 };
 
