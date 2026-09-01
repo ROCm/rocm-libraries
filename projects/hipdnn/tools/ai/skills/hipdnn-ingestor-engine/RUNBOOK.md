@@ -1620,6 +1620,15 @@ cmake --install $BUILD --prefix $INSTALL
 cd $INSTALL && ctest -R "external-integration-check" -V
 ```
 
+**Anchor the selector when you run ctest yourself.** `-R`, `-L` and `-E` are unanchored
+regexes, not literal names. `ctest -L quick` also selects every `ffm-quick` suite — on a
+`hipdnn-dev-all` build that is 74 tests rather than 62, and the 12 extra are the on-device
+ones, so the run roughly doubles and reads as a hang. Use `-L '^quick$'`, and dry-run
+`ctest -N -L '^quick$'` first: `Total Tests: 0` means the selector matched nothing (a
+green exit 0 that proves nothing), and a count well above what you expected means the
+regex widened. The same applies to `-R "external-integration-check"` above, which
+deliberately matches every provider's check — narrow it when you want just one.
+
 Testing only out of a build tree with hand-rolled arguments for a whole run, and never
 executing the registered target, is a real cost already paid. The install-tree run is the
 one that proves the wiring, and step 9c makes it a gate.

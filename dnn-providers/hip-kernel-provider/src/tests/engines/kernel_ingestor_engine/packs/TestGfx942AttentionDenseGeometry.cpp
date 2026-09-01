@@ -97,7 +97,7 @@ const std::vector<Family>& families()
 // The default arm: a 3-D grid over (query blocks, heads, batch)
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseGeometry, DefaultArmTilesQueryBlocksByHeadsByBatch)
+TEST(TestGfx942AttentionDenseGeometry, DefaultArmTilesQueryBlocksByHeadsByBatch)
 {
     for(const auto& family : families())
     {
@@ -110,7 +110,7 @@ TEST(Gfx942AttentionDenseGeometry, DefaultArmTilesQueryBlocksByHeadsByBatch)
     }
 }
 
-TEST(Gfx942AttentionDenseGeometry, DefaultArmCoversEveryQueryRowExactly)
+TEST(TestGfx942AttentionDenseGeometry, DefaultArmCoversEveryQueryRowExactly)
 {
     // The property underneath the arithmetic, and the one whose violation is silent:
     // gridX * BLOCK_M must cover Sq with no row left over. Under-covering leaves rows
@@ -125,7 +125,7 @@ TEST(Gfx942AttentionDenseGeometry, DefaultArmCoversEveryQueryRowExactly)
     }
 }
 
-TEST(Gfx942AttentionDenseGeometry, DefaultArmRoundsQueryBlocksUpNotDown)
+TEST(TestGfx942AttentionDenseGeometry, DefaultArmRoundsQueryBlocksUpNotDown)
 {
     // Every family above has Sq % BLOCK_M == 0, where floor and ceil AGREE -- so
     // none of them can tell the two apart, and a floor would pass the whole suite.
@@ -152,7 +152,7 @@ TEST(Gfx942AttentionDenseGeometry, DefaultArmRoundsQueryBlocksUpNotDown)
 // The persistent arm: a 1-D grid of num_persistent CTAs
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseGeometry, PersistentArmLaunchesAFlatGridOfNumPersistent)
+TEST(TestGfx942AttentionDenseGeometry, PersistentArmLaunchesAFlatGridOfNumPersistent)
 {
     // The branch that shipped missing. The engine implemented only the default arm,
     // so every persistent variant launched the 3-D grid and left output rows
@@ -166,7 +166,7 @@ TEST(Gfx942AttentionDenseGeometry, PersistentArmLaunchesAFlatGridOfNumPersistent
     }
 }
 
-TEST(Gfx942AttentionDenseGeometry, TheTwoArmsDisagreeOnEveryRealFamily)
+TEST(TestGfx942AttentionDenseGeometry, TheTwoArmsDisagreeOnEveryRealFamily)
 {
     // If they ever agreed, every test above would pass with the branch deleted --
     // which is precisely the defect that shipped. This is the assertion that makes
@@ -184,7 +184,7 @@ TEST(Gfx942AttentionDenseGeometry, TheTwoArmsDisagreeOnEveryRealFamily)
 // The block size, which both arms share
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseGeometry, BlockIsWave64LanesPerQueryRowGroup)
+TEST(TestGfx942AttentionDenseGeometry, BlockIsWave64LanesPerQueryRowGroup)
 {
     // attention_dense_block (:1822): (block_m // 32 * 64, 1, 1).
     for(const auto& family : families())
@@ -200,7 +200,7 @@ TEST(Gfx942AttentionDenseGeometry, BlockIsWave64LanesPerQueryRowGroup)
 // Agreement with the dispatcher's own rule
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseGeometry, FamiliesStraddleThePersistentThreshold)
+TEST(TestGfx942AttentionDenseGeometry, FamiliesStraddleThePersistentThreshold)
 {
     // Guards the suite itself: if every family fell on one side, the arm tests would
     // still pass while covering one branch. The corpus must exercise both.
@@ -218,7 +218,7 @@ TEST(Gfx942AttentionDenseGeometry, FamiliesStraddleThePersistentThreshold)
 // Refusals: a degenerate grid must be named, not launched
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseGeometry, RefusesNonPositiveBlockM)
+TEST(TestGfx942AttentionDenseGeometry, RefusesNonPositiveBlockM)
 {
     // blockM reaches an integer division, so without the guard this is SIGFPE rather
     // than a wrong answer. Verified by mutation: deleting the guard takes the whole
@@ -233,14 +233,14 @@ TEST(Gfx942AttentionDenseGeometry, RefusesNonPositiveBlockM)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(Gfx942AttentionDenseGeometry, RefusesPersistentWithoutACtaCount)
+TEST(TestGfx942AttentionDenseGeometry, RefusesPersistentWithoutACtaCount)
 {
     // Would launch an empty or negative grid and return having written nothing.
     EXPECT_THROW(attentionDenseGeometry(BLOCK_M, 4096, 32, 1, ON, 0, "k"),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(Gfx942AttentionDenseGeometry, RefusesADefaultArmThatWouldLaunchZeroCtas)
+TEST(TestGfx942AttentionDenseGeometry, RefusesADefaultArmThatWouldLaunchZeroCtas)
 {
     // gridY/gridZ come straight from metadata, so a zero head count or batch is a
     // launch of nothing that reports success.
@@ -255,7 +255,7 @@ TEST(Gfx942AttentionDenseGeometry, RefusesADefaultArmThatWouldLaunchZeroCtas)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(Gfx942AttentionDenseGeometry, PersistentArmIgnoresTheShapeItDoesNotIndex)
+TEST(TestGfx942AttentionDenseGeometry, PersistentArmIgnoresTheShapeItDoesNotIndex)
 {
     // The persistent grid is (num_persistent, 1, 1) whatever the shape, so a zero
     // head count is NOT a refusal here -- the arm never indexes it. Pinned so the

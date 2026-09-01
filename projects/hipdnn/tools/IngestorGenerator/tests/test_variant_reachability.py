@@ -14,8 +14,8 @@ which ranks the wider tile higher -- picked it every single time. The suite was
 green throughout; nothing had ever asked "for the narrow tile, is there a shape
 where it wins?"
 
-`Gfx942AttentionDenseScore.RanksTheWiderKvTileHigher` and
-`Gfx942AttentionDenseKernelMatch.AcceptsEitherShippedTileForA256KeyGraph`
+`TestGfx942AttentionDenseScore.RanksTheWiderKvTileHigher` and
+`TestGfx942AttentionDenseKernelMatch.AcceptsEitherShippedTileForA256KeyGraph`
 (TestGfx942AttentionDenseMatchers.cpp) are the real engine's own version of this
 exact shape: applicability is `seqlen_kv % block_n == 0`, not equality, and both
 shipped tiles are simultaneously legal at the shapes the corpus actually has.

@@ -395,12 +395,12 @@ double scoreOf(const KernelSpec& kernelSpec)
 // a matcher that declines everything would pass all the negatives.
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseGraphMatch, AcceptsDenseBshdCausalGraph)
+TEST(TestGfx942AttentionDenseGraphMatch, AcceptsDenseBshdCausalGraph)
 {
     EXPECT_TRUE(matchGraph(GraphSpec{}).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, AcceptsNoMaskGraph)
+TEST(TestGfx942AttentionDenseGraphMatch, AcceptsNoMaskGraph)
 {
     GraphSpec spec;
     spec.leftBound = std::nullopt;
@@ -408,7 +408,7 @@ TEST(Gfx942AttentionDenseGraphMatch, AcceptsNoMaskGraph)
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, AcceptsDeprecatedCausalBoolean)
+TEST(TestGfx942AttentionDenseGraphMatch, AcceptsDeprecatedCausalBoolean)
 {
     // The deprecated boolean takes precedence over the trio when set.
     GraphSpec spec;
@@ -418,7 +418,7 @@ TEST(Gfx942AttentionDenseGraphMatch, AcceptsDeprecatedCausalBoolean)
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, AcceptsGroupedQueryAttention)
+TEST(TestGfx942AttentionDenseGraphMatch, AcceptsGroupedQueryAttention)
 {
     GraphSpec spec;
     spec.numQueryHeads = 8;
@@ -426,7 +426,7 @@ TEST(Gfx942AttentionDenseGraphMatch, AcceptsGroupedQueryAttention)
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, AcceptsMmaCoreModeFloat)
+TEST(TestGfx942AttentionDenseGraphMatch, AcceptsMmaCoreModeFloat)
 {
     // Every shipped SdpaFwd bundle sets "float". A `!= UNSET` rejection would decline
     // all of them SILENTLY -- the engine would register, build, and never be selected.
@@ -439,7 +439,7 @@ TEST(Gfx942AttentionDenseGraphMatch, AcceptsMmaCoreModeFloat)
 // Tier 1 -- silent wrong answers. The kernel would compute a plausible result.
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesBhsdLayout)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesBhsdLayout)
 {
     // THE case this whole file exists for. The kernel bakes BSHD and takes no stride
     // arguments, so a BHSD graph is indexed as if it were BSHD: in-bounds reads of the
@@ -450,7 +450,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesBhsdLayout)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, AcceptsSingleHeadUnderEitherStrideSpelling)
+TEST(TestGfx942AttentionDenseGraphMatch, AcceptsSingleHeadUnderEitherStrideSpelling)
 {
     // The degenerate case, and the reason the layout check exempts unit-extent axes.
     // At H == 1 the head index is always 0, so no address depends on strides[H] and
@@ -468,7 +468,7 @@ TEST(Gfx942AttentionDenseGraphMatch, AcceptsSingleHeadUnderEitherStrideSpelling)
     EXPECT_TRUE(matchGraph(bhsd).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesBottomRightCausalWhenSeqLensDiffer)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesBottomRightCausalWhenSeqLensDiffer)
 {
     // The kernel's causal clamp is top-left (no Skv - Sq offset term). Bottom-right
     // differs from top-left by exactly that offset, so serving this at Sq != Skv would
@@ -479,7 +479,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesBottomRightCausalWhenSeqLensDiffer)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, AcceptsBottomRightCausalWhenSeqLensMatch)
+TEST(TestGfx942AttentionDenseGraphMatch, AcceptsBottomRightCausalWhenSeqLensMatch)
 {
     // ...and accepts it when Sq == Skv, where the two alignments coincide exactly.
     // Load-bearing: every shipped causal SdpaFwd bundle sets BOTTOM_RIGHT at Sq == Skv,
@@ -489,7 +489,7 @@ TEST(Gfx942AttentionDenseGraphMatch, AcceptsBottomRightCausalWhenSeqLensMatch)
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesMismatchedHeadSizes)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesMismatchedHeadSizes)
 {
     // hipDNN permits D_qk != D_v; the kernel has ONE head_size and would read V with
     // Q's stride arithmetic.
@@ -498,7 +498,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesMismatchedHeadSizes)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesMixedOperandDataTypes)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesMixedOperandDataTypes)
 {
     // One spec.dtype types all four pointers; a bf16 Q with an fp16 V would be read at
     // the wrong element width.
@@ -507,14 +507,14 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesMixedOperandDataTypes)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesUnsupportedDataType)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesUnsupportedDataType)
 {
     GraphSpec spec;
     spec.dataType = data_objects::DataType::FLOAT;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesGraphsPastThe32BitExtentLimit)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesGraphsPastThe32BitExtentLimit)
 {
     // Offsets lower to `add nsw` / `mul nsw` i32: signed overflow is UB, so LLVM may
     // poison the whole address chain rather than merely read the wrong place.
@@ -527,7 +527,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesGraphsPastThe32BitExtentLimit)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesMissingAttentionScale)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesMissingAttentionScale)
 {
     // The ABI takes `scale` as a required f32 kernarg. The mathematically obvious
     // 1/sqrt(D) default would silently override whatever the frontend's omission meant,
@@ -541,7 +541,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesMissingAttentionScale)
 // Tier 2 -- faults and malformed graphs. graph_match runs on an UNVALIDATED graph.
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesNonDivisibleGqaGrouping)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesNonDivisibleGqaGrouping)
 {
     // The kernel derives gqa = Hq // Hkv by integer division, silently dropping the
     // remainder heads.
@@ -551,7 +551,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesNonDivisibleGqaGrouping)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesGraphWithNoStrides)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesGraphWithNoStrides)
 {
     // strides() returns nullptr. Every layout predicate dereferences it, so this must
     // decline rather than crash.
@@ -560,14 +560,14 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesGraphWithNoStrides)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesMultiNodeGraph)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesMultiNodeGraph)
 {
     GraphSpec spec;
     spec.twoNodes = true;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesBothDeprecatedCausalBooleans)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesBothDeprecatedCausalBooleans)
 {
     // Mutually exclusive. The frontend owns the diagnostic; graph_match must be total
     // over an unvalidated graph, so it declines rather than throws.
@@ -582,14 +582,14 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesBothDeprecatedCausalBooleans)
 // silently not performed, which is a wrong answer with no error.
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesAdditiveAttentionMask)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAdditiveAttentionMask)
 {
     GraphSpec spec;
     spec.attnMaskUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesDeviceResidentScaleTensor)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesDeviceResidentScaleTensor)
 {
     // The ABI's scale is a launch scalar; there is no pointer slot for a scale tensor.
     // Note this is the SAME frontend setter name as attn_scale_value -- set_attn_scale
@@ -600,14 +600,14 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesDeviceResidentScaleTensor)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesVarlen)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesVarlen)
 {
     GraphSpec spec;
     spec.seqLenQUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesPagedKv)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesPagedKv)
 {
     // Worth its own case: supports_attention_dense never inspects `spec.paged` at all,
     // so the graph side is the only place a paged request can be caught.
@@ -616,21 +616,21 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesPagedKv)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesAttentionSinks)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAttentionSinks)
 {
     GraphSpec spec;
     spec.sinkTokenUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesBlockSparseMask)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesBlockSparseMask)
 {
     GraphSpec spec;
     spec.blockMaskUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesSoftmaxStatsBothSpellings)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSoftmaxStatsBothSpellings)
 {
     // Two spellings of one feature; rejecting only the UID admits graphs carrying the
     // boolean, and vice versa.
@@ -643,7 +643,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesSoftmaxStatsBothSpellings)
     EXPECT_FALSE(matchGraph(byFlag).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, AcceptsExplicitlyDisabledStats)
+TEST(TestGfx942AttentionDenseGraphMatch, AcceptsExplicitlyDisabledStats)
 {
     // generate_stats is optional<bool>: an explicit `false` is a request for NO stats,
     // which this kernel satisfies. Declining it would be an over-rejection.
@@ -652,35 +652,35 @@ TEST(Gfx942AttentionDenseGraphMatch, AcceptsExplicitlyDisabledStats)
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesDropout)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesDropout)
 {
     GraphSpec spec;
     spec.dropoutProbability = 0.1F;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesFp8Descale)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesFp8Descale)
 {
     GraphSpec spec;
     spec.descaleQUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesAlibiMask)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAlibiMask)
 {
     GraphSpec spec;
     spec.alibiMask = true;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesPaddingMask)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesPaddingMask)
 {
     GraphSpec spec;
     spec.paddingMask = true;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesSlidingWindow)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSlidingWindow)
 {
     // A bounded left edge that is not the causal (-1, 0) pair derives to
     // SLIDING_WINDOW, which supports_attention_dense rejects unconditionally.
@@ -690,7 +690,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesSlidingWindow)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesSlidingWindowSetAlongsideDeprecatedCausal)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSlidingWindowSetAlongsideDeprecatedCausal)
 {
     // A REAL graph shape, and the one the sibling test above misses: gpt_oss sets the
     // deprecated causal_mask boolean AND a 128-token left bound. Deriving the mask
@@ -704,7 +704,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesSlidingWindowSetAlongsideDeprecated
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesSlidingWindowSetAlongsideBottomRightCausal)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSlidingWindowSetAlongsideBottomRightCausal)
 {
     // Same hazard on the bottom-right spelling of the deprecated pair.
     GraphSpec spec;
@@ -714,7 +714,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesSlidingWindowSetAlongsideBottomRigh
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoBound)
+TEST(TestGfx942AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoBound)
 {
     // The guard above must not over-decline: a deprecated causal flag with NO bound is
     // ordinary causal and stays servable. 152 graphs in the corpus are this shape.
@@ -723,7 +723,7 @@ TEST(Gfx942AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoBound
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesNonAutoImplementationHint)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesNonAutoImplementationHint)
 {
     // The one field the completeness check flags as still UNCHECKED in the shipped
     // reference pack. A named execution strategy is a request this pack does not
@@ -733,7 +733,7 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesNonAutoImplementationHint)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(Gfx942AttentionDenseGraphMatch, DeclinesUnsupportedMmaCoreMode)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesUnsupportedMmaCoreMode)
 {
     GraphSpec spec;
     spec.mmaCoreMode = data_objects::DataType::BFLOAT16;
@@ -750,26 +750,26 @@ TEST(Gfx942AttentionDenseGraphMatch, DeclinesUnsupportedMmaCoreMode)
 // be served zero-fill or a truncated loop rather than faulting.
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseKernelMatch, AcceptsTheCandidateBakedForThisGraph)
+TEST(TestGfx942AttentionDenseKernelMatch, AcceptsTheCandidateBakedForThisGraph)
 {
     EXPECT_TRUE(matchesKernel(GraphSpec{}, KernelSpec{}));
 }
 
-TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherDtype)
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherDtype)
 {
     KernelSpec kernel;
     kernel.dtype = "FP16";
     EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
 }
 
-TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadSize)
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadSize)
 {
     KernelSpec kernel;
     kernel.headSize = 64;
     EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
 }
 
-TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherBatch)
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherBatch)
 {
     // The defect class this check exists for: `batch` is baked into the K/V
     // buffer-resource extent (attention_dense.py:1264-1265), so a graph with a larger
@@ -780,7 +780,7 @@ TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherBatch)
     EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
 }
 
-TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherSequenceLength)
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherSequenceLength)
 {
     KernelSpec shorterQ;
     shorterQ.seqLenQ = 512;
@@ -791,7 +791,7 @@ TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherSequenceLe
     EXPECT_FALSE(matchesKernel(GraphSpec{}, shorterKv));
 }
 
-TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadCount)
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadCount)
 {
     KernelSpec queryHeads;
     queryHeads.numQueryHeads = 8;
@@ -802,7 +802,7 @@ TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadCount)
     EXPECT_FALSE(matchesKernel(GraphSpec{}, kvHeads));
 }
 
-TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForTheOtherMask)
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateBakedForTheOtherMask)
 {
     // The graph's mask is a DERIVATION (left_bound/right_bound/diagonal_alignment or
     // the deprecated booleans); the candidate bakes a plain 0/1. A mismatch here serves
@@ -818,7 +818,7 @@ TEST(Gfx942AttentionDenseKernelMatch, RefusesACandidateBakedForTheOtherMask)
     EXPECT_TRUE(matchesKernel(noMaskGraph, nonCausal));
 }
 
-TEST(Gfx942AttentionDenseKernelMatch, RefusesATileThatDoesNotDivideTheSequence)
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesATileThatDoesNotDivideTheSequence)
 {
     // The knob-selection rows. block_n must divide seqlen_kv and block_m must divide
     // seqlen_q -- tested against the CANDIDATE rather than a constant, so a different
@@ -832,7 +832,7 @@ TEST(Gfx942AttentionDenseKernelMatch, RefusesATileThatDoesNotDivideTheSequence)
     EXPECT_FALSE(matchesKernel(GraphSpec{}, badBlockM));
 }
 
-TEST(Gfx942AttentionDenseKernelMatch, RefusesANonPositiveTile)
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesANonPositiveTile)
 {
     KernelSpec zeroBlockN;
     zeroBlockN.blockN = 0;
@@ -843,7 +843,7 @@ TEST(Gfx942AttentionDenseKernelMatch, RefusesANonPositiveTile)
     EXPECT_FALSE(matchesKernel(GraphSpec{}, zeroBlockM));
 }
 
-TEST(Gfx942AttentionDenseKernelMatch, AcceptsEitherShippedTileForA256KeyGraph)
+TEST(TestGfx942AttentionDenseKernelMatch, AcceptsEitherShippedTileForA256KeyGraph)
 {
     // Both shipped block_n values divide 256, so both are applicable and `score`
     // decides. This is what makes the ranking test below meaningful rather than
@@ -860,7 +860,7 @@ TEST(Gfx942AttentionDenseKernelMatch, AcceptsEitherShippedTileForA256KeyGraph)
 // score -- ranks the survivors. Higher wins.
 // ---------------------------------------------------------------------------
 
-TEST(Gfx942AttentionDenseScore, RanksTheWiderKvTileHigher)
+TEST(TestGfx942AttentionDenseScore, RanksTheWiderKvTileHigher)
 {
     // A larger KV tile amortises the per-tile barrier, LDS publication and loop
     // overhead across more keys. This is the engine's ONLY free axis once
@@ -872,7 +872,7 @@ TEST(Gfx942AttentionDenseScore, RanksTheWiderKvTileHigher)
     EXPECT_GT(scoreOf(wide), scoreOf(narrow));
 }
 
-TEST(Gfx942AttentionDenseScore, DoesNotReturnAConstant)
+TEST(TestGfx942AttentionDenseScore, DoesNotReturnAConstant)
 {
     // A constant score makes ranking arbitrary and hides mis-specialization, so it is
     // not a legitimate placeholder however honestly it is disclosed. This test is the
@@ -884,7 +884,7 @@ TEST(Gfx942AttentionDenseScore, DoesNotReturnAConstant)
     EXPECT_NE(scoreOf(wide), scoreOf(narrow));
 }
 
-TEST(Gfx942AttentionDenseScore, IgnoresAxesThatKernelMatchAlreadyPinned)
+TEST(TestGfx942AttentionDenseScore, IgnoresAxesThatKernelMatchAlreadyPinned)
 {
     // dtype/head_size/shape are decided by kernel_match, so score must not also rank on
     // them -- two candidates differing only there would otherwise be ordered by an axis
