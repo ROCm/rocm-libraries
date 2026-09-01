@@ -96,6 +96,13 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     static constexpr index_t kBlockSize  = Problem::kBlockSize;
 
     static constexpr index_t kM0        = BlockFmhaShape::kM0;
+
+    // Holding dV in registers, and evicting V to pay for it, only wins at
+    // kM0 = 64. The dV accumulator is kN0 x headdim and does not shrink with
+    // kM0, so at kM0 = 32 the same work does twice the dV LDS round trips --
+    // measured -8.2% on d=256 causal, whose tile is kM0=32.
+    static constexpr bool kDVInReg      = CK_TILE_FMHA_BWD_DV_IN_REG && (kM0 >= 64);
+    static constexpr bool kVNonResident = CK_TILE_FMHA_BWD_V_NONRESIDENT && (kM0 >= 64);
     static constexpr index_t kN0        = BlockFmhaShape::kN0;
     static constexpr index_t kK0        = BlockFmhaShape::kK0;
     static constexpr index_t kK1        = BlockFmhaShape::kK1;
@@ -362,9 +369,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // vector-memory counters, so block_sync_lds alone would not fence it.
         s_wait_tensorcnt_barrier<0>();
 
-#if !CK_TILE_FMHA_BWD_V_NONRESIDENT
+        // Unconditional: on the non-resident path every use below overwrites
+        // this before reading it, so it is dead and the compiler drops both the
+        // load and the live range.
         auto v_reg_tensor = load_tile(v_lds_read_window);
-#endif
         //---------------------------- Loop Load in ----------------------------//
         // Q: HBM ->Reg ->LDS
         auto q_dram_window =
@@ -667,21 +675,23 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // to synchronise.
         auto dk_acc = decltype(gemm_3.MakeCBlockTile()){};
         clear_tile(dk_acc);
-#if CK_TILE_FMHA_BWD_DV_IN_REG
+        // Declared either way so both branches below can name it; when it
+        // lives in LDS nothing reads it here and it costs nothing.
         auto dv_acc = decltype(gemm_1.MakeCBlockTile()){};
-        clear_tile(dv_acc);
-#endif
+        if constexpr(kDVInReg)
+        {
+            clear_tile(dv_acc);
+        }
         // Each accumulator is zeroed in LDS only if it actually lives there.
         // (These two were previously joined under an `#if 0 / #else`, which made
         // the pair unconditional -- so a register-resident arm still paid for a
         // dead zero-store of the accumulator it had just hoisted out.)
-#if !CK_TILE_FMHA_BWD_DV_IN_REG
+        if constexpr(!kDVInReg)
         {
             auto dv_zero = decltype(gemm_1.MakeCBlockTile()){};
             clear_tile(dv_zero);
             store_tile(dv_acc_lds_window, dv_zero);
         }
-#endif
 
         __builtin_amdgcn_sched_barrier(0);
         // Hot loop
@@ -839,13 +849,16 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             // STAGE 3, P^T@OGrad^T Gemm1
             Policy::template PTFromGemm0CToGemm1A<Problem>(pt_reg_tensor, p_gemm);
             {
-#if CK_TILE_FMHA_BWD_DV_IN_REG
-                gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
-#else
-                auto dv_acc = load_tile(dv_acc_lds_window);
-                gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
-                store_tile(dv_acc_lds_window, dv_acc);
-#endif
+                if constexpr(kDVInReg)
+                {
+                    gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
+                }
+                else
+                {
+                    auto dv_lds = load_tile(dv_acc_lds_window);
+                    gemm_1(dv_lds, pt_reg_tensor, dot_reg_tensor);
+                    store_tile(dv_acc_lds_window, dv_lds);
+                }
             }
 
             auto qt_reg_tensor = load_tile_transpose(qt_rd_cur);
@@ -853,9 +866,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             // STAGE 4, OGrad@V Gemm2
             auto dp_acc = SPGradBlockTileType{};
 
-#if CK_TILE_FMHA_BWD_V_NONRESIDENT
-            auto v_reg_tensor = load_tile(v_lds_read_window);
-#endif
+            if constexpr(kVNonResident)
+            {
+                v_reg_tensor = load_tile(v_lds_read_window);
+            }
             dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
 
             block_sync_lds();
@@ -1115,13 +1129,16 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 #endif
         auto dot_reg_tensor = load_tile_transpose(dot_rd_tail);
         {
-#if CK_TILE_FMHA_BWD_DV_IN_REG
-            gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
-#else
-            auto dv_acc = load_tile(dv_acc_lds_window);
-            gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
-            store_tile(dv_acc_lds_window, dv_acc);
-#endif
+            if constexpr(kDVInReg)
+            {
+                gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
+            }
+            else
+            {
+                auto dv_lds = load_tile(dv_acc_lds_window);
+                gemm_1(dv_lds, pt_reg_tensor, dot_reg_tensor);
+                store_tile(dv_acc_lds_window, dv_lds);
+            }
         }
 
 
@@ -1130,9 +1147,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         auto qt_reg_tensor = load_tile_transpose(qt_rd_tail);
 
-#if CK_TILE_FMHA_BWD_V_NONRESIDENT
-        auto v_reg_tensor = load_tile(v_lds_read_window);
-#endif
+        if constexpr(kVNonResident)
+        {
+            v_reg_tensor = load_tile(v_lds_read_window);
+        }
         dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
 
         HotLoopScheduler::template GemmStagedScheduler<2>();
@@ -1221,9 +1239,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // Pull the finished accumulators out of LDS. They come back with the
         // gemm C distribution, which is what the epilogue already expects, so
         // the return type is unchanged from the register-resident pipeline.
-#if !CK_TILE_FMHA_BWD_DV_IN_REG
-        auto dv_acc = load_tile(dv_acc_lds_window);
-#endif
+        if constexpr(!kDVInReg)
+        {
+            dv_acc = load_tile(dv_acc_lds_window);
+        }
 
         // Results Scale
         if constexpr(FmhaDropout::IsDropout)
