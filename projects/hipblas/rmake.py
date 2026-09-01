@@ -280,9 +280,11 @@ def config_cmd():
     if args.compiler is not None:
         cmake_options.append(f"-DCMAKE_CXX_COMPILER={args.compiler}")
 
-    # amdclang++ default in linux toolchain, clang++ in windows toolchain
+    # amdclang++ default in linux toolchain, clang++ in windows toolchain.
+    # Skip when targeting CUDA: nvcc drives device compilation and g++ is not
+    # the right host compiler for CUDA workflows.
     if os.name != "nt" and args.compiler is None:
-        if not args.use_amdclang_compiler:
+        if not args.use_amdclang_compiler and os.environ.get('HIP_PLATFORM') != 'nvidia':
             cmake_options.append(f"-DCMAKE_CXX_COMPILER=g++")
 
     if args.static_lib:
@@ -337,8 +339,20 @@ def config_cmd():
         rocsolver_path_cmake =  f'"{raw_rocsolver_path}"'
         cmake_options.append( f"-DCUSTOM_ROCSOLVER={rocsolver_path_cmake}")
 
-    if args.cuda_path:
-        os.environ['CUDA_BIN_PATH'] = args.cuda_path
+    # When building for the CUDA backend, locate nvcc directly rather than
+    # relying on hipcc to wrap it.  Pass the CUDA toolkit root and the nvcc
+    # executable to CMake so find_package(CUDA) and find_package(CUDAToolkit)
+    # resolve correctly without any hipcc dependency.
+    if os.environ.get('HIP_PLATFORM') == 'nvidia':
+        cuda_path = args.cuda_path  # defaults to /usr/local/cuda
+        nvcc_candidate = os.path.join(cuda_path, 'bin', 'nvcc')
+        if not os.path.exists(nvcc_candidate):
+            nvcc_candidate = which('nvcc') or ''
+        if not nvcc_candidate:
+            fatal("nvcc not found. Install the CUDA toolkit or pass "
+                  "--cudapath=/path/to/cuda to specify its location.")
+        cmake_options.append(f"-DCUDA_TOOLKIT_ROOT_DIR={cuda_path}")
+        cmake_options.append(f"-DCMAKE_CUDA_COMPILER={nvcc_candidate}")
 
     if args.cmake_dargs:
         for i in args.cmake_dargs:
