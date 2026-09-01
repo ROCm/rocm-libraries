@@ -57,7 +57,35 @@ test_categories:
     description: "Nightly comprehensive external integration coverage"
     test_patterns:
       - "*"
-    exclude: *common_excludes
+    # Layernorm backward is always built (HIPDNN_IT_ALWAYS_BUILT_SOURCES), so
+    # unlike the other C++ graph suites it runs in CI. At 2741 s on gfx1151 it
+    # timed this job out: ROCm/rocm-libraries#11529. Cost is host-side
+    # verification, ~450 ns per tensor element regardless of dtype, so a few big
+    # shapes repeated over 7 dtype fixtures x 2 layouts dominate. Excluding them
+    # brings it to 42 s measured; the "full" tier still runs everything.
+    #
+    # Explicit list because YAML cannot concatenate an aliased sequence, hence
+    # the repeated "*DISABLED*" instead of *common_excludes.
+    exclude:
+      - "*DISABLED*"
+      # 1162 s: batch-256/512 volumetric shapes, ~5-29 s a case. The engine's
+      # test-config TOML aims to skip these but its pattern is the forward
+      # suite's "Full5dLargeBatch/" prefix, which the always-built backward
+      # suites do not use, so they ran anyway.
+      - "Full/*IntegrationGpuLayernormBackwardLargeBatch*"
+      # 1274 s: 19 production shapes x 2 bias x 2 layouts x 7 fixtures. No dtype
+      # subset fits -- each fixture alone is ~180 s.
+      - "Full/*IntegrationGpuLayernormBackward*5D*"
+      # One shape, {32,32,14,25,59} (21.1M el), is 263 s of Smoke 5D's 288 s; the
+      # other 22 cases cost 24 s, so only these four go.
+      # Index rather than name because the shape is not in the test name:
+      # Combine(2 layouts, getLayernorm5DTestCases()) gives index = layout * 13 +
+      # case, and this shape is cases 10 and 12 in common/LayernormCommon.hpp.
+      # Re-derive if that list changes -- the indices shift silently.
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/10"
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/12"
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/23"
+      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/25"
     labels:
       - "comprehensive"
       - "nightly"
@@ -88,6 +116,6 @@ execution_settings:
   category_timeouts:
     quick: 1200
     standard: 2700
-    comprehensive: 25200
+    comprehensive: 7200
     full: 28800
     ffm-quick: 7200  # 2 hours
