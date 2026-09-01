@@ -25,7 +25,7 @@ from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, \
   SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
-  BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, DSBPermuteB32, FlatAtomicCmpswapB32, \
+  BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, DSBPermuteB32, DSStoreInstruction, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAndB32, \
   SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
   SCBranchSCC0, SCBranchSCC1, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SMinU32, SEndpgm, \
@@ -405,25 +405,95 @@ class GlobalWriteBatchWriter:
   def _computeCLSLayout(self):
     return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw)
 
+  @staticmethod
+  def _needsBiasSavDrain(kernel, useBias) -> bool:
+    """True when the epilogue stages a bias / scaleAlphaVec column vector into LDS.
+
+    A subtile bias or scaleAlphaVec epilogue reduces a per-column vector into LDS
+    before the store loop and every wave then reads that shared LDS vector. Only
+    those two features stage LDS ahead of the stores, so only they require the
+    pre-store drain/barrier ordering. Non-subtile kernels never take this path.
+    """
+    return bool(kernel.get("UseSubtileImpl")) and \
+        (useBias != DataDirection.NONE or bool(kernel["ProblemType"].get("UseScaleAlphaVec", 0)))
+
+  @staticmethod
+  def _isLdsMemoryWrite(item) -> bool:
+    """True for a genuine LDS memory write (ds_write*/ds_store*).
+
+    Excludes the ds_permute/ds_bpermute crossbar: rocisa models the permute
+    instructions under DSStoreInstruction, but they shuffle values across lanes
+    through the LDS bus without writing LDS memory, so they are not a write
+    hazard against in-flight LDS reads. Match on the emitted mnemonic so the
+    crossbar cannot be mistaken for a store.
+    """
+    if not isinstance(item, DSStoreInstruction):
+      return False
+    mnemonic = str(item).split(None, 1)[0]
+    return mnemonic.startswith("ds_write") or mnemonic.startswith("ds_store")
+
+  @staticmethod
+  def _emitBiasSavDrainBarrier(module: Module, isMultiDU: bool, needsDrain: bool) -> bool:
+    """Emit the pre-store bias/SAV LDS-read drain + workgroup barrier, multi-DU only.
+
+    Multi-DU emits this pair before _emitAdd, which makes its s_waitcnt lgkmcnt(0) the
+    load-to-use wait for the shared bias/scaleAlphaVec LDS column vector: it retires
+    those ds_reads before the v_pk_mul/v_pk_add that consume them. It must not be removed
+    there -- those reads have no other wait, because UseSubtileImpl excludes bias/SAV from
+    the interleaved per-element waitcnt (see globalStoreWait).
+
+    Single-DU emits _emitAdd first, so the pair would land after its own consumers and
+    cover nothing; it is elided (see emit()). This is *not* justified by the store region
+    being LDS-write-free -- that holds in multi-DU too, so it cannot distinguish the two
+    cases. The LDS-write-free invariant asserted in emit() guards a different hazard: an
+    LDS write in the store region racing other waves' in-flight reads.
+
+    Returns True iff the barrier was emitted.
+    """
+    if isMultiDU and needsDrain:
+      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
+      module.add(SBarrier(comment="sync waves before subtile paired stores"))
+      return True
+    return False
+
   def emit(self) -> Module:
     assert self._checkAtomicPreconditions()
     module = Module(self.moduleName)
     self._prolog(module)
-    # The bias/SAV drain barrier ordering is a multi-DU-only hardening that
-    # prevents cross-wave LDS corruption from ds_bpermute. Multi-DU emits the
-    # drain+barrier before the _emitAdd subtile stores; non-multi-DU emits
-    # _emitAdd first.
+    # Pre-store bias/SAV LDS-read drain + workgroup barrier ordering.
+    #
+    # A subtile bias/scaleAlphaVec epilogue stages a per-column vector into LDS once, then
+    # every wave reads that shared LDS vector while computing the paired stores. What makes
+    # the drain+barrier necessary or redundant is *which side of _emitAdd it lands on*, not
+    # whether the store region writes LDS -- the store region routes through the
+    # ds_permute/ds_bpermute crossbar, a register-lane shuffle that writes no LDS memory, in
+    # both DU modes:
+    #   * multi-DU: the pair is emitted BEFORE _emitAdd, so it sits between the ds_reads and
+    #     the v_pk_mul/v_pk_add that consume them, and its s_waitcnt lgkmcnt(0) is the only
+    #     thing retiring those reads -- UseSubtileImpl drops bias/SAV from the interleaved
+    #     per-element waitcnt. Required. It also pairs with the multi-DU epilogue-vector
+    #     barrier in KernelWriterAssembly.
+    #   * single-DU: _emitAdd is emitted FIRST, so the pair would land after its own
+    #     consumers, where it can retire nothing. Elided.
+    # The assert below is a separate guard, for a hazard neither case currently has: an LDS
+    # write reintroduced into the single-DU store region, racing other waves' in-flight
+    # reads. It is not the justification for the elision.
     isMultiDU = isSubtileMultiDU(self.kernel)
-    drainBiasSav = self.kernel.get("UseSubtileImpl") and \
-       (self.parentWriter.states.useBias != DataDirection.NONE or \
-        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
-    if not isMultiDU:
-      self._emitAdd(module)
-    if drainBiasSav:
-      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
-      module.add(SBarrier(comment="sync waves before subtile paired stores"))
+    needsDrain = self._needsBiasSavDrain(self.kernel, self.parentWriter.states.useBias)
     if isMultiDU:
+      self._emitBiasSavDrainBarrier(module, isMultiDU, needsDrain)
       self._emitAdd(module)
+    else:
+      storeStart = len(module.flatitems())
+      self._emitAdd(module)
+      if needsDrain:
+        assert not any(self._isLdsMemoryWrite(i) for i in module.flatitems()[storeStart:]), \
+          ("single-DU subtile store region must stay LDS-write-free: an LDS memory write "
+           "(ds_write/ds_store) here could race other waves' in-flight bias/SAV LDS "
+           "column-vector reads. Move the LDS write out of the store region, or add a "
+           "waitcnt+barrier ahead of it -- note the elided pre-store drain+barrier is not "
+           "that fence, since in single-DU it is emitted after the whole store region and "
+           "so lands after any write inside it.")
     self._epilog(module)
     # CompactLoopStore CLS countdown tail: emit countdown + branch + s_endpgm at
     # END of the CLS-loop body (= last batch of batchesPerCLSBody). Gated by
