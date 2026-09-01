@@ -432,26 +432,14 @@ def test_instruction_scalar_float():
         assert "// mutated" not in str(b)
 
 
-@pytest.mark.xfail(
-    reason="ROCM-3994 (W-KNOWN-BUG two-PR flow): the EMaxF16 true16 helper does not "
-           "exist on develop, so this reproducer fails at import. The true16 fix PR "
-           "(users/ericwan/true16-patch) must delete this marker; strict=True flips "
-           "the resulting XPASS to a failure if it is left behind. Time-box: next "
-           "hipBLASLt release.",
-    strict=True,
-    raises=(ImportError, AttributeError),
-)
 def test_instruction_vmax_f16_true16():
-    # Regression for the true16 (real-true16) activation-clamp defect (ROCM-3994).
+    # Regression for the true16 (real-true16) activation-clamp defect.
     #
-    # On a NoSDWA target (isaVersion 11/12) the EMaxF16 helper must emit the
-    # v_max_f16 activation clamp in true16 form, binding a half-word selector
-    # (.l) to every register operand. The abs() source keeps its suffix *inside*
-    # the closing paren: abs(v[..].l) is valid, abs(v[..]).l is not.
-    #
-    # RED on develop: EMaxF16 (and the VMaxF16 true16 kwarg) do not exist there,
-    # so the import / construction below fails outright. GREEN on the fix branch:
-    # the emitted text carries the .l selectors.
+    # On a NoSDWA target (isaVersion 11/12) the v_max_f16 activation clamp must
+    # be emitted in true16 form, binding a half-word selector (.l) to every
+    # register operand via the NoSDWA-gated t16() helper. The abs() source keeps
+    # its suffix *inside* the closing paren: abs(v[..].l) is valid,
+    # abs(v[..]).l is not.
     #
     # Assertions are substring/regex based to stay agnostic to the ~50-column
     # comment padding, matching test_instruction_swait_xcnt / _global_wb.
@@ -461,7 +449,8 @@ def test_instruction_vmax_f16_true16():
 
     import rocisa
     from rocisa.container import vgpr
-    from rocisa.instruction import EMaxF16
+    from rocisa.enum import HighBitSel
+    from rocisa.instruction import VMaxF16, t16
 
     # Initialize a NoSDWA gfx11 ISA so EMaxF16 selects the true16 path. Resolve
     # the assembler via ROCM_PATH first (matching test_mubuf.py::_isa_context) so
@@ -482,13 +471,15 @@ def test_instruction_vmax_f16_true16():
     # through __str__, so we construct the instruction under test, stringify it,
     # and assert on the emitted form. vgpr(name, ...) builds a VGPR operand
     # container (symbolic names like "Output"/"Value+0" mirror what the AMax
-    # generator passes; isAbs=True wraps it in abs()). EMaxF16 is the true16-aware
-    # max helper under test. Nothing is assembled or run on a device.
-    # TODO(#9720): decouple this from the toolchain/env init above; a
-    # string-rendering test should not need a resolved assembler path.
+    # generator passes; isAbs=True wraps it in abs()). t16() is the NoSDWA-gated
+    # half-select helper that tags .l on true16 targets. This mirrors exactly what
+    # AMaxGenerator.max_per_data / merge_sum emit. Nothing is assembled or run on
+    # a device.
+    low = HighBitSel.LOW
 
     # abs() source (the activation-clamp shape from AMaxGenerator.max_per_data).
-    inst = EMaxF16(vgpr("Output"), vgpr("Output"), vgpr("Value+0", isAbs=True))
+    inst = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
+                   t16(vgpr("Value+0", isAbs=True), low))
     s = str(inst)
     assert re.search(
         r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+abs\(v\[vgprValue\+0\]\.l\)",
@@ -501,7 +492,8 @@ def test_instruction_vmax_f16_true16():
     assert "abs(v[vgprValue+0])," not in s and not s.rstrip().endswith("abs(v[vgprValue+0])")
 
     # Plain register sources (the merge_sum shape): every operand gets .l.
-    inst2 = EMaxF16(vgpr("Output"), vgpr("Output"), vgpr("OutputB"))
+    inst2 = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
+                    t16(vgpr("OutputB"), low))
     s2 = str(inst2)
     assert re.search(
         r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+v\[vgprOutputB\]\.l",
