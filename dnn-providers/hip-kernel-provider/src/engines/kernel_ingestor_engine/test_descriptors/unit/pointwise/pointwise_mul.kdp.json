@@ -2,6 +2,7 @@
   "version": "1.0",
   "id": "19373f40-1ee2-4f5d-97da-58d0447ef6a7",
   "name": "hipkernel:pointwise_mul",
+  "arch": [],
   "matchers": [
     "91ecbb8a-475d-408e-9d0c-6364093877cd",
     "1a7f52c8-b036-4e91-95d2-6c83af407b14"

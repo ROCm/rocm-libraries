@@ -227,6 +227,24 @@ def _reject_nonbare_arch(archs, where):
             raise HkpPackError(f"{where}: arch '{arch}' is not usable -- {hint}")
 
 
+def _validate_embedded_source_file(source_file, where):
+    """Reject an embedded_source `source_file` that cannot act as an identity.
+
+    The value names the source file and is not normalised anywhere. A '..'
+    segment lets one file be named by two different spellings, so one file
+    takes two identities.
+    """
+    if not isinstance(source_file, str) or not source_file:
+        raise HkpPackError(
+            f"{where} kernel_source 'source_file' must be a non-empty string"
+        )
+    if ".." in source_file.replace("\\", "/").split("/"):
+        raise HkpPackError(
+            f"{where} kernel_source source_file '{source_file}' must not "
+            "contain a '..' segment"
+        )
+
+
 def _validate_ukd_fields(ukd, where, log=print):
     """Validate the shape shared by inline and standalone UKDs.
 
@@ -262,10 +280,13 @@ def _validate_ukd_fields(ukd, where, log=print):
         _require(ks, ["file", "symbol"], where)
     elif kind == "kpack":
         _require(ks, ["library", "toc_key", "symbol", "sha256"], where)
+    elif kind == "embedded_source":
+        _require(ks, ["source_file", "entry_point"], where)
+        _validate_embedded_source_file(ks["source_file"], where)
     else:
         raise HkpPackError(
             f"{where} kernel_source has unsupported kind '{kind}' "
-            "(expected 'hip', 'rocke', 'hsaco', or 'kpack')"
+            "(expected 'hip', 'rocke', 'hsaco', 'kpack', or 'embedded_source')"
         )
 
 

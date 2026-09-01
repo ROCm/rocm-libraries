@@ -2,6 +2,7 @@
   "version": "1.0",
   "id": "530216cb-d708-4097-9391-d81882633b3b",
   "name": "hipkernel:pointwise_sub",
+  "arch": [],
   "matchers": [
     "ce26cf8b-0857-4a10-900e-b8c7a00b5716",
     "1a7f52c8-b036-4e91-95d2-6c83af407b14"

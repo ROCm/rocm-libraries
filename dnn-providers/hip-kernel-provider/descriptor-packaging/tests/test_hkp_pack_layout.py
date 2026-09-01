@@ -1135,3 +1135,94 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
             f"example ids collide with "
             f"{other.relative_to(descriptors).as_posix()}: {sorted(clash)}"
         )
+
+
+# --- I. The embedded_source kind (quick, compile-free) ----------------------
+_EMBEDDED_SOURCE = {
+    "kind": "embedded_source",
+    "source_file": "kernels/PointwiseAdd.cpp",
+    "entry_point": "PointwiseAdd",
+}
+
+
+def _embedded_source_root(tmp_path, fixture, kernel_source):
+    """Nest `fixture` under one child folder and set its inline UKD's source.
+
+    The fixture carries exactly one inline UKD, so replacing its kernel_source
+    puts the whole root on the kind under test.
+    """
+    root = tmp_path / "root"
+    _nest(root, "pointwise", fixture)
+    kdp = root / "pointwise" / "solo.kdp.json"
+    doc = _read(kdp)
+    doc["kernelDescriptors"][0]["kernel_source"] = kernel_source
+    kdp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    return root
+
+
+@pytest.mark.quick
+def test_embedded_source_root_loads(tmp_path, empty_arch_fixture):
+    """The walk accepts the kind and leaves the block unmodified."""
+    root = _embedded_source_root(tmp_path, empty_arch_fixture, dict(_EMBEDDED_SOURCE))
+
+    flat = load_flat_input(root)
+    kdps = list(flat.kdps())
+    assert len(kdps) == 1
+    ukd = kdps[0].doc["kernelDescriptors"][0]
+    assert ukd["kernel_source"] == _EMBEDDED_SOURCE
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("missing", ["source_file", "entry_point"])
+def test_embedded_source_requires_source_file_and_entry_point(
+    tmp_path, empty_arch_fixture, missing
+):
+    kernel_source = dict(_EMBEDDED_SOURCE)
+    kernel_source.pop(missing)
+    root = _embedded_source_root(tmp_path, empty_arch_fixture, kernel_source)
+
+    with pytest.raises(HkpPackError, match=missing):
+        load_flat_input(root)
+
+
+@pytest.mark.quick
+def test_unhandled_kind_aborts_the_walk_and_lists_the_accepted_kinds(
+    tmp_path, empty_arch_fixture
+):
+    """A kind no producer handles is an error, and the message says what is.
+
+    A misspelling is the common case, so the diagnostic must let an author see
+    the intended spelling next to theirs.
+    """
+    root = _embedded_source_root(
+        tmp_path, empty_arch_fixture, dict(_EMBEDDED_SOURCE, kind="embedded_sources")
+    )
+
+    with pytest.raises(HkpPackError) as excinfo:
+        load_flat_input(root)
+
+    message = str(excinfo.value)
+    assert "unsupported kind 'embedded_sources'" in message
+    for kind in ("hip", "rocke", "hsaco", "kpack", "embedded_source"):
+        assert f"'{kind}'" in message, f"the accepted-kind list omits {kind}"
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "source_file",
+    ["../shared/PointwiseAdd.cpp", "kernels/../kernels/PointwiseAdd.cpp", ".."],
+)
+def test_embedded_source_rejects_a_parent_segment(
+    tmp_path, empty_arch_fixture, source_file
+):
+    """source_file is the embedded source's identity and is never normalised.
+
+    Two spellings of one file would take two keys, so the file would be
+    embedded twice.
+    """
+    root = _embedded_source_root(
+        tmp_path, empty_arch_fixture, dict(_EMBEDDED_SOURCE, source_file=source_file)
+    )
+
+    with pytest.raises(HkpPackError, match=re.escape(source_file)):
+        load_flat_input(root)
