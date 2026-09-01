@@ -481,6 +481,7 @@ class TestGetSourceFileStringCustomKernelPath:
         assert ti.getRegCaps().get("MaxVgpr") is not None, (
             "rocisa singleton not properly initialized; getRegCaps() returned empty dict"
         )
+        yield
 
     def _make_kernel(self):
         """Construct a kernel object matching the production custom-kernel dict."""
@@ -514,7 +515,7 @@ class TestGetSourceFileStringCustomKernelPath:
         # states WITHOUT regCaps/archCaps — the critical setRocIsa-path invariant
         kwa.states = SimpleNamespace()
         # return the .s content without touching the filesystem or assembler
-        kwa._getCustomKernelSource = lambda kernel, directory: asm_source
+        kwa._getCustomKernelSource = lambda kernel, directory=None: asm_source
         return kwa
 
     # ------------------------------------------------------------------
@@ -628,7 +629,7 @@ class TestGetSourceFileStringIncompleteSingletonCaps:
     def _make_kwa(self, asm_source):
         kwa = object.__new__(_KWA)
         kwa.states = SimpleNamespace()
-        kwa._getCustomKernelSource = lambda k, d: asm_source
+        kwa._getCustomKernelSource = lambda k, d=None: asm_source
         return kwa
 
     # ------------------------------------------------------------------

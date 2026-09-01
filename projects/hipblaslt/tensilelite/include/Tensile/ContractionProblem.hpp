@@ -1707,7 +1707,12 @@ namespace TensileLite
         uint32_t                        fusedA2ADrain   = 0;
 
         // Workspace
-        void* ws           = nullptr;
+        void* ws = nullptr;
+        // Inter-workgroup flags. Which region this points at is decided by the
+        // host once the solution is known: the Stream-K region for a Stream-K
+        // solution, the GSU one otherwise. They never both need it in one
+        // kernel, so one pointer is enough -- and this layout must not change,
+        // because more than one ROCm library exports these symbols.
         void* Synchronizer = nullptr;
 
         std::vector<size_t> maxElements;
