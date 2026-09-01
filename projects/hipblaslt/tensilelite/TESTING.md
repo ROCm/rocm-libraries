@@ -55,8 +55,9 @@ question that this section returns to below. It matters more than the headline c
 A significant part of that suite is a **characterization suite** under
 [`Tensile/Tests/unit/characterization/`](Tensile/Tests/unit/characterization/), established in
 [PR #7989](https://github.com/ROCm/rocm-libraries/pull/7989) and grown considerably since. It now
-spans more than 60 characterized modules across roughly 250 test files, backed by 98 `.ambr` golden
-files, plus a separate codegen harness that characterizes generated assembly per architecture. These
+spans dozens of characterized module directories, each backed by one or more `.ambr` golden files
+in its own `__snapshots__/` directory, plus a separate codegen harness that characterizes generated
+assembly per architecture. These
 are explicitly *not* specification tests: they pin down what the code does today, including latent
 bugs, so that the ongoing consolidation refactor shows any unintended behavior change as a reviewable
 diff rather than a silent downstream regression. Latent bugs found while characterizing are flagged in
@@ -182,9 +183,9 @@ and every `# pragma: no mutate` are justified in `DECISIONS.md`. A series of PRs
 mutation-hardened surface starts at
 [PR #10133](https://github.com/ROCm/rocm-libraries/pull/10133); those are still in draft.
 
-**Suite size.** The characterization half is about 2,891 tests and the pure-unit half about 3,126, of
-which roughly 230 are GPU-guarded and skip on a CPU-only runner. Call it six thousand tests, and note
-that all of them run in four separate CI lanes (see
+**Suite size.** The characterization half and the pure-unit half are roughly comparable in size, and
+together they run into the thousands of tests; a small minority are GPU-guarded and skip on a
+CPU-only runner. All of them run in four separate CI lanes (see
 [Where these tests actually run](#where-these-tests-actually-run)).
 
 **Coverage expectation.** The enforced whole-project floor is `fail_under = 75` in
@@ -622,8 +623,8 @@ does not own.
 The practical benefit is local reproduction. `coverage-gate` sets `skip_install = true` and depends
 only on `coverage[toml]`, so it builds no rocisa, needs no ROCm, and runs no tests. Run
 `coverage-unit` once, then re-run `coverage-gate` as often as you like against the `coverage.json`
-you already have. Chasing a floor failure costs seconds rather than another pass over six thousand
-tests.
+you already have. Chasing a floor failure costs seconds rather than another pass over the full test
+suite.
 
 ### Targets
 
@@ -779,7 +780,7 @@ the note there: an empty cell means the gap is real and acknowledged but not yet
 | The `preliminary` stage that runs the `common` GEMM suite is conditional on the target branch | Medium | Medium | Most pull requests target `develop` and do get the full gate |  |
 | As of the Aug-26 2026 reorder, `unit` runs before `common` in `preliminary`, so an unrelated unit-test failure on one architecture prevents `common` from running at all that PR. This already let a StreamK register-pool bug ([#11335](https://github.com/ROCm/rocm-libraries/pull/11335), fixed in [#11471](https://github.com/ROCm/rocm-libraries/pull/11471)) merge with no `common`-stage signal, two days after the reorder landed | High | High if hit | None observed for this ordering specifically; the pre-reorder order ran `common` unconditionally | AIHPBLAS-4431 |
 | `Tests/common` (real codegen, build, execution) does not run in TheRock CI or GitHub Actions for any architecture today, including gfx1250 (see [Pre-submit / CI Gates](#pre-submit--ci-gates)); coverage of that suite is Math-CI-only | Medium | High if hit | Math CI's `preliminary` runs it on real hardware, `gfx90a`/`gfx942`/`gfx950`/`gfx12` |  |
-| The same ~6,000 TensileLite tests run in four lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation |  |
+| The same TensileLite test suite runs in four lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation |  |
 | The installed-artifact lane silently skips the snapshot tests, since syrupy is not in the installed tree | Low | Low | The goldens are enforced upstream; the skip is stated in `conftest.py` but reads like an accident |  |
 | Math CI's `preliminary` job appears to skip the `Tensile/Tests/unit` suite entirely on YAML-only diffs, running only numeric/solution-correctness checks instead | High | High if hit | None observed. Confirmed by the 2026-08-27 `develop` break: a 444-file, YAML-only PR (#11274) never ran the suite containing the sibling-`DeviceNames` check, and the resulting data bug only surfaced on a later, unrelated PR that happened to touch `.py` files |  |
 | The `_needs_logic_dir` xfail (see [../TESTING.md#known-bugs-and-expected-failures](../TESTING.md#known-bugs-and-expected-failures)) is unconditional in TheRock CI, so the logic-corpus consistency checks it guards never execute there | Medium | High if hit | Math CI can still catch it when its own suite actually runs, but see the row above for when it does not | |
