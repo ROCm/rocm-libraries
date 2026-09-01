@@ -327,6 +327,8 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_q;
         TDMConfig tdm_config_do;
+        TDMConfig tdm_config_lse;
+        TDMConfig tdm_config_d;
         {
             constexpr auto LdsPaddingConfigV = Policy::template GetLdsPaddingConfigV<Problem>();
             tdm_config_v.pad_enable              = LdsPaddingConfigV[number<0>{}];
@@ -347,6 +349,11 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             tdm_config_do.pad_enable              = LdsPaddingConfigDO[number<0>{}];
             tdm_config_do.pad_config.pad_amount   = LdsPaddingConfigDO[number<1>{}];
             tdm_config_do.pad_config.pad_interval = LdsPaddingConfigDO[number<2>{}];
+
+            // LSE/D are rank 1: a single contiguous run with no rows to
+            // pad between, so the padding machinery stays off.
+            tdm_config_lse.pad_enable = false;
+            tdm_config_d.pad_enable   = false;
         }
 
         //------------------------------------------------------------------
@@ -551,7 +558,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             lse_dram_block_window_tmp.get_bottom_tensor_view(),
             lse_dram_block_window_tmp.get_window_lengths(),
             {seqlen_q_start},
-            Policy::template MakeLSEDDramTileDistribution<Problem, decltype(gemm_0)>());
+            Policy::template MakeLSEDDramTdmDistribution<Problem>());
 
         LSEDataType* lse_lds_ptr = static_cast<LSEDataType*>(static_cast<void*>(
             static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
@@ -575,7 +582,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             d_dram_block_window_tmp.get_bottom_tensor_view(),
             d_dram_block_window_tmp.get_window_lengths(),
             {seqlen_q_start},
-            Policy::template MakeLSEDDramTileDistribution<Problem, decltype(gemm_0)>());
+            Policy::template MakeLSEDDramTdmDistribution<Problem>());
 
         DDataType* d_lds_ptr = static_cast<DDataType*>(static_cast<void*>(
             static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
@@ -637,12 +644,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // registers here. Their DRAM windows are advanced only after the
         // transfer has been issued, because TDM reads at issue time whereas the
         // old load_tile read before the advance.
-        auto lse_block_tile = load_tile(lse_dram_window);
-        move_tile_window(lse_dram_window, {kM0});
-
-        auto d_block_tile = load_tile(d_dram_window);
-        move_tile_window(d_dram_window, {kM0});
-
         /*
          * Store prefetched data into LDS
          */
@@ -650,14 +651,16 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         load_tile_tdm(tdm_config_q, q_lds_window, q_dram_window);
         move_tile_window(q_dram_window, {kM0, 0});
 
-        store_tile(lse_lds_write_window, lse_block_tile);
+        load_tile_tdm(tdm_config_lse, lse_lds_write_window, lse_dram_window);
+        move_tile_window(lse_dram_window, {kM0});
 
         load_tile_tdm(tdm_config_do, do_lds_window, do_dram_window);
         move_tile_window(do_dram_window, {kM0, 0});
 
-        store_tile(d_lds_write_window, d_block_tile);
-        // Q and dO now arrive by TDM, which commits on TENSORcnt; block_sync_lds
-        // only covers the LSE/D stores that still go through dscnt.
+        load_tile_tdm(tdm_config_d, d_lds_write_window, d_dram_window);
+        move_tile_window(d_dram_window, {kM0});
+        // All four operands now arrive by TDM and commit on TENSORcnt; nothing
+        // in this region goes through dscnt any more.
         s_wait_tensorcnt_barrier<0>();
         block_sync_lds();
 
@@ -727,12 +730,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             ignore = do_rd_cur;
             // STAGE 1, Q@K Gemm0
             auto s_acc = SPBlockTileType{};
-
-            lse_block_tile = load_tile(lse_dram_window);
-            move_tile_window(lse_dram_window, {kM0});
-
-            d_block_tile = load_tile(d_dram_window);
-            move_tile_window(d_dram_window, {kM0});
 
             s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
 
@@ -877,12 +874,14 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             load_tile_tdm(tdm_config_q, q_wr_dst, q_dram_window);
             move_tile_window(q_dram_window, {kM0, 0});
 
-            store_tile(lse_lds_write_window, lse_block_tile);
+            load_tile_tdm(tdm_config_lse, lse_lds_write_window, lse_dram_window);
+            move_tile_window(lse_dram_window, {kM0});
 
             load_tile_tdm(tdm_config_do, do_wr_dst, do_dram_window);
             move_tile_window(do_dram_window, {kM0, 0});
 
-            store_tile(d_lds_write_window, d_block_tile);
+            load_tile_tdm(tdm_config_d, d_lds_write_window, d_dram_window);
+            move_tile_window(d_dram_window, {kM0});
 #if !CK_TILE_FMHA_BWD_SINK_TDM_WAIT
             // same as the prologue: Q/dO are on TENSORcnt now
             s_wait_tensorcnt_barrier<0>();
