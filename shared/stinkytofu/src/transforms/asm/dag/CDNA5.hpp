@@ -392,10 +392,23 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return cfg > 0 ? cfg : hw_.lds.readDrainLatency;
     }
     // Lifetime of one in-flight ds_read credit; also sets the saturated-queue issue interval
-    // (dsReadThrottleLatency/dsReadQueueDepth cycles per ds_read).
+    // (dsReadThrottleLatency/dsReadQueueDepth cycles per ds_read). If neither the pass nor
+    // hardware model supplies a value, default to four cycles per queue entry.
     int dsReadThrottleLatency() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleLatency;
-        return cfg > 0 ? cfg : hw_.lds.readThrottleLatency;
+        if (cfg > 0) return cfg;
+        if (hw_.lds.readThrottleLatency > 0) return hw_.lds.readThrottleLatency;
+        return 4 * dsReadQueueDepth();
+    }
+    double dsReadThrottleTransitionFactor() const {
+        const double cfg =
+            getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleTransitionFactor;
+        return std::clamp(cfg, 0.0, 1.0);
+    }
+    int dsReadThrottleTransitionEntries() const {
+        const int cfg =
+            getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleTransitionEntries;
+        return cfg >= 0 ? cfg : dsReadQueueDepth();
     }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
@@ -1048,7 +1061,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
     // co-issue window; it is meaningless when no WMMA is available to issue, so it
     // is applied only while a WMMA is pending. When the DS queue reaches depth,
-    // ds_load can still issue, but is throttled to dsReadThrottleLatency/dsReadQueueDepth.
+    // ds_load can still issue: configured transition entries use the transition
+    // factor, then later entries use dsReadThrottleLatency/dsReadQueueDepth.
     int windowCap = maxDsPerWmmaWindow_;
     if (!dsTargetPerWindow_.empty()) {
         const int w = std::min((int)wmmaIssuedCountThisRegion_, (int)dsTargetPerWindow_.size() - 1);
@@ -1218,10 +1232,10 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
     return forced;
 }
 
-// WMMA windows needed to issue dsLoadCount ds_reads given the per-window DS cap. When the
-// count exceeds the DS read queue depth, the queue is saturated and the extra ds_reads are
-// paced at dsReadThrottleLatency/dsReadQueueDepth cycles each, so add enough extra windows
-// to cover that pacing cost.
+// WMMA windows needed to issue dsLoadCount ds_reads given the per-window DS cap. After the
+// count reaches the DS read queue depth, the configured transition entries use the scaled
+// throttle interval; any entries beyond that use the full interval. Add enough windows to
+// cover both pacing stages.
 int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     const int maxDsPerWmmaWindow = dsReadPerWmma();
     int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
@@ -1230,7 +1244,12 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     // ratio when the depth is zero.
     if (dsReadQueueDepth() > 0 && dsLoadCount > dsReadQueueDepth()) {
         const float cyclePerDs = (float)dsReadThrottleLatency() / (float)dsReadQueueDepth();
-        const float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
+        const int overflowCount = dsLoadCount - dsReadQueueDepth();
+        const int transitionCount = std::min(overflowCount, dsReadThrottleTransitionEntries());
+        const int fullThrottleCount = std::max(0, overflowCount - transitionCount);
+        const float transitionFactor = (float)dsReadThrottleTransitionFactor();
+        const float cyclesNeeded =
+            cyclePerDs * (transitionFactor * (float)transitionCount + (float)fullThrottleCount);
         const float baseWindows =
             (float)(dsReadQueueDepth() + maxDsPerWmmaWindow - 1) / (float)maxDsPerWmmaWindow;
         const float latencyWindows = cyclesNeeded / (float)wmmaIssueConfig.latency;
@@ -1535,8 +1554,7 @@ CDNA5ReadyQueue::computeBarrierBeforeThresholds(IRList::iterator regionStart,
         //   beforeN — remaining latency after the last consumer WMMA
         //   maxFinalWmmaIdx — absolute cap after the 1st ds_load (DS load latency / WMMA latency)
         //   wmmaWindowsNeeded — DS issue bandwidth (enough WMMA windows for all ds_loads); when
-        //       dsLoadCount > dsReadQueueDepth(), add extra drain windows from
-        //       dsReadThrottleLatency.
+        //       dsLoadCount > dsReadQueueDepth(), add the scaled/full throttle windows.
         int beforeThreshold =
             std::max(0, std::min(beforeN, wmmaIssueConfig.issuedCount -
                                               std::max(maxFinalWmmaIdx, wmmaWindowsNeeded)));
@@ -1860,7 +1878,8 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     const int dsDepth = dsReadQueueDepth();
     const double dsThrottleInterval =
         dsDepth > 0 ? (double)dsReadThrottleLatency() / (double)dsDepth : 0.0;
-    dsReadInflight_.setThrottleInterval(dsThrottleInterval);
+    dsReadInflight_.setThrottleInterval(dsThrottleInterval, dsReadThrottleTransitionFactor(),
+                                        dsReadThrottleTransitionEntries());
 
     currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
 

@@ -177,13 +177,16 @@ class DAGSchedulerPassTest : public ::testing::Test {
     // ds cap never binds. throttleLatency drives queue-full pacing; drainLatency is
     // kept for paths that still model data-return/drain behavior (e.g. barrier timing).
     void runPassWithDsReadThrottle(int queueDepth, int throttleLatency, int perWmma = 100,
-                                   int drainLatency = -1) {
+                                   int drainLatency = -1, double transitionFactor = 0.5,
+                                   int transitionEntries = -1) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.dsReadQueueDepth = queueDepth;
         pfc.dagFeatures.dsReadThrottleLatency = throttleLatency;
+        pfc.dagFeatures.dsReadThrottleTransitionFactor = transitionFactor;
+        pfc.dagFeatures.dsReadThrottleTransitionEntries = transitionEntries;
         if (drainLatency <= 0) drainLatency = throttleLatency;
         pfc.dagFeatures.dsReadDrainLatency = drainLatency;
         pfc.dagFeatures.dsReadPerWmma = perWmma;
@@ -1431,6 +1434,28 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_QueuePacingIgnoresDrainLatency) {
         << "drainLatency must not change queue pacing order when throttleLatency is fixed";
 }
 
+// A zero configured and hardware throttle latency derives four cycles per queue entry.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_ZeroLatencyUsesHardwareDefault) {
+    auto runCase = [&](int throttleLatency) {
+        am.clear();
+        func = std::make_unique<Function>("dag_sched_test_ds_throttle_default");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
+        for (int i = 0; i < 8; i++)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
+
+        runPassWithDsReadThrottle(/*queueDepth=*/2, throttleLatency, /*perWmma=*/100,
+                                  /*drainLatency=*/80);
+        return mnemonicSequence(*bb);
+    };
+
+    EXPECT_EQ(runCase(/*throttleLatency=*/0), runCase(/*throttleLatency=*/72));
+}
+
 // Smaller dsReadThrottleLatency should allow more aggressive ds_read bursts
 // under the same queue depth.
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_ThrottleLatencyControlsBurstLength) {
@@ -1462,6 +1487,29 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_ThrottleLatencyControlsBurstLength) 
         << "smaller throttleLatency should not reduce ds_read burst capacity";
     EXPECT_GT(burstFast, burstSlow)
         << "smaller throttleLatency should increase ds_read burst length under same queue depth";
+}
+
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_TransitionConfigControlsBurstLength) {
+    auto runCase = [&](double transitionFactor, int transitionEntries) {
+        am.clear();
+        func = std::make_unique<Function>("dag_sched_test_ds_throttle_transition");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
+        for (int i = 0; i < 6; i++)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
+
+        runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8, /*perWmma=*/100,
+                                  /*drainLatency=*/80, transitionFactor, transitionEntries);
+        return maxConsecutiveDsReads(mnemonicSequence(*bb));
+    };
+
+    const int defaultBurst = runCase(/*transitionFactor=*/0.5, /*transitionEntries=*/-1);
+    const int unpacedTransitionBurst = runCase(/*transitionFactor=*/0.0, /*transitionEntries=*/4);
+    EXPECT_GT(unpacedTransitionBurst, defaultBurst);
 }
 
 // NOTE: the former DsReadThrottle_PerWmmaCap_RespectsCap test isolated the
