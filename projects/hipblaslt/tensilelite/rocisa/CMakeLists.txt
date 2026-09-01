@@ -14,11 +14,9 @@ else()
     set(ROCISA_STANDALONE OFF)
 endif()
 
-# rocISA's standalone build historically produces shared dependencies unless
-# the caller explicitly selects static libraries. Define the canonical option
-# before nested origami and stinkytofu inspect it so their defaults cannot make
-# the result depend on add_subdirectory order.
-option(BUILD_SHARED_LIBS "Build libraries as shared by default." ON)
+if(ROCISA_STANDALONE)
+    option(BUILD_SHARED_LIBS "Build libraries as shared by default." ON)
+endif()
 
 option(ROCISA_USE_STABLE_ABI
        "Build rocisa as a Python stable ABI extension (requires Python >= 3.12 and CMake >= 3.26)."
@@ -37,6 +35,7 @@ option(ROCISA_ENABLE_COVERAGE "Enable code coverage instrumentation for rocisa" 
 option(ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN
     "Compile StinkyTofu's example HelloWorldPass plugin directly into rocisa (for testing static stinkytofu builds)"
     OFF)
+mark_as_advanced(ROCISA_USE_STABLE_ABI ROCISA_ENABLE_COVERAGE ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -96,7 +95,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
             # Keep it static in the standalone wheel while allowing subsequent
             # dependencies such as stinkytofu to honor rocISA's shared default.
             block()
-                set(BUILD_SHARED_LIBS OFF)
+                set(ORIGAMI_BUILD_SHARED_LIBS OFF)
                 add_subdirectory("${_origami_sibling}" origami EXCLUDE_FROM_ALL)
             endblock()
         else()
@@ -237,6 +236,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # dev build, where libstinkytofu lives in a temp install prefix off the
     # loader's default search path.
     option(ROCISA_INCLUDE_BUILD_INFO "Install _build_info.py for staleness detection" OFF)
+    mark_as_advanced(ROCISA_INCLUDE_BUILD_INFO)
 
     # Directory containing libstinkytofu, resolved by CMake for the active
     # config. $<TARGET_FILE_DIR:...> handles both the add_subdirectory target
@@ -360,7 +360,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
             # A static stinkytofu is already inside _rocisa, and TARGET_SONAME_FILE below
             # is only valid for SHARED targets.
             install(FILES $<TARGET_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
-            if(NOT WIN32 AND BUILD_SHARED_LIBS)
+            if(NOT WIN32 AND _stinkytofu_shared)
                 install(FILES $<TARGET_SONAME_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
             endif()
         endif()

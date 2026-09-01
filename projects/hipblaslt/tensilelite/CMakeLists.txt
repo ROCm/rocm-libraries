@@ -1,9 +1,15 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shared vs static." ON)
+set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
+
 option(TENSILELITE_ENABLE_HOST_ASAN "Enable AddressSanitizer for host code" OFF)
 option(TENSILELITE_ENABLE_HOST_TSAN "Enable ThreadSanitizer for host code" OFF)
 option(TENSILELITE_ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
+mark_as_advanced(TENSILELITE_ENABLE_HOST_ASAN)
+mark_as_advanced(TENSILELITE_ENABLE_HOST_TSAN)
+mark_as_advanced(TENSILELITE_ENABLE_COVERAGE)
 
 if(TENSILELITE_ENABLE_HOST_ASAN AND TENSILELITE_ENABLE_HOST_TSAN)
     message(FATAL_ERROR "ASAN and TSAN cannot be enabled simultaneously")

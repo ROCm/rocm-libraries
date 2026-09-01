@@ -60,7 +60,8 @@ option(HIPBLASLT_ENABLE_EXTOPS "Build hipBLASLt ExtOp device libraries." ON)
 option(HIPBLASLT_ENABLE_MATRIX_TRANSFORM "Build hipBLASLt MatrixTransform device library." ON)
 option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
 option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
-option(BUILD_SHARED_LIBS "Build libraries as shared by default." ON)
+option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipBLASLt library as shared vs static." ON)
+option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shared vs static." ON)
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
@@ -74,13 +75,6 @@ option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        OFF)
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
-if(NOT HIPBLASLT_ENABLE_HOST
-        AND NOT TENSILELITE_ENABLE_HOST
-        AND NOT HIPBLASLT_ENABLE_DEVICE
-        AND NOT HIPBLASLT_ENABLE_CLIENT)
-    message(FATAL_ERROR "hipBLASLt has no enabled build products.")
-endif()
-
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
@@ -93,9 +87,6 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
     option(HIPBLASLT_ENABLE_YAML "Use YAML for parsing configuration files." OFF)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
-    option(TENSILELITE_ENABLE_HOST_ASAN "Enable AddressSanitizer for host code" OFF)
-    option(TENSILELITE_ENABLE_HOST_TSAN "Enable ThreadSanitizer for host code" OFF)
-    option(TENSILELITE_ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -119,6 +110,12 @@ mark_as_advanced(CMAKE_SKIP_BUILD_RPATH)
 mark_as_advanced(CMAKE_BUILD_WITH_INSTALL_RPATH)
 mark_as_advanced(CMAKE_INSTALL_RPATH)
 mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
+mark_as_advanced(HIPBLASLT_ENABLE_FETCH)
+mark_as_advanced(HIPBLASLT_ENABLE_THEROCK)
+mark_as_advanced(HIPBLASLT_VALIDATE_INSTALL)
+mark_as_advanced(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+mark_as_advanced(HIPBLASLT_ENABLE_COVERAGE)
+mark_as_advanced(TENSILELITE_ENABLE_AUTOBUILD)
 
 set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
 
@@ -252,6 +249,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
                 set(ROCROLLER_ENABLE_FETCH ON)
                 set(ROCROLLER_BUILD_TESTING OFF)
                 set(ROCROLLER_ENABLE_CLIENT OFF)
+                set(BUILD_SHARED_LIBS OFF)
                 option(YAML_CPP_INSTALL "" ON)
                 set(BUILD_TESTING OFF)
                 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
@@ -360,7 +358,14 @@ if(_hipblaslt_mxdatagen_enabled)
     add_subdirectory(clients/common)
 endif()
 
-add_subdirectory(tensilelite)
+block(SCOPE_FOR VARIABLES)
+    set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
+    add_subdirectory(tensilelite)
+endblock()
+
+# hipBLASLt owns this directory's library and package policy. Dependencies have
+# already been configured in their own scopes above.
+set(BUILD_SHARED_LIBS "${HIPBLASLT_BUILD_SHARED_LIBS}")
 
 if(HIPBLASLT_ENABLE_HOST)
     add_library(hipblaslt)
@@ -742,16 +747,19 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     # Co-install stinkytofu shared library next to _rocisa. TARGET_FILE lands on
     # all platforms (stinkytofu.dll on Windows); the soname symlink is Linux-only
     # and invalid for a .dll, so it is guarded.
-    if(TARGET stinkytofu AND BUILD_SHARED_LIBS)
-        install(FILES $<TARGET_FILE:stinkytofu>
-            DESTINATION "${_tensilelite_install_dest}/rocisa"
-            COMPONENT tests
-        )
-        if(NOT WIN32)
-            install(FILES $<TARGET_SONAME_FILE:stinkytofu>
+    if(TARGET stinkytofu)
+        get_target_property(_hipblaslt_stinkytofu_type stinkytofu TYPE)
+        if(_hipblaslt_stinkytofu_type STREQUAL "SHARED_LIBRARY")
+            install(FILES $<TARGET_FILE:stinkytofu>
                 DESTINATION "${_tensilelite_install_dest}/rocisa"
                 COMPONENT tests
             )
+            if(NOT WIN32)
+                install(FILES $<TARGET_SONAME_FILE:stinkytofu>
+                    DESTINATION "${_tensilelite_install_dest}/rocisa"
+                    COMPONENT tests
+                )
+            endif()
         endif()
     endif()
 
