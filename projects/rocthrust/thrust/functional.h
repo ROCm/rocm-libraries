@@ -51,12 +51,18 @@ THRUST_NAMESPACE_BEGIN
  *  \{
  */
 
-using _THRUST_STD::divides;
-using _THRUST_STD::minus;
-using _THRUST_STD::modulus;
-using _THRUST_STD::multiplies;
-using _THRUST_STD::negate;
-using _THRUST_STD::plus;
+template <class T = void>
+using divides THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::divides instead") = _THRUST_STD::divides<T>;
+template <class T = void>
+using minus THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::minus instead") = _THRUST_STD::minus<T>;
+template <class T = void>
+using modulus THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::modulus instead") = _THRUST_STD::modulus<T>;
+template <class T = void>
+using multiplies THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::multiplies instead") = _THRUST_STD::multiplies<T>;
+template <class T = void>
+using negate THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::negate instead") = _THRUST_STD::negate<T>;
+template <class T = void>
+using plus THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::plus instead") = _THRUST_STD::plus<T>;
 
 /*! \p square is a function object. Specifically, it is an Adaptable Unary Function.
  *  If \c f is an object of class <tt>square<T></tt>, and \c x is an object
@@ -123,12 +129,24 @@ struct square<void>
  *  \{
  */
 
-using _THRUST_STD::equal_to;
-using _THRUST_STD::greater;
-using _THRUST_STD::greater_equal;
-using _THRUST_STD::less;
-using _THRUST_STD::less_equal;
-using _THRUST_STD::not_equal_to;
+//! deprecated [since 3.1]
+template <class T = void>
+using equal_to THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::equal_to instead") = _THRUST_STD::equal_to<T>;
+//! deprecated [since 3.1]
+template <class T = void>
+using greater THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::greater instead") = _THRUST_STD::greater<T>;
+//! deprecated [since 3.1]
+template <class T = void>
+using greater_equal THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::greater_equal instead") = _THRUST_STD::greater_equal<T>;
+//! deprecated [since 3.1]
+template <class T = void>
+using less THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::less instead") = _THRUST_STD::less<T>;
+//! deprecated [since 3.1]
+template <class T = void>
+using less_equal THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::less_equal instead") = _THRUST_STD::less_equal<T>;
+//! deprecated [since 3.1]
+template <class T = void>
+using not_equal_to THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::not_equal_to instead") = _THRUST_STD::not_equal_to<T>;
 
 /*! \}
  */
@@ -138,9 +156,15 @@ using _THRUST_STD::not_equal_to;
  *  \{
  */
 
-using _THRUST_STD::logical_and;
-using _THRUST_STD::logical_not;
-using _THRUST_STD::logical_or;
+//! deprecated [since 3.1]
+template <class T = void>
+using logical_and THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::logical_and instead") = _THRUST_STD::logical_and<T>;
+//! deprecated [since 3.1]
+template <class T = void>
+using logical_not THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::logical_not instead") = _THRUST_STD::logical_not<T>;
+//! deprecated [since 3.1]
+template <class T = void>
+using logical_or THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::logical_or instead") = _THRUST_STD::logical_or<T>;
 
 /*! \}
  */
@@ -150,9 +174,15 @@ using _THRUST_STD::logical_or;
  *  \{
  */
 
-using _THRUST_STD::bit_and;
-using _THRUST_STD::bit_or;
-using _THRUST_STD::bit_xor;
+//! deprecated [since 3.1]
+template <class T = void>
+using bit_and THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::bit_and instead") = _THRUST_STD::bit_and<T>;
+//! deprecated [since 3.1]
+template <class T = void>
+using bit_or THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::bit_or instead") = _THRUST_STD::bit_or<T>;
+//! deprecated [since 3.1]
+template <class T = void>
+using bit_xor THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::bit_xor instead") = _THRUST_STD::bit_xor<T>;
 
 /*! \}
  */
@@ -162,8 +192,12 @@ using _THRUST_STD::bit_xor;
  *  \{
  */
 
-using ::internal::maximum;
-using ::internal::minimum;
+//! deprecated [since 3.1]
+template <class T = void>
+using maximum THRUST_DEPRECATED_BECAUSE("Use ::internal::maximum instead") = ::internal::maximum<T>;
+//! deprecated [since 3.1]
+template <class T = void>
+using minimum THRUST_DEPRECATED_BECAUSE("Use ::internal::minimum instead") = ::internal::minimum<T>;
 
 /*! \p project1st is a function object that takes two arguments and returns
  *  its first argument; the second argument is unused. It is essentially a
@@ -268,7 +302,15 @@ struct project2nd<void, void>
  *  \{
  */
 
-using ::internal::not_fn;
+//! deprecated [since 3.1]
+template <typename Fn,
+          _THRUST_STD::enable_if_t<_THRUST_STD::is_constructible_v<_THRUST_STD::decay_t<Fn>, Fn>, int>  = 0,
+          _THRUST_STD::enable_if_t<_THRUST_STD::is_move_constructible_v<_THRUST_STD::decay_t<Fn>>, int> = 0>
+THRUST_DEPRECATED_BECAUSE("Use ::internal::not_fn instead")
+THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr auto not_fn(Fn&& f)
+{
+  return ::internal::not_fn(THRUST_FWD(f));
+}
 
 /*! \}
  */

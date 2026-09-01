@@ -489,6 +489,18 @@ public:
       : m_iterator_tuple(iterator_tuple)
   {}
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  //! This constructor creates a new \p zip_iterator from multiple iterators.
+  //!
+  //! \param iterators The iterators to zip.
+  template <class... Iterators,
+            _THRUST_STD::enable_if_t<(sizeof...(Iterators) != 0), int>                                = 0,
+            _THRUST_STD::enable_if_t<_THRUST_STD::is_constructible_v<IteratorTuple, Iterators...>, int> = 0>
+  inline THRUST_HOST_DEVICE zip_iterator(Iterators&&... iterators)
+      : m_iterator_tuple(_THRUST_STD::forward<Iterators>(iterators)...)
+  {}
+#endif
+
   //! This copy constructor creates a new \p zip_iterator from another \p zip_iterator.
   //!
   //! \param other The \p zip_iterator to copy.
@@ -551,7 +563,7 @@ private:
   template <size_t... Is>
   inline THRUST_HOST_DEVICE void advance_impl(typename super_t::difference_type n, index_sequence<Is...>)
   {
-    (..., thrust::advance(_THRUST_STD::get<Is>(m_iterator_tuple), n));
+    (..., _THRUST_STD::advance(_THRUST_STD::get<Is>(m_iterator_tuple), n));
   }
 #endif
 
@@ -620,6 +632,11 @@ private:
   //! \endcond
 };
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+template <class... Iterators>
+THRUST_HOST_DEVICE zip_iterator(Iterators...) -> zip_iterator<_THRUST_STD::tuple<Iterators...>>;
+#endif
+
 //! \p make_zip_iterator creates a \p zip_iterator from a \p tuple of iterators.
 //!
 //! \param t The \p tuple of iterators to copy.
@@ -634,7 +651,7 @@ inline THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_ite
 #endif
 {
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-  return zip_iterator<_THRUST_STD::tuple<Iterators...>>(t);
+  return zip_iterator<_THRUST_STD::tuple<Iterators...>>{t};
 #else
   return zip_iterator<thrust::tuple<Iterators...>>(t);
 #endif
@@ -655,7 +672,7 @@ inline THRUST_HOST_DEVICE zip_iterator<thrust::tuple<Iterators...>> make_zip_ite
 #endif
 {
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-  return make_zip_iterator(_THRUST_STD::make_tuple(its...));
+  return zip_iterator<_THRUST_STD::tuple<Iterators...>>{its...};
 #else
   return make_zip_iterator(thrust::make_tuple(its...));
 #endif

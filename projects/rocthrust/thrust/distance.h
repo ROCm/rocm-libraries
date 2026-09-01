@@ -30,6 +30,13 @@
 
 THRUST_NAMESPACE_BEGIN
 
-using _THRUST_STD::distance;
+//! deprecated [since 3.1]
+template <class InputIter>
+THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::distance instead")
+THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr typename _THRUST_STD::iterator_traits<InputIter>::difference_type
+distance(InputIter first, InputIter last)
+{
+  return _THRUST_STD::distance(first, last);
+}
 
 THRUST_NAMESPACE_END

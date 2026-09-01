@@ -52,7 +52,7 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator1, ForwardIterator2> unique_by_ke
   ForwardIterator2 values_first)
 {
   using KeyType = thrust::detail::it_value_t<ForwardIterator1>;
-  return thrust::unique_by_key(exec, keys_first, keys_last, values_first, thrust::equal_to<KeyType>());
+  return thrust::unique_by_key(exec, keys_first, keys_last, values_first, _THRUST_STD::equal_to<KeyType>());
 } // end unique_by_key()
 
 template <typename ExecutionPolicy, typename ForwardIterator1, typename ForwardIterator2, typename BinaryPredicate>
@@ -89,7 +89,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_
 {
   using KeyType = thrust::detail::it_value_t<InputIterator1>;
   return thrust::unique_by_key_copy(
-    exec, keys_first, keys_last, values_first, keys_output, values_output, thrust::equal_to<KeyType>());
+    exec, keys_first, keys_last, values_first, keys_output, values_output, _THRUST_STD::equal_to<KeyType>());
 } // end unique_by_key_copy()
 
 template <typename ExecutionPolicy,
@@ -109,7 +109,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_
 {
   using difference_type = thrust::detail::it_difference_t<InputIterator1>;
 
-  difference_type n = thrust::distance(keys_first, keys_last);
+  difference_type n = _THRUST_STD::distance(keys_first, keys_last);
 
   thrust::detail::head_flags<InputIterator1, BinaryPredicate> stencil(keys_first, keys_last, binary_pred);
 

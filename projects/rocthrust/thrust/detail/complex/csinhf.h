@@ -54,6 +54,8 @@
 #include <thrust/detail/complex/cexpf.h>
 #include <thrust/detail/complex/math_private.h>
 
+#include _THRUST_STD_INCLUDE(limits)
+
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
@@ -135,7 +137,7 @@ THRUST_HOST_DEVICE inline complex<float> csinhf(const complex<float>& z)
     {
       return (complex<float>(x * x, x * (y - y)));
     }
-    return (complex<float>(x * cosf(y), infinity<float>() * sinf(y)));
+    return (complex<float>(x * cosf(y), _THRUST_STD::numeric_limits<float>::infinity() * sinf(y)));
   }
 
   return (complex<float>((x * x) * (y - y), (x + x) * (y - y)));

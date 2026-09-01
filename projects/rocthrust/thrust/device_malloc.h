@@ -31,7 +31,7 @@
 #endif // no system header
 #include <thrust/device_ptr.h>
 
-#include <cstddef> // for std::size_t
+#include _THRUST_STD_INCLUDE(cstddef) // for std::size_t
 
 THRUST_NAMESPACE_BEGIN
 

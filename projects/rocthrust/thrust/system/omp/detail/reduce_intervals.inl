@@ -31,7 +31,7 @@
 #include <thrust/system/omp/detail/pragma_omp.h>
 #include <thrust/system/omp/detail/reduce_intervals.h>
 
-#include <cstdint>
+#include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 namespace system

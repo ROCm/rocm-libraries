@@ -53,7 +53,7 @@ namespace sort_detail
 ////////////////////
 
 template <typename KeyType, typename Compare>
-struct needs_reverse : _THRUST_STD::is_same<Compare, typename thrust::greater<KeyType>>
+struct needs_reverse : _THRUST_STD::is_same<Compare, typename _THRUST_STD::greater<KeyType>>
 {};
 
 template <typename DerivedPolicy, typename RandomAccessIterator, typename StrictWeakOrdering>
@@ -139,8 +139,8 @@ THRUST_HOST_DEVICE void stable_sort_by_key(
 template <typename KeyType, typename Compare>
 struct use_primitive_sort
     : ::internal::_And<::internal::is_arithmetic<KeyType>,
-                       _THRUST_STD::disjunction<_THRUST_STD::is_same<Compare, thrust::less<KeyType>>,
-                                                _THRUST_STD::is_same<Compare, thrust::greater<KeyType>>>>
+                       _THRUST_STD::disjunction<_THRUST_STD::is_same<Compare, _THRUST_STD::less<KeyType>>,
+                                                _THRUST_STD::is_same<Compare, _THRUST_STD::greater<KeyType>>>>
 {};
 
 } // end namespace sort_detail

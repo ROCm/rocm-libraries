@@ -36,7 +36,8 @@
 #include <thrust/random/detail/random_core_access.h>
 #include <thrust/random/detail/xor_combine_engine_max.h>
 
-#include <cstddef> // for size_t
+#include _THRUST_STD_INCLUDE(cstddef) // for size_t
+
 #include <iostream>
 
 THRUST_NAMESPACE_BEGIN

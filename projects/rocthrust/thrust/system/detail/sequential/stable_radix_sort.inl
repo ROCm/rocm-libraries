@@ -34,10 +34,9 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/scatter.h>
 
+#include _THRUST_STD_INCLUDE(cstdint)
+#include _THRUST_STD_INCLUDE(limits)
 #include _THRUST_STD_INCLUDE(utility)
-
-#include <cstdint>
-#include <limits>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -63,7 +62,7 @@ struct RadixEncoder<char>
 {
   THRUST_HOST_DEVICE unsigned char operator()(char x) const
   {
-    if (std::numeric_limits<char>::is_signed)
+    if (_THRUST_STD::numeric_limits<char>::is_signed)
     {
       return static_cast<unsigned char>(x) ^ static_cast<unsigned char>(1) << (8 * sizeof(unsigned char) - 1);
     }

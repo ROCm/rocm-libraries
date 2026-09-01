@@ -114,7 +114,7 @@ OutputIt _CCCL_HOST cross_system_copy_n(
 
   // copy input data into host temp storage
   InputIt last = first;
-  thrust::advance(last, num_items);
+  _THRUST_STD::advance(last, num_items);
   thrust::detail::temporary_array<InputTy, H> temp(host_s, num_items);
 
   for (Size idx = 0; idx != num_items; idx++)
@@ -185,6 +185,9 @@ OutputIt _CCCL_HOST cross_system_copy_n(cross_system<System1, System2> systems, 
     begin,
     n,
     result,
+    // FIXME(bgruber): I think this is a pessimization. We should only check if the iterator is contiguous and the value
+    // types are the same, and not whether value_t<InputIt> is trivially copyable, since we memcpy the content
+    // regardless in the non-trivial path, but pay for a temporary storage allocation.
     typename is_indirectly_trivially_relocatable_to<InputIt, OutputIt>::type());
 }
 
@@ -192,7 +195,7 @@ template <class System1, class System2, class InputIterator, class OutputIterato
 OutputIterator _CCCL_HOST
 cross_system_copy(cross_system<System1, System2> systems, InputIterator begin, InputIterator end, OutputIterator result)
 {
-  return cross_system_copy_n(systems, begin, thrust::distance(begin, end), result);
+  return cross_system_copy_n(systems, begin, _THRUST_STD::distance(begin, end), result);
 }
 
 } // namespace __copy

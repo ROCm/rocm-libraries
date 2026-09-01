@@ -30,7 +30,7 @@
 #include <thrust/detail/temporary_buffer.h>
 #include <thrust/system/detail/bad_alloc.h>
 
-#include <cassert>
+#include _THRUST_STD_INCLUDE(cassert)
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  if (defined(_NVHPC_CUDA) || defined(__CUDA_ARCH__))

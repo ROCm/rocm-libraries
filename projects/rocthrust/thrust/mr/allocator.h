@@ -37,7 +37,7 @@
 #include <thrust/mr/polymorphic_adaptor.h>
 #include <thrust/mr/validator.h>
 
-#include <limits>
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace mr
@@ -105,7 +105,7 @@ public:
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE size_type max_size() const
   {
-    return (std::numeric_limits<size_type>::max)() / sizeof(T);
+    return (_THRUST_STD::numeric_limits<size_type>::max)() / sizeof(T);
   }
 
   /*! Constructor.

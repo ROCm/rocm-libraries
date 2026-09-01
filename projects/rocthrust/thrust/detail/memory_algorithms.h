@@ -28,7 +28,8 @@
 #endif
 
 #include <new>
-#include <utility>
+
+#include _THRUST_STD_INCLUDE(utility)
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
@@ -46,8 +47,8 @@ THRUST_HOST_DEVICE void destroy_at(T* location) noexcept
 template <typename Allocator, typename T>
 THRUST_HOST_DEVICE void destroy_at(Allocator const& alloc, T* location) noexcept
 {
-  using traits = typename detail::allocator_traits<
-    _THRUST_STD::remove_cv_t<_THRUST_STD::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
+  using traits =
+    typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -68,9 +69,9 @@ THRUST_HOST_DEVICE ForwardIt destroy(ForwardIt first, ForwardIt last) noexcept
 template <typename Allocator, typename ForwardIt>
 THRUST_HOST_DEVICE ForwardIt destroy(Allocator const& alloc, ForwardIt first, ForwardIt last) noexcept
 {
-  using T      = detail::it_value_t<ForwardIt>;
-  using traits = typename detail::allocator_traits<
-    _THRUST_STD::remove_cv_t<_THRUST_STD::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
+  using T = detail::it_value_t<ForwardIt>;
+  using traits =
+    typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -96,9 +97,9 @@ THRUST_HOST_DEVICE ForwardIt destroy_n(ForwardIt first, Size n) noexcept
 template <typename Allocator, typename ForwardIt, typename Size>
 THRUST_HOST_DEVICE ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, Size n) noexcept
 {
-  using T      = detail::it_value_t<ForwardIt>;
-  using traits = typename detail::allocator_traits<
-    _THRUST_STD::remove_cv_t<_THRUST_STD::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
+  using T = detail::it_value_t<ForwardIt>;
+  using traits =
+    typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -137,8 +138,7 @@ template <typename Allocator, typename ForwardIt, typename... Args>
 void uninitialized_construct_with_allocator(Allocator const& alloc, ForwardIt first, ForwardIt last, Args const&... args)
 {
   using T      = detail::it_value_t<ForwardIt>;
-  using traits = typename detail::allocator_traits<
-    typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>::template rebind_traits<T>;
+  using traits = typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -187,8 +187,7 @@ template <typename Allocator, typename ForwardIt, typename Size, typename... Arg
 void uninitialized_construct_n_with_allocator(Allocator const& alloc, ForwardIt first, Size n, Args const&... args)
 {
   using T      = detail::it_value_t<ForwardIt>;
-  using traits = typename detail::allocator_traits<
-    typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>::template rebind_traits<T>;
+  using traits = typename detail::allocator_traits<::internal::remove_cvref_t<Allocator>>::template rebind_traits<T>;
 
   typename traits::allocator_type alloc_T(alloc);
 

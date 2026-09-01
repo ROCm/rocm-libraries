@@ -28,7 +28,7 @@
 
 #include <thrust/detail/type_traits.h>
 
-#include <utility> // for std::declval
+#include _THRUST_STD_INCLUDE(utility) // for std::declval
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
@@ -44,7 +44,8 @@
     ResultT(Args...),                                                                                               \
     _THRUST_STD::enable_if_t<                                                                                       \
       _THRUST_STD::is_same<ResultT, void>::value                                                                    \
-      || _THRUST_STD::                                                                                              \
-        is_convertible<ResultT, decltype(std::declval<T>().member_function_name(std::declval<Args>()...))>::value>> \
+      || _THRUST_STD::is_convertible<                                                                              \
+        ResultT,                                                                                                    \
+        decltype(_THRUST_STD::declval<T>().member_function_name(_THRUST_STD::declval<Args>()...))>::value>>        \
       : thrust::true_type                                                                                           \
   {};

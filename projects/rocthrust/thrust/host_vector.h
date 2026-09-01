@@ -33,8 +33,9 @@
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/vector_base.h>
 
-#include <initializer_list>
-#include <utility>
+#include _THRUST_STD_INCLUDE(initializer_list)
+#include _THRUST_STD_INCLUDE(utility)
+
 #include <vector>
 
 THRUST_NAMESPACE_BEGIN
@@ -144,7 +145,7 @@ public:
    *  \param v The host_vector to move.
    */
   THRUST_HOST host_vector(host_vector&& v)
-      : Parent(std::move(v))
+      : Parent(_THRUST_STD::move(v))
   {}
 
   /*! Move constructor moves from another host_vector.
@@ -152,7 +153,7 @@ public:
    *  \param alloc The allocator to use by this host_vector.
    */
   THRUST_HOST host_vector(host_vector&& v, const Alloc& alloc)
-      : Parent(std::move(v), alloc)
+      : Parent(_THRUST_STD::move(v), alloc)
   {}
 
   /*! Assign operator copies from an exemplar \p host_vector.
@@ -169,7 +170,7 @@ public:
    */
   THRUST_HOST host_vector& operator=(host_vector&& v)
   {
-    Parent::operator=(std::move(v));
+    Parent::operator=(_THRUST_STD::move(v));
     return *this;
   }
 
@@ -233,7 +234,7 @@ public:
   /*! This constructor builds a \p host_vector from an intializer_list.
    *  \param il The intializer_list.
    */
-  host_vector(std::initializer_list<T> il)
+  host_vector(_THRUST_STD::initializer_list<T> il)
       : Parent(il)
   {}
 
@@ -241,14 +242,14 @@ public:
    *  \param il The intializer_list.
    *  \param alloc The allocator to use by this host_vector.
    */
-  host_vector(std::initializer_list<T> il, const Alloc& alloc)
+  host_vector(_THRUST_STD::initializer_list<T> il, const Alloc& alloc)
       : Parent(il, alloc)
   {}
 
   /*! Assign an \p intializer_list with a matching element type
    *  \param il The intializer_list.
    */
-  host_vector& operator=(std::initializer_list<T> il)
+  host_vector& operator=(_THRUST_STD::initializer_list<T> il)
   {
     Parent::operator=(il);
     return *this;

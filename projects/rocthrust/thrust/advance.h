@@ -30,8 +30,33 @@
 
 THRUST_NAMESPACE_BEGIN
 
-using _THRUST_STD::advance;
-using _THRUST_STD::next;
-using _THRUST_STD::prev;
+//! deprecated [since 3.1]
+template <typename InputIterator, typename Distance>
+THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::advance instead")
+// TODO(libhipcxx): replace inline with _CCCL_HIDE_FROM_ABI once libhipcxx gets ready
+inline THRUST_HOST_DEVICE constexpr void advance(InputIterator& i, Distance n)
+{
+  _THRUST_STD::advance(i, n);
+}
+
+//! deprecated [since 3.1]
+template <typename InputIterator>
+THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::next instead")
+// TODO(libhipcxx): replace inline with _CCCL_HIDE_FROM_ABI once libhipcxx gets ready
+THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr InputIterator
+  next(InputIterator i, typename _THRUST_STD::iterator_traits<InputIterator>::difference_type n = 1)
+{
+  return _THRUST_STD::next(i, n);
+}
+
+//! deprecated [since 3.1]
+template <typename InputIterator>
+THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::prev instead")
+// TODO(libhipcxx): replace inline with _CCCL_HIDE_FROM_ABI once libhipcxx gets ready
+THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr InputIterator
+  prev(InputIterator i, typename _THRUST_STD::iterator_traits<InputIterator>::difference_type n = 1)
+{
+  return _THRUST_STD::prev(i, n);
+}
 
 THRUST_NAMESPACE_END

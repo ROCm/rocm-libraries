@@ -38,6 +38,8 @@
 #  define THRUST_PRAGMA(ARG)          _CCCL_PRAGMA(ARG)
 #  define THRUST_PRAGMA_UNROLL_FULL() _CCCL_PRAGMA_UNROLL_FULL()
 
+#  define THRUST_WARNING(MSG) _CCCL_WARNING(MSG)
+
 #else
 
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/deprecated.h>
@@ -211,6 +213,12 @@
 #    define THRUST_PRAGMA_UNROLL(_N)
 #    define THRUST_PRAGMA_UNROLL_FULL()
 #  endif // ^^^ no pragma unroll support ^^^
+
+#  if THRUST_COMPILER(MSVC)
+#    define THRUST_WARNING(MSG) THRUST_PRAGMA(message(__FILE__ ":" THRUST_TO_STRING(__LINE__) ": warning: " MSG))
+#  else // ^^^ THRUST_COMPILER(MSVC) ^^^ / vvv !THRUST_COMPILER(MSVC) vvv
+#    define THRUST_WARNING(MSG) THRUST_PRAGMA(GCC warning MSG)
+#  endif // !THRUST_COMPILER(MSVC)
 
 #endif
 

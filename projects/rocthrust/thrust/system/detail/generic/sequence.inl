@@ -85,7 +85,8 @@ template <typename DerivedPolicy, typename ForwardIterator, typename T>
 THRUST_HOST_DEVICE void
 sequence(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last, T init, T step)
 {
-  thrust::tabulate(exec, first, last, detail::compute_sequence_value<T>{std::move(init), std::move(step)});
+  thrust::tabulate(
+    exec, first, last, detail::compute_sequence_value<T>{_THRUST_STD::move(init), _THRUST_STD::move(step)});
 } // end sequence()
 
 } // end namespace generic
