@@ -82,7 +82,7 @@ from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
-from .CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload
+from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, supportsUserSgprKernargPreload
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKMulticast
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
@@ -159,7 +159,7 @@ class KernelWriterAssembly(KernelWriter):
 
   def _getCustomKernelSource(self, kernel, CustomKernelDirectory):
     kernelName = getKernelFileBase(self.debugConfig.splitGSU, kernel)
-    with open(os.path.join(CustomKernelDirectory, (kernelName + ".s"))) as f:
+    with open(getCustomKernelFilepath(kernelName, CustomKernelDirectory)) as f:
       rocmVersion = self.assembler.rocm_version
       if not supportsUserSgprKernargPreload(rocmVersion):
         code = []
@@ -624,6 +624,12 @@ class KernelWriterAssembly(KernelWriter):
 
   def defineMultiSgprIndex(self, names: List[str], numSgprs: List[int], align=1):
     assert(len(names) == len(numSgprs))
+    # checkOutMulti only aligns the start of the whole block, so a repeated name
+    # remaps self.sgprs[name] to its later index, which is aligned only by luck.
+    # A 64-bit arg landing on an odd SGPR then fails assembly with "invalid
+    # register alignment" far from the duplicate that caused it.
+    assert len(set(names)) == len(names), \
+        "duplicate sgpr arg names: %s" % sorted({n for n in names if names.count(n) > 1})
 
     sgprIdxVec = self.sgprPool.checkOutMulti(numSgprs, align, tags=names)
     #self.sgprIdx = roundUpToNearestMultiple(self.sgprIdx,align)

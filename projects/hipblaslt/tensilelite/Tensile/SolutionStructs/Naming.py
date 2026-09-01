@@ -148,7 +148,10 @@ def getParameterValueAbbreviation(key, value):
 
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
-  if "CustomKernelName" in state and state["CustomKernelName"]:
+  ck = state.get("CustomKernel")
+  if isinstance(ck, dict) and ck.get("name"):
+    return ck["name"]
+  if state.get("CustomKernelName", ""):
     return state["CustomKernelName"]
 
   gsuBackup = state["GlobalSplitU"]
@@ -215,7 +218,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
   for key in sorted(requiredParametersTemp):
-    if key not in state or key == "CustomKernelName":
+    if key not in state or key == "CustomKernel":
       continue
     components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
@@ -241,7 +244,10 @@ def shortenFileBase(splitGSU, kernel):
 
 
 def getKernelFileBase(splitGSU: bool, kernel):
-  if "CustomKernelName" in kernel and kernel["CustomKernelName"]:
+  ck = kernel.get("CustomKernel")
+  if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+    fileBase = ck["name"]
+  elif kernel.get("CustomKernelName", ""):
     fileBase = kernel["CustomKernelName"]
   else:
     fileBase = shortenFileBase(splitGSU, kernel)
