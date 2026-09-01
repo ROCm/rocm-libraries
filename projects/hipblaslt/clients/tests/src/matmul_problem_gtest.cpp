@@ -203,6 +203,10 @@ TEST(MatmulProblem, RejectsInvalidSerializedGeometry)
     arguments.c_equal_d = true;
     arguments.d_type    = HIP_R_16F;
     EXPECT_THROW(hipblaslt::client::normalizeMatmulProblems(arguments), std::invalid_argument);
+
+    arguments             = baseArguments();
+    arguments.batch_count = -1;
+    EXPECT_THROW(hipblaslt::client::normalizeMatmulProblems(arguments), std::invalid_argument);
 }
 
 TEST(MatmulDataTypes, ResolvesDefaultsOnce)
@@ -216,6 +220,49 @@ TEST(MatmulDataTypes, ResolvesDefaultsOnce)
     EXPECT_EQ(dataTypes.bias, HIP_R_32F);
     EXPECT_EQ(dataTypes.biasStorage, HIP_R_32F);
     EXPECT_EQ(dataTypes.auxiliary, HIP_R_32F);
+}
+
+TEST(MatmulDataTypes, PreservesImplicitComplexComputeInputs)
+{
+    auto arguments   = baseArguments();
+    arguments.a_type = HIP_C_32F;
+    arguments.b_type = HIP_C_32F;
+    arguments.c_type = HIP_C_32F;
+    arguments.d_type = HIP_C_32F;
+
+    const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(arguments);
+
+    EXPECT_EQ(dataTypes.computeScalar, HIP_R_32F);
+    EXPECT_EQ(dataTypes.computeInputA, HIP_C_32F);
+    EXPECT_EQ(dataTypes.computeInputB, HIP_C_32F);
+    EXPECT_EQ(dataTypes.coefficient, HIP_C_32F);
+
+    arguments.a_type           = HIP_C_64F;
+    arguments.b_type           = HIP_C_64F;
+    arguments.c_type           = HIP_C_64F;
+    arguments.d_type           = HIP_C_64F;
+    arguments.compute_type     = HIPBLAS_COMPUTE_64F;
+    const auto doubleDataTypes = hipblaslt::client::resolveMatmulDataTypes(arguments);
+    EXPECT_EQ(doubleDataTypes.computeScalar, HIP_R_64F);
+    EXPECT_EQ(doubleDataTypes.computeInputA, HIP_C_64F);
+    EXPECT_EQ(doubleDataTypes.computeInputB, HIP_C_64F);
+    EXPECT_EQ(doubleDataTypes.coefficient, HIP_C_64F);
+}
+
+TEST(MatmulProblem, PreservesZeroBatchAsEmptyWork)
+{
+    auto arguments        = baseArguments();
+    arguments.batch_count = 0;
+
+    const auto problems = hipblaslt::client::normalizeMatmulProblems(arguments);
+
+    ASSERT_EQ(problems.size(), 1);
+    const auto& problem = problems.front();
+    EXPECT_EQ(problem.batchCount, 0);
+    expectMatrix(problem.a, HIP_R_16F, 3, 7, 0, 4, 28, 0);
+    expectMatrix(problem.b, HIP_R_16BF, 7, 5, 0, 8, 40, 0);
+    expectMatrix(problem.c, HIP_R_32F, 3, 5, 0, 6, 30, 0);
+    expectMatrix(problem.d, HIP_R_32F, 3, 5, 0, 9, 45, 0);
 }
 
 TEST(MatmulPreparation, ComputesLogicalStorageAndScalarState)

@@ -8,10 +8,41 @@
 #include <hipblaslt/host_numerics/Types.hpp>
 #include <roc/host_numerics/backends/blas.hpp>
 
+#include <array>
 #include <utility>
 
 namespace hipblaslt::host_numerics
 {
+    roc::host_numerics::Layout referenceBatchLayout(const hipblaslt::client::MatmulMatrix& matrix,
+                                                    size_t                                 rows,
+                                                    size_t                                 columns,
+                                                    hipblasOperation_t operation,
+                                                    size_t             batch,
+                                                    bool               separateBatchStorage)
+    {
+        using roc::host_numerics::Layout;
+        using roc::host_numerics::Shape;
+
+        const ptrdiff_t rowStride    = operation == HIPBLAS_OP_N ? 1 : matrix.layout.stride(1);
+        const ptrdiff_t columnStride = operation == HIPBLAS_OP_N ? matrix.layout.stride(1) : 1;
+
+        ptrdiff_t offset = 0;
+        if(!separateBatchStorage)
+        {
+            // A zero matrix extent has no valid {0, 0, batch} coordinate, but
+            // its batch base is still well-defined. Use a non-empty address
+            // layout to retain Layout's checked offset arithmetic without
+            // pretending that the empty matrix contains an element.
+            const Layout batchAddressLayout(Shape{1, 1, matrix.layout.shape().extent(2)},
+                                            {0, 0, matrix.layout.stride(2)},
+                                            matrix.layout.offset());
+            const std::array<size_t, 3> batchCoordinates{0, 0, batch};
+            offset = batchAddressLayout.elementOffset(batchCoordinates);
+        }
+
+        return Layout(Shape{rows, columns}, {rowStride, columnStride}, offset);
+    }
+
     roc::host_numerics::GemmRunInfo
         referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,
                             const hipblaslt::client::MatmulDataTypes&       dataTypes,
@@ -49,13 +80,12 @@ namespace hipblaslt::host_numerics
                             std::move(operandB),
                             std::move(inputs.c),
                             std::move(inputs.d),
-                            referenceAccumulatorType(dataTypes.computeScalar));
-        request.epilogue.alpha  = scalarValue(preparation.alpha, dataTypes.computeScalar);
-        request.epilogue.beta   = scalarValue(preparation.beta, dataTypes.computeScalar);
-        request.epilogue.scaleC = inputs.scaleC.value_or(
-            Scalar::one(scalarType(dataTypes.computeScalar)));
-        request.epilogue.outputScale = inputs.scaleD.value_or(
-            Scalar::one(scalarType(dataTypes.computeScalar)));
+                            referenceAccumulatorType(dataTypes.coefficient));
+        request.epilogue.alpha           = scalarValue(preparation.alpha, dataTypes.coefficient);
+        request.epilogue.beta            = scalarValue(preparation.beta, dataTypes.coefficient);
+        const ScalarType accumulatorType = request.accumulatorType;
+        request.epilogue.scaleC          = inputs.scaleC.value_or(Scalar::one(accumulatorType));
+        request.epilogue.outputScale     = inputs.scaleD.value_or(Scalar::one(accumulatorType));
         if(request.d.type() == ScalarType::Int8)
             request.epilogue.outputConversion = OutputConversion::SaturatingInt8;
         return referenceGemmWithBlasBackend(request);
