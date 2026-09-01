@@ -64,6 +64,14 @@ Infer from the user request:
    `compile_commands.json` under the repository's build directories and confirm
    the choice before running.
 
+   Then choose the scope. Default to changed files; use `--all` for a full pass
+   over every translation unit in the compile database when the user asks to
+   check the whole project, wants a CI-equivalent result, or when the change
+   invalidates a per-file scope: edits to `.clang-tidy`, to compiler flags, or
+   to a build option that alters preprocessor branches. A full pass on hipDNN
+   core is roughly 554 translation units and takes minutes, so say so before
+   starting one, and prefer changed-file scope when a branch is the subject.
+
 2. Run the script from the repository root:
 
    ```bash
