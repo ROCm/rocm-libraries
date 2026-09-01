@@ -944,6 +944,8 @@ miopenStatus_t CallGemm(const Handle& handle,
                                    workspace_size);
         return miopenStatusSuccess;
 #else
+        std::ignore = workspace;
+        std::ignore = workspace_size;
         return miopenStatusNotImplemented;
 #endif
     }
