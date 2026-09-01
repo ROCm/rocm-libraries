@@ -168,6 +168,32 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
             bool_constant<true>{});
     }
 
+    // LSE/D are 1-D over seqlen_q and, after this change, reach LDS by TDM just
+    // like K/V/Q/dO.  The inherited MakeLSEDDramTileDistribution scatters kM0
+    // across the lanes of a warp so load_tile can assemble a register tile; its
+    // ys length is therefore kM0/warp_size = 2, which as a TDM box would be 8 B.
+    // TDM builds no register tile and just needs the box walked in order, so
+    // partition by warp only (IsWarpLevelParallelOnly) and let ys span the whole
+    // per-warp run.  This mirrors MakeKDramTileDistribution one rank down.
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeLSEDDramTdmDistribution()
+    {
+        constexpr index_t kSeq    = Problem::BlockFmhaShape::kM0;
+        constexpr index_t warpNum = Problem::BlockFmhaShape::NumWarps;
+
+        static_assert(kSeq % warpNum == 0,
+                      "LSE/D kM0 must be divisible by the warp count for a tile-major dist");
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<warpNum, kSeq / warpNum>>,
+                                       tuple<sequence<1>>,
+                                       tuple<sequence<0>>,
+                                       sequence<1>,
+                                       sequence<1>>{},
+            bool_constant<true>{});
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigK()
     {
