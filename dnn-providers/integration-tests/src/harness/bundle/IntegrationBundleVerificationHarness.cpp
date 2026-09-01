@@ -20,7 +20,7 @@
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
-#include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
@@ -69,7 +69,11 @@ SupportObservation
         // ADD_FAILURE rather than ASSERT: this runs before runComparison(), which
         // reports the same build failure as an outcome; asserting here would hide it.
         ADD_FAILURE() << "from_binary failed: " << session.buildError;
-        return {};
+
+        // NOT_QUERIED, not the default NONE: there is a sidecar here — enforcement
+        // would not be on otherwise — and calling it unqueried would report an
+        // enforcement gap on top of a graph that never opened.
+        return SupportObservation{SidecarState::NOT_QUERIED, {}};
     }
 
     return _deps.claimObserver->observe(session.engines,
@@ -240,6 +244,11 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
 VerificationOutcome
     IntegrationBundleVerificationHarness::engineDidNotRun(const EngineRunResult& run) const
 {
+    // The rung the engine actually cleared. A bundle that only has to compile still
+    // gets credit for compiling, even though what came next did not work.
+    const VerificationDepth reached
+        = run.plansBuilt ? VerificationDepth::BUILDABLE : VerificationDepth::NOT_REACHED;
+
     if(run.status == EngineStatus::DECLINED)
     {
         std::ostringstream msg;
@@ -248,13 +257,22 @@ VerificationOutcome
         {
             msg << ": " << run.message;
         }
-        return VerificationOutcome::skipped(VerificationDepth::NOT_REACHED, msg.str());
+        return VerificationOutcome::skipped(reached, msg.str());
     }
 
     // ERRORED: the engine broke while compiling or executing, and the runner handed
     // back the frontend's own message. The engine is at fault.
-    return VerificationOutcome::failed(
-        VerificationDepth::NOT_REACHED, FailureOrigin::ENGINE, run.message);
+    //
+    // Named unconditionally: an empty message on a FAILED outcome means "the failure
+    // is already on the gtest record", which only the comparison can promise. A
+    // silent green test is the exact shape this harness exists to rule out.
+    std::ostringstream msg;
+    msg << "Engine failed on bundle " << _bundlePath;
+    if(!run.message.empty())
+    {
+        msg << ": " << run.message;
+    }
+    return VerificationOutcome::failed(reached, FailureOrigin::ENGINE, msg.str());
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSession& session)
@@ -444,9 +462,9 @@ IntegrationBundleVerificationHarness::EngineRunResult
 {
     EngineRunResult run;
 
-    // Decided once, in openGraph(). Asking the executor to work this out again is
-    // what used to make one fact three different pieces of code. A test states what
-    // it is simulating by setting engines.accepted on the session it hands back.
+    // Decided once, in openGraph(), so applicability is one fact rather than three
+    // opinions. A test states what it is simulating by setting engines.accepted on
+    // the session it hands back.
     if(!session.engines.accepted)
     {
         const auto summary
@@ -464,10 +482,12 @@ IntegrationBundleVerificationHarness::EngineRunResult
     auto variantPack = buildVariantPack(run.outputs, _deps.policy.useDevice());
 
     // The runner reports rather than asserts, so "the engine broke" is a value here
-    // instead of something reconstructed from GTest's result state afterwards —
-    // which could not tell an engine assertion apart from any other fatal failure.
+    // instead of a disposition read back off GTest, which cannot tell an engine
+    // assertion apart from any other fatal failure in the same test.
     const EngineOpResult result
         = _deps.engineRunner->execute(session, _engineUnderTest, variantPack);
+
+    run.plansBuilt = result.plansBuilt;
 
     if(result.declined)
     {
@@ -493,14 +513,17 @@ IntegrationBundleVerificationHarness::RefRunResult
 {
     refOutputs = allocateSentinelOutputs();
 
-    // The CPU reference reads and writes host memory; only the GPU one wants device
-    // pointers. Handing a CPU executor device pointers is a silent crash.
-    const bool useDevice = _deps.policy.useDevice() && (type == ReferenceExecutorType::GPU);
-    auto variantPack = buildVariantPack(refOutputs, useDevice);
+    // Only an executor that asks for device pointers gets them. Handing host memory
+    // to an executor that wants device memory — or the reverse — is a silent crash,
+    // not an error, and the executor is the one that knows which it needs.
+    bool useDevice = false;
 
     try
     {
         IReferenceGraphExecutor& executor = _deps.referenceExecutors->get(type);
+        useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
+        auto variantPack = buildVariantPack(refOutputs, useDevice);
+
         if(!executor.isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
         {
             return {RefStatus::CAPABILITY_MISS,

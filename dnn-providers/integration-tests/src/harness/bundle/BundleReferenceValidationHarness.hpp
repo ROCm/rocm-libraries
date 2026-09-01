@@ -31,10 +31,12 @@ namespace hipdnn_integration_tests::bundle
 /// what produced a "verification mode" that structurally never reached an engine —
 /// and therefore never checked the claims the engine harness exists to enforce.
 ///
-/// **There is no skip path.** Registration only creates a test when the bundle has
-/// golden data *and* every node type is in this reference's required-op set
-/// (see ReferenceOpCoverage.hpp). Given that, a reference that cannot run the graph
-/// is a gap in the reference, so it fails rather than skips.
+/// **There is no verification skip path.** Registration only creates a test when
+/// the bundle has golden data *and* every node type is in this reference's
+/// required-op set (see ReferenceOpCoverage.hpp). Given that, a reference that
+/// cannot run the graph is a gap in the reference, so it fails rather than skips.
+/// The one skip is device availability, checked before that gate: the GPU
+/// reference needs a device, so its suite skips on a runner that has none.
 class BundleReferenceValidationHarness : public ::testing::Test
 {
 public:
@@ -58,7 +60,10 @@ public:
         return type == ReferenceExecutorType::GPU ? "GpuRef" : "CpuRef";
     }
 
-protected:
+    // Public rather than protected: the unit tests drive a real harness directly
+    // instead of subclassing it, so they need to call these. GTest calls them
+    // through the base class either way.
+    //
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override;
 
@@ -68,7 +73,7 @@ protected:
 private:
     // Borrowed from the run's pool: the executors are reusable, so this harness
     // does not build one per bundle.
-    IReferenceGraphExecutor& referenceExecutor();
+    IReferenceGraphExecutor& referenceExecutor() const;
 
     bool useDevice() const;
     OutputTensors allocateOutputs() const;

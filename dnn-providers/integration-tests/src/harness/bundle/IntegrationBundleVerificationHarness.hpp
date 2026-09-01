@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <iosfwd>
 #include <memory>
@@ -26,7 +27,7 @@
 #include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
-#include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
@@ -126,23 +127,39 @@ public:
 
         // Phase 2: either a claim already failed, or this bundle gets run.
         VerificationOutcome outcome;
-        if(const auto blocked = claimBlocked(observation))
+        try
         {
-            // A broken claim means the engine will not take the graph, so there is
-            // nothing to compare. Running anyway would execute nothing, leave the NaN
-            // sentinel outputs untouched, and pile a tensor diff on the real message.
-            outcome = *blocked;
-        }
-        else
-        {
-            outcome = runComparison(session);
+            if(const auto blocked = claimBlocked(observation))
+            {
+                // A broken claim means the engine will not take the graph, so there is
+                // nothing to compare. Running anyway would execute nothing, leave the
+                // NaN sentinel outputs untouched, and pile a tensor diff on the real
+                // message.
+                outcome = *blocked;
+            }
+            else
+            {
+                outcome = runComparison(session);
 
-            // Kept as a live check because "the test did nothing and went green" is
-            // the failure this harness exists to catch. Only asked on this path: a
-            // blocked claim never reached the depth, and is already a failure.
-            const VerificationDepth required = bundleRequiredDepth();
-            EXPECT_FALSE(outcome.status == OutcomeStatus::PASSED && outcome.depth < required)
-                << "test passed without reaching " << toString(required) << " for " << _bundlePath;
+                // Kept as a live check because "the test did nothing and went green"
+                // is the failure this harness exists to catch. Only asked on this
+                // path: a blocked claim never reached the depth, and is already a
+                // failure.
+                const VerificationDepth required = bundleRequiredDepth();
+                EXPECT_FALSE(outcome.status == OutcomeStatus::PASSED && outcome.depth < required)
+                    << "test passed without reaching " << toString(required) << " for "
+                    << _bundlePath;
+            }
+        }
+        catch(const std::exception& e)
+        {
+            // This graph was already counted as queried, so a verdict that never
+            // lands leaves the summary short a row and reconciles against nothing.
+            // HARNESS at NOT_REACHED because a throw in here is our bug and proves
+            // nothing about the engine: it must not demote the claim, and it must
+            // not confirm it either.
+            outcome = VerificationOutcome::failed(
+                VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, e.what());
         }
 
         // Phase 3: one verdict, then one pass/fail/skip, both from the same outcome.
@@ -222,6 +239,9 @@ private:
     struct EngineRunResult
     {
         EngineStatus status = EngineStatus::DECLINED;
+        /// Plans compiled before the engine stopped, so the run reached BUILDABLE
+        /// even though it did not execute.
+        bool plansBuilt = false;
         std::string message;
         OutputTensors outputs;
     };

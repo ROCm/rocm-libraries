@@ -21,7 +21,7 @@
 namespace hipdnn_integration_tests::bundle
 {
 
-IReferenceGraphExecutor& BundleReferenceValidationHarness::referenceExecutor()
+IReferenceGraphExecutor& BundleReferenceValidationHarness::referenceExecutor() const
 {
     return _referenceExecutors->get(_referenceType);
 }
@@ -57,11 +57,12 @@ OutputTensors BundleReferenceValidationHarness::allocateOutputs() const
     return outputs;
 }
 
-// The CPU reference reads and writes host memory; only the GPU one wants device
-// pointers. Handing a CPU executor device pointers is a silent crash, not an error.
+// Only an executor that actually wants device pointers gets them; the enum a
+// harness was registered with says nothing about what the executor it was
+// actually handed needs.
 bool BundleReferenceValidationHarness::useDevice() const
 {
-    return _requiresDevice && _referenceType == ReferenceExecutorType::GPU;
+    return _requiresDevice && referenceExecutor().requiresDeviceMemory();
 }
 
 std::unordered_map<int64_t, void*>

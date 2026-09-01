@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <gmock/gmock.h>
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include "ScratchDirectory.hpp"
@@ -229,7 +230,7 @@ inline std::string allMessages(const ::testing::TestPartResultArray& results)
 /// The skip guard is the whole point. `Test::Run()` checks IsSkipped() after SetUp()
 /// and does not call TestBody() when it is set, so a driver that always calls
 /// TestBody() diverges from production the moment a metadata guard or a TOML skip
-/// fires in SetUp(). Four suites each wrote this block out; only one had the guard.
+/// fires in SetUp() — easy to omit, and silent when omitted.
 ///
 /// Bundle and locator wiring stays with the caller: the suites disagree on what to
 /// set up (some pass a locator, some tag metadata, some build the harness from a

@@ -11,7 +11,7 @@
 
 #include <hipdnn_frontend/Error.hpp>
 
-#include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
 
 // Held by pointer so this header stays free of the frontend's Graph.hpp, which the
 // harness header pulls into every test that includes it.

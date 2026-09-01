@@ -27,7 +27,10 @@ CoverageUpdate coverageFor(const SupportObservation& observation, bool enforceme
     // — the verdict tallies look the same for both, and only one of them means the
     // cell is covered.
     update.noApplicableClaim = read && !observation.hasApplicableClaim();
-    update.missedQuery = enforcementExpected && !read;
+    // NONE with enforcement expected means a sidecar is sitting there and nothing
+    // looked at it, which is a harness bug. NOT_QUERIED is the honest case — the
+    // graph never opened — and is already reported where it happened.
+    update.missedQuery = enforcementExpected && observation.sidecar == SidecarState::NONE;
     return update;
 }
 
@@ -151,7 +154,8 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
             }
             os << "  " << r.bundlePath << "\n"
                << "    engine=" << r.engineName << "  arch=" << r.arch
-               << "  platform=" << r.platform << "\n";
+               << "  platform=" << r.platform << "\n"
+               << "    " << r.detail << "\n";
         }
         os << "\nThese are supported but not recorded in a sidecar.\n";
     }

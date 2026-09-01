@@ -6,7 +6,7 @@
 #include <string_view>
 
 #include "harness/bundle/GraphSession.hpp"
-#include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
@@ -41,7 +41,7 @@ public:
         = 0;
 };
 
-/// The real decision: observeSupport(), unchanged.
+/// The real decision: observeSupport().
 class DefaultSupportClaimObserver : public ISupportClaimObserver
 {
 public:

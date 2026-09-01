@@ -110,9 +110,8 @@ inline const char* toString(FailureOrigin origin)
 ///
 /// Everything under TestBody() returns one of these instead of calling GTEST_SKIP()
 /// or FAIL() on the spot. That is what lets the claim verdict and the test result
-/// each be decided once, in one place, from the same facts — instead of being worked
-/// out afterwards from HasFailure()/IsSkipped() and a pair of mutable flags set six
-/// levels down.
+/// each be decided once, in one place, from the same facts, rather than each being
+/// reconstructed afterwards from whatever state the other left behind.
 struct VerificationOutcome
 {
     OutcomeStatus status = OutcomeStatus::SKIPPED;

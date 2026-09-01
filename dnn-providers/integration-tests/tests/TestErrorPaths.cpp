@@ -67,9 +67,8 @@ protected:
     }
 };
 
-// Was: EngineStub throwing EngineNotApplicableError. IGraphEngineRunner::execute()
-// now answers "not mine" with EngineOpResult::declinedBy(...) instead of throwing.
-// The outcome the test defends is unchanged (SKIP).
+// The engine seam answers "not mine" with EngineOpResult::declinedBy(...) rather
+// than throwing: a decline is an answer, and the harness turns it into a SKIP.
 TEST_F(TestErrorPaths, EngineNotApplicableSkips)
 {
     testing_support::HarnessMocks mocks;
@@ -88,13 +87,9 @@ TEST_F(TestErrorPaths, EngineNotApplicableSkips)
     EXPECT_FALSE(testing_support::anyFailed(results));
 }
 
-// Was: EngineStub throwing a generic std::runtime_error, expected to propagate
-// uncaught out of TestBody() (caught here by EXPECT_THROW). The engine seam no
-// longer throws for a compile/execute failure -- it answers with
-// EngineOpResult::failed(message), which the harness turns into a
-// FailureOrigin::ENGINE outcome carrying that message verbatim. The intent (a
-// generic engine problem is loud, not silently swallowed as SKIP) is unchanged;
-// only the mechanism moved from an uncaught exception to a reported FAIL.
+// A generic engine problem is loud, never silently swallowed as a SKIP. The runner
+// answers with EngineOpResult::failed(message) and the harness turns it into a
+// FailureOrigin::ENGINE outcome carrying that message.
 TEST_F(TestErrorPaths, EngineCrashFails)
 {
     testing_support::HarnessMocks mocks;
@@ -114,9 +109,31 @@ TEST_F(TestErrorPaths, EngineCrashFails)
                 ::testing::HasSubstr("stub: unexpected engine crash"));
 }
 
-// Was: RefStub throwing ReferenceCapabilityError. This is one of the two forms the
-// harness still catches as CAPABILITY_MISS (the other is isApplicable()==false,
-// covered by RefNotApplicableSkips below).
+// An empty message on a FAILED outcome means "the failure is already on the gtest
+// record with more detail than this could add", which only the comparison can
+// promise. The engine seam cannot, so the harness has to name the failure itself —
+// an engine error that produces a green test is the exact shape this harness
+// exists to rule out.
+TEST_F(TestErrorPaths, EngineFailureWithNoMessageStillFails)
+{
+    testing_support::HarnessMocks mocks;
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(EngineOpResult::failed("")));
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks,
+                 loadBundle("eng_silent_crash", /*includeGoldenOutput=*/true),
+                 VerificationMode::GOLDEN,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results))
+        << "an engine failure with no message must still fail the test";
+    EXPECT_THAT(testing_support::allMessages(results),
+                ::testing::HasSubstr("err-path-test-bundle"));
+}
+
+// One of the two forms the harness maps to CAPABILITY_MISS; the other is
+// isApplicable()==false, covered by RefNotApplicableSkips below.
 TEST_F(TestErrorPaths, RefCapabilityMissSkips)
 {
     testing_support::HarnessMocks mocks;
@@ -139,8 +156,7 @@ TEST_F(TestErrorPaths, RefCapabilityMissSkips)
 }
 
 // The other capability-miss form: the reference says up front, via isApplicable(),
-// that it has no plan for this op, without ever being asked to execute. Added so
-// both forms the harness maps to CAPABILITY_MISS are exercised in this file.
+// that it has no plan for this op, without ever being asked to execute.
 TEST_F(TestErrorPaths, RefNotApplicableSkips)
 {
     testing_support::HarnessMocks mocks;
@@ -161,8 +177,8 @@ TEST_F(TestErrorPaths, RefNotApplicableSkips)
     EXPECT_FALSE(testing_support::anyFailed(results));
 }
 
-// Was: RefStub throwing a generic std::runtime_error. Still routes to
-// RefStatus::RUNTIME_ERROR and FAILs the test -- unchanged.
+// A reference that breaks on an op it accepted is a real defect in the reference,
+// so it routes to RefStatus::RUNTIME_ERROR and fails the test.
 TEST_F(TestErrorPaths, RefCrashFails)
 {
     testing_support::HarnessMocks mocks;

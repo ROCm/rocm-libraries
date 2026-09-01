@@ -13,7 +13,7 @@
 #include <string_view>
 #include <unordered_map>
 
-#include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -150,9 +150,11 @@ std::optional<SupportVerdict> chooseVerdict(bool claimed, bool resolved, bool ac
 {
     if(!claimed)
     {
-        if(!accepted)
+        if(!accepted || !resolved)
         {
-            // Neither promised nor offered. Nothing happened here worth a row.
+            // Nothing was promised, and either nothing was offered or the ranked list
+            // cannot be believed. Recording drift off a query nobody could read would
+            // be inventing the one fact this row exists to report.
             return std::nullopt;
         }
         // Supported but not written down. Not a failure; it is how an engine that
@@ -298,6 +300,20 @@ std::vector<SupportResult> finalizeClaims(std::vector<SupportResult> results,
             // between "add this cell to the sidecar" and "the ranked list said so and
             // nothing tried it".
             record.detail += " (" + describeOutcome(outcome, required) + ")";
+        }
+        else
+        {
+            // A failing verdict already carries its own detail, and the outcome that
+            // reports it is built from these same records.
+            continue;
+        }
+
+        // describeOutcome() says how far the run got; the outcome's message says what
+        // to do about it — the frontend's error text, or which oracle was missing.
+        // Without it the summary is a tally nobody can act on.
+        if(!outcome.message.empty())
+        {
+            record.detail += ": " + outcome.message;
         }
     }
     return results;

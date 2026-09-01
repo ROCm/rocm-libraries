@@ -10,6 +10,7 @@
 #include "harness/bundle/IGraphEngineRunner.hpp"
 #include "harness/bundle/ISupportClaimObserver.hpp"
 #include "harness/bundle/IVerificationReporter.hpp"
+#include "harness/bundle/ProductionPolicy.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -29,9 +30,6 @@ struct HarnessDependencies
     std::shared_ptr<IVerificationReporter> reporter;
     HarnessPolicy policy;
 };
-
-/// TestConfig, read once, into a value.
-HarnessPolicy productionPolicy(TensorPlacement placement);
 
 /// The real collaborators, with the process-wide reference-executor pool.
 ///

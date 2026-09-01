@@ -25,7 +25,7 @@ previously advertised, which otherwise shows up as a skip nobody notices.
 
 The two axes meet in exactly one place — a claim that was accepted and then failed
 in use is reported as such, and never published as working support. See
-[Phase 2](#phase-2--commit-with-the-outcome).
+[Phase 3](#phase-3--commit-with-the-outcome).
 
 ## Sidecar layout
 
@@ -293,7 +293,20 @@ Discovery counts every claim-bearing bundle; only selected tests run. Because a
 doing — so the summary names it rather than leaving a mismatch to be misread as an
 enforcement gap. **Filtered lanes do not enforce the claims they filtered out.**
 
-Two detail sections follow the counters when non-empty:
+A second shortfall hides inside `queried` itself: a sidecar read in full that
+claims nothing for this arch/platform still counts as queried, so it looks
+identical to a graph that was never claimed at all. The summary names that gap
+too:
+
+```text
+  1 queried graph(s) carry a sidecar that claims nothing for this arch/platform;
+  nothing was promised for them, so nothing was enforced.
+```
+
+On a bring-up ASIC this line is often the whole tree, and it is the difference
+between "enforced and green" and "enforced nothing here".
+
+Three detail sections follow the counters when non-empty:
 
 - **`CLAIM FAILURES`** — every `isFailure()` verdict, with bundle, engine, cell, and
   the backend's own message for an errored query.
@@ -366,7 +379,7 @@ can become an engine run.
 | engine involved | yes | **no** |
 | support claims | queried and enforced | **not linked in** |
 | verification modes | `auto` / `golden` / `gpu` / `cpu` | n/a |
-| skip path | yes (no oracle, engine declines, TOML skip) | **none** |
+| skip path | yes (no oracle, engine declines, TOML skip) | no *verification* skip — every `_GpuRef` test skips on a deviceless runner |
 | device | yes | GPU reference only; the CPU one is host-only |
 | ctest registration | per provider, via `add_external_integration_test_target()` | once, via `add_integration_test_target()` |
 | suite name | `{tier}_{Op}_{Topology}` | `…_CpuRef` / `…_GpuRef` |
@@ -375,10 +388,14 @@ Registering the golden-data binary once rather than per provider is the point: n
 engine is involved, so running it in each provider's lane repeated identical work
 and gave three lanes a chance to disagree about our own data.
 
-The reference harness has no skip path because registration is the gate: a test is
-created only when the bundle has golden data **and** every node type in its graph
-is inside that reference's required-op set (`ReferenceOpCoverage.hpp`). Given both,
-a reference that cannot run the graph is a gap in the reference, so it fails.
+Registration is the gate, not a runtime verification skip: a test is created only
+when the bundle has golden data **and** every node type in its graph is inside
+that reference's required-op set (`ReferenceOpCoverage.hpp`). Given both, a
+reference that cannot run the graph is a gap in the reference, so it fails rather
+than skips. The one exception is device availability, checked before that gate:
+`SetUp()` calls `SKIP_IF_NO_DEVICES()`, same as the engine harness, so every
+`_GpuRef` test skips on a runner with no device. The CPU reference needs no
+device and never takes this path.
 
 Bundles outside a reference's op set are simply absent from its suite, and the
 counts are printed at registration so the gap is visible rather than silent:

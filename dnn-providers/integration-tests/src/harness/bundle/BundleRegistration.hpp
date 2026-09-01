@@ -23,6 +23,7 @@
 #include "harness/bundle/BundleReferenceValidationHarness.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/ReferenceOpCoverage.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"

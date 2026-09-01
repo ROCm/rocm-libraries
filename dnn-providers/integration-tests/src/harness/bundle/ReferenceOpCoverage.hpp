@@ -43,8 +43,8 @@ const std::set<NodeAttributes>& referenceSupportedOps(ReferenceExecutorType type
 /// Node types this graph uses, or nullopt when the buffer cannot be walked.
 ///
 /// The two cases are distinct and callers must keep them apart: a graph with no
-/// nodes is covered by every reference, an unreadable one is covered by none. An
-/// empty set used to mean both, which made referenceCoversGraph() and
+/// nodes is covered by every reference, an unreadable one is covered by none.
+/// Collapsing both onto an empty set makes referenceCoversGraph() and
 /// uncoveredNodeTypes() disagree -- "not covered, but nothing is uncovered".
 std::optional<std::set<NodeAttributes>> graphNodeTypes(const void* graphBuffer, size_t size);
 

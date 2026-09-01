@@ -415,7 +415,7 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWithOnlyQueries)
 //
 // The one that matters is that `queried` follows the sidecar state and never
 // results.empty(): a sidecar read in full can legally leave no verdicts, and
-// counting those as gaps is what used to fail healthy runs.
+// counting those as gaps fails healthy runs.
 // ---------------------------------------------------------------------------
 
 TEST(TestSupportClaimCoverageRules, NoSidecarCountsNothing)
@@ -471,6 +471,19 @@ TEST(TestSupportClaimCoverageRules, ExpectedButUnreadSidecarIsAHarnessBug)
 
     EXPECT_FALSE(update.queried);
     EXPECT_TRUE(update.missedQuery);
+}
+
+// A graph that never opened is not an enforcement gap. The run is already failing
+// on the graph, and "enforcement would have passed without checking" would be a
+// false statement pointing at a bug that is not there.
+TEST(TestSupportClaimCoverageRules, UnopenedGraphIsUncoveredButNotAHarnessBug)
+{
+    const auto update = coverageFor(SupportObservation{SidecarState::NOT_QUERIED, {}},
+                                    /*enforcementExpected=*/true);
+
+    EXPECT_FALSE(update.queried);
+    EXPECT_FALSE(update.missedQuery);
+    EXPECT_FALSE(update.noApplicableClaim);
 }
 
 // NOLINTEND(readability-identifier-naming)

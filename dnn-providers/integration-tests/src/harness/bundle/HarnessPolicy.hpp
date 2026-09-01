@@ -23,7 +23,7 @@ enum class TensorPlacement
     DEVICE,
 };
 
-/// Everything the harness used to read out of the TestConfig singleton mid-run.
+/// Everything about the run the harness needs and cannot work out for itself.
 ///
 /// A value, not an interface. Every field is a plain answer that cannot change
 /// during a test, so a struct beats a mock: a test states the environment it wants

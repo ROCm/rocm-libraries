@@ -552,4 +552,128 @@ TEST_F(TestSupportClaimEnforcement, EveryVerdictIsRecordedExactlyOnce)
     EXPECT_EQ(verdicts.size(), 2u);
 }
 
+// An engine that compiled the graph and then broke reached BUILDABLE, and the
+// report has to say so: a bundle whose enforcement_level only asks for plans is
+// otherwise denied the rung it actually cleared, and the row reads exactly like an
+// engine that never took the graph at all.
+TEST_F(TestSupportClaimEnforcement, EngineFailureAfterPlansBuiltKeepsTheDepthItReached)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    ::testing::TestPartResultArray results;
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(_mocks.reporter, verdicts);
+
+    ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
+        .WillByDefault(Return(observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)})));
+    ON_CALL(_mocks.engineRunner, execute(_, _, _))
+        .WillByDefault(Return(EngineOpResult{/*ok=*/false,
+                                             /*declined=*/false,
+                                             /*plansBuilt=*/true,
+                                             "stub: died executing compiled plans"}));
+
+    IntegrationBundleVerificationHarness harness(
+        _mocks.dependencies(
+            testing_support::hostPolicy(VerificationMode::GOLDEN, /*enforceSupportClaims=*/true)),
+        makeEngineUnderTest());
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+
+    ASSERT_EQ(verdicts.size(), 1u);
+    EXPECT_EQ(verdicts.front().verdict, SupportVerdict::CLAIM_FAILED_IN_USE);
+    EXPECT_NE(verdicts.front().detail.find("buildable"), std::string::npos)
+        << "detail was: " << verdicts.front().detail;
+}
+
+// The same failure before plan compilation is the one that genuinely never reached
+// a rung, so the two must not read alike.
+TEST_F(TestSupportClaimEnforcement, EngineFailureBeforePlansBuiltReachedNothing)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    ::testing::TestPartResultArray results;
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(_mocks.reporter, verdicts);
+
+    ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
+        .WillByDefault(Return(observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)})));
+    ON_CALL(_mocks.engineRunner, execute(_, _, _))
+        .WillByDefault(Return(EngineOpResult::failed("stub: died compiling plans")));
+
+    IntegrationBundleVerificationHarness harness(
+        _mocks.dependencies(
+            testing_support::hostPolicy(VerificationMode::GOLDEN, /*enforceSupportClaims=*/true)),
+        makeEngineUnderTest());
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+
+    ASSERT_EQ(verdicts.size(), 1u);
+    EXPECT_NE(verdicts.front().detail.find("not-reached"), std::string::npos)
+        << "detail was: " << verdicts.front().detail;
+}
+
+// A graph that would not open is already failing on the graph. Reporting an
+// unqueried sidecar on top of it sends a reader after an enforcement gap that is
+// not there — enforcement would not have "passed without checking", it failed.
+TEST_F(TestSupportClaimEnforcement, UnreadableGraphIsNotReportedAsAnUnqueriedSidecar)
+{
+    using ::testing::_;
+
+    ::testing::TestPartResultArray results;
+    std::vector<CoverageUpdate> coverage;
+    testing_support::captureCoverage(_mocks.reporter, coverage);
+
+    ON_CALL(_mocks.engineRunner, openGraph(_, _))
+        .WillByDefault([](const IntegrationTestBundle&, const std::optional<LoadedEngine>&) {
+            return testing_support::buildErrorSession("stub: truncated graph buffer");
+        });
+
+    IntegrationBundleVerificationHarness harness(
+        _mocks.dependencies(
+            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
+        makeEngineUnderTest());
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+
+    ASSERT_EQ(coverage.size(), 1u);
+    EXPECT_FALSE(coverage.front().missedQuery);
+    EXPECT_FALSE(coverage.front().queried);
+
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("from_binary failed"), std::string::npos);
+    EXPECT_EQ(messages.find("never queried"), std::string::npos) << messages;
+}
+
+// The coverage counter is bumped before the bundle runs, so a throw on the way to
+// the commit would leave the summary a row short and nothing to reconcile it
+// against. A harness bug is also no evidence about the engine, so the claim keeps
+// the verdict the query gave it.
+TEST_F(TestSupportClaimEnforcement, AThrowOnTheWayToTheCommitStillPublishesTheVerdict)
+{
+    using ::testing::_;
+    using ::testing::Return;
+    using ::testing::Throw;
+
+    ::testing::TestPartResultArray results;
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(_mocks.reporter, verdicts);
+
+    ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
+        .WillByDefault(Return(observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)})));
+    ON_CALL(_mocks.engineRunner, execute(_, _, _))
+        .WillByDefault(Throw(std::runtime_error("stub: harness bug mid-run")));
+
+    IntegrationBundleVerificationHarness harness(
+        _mocks.dependencies(
+            testing_support::hostPolicy(VerificationMode::GOLDEN, /*enforceSupportClaims=*/true)),
+        makeEngineUnderTest());
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+
+    ASSERT_EQ(verdicts.size(), 1u);
+    EXPECT_EQ(verdicts.front().verdict, SupportVerdict::CLAIM_ACCEPTED)
+        << "a harness bug must not be charged to the engine";
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("stub: harness bug mid-run"),
+              std::string::npos);
+}
+
 // NOLINTEND(readability-identifier-naming)

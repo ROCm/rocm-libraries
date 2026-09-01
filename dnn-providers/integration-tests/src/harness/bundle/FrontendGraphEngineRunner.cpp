@@ -113,30 +113,40 @@ EngineOpResult
     auto& graph = *session.graph;
     auto handle = getSharedHandle();
 
-    try
-    {
-        int64_t workspaceSize = 0;
-        if(auto result = graph.get_workspace_size(workspaceSize); !result.is_good())
+    // Plans are compiled by the time this runs, so every answer below it — success,
+    // break, or late decline — is one the engine gave after reaching BUILDABLE.
+    // Stamped once here rather than at each return, where the next one added would
+    // silently under-report the depth.
+    auto result = [&]() -> EngineOpResult {
+        try
         {
-            return EngineOpResult::failed(result.get_message());
-        }
-        if(workspaceSize < 0)
-        {
-            return EngineOpResult::failed("engine reported a negative workspace size");
-        }
-        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+            int64_t workspaceSize = 0;
+            if(auto status = graph.get_workspace_size(workspaceSize); !status.is_good())
+            {
+                return EngineOpResult::failed(status.get_message());
+            }
+            if(workspaceSize < 0)
+            {
+                return EngineOpResult::failed("engine reported a negative workspace size");
+            }
+            const hipdnn_data_sdk::utilities::Workspace workspace(
+                static_cast<size_t>(workspaceSize));
 
-        if(auto result = graph.execute(handle, variantPack, workspace.get()); !result.is_good())
-        {
-            return EngineOpResult::failed(result.get_message());
+            if(auto status = graph.execute(handle, variantPack, workspace.get()); !status.is_good())
+            {
+                return EngineOpResult::failed(status.get_message());
+            }
         }
-    }
-    catch(const EngineNotApplicableError& e)
-    {
-        return EngineOpResult::declinedBy(e.what());
-    }
+        catch(const EngineNotApplicableError& e)
+        {
+            return EngineOpResult::declinedBy(e.what());
+        }
 
-    return EngineOpResult::succeeded();
+        return EngineOpResult::succeeded();
+    }();
+
+    result.plansBuilt = true;
+    return result;
 }
 
 } // namespace hipdnn_integration_tests::bundle

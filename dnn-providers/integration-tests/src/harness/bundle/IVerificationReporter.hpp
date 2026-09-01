@@ -14,10 +14,9 @@ namespace hipdnn_integration_tests::bundle
 
 /// Where a test body's findings go once they are decided.
 ///
-/// The three destinations are process-wide singletons, which the harness used to
-/// reach into directly. Behind this seam a test asserts on what the harness
-/// published instead of clearing global state in SetUp and hoping no other suite
-/// wrote to it in between.
+/// All three destinations behind it are process-wide singletons. Reached through
+/// this seam, a test asserts on what the harness published instead of clearing
+/// global state in SetUp and hoping no other suite wrote to it in between.
 ///
 /// Deciding stays in the harness — this only publishes.
 class IVerificationReporter

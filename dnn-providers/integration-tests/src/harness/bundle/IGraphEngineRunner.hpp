@@ -11,7 +11,7 @@
 
 #include "harness/VariantPack.hpp"
 #include "harness/bundle/GraphSession.hpp"
-#include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -21,30 +21,34 @@ struct IntegrationTestBundle;
 /// What one frontend operation did.
 ///
 /// Returned rather than asserted so nothing below the harness owns a GTest
-/// disposition. This is what replaced reading ::testing::Test::HasFatalFailure()
-/// after the fact — that could not tell an engine assertion apart from any other
-/// fatal failure in the same test, and blamed the engine for both.
+/// disposition: only the operation itself can tell an engine failure apart from any
+/// other fatal failure in the same test, and only it knows how far the engine got.
 struct EngineOpResult
 {
     bool ok = false;
     /// The engine refused the graph. Distinct from `!ok`: a decline is the engine
     /// answering "not mine", which skips, while a failure is the engine breaking.
     bool declined = false;
+    /// Plan compilation had already succeeded when this result was produced, so the
+    /// engine reached BUILDABLE whatever happened next. Without it every engine
+    /// error reads as "the engine never took the graph", and a bundle that only has
+    /// to compile is denied the depth it actually reached.
+    bool plansBuilt = false;
     std::string message;
 
     static EngineOpResult succeeded()
     {
-        return {true, false, {}};
+        return {true, false, true, {}};
     }
 
     static EngineOpResult failed(std::string message)
     {
-        return {false, false, std::move(message)};
+        return {false, false, false, std::move(message)};
     }
 
     static EngineOpResult declinedBy(std::string message)
     {
-        return {false, true, std::move(message)};
+        return {false, true, false, std::move(message)};
     }
 };
 

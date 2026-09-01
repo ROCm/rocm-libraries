@@ -81,7 +81,7 @@ struct SupportResult
 /// another platform, another sweep case, or engines this build does not load. Those
 /// runs did everything they could and must count as covered, but `results.empty()`
 /// cannot tell them apart from "there was no sidecar" — the one case that must not
-/// count. Working it out that way is what used to fail healthy runs.
+/// count.
 ///
 /// Registration counts the same thing when it seeds `graphsWithClaims` (does the
 /// file exist?), which is what keeps `withClaims >= queried` true.
@@ -95,6 +95,12 @@ enum class SidecarState : uint8_t
     /// platform. Says nothing about what was in it: a sidecar that promised nothing
     /// still counts as checked.
     CHECKED,
+    /// The graph never opened, so there was no ranked list to check a sidecar
+    /// against. Distinct from NONE because the coverage check reads NONE as "a
+    /// sidecar exists and nothing looked at it" — a harness bug — and this is not
+    /// that: the run is already failing on the graph itself, and naming an
+    /// enforcement gap on top would send a reader after a bug that is not there.
+    NOT_QUERIED,
 };
 
 /// What one graph's sidecar had to say, and whether we got to read it.

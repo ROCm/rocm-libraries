@@ -15,7 +15,7 @@
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 #include "ScratchDirectory.hpp"
-#include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
 using hipdnn_frontend::ErrorCode;
@@ -719,6 +719,38 @@ TEST(TestSupportVerdict, FinalizePassesFailingVerdictsThrough)
     EXPECT_EQ(records[0].verdict, SupportVerdict::CLAIM_BROKEN);
 }
 
+// The depth says how far the run got; the outcome's message says what to do about
+// it. A summary carrying only the first is a tally nobody can act on.
+TEST(TestSupportVerdict, FinalizeKeepsTheOutcomeMessage)
+{
+    const auto records
+        = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED)},
+                         UNDER_TEST,
+                         VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                                     FailureOrigin::HARNESS,
+                                                     "no golden data; run `dvc pull` for it"),
+                         VerificationDepth::VERIFIED);
+
+    ASSERT_EQ(records.size(), 1u);
+    EXPECT_NE(records[0].detail.find("dvc pull"), std::string::npos)
+        << "detail was: " << records[0].detail;
+}
+
+// A claim the run has no evidence about keeps the detail its own query wrote: the
+// outcome belongs to a different engine's execution.
+TEST(TestSupportVerdict, FinalizeLeavesOtherEnginesDetailAlone)
+{
+    const auto records
+        = finalizeClaims({verdict(SupportVerdict::CLAIM_ACCEPTED, OTHER_ENGINE)},
+                         UNDER_TEST,
+                         VerificationOutcome::failed(
+                             VerificationDepth::NOT_REACHED, FailureOrigin::ENGINE, "engine died"),
+                         VerificationDepth::VERIFIED);
+
+    ASSERT_EQ(records.size(), 1u);
+    EXPECT_EQ(records[0].detail.find("engine died"), std::string::npos);
+}
+
 // ---------------------------------------------------------------------------
 // chooseVerdict(): the whole table, one row at a time.
 //
@@ -765,11 +797,10 @@ TEST(TestSupportVerdict, NeitherClaimedNorAcceptedRecordsNothing)
 
 // Unclaimed and unresolved: `accepted` is already false whenever the query did not
 // resolve, so this row can only be reached by calling the table directly. It must
-// still record nothing rather than invent drift.
+// still record nothing rather than invent drift off a query nobody could read.
 TEST(TestSupportVerdict, UnclaimedAndUnresolvedRecordsNothing)
 {
-    EXPECT_EQ(chooseVerdict(/*claimed=*/false, /*resolved=*/false, /*accepted=*/true),
-              SupportVerdict::UNCLAIMED_SUPPORT);
+    EXPECT_FALSE(chooseVerdict(/*claimed=*/false, /*resolved=*/false, /*accepted=*/true));
 }
 
 // Every verdict the table can produce explains itself; the detail column is what a

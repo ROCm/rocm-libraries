@@ -15,15 +15,10 @@
 #include <hipdnn_backend.h>
 
 #include "common/Utilities.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
-
-struct LoadedEngine
-{
-    int64_t id = 0;
-    std::string name;
-};
 
 class LoadedEngineTable
 {
