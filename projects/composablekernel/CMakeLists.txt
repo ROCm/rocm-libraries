@@ -548,18 +548,14 @@ if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600140090)
   if(HAS_ENABLE_POST_MISCHED)
     message(STATUS "Adding the enable-post-misched=0 compiler flag")
     add_compile_options("SHELL: -mllvm -enable-post-misched=0")
+    # Workraound for an issue where LDS fences are incorrectly removed (made not
+    # to synchronize LDS) whene there's a loop-carried memory dependency on gfx90a.
+    # Should hopefully be fixed in the backend soon. The bug only triggered on
+    # gfx90a to our current knowledge.
+    add_compile_options("SHELL: -Xarch_gfx90a -mllvm=-enable-post-misched=1")
   endif()
 endif()
-# Workaround (lcompiler-2592): gfx90a has neither BackOffBarrier nor an implicit
-# waitcnt before barriers, so the post-RA machine scheduler must run there. With
-# it disabled (above), the fence-based LDS drain in block_sync_lds is elided
-# before loop-header s_barriers, producing a loop-carried WAR hazard (wrong
-# results on gfx90a). Re-enable misched for gfx90a only; the =0 above still
-# applies to every other target. Remove once the compiler bug is fixed.
-if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600140090)
-  message(STATUS "Adding the -Xarch_gfx90a -enable-post-misched=1 workaround")
-  add_compile_options("SHELL: -Xarch_gfx90a -mllvm=-enable-post-misched=1")
-endif()
+
 set(check-coerce)
 check_cxx_compiler_flag(" -mllvm -amdgpu-coerce-illegal-types=1" check-coerce)
 if(NOT WIN32 AND check-coerce AND ${hip_VERSION_FLAT} GREATER 600241132)
