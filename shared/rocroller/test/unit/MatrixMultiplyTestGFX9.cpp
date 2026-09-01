@@ -837,10 +837,8 @@ namespace MatrixMultiplyTest
             HostNumerics::hostTensor(referenceDescA, A),
             HostNumerics::hostTensor(referenceDescB, B),
             HostNumerics::hostTensor(descC, C),
-            HostNumerics::hostScaleTensor(
-                DataType::E8M0, AX, referenceDescA, 1, scaleBlockSize),
-            HostNumerics::hostScaleTensor(
-                DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize),
+            HostNumerics::hostScaleTensor(DataType::E8M0, AX, referenceDescA, 1, scaleBlockSize),
+            HostNumerics::hostScaleTensor(DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize),
             scaleBlockSize,
             alpha,
             0.0f);
@@ -849,15 +847,15 @@ namespace MatrixMultiplyTest
 
         alpha *= std::pow(2.0f, int(scaleA) - 127) * std::pow(2.0f, int(scaleB) - 127);
 
-        auto unscaledProblem = HostNumerics::makeHostReferenceProblem(
-            HostNumerics::hostTensor(referenceDescA, A),
-            HostNumerics::hostTensor(referenceDescB, B),
-            HostNumerics::hostTensor(descC, C),
-            std::nullopt,
-            std::nullopt,
-            0,
-            alpha,
-            0.0f);
+        auto unscaledProblem
+            = HostNumerics::makeHostReferenceProblem(HostNumerics::hostTensor(referenceDescA, A),
+                                                     HostNumerics::hostTensor(referenceDescB, B),
+                                                     HostNumerics::hostTensor(descC, C),
+                                                     std::nullopt,
+                                                     std::nullopt,
+                                                     0,
+                                                     alpha,
+                                                     0.0f);
         auto reference = HostNumerics::convertHostReference<float>(
             HostNumerics::computeHostReference(unscaledProblem));
 

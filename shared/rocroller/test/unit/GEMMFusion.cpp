@@ -355,15 +355,15 @@ namespace GEMMDriverTest
             }
 
             // Host result
-            auto referenceProblem = HostNumerics::makeHostReferenceProblem(
-                HostNumerics::hostTensor(descA, hostA),
-                HostNumerics::hostTensor(descB, hostB),
-                HostNumerics::hostTensor(descC, hostC),
-                std::nullopt,
-                std::nullopt,
-                0,
-                alpha,
-                beta);
+            auto referenceProblem
+                = HostNumerics::makeHostReferenceProblem(HostNumerics::hostTensor(descA, hostA),
+                                                         HostNumerics::hostTensor(descB, hostB),
+                                                         HostNumerics::hostTensor(descC, hostC),
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         0,
+                                                         alpha,
+                                                         beta);
             auto h_result = HostNumerics::convertHostReference<T>(
                 HostNumerics::computeHostReference(referenceProblem));
             // Host leaky relu
