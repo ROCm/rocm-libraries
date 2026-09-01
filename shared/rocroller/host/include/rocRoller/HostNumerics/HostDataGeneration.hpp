@@ -76,8 +76,8 @@ namespace rocRoller::HostNumerics
     };
 
     roc::host_numerics::ScalarType hostScalarType(DataType               type,
-                                                    DataTypeInterpretation interpretation
-                                                    = DataTypeInterpretation::Unscaled);
+                                                  DataTypeInterpretation interpretation
+                                                  = DataTypeInterpretation::Unscaled);
 
     roc::host_numerics::Layout hostTensorLayout(TensorDescriptor const& descriptor);
 
@@ -87,8 +87,8 @@ namespace rocRoller::HostNumerics
      * be uploaded directly before any explicitly requested pre-swizzle.
      */
     roc::host_numerics::Layout hostScaleLayout(TensorDescriptor const& descriptor,
-                                                 size_t                  blockedDimension,
-                                                 size_t                  blockSize);
+                                               size_t                  blockedDimension,
+                                               size_t                  blockSize);
 
     /**
      * Generates one real-valued rocRoller tensor from a typed host-numerics
@@ -151,9 +151,9 @@ namespace rocRoller::HostNumerics
 
     template <typename T>
     roc::host_numerics::Tensor hostTensor(TensorDescriptor const& descriptor,
-                                            std::span<const T>      values,
-                                            DataTypeInterpretation  interpretation
-                                            = DataTypeInterpretation::Unscaled)
+                                          std::span<const T>      values,
+                                          DataTypeInterpretation  interpretation
+                                          = DataTypeInterpretation::Unscaled)
     {
         static_assert(std::is_trivially_copyable_v<T>);
 
@@ -176,9 +176,9 @@ namespace rocRoller::HostNumerics
 
     template <typename T, typename Allocator>
     roc::host_numerics::Tensor hostTensor(TensorDescriptor const&          descriptor,
-                                            std::vector<T, Allocator> const& values,
-                                            DataTypeInterpretation           interpretation
-                                            = DataTypeInterpretation::Unscaled)
+                                          std::vector<T, Allocator> const& values,
+                                          DataTypeInterpretation           interpretation
+                                          = DataTypeInterpretation::Unscaled)
     {
         return hostTensor(descriptor, std::span<const T>(values), interpretation);
     }

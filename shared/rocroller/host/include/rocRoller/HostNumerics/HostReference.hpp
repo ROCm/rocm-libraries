@@ -35,7 +35,7 @@ namespace rocRoller::HostNumerics
 
     struct HostComparisonResult
     {
-        AcceptableGEMMError                    acceptableError;
+        AcceptableGEMMError                  acceptableError;
         roc::host_numerics::ComparisonResult statistics;
 
         bool        ok() const;
@@ -43,16 +43,16 @@ namespace rocRoller::HostNumerics
     };
 
     roc::host_numerics::Tensor hostScaleTensor(DataType                 type,
-                                                 std::span<const uint8_t> values,
-                                                 size_t                   freeExtent,
-                                                 size_t                   reductionExtent,
-                                                 size_t                   blockSize);
+                                               std::span<const uint8_t> values,
+                                               size_t                   freeExtent,
+                                               size_t                   reductionExtent,
+                                               size_t                   blockSize);
 
     roc::host_numerics::Tensor hostScaleTensor(DataType                 type,
-                                                 std::span<const uint8_t> values,
-                                                 TensorDescriptor const&  dataDescriptor,
-                                                 size_t                   blockedDimension,
-                                                 size_t                   blockSize);
+                                               std::span<const uint8_t> values,
+                                               TensorDescriptor const&  dataDescriptor,
+                                               size_t                   blockedDimension,
+                                               size_t                   blockSize);
 
     roc::host_numerics::GemmProblem
         makeHostReferenceProblem(roc::host_numerics::Tensor                a,
@@ -65,19 +65,18 @@ namespace rocRoller::HostNumerics
                                  float                                     beta);
 
     roc::host_numerics::GemmProblem
-        makeHostReferenceProblem(GeneratedGEMMInputs const&                  inputs,
+        makeHostReferenceProblem(GeneratedGEMMInputs const&                inputs,
                                  std::optional<roc::host_numerics::Tensor> runtimeScaleA,
                                  std::optional<roc::host_numerics::Tensor> runtimeScaleB,
-                                 size_t                                      scaleBlockSize,
-                                 float                                       alpha,
-                                 float                                       beta);
+                                 size_t                                    scaleBlockSize,
+                                 float                                     alpha,
+                                 float                                     beta);
 
-    roc::host_numerics::Tensor
-        computeHostReference(roc::host_numerics::GemmProblem const& problem);
+    roc::host_numerics::Tensor computeHostReference(roc::host_numerics::GemmProblem const& problem);
 
     HostComparisonResult compareHostReference(roc::host_numerics::Tensor observed,
                                               roc::host_numerics::Tensor expected,
-                                              AcceptableGEMMError          acceptableError);
+                                              AcceptableGEMMError        acceptableError);
 
     namespace HostReferenceDetail
     {
@@ -115,7 +114,7 @@ namespace rocRoller::HostNumerics
         return roc::host_numerics::Tensor::copyEncodedBackingStorage(
             HostReferenceDetail::outputScalarType<T>(),
             roc::host_numerics::Layout(roc::host_numerics::Shape{rows, columns},
-                                         {1, static_cast<ptrdiff_t>(rows)}),
+                                       {1, static_cast<ptrdiff_t>(rows)}),
             std::as_bytes(values));
     }
 
@@ -143,7 +142,7 @@ namespace rocRoller::HostNumerics
             HostReferenceDetail::outputScalarType<Output>(),
             Layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(rows)}),
             conversion);
-        const auto   storage   = converted.rawEncodedBackingStorage();
+        const auto storage = converted.rawEncodedBackingStorage();
         if(storage.size() != rows * columns * sizeof(Output))
             throw std::invalid_argument(
                 "rocRoller output conversion requires contiguous column-major storage.");
