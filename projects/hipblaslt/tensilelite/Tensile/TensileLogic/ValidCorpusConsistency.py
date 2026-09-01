@@ -4,18 +4,18 @@
 """
 ValidCorpusConsistency
 ---
-Architecture-independent, whole-corpus consistency checks for the library
-logic tree, run unconditionally by ``TensileLogic --check-all`` regardless of
-which ``--architecture`` values a given build targets.
+Cross-file consistency checks for the library logic tree, run by
+``TensileLogic --check-all`` in addition to the existing per-file/per-solution
+validators.
 
 These checks are different in kind from the other ``Valid*.py`` validators:
-they are cheap (header-only YAML reads, or a bare predicate call -- no
-per-solution parsing) and inherently need whole-corpus visibility. A sibling
-mismatch or an overlay-shape violation in one architecture's tree should be
-caught by *any* build that has the corpus checked out, not just one that
-happens to target that architecture. So every function here walks the full
-``logic_root`` and ignores any ``--architecture`` filtering the caller may be
-applying to its own per-solution validation.
+they are cheap (header-only YAML reads -- no per-solution parsing) but need
+visibility across more than one file to do their job. Both checks below are
+scoped the same way the caller's own per-solution validation already is: to
+the files ``TensileLogic`` selected for the requested ``--architecture``
+(the full corpus when ``--architecture all`` is given). There's no separate
+"whole corpus" mode here -- if a gfx942-only build doesn't touch gfx1250
+data, a gfx1250-only violation should not fail it.
 
 No known-bugs / quarantine escape hatch exists for these checks (unlike the
 per-solution validators, which can accept a documented ``known_bugs.yaml``
@@ -25,24 +25,21 @@ needs a documented, temporary exception, extend the known-bugs schema (see
 checks.
 """
 
-import re
 import sys
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
-from Tensile.Common.Architectures import supportsChipIdPredicate
-from Tensile.CustomYamlLoader import load_logic_gfx_arch, load_logic_schedule_name
+from Tensile.CustomYamlLoader import (
+    load_logic_cu_count,
+    load_logic_device_names,
+    load_logic_gfx_arch,
+    load_logic_schedule_name,
+)
 
 GFX1250 = "gfx1250"
 GFX1250V0 = "gfx1250v0"
-
-# Logic YAMLs come in two header dialects: the positional list form, where
-# DeviceNames is the 4th sequence entry (``- [Device ...]``), and the mapping
-# form used by e.g. Origami (``DeviceNames: [Device ...]``). Match both, or
-# divergence in the mapping-form files is silently skipped (see #11442).
-_DEVICE_NAMES_RE = re.compile(r"^\s*(?:-|DeviceNames:)\s*\[\s*Device\s+([^\]]+)\]\s*$")
 
 # The corpus's ``<codename>/<gfx_arch>/...`` layout always lives under a
 # directory named ``asm_full``. Callers rarely pass that exact directory,
@@ -74,107 +71,146 @@ def _resolve_corpus_root(logic_root: Path) -> Path:
     return logic_root
 
 
-def iter_arch_dirs(logic_root: Path) -> Iterator[Tuple[str, Path]]:
-    """Yield (codename, arch_dir) for every ``gfx*`` directory one level below
-    a codename directory directly under ``logic_root`` (the corpus's
-    ``<codename>/<gfx_arch>/...`` layout)."""
-    logic_root = _resolve_corpus_root(logic_root)
-    for codename_dir in logic_root.iterdir():
-        if not codename_dir.is_dir():
-            continue
-        for arch_dir in codename_dir.iterdir():
-            if arch_dir.is_dir() and arch_dir.name.startswith("gfx"):
-                yield codename_dir.name, arch_dir
-
-
-def all_arch_names(logic_root: Path) -> List[str]:
-    """Sorted, de-duplicated set of arch directory names present anywhere in
-    the corpus (e.g. ``gfx950``, ``gfx950_id75a3``)."""
-    return sorted({arch_dir.name for _, arch_dir in iter_arch_dirs(logic_root)})
-
-
 def read_device_names(yaml_path: Path) -> Optional[Tuple[str, ...]]:
-    """Return the sorted ``DeviceNames`` tuple from a logic-YAML header (the
-    ``- [Device ...]`` or ``DeviceNames: [Device ...]`` line within the first
-    few lines), or ``None`` if it can't be found/read. Intentionally a cheap
-    line scan, not a full parse: this runs over the whole corpus on every
-    check-all invocation."""
+    """Return the sorted ``DeviceNames`` tuple parsed from a logic YAML's
+    header (list index 3 in the positional dialect, or the ``DeviceNames``
+    mapping key), or ``None`` if the file itself can't be opened or parsed at
+    all. A header that parses fine but has no ``DeviceNames`` field returns
+    an *empty* tuple rather than ``None`` -- a distinct, comparable value, so
+    it still participates in sibling comparison (and is flagged as a
+    divergence from any sibling that does declare device names) instead of
+    being silently dropped, the same fail-open gap that let a divergence go
+    unnoticed before this module existed."""
     try:
-        with yaml_path.open("r") as f:
-            for _ in range(8):
-                line = f.readline()
-                if not line:
-                    return None
-                m = _DEVICE_NAMES_RE.match(line)
-                if m:
-                    parts = [p.strip() for p in m.group(1).split(",")]
-                    parts = [
-                        p[len("Device "):].strip() if p.startswith("Device ") else p
-                        for p in parts
-                    ]
-                    return tuple(sorted(parts))
-    except OSError:
+        names = load_logic_device_names(yaml_path)
+    except (OSError, RuntimeError):
         return None
+    if not names:
+        return ()
+    parts = []
+    for name in names:
+        name = str(name)
+        parts.append(name[len("Device "):].strip() if name.startswith("Device ") else name.strip())
+    return tuple(sorted(parts))
+
+
+def _hashable(value):
+    """Coerce a parsed header value into something hashable. Header fields
+    are normally scalars (str/int/None), but a malformed file can put a
+    mapping where a scalar is expected (e.g. a stray ``{Architecture: ...,
+    CUCount: ...}`` in the ScheduleName slot) -- stringify it rather than
+    letting the whole check crash on an unhashable dict; the file's own
+    logic tree becomes its own singleton group and any real sibling still
+    compares against it (correctly reporting a divergence, since a
+    malformed header can never equal a well-formed sibling's)."""
+    try:
+        hash(value)
+        return value
+    except TypeError:
+        return repr(value)
+
+
+def _chip_id_dir_suffix(yaml_path: Path, base_arch: str) -> Optional[str]:
+    """Return the chip-ID-variant directory component nearest the file (e.g.
+    ``"gfx950_id75a3"``), or ``None`` if the file lives under the bare
+    ``base_arch`` directory instead (the default/fallback tree). A chip-ID
+    variant's header declares the *same* ScheduleName/ArchitectureName as the
+    default tree's -- ``ValidChipId.py``'s placement rules, not header
+    content, are what distinguish per-chip-ID logic files, so the
+    sibling-DeviceNames comparison must not merge them just because their
+    headers otherwise match. Mirrors ``ValidChipId.py``'s own
+    ``_chipIdDirFromPath``: walk ancestors nearest-first so an outer
+    ``base_arch``-named segment (e.g. an enclosing checkout path) can't
+    shadow a real variant directory closer to the file."""
+    if not base_arch:
+        return None
+    for part in reversed(yaml_path.parts[:-1]):
+        if part == base_arch:
+            return None
+        if part.startswith(base_arch + "_"):
+            return part
     return None
 
 
-def find_sibling_device_names_violations(logic_root: Path) -> List[str]:
-    """Same-basename logic YAMLs within one arch directory must declare
+def _arch_variant_key(yaml_path: Path) -> Tuple[object, object, object, object]:
+    """(ScheduleName, base gfx arch, CUCount, chip-ID directory variant)
+    identifies one logic *tree* -- e.g. a CU-limited SKU (``gfx942`` at 20
+    CUs) legitimately supports a different device subset than the full chip,
+    and a chip-ID-specific directory (``gfx950_id75a3``) legitimately covers
+    a different device subset than the default ``gfx950`` tree, so neither
+    must be merged into a comparison with its unrelated sibling just because
+    they share a bare gfx-arch string. ScheduleName/arch/CUCount are read
+    from each file's own header rather than inferred from directory depth:
+    the corpus does not use one fixed directory shape (some architectures
+    nest under a codename directory, e.g. ``aldebaran/gfx90a/...``; others
+    use the gfx name as both the top-level directory and the arch, e.g.
+    ``gfx1201/...``), and grouping by header content instead of a
+    directory-depth assumption is what actually identifies "the same tree"
+    in both shapes. The chip-ID variant is the one part of this key that is
+    *not* in the header (see ``_chip_id_dir_suffix``), so it's still read
+    from the path."""
+    try:
+        schedule = load_logic_schedule_name(yaml_path)
+    except (OSError, RuntimeError):
+        schedule = None
+    try:
+        arch = load_logic_gfx_arch(yaml_path)
+    except (OSError, RuntimeError):
+        arch = None
+    try:
+        cu_count = load_logic_cu_count(yaml_path)
+    except (OSError, RuntimeError):
+        cu_count = None
+    chip_id_suffix = _chip_id_dir_suffix(yaml_path, arch) if isinstance(arch, str) else None
+    return (_hashable(schedule), _hashable(arch), _hashable(cu_count), chip_id_suffix)
+
+
+def find_sibling_device_names_violations(
+    files: Sequence[Path], logic_root: Path
+) -> List[str]:
+    """Same-basename logic YAMLs within one logic tree (same ``ScheduleName``,
+    gfx arch, and CU count -- see ``_arch_variant_key``) must declare
     identical ``DeviceNames``; a divergence (e.g. one sibling missing a chip
     ID the other declares) shipped invisibly before this check existed --
-    see https://github.com/ROCm/rocm-libraries/issues/11397."""
-    # Resolved here (not just inside iter_arch_dirs()) because relative_to()
-    # below needs the resolved root too. Not a duplicate walk: iter_arch_dirs()
-    # re-resolving this already-resolved path is an O(1) name check, since
-    # _resolve_corpus_root() short-circuits when logic_root.name is already
-    # "asm_full".
+    see https://github.com/ROCm/rocm-libraries/issues/11397.
+
+    ``files`` is whatever the caller already selected (the full corpus for
+    ``--architecture all``, or just the files matching a requested
+    architecture otherwise) -- this only compares within that set, it does
+    not independently re-walk ``logic_root`` for more files."""
     logic_root = _resolve_corpus_root(logic_root)
-    violations: List[str] = []
-    for codename, arch_dir in iter_arch_dirs(logic_root):
-        by_basename: Dict[str, Dict[Tuple[str, ...], List[Path]]] = defaultdict(
-            lambda: defaultdict(list)
-        )
-        for yaml_path in arch_dir.rglob("*.yaml"):
-            names = read_device_names(yaml_path)
-            if names is None:
-                continue
-            by_basename[yaml_path.name][names].append(yaml_path)
-        for basename, dn_map in by_basename.items():
-            if len(dn_map) > 1:
-                detail = {
-                    str(names): [str(p.relative_to(logic_root)) for p in paths]
-                    for names, paths in dn_map.items()
-                }
-                violations.append(
-                    f"Divergent sibling DeviceNames: {codename}/{arch_dir.name}/"
-                    f"{basename}: {detail}"
-                )
-    return violations
+    by_variant_and_basename: Dict[
+        Tuple[Tuple, str], Dict[Tuple[str, ...], List[Path]]
+    ] = defaultdict(lambda: defaultdict(list))
+    for yaml_path in files:
+        names = read_device_names(yaml_path)
+        if names is None:
+            continue
+        key = (_arch_variant_key(yaml_path), yaml_path.name)
+        by_variant_and_basename[key][names].append(yaml_path)
 
-
-def find_chip_id_arch_lock_violations(logic_root: Path) -> List[str]:
-    """Lock chip-ID-aware architectures to the current, audited set
-    (``gfx950`` only). ``supportsChipIdPredicate`` gates both logic-file
-    placement rules (``ValidChipId.py``) and the ``SolutionLibrary`` placeholder
-    suffix; a new architecture silently becoming chip-ID-aware (or ``gfx950``
-    silently stopping being one) needs a deliberate re-audit of both, not a
-    registry edit that just happens to flip this predicate."""
     violations: List[str] = []
-    for arch in all_arch_names(logic_root):
-        base_arch = arch.split("_", 1)[0]
-        expected = base_arch == "gfx950"
-        actual = supportsChipIdPredicate(base_arch)
-        if actual is not expected:
+    for (variant, basename), dn_map in by_variant_and_basename.items():
+        if len(dn_map) > 1:
+            schedule, arch, cu_count, chip_id_suffix = variant
+            variant_label = (
+                f"{schedule}/{arch}"
+                + (f"@{cu_count}CU" if cu_count else "")
+                + (f" [{chip_id_suffix}]" if chip_id_suffix else "")
+            )
+            detail = {
+                str(names): [str(p.relative_to(logic_root)) for p in paths]
+                for names, paths in dn_map.items()
+            }
             violations.append(
-                f"Chip-ID-arch-lock violation: {arch} (base {base_arch}): "
-                f"supportsChipIdPredicate={actual}, expected={expected} -- new "
-                "chip-ID-aware architectures require a re-audit of logic YAML "
-                "placement rules and the SolutionLibrary suffix gate"
+                f"Divergent sibling DeviceNames: {variant_label}/{basename}: {detail}"
             )
     return violations
 
 
-def find_gfx1250v0_overlay_violations(logic_root: Path) -> List[str]:
+def find_gfx1250v0_overlay_violations(
+    logic_root: Path, overlay_required: bool = False
+) -> List[str]:
     """gfx1250 ships as two silicon revisions (v0, v1) sharing one ISA, arch
     name, and compiler target; the runtime tells them apart only via
     ``hipDeviceProp_t::asicRevision``, and ``TensileCreateLibrary`` globs one
@@ -182,18 +218,23 @@ def find_gfx1250v0_overlay_violations(logic_root: Path) -> List[str]:
     file fails silently -- dropped from v0, or leaked into every v1 build --
     so this checks the invariant against the tree that actually ships:
 
-    1. if the ``gfx1250v0`` overlay directory exists at all, it ships at
-       least one logic file (an *existing but empty* overlay means a v0
-       build reports success having written a library with no solutions in
-       it). Not every ``TensileLogic``-checked corpus does a v0/v1 split for
-       gfx1250 in the first place -- e.g. hipSPARSELt's corpus has no
-       ``gfx1250v0`` directory at all -- so a corpus with no overlay
-       directory is inapplicable, not a violation;
-    2. every file inside the overlay declares ``ScheduleName: gfx1250v0``;
-    3. every file inside the overlay keeps ``ArchitectureName: gfx1250``
+    1. if ``overlay_required`` (the caller is building specifically for
+       ``gfx1250v0``, hipBLASLt's only consumer of the split -- see
+       ``device-library/CMakeLists.txt``), the ``gfx1250v0`` overlay
+       directory must exist. Not every ``TensileLogic``-checked corpus does
+       a v0/v1 split for gfx1250 in the first place -- e.g. hipSPARSELt's
+       corpus has no ``gfx1250v0`` directory at all and never requests this
+       architecture -- so a missing overlay is only a violation when the
+       caller is actually asking for it;
+    2. an *existing but empty* overlay is always a violation, regardless of
+       ``overlay_required``: a v0 build reports success having written a
+       library with no solutions in it, and any tree deliberately doing the
+       split should never leave the overlay directory present-but-empty;
+    3. every file inside the overlay declares ``ScheduleName: gfx1250v0``;
+    4. every file inside the overlay keeps ``ArchitectureName: gfx1250``
        (a stepping there is rejected by ``TensileCreateLibrary``, and
        ``library/gfx1250v0/`` is a directory the runtime never reads); and
-    4. no file *outside* the overlay claims ``ScheduleName: gfx1250v0``
+    5. no file *outside* the overlay claims ``ScheduleName: gfx1250v0``
        (checked regardless of whether the overlay directory exists).
     """
     logic_root = _resolve_corpus_root(logic_root)
@@ -202,7 +243,12 @@ def find_gfx1250v0_overlay_violations(logic_root: Path) -> List[str]:
     overlay_exists = overlay_root.is_dir()
     overlay_files = sorted(overlay_root.rglob("*.yaml")) if overlay_exists else []
 
-    if overlay_exists and not overlay_files:
+    if overlay_required and not overlay_exists:
+        violations.append(
+            f"{GFX1250V0} overlay required (architecture {GFX1250V0} was "
+            f"requested) but missing under {overlay_root}"
+        )
+    elif overlay_exists and not overlay_files:
         violations.append(
             f"{GFX1250V0} overlay ships no logic under {overlay_root} -- an "
             "empty overlay means a v0 build reports success having written a "
@@ -235,19 +281,83 @@ def find_gfx1250v0_overlay_violations(logic_root: Path) -> List[str]:
     return violations
 
 
-def check_corpus_invariants(logic_root: Path) -> List[str]:
-    """Aggregate every corpus-wide invariant check into one flat violation
+def check_corpus_invariants(
+    logic_root: Path,
+    files: Optional[Sequence[Path]] = None,
+    archs: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """Aggregate the corpus-wide invariant checks into one flat violation
     list. Returns an empty list (rather than raising) when ``logic_root``
-    isn't a directory -- a single-file ``LogicPath`` invocation has no corpus
-    to walk, so these checks are inapplicable rather than failing."""
+    isn't a directory -- a single-file ``LogicPath`` invocation has no
+    cross-file comparison to make, so these checks are inapplicable rather
+    than failing.
+
+    ``files`` and ``archs`` should be the caller's own already-selected file
+    list and requested ``--architecture`` values (``["all"]`` when no
+    filtering applies); both default to "the whole resolved corpus" for
+    hermetic tests and other callers that just want to check everything.
+
+    The gfx1250v0-overlay check runs whenever ``gfx1250v0`` or ``all`` is in
+    ``archs``, and requires the overlay to exist only for the former (the
+    dedicated ``gfx1250v0`` build; see ``find_gfx1250v0_overlay_violations``).
+    The chip-ID-architecture-lock check (locking chip-ID-aware dispatch to
+    ``gfx950``) is intentionally *not* included here: it guards a future
+    source-policy change, not the artifact a given build selects, so it's a
+    hermetic pytest assertion over the architecture registry (see
+    ``Tests/unit/test_valid_corpus_consistency.py`` and
+    ``find_chip_id_arch_lock_violations``), not a per-build gate."""
     logic_root = Path(logic_root)
     if not logic_root.is_dir():
         return []
-    return [
-        *find_sibling_device_names_violations(logic_root),
-        *find_chip_id_arch_lock_violations(logic_root),
-        *find_gfx1250v0_overlay_violations(logic_root),
-    ]
+    resolved_root = _resolve_corpus_root(logic_root)
+    if files is None:
+        files = sorted(resolved_root.rglob("*.yaml"))
+    if archs is None:
+        archs = ["all"]
+
+    violations = list(find_sibling_device_names_violations(files, resolved_root))
+    if GFX1250V0 in archs or "all" in archs:
+        violations += find_gfx1250v0_overlay_violations(
+            resolved_root, overlay_required=GFX1250V0 in archs
+        )
+    return violations
+
+
+def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:
+    """Lock chip-ID-aware architectures to the current, audited set
+    (``gfx950`` only). ``supportsChipIdPredicate`` gates both logic-file
+    placement rules (``ValidChipId.py``) and the ``SolutionLibrary`` placeholder
+    suffix; a new architecture silently becoming chip-ID-aware (or ``gfx950``
+    silently stopping being one) needs a deliberate re-audit of both, not a
+    registry edit that just happens to flip this predicate.
+
+    This is a source-policy check over the set of architectures the corpus
+    currently contains, not a property of any one build's artifact, so it is
+    exercised only as a pytest assertion (hermetically, and against the real
+    corpus in ``test_PlaceholderMerge.py``) rather than wired into
+    ``check_corpus_invariants()`` / ``TensileLogic --check-all`` -- every
+    from-source build re-checking the whole architecture registry on every
+    invocation would add no additional safety over running it once in CI's
+    unit-test job."""
+    from Tensile.Common.Architectures import supportsChipIdPredicate
+
+    violations: List[str] = []
+    seen_archs = set()
+    for yaml_path in files:
+        arch = load_logic_gfx_arch(yaml_path)
+        if not isinstance(arch, str) or arch in seen_archs:
+            continue
+        seen_archs.add(arch)
+        expected = arch == "gfx950"
+        actual = supportsChipIdPredicate(arch)
+        if actual is not expected:
+            violations.append(
+                f"Chip-ID-arch-lock violation: {arch}: "
+                f"supportsChipIdPredicate={actual}, expected={expected} -- new "
+                "chip-ID-aware architectures require a re-audit of logic YAML "
+                "placement rules and the SolutionLibrary suffix gate"
+            )
+    return violations
 
 
 def report_corpus_invariant_violations(violations: List[str]) -> None:

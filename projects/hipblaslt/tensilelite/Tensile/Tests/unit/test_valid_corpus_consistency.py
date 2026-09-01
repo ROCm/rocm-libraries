@@ -64,6 +64,10 @@ def vcc(monkeypatch):
     return _load_vcc_mod()
 
 
+def _all_yaml(root: Path):
+    return sorted(root.rglob("*.yaml"))
+
+
 # ===========================================================================
 # Shared helpers
 # ===========================================================================
@@ -83,6 +87,41 @@ def _write_header_yaml(path, *, schedule="schedule", gfx="gfx942", devices="Devi
             ]
         )
     )
+    return path
+
+
+def _write_header_yaml_no_device_names(path, *, schedule="schedule", gfx="gfx942"):
+    """A structurally valid header that simply omits the DeviceNames item --
+    an unmet precondition, not a parse failure; distinct from a genuinely
+    unparseable file (see test_read_device_names_returns_none_for_unparseable_content)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                "- MinimumRequiredVersion: 4.33.0",
+                f"- {schedule}",
+                f"- {gfx}",
+                "",
+            ]
+        )
+    )
+    return path
+
+
+def _write_multiline_header_yaml(path, *, schedule="schedule", gfx="gfx942", device_lines=("Device 0050,", "    Device 740c")):
+    """A DeviceNames header that wraps onto multiple physical lines, the way
+    the real aldebaran corpus files do. A regex line-scan limited to a single
+    line silently drops these; the event-based YAML parser must not."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "- MinimumRequiredVersion: 4.33.0",
+        f"- {schedule}",
+        f"- {gfx}",
+        f"- [{device_lines[0]}",
+    ]
+    lines.extend(f"    {line}" for line in device_lines[1:-1])
+    lines.append(f"    {device_lines[-1]}]")
+    path.write_text("\n".join(lines) + "\n")
     return path
 
 
@@ -110,6 +149,24 @@ def _write_mapping_form_header_yaml(path, *, schedule="schedule", gfx="gfx942", 
     return path
 
 
+def _write_cu_variant_header_yaml(path, *, schedule="schedule", gfx="gfx942", cu_count=20, devices="Device 74a0"):
+    """A CU-limited SKU's header: the positional dialect nests CUCount inside
+    the same sequence item as the gfx arch."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                "- MinimumRequiredVersion: 4.33.0",
+                f"- {schedule}",
+                f"- {{Architecture: {gfx}, CUCount: {cu_count}}}",
+                f"- [{devices}]",
+                "",
+            ]
+        )
+    )
+    return path
+
+
 def _write_overlay_yaml(path, *, schedule, gfx):
     """gfx1250v0-overlay tests only care about ScheduleName / gfx arch, but
     write the same full header shape ``_write_header_yaml`` does (rather than
@@ -118,6 +175,10 @@ def _write_overlay_yaml(path, *, schedule, gfx):
     ``load_logic_gfx_arch()`` parse."""
     return _write_header_yaml(path, schedule=schedule, gfx=gfx)
 
+
+# ===========================================================================
+# read_device_names
+# ===========================================================================
 
 def test_read_device_names_parses_header_line(tmp_path, vcc):
     f = _write_header_yaml(tmp_path / "a.yaml", devices="Device 74a0, Device 74a1")
@@ -132,38 +193,32 @@ def test_read_device_names_parses_mapping_form_header_line(tmp_path, vcc):
     assert vcc.read_device_names(f) == ("74a0", "74a1")
 
 
-def test_read_device_names_returns_none_when_absent(tmp_path, vcc):
+def test_read_device_names_parses_a_multiline_device_list(tmp_path, vcc):
+    # The real, checked-in aldebaran corpus wraps DeviceNames onto a second
+    # physical line; a single-line regex scan would silently miss these.
+    f = _write_multiline_header_yaml(
+        tmp_path / "a.yaml",
+        device_lines=("Device 0050,", "Device 0051,", "Device 740c"),
+    )
+    assert vcc.read_device_names(f) == ("0050", "0051", "740c")
+
+
+def test_read_device_names_returns_empty_tuple_when_field_absent(tmp_path, vcc):
+    # A structurally valid header missing the DeviceNames field is a distinct,
+    # comparable value (empty tuple) -- not dropped from sibling comparison
+    # the way an unreadable file is.
+    f = _write_header_yaml_no_device_names(tmp_path / "a.yaml")
+    assert vcc.read_device_names(f) == ()
+
+
+def test_read_device_names_returns_none_for_unparseable_content(tmp_path, vcc):
     f = tmp_path / "a.yaml"
-    f.write_text("- MinimumRequiredVersion: 4.33.0\n- schedule\n- gfx942\n")
+    f.write_text("not a logic header at all\n")
     assert vcc.read_device_names(f) is None
 
 
 def test_read_device_names_returns_none_for_missing_file(tmp_path, vcc):
     assert vcc.read_device_names(tmp_path / "does_not_exist.yaml") is None
-
-
-def test_iter_arch_dirs_and_all_arch_names(tmp_path, vcc):
-    _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml")
-    _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942_20cu" / "Equality" / "a.yaml")
-    _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml")
-    # Not a gfx* directory -> excluded.
-    (tmp_path / "aquavanjaram" / "notes.txt").parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / "aquavanjaram" / "notes.txt").write_text("n/a")
-
-    pairs = sorted(vcc.iter_arch_dirs(tmp_path))
-    assert [codename for codename, _ in pairs] == ["aldebaran", "aquavanjaram", "aquavanjaram"]
-    assert vcc.all_arch_names(tmp_path) == ["gfx942", "gfx942_20cu", "gfx950"]
-
-
-def test_iter_arch_dirs_skips_non_directory_entries_at_the_codename_level(tmp_path, vcc):
-    # A stray file directly under logic_root (not a codename directory at
-    # all) must be skipped, not just a stray file *inside* a codename dir
-    # (test_iter_arch_dirs_and_all_arch_names, above).
-    _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml")
-    (tmp_path / "README.md").write_text("n/a")
-
-    pairs = list(vcc.iter_arch_dirs(tmp_path))
-    assert [codename for codename, _ in pairs] == ["aldebaran"]
 
 
 # ===========================================================================
@@ -240,8 +295,10 @@ def test_sibling_device_names_violations_identical_via_ancestor_or_direct_corpus
         asm_full / "aldebaran" / "gfx950" / "GridBased" / "logic.yaml",
         devices="Device 75a3",
     )
-    direct = vcc.find_sibling_device_names_violations(asm_full)
-    via_ancestor = vcc.find_sibling_device_names_violations(tmp_path / "library")
+    direct = vcc.find_sibling_device_names_violations(_all_yaml(asm_full), asm_full)
+    via_ancestor = vcc.find_sibling_device_names_violations(
+        _all_yaml(asm_full), tmp_path / "library"
+    )
     assert len(direct) == 1
     assert direct == via_ancestor
 
@@ -259,11 +316,11 @@ def test_sibling_device_names_clean_when_consistent(tmp_path, vcc):
         tmp_path / "aldebaran" / "gfx950" / "GridBased" / "logic.yaml",
         devices="Device 75a0",
     )
-    assert vcc.find_sibling_device_names_violations(tmp_path) == []
+    assert vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path) == []
 
 
 def test_sibling_device_names_flags_mismatched_siblings(tmp_path, vcc):
-    # Same basename ("logic.yaml"), same arch dir, divergent DeviceNames --
+    # Same basename ("logic.yaml"), same arch tree, divergent DeviceNames --
     # exactly the shape of https://github.com/ROCm/rocm-libraries/issues/11397.
     _write_header_yaml(
         tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",
@@ -273,7 +330,7 @@ def test_sibling_device_names_flags_mismatched_siblings(tmp_path, vcc):
         tmp_path / "aldebaran" / "gfx950" / "GridBased" / "logic.yaml",
         devices="Device 75a0, Device 75a3",
     )
-    violations = vcc.find_sibling_device_names_violations(tmp_path)
+    violations = vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path)
     assert len(violations) == 1
     assert "logic.yaml" in violations[0]
     assert "aldebaran/gfx950" in violations[0]
@@ -292,7 +349,60 @@ def test_sibling_device_names_flags_mismatch_against_a_mapping_form_sibling(tmp_
         tmp_path / "gfx1250" / "gfx1250" / "Origami" / "logic.yaml",
         devices="Device 73f0",
     )
-    violations = vcc.find_sibling_device_names_violations(tmp_path)
+    violations = vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path)
+    assert len(violations) == 1
+    assert "logic.yaml" in violations[0]
+
+
+def test_sibling_device_names_flags_mismatch_against_a_multiline_sibling(tmp_path, vcc):
+    # A real, present-day corpus shape: one sibling's DeviceNames wraps onto
+    # a second physical line. Before load_logic_device_names() replaced the
+    # 8-line single-line regex scan, this file's DeviceNames read as None and
+    # the divergence went unnoticed.
+    _write_header_yaml(
+        tmp_path / "aldebaran" / "gfx90a" / "Equality" / "logic.yaml",
+        gfx="gfx90a",
+        devices="Device 0050",
+    )
+    _write_multiline_header_yaml(
+        tmp_path / "aldebaran" / "gfx90a" / "GridBased" / "logic.yaml",
+        gfx="gfx90a",
+        device_lines=("Device 0050,", "Device 0051"),
+    )
+    violations = vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path)
+    assert len(violations) == 1
+
+
+def test_sibling_device_names_flags_a_missing_device_names_field_against_a_declared_sibling(tmp_path, vcc):
+    # A sibling with a structurally valid header but no DeviceNames field at
+    # all must not be silently dropped -- it's a distinct, comparable ()
+    # value, so it diverges from a sibling that does declare device names.
+    _write_header_yaml(
+        tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",
+        devices="Device 75a0",
+    )
+    _write_header_yaml_no_device_names(
+        tmp_path / "aldebaran" / "gfx950" / "GridBased" / "logic.yaml",
+    )
+    violations = vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path)
+    assert len(violations) == 1
+
+
+def test_sibling_device_names_checks_a_direct_gfx_named_layout(tmp_path, vcc):
+    # The real, checked-in corpus shape for e.g. gfx1201/navi31/gfx1200: the
+    # top-level directory *is* the gfx arch itself (no separate codename
+    # directory above it), with category directories directly beneath it.
+    # A directory-depth-based walker that assumes a codename directory
+    # always sits above the arch directory misses this shape entirely.
+    _write_header_yaml(
+        tmp_path / "gfx1201" / "Equality" / "logic.yaml",
+        schedule="gfx1201", gfx="gfx1201", devices="Device 1111",
+    )
+    _write_header_yaml(
+        tmp_path / "gfx1201" / "GridBased" / "logic.yaml",
+        schedule="gfx1201", gfx="gfx1201", devices="Device 2222",
+    )
+    violations = vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path)
     assert len(violations) == 1
     assert "logic.yaml" in violations[0]
 
@@ -308,14 +418,105 @@ def test_sibling_device_names_ignores_different_basenames(tmp_path, vcc):
         tmp_path / "aldebaran" / "gfx950" / "Equality" / "b.yaml",
         devices="Device 75a3",
     )
-    assert vcc.find_sibling_device_names_violations(tmp_path) == []
+    assert vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path) == []
 
 
-def test_sibling_device_names_skips_a_file_with_no_parseable_device_names(tmp_path, vcc):
-    # A same-basename sibling that read_device_names() can't parse (e.g. a
-    # malformed or unusually-shaped header) must be skipped rather than
-    # treated as an empty-tuple DeviceNames that would falsely diverge from
-    # every real sibling.
+def test_sibling_device_names_does_not_merge_different_cu_variants(tmp_path, vcc):
+    # A CU-limited SKU (e.g. gfx942 @ 20 CUs) legitimately supports a
+    # different device subset than the full chip -- these must not be
+    # compared against each other just because they share a bare gfx arch.
+    _write_header_yaml(
+        tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "logic.yaml",
+        schedule="aquavanjaram", gfx="gfx942", devices="Device 74a0, Device 74a1",
+    )
+    _write_cu_variant_header_yaml(
+        tmp_path / "aquavanjaram" / "gfx942_20cu" / "Equality" / "logic.yaml",
+        schedule="aquavanjaram", gfx="gfx942", cu_count=20, devices="Device 74a2",
+    )
+    assert vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path) == []
+
+
+def test_sibling_device_names_does_not_merge_chip_id_directory_variants(tmp_path, vcc):
+    # The real, checked-in gfx950 corpus: a chip-ID-specific directory
+    # (gfx950_id75a3) sits alongside the default gfx950 tree, and both
+    # declare *identical* ScheduleName/ArchitectureName headers (the header
+    # carries no chip-ID information at all -- ValidChipId.py's placement
+    # rules are what distinguish them). These must not be compared against
+    # each other even though (schedule, arch, CUCount) alone would collide.
+    _write_header_yaml(
+        tmp_path / "gfx950" / "gfx950" / "Equality" / "logic.yaml",
+        schedule="gfx950", gfx="gfx950", devices="Device 75a0",
+    )
+    _write_header_yaml(
+        tmp_path / "gfx950" / "gfx950_id75a3" / "Equality" / "logic.yaml",
+        schedule="gfx950", gfx="gfx950", devices="Device 75a2, Device 75a3",
+    )
+    assert vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path) == []
+
+
+def test_sibling_device_names_still_flags_true_divergence_within_a_chip_id_variant(tmp_path, vcc):
+    _write_header_yaml(
+        tmp_path / "gfx950" / "gfx950_id75a3" / "Equality" / "logic.yaml",
+        schedule="gfx950", gfx="gfx950", devices="Device 75a3",
+    )
+    _write_header_yaml(
+        tmp_path / "gfx950" / "gfx950_id75a3" / "GridBased" / "logic.yaml",
+        schedule="gfx950", gfx="gfx950", devices="Device 75a3, Device 75a2",
+    )
+    violations = vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path)
+    assert len(violations) == 1
+
+
+def test_sibling_device_names_tolerates_a_malformed_unhashable_header(tmp_path, vcc):
+    # Two real, checked-in hipBLASLt files put a {Architecture, CUCount}
+    # mapping in the ScheduleName slot instead of a plain codename string --
+    # a pre-existing corpus data quirk unrelated to this check. It must not
+    # crash the whole comparison; the malformed file becomes its own
+    # singleton group (no sibling has the same malformed key) rather than
+    # raising on an unhashable dict.
+    malformed = tmp_path / "aquavanjaram" / "gfx942_152cu" / "GridBased" / "logic.yaml"
+    malformed.parent.mkdir(parents=True, exist_ok=True)
+    malformed.write_text(
+        "\n".join(
+            [
+                "- {MinimumRequiredVersion: 5.0.0}",
+                "- {Architecture: gfx942, CUCount: 152}",
+                "- gfx942",
+                "- [Device 0049]",
+                "",
+            ]
+        )
+    )
+    _write_header_yaml(
+        tmp_path / "aquavanjaram" / "gfx942_152cu" / "Equality" / "logic.yaml",
+        schedule="aquavanjaram", gfx="gfx942", devices="Device 0049",
+    )
+    violations = vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path)
+    assert violations == []
+
+
+def test_sibling_device_names_flags_mismatched_cu_variant_siblings(tmp_path, vcc):
+    # Two files that do share the same (schedule, arch, CUCount) tree must
+    # still be compared against each other.
+    _write_cu_variant_header_yaml(
+        tmp_path / "aquavanjaram" / "gfx942_20cu" / "Equality" / "logic.yaml",
+        schedule="aquavanjaram", gfx="gfx942", cu_count=20, devices="Device 74a2",
+    )
+    _write_cu_variant_header_yaml(
+        tmp_path / "aquavanjaram" / "gfx942_20cu" / "GridBased" / "logic.yaml",
+        schedule="aquavanjaram", gfx="gfx942", cu_count=20, devices="Device 74a3",
+    )
+    violations = vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path)
+    assert len(violations) == 1
+
+
+def test_sibling_device_names_skips_a_file_that_is_entirely_unparseable(tmp_path, vcc):
+    # A same-basename sibling that read_device_names() can't parse at all
+    # (e.g. a malformed or unusually-shaped header) must be skipped rather
+    # than treated as an empty-tuple DeviceNames that would falsely diverge
+    # from every real sibling. Distinct from
+    # test_sibling_device_names_flags_a_missing_device_names_field_against_a_declared_sibling,
+    # where the header itself is valid but simply omits DeviceNames.
     _write_header_yaml(
         tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",
         devices="Device 75a0",
@@ -323,28 +524,53 @@ def test_sibling_device_names_skips_a_file_with_no_parseable_device_names(tmp_pa
     unparseable = tmp_path / "aldebaran" / "gfx950" / "GridBased" / "logic.yaml"
     unparseable.parent.mkdir(parents=True, exist_ok=True)
     unparseable.write_text("not a logic header at all\n")
-    assert vcc.find_sibling_device_names_violations(tmp_path) == []
+    assert vcc.find_sibling_device_names_violations(_all_yaml(tmp_path), tmp_path) == []
+
+
+def test_sibling_device_names_respects_a_caller_supplied_file_subset(tmp_path, vcc):
+    # This is how Run.py scopes the check to a requested --architecture: the
+    # caller passes only the files it already selected, not a fresh
+    # unfiltered walk of logic_root. A divergent pair that both live outside
+    # that subset must not be reported.
+    _write_header_yaml(
+        tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",
+        devices="Device 75a0",
+    )
+    divergent_sibling = _write_header_yaml(
+        tmp_path / "aldebaran" / "gfx950" / "GridBased" / "logic.yaml",
+        devices="Device 75a3",
+    )
+    only_one_side = [
+        f for f in _all_yaml(tmp_path) if f != divergent_sibling
+    ]
+    assert vcc.find_sibling_device_names_violations(only_one_side, tmp_path) == []
 
 
 # ===========================================================================
 # find_chip_id_arch_lock_violations
+#
+# Not wired into check_corpus_invariants() / TensileLogic --check-all -- see
+# that function's docstring. Exercised directly here (and against the real
+# corpus in test_PlaceholderMerge.py) as a source-policy assertion.
 # ===========================================================================
 
 def test_chip_id_arch_lock_clean_for_real_predicate(tmp_path, vcc):
     # gfx950 (chip-ID-aware) and gfx942 (not) both match the real,
     # unpatched supportsChipIdPredicate -- no violations.
-    _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml")
-    _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml")
-    assert vcc.find_chip_id_arch_lock_violations(tmp_path) == []
+    f1 = _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml", gfx="gfx950")
+    f2 = _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml", gfx="gfx942")
+    assert vcc.find_chip_id_arch_lock_violations([f1, f2]) == []
 
 
 def test_chip_id_arch_lock_flags_a_newly_gated_architecture(tmp_path, vcc, monkeypatch):
     # Simulate a registry edit that makes a non-gfx950 architecture report
     # chip-ID awareness without the corresponding re-audit -- the lock must
     # catch it even though no real logic file changed.
-    _write_header_yaml(tmp_path / "codename" / "gfx1200" / "Equality" / "a.yaml")
-    monkeypatch.setattr(vcc, "supportsChipIdPredicate", lambda gfx: gfx == "gfx1200")
-    violations = vcc.find_chip_id_arch_lock_violations(tmp_path)
+    f = _write_header_yaml(tmp_path / "codename" / "gfx1200" / "Equality" / "a.yaml", gfx="gfx1200")
+    import Tensile.Common.Architectures as arch_mod
+
+    monkeypatch.setattr(arch_mod, "supportsChipIdPredicate", lambda gfx: gfx == "gfx1200")
+    violations = vcc.find_chip_id_arch_lock_violations([f])
     assert len(violations) == 1
     assert "gfx1200" in violations[0]
     assert "expected=False" in violations[0]
@@ -353,12 +579,23 @@ def test_chip_id_arch_lock_flags_a_newly_gated_architecture(tmp_path, vcc, monke
 def test_chip_id_arch_lock_flags_gfx950_losing_its_gate(tmp_path, vcc, monkeypatch):
     # The lock is symmetric: gfx950 silently losing chip-ID awareness is
     # just as much a violation as another arch silently gaining it.
-    _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml")
-    monkeypatch.setattr(vcc, "supportsChipIdPredicate", lambda gfx: False)
-    violations = vcc.find_chip_id_arch_lock_violations(tmp_path)
+    f = _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml", gfx="gfx950")
+    import Tensile.Common.Architectures as arch_mod
+
+    monkeypatch.setattr(arch_mod, "supportsChipIdPredicate", lambda gfx: False)
+    violations = vcc.find_chip_id_arch_lock_violations([f])
     assert len(violations) == 1
     assert "gfx950" in violations[0]
     assert "expected=True" in violations[0]
+
+
+def test_chip_id_arch_lock_dedupes_repeated_archs(tmp_path, vcc):
+    # Many files declare the same arch (e.g. every gfx950 logic file); the
+    # lock is a property of the arch, so it must only be reported once even
+    # though a real corpus has far more than one file per arch.
+    f1 = _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml", gfx="gfx950")
+    f2 = _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "GridBased" / "a.yaml", gfx="gfx950")
+    assert vcc.find_chip_id_arch_lock_violations([f1, f2]) == []
 
 
 # ===========================================================================
@@ -379,20 +616,32 @@ def test_gfx1250v0_overlay_clean(tmp_path, vcc):
     assert vcc.find_gfx1250v0_overlay_violations(tmp_path) == []
 
 
-def test_gfx1250v0_overlay_no_split_at_all_is_not_a_violation(tmp_path, vcc):
-    # No gfx1250v0 directory anywhere -- this corpus simply hasn't done a
-    # v0/v1 split for gfx1250 (e.g. hipSPARSELt's corpus, which ships only a
-    # unified gfx1250 tree with no per-revision overlay at all). Not every
-    # TensileLogic-checked corpus is hipBLASLt's, so this is inapplicable,
-    # not a violation.
+def test_gfx1250v0_overlay_no_split_at_all_is_not_a_violation_when_not_required(tmp_path, vcc):
+    # No gfx1250v0 directory anywhere, and the caller isn't specifically
+    # requesting the gfx1250v0 architecture -- this corpus simply hasn't done
+    # a v0/v1 split for gfx1250 (e.g. hipSPARSELt's corpus, which ships only a
+    # unified gfx1250 tree with no per-revision overlay at all, and never
+    # requests architecture gfx1250v0). Not every TensileLogic-checked corpus
+    # is hipBLASLt's, so this is inapplicable, not a violation.
     (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
-    assert vcc.find_gfx1250v0_overlay_violations(tmp_path) == []
+    assert vcc.find_gfx1250v0_overlay_violations(tmp_path, overlay_required=False) == []
+
+
+def test_gfx1250v0_overlay_missing_is_a_violation_when_required(tmp_path, vcc):
+    # hipBLASLt's dedicated gfx1250v0 build (device-library/CMakeLists.txt
+    # invokes TensileLogic with --architecture gfx1250v0 specifically for
+    # this) must find the overlay -- a corpus that does the v0/v1 split for
+    # gfx1250 elsewhere cannot silently lose the overlay directory itself.
+    (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
+    violations = vcc.find_gfx1250v0_overlay_violations(tmp_path, overlay_required=True)
+    assert any("required" in v for v in violations)
 
 
 def test_gfx1250v0_overlay_existing_but_empty_is_a_violation(tmp_path, vcc):
     # The overlay directory exists on disk but ships no logic files -- this
     # is the actually-broken case: something started the v0/v1 split for
-    # this corpus but the overlay ended up empty.
+    # this corpus but the overlay ended up empty. A violation regardless of
+    # overlay_required.
     (tmp_path / vcc.GFX1250V0).mkdir(parents=True)
     (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
     violations = vcc.find_gfx1250v0_overlay_violations(tmp_path)
@@ -438,8 +687,10 @@ def test_gfx1250v0_overlay_leaking_outside_is_a_violation(tmp_path, vcc):
 # check_corpus_invariants / report_corpus_invariant_violations
 # ===========================================================================
 
-def test_check_corpus_invariants_aggregates_all_finders(tmp_path, vcc):
-    # One violation from each finder, planted in the same tmp corpus.
+def test_check_corpus_invariants_aggregates_sibling_and_overlay_finders(tmp_path, vcc):
+    # One violation from each of the two finders check_corpus_invariants()
+    # aggregates, planted in the same tmp corpus. (find_chip_id_arch_lock_violations
+    # is deliberately not one of them -- see check_corpus_invariants()'s docstring.)
     _write_header_yaml(
         tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",
         devices="Device 75a0",
@@ -450,13 +701,44 @@ def test_check_corpus_invariants_aggregates_all_finders(tmp_path, vcc):
     )
     (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
     # An existing-but-empty overlay directory, not merely a missing one, is
-    # what actually trips the gfx1250v0-overlay finder (see
-    # test_gfx1250v0_overlay_no_split_at_all_is_not_a_violation).
+    # what actually trips the gfx1250v0-overlay finder when "all" is
+    # requested (see test_gfx1250v0_overlay_no_split_at_all_is_not_a_violation_when_not_required).
     (tmp_path / vcc.GFX1250V0).mkdir(parents=True)
 
     violations = vcc.check_corpus_invariants(tmp_path)
     assert any("Divergent sibling DeviceNames" in v for v in violations)
     assert any("ships no logic" in v for v in violations)
+
+
+def test_check_corpus_invariants_requires_overlay_when_gfx1250v0_requested(tmp_path, vcc):
+    (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
+    violations = vcc.check_corpus_invariants(tmp_path, archs=["gfx1250v0"])
+    assert any("required" in v for v in violations)
+
+
+def test_check_corpus_invariants_skips_overlay_check_for_an_unrelated_architecture(tmp_path, vcc):
+    # A gfx942-only build has no reason to care about the gfx1250v0 overlay
+    # at all -- an absent (or even empty) overlay must not fail it.
+    (tmp_path / vcc.GFX1250V0).mkdir(parents=True)
+    _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml", gfx="gfx942")
+    files = [tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml"]
+    assert vcc.check_corpus_invariants(tmp_path, files=files, archs=["gfx942"]) == []
+
+
+def test_check_corpus_invariants_respects_a_caller_supplied_file_subset(tmp_path, vcc):
+    # Mirrors Run.py's usage: only the already --architecture-filtered files
+    # are compared, not a fresh unfiltered walk of logic_root.
+    _write_header_yaml(
+        tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",
+        devices="Device 75a0",
+    )
+    _write_header_yaml(
+        tmp_path / "aldebaran" / "gfx950" / "GridBased" / "logic.yaml",
+        devices="Device 75a3",
+    )
+    _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml", gfx="gfx942")
+    gfx942_only = [tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml"]
+    assert vcc.check_corpus_invariants(tmp_path, files=gfx942_only, archs=["gfx942"]) == []
 
 
 def test_check_corpus_invariants_empty_for_a_clean_corpus(tmp_path, vcc):

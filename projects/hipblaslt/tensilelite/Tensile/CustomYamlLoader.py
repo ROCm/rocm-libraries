@@ -169,3 +169,27 @@ def load_logic_schedule_name(yaml_path: Path, loader_type: yaml.Loader = DEFAULT
         return load_yaml_sequence_item(yaml_path, loader_type, SCHEDULE_NAME_IDX)
     except RuntimeError:
         return load_yaml_dict_item(yaml_path, loader_type, 'ScheduleName')
+
+def load_logic_cu_count(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML_LOADER):
+    """Return the header's CUCount (an int for a CU-limited SKU, else None),
+    from either dialect: the positional form nests it inside the same
+    sequence item as the gfx arch (``- {Architecture: gfx942, CUCount: 20}``),
+    the mapping form carries it as its own top-level key."""
+    try:
+        ARCH_IDX = 2
+        arch = load_yaml_sequence_item(yaml_path, loader_type, ARCH_IDX)
+        return arch.get('CUCount') if isinstance(arch, dict) else None
+    except RuntimeError:
+        return load_yaml_dict_item(yaml_path, loader_type, 'CUCount')
+
+def load_logic_device_names(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML_LOADER):
+    """Return the header's raw ``DeviceNames`` sequence (a list of
+    ``"Device ...."`` strings), or ``None`` if the header has no such field.
+    Uses the same event-based partial parse as ``load_logic_gfx_arch`` /
+    ``load_logic_schedule_name``, so it naturally handles a DeviceNames list
+    that wraps onto multiple physical lines -- a regex line-scan does not."""
+    try:
+        DEVICE_NAMES_IDX = 3
+        return load_yaml_sequence_item(yaml_path, loader_type, DEVICE_NAMES_IDX)
+    except RuntimeError:
+        return load_yaml_dict_item(yaml_path, loader_type, 'DeviceNames')

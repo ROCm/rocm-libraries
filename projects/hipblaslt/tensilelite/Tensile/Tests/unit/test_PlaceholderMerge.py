@@ -68,8 +68,8 @@ _GATE_FUNC_NAME = "supportsChipIdPredicate"
 
 @_needs_logic_dir
 def test_logic_yaml_sibling_device_names_consistent():
-    """Same-basename YAMLs in one arch dir must declare identical DeviceNames."""
-    violations = find_sibling_device_names_violations(_LOGIC_ROOT)
+    """Same-basename YAMLs in one logic tree must declare identical DeviceNames."""
+    violations = find_sibling_device_names_violations(sorted(_LOGIC_ROOT.rglob("*.yaml")), _LOGIC_ROOT)
     assert not violations, "\n".join(violations)
 
 
@@ -164,7 +164,7 @@ def test_hardware_gates_placeholder_chip_id_suffix(
 def test_supports_chip_id_predicate_only_gfx950():
     """Lock chip-id-aware archs (as seen in the corpus) to gfx950; new
     entries require re-audit of YAMLs and the SolutionLibrary suffix gate."""
-    violations = find_chip_id_arch_lock_violations(_LOGIC_ROOT)
+    violations = find_chip_id_arch_lock_violations(sorted(_LOGIC_ROOT.rglob("*.yaml")))
     assert not violations, "\n".join(violations)
 
 

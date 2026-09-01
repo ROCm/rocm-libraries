@@ -324,9 +324,11 @@ class TestBuildTaskCommandLine:
 #
 # The enforcement point is ``TensileLogic --check-all``, via
 # ``Tensile.TensileLogic.ValidCorpusConsistency.find_gfx1250v0_overlay_violations``,
-# which runs unconditionally regardless of whether the real ``Logic/asm_full``
-# directory is present in *this* test environment. This test is a
-# convenience/local-dev signal, not the enforcement point -- hence
+# which runs whenever ``--architecture`` includes ``gfx1250v0`` or ``all``
+# (hipBLASLt's dedicated gfx1250v0 build always passes the former -- see
+# ``device-library/CMakeLists.txt``), regardless of whether the real
+# ``Logic/asm_full`` directory is present in *this* test environment. This
+# test is a convenience/local-dev signal, not the enforcement point -- hence
 # ``skipif`` (an unmet precondition), not ``xfail`` (an expected failure).
 # --------------------------------------------------------------------------- #
 _LOGIC_ROOT = (
@@ -346,5 +348,5 @@ def test_gfx1250v0_overlay_is_consistent():
     """The overlay ships logic, every file in it declares
     ``ScheduleName: gfx1250v0`` and keeps ``ArchitectureName: gfx1250``, and no
     file outside it claims the ``gfx1250v0`` schedule name."""
-    violations = find_gfx1250v0_overlay_violations(_LOGIC_ROOT)
+    violations = find_gfx1250v0_overlay_violations(_LOGIC_ROOT, overlay_required=True)
     assert not violations, "\n".join(violations)
