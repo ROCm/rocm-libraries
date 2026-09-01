@@ -30,14 +30,16 @@ void requireThrows(Function&& function, const std::string& message) {
     throw std::runtime_error(message);
 }
 
+bool hasEqualStorage(const Tensor& first, const Tensor& second) {
+    return first.type() == second.type() && first.layout() == second.layout() &&
+           first.rawEncodedBackingStorage().size() == second.rawEncodedBackingStorage().size() &&
+           std::equal(first.rawEncodedBackingStorage().begin(),
+                      first.rawEncodedBackingStorage().end(),
+                      second.rawEncodedBackingStorage().begin());
+}
+
 void requireEqualStorage(const Tensor& first, const Tensor& second, const std::string& message) {
-    require(
-        first.type() == second.type() && first.layout() == second.layout() &&
-            first.rawEncodedBackingStorage().size() == second.rawEncodedBackingStorage().size() &&
-            std::equal(first.rawEncodedBackingStorage().begin(),
-                       first.rawEncodedBackingStorage().end(),
-                       second.rawEncodedBackingStorage().begin()),
-        message);
+    require(hasEqualStorage(first, second), message);
 }
 
 void testValueSemanticsAndExamples() {
@@ -161,18 +163,11 @@ void testSeedAndComplexPolicies() {
     require(cartesianComponentsDiffer,
             "Cartesian component domains produced identical values for the complete sample.");
 
-    constexpr uint64_t customDomain = 0x123456789abcdef0ULL;
-    const GenerationRecipe customStream = realOnly.withRandomDomain(customDomain);
-    const Tensor customValues = generate(ScalarType::Int32, Shape{16}, customStream);
-    constexpr std::array<int, 16> expectedCustom{-29, 43,  -39, 2,  -3, -20, -23, 98,
-                                                 62,  -13, 51,  12, 75, 69,  96,  -29};
-    for (size_t index = 0; index < 16; ++index) {
-        require(customValues.loadAs<int32_t>({index}) == expectedCustom[index],
-                "Generation recipe random-domain selection changed the stream.");
-    }
-    require(realOnly.randomDomain() == 0 && customStream.randomDomain() == customDomain,
-            "Generation recipe random-domain modifier changed the source recipe.");
-    require(customStream.withSeed(seed + 1).seed() == seed + 1 && customStream.seed() == seed,
+    const GenerationRecipe differentSeed = realOnly.withSeed(seed + 1);
+    const Tensor differentSeedValues = generate(ScalarType::Int32, Shape{16}, differentSeed);
+    require(!hasEqualStorage(realOnlyValues, differentSeedValues),
+            "Different caller-provided seeds produced identical storage.");
+    require(differentSeed.seed() == seed + 1 && realOnly.seed() == seed,
             "Generation recipe seed modifier changed the source recipe.");
 
     const Tensor realDestination = generate(ScalarType::Int32, Shape{16}, cartesian);

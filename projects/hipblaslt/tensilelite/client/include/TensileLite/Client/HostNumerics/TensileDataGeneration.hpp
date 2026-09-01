@@ -15,13 +15,11 @@ namespace TensileLite::Client::HostNumerics
     inline constexpr uint64_t dataInitializationFnvLikeOffsetBasis = 1469598103934665603ULL;
     inline constexpr uint64_t dataInitializationFnvLikePrime       = 1099511628211ULL;
 
-    inline constexpr uint64_t dataInitializationSeedSalt = 0x54454e53494c454cULL;
     inline constexpr uint64_t sparsePruningSeed          = 0x5350415253453234ULL;
 
     inline roc::host_numerics::GenerationRecipeSettings
         dataInitializationSettings(uint64_t seed, uint64_t sequence)
     {
-        return {.seed = roc::host_numerics::deriveDeterministicSeed(
-                    seed, dataInitializationSeedSalt, sequence)};
+        return {.seed = seed + sequence};
     }
 } // namespace TensileLite::Client::HostNumerics

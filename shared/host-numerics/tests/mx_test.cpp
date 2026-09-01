@@ -37,15 +37,6 @@ bool sameResult(const MxGenerationResult& first, const MxGenerationResult& secon
            sameStorage(first.reference, second.reference);
 }
 
-template <size_t N>
-void requireStorage(const Tensor& tensor, const std::array<uint8_t, N>& expected,
-                    const char* message) {
-    const auto storage = tensor.rawEncodedBackingStorage();
-    require(storage.size() == expected.size(), message);
-    for (size_t index = 0; index < expected.size(); ++index)
-        require(std::to_integer<uint8_t>(storage[index]) == expected[index], message);
-}
-
 size_t expectedScaleCount(const MxGenerationProblem& problem) {
     const size_t blockedExtent = problem.shape[problem.blockAxis];
     const size_t freeExtent = problem.shape[1 - problem.blockAxis];
@@ -96,13 +87,11 @@ void checkReference(const MxGenerationProblem& problem, const MxGenerationResult
     }
 }
 
-GenerationRecipe mxRecipe(GenerationRecipe::Component component, uint64_t seed = 12345,
-                          uint64_t randomDomain = mx_generation_random_domain_version_1::data) {
+GenerationRecipe mxRecipe(GenerationRecipe::Component component, uint64_t seed = 12345) {
     return GenerationRecipe::realOnly(std::move(component),
                                       {
                                           .seed = seed,
                                           .indexOrder = IndexOrder::FirstDimensionFastest,
-                                          .randomDomain = randomDomain,
                                       });
 }
 
@@ -120,9 +109,8 @@ MxGenerationProblem stochasticProblem(
     GenerationRecipe::Component component,
     MxDataQuantization quantization = MxDataQuantization::Nearest,
     std::optional<MxRepresentedValueRange> representedValueRange = std::nullopt,
-    MxScaleGenerationMode scale = MxScaleGenerationMode::Derived,
-    uint64_t randomDomain = mx_generation_random_domain_version_1::data) {
-    GenerationRecipe recipe = mxRecipe(std::move(component), 12345, randomDomain);
+    MxScaleGenerationMode scale = MxScaleGenerationMode::Derived) {
+    GenerationRecipe recipe = mxRecipe(std::move(component), 12345);
     MxDataGeneration data = [&] {
         if (quantization == MxDataQuantization::PreserveRange)
             return MxDataGeneration::preserveRange(std::move(recipe), *representedValueRange);
@@ -149,75 +137,16 @@ MxGenerationProblem boundedProblem(double lower = -1.0, double upper = 1.0) {
 MxGenerationProblem unboundedProblem() {
     return stochasticProblem(GenerationRecipe::uniformFiniteEncodedValue(),
                              MxDataQuantization::PreserveGeneratedEncoding, std::nullopt,
-                             MxScaleGenerationMode::RandomFinite,
-                             mx_generation_random_domain_version_1::unboundedData);
-}
-
-void testLegacyRandomStreamCompatibility() {
-    auto makeProblem = [](GenerationRecipe::Component component, MxDataQuantization quantization,
-                          std::optional<MxRepresentedValueRange> representedValueRange,
-                          MxScaleGenerationMode scale, uint64_t randomDomain) {
-        GenerationRecipe recipe = mxRecipe(std::move(component), 0x10203040, randomDomain);
-        MxDataGeneration data = [&] {
-            if (quantization == MxDataQuantization::PreserveRange)
-                return MxDataGeneration::preserveRange(std::move(recipe), *representedValueRange);
-            if (quantization == MxDataQuantization::PreserveGeneratedEncoding)
-                return MxDataGeneration::preserveGeneratedEncoding(std::move(recipe));
-            return MxDataGeneration::quantize(std::move(recipe));
-        }();
-        MxGenerationProblem problem(Shape{5, 3}, std::move(data));
-        problem.dataType = ScalarType::Float4E2M1;
-        problem.scaleType = ScalarType::E8M0;
-        problem.leadingDimension = 7;
-        problem.blockAxis = 0;
-        problem.blockSize = 4;
-        problem.scale = scale;
-        return problem;
-    };
-
-    const MxGenerationResult bounded = generateMx(makeProblem(
-        GenerationRecipe::uniformReal({.lower = -1.25, .upper = 0.875}),
-        MxDataQuantization::PreserveRange, MxRepresentedValueRange{.lower = -1.25, .upper = 0.875},
-        MxScaleGenerationMode::Derived, mx_generation_random_domain_version_1::data));
-    requireStorage(
-        bounded.data,
-        std::array<uint8_t, 11>{0xff, 0x77, 0x05, 0x20, 0x1e, 0xda, 0x00, 0x1c, 0x5e, 0x0b, 0x00},
-        "Bounded MX data stream changed.");
-    requireStorage(bounded.scales, std::array<uint8_t, 6>{0x7c, 0x7d, 0x7d, 0x7d, 0x7d, 0x7e},
-                   "Bounded MX scale stream changed.");
-
-    const MxGenerationResult normal = generateMx(
-        makeProblem(GenerationRecipe::normal({.mean = 0.0, .standardDeviation = 1.25}),
-                    MxDataQuantization::Nearest, std::nullopt, MxScaleGenerationMode::Derived,
-                    mx_generation_random_domain_version_1::normal));
-    requireStorage(
-        normal.data,
-        std::array<uint8_t, 11>{0xdb, 0x43, 0x0f, 0x50, 0xf6, 0xee, 0x00, 0xd4, 0xc9, 0x0e, 0x00},
-        "Normal MX data stream changed.");
-    requireStorage(normal.scales, std::array<uint8_t, 6>{0x7f, 0x7d, 0x7d, 0x7d, 0x7e, 0x7d},
-                   "Normal MX scale stream changed.");
-
-    const MxGenerationResult unbounded = generateMx(makeProblem(
-        GenerationRecipe::uniformFiniteEncodedValue(),
-        MxDataQuantization::PreserveGeneratedEncoding, std::nullopt,
-        MxScaleGenerationMode::RandomFinite, mx_generation_random_domain_version_1::unboundedData));
-    requireStorage(
-        unbounded.data,
-        std::array<uint8_t, 11>{0x3a, 0x98, 0x06, 0x40, 0x58, 0x50, 0x00, 0x13, 0x1a, 0x06, 0x00},
-        "Unbounded MX data stream changed.");
-    requireStorage(unbounded.scales, std::array<uint8_t, 6>{0xd2, 0xdc, 0x12, 0x24, 0x36, 0xbf},
-                   "Unbounded MX scale stream changed.");
+                             MxScaleGenerationMode::RandomFinite);
 }
 
 void testGenerationRecipeIndexOrder() {
     auto makeProblem = [](IndexOrder order) {
         MxDataGeneration data = MxDataGeneration::quantize(GenerationRecipe::realOnly(
-            GenerationRecipe::uniformInteger({.lower = -4, .upper = 4}),
-            {
-                .seed = 123,
-                .indexOrder = order,
-                .randomDomain = mx_generation_random_domain_version_1::data,
-            }));
+            GenerationRecipe::uniformInteger({.lower = -4, .upper = 4}), {
+                                                                             .seed = 123,
+                                                                             .indexOrder = order,
+                                                                         }));
         MxGenerationProblem problem(Shape{3, 5}, std::move(data));
         problem.dataType = ScalarType::Float8E4M3;
         problem.scaleType = ScalarType::E8M0;
@@ -276,7 +205,6 @@ int main() {
     require(rejectedInvalidConstruction,
             "MX problem construction accepted a shape that was not rank two.");
 
-    testLegacyRandomStreamCompatibility();
     testGenerationRecipeIndexOrder();
     testPreservedRawGenerationMasksToDataWidth();
     const std::array typePairs{
@@ -485,10 +413,9 @@ int main() {
         stochasticProblem(GenerationRecipe::uniformReal(
                               {.lower = 0.0, .upper = 6.28318530717958647692528676655900576})
                               .withCosineTransform()));
-    stochasticProblems.push_back(
-        stochasticProblem(GenerationRecipe::normal({.mean = 0.0, .standardDeviation = 1.25}),
-                          MxDataQuantization::Nearest, std::nullopt, MxScaleGenerationMode::Derived,
-                          mx_generation_random_domain_version_1::normal));
+    stochasticProblems.push_back(stochasticProblem(
+        GenerationRecipe::normal({.mean = 0.0, .standardDeviation = 1.25}),
+        MxDataQuantization::Nearest, std::nullopt, MxScaleGenerationMode::Derived));
     stochasticProblems.push_back(
         stochasticProblem(GenerationRecipe::uniformInteger({.lower = -4, .upper = 4})));
     for (MxGenerationProblem problem : stochasticProblems) {

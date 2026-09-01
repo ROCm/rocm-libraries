@@ -239,15 +239,12 @@ namespace rocRoller::HostNumerics
                                           float                     maximum,
                                           uint32_t                  seed)
         {
-            auto recipe = [&](GenerationRecipe::Component component,
-                              uint64_t                    randomDomain
-                              = roc::host_numerics::mx_generation_random_domain_version_1::data) {
+            auto recipe = [&](GenerationRecipe::Component component) {
                 return GenerationRecipe::realOnly(
                     std::move(component),
                     {
-                        .seed         = seed,
-                        .indexOrder   = IndexOrder::FirstDimensionFastest,
-                        .randomDomain = randomDomain,
+                        .seed       = seed,
+                        .indexOrder = IndexOrder::FirstDimensionFastest,
                     });
             };
 
@@ -270,9 +267,8 @@ namespace rocRoller::HostNumerics
                     {.lower = -maximumMagnitude, .upper = maximumMagnitude});
             }
             case DataInitializationMode::Unbounded:
-                return MxDataGeneration::preserveGeneratedEncoding(recipe(
-                    GenerationRecipe::uniformFiniteEncodedValue(),
-                    roc::host_numerics::mx_generation_random_domain_version_1::unboundedData));
+                return MxDataGeneration::preserveGeneratedEncoding(
+                    recipe(GenerationRecipe::uniformFiniteEncodedValue()));
             case DataInitializationMode::Identity:
                 return MxDataGeneration::quantize(recipe(GenerationRecipe::identity()));
             case DataInitializationMode::Ones:
@@ -286,11 +282,9 @@ namespace rocRoller::HostNumerics
                                {.lower = 0.0, .upper = 6.28318530717958647692528676655900576})
                                .withCosineTransform()));
             case DataInitializationMode::NormalFromFloat:
-                return MxDataGeneration::quantize(
-                    recipe(GenerationRecipe::normal(
-                               {.mean              = initialization.normalMean,
-                                .standardDeviation = initialization.normalStandardDeviation}),
-                           roc::host_numerics::mx_generation_random_domain_version_1::normal));
+                return MxDataGeneration::quantize(recipe(GenerationRecipe::normal(
+                    {.mean              = initialization.normalMean,
+                     .standardDeviation = initialization.normalStandardDeviation})));
             }
             throw std::invalid_argument("Unknown rocRoller MX data initialization mode.");
         }

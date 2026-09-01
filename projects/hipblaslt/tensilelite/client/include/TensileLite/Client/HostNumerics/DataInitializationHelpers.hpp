@@ -89,17 +89,14 @@ namespace TensileLite
                                  uint32_t                         seed)
             {
                 using namespace roc::host_numerics;
-                auto recipe
-                    = [&](GenerationRecipe::Component component,
-                          uint64_t randomDomain = mx_generation_random_domain_version_1::data) {
-                          return GenerationRecipe::realOnly(
-                              std::move(component),
-                              {
-                                  .seed         = seed,
-                                  .indexOrder   = IndexOrder::FirstDimensionFastest,
-                                  .randomDomain = randomDomain,
-                              });
-                      };
+                auto recipe = [&](GenerationRecipe::Component component) {
+                    return GenerationRecipe::realOnly(
+                        std::move(component),
+                        {
+                            .seed       = seed,
+                            .indexOrder = IndexOrder::FirstDimensionFastest,
+                        });
+                };
 
                 switch(mode)
                 {
