@@ -30,9 +30,9 @@ namespace rocsparse
 {
     template <typename T>
     rocsparse_status prune_csr2csr_buffer_size_template(rocsparse_handle          handle,
-                                                        rocsparse_int             m,
-                                                        rocsparse_int             n,
-                                                        rocsparse_int             nnz_A,
+                                                        int64_t                   m,
+                                                        int64_t                   n,
+                                                        int64_t                   nnz_A,
                                                         const rocsparse_mat_descr csr_descr_A,
                                                         const T*                  csr_val_A,
                                                         const rocsparse_int*      csr_row_ptr_A,
@@ -46,9 +46,9 @@ namespace rocsparse
 
     template <typename T>
     rocsparse_status prune_csr2csr_nnz_template(rocsparse_handle          handle,
-                                                rocsparse_int             m,
-                                                rocsparse_int             n,
-                                                rocsparse_int             nnz_A,
+                                                int64_t                   m,
+                                                int64_t                   n,
+                                                int64_t                   nnz_A,
                                                 const rocsparse_mat_descr csr_descr_A,
                                                 const T*                  csr_val_A,
                                                 const rocsparse_int*      csr_row_ptr_A,

@@ -379,7 +379,7 @@ Tests:
   matrix_size: *medium_matrix_size_range
   transA_transB: *complex_transA_transB_range
   alpha_beta: *complex_alpha_beta_range
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_batch_medium
   category: pre_checkin
@@ -399,7 +399,7 @@ Tests:
   transA_transB: *complex_transA_transB_range
   alpha_beta: *complex_alpha_beta_range
   batch_count: 10
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 
 - name: matmul_medium_HMM
@@ -573,7 +573,7 @@ Tests:
   K: 16
   alpha_beta: *complex_alpha_beta_range
   transA_transB: *complex_transA_transB_range
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_24
   category: pre_checkin
@@ -615,7 +615,7 @@ Tests:
   K: 32
   alpha_beta: *complex_alpha_beta_range
   transA_transB: *complex_transA_transB_range
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_48_8_128
   category: nightly
@@ -3016,7 +3016,7 @@ Tests:
   K: 96
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_256_8_16_complex
   category: pre_checkin
@@ -3027,7 +3027,7 @@ Tests:
   K: 16
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_2001_5431_3004_complex
   category: pre_checkin
@@ -3038,7 +3038,7 @@ Tests:
   K: 3004
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_1093_141_7011_complex
   category: pre_checkin
@@ -3049,7 +3049,7 @@ Tests:
   K: 7011
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_4097_2187_2653_complex
   category: pre_checkin
@@ -3060,7 +3060,7 @@ Tests:
   K: 2653
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_one_bf16_fp32dst_precision_gfx90a
   category: quick
@@ -3371,7 +3371,6 @@ Tests:
   beta: 0.0
   unit_check: 1
   norm_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Offset variation test - various offset values
 # Note: Uses M=256 to avoid known General Batched GEMM issue with larger sizes
@@ -3398,7 +3397,6 @@ Tests:
   beta: [0.0, 1.0]
   unit_check: 1
   norm_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Transpose with offset
 # Note: lda/ldb must be valid for all transpose combinations
@@ -3428,7 +3426,6 @@ Tests:
   beta: 0.5
   unit_check: 1
   norm_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Alpha/Beta edge cases with offset
 - name: matmul_batch_offset_alpha_beta
@@ -3449,7 +3446,6 @@ Tests:
   alpha_beta: *alpha_beta_range
   unit_check: 1
   norm_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Large offset test
 - name: matmul_batch_offset_large
@@ -3500,7 +3496,6 @@ Tests:
   beta: 1.0
   requested_solution_num: -1
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Test with negative batch offsets to verify proper memory layout handling
 - name: matmul_batch_offset_negative
@@ -3524,7 +3519,6 @@ Tests:
   alpha: 1.0
   beta: 1.0
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Test with mixed positive and negative offsets
 - name: matmul_batch_offset_mixed
@@ -3548,6 +3542,5 @@ Tests:
   alpha: 1.0
   beta: 1.0
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 ...

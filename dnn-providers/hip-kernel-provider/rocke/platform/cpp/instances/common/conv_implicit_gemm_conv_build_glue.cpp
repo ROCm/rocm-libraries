@@ -123,6 +123,40 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             b, ROCKE_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
         return false;
     }
+    /* Forward-conv-only: reject default epilogue when vec_c > 1 (auto-derived from kpg).
+     * Python build_implicit_gemm_conv calls is_valid_spec which now checks:
+     *   _eff_vec_c = vector_size_c if set else default_vector_sizes(cpg,kpg,dtype_d)[2]
+     *   if _eff_vec_c > 1 and epilogue == "default": raise ValueError(...)
+     * This gate is NOT part of rocke_implicit_gemm_conv_is_valid_spec because
+     * wgrad calls that function with a dummy forward spec and uses a separate
+     * explicit-only vec_c check (its own is_valid_spec mirrors the old Python). */
+    if(spec->epilogue && strcmp(spec->epilogue, "default") == 0)
+    {
+        int _eff_vec_c;
+        if(spec->has_vector_size_c)
+        {
+            _eff_vec_c = spec->vector_size_c;
+        }
+        else
+        {
+            int _K = rocke_conv_problem_kpg(&spec->problem);
+            bool _is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
+            if(_is_fp32_d)
+                _eff_vec_c = (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
+            else
+                _eff_vec_c = (_K % 8 == 0) ? 8 : (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
+        }
+        if(_eff_vec_c > 1)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "invalid conv_igemm spec for %s: default epilogue is not "
+                            "supported with vector size c: %d",
+                            ctx->arch,
+                            _eff_vec_c);
+            return false;
+        }
+    }
 
     /* ---- b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu ---- (792-795)
      * The builder `b` is already constructed with spec.kernel_name() by the
@@ -244,8 +278,11 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      */
     if(b->kernel != NULL)
     {
-        rocke_attr_set_int(
-            b, &b->kernel->attrs, "max_workgroup_size", rocke_warp_grid_block_size(&ctx->grid));
+        /* Wavelet uses launch_block_size (math + load waves); others use block_size. */
+        int mwgs = (spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
+                       ? rocke_implicit_gemm_conv_spec_launch_block_size(spec)
+                       : rocke_warp_grid_block_size(&ctx->grid);
+        rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", mwgs);
     }
 
     rocke_value_t* wave = rocke_b_const_i32(b, spec->wave_size);
@@ -330,6 +367,28 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     {
         ctx->block_m_off_v = ctx->grid.block_m_off;
         ctx->block_n_off_v = ctx->grid.block_n_off;
+    }
+
+    /* ---- grouped conv: group index + absolute output-filter base ---- (818-831)
+     * Python:
+     *   grouped = p.groups > 1
+     *   if grouped:
+     *       group_idx = b.block_id_z()
+     *       k_out_group_base = b.mul(group_idx, b.const_i32(p.kpg))
+     *   else: group_idx = None; k_out_group_base = None
+     * Both are NULL for groups == 1 (byte-identical ungrouped path). */
+    if(ctx->p->groups > 1)
+    {
+        /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
+         * Bind subexpressions in Python's left-to-right order to pin SSA ids. */
+        ctx->group_idx = rocke_b_block_id_z(b);
+        rocke_value_t* c_kpg = rocke_b_const_i32(b, rocke_conv_problem_kpg(ctx->p));
+        ctx->k_out_group_base = rocke_b_mul(b, ctx->group_idx, c_kpg);
+    }
+    else
+    {
+        ctx->group_idx = NULL;
+        ctx->k_out_group_base = NULL;
     }
 
     /* ---- LDS plan ---- (894-896). lds_layout = spec.effective_lds_layout():
@@ -419,15 +478,14 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->threads = rocke_implicit_gemm_conv_spec_block_size(spec);
     ctx->load_vec = rocke_conv_choose_load_vec(spec);
     /* Mirror Python default_vector_sizes: clamp the tile-geometry vec by the largest
-     * power-of-two that divides C (A and B both stride along C in NHWC/KYXC layouts).
-     * Python: sizes = [8,4,2,1] for fp16/bf16, [4,2,1] for fp32; vec = largest s in
-     * sizes where C % s == 0.  For C=3 this yields vec=1; without the clamp the
-     * tile-geometry picker returns a wider vec that Python never uses, causing MISMATCH
-     * (e.g. the ImageNet-stem N1H224W224C3K64Y7X7 conv). */
+     * power-of-two that divides the per-group channel count (A strides over cpg,
+     * B strides over cpg). For groups==1 cpg==C -> byte-identical. For C=3 this
+     * yields vec=1; without the clamp the tile-geometry picker returns a wider vec
+     * that Python never uses, causing MISMATCH (e.g. ImageNet-stem C3 conv). */
     {
         bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
         int max_elem = is_fp32 ? 4 : 8;
-        int c_dim = ctx->p->C;
+        int c_dim = rocke_conv_problem_cpg(ctx->p);
         int max_ab = (c_dim % max_elem == 0) ? max_elem
                      : (c_dim % 4 == 0)      ? 4
                      : (c_dim % 2 == 0)      ? 2
@@ -437,12 +495,50 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     }
 
     /* ---- coordinate-transform descriptors ---- (935-936).
+     * Pointwise fast path: Y=X=1, stride=1, pad=0 -> descriptors are NULL and
+     * flat multiply+add arithmetic is used in a_descriptor/b_descriptor/epilogues.
      * A_desc decompose_m = (a_mhw_index_fn is None). */
     {
-        bool decompose_m = !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
-        ctx->A_desc = rocke_conv_make_a_descriptor(b, ctx->p, decompose_m);
-        ctx->B_desc = rocke_conv_make_b_descriptor(b, ctx->p);
+        ctx->is_pointwise = rocke_conv_problem_is_pointwise(ctx->p);
+        ctx->c_wgK_pw = 0; /* forward conv: unused */
+        ctx->c_wgN_pw = 0; /* forward conv: unused */
+        ctx->b_descriptor_fn = NULL; /* forward conv: use default rocke_conv_b_descriptor */
+        if(ctx->is_pointwise)
+        {
+            ctx->c_M_pw = rocke_conv_problem_m(ctx->p);
+            ctx->c_C_pw = rocke_conv_problem_cpg(ctx->p);
+            ctx->c_K_pw = rocke_conv_problem_kpg(ctx->p);
+            ctx->A_desc = NULL;
+            ctx->B_desc = NULL;
+        }
+        else
+        {
+            ctx->c_M_pw = 0;
+            ctx->c_C_pw = 0;
+            ctx->c_K_pw = 0;
+            bool decompose_m = !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
+            ctx->A_desc = rocke_conv_make_a_descriptor(b, ctx->p, decompose_m);
+            ctx->B_desc = rocke_conv_make_b_descriptor(b, ctx->p);
+        }
         ctx->D_desc = NULL; /* built lazily in the epilogue phase */
+    }
+
+    /* ---- pointwise IR constants (Python lines 987-990, before buffer resources).
+     * Python:  _c_C_ir = b.const_i32(cpg)    <- first
+     *          _c_K_ir = b.const_i32(kpg)    <- second
+     *          _c_M_ir = b.const_i32(M)      <- third
+     *          _always_valid = b.const_i32(1) <- fourth
+     * Emitted here (before buffer_rsrc) so the SSA sequence matches Python. */
+    if(ctx->is_pointwise)
+    {
+        ctx->ir_c_C_pw = rocke_b_const_i32(b, ctx->c_C_pw);
+        ctx->ir_c_K_pw = rocke_b_const_i32(b, ctx->c_K_pw);
+        ctx->ir_c_M_pw = rocke_b_const_i32(b, ctx->c_M_pw);
+        ctx->ir_always_valid = rocke_b_const_i32(b, 1);
+    }
+    else
+    {
+        ctx->ir_c_C_pw = ctx->ir_c_K_pw = ctx->ir_c_M_pw = ctx->ir_always_valid = NULL;
     }
 
     /* ---- buffer resources (CK-Tile views over A/B/D) ---- (946-951) */
@@ -469,6 +565,10 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     /* ---- loaders (exactly one family populated) ---- (986-1027) */
     ctx->async_dma = spec->async_dma;
+    ctx->have_async_loaders = false;
+    ctx->have_sync_loaders = false;
+    ctx->have_wavelet_loaders = false;
+
     if(ctx->async_dma)
     {
         rocke_status_t sa = rocke_async_tile_loader_from_tile(
@@ -481,7 +581,49 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             return false;
         }
         ctx->have_async_loaders = true;
-        ctx->have_sync_loaders = false;
+    }
+    else if(spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
+    {
+        /* Wavelet loaders are sized to num_load_waves * wave_size threads
+         * (load-wave-relative thread index is load_tid = tid - block_size). */
+        int load_threads = spec->num_load_waves * spec->wave_size;
+        int load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
+        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
+        rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
+            ctx->block_m, ctx->block_k, load_threads, load_vec_a, true, &ctx->a_wavelet_loader);
+        rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
+            ctx->block_n, ctx->block_k, load_threads, load_vec_b, true, &ctx->b_wavelet_loader);
+        if(sa != ROCKE_OK || sb != ROCKE_OK)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: wavelet tile loader from_tile failed");
+            return false;
+        }
+        ctx->have_wavelet_loaders = true;
+
+        /* Wavelet local state: load_tid, is_math, K_iters, epi_barriers. */
+        ctx->wavelet_n_math_warps = spec->warp_m * spec->warp_n;
+        ctx->wavelet_K_iters
+            = (rocke_conv_problem_k_gemm(ctx->p) + ctx->block_k - 1) / ctx->block_k;
+        /* epi_barriers = (no_alias ? 0 : war_barriers) + 1 (RAW), war_barriers=2 for wavelet.
+         * This formula is the C++ mirror of CShuffleEpilogue.compute_barrier_count; both must
+         * stay in sync.  war_barriers=2: one WAR before the cshuffle store (load waves overwrote
+         * A/B LDS) and one WAR before the cshuffle re-read (math waves may still read C LDS). */
+        if(spec->epilogue != NULL && strcmp(spec->epilogue, "cshuffle") == 0)
+        {
+            const int _war_barriers = 2; /* wavelet always uses war_barriers=2 */
+            ctx->wavelet_epi_barriers = (spec->cshuffle_no_alias ? 0 : _war_barriers) + 1;
+        }
+        else
+            ctx->wavelet_epi_barriers = 0;
+
+        rocke_value_t* c_nmath = rocke_b_const_i32(b, ctx->wavelet_n_math_warps);
+        /* warp_id is tid/wave_size — a VGPR. Materialise as a scalar via readfirstlane
+         * so the branch lowers to s_cmp + s_cbranch (uniform), not v_cmpx (exec-masked),
+         * which would make barrier placement inside the branch accidentally legal. */
+        rocke_value_t* warp_id_s = rocke_b_readfirstlane(b, ctx->warp_id);
+        ctx->wavelet_is_math = rocke_b_cmp_lt(b, warp_id_s, c_nmath);
+        ctx->wavelet_load_tid = rocke_b_sub(
+            b, ctx->tid, rocke_b_const_i32(b, rocke_implicit_gemm_conv_spec_block_size(spec)));
     }
     else
     {
@@ -500,7 +642,6 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             return false;
         }
         ctx->have_sync_loaders = true;
-        ctx->have_async_loaders = false;
     }
 
     /* ---- schedule policy + prologue ---- (1029-1032) */
@@ -592,6 +733,10 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     {
         rocke_conv_emit_kloop_basic(&ctx);
     }
+    else if(spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
+    {
+        rocke_conv_emit_kloop_wavelet(&ctx);
+    }
     else if(!ctx.async_dma)
     {
         rocke_conv_emit_kloop_simple(&ctx);
@@ -602,8 +747,13 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     }
 
     /* ---- epilogue (1349-1377): apply acc epilogue + dispatch the override /
-     * cshuffle / wmma-direct / mfma-direct chain. Reads ctx.final_accs. ---- */
-    rocke_conv_emit_epilogue(&ctx);
+     * cshuffle / wmma-direct / mfma-direct chain. Reads ctx.final_accs.
+     * Skipped for wavelet: the kloop driver emits the epilogue inline inside
+     * the math branch (it cannot be deferred outside the scf_if_else). ---- */
+    if(!ctx.epilogue_already_emitted)
+    {
+        rocke_conv_emit_epilogue(&ctx);
+    }
 
     if(!rocke_ir_builder_ok(b))
     {

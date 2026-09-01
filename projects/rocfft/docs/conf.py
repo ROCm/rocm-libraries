@@ -34,12 +34,17 @@ external_projects_current_project = "rocfft"
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
 
-html_theme_options.update(
-    {
-        "repository_url": "https://github.com/ROCm/rocm-libraries",
-        "use_repository_button": True,
-        "use_issues_button": True,
-    }
-)
+# Theme-related settings
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "repository_branch": "develop",
+    "path_to_docs": "projects/rocfft/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_source_button": True,
+    "use_download_button": True,
+}
 
 extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]

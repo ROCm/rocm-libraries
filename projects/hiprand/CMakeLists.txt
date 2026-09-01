@@ -28,9 +28,9 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 # Set the library version
 set(VERSION_STRING "3.4.0")
 # Set the minimum required rocPRIM version
-set(MIN_ROCRAND_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
+set(MIN_ROCRAND_PACKAGE_VERSION "5.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocRAND
-set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.14" CACHE STRING "Download branch for ROCm dependencies")
+set(ROCM_DEP_RELEASE_BRANCH "release/therock-10.0" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
   set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")

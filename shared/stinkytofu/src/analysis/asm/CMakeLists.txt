@@ -3,4 +3,6 @@
 
 target_sources(stinkytofu_objs PRIVATE
     AsmVerifierPass.cpp
+    HazardGapAnalysisPass.cpp
+    WmmaHideBudgetAnalysis.cpp
 )

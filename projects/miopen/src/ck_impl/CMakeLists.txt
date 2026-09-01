@@ -105,6 +105,16 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
         --offload-arch=${gpu_target}
     )
 
+    # Leave AMDGPU device code uninstrumented under a host UBSan build (see the detection in the
+    # top-level CMakeLists.txt). These CK-impl plugins device-compile the same way the main
+    # MIOpen library does, so without this their device objects fail to link with undefined
+    # __ubsan_handle_*_abort symbols. -Xarch_device scopes -fno-sanitize=undefined to the device
+    # sub-compile only, so host code keeps UBSan.
+    if(MIOPEN_DISABLE_DEVICE_UBSAN)
+        target_compile_options(${lib_name} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+    endif()
+
     # Mark as building the DLL for dllexport on Windows
     target_compile_definitions(${lib_name} PRIVATE CK_IMPL_BUILDING_DLL)
 
@@ -112,6 +122,14 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # plugin's single GPU arch) so the plugin's CK macro set stays in sync with
     # the main MIOpen target and with how CK itself was built.
     miopen_apply_ck_compile_definitions(${lib_name} ${gpu_target})
+
+    # Select the wavefront-size-specialized depthwise instance set for this GPU.
+    # CDNA (gfx9xx) uses 64-lane wavefronts; RDNA (gfx10xx/gfx11xx/gfx12xx) uses 32.
+    if(arch_base MATCHES "^gfx9")
+        target_compile_definitions(${lib_name} PRIVATE MIOPEN_CK_DEPTHWISE_WAVE_SIZE=64)
+    else()
+        target_compile_definitions(${lib_name} PRIVATE MIOPEN_CK_DEPTHWISE_WAVE_SIZE=32)
+    endif()
 
     # Choose CK linkage mode:
     #   - Per-arch unbundled archive

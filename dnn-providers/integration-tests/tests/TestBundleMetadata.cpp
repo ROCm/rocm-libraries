@@ -3,10 +3,21 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdlib>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
+
+// getpid() below stamps the temp path per process. MSVC ships no <unistd.h>;
+// it spells the same call _getpid() in <process.h>.
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #include "harness/BundleMetadata.hpp"
 
@@ -15,6 +26,7 @@
 using hipdnn_integration_tests::BundleMetadata;
 using hipdnn_integration_tests::checkArchCompatibility;
 using hipdnn_integration_tests::checkVramRequirement;
+using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::loadBundleMetadata;
 using hipdnn_integration_tests::metaJsonPath;
 using hipdnn_test_sdk::utilities::isMetaJsonFile;
@@ -24,14 +36,66 @@ using hipdnn_test_sdk::utilities::isMetaJsonFile;
 namespace
 {
 
+/// This process's id. MSVC has no <unistd.h> and spells the call _getpid().
+int currentProcessId()
+{
+#ifdef _WIN32
+    return _getpid();
+#else
+    return ::getpid();
+#endif
+}
+
+/// Claims a uniquely-named temp directory. Seeded from the clock, the pid and a
+/// per-call counter, so neither a sibling process nor a second TempBundle in this one
+/// draws the same name.
+///
+/// ScopedDirectory itself creates the directory and throws when the name is already
+/// taken, which is the behaviour that makes this safe: a lost race is retried rather
+/// than adopted, and the returned object still owns exactly what it created.
+hipdnn_test_sdk::utilities::ScopedDirectory makeUniqueBundleDir()
+{
+    static std::atomic<uint64_t> counter{0};
+    const auto base = std::filesystem::temp_directory_path();
+    const auto seed
+        = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())
+          ^ (static_cast<uint64_t>(currentProcessId()) << 32U);
+
+    for(int attempt = 0; attempt < 64; ++attempt)
+    {
+        const auto candidate
+            = base / ("test_bundle_" + std::to_string(seed + counter.fetch_add(1)));
+        try
+        {
+            return {candidate};
+        }
+        catch(const std::runtime_error&)
+        {
+            // Name taken by a concurrent binary; draw another. Nothing to record:
+            // the retry is the handling, and the throw below reports exhaustion.
+            continue;
+        }
+    }
+    throw std::runtime_error("makeUniqueBundleDir: could not claim a temp directory");
+}
+
 /// Helper: create a temporary directory with a fake bundle JSON and optional
 /// .meta.json companion. Auto-cleans on destruction via ScopedDirectory.
+///
+/// The directory name must be unique per process AND per construction. `std::rand()`
+/// without a seed yields the same sequence in every process, so two test binaries
+/// running concurrently -- ctest -j N, or an install-tree and build-tree run at once --
+/// both draw 1804289383 first and the second one dies with "ScopedDirectory: Directory
+/// already exists" before reaching an assertion. That is why only the FIRST TempBundle
+/// user in this file was observed failing while its siblings passed.
+///
+/// create_directory() reporting whether it did the creating is what makes this safe:
+/// a name already taken is retried rather than adopted.
 class TempBundle
 {
 public:
     explicit TempBundle(const std::string& metaJsonContent = "")
-        : _dir(std::filesystem::temp_directory_path()
-               / ("test_bundle_" + std::to_string(std::rand())))
+        : _dir(makeUniqueBundleDir())
     {
         // Create a minimal bundle JSON (enough for path derivation)
         std::ofstream bundleFile(_dir.path() / "Bundle.json");
@@ -507,6 +571,56 @@ TEST(TestLoadBundleMetadata, ReturnsNulloptOnJsonArray)
 TEST(TestLoadBundleMetadata, RejectsFormatVersionZero)
 {
     const TempBundle bundle(R"({"format_version": 0})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    EXPECT_FALSE(meta.has_value());
+}
+
+// ---------------------------------------------------------------------------
+// loadBundleMetadata — enforcement_level
+// ---------------------------------------------------------------------------
+
+TEST(TestLoadBundleMetadata, EnforcementLevelDefaultsToFullWhenAbsent)
+{
+    const TempBundle bundle(R"({"format_version": 1})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::FULL);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelParsesApplicability)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "applicability"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::APPLICABILITY);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelParsesBuildable)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "buildable"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::BUILDABLE);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelParsesFull)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "full"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::FULL);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelInvalidTokenRejectsMetadata)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "buildible"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    EXPECT_FALSE(meta.has_value());
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelNonStringRejectsMetadata)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": 1})");
     auto meta = loadBundleMetadata(bundle.bundleJsonPath());
     EXPECT_FALSE(meta.has_value());
 }

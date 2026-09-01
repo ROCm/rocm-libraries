@@ -64,8 +64,9 @@ One script builds the C++ engine and runs the full cross-engine `.ll` diff:
 tools/check_byte_identity.py
 ```
 
-It prints a per-family GREEN/MISMATCH table and exits non-zero on any **real**
-mismatch. A green run means the two engines still agree everywhere.
+It prints a per-family status table and exits non-zero unless every family
+passed the gate. A green run means the two engines were compared everywhere and
+agreed.
 
 If you prefer to run the steps by hand (they are what the script does):
 
@@ -81,14 +82,17 @@ cmake --build /tmp/rocke_verify -j
 PYTHONPATH="$PY" python3 -m tests/instances/differential/run_diff.py --mode ll
 ```
 
-Expected: every family GREEN, 0 real mismatches. Two families
-(`fmha_appendkv`, `gfx1151_wmma_gemm_iu8_dequant`) may report a benign
-`RANGE_DRIFT` (the C emitter enumerates a slightly wider config range; the
-in-range bytes are identical) — that is pre-existing and not a failure.
+Expected: every family GREEN. Any other status fails the gate, including ones
+this doc does not name — the runner classifies every status it knows and fails
+closed on the rest, so a status added later is red until someone decides it is
+benign. A failing run prints a `=== GATE FAILURES ===` block naming each family
+and why.
 
 ### When the gate is red
 
-A red gate means your change altered emitted bytes on one side but not the other.
+A red gate means the run did not establish byte-identity. Usually that is your
+change altering emitted bytes on one side but not the other; it can also be a
+family that compared nothing. The `=== GATE FAILURES ===` block says which.
 To localize and understand it:
 
 ```bash

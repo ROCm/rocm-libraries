@@ -1,0 +1,123 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  Architecture: gfx1250
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  CpuThreads: 32
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 2
+  PrintSolutionRejectionReason: True
+  ForceGenerateKernel: True
+
+BenchmarkProblems:
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+
+    - # Force StreamK to use persistent DP only, with no SK region.
+      # MXFP8 sibling of sk_mxf4_force_dp_only.yaml: same Force-DP-Only shape,
+      # but sized and swept like the other gfx1250 MXFP8 tests
+      # (see sk_mxf8gemm_tdm.yaml) rather than inheriting the mxf4 point case.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  1, 1,  2, 1]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [True, False]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [0, 4]
+        - SourceSwap: [False]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - DirectToVgprSparseMetadata: [false]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - TDMInst: [3]
+        - MXLoadInst: ["TDM"]
+        - MXScaleFormat: ["InMemorySwizzle"]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Size set shared with sk_mxf8_force_dp_only_pap.yaml, so that file is
+          # this one plus PrefetchAcrossPersistent and nothing else.
+          # 127/128/129 straddle the 128-wide tile boundary (under, exact, over)
+          # at both a DepthU multiple (1024) and a non-multiple (1056).
+          - Exact: [127, 127, 1, 1024]
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [129, 129, 1, 1024]
+          - Exact: [127, 127, 1, 1056]
+          - Exact: [128, 128, 1, 1056]
+          - Exact: [129, 129, 1, 1056]
+          # 2048/2056 straddle the tile boundary (exact, over) and K 2048/2080/2112
+          # cover a DepthU multiple and two K-tails at the MXFP8 K scale.
+          - Exact: [2048, 256, 1, 2048]
+          - Exact: [2048, 256, 1, 2080]
+          - Exact: [2048, 2048, 1, 2048]
+          - Exact: [2048, 2048, 1, 2112]
+          - Exact: [2056, 2056, 1, 2048]
+          - Exact: [1280, 1280, 1, 1024]
+          - Exact: [320, 320, 3, 1056]
+        - ActivationArgs:
+          - [Enum: none]

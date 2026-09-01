@@ -199,6 +199,12 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* block_m_off_v; /* grid.block_m_off OR swizzled row*tile_m */
     rocke_value_t* block_n_off_v; /* grid.block_n_off OR swizzled col*tile_n */
 
+    /* ---- grouped conv state (groups > 1; both NULL for groups == 1) ---- *
+     * group_idx      = b.block_id_z()           (the CTA's group in [0, groups))
+     * k_out_group_base = b.mul(group_idx, kpg)  (absolute output-filter base for B/D) */
+    rocke_value_t* group_idx;
+    rocke_value_t* k_out_group_base;
+
     /* ---- LDS plan + smem handles ---- */
     rocke_conv_lds_layout_t lds_layout; /* spec.effective_lds_layout()         */
     bool double_buffer; /* compv4 || async_dma || unroll_k     */
@@ -225,12 +231,43 @@ typedef struct rocke_conv_build_ctx
     int load_vec; /* _choose_load_vec(spec)    */
 
     /* ---- coordinate-transform descriptors ---- */
-    rocke_tensor_descriptor_t* A_desc; /* make_a_descriptor(p, decompose_m)     */
-    rocke_tensor_descriptor_t* B_desc; /* make_b_descriptor(p)                  */
+    rocke_tensor_descriptor_t* A_desc; /* make_a_descriptor(p, decompose_m); NULL if pointwise */
+    rocke_tensor_descriptor_t* B_desc; /* make_b_descriptor(p);              NULL if pointwise */
     /* D_desc is built lazily inside the epilogue phase (Python builds it per
      * epilogue fn); held here so an epilogue_override and the two stock
      * epilogues share one instance. NULL until the epilogue phase populates. */
     rocke_tensor_descriptor_t* D_desc;
+
+    /* ---- pointwise fast-path (Python p.is_pointwise) ---- *
+     * When true, A_desc / B_desc / D_desc are NULL and flat multiply+add
+     * arithmetic is used instead of the coordinate-transform DAG.
+     * Mirrors: if p.is_pointwise: A_desc = None; B_desc = None ...
+     *
+     * Forward conv: c_M_pw=p.M, c_C_pw=p.cpg, c_K_pw=p.kpg.
+     * Wgrad:        c_M_pw=wg_M, c_C_pw=p.cpg, c_K_pw=p.kpg,
+     *               c_wgK_pw=wg_K, c_wgN_pw=wg_N. */
+    bool is_pointwise;
+    int c_M_pw; /* forward: p.M;   wgrad: wg_M */
+    int c_C_pw; /* forward: p.cpg; wgrad: p.cpg (input channels per group) */
+    int c_K_pw; /* forward: p.kpg; wgrad: p.kpg (output channels per group) */
+    int c_wgK_pw; /* wgrad only: wg_K (= N*Ho*Wo, reduction dim); 0 for forward */
+    int c_wgN_pw; /* wgrad only: wg_N (= Y*X*C, N dim); 0 for forward */
+
+    /* ---- pointwise IR constants (emitted before buffer resources, matching Python) ---- *
+     * Python emits _c_C_ir, _c_K_ir, _c_M_ir, _always_valid (in that order)
+     * before make_buffer_resource calls. We pre-emit and cache them so the
+     * descriptor callbacks reuse rather than re-emit them. */
+    rocke_value_t* ir_c_C_pw; /* const_i32(cpg)    — first  (fwd) / _c_K_ir=kpg (wgrad) */
+    rocke_value_t* ir_c_K_pw; /* const_i32(kpg)    — second (fwd) / _c_C_ir=cpg (wgrad) */
+    rocke_value_t* ir_c_M_pw; /* const_i32(M/wg_M) — third  (fwd) / _c_wgM_ir  (wgrad) */
+    rocke_value_t* ir_always_valid; /* const_i32(1)  — fourth (fwd) / _c_wgN_ir  (wgrad) */
+    rocke_value_t* ir_c_wgN_pw; /* wgrad only: const_i32(wg_N) — fifth */
+
+    /* ---- optional B-descriptor override (wgrad only) ---- *
+     * When non-NULL, rocke_conv_emit_load_phase calls this instead of
+     * rocke_conv_b_descriptor. Used by wgrad to provide a different pointwise
+     * formula for the X (input) B-tile descriptor. */
+    rocke_loads_descriptor_fn b_descriptor_fn;
 
     /* ---- buffer resources (CK-Tile views over A/B/D) ---- */
     rocke_conv_buffer_resource_t a_buf_rsrc; /* make_buffer_resource(b, A, A_bytes) */
@@ -243,7 +280,9 @@ typedef struct rocke_conv_build_ctx
 
     /* ---- loaders (exactly one family populated; the other side NULL) ---- *
      * async_dma=True  : a_loader/b_loader are AsyncTileLoader.from_tile(...).
-     * async_dma=False : a_sync_loader/b_sync_loader are CoalescedTileLoader(...). */
+     * async_dma=False : a_sync_loader/b_sync_loader are CoalescedTileLoader(...).
+     * pipeline="wavelet": a_wavelet_loader/b_wavelet_loader are
+     *   CoalescedTileLoader sized to num_load_waves * wave_size threads. */
     bool async_dma; /* spec.async_dma (cached)         */
     rocke_async_tile_loader_t a_loader; /* async A loader (valid iff async)*/
     rocke_async_tile_loader_t b_loader; /* async B loader                  */
@@ -251,6 +290,28 @@ typedef struct rocke_conv_build_ctx
     rocke_coalesced_tile_loader_t a_sync_loader; /* sync A loader (valid iff sync)*/
     rocke_coalesced_tile_loader_t b_sync_loader; /* sync B loader                 */
     bool have_sync_loaders; /* true => *_sync_loader valid     */
+    rocke_coalesced_tile_loader_t a_wavelet_loader; /* wavelet load-wave A loader     */
+    rocke_coalesced_tile_loader_t b_wavelet_loader; /* wavelet load-wave B loader     */
+    bool have_wavelet_loaders; /* true => *_wavelet_loader valid */
+
+    /* ---- wavelet pipeline local state (populated when pipeline=="wavelet") ---- *
+     * These mirror the variables the Python wavelet closure captures from the
+     * enclosing build_implicit_gemm_conv scope.
+     *
+     *   load_tid   = b.sub(tid, b.const_i32(spec.block_size))
+     *   is_math    = b.cmp_lt(warp_id, c_nmath)
+     *   n_math_warps = spec.warp_m * spec.warp_n
+     *   K_iters    = ceil(p.K_gemm / block_k) */
+    rocke_value_t* wavelet_load_tid; /* load-wave-relative tid in [0, nloads*ws) */
+    rocke_value_t* wavelet_is_math; /* i1: warp_id < n_math_warps             */
+    int wavelet_n_math_warps; /* warp_m * warp_n                        */
+    int wavelet_K_iters; /* ceil(K_gemm / block_k)                 */
+    int wavelet_epi_barriers; /* N_epi: extra barriers epilogue emits    */
+
+    /* Set to true by rocke_conv_emit_kloop_wavelet to tell the build driver
+     * that the epilogue has already been emitted inside the wavelet branches
+     * (it cannot be deferred outside the scf_if_else / exec-mask sections). */
+    bool epilogue_already_emitted;
 
     /* ---- schedule policy ---- */
     rocke_schedule_policy_t schedule; /* SchedulePolicy.for_pipeline(...)        */
@@ -422,6 +483,12 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
  * its run_ping_pong sequencing inline against ctx until that port lands.) */
 void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx);
 
+/* pipeline=="wavelet" branch (Python lines 1539-1797): dedicated load-wave /
+ * math-wave split. Requires ctx->have_wavelet_loaders and the wavelet_* fields
+ * to be populated by rocke_conv_build_ctx_init. Dispatches the WMMA
+ * (scf_if_else) or MFMA (exec-mask) sub-path based on ctx->is_wmma. */
+void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx);
+
 /* ----- epilogue (ctx-driven; reads ctx->final_accs) ----- */
 
 /* The epilogue phase (lines 1349-1377): apply the accumulator epilogue, then
@@ -436,11 +503,11 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      rocke_value_t* const* accs,
                                      int num_accs,
                                      const rocke_warp_grid_t* grid,
-                                     rocke_value_t* d_rsrc);
+                                     rocke_value_t* d_rsrc,
+                                     rocke_value_t* ir_c_K_pw);
 
 /* _emit_direct_epilogue_wmma(b, spec, op, accs[n], warp_m_idx, warp_n_idx, lane,
- * block_m_off, block_n_off, d_rsrc, c0): WMMA per-lane fp16 store via the op's
- * c_layout map + the D descriptor. */
+ * block_m_off, block_n_off, d_rsrc, c0, ir_c_K_pw): WMMA per-lane fp16 store. */
 void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           const rocke_implicit_gemm_conv_spec_t* spec,
                                           const rocke_mmaop_t* op,
@@ -452,16 +519,19 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* block_m_off,
                                           rocke_value_t* block_n_off,
                                           rocke_value_t* d_rsrc,
-                                          rocke_value_t* c0);
+                                          rocke_value_t* c0,
+                                          rocke_value_t* ir_c_K_pw);
 
-/* _emit_cshuffle_epilogue(b, spec, accs[n], grid, d_rsrc): LDS-staged cshuffle
- * store via CShuffleEpilogue.from_grid + the D descriptor addr_fn. */
+/* _emit_cshuffle_epilogue(b, spec, accs[n], grid, d_rsrc, ir_c_K_pw): LDS-staged
+ * cshuffle store via CShuffleEpilogue.from_grid + the D descriptor addr_fn. */
 void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_implicit_gemm_conv_spec_t* spec,
                                        rocke_value_t* const* accs,
                                        int num_accs,
                                        const rocke_warp_grid_t* grid,
-                                       rocke_value_t* d_rsrc);
+                                       rocke_value_t* d_rsrc,
+                                       rocke_value_t* ir_c_K_pw,
+                                       const rocke_mmaop_t* op);
 
 /* ----- driver-internal ctx population (the build prologue, lines 787-1032) ----
  * Splitting the long prologue out of the public entry keeps the glue TU small;

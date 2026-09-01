@@ -42,7 +42,7 @@ KernDb::KernDb(
       compress_fn(compress_fn_),
       decompress_fn(decompress_fn_)
 {
-    if(!is_system && DisableUserDbFileIO)
+    if(disable_file_io)
         return;
 
     if(dbInvalid)

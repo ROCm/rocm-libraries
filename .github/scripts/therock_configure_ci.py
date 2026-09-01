@@ -10,7 +10,11 @@ import json
 import logging
 from pathlib import Path
 import sys
-from therock_matrix import subtree_to_project_map, collect_projects_to_run
+from therock_matrix import (
+    ROCJITSU_RACE_CHECK_SUBTREES,
+    collect_projects_to_run,
+    subtree_to_project_map,
+)
 from typing import Optional, Iterable, List
 import os
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
@@ -151,6 +155,11 @@ THEROCK_CI_PATTERNS = [
     ".github/actions/ci-env/action.yml",
 ]
 
+ROCJITSU_RACE_CHECK_PATTERNS = [
+    ".github/workflows/therock-rocjitsu-race-check-linux.yml",
+    ".github/scripts/run_rocjitsu_hipblaslt_race_check.sh",
+]
+
 
 def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> bool:
     if paths is None:
@@ -158,10 +167,21 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
     return matches_paths(paths, THEROCK_CI_PATTERNS)
 
 
+def check_for_rocjitsu_race_check_file(paths: Optional[Iterable[str]]) -> bool:
+    if paths is None:
+        return False
+    return matches_paths(paths, ROCJITSU_RACE_CHECK_PATTERNS)
+
+
 def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
     repo_config_path = Path(SCRIPT_DIR / ".." / "repos-config.json")
     config = load_repo_config(str(repo_config_path))
-    valid_prefixes = get_valid_prefixes(config)
+    # repos-config.json only registers subtrees that sync with a standalone
+    # upstream repo, so in-tree-only projects never appear there. The build
+    # matrix is the authoritative list of what CI knows how to build, so union
+    # the two. Without this, a matrix project missing from repos-config.json is
+    # reachable only through a `test:` label and its file changes run no CI.
+    valid_prefixes = get_valid_prefixes(config) | set(subtree_to_project_map)
     matched_subtrees = find_matched_subtrees(paths, valid_prefixes)
     return matched_subtrees
 
@@ -183,16 +203,28 @@ def select_build_runner(platform: str) -> str:
 
 
 def retrieve_projects(args):
+    # by default, we select standard tests
+    test_type = "standard"
+
+    # Skip CI entirely for draft PRs so repeated work-in-progress pushes don't
+    # burn full Linux/Windows build/test capacity. Checked first (before
+    # diffing modified paths) so this stays cheap. The setup job itself still
+    # runs to completion and succeeds rather than being skipped, so the
+    # existing "{platform}_projects != '[]'" gate on the build/test jobs (and
+    # the required TheRock CI Summary check) don't need any extra
+    # skip-cascade handling.
+    if args.get("is_pull_request") and args.get("is_draft"):
+        logging.info("Pull request is a draft, skipping CI")
+        return [], test_type
+
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
 
-    # by default, we select standard tests
-    test_type = "standard"
-
     # Variables to track if labels override defaults
     label_projects = []
     label_test_type = None
+    pr_labels = []
 
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
@@ -218,7 +250,8 @@ def retrieve_projects(args):
             logging.info("`skip-therockci` label was added, skipping CI")
             return [], test_type
 
-    subtrees = get_changed_path_projects(modified_paths)
+    direct_subtrees = list(get_changed_path_projects(modified_paths))
+    subtrees = list(direct_subtrees)
 
     # If test: labels are present (only for pull requests), add those projects to the build/test list
     if label_projects and args.get("is_pull_request"):
@@ -232,9 +265,33 @@ def retrieve_projects(args):
                 if mapped_project == project:
                     label_subtrees.append(subtree)
                     break  # Only need one representative subtree per project
+        if "test:hipblaslt" in pr_labels:
+            # The generic BLAS representative may be a different subtree.
+            # Preserve the explicit hipBLASLt request for rocjitsu selection.
+            label_subtrees.append("projects/hipblaslt")
 
         # Combine file-based detection with label-based selection
         subtrees = list(set(subtrees + label_subtrees))
+
+    rocjitsu_race_check_file_changed = bool(
+        args.get("is_pull_request")
+        and check_for_rocjitsu_race_check_file(modified_paths)
+    )
+    if rocjitsu_race_check_file_changed:
+        # Sidecar-owned files must select the hipBLASLt product row so there is
+        # a build artifact for the sidecar to consume.
+        subtrees = list(set(subtrees).union(ROCJITSU_RACE_CHECK_SUBTREES))
+
+    # Preserve why the sidecar was selected before shared workflow changes
+    # expand the ordinary build/test matrix to every project.
+    run_rocjitsu_race_check = bool(
+        args.get("is_pull_request")
+        and (
+            ROCJITSU_RACE_CHECK_SUBTREES.intersection(direct_subtrees)
+            or "test:hipblaslt" in pr_labels
+            or rocjitsu_race_check_file_changed
+        )
+    )
 
     if args.get("is_workflow_dispatch"):
         if args.get("input_projects") == "all":
@@ -259,7 +316,9 @@ def retrieve_projects(args):
         subtrees = list(subtree_to_project_map.keys())
         test_type = "comprehensive"
 
-    project_to_run = collect_projects_to_run(subtrees)
+    project_to_run = collect_projects_to_run(
+        subtrees, run_rocjitsu_race_check=run_rocjitsu_race_check
+    )
 
     return project_to_run, test_type
 
@@ -286,6 +345,7 @@ if __name__ == "__main__":
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
     args["is_nightly"] = github_event_name == "schedule"
+    args["is_draft"] = os.environ.get("IS_DRAFT", "false").lower() == "true"
 
     args["pr_labels"] = os.environ.get("PR_LABELS", '{"labels": []}')
 

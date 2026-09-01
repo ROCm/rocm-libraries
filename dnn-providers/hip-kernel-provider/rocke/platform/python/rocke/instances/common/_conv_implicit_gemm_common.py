@@ -20,12 +20,15 @@ What lives here
   ``_emit_frag_smem_load``, ``_apply_accumulator_epilogue``,
   ``_choose_load_vec_for`` — the LDS-load + MFMA emission plumbing reused by
   both the forward and wgrad K-loop bodies.
+* Wavelet pipeline helpers: :func:`compute_wavelet_epi_barriers`,
+  :func:`build_wavelet_loaders`, :func:`emit_wavelet_kloop` — shared by
+  forward, wgrad, and dgrad wavelet (gfx1250/WMMA) K-loop emission.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from ...core.ir import (
     BF16,
@@ -178,6 +181,21 @@ class ConvProblem:
         return z * self.Y * self.X * self.cpg
 
     @property
+    def is_pointwise(self) -> bool:
+        """True when the conv reduces to an explicit GEMM (1x1 kernel, stride 1, no pad)."""
+        hw = (
+            self.Y == 1
+            and self.X == 1
+            and self.sH == 1
+            and self.sW == 1
+            and self.pH == 0
+            and self.pW == 0
+        )
+        if not self.is_3d:
+            return hw
+        return hw and self.Z == 1 and self.sD == 1 and self.pD == 0
+
+    @property
     def flops(self) -> int:
         return 2 * self.M * self.N_gemm * self.K_gemm * self.groups
 
@@ -235,6 +253,56 @@ class ConvAccumulatorEpilogue:
 # ---------------------------------------------------------------------
 # Descriptor builders
 # ---------------------------------------------------------------------
+
+
+def _a_channel_decode(p: ConvProblem, *, is_3d: bool) -> List:
+    """Channel-decode transforms for A's ``k_gemm`` unmerge.
+
+    For ``groups == 1`` this is the historical single ``unmerge`` of the
+    contraction index ``k`` into the spatial-filter coords plus the full input
+    channel ``c`` (``dims=[.., Y, X, C]``) — byte-identical to the pre-groups
+    kernel.
+
+    For ``groups > 1`` (grouped / cardinality-grouped conv) the contraction
+    index only spans the *per-group* channels ``cpg = C / groups``, so ``k``
+    unmerges into ``c_in_group`` (``dims=[.., Y, X, cpg]``) and an affine
+    ``embed`` recovers the absolute NHWC channel
+    ``c = group * cpg + c_in_group`` from the extra ``group`` upper coord
+    threaded in by the caller's block-z index. This mirrors CK Tile's
+    grouped-conv per-group ``C_`` slab: the descriptor stays NHWC
+    (``C = total``) and the group selects the ``[g*cpg, (g+1)*cpg)`` slab.
+    ``group`` is supplied at ``A_desc.offset(..., group=g)`` for the grouped
+    path only, so ``upper_names`` gains ``group`` exactly when ``groups > 1``.
+
+    ``embed`` (not ``merge``) is used deliberately: it is one of the transform
+    kinds already mirrored in the C++ engine, so the grouped descriptor lowers
+    byte-identically in both engines without adding a new C++ transform kind.
+    The ``0 <= c < C`` bound it emits is always true here (``group < groups`` and
+    ``c_in_group < cpg``) and costs only a redundant compare on the grouped path.
+    """
+    if p.groups > 1:
+        if is_3d:
+            unmerge_into = ["z", "y", "x", "c_in_group"]
+            unmerge_dims = [p.Z, p.Y, p.X, p.cpg]
+        else:
+            unmerge_into = ["y", "x", "c_in_group"]
+            unmerge_dims = [p.Y, p.X, p.cpg]
+        return [
+            unmerge_magic("k", into=unmerge_into, dims=unmerge_dims),
+            embed(
+                upper=["group", "c_in_group"],
+                into="c",
+                strides=[p.cpg, 1],
+                offset=0,
+                lo=0,
+                hi=p.C,
+            ),
+        ]
+    if is_3d:
+        return [
+            unmerge_magic("k", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C])
+        ]
+    return [unmerge_magic("k", into=["y", "x", "c"], dims=[p.Y, p.X, p.C])]
 
 
 def make_a_descriptor(
@@ -312,7 +380,7 @@ def make_a_descriptor(
                 lo=0,
                 hi=p.Wi,
             ),
-            unmerge_magic("k", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C]),
+            *_a_channel_decode(p, is_3d=True),
             pad("z", lo=0, hi=p.Z),
             pad("y", lo=0, hi=p.Y),
             pad("x", lo=0, hi=p.X),
@@ -345,7 +413,7 @@ def make_a_descriptor(
                 lo=0,
                 hi=p.Wi,
             ),
-            unmerge_magic(upper="k", into=["y", "x", "c"], dims=[p.Y, p.X, p.C]),
+            *_a_channel_decode(p, is_3d=False),
             # pad('y'/'x'): guard against partial K-tile overruns into adjacent weight rows.
             pad("y", lo=0, hi=p.Y),
             pad("x", lo=0, hi=p.X),
@@ -472,3 +540,225 @@ def _choose_load_vec_for(
     Thin adapter over the shared :func:`rocke.helpers.spec.choose_load_vec`."""
     elem_bytes = {"fp16": 2, "bf16": 2, "fp32": 4}.get(dtype_a, 2)
     return choose_load_vec(tile_m, tile_n, tile_k, block_size, elem_bytes=elem_bytes)
+
+
+# ---------------------------------------------------------------------
+# Wavelet pipeline helpers (gfx1250/WMMA load/math wave specialization)
+# ---------------------------------------------------------------------
+
+
+def compute_wavelet_epi_barriers(epilogue: str, cshuffle_no_alias: bool) -> int:
+    """Return the number of barriers the epilogue emits in the math branch.
+
+    The load branch must mirror this count with bare ``b.sync()`` calls so
+    the total barrier sequence is bit-identical in both branches (a hardware
+    requirement for correct barrier pairing on gfx1250).
+
+    Values:
+      ``"default"``       → 0 (direct per-lane stores, no LDS staging).
+      ``"cshuffle"``      → ``CShuffleEpilogue.compute_barrier_count(...)``
+                            (3 for normal alias, 1 for no_alias).
+    """
+    if epilogue == "cshuffle":
+        from ...helpers.epilogues import CShuffleEpilogue
+
+        return CShuffleEpilogue.compute_barrier_count(
+            no_alias=cshuffle_no_alias, war_barriers=2
+        )
+    return 0
+
+
+def build_wavelet_loaders(
+    num_load_waves: int,
+    wave_size: int,
+    block_m: int,
+    block_n: int,
+    block_k: int,
+    load_vec_a: int,
+    load_vec_b: int,
+    ir_dtype_a: Type,
+    ir_dtype_b: Type,
+    vector_axis_b: str = "col",
+):
+    """Create the load-wave :class:`~rocke.helpers.loads.CoalescedTileLoader` pair.
+
+    Load waves handle all DRAM→register→LDS transfers in the wavelet pipeline.
+    Their block_size is ``num_load_waves * wave_size`` (not the math-wave
+    block_size), so the per-thread chunk arithmetic is sized correctly for the
+    smaller load-only thread group.
+
+    ``vector_axis_b`` controls the vectorisation axis for the B loader (default
+    ``"col"`` for fwd/wgrad; pass ``axis_b`` from dgrad when it uses ``"row"``).
+
+    Returns ``(a_wavelet_loader, b_wavelet_loader)``.
+    """
+    from ...helpers.loads import CoalescedTileLoader
+
+    _load_threads = num_load_waves * wave_size
+
+    _vec_a = CoalescedTileLoader.choose_vec(
+        tile_rows=block_m,
+        tile_cols=block_k,
+        block_size=_load_threads,
+        max_vec=load_vec_a,
+    )
+    a_wavelet_loader = CoalescedTileLoader(
+        tile_rows=block_m,
+        tile_cols=block_k,
+        block_size=_load_threads,
+        load_vec=_vec_a,
+        elem_dtype=ir_dtype_a,
+    )
+
+    _vec_b = CoalescedTileLoader.choose_vec(
+        tile_rows=block_n,
+        tile_cols=block_k,
+        block_size=_load_threads,
+        max_vec=load_vec_b,
+        vector_axis=vector_axis_b,
+    )
+    b_wavelet_loader = CoalescedTileLoader(
+        tile_rows=block_n,
+        tile_cols=block_k,
+        block_size=_load_threads,
+        load_vec=_vec_b,
+        elem_dtype=ir_dtype_b,
+        vector_axis=vector_axis_b,
+    )
+    return a_wavelet_loader, b_wavelet_loader
+
+
+def emit_wavelet_kloop(
+    b: IRBuilder,
+    *,
+    warp_id: Value,
+    tid: Value,
+    n_math_warps: int,
+    math_block_size: int,
+    K_iters: int,
+    block_k: int,
+    k_lo: Value,
+    A_smem: Value,
+    B_smem: Value,
+    a_wavelet_loader,
+    b_wavelet_loader,
+    a_descriptor: Callable,
+    b_descriptor: Callable,
+    a_rsrc: Value,
+    b_rsrc: Value,
+    k_off_capture: List,
+    accs: List,
+    emit_mfma_phase: Callable,
+    emit_epilogue_fn: Callable,
+    epi_barriers: int,
+    k_lo_is_zero: bool = False,
+) -> None:
+    """Emit the wavelet K-loop via ``scf_if_else`` for gfx1250/WMMA.
+
+    Implements the CK Tile PR #8009 load/math wave-specialization pattern:
+
+    * Math waves ``[0, n_math_warps)`` run WMMA exclusively (LDS reads + MMA +
+      epilogue).
+    * Load waves ``[n_math_warps, total_warps)`` run DRAM→register fetch +
+      LDS write exclusively.
+
+    Barrier protocol (must be bit-identical in both branches)::
+
+        MATH: barrier_0
+              for i in 0..K-2:
+                WMMA(LDS)
+                barrier_A   ← math done reading LDS
+                barrier_B   ← wait for load to write next tile
+              WMMA(LDS)     ← tail, no barriers
+              epilogue      ← emits epi_barriers bare syncs
+
+        LOAD: fetch tile 0 → regs
+              store regs → LDS
+              barrier_0
+              for i in 0..K-2:
+                fetch tile i+1 → regs   ← overlaps math WMMA
+                barrier_A               ← wait for math to release LDS
+                store regs → LDS
+                barrier_B               ← signal LDS ready
+              for _ in range(epi_barriers):
+                barrier
+
+    ``emit_epilogue_fn(final_accs)`` is called in the math branch after the
+    tail WMMA; it must emit exactly ``epi_barriers`` barriers internally.
+    ``k_off_capture`` is a ``[value]`` list shared with the descriptor closures.
+    ``k_lo`` is the slice-start offset (0 for split_k=1, nonzero for split_k>1).
+    ``tid`` is the pre-computed ``thread_id_x()`` SSA value from ``WarpGrid.bind()``;
+    passing it avoids emitting a second ``thread_id_x`` instruction.
+    ``k_lo_is_zero`` signals that ``k_lo`` is the constant zero so offset arithmetic
+    can use bare ``b.const_i32(it * block_k)`` instead of ``b.add(k_lo, ...)``,
+    preserving byte-identity with the original forward-conv inline wavelet code.
+    """
+    c_nmath = b.const_i32(n_math_warps)
+    warp_id_s = b.readfirstlane(warp_id)
+    is_math = b.cmp_lt(warp_id_s, c_nmath)
+
+    load_tid = b.sub(tid, b.const_i32(math_block_size))
+
+    def _wavelet_fetch(k_off: Value):
+        k_off_capture[0] = k_off
+        a_f = a_wavelet_loader.fetch(
+            b, tid=load_tid, descriptor=a_descriptor, rsrc=a_rsrc
+        )
+        b_f = b_wavelet_loader.fetch(
+            b, tid=load_tid, descriptor=b_descriptor, rsrc=b_rsrc
+        )
+        return a_f, b_f
+
+    def _wavelet_store(a_f, b_f):
+        a_wavelet_loader.store_fetched(b, smem_dst=A_smem, fetched=a_f)
+        b_wavelet_loader.store_fetched(b, smem_dst=B_smem, fetched=b_f)
+
+    def _k_at(it: int) -> Value:
+        """Return the k offset SSA value for tile iteration ``it``.
+
+        When ``k_lo_is_zero`` (forward-conv path where split_k is always 1):
+          - emit bare ``b.const_i32(it * block_k)`` — no add instruction, byte-identical
+            to the original inline wavelet code.
+        Otherwise (wgrad/dgrad with dynamic k_lo from split-K slice):
+          - ``it == 0`` → return ``k_lo`` directly.
+          - ``it > 0``  → emit ``k_lo + it*block_k``.
+        """
+        if k_lo_is_zero:
+            return b.const_i32(it * block_k)
+        if it == 0:
+            return k_lo
+        return b.add(k_lo, b.const_i32(it * block_k))
+
+    with b.scf_if_else(is_math) as (math_ctx, load_ctx):
+
+        with math_ctx:
+            current_accs = [v for _, v in accs]
+            b.sync()  # barrier_0
+
+            for it in range(K_iters - 1):
+                k_off_capture[0] = _k_at(it)
+                current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+                b.sync()  # barrier_A
+                b.sync()  # barrier_B
+
+            k_off_capture[0] = _k_at(K_iters - 1)
+            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+            emit_epilogue_fn(current_accs)
+
+        with load_ctx:
+            a_regs, b_regs = _wavelet_fetch(k_lo)
+            b.s_waitcnt(vmcnt=0)
+            _wavelet_store(a_regs, b_regs)
+            b.s_waitcnt(lgkmcnt=0)
+            b.sync()  # barrier_0
+
+            for it in range(K_iters - 1):
+                a_regs, b_regs = _wavelet_fetch(_k_at(it + 1))
+                b.sync()  # barrier_A
+                b.s_waitcnt(vmcnt=0)
+                _wavelet_store(a_regs, b_regs)
+                b.s_waitcnt(lgkmcnt=0)
+                b.sync()  # barrier_B
+
+            for _ in range(epi_barriers):
+                b.sync()

@@ -20,9 +20,9 @@ graph test runs against every engine** — see
 # Superbuild — plugin discovery is automatic
 ./bin/hipdnn_integration_tests
 
-# Enable data-driven bundle/sweep tests — opt-in at runtime during rollout,
-# see "Bundles are opt-in at runtime" below
-./bin/hipdnn_integration_tests --allow-bundles
+# Bundle/sweep tests run by default. Turn them off to run only the C++ tests
+# compiled into the binary — see "Bundles are the CI driver" below
+./bin/hipdnn_integration_tests --no-bundles
 ```
 
 ## Two Ways to Test a Graph
@@ -50,17 +50,19 @@ There are two mechanisms for testing that a graph runs correctly on an engine.
 > pass-by-value semantics. See
 > [C++ Integration Tests](#c-integration-tests-history--when-to-use).
 
-### Bundles are opt-in at runtime (for now)
+### Bundles are the CI driver
 
-"Default" above is about **authoring**: write new graph-verification tests as
-bundles, not C++. It is not yet true of **execution**: `--allow-bundles` (or
-`HIPDNN_TEST_ALLOW_BUNDLES=1`) gates whether any registered bundle actually
-runs, and none of the three providers' `add_external_integration_test_target()`
-CMake calls pass it yet (see [Provider Integration](#provider-integration)) —
-so bundle tests do not currently run in the wired-up provider CI checks, only
-in local/manual invocations and the migration pipeline. Pass `--allow-bundles`
-yourself to exercise bundles locally; flipping it on in provider CI wiring is
-pending validation per engine.
+"Default" is true of both **authoring** and **execution**:
+
+- **Execution.** Bundle registration is on by default. `--no-bundles` (or
+  `HIPDNN_TEST_ALLOW_BUNDLES=0`) is the opt-out, leaving only the C++ tests
+  compiled into the binary.
+- **Build.** The C++ graph tests under `src/integration-tests/` no longer build
+  by default: they are gated behind `-DBUILD_CPP_GRAPH_TESTS=ON`, which is
+  `OFF` unless a developer opts in on their branch. So the provider CI checks
+  run bundles and nothing else.
+- **Authoring.** New graph-verification coverage must be a bundle. CMake
+  enforces this — see [Adding a C++ test](#adding-a-c-test-the-cmake-rule).
 
 ## Bundle Formats: Single-Graph vs Template-Sweep
 
@@ -223,9 +225,9 @@ The mode is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE
 | `cpu` | compute the reference on the CPU ref executor |
 
 Golden data is optional: `--verification-mode gpu` (or `cpu`) runs the bundle
-graphs without any DVC pull. Bundle registration itself is gated on
-`--allow-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=1`); without it, only the C++
-tests run.
+graphs without any DVC pull. Bundle registration is on by default; pass
+`--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
+that were compiled into the binary.
 
 ## Test Tiers
 
@@ -239,9 +241,8 @@ tests (via GTest prefixes) and to bundles (via the `{Tier}` path segment).
 | Comprehensive | `Comprehensive` | `comprehensive/` | Nightly | 3600s (60 min) |
 | Full | `Full` | `full/` | Weekly | 7200s (120 min) |
 
-Timeouts can be overridden per binary via `SMOKE_TIMEOUT`, `STANDARD_TIMEOUT`,
-`COMPREHENSIVE_TIMEOUT`, and `FULL_TIMEOUT` arguments to
-`add_tiered_test_target()`.
+Timeouts are configured per tier via `category_timeouts` in
+[`test_categories.yaml`](test_categories.yaml).
 
 ### Smoke is a catch-all
 
@@ -436,7 +437,8 @@ cannot express. The remaining C++ tests live in two places:
 
 - `src/integration-tests/{op}/` — shared cross-provider C++ tests built into
   `hipdnn_integration_tests` (conv, matmul, sdpa, batchnorm, layernorm,
-  rmsnorm, reduction, pointwise).
+  rmsnorm, reduction, pointwise). Most of these are graph tests and are
+  **not built by default** — see below.
 - `<provider>/integration_tests/` — provider-local C++ tests (e.g.
   `miopen_plugin_integration_tests`) for behavior specific to one plugin.
 
@@ -461,6 +463,46 @@ into the bundle tree — see ["Quick path: convert one existing C++
 test"](migration-scripts/README.md#quick-path-convert-one-existing-c-test-no-full-pipeline-needed)
 for the exact two-step commands. Don't add another parameterized
 instantiation to the C++ test instead.
+
+### Adding a C++ test: the CMake rule
+
+The rule above is enforced by
+[`src/integration-tests/CMakeLists.txt`](src/integration-tests/CMakeLists.txt).
+Every `.cpp` under `src/integration-tests/` must be registered through exactly
+one of two functions; a file registered through neither fails the configure
+step as an *orphan*, so a new C++ test cannot slip into CI unnoticed and a
+`target_sources()` call cannot quietly bypass the gate.
+
+| Function | Builds when | Use for |
+|---|---|---|
+| `add_cpp_graph_test_sources(...)` | only `-DBUILD_CPP_GRAPH_TESTS=ON` | C++ graph-verification tests (the legacy style) |
+| `add_always_built_test_sources(...)` | always | tests that have no bundle equivalent by construction |
+
+`add_always_built_test_sources()` additionally requires the file to be listed
+in `HIPDNN_IT_ALWAYS_BUILT_SOURCES` at the top of that same CMakeLists — a
+central, reviewable edit — so exempting a test from the bundle-first rule
+cannot happen inside a leaf directory. Adding a file there without listing it
+is a `FATAL_ERROR` naming the file and pointing at bundles.
+
+So, in practice:
+
+- **New graph coverage** → add a bundle under `integration-test-bundles/`. Do
+  not add a C++ file at all.
+- **New non-graph test** (error path, API contract, round-trip, determinism) →
+  `add_always_built_test_sources()` plus an entry in
+  `HIPDNN_IT_ALWAYS_BUILT_SOURCES` with a comment saying why it can't be a
+  bundle.
+- **Debugging / bisecting against the bundle harness** → build your branch with
+  `-DBUILD_CPP_GRAPH_TESTS=ON` to get the existing C++ graph tests back. They
+  register under the `Smoke/*` GTest prefix that the provider
+  `test_categories_integration.yaml` files still match, so they pick up CTest
+  labels normally. Keep that pattern in the YAMLs even on a default `OFF`
+  build: the always-built tests (`Smoke/IntegrationConvFwdSerializeRoundTripFp32`,
+  `Smoke/IntegrationGpuResampleForward*`) register under it too.
+
+One op is still exempt as migration debt: `resample/` has no bundles yet, so
+`IntegrationGpuResampleForward.cpp` stays always-built rather than dropping the
+op's only coverage. Remove it from the allow-list once its bundles land.
 
 ## Adding a New Reference-Executor Operation
 
@@ -487,7 +529,7 @@ tests/
 Register the test binary in `tests/CMakeLists.txt`:
 
 ```cmake
-add_tiered_test_target(hipdnn_my_new_op_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_integration_test_target(hipdnn_my_new_op_tests ${CMAKE_CURRENT_BINARY_DIR})
 ```
 
 ### Step 2 — Shape catalog
@@ -553,7 +595,8 @@ for the full workflow and tooling reference.
 | Symptom | Fix |
 |---------|-----|
 | `Engine 'X' is not loaded` | Pass `--test-article /path/to/plugin.so`, or run from a superbuild |
-| Bundle tests don't run | Pass `--allow-bundles` (or set `HIPDNN_TEST_ALLOW_BUNDLES=1`) |
+| Bundle tests don't run | Check for `--no-bundles` / `HIPDNN_TEST_ALLOW_BUNDLES=0`; otherwise the data dir is missing (see the `Bundle tests are enabled but …` warning in the log) |
+| A C++ graph test doesn't run | Expected — they build only with `-DBUILD_CPP_GRAPH_TESTS=ON`. See [Adding a C++ test](#adding-a-c-test-the-cmake-rule) |
 | Tests can't find bundle data | `dvc pull` the op, or run with `--verification-mode gpu` to skip golden comparison |
 | Smoke tier timing out | A shape is missing its tier prefix — check `INSTANTIATE_TEST_SUITE_P` prefixes |
 | `No tests matched the filter` | Use a single `-` for negative filters: `-Standard*:Comprehensive*:Full*` |
