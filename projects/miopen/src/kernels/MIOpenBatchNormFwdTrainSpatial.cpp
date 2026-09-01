@@ -1011,7 +1011,123 @@ extern "C" __global__ void __launch_bounds__(
                                        mio_bn_config::fp_prec_type alpha,
                                        mio_bn_config::fp_prec_type beta)
 {
-    miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.Norm(in, out, scale, bias, alpha, beta);
+    // miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.Norm(in, out, scale, bias, alpha, beta);
+    using FpType = mio_bn_config::fp_type;
+    using FpType_C = mio_bn_config::fp_c_type;
+    using FpLsType = mio_bn_config::fp_ls_type;
+    using FpPrecType = mio_bn_config::fp_prec_type;
+    using FpPrecType_C = mio_bn_config::fp_prec_c_type; 
+    using FpPrecLsType = mio_bn_config::fp_prec_ls_type;
+    using FpAccumType = mio_bn_config::fp_accum_type;
+    using FpAccumCType = mio_bn_config::fp_accum_c_type; 
+                
+    unsigned int xstride = mio_config::layout_nhwc ? 1 : mio_bn_config::hw;
+    unsigned int ystride = mio_config::layout_nhwc ? mio_bn_config::c : 1;
+
+    unsigned int xgrp_id = blockIdx.x;
+    unsigned int ygrp_id = blockIdx.y;
+    unsigned int zgrp_id = blockIdx.z;
+
+    unsigned int xgrp_sz = mio_bn_config::launch_dim.grp0;
+    unsigned int ygrp_sz = mio_bn_config::launch_dim.grp1;
+    unsigned int zgrp_sz = mio_bn_config::launch_dim.grp2;
+
+    unsigned int xlid = threadIdx.x;
+    unsigned int ylid = threadIdx.y;
+    unsigned int zlid = threadIdx.z;
+
+    unsigned int xgid = xgrp_id * xgrp_sz + xlid;
+    unsigned int ygid = ygrp_id * ygrp_sz + ylid;
+    unsigned int zgid = zgrp_id * zgrp_sz + zlid;
+
+    unsigned int index;
+
+    FpPrecType_C mean;
+    FpPrecType_C invVariance;
+    FpPrecLsType inhat; // this is a float4 when not vectorizing; for FPMIX FpPrecC is float,
+                        // FpType is __half
+    FpPrecType_C pvt_scale;
+    FpPrecType_C pvt_bias;
+    FpLsType value;
+
+    __shared__ FpPrecType_C lcl_bias[mio_bn_config::launch_dim.grp0];
+    __shared__ FpPrecType_C lcl_scale[mio_bn_config::launch_dim.grp0];
+    __shared__ FpPrecType_C lcl_mean[mio_bn_config::launch_dim.grp0];
+    __shared__ FpPrecType_C lcl_ivar[mio_bn_config::launch_dim.grp0];
+
+    if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
+        return;
+
+    // #4 apply the normalization :: x_hat = (x_i - mean) / sqrt(variance_accum + epsilon)
+    if(ylid == 0 && zlid == 0)
+    {
+        lcl_scale[xlid] = *((const FpPrecType_C*)(scale + xgid * mio_bn_config::vec_size_x));
+        lcl_bias[xlid]  = *((const FpPrecType_C*)(bias + xgid * mio_bn_config::vec_size_x));
+        lcl_mean[xlid]  = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
+            (const FpType_C*)(out),
+            0,
+            zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
+            ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
+            ystride / mio_bn_config::vec_size_x,
+            xgrp_sz,
+            xgrp_id,
+            xlid,
+            xstride);
+        lcl_ivar[xlid] = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
+            (const FpType_C*)(out),
+            1,
+            zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
+            ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
+            ystride / mio_bn_config::vec_size_x,
+            xgrp_sz,
+            xgrp_id,
+            xlid,
+            xstride);
+    }
+    __syncthreads();
+
+    if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw && zgid < mio_bn_config::n)
+    {
+        mean                    = lcl_mean[xlid];
+        invVariance             = lcl_ivar[xlid];
+        pvt_scale               = lcl_scale[xlid];
+        pvt_bias                = lcl_bias[xlid];
+        unsigned int index_base = zgid * MIO_BN_N_ELEMENTS * MIO_BN_CHW +
+                                    ygid * ystride * mio_bn_config::vec_size_y +
+                                    xgid * xstride * mio_bn_config::vec_size_x;
+
+        // Unroll the loop only when this condition is met.
+        // Using this unrollHint and the static_unroll_count struct replicates this.
+        constexpr unsigned int unrollHint =
+            mio_bn_config::hw > mio_bn_config::loop_unroll_max_hw ? 1 : 2;
+
+        // This method of unrolling is used as opposed to
+        // the struct static_unroll_count due to a bug where
+        // the kernel writes a tensor for the output twice bigger
+        // than it should be, and it repeats values equal to the number of channels
+        // in the examined test cases that were failing.
+
+#if(MIO_BN_HW > MIO_BN_LOOP_UNROLL_MAXHW)
+        for(unsigned int n = 0; n < MIO_BN_N_ELEMENTS; n++)
+#else
+#pragma unroll(2)
+        for(unsigned int n = 0; n < MIO_BN_N_ELEMENTS; n++)
+#endif
+        {
+            index = index_base + n * MIO_BN_CHW;
+            value = *((const FpLsType*)(in + index));
+            inhat = miopen::cast<FpPrecLsType>(value);
+            inhat = (inhat - mean) * invVariance;
+            inhat =
+                miopen::fma(miopen::cast<FpPrecLsType>(pvt_scale), inhat, miopen::cast<FpPrecLsType>(pvt_bias));
+
+            value = miopen::cast<FpLsType>(miopen::batchnorm::activation_op(
+                inhat, miopen::cast<FpPrecLsType>(alpha), miopen::cast<FpPrecLsType>(beta)));
+
+            *((FpLsType*)(out + index)) = value;
+        } // end for(n)
+
+    } // end if(inImgIndex)
 }
 
 extern "C" __global__ void
@@ -1056,8 +1172,133 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
         return;
 
-    miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.FinalMeanVariance(
-        meanvarbuff, INHW, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);
+    using FpType = mio_bn_config::fp_type;
+    using FpType_C = mio_bn_config::fp_c_type;
+    using FpLsType = mio_bn_config::fp_ls_type;
+    using FpPrecType = mio_bn_config::fp_prec_type;
+    using FpPrecType_C = mio_bn_config::fp_prec_c_type; 
+    using FpPrecLsType = mio_bn_config::fp_prec_ls_type;
+    using FpAccumType = mio_bn_config::fp_accum_type;
+    using FpAccumCType = mio_bn_config::fp_accum_c_type; 
+
+
+    // miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.FinalMeanVariance(
+        // meanvarbuff, INHW, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);
+
+
+    
+    variance    = miopen::cast<FpPrecType_C>(0.);
+    invVariance = miopen::cast<FpPrecType_C>(0.);
+    mean        = miopen::cast<FpPrecType_C>(0.);
+
+    unsigned int xgrp_id = blockIdx.x;
+
+    // These values (?grp_sz) cannot be substituted with mio_bn_config::launch_dim.grp? because
+    // the dimensions of the blocks for this kernel may be different from the other
+    // kernels that take part in the operation. Given that the launch dimensions are
+    // rounded up, blockDim would return a consistent value.
+
+    unsigned int xgrp_sz = blockDim.x;
+    unsigned int ygrp_sz = blockDim.y;
+    unsigned int zgrp_sz = blockDim.z;
+
+    unsigned int xlid = threadIdx.x;
+    unsigned int ylid = threadIdx.y;
+    unsigned int zlid = threadIdx.z;
+
+    unsigned int xstride = mio_config::layout_nhwc ? 1 : mio_bn_config::hw;
+    unsigned int ystride = mio_config::layout_nhwc ? mio_bn_config::c : 1;
+
+    commitID = 0;
+    constexpr unsigned int ngrps  = MIO_BN_NGRPS;
+    constexpr unsigned int ngrps2 = MIO_BN_NGRPS2;
+
+    for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
+    {
+        for(unsigned int yoffset = ylid; yoffset < ngrps; yoffset += ygrp_sz)
+        {
+            mean += miopen::batchnorm::loadFromStash<FpPrecType_C>(
+                (FpType_C*)(meanvarbuff),
+                0,
+                mio_bn_config::launch_dim.grp2 * zoffset * MIO_BN_N_ELEMENTS,
+                mio_bn_config::launch_dim.grp1 * yoffset * mio_bn_config::vec_size_y,
+                ystride / mio_bn_config::vec_size_x,
+                xgrp_sz,
+                xgrp_id,
+                xlid,
+                xstride);
+            variance += miopen::batchnorm::loadFromStash<FpPrecType_C>(
+                (FpType_C*)(meanvarbuff),
+                1,
+                mio_bn_config::launch_dim.grp2 * zoffset * MIO_BN_N_ELEMENTS,
+                mio_bn_config::launch_dim.grp1 * yoffset * mio_bn_config::vec_size_y,
+                ystride / mio_bn_config::vec_size_x,
+                xgrp_sz,
+                xgrp_id,
+                xlid,
+                xstride);
+        }
+    }
+
+    // Total workgroup size for final kernel - reused in condition and array declarations
+    constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
+
+    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+                    (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1 ||
+                    (grp_final_total < 64))
+    {
+        __shared__ FpAccumCType lcl_data[2 * grp_final_total];
+
+        miopen::reduction::lds_reduce2_2d(mean,
+                                            variance,
+                                            INHW,
+                                            lcl_data,
+                                            xgrp_sz,
+                                            xlid,
+                                            ylid + zlid * ygrp_sz,
+                                            ygrp_sz * zgrp_sz);
+    }
+    else
+    {
+        miopen::reduction::reduce2<FpPrecType_C, grp_final_total>(
+            mean, variance, static_cast<FpPrecType_C>(INHW), ylid + zlid * ygrp_sz);
+    }
+
+    variance    = miopen::fma(-mean, mean, variance);
+    variance    = miopen::max(variance, miopen::cast<FpPrecType_C>(0.));
+    invVariance = miopen::rsqrt(variance + miopen::cast<FpPrecType_C>(epsilon));
+
+    for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
+    {
+        for(unsigned int yoffset = ylid; yoffset < ngrps; yoffset += ygrp_sz)
+        {
+
+            miopen::batchnorm::storeToStash(mean,
+                            (FpType_C*)(meanvarbuff),
+                            0,
+                            MIO_BN_GRP2 * zoffset * MIO_BN_N_ELEMENTS,
+                            MIO_BN_GRP1 * yoffset * mio_bn_config::vec_size_y,
+                            ystride / mio_bn_config::vec_size_x,
+                            xgrp_sz,
+                            xgrp_id,
+                            xlid,
+                            xstride);
+            miopen::batchnorm::storeToStash(invVariance,
+                            (FpType_C*)(meanvarbuff),
+                            1,
+                            MIO_BN_GRP2 * zoffset * MIO_BN_N_ELEMENTS,
+                            MIO_BN_GRP1 * yoffset * mio_bn_config::vec_size_y,
+                            ystride / mio_bn_config::vec_size_x,
+                            xgrp_sz,
+                            xgrp_id,
+                            xlid,
+                            xstride);
+        }
+    }
+    
+
+
+
     // Save mean and calculate and save running mean
     if(ygid == commitID && zgid == 0)
     {
@@ -1092,7 +1333,106 @@ extern "C" __global__ void __launch_bounds__(
     MIOpenBatchNormFwdTrainSpatialMeanVariance(const mio_bn_config::fp_type* __restrict__ in,
                                                mio_bn_config::fp_type* __restrict__ mvbuff)
 {
-    miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.MeanVariance(in, mvbuff);
+    // miopen::batchnorm::MIOpenBNFwdTrainSpatialVar2{}.MeanVariance(in, mvbuff);
+
+    using FpType = mio_bn_config::fp_type;
+    using FpType_C = mio_bn_config::fp_c_type;
+    using FpLsType = mio_bn_config::fp_ls_type;
+    using FpPrecType = mio_bn_config::fp_prec_type;
+    using FpPrecType_C = mio_bn_config::fp_prec_c_type; 
+    using FpPrecLsType = mio_bn_config::fp_prec_ls_type;
+    using FpAccumType = mio_bn_config::fp_accum_type;
+    using FpAccumCType = mio_bn_config::fp_accum_c_type; 
+
+    
+    unsigned int xgrp_id = blockIdx.x;
+    unsigned int ygrp_id = blockIdx.y;
+    unsigned int zgrp_id = blockIdx.z;
+
+    unsigned int xgrp_sz = mio_bn_config::launch_dim.grp0;
+    unsigned int ygrp_sz = mio_bn_config::launch_dim.grp1;
+    unsigned int zgrp_sz = mio_bn_config::launch_dim.grp2;
+
+    unsigned int xlid = threadIdx.x;
+    unsigned int ylid = threadIdx.y;
+    unsigned int zlid = threadIdx.z;
+
+    unsigned int xgid = xgrp_id * xgrp_sz + xlid;
+    unsigned int ygid = ygrp_id * ygrp_sz + ylid;
+    unsigned int zgid = zgrp_id * zgrp_sz + zlid;
+
+    unsigned int xstride = mio_config::layout_nhwc ? 1 : mio_bn_config::hw;
+    unsigned int ystride = mio_config::layout_nhwc ? mio_bn_config::c : 1;
+
+    unsigned int index;
+
+    FpPrecType_C mean     = miopen::cast<FpPrecType_C>(0.);
+    FpPrecType_C variance = miopen::cast<FpPrecType_C>(0.);
+    FpPrecLsType value;
+
+    if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
+        return;
+
+    if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw && zgid < mio_bn_config::n)
+    {
+        unsigned int index_base = zgid * MIO_BN_N_ELEMENTS * mio_bn_config::chw +
+                                    ygid * ystride * mio_bn_config::vec_size_y +
+                                    xgid * xstride * mio_bn_config::vec_size_x;
+        FpLsType read4;
+        for(unsigned int n = 0; n < MIO_BN_N_ELEMENTS; n++)
+        {
+            index = index_base + n * mio_bn_config::chw;
+            read4 = *((const FpLsType*)(in + index));
+            value = miopen::cast<FpPrecLsType>(read4);
+
+            miopen::batchnorm::_accumulate(mean, value);
+            miopen::batchnorm::_accumulate_mad(variance, value, value);
+        }
+    }
+
+    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+                    (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
+    {
+        __shared__ FpAccumCType lcl_data[2 * mio_bn_config::lds_size];
+        miopen::reduction::lds_reduce2_2d(mean,
+                                            variance,
+                                            miopen::cast<FpAccumType>(1.0),
+                                            lcl_data,
+                                            xgrp_sz,
+                                            xlid,
+                                            ylid + zlid * ygrp_sz,
+                                            ygrp_sz * zgrp_sz);
+    }
+    else
+    {
+        miopen::reduction::reduce2<FpPrecType_C, mio_bn_config::lds_size>(
+            mean, variance, static_cast<FpPrecType_C>(1.0), ylid + zlid * ygrp_sz);
+    }
+
+    if(ylid == 0 && zlid == 0)
+    {
+        miopen::batchnorm::storeToStash(mean,
+                        (FpType_C*)(mvbuff),
+                        0,
+                        zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
+                        ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
+                        ystride / mio_bn_config::vec_size_x,
+                        xgrp_sz,
+                        xgrp_id,
+                        xlid,
+                        xstride);
+        miopen::batchnorm::storeToStash(variance,
+                        (FpType_C*)(mvbuff),
+                        1,
+                        zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
+                        ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
+                        ystride / mio_bn_config::vec_size_x,
+                        xgrp_sz,
+                        xgrp_id,
+                        xlid,
+                        xstride);
+    }
+    
 }
 
 #endif
