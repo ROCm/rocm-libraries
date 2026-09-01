@@ -24,36 +24,44 @@ from uhd_gen.benchmark_log import (
 )
 
 
-def _ok(benchmark: str, kernel: str, min_ms: float, avg_ms: float = None) -> str:
-    return json.dumps(
-        {
-            "event": CANDIDATE_EVENT,
-            "benchmark": benchmark,
-            "kernel": kernel,
-            "pack": "pack-1",
-            "dispatch": "dispatch-1",
-            "status": "ok",
-            "min_ms": min_ms,
-            "avg_ms": avg_ms if avg_ms is not None else min_ms,
-            "stddev_ms": 0.0004,
-            "robust_mean_ms": min_ms,
-            "iters": 7,
-        }
-    )
+def _ok(
+    benchmark: str,
+    kernel: str,
+    min_ms: float,
+    avg_ms: float = None,
+    features: dict | None = None,
+) -> str:
+    record = {
+        "event": CANDIDATE_EVENT,
+        "benchmark": benchmark,
+        "kernel": kernel,
+        "pack": "pack-1",
+        "dispatch": "dispatch-1",
+        "status": "ok",
+        "min_ms": min_ms,
+        "avg_ms": avg_ms if avg_ms is not None else min_ms,
+        "stddev_ms": 0.0004,
+        "robust_mean_ms": min_ms,
+        "iters": 7,
+    }
+    record.update(features or {})
+    return json.dumps(record)
 
 
-def _failed(benchmark: str, kernel: str, reason: str) -> str:
-    return json.dumps(
-        {
-            "event": CANDIDATE_EVENT,
-            "benchmark": benchmark,
-            "kernel": kernel,
-            "pack": "pack-1",
-            "dispatch": "dispatch-1",
-            "status": "failed",
-            "reason": reason,
-        }
-    )
+def _failed(
+    benchmark: str, kernel: str, reason: str, features: dict | None = None
+) -> str:
+    record = {
+        "event": CANDIDATE_EVENT,
+        "benchmark": benchmark,
+        "kernel": kernel,
+        "pack": "pack-1",
+        "dispatch": "dispatch-1",
+        "status": "failed",
+        "reason": reason,
+    }
+    record.update(features or {})
+    return json.dumps(record)
 
 
 def _write_log(path: Path, lines: list[str]) -> Path:
@@ -135,6 +143,7 @@ class TestExtraction:
 
 class TestSchema:
     def test_header_is_the_declared_envelope(self, tmp_path: Path):
+        """A log with no feature keys writes the envelope and nothing else."""
         log = _write_log(tmp_path / "sweep.log", [_ok("g", "k1", 0.02)])
 
         convert([log], tmp_path / "out.csv")
@@ -182,6 +191,123 @@ class TestSchema:
 
         row = _read_csv(tmp_path / "out.csv")[0]
         assert float(row["minTimeMs"]) <= float(row["avgTimeMs"])
+
+
+class TestFeatureColumns:
+    """The columns a UHD is actually fitted against.
+
+    Without them the CSV is timings and identity, and a human has to join every row
+    back to the problem and kernel it measured before anything can be trained.
+    """
+
+    def test_feature_keys_become_columns_carrying_their_values(self, tmp_path: Path):
+        log = _write_log(
+            tmp_path / "sweep.log",
+            [
+                _ok(
+                    "g",
+                    "k1",
+                    0.02,
+                    features={"q.seqlen": 512, "kernel.tile_m": 128,
+                              "kernel.dtype": "fp16"},
+                )
+            ],
+        )
+
+        convert([log], tmp_path / "out.csv")
+
+        with open(tmp_path / "out.csv", encoding="utf-8", newline="") as handle:
+            header = next(csv.reader(handle))
+        assert header[: len(ENVELOPE_COLUMNS)] == list(ENVELOPE_COLUMNS)
+        assert header[len(ENVELOPE_COLUMNS) :] == [
+            "kernel.dtype",
+            "kernel.tile_m",
+            "q.seqlen",
+        ]
+
+        row = _read_csv(tmp_path / "out.csv")[0]
+        assert row["q.seqlen"] == "512"
+        assert row["kernel.tile_m"] == "128"
+        assert row["kernel.dtype"] == "fp16"
+
+    def test_a_value_lands_in_the_row_that_measured_it(self, tmp_path: Path):
+        """Two kernels of one sweep differ only in their features."""
+        log = _write_log(
+            tmp_path / "sweep.log",
+            [
+                _ok("g", "k1", 0.02, features={"kernel.tile_m": 64}),
+                _ok("g", "k2", 0.03, features={"kernel.tile_m": 256}),
+            ],
+        )
+
+        convert([log], tmp_path / "out.csv")
+
+        rows = {row["kernel"]: row for row in _read_csv(tmp_path / "out.csv")}
+        assert rows["k1"]["kernel.tile_m"] == "64"
+        assert rows["k2"]["kernel.tile_m"] == "256"
+
+    def test_records_with_different_feature_keys_still_line_up(self, tmp_path: Path):
+        """A key one row has and another lacks must leave a hole, not a shift.
+
+        Two engines, or two kernels of one engine, declare different KMD fields.
+        Writing each row against its own keys would slide every cell after the gap
+        one column left, which reads as valid data and trains on nonsense.
+        """
+        log = _write_log(
+            tmp_path / "sweep.log",
+            [
+                _ok("g", "k1", 0.02, features={"q.seqlen": 512, "kernel.tile_m": 64}),
+                _ok("g", "k2", 0.03, features={"q.seqlen": 512, "kernel.split_k": 4}),
+            ],
+        )
+
+        convert([log], tmp_path / "out.csv")
+
+        rows = {row["kernel"]: row for row in _read_csv(tmp_path / "out.csv")}
+        assert rows["k1"]["kernel.tile_m"] == "64"
+        assert rows["k1"]["kernel.split_k"] == ""
+        assert rows["k2"]["kernel.split_k"] == "4"
+        assert rows["k2"]["kernel.tile_m"] == ""
+        assert rows["k1"]["q.seqlen"] == rows["k2"]["q.seqlen"] == "512"
+        assert rows["k1"]["minTimeMs"] == "0.02"
+
+    def test_a_failed_pair_keeps_its_features(self, tmp_path: Path):
+        """It is the only evidence the pair was tried; a row with no features
+        cannot be placed in feature space and can only be discarded, which biases
+        the corpus towards kernels that happened to work."""
+        log = _write_log(
+            tmp_path / "sweep.log",
+            [
+                _failed(
+                    "g",
+                    "k2",
+                    "launch-not-timed",
+                    features={"q.seqlen": 512, "kernel.tile_m": 64},
+                )
+            ],
+        )
+
+        convert([log], tmp_path / "out.csv")
+
+        row = _read_csv(tmp_path / "out.csv")[0]
+        assert row["is_valid"] == "False"
+        assert row["minTimeMs"] == ""
+        assert row["q.seqlen"] == "512"
+        assert row["kernel.tile_m"] == "64"
+
+    def test_the_envelope_columns_are_never_mistaken_for_features(
+        self, tmp_path: Path
+    ):
+        """`kernel` is identity; `kernel.dtype` is a feature. One dot apart."""
+        log = _write_log(
+            tmp_path / "sweep.log",
+            [_ok("g", "k1", 0.02, features={"kernel.dtype": "fp16"})],
+        )
+
+        stats = convert([log], tmp_path / "out.csv")
+
+        assert stats.feature_keys == {"kernel.dtype"}
+        assert _read_csv(tmp_path / "out.csv")[0]["kernel"] == "k1"
 
 
 class TestProvenance:

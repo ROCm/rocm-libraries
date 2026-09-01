@@ -54,6 +54,21 @@ ENVELOPE_COLUMNS = (
     "applicability_id",
 )
 
+# What tells a feature key apart from an envelope key in a record. The runtime
+# namespaces every feature it logs (`q.seqlen`, `kernel.tile_m`) and every envelope
+# key is a bare word, so the dot is the whole test. Discovered rather than listed:
+# a sweep over a different operation binds different problem tokens and different KMD
+# fields, and a hardcoded set would silently drop the columns of any op but the one
+# it was written for.
+FEATURE_KEY_MARKER = "."
+
+
+def feature_items(record: dict) -> Iterator[tuple[str, Any]]:
+    """The (key, value) pairs of @p record that name a feature."""
+    for key, value in record.items():
+        if FEATURE_KEY_MARKER in key:
+            yield key, value
+
 
 @dataclass
 class SweepProvenance:
@@ -79,6 +94,10 @@ class ParseStats:
     failed: int = 0
     malformed: int = 0
     problems: set = field(default_factory=set)
+    #: Every feature column the sweep produced. Reported so an operator sees at a
+    #: glance that a log carried nothing to train on, rather than discovering it when
+    #: `train --features` cannot find a column.
+    feature_keys: set = field(default_factory=set)
 
 
 def iter_candidate_records(lines: Iterable[str], stats: ParseStats) -> Iterator[dict]:
@@ -111,7 +130,8 @@ def row_from_record(record: dict, provenance: SweepProvenance) -> dict[str, Any]
 
     A failed candidate keeps its identity and its reason and carries no timings:
     §8.3 rule 6 wants the timing columns empty when `is_valid` is False, so a
-    zero can never be read as a measurement of zero.
+    zero can never be read as a measurement of zero. It keeps its features, though:
+    a pair that could not run is a row the corpus needs placed in feature space.
     """
     succeeded = record.get("status") == "ok"
     row: dict[str, Any] = {
@@ -141,6 +161,11 @@ def row_from_record(record: dict, provenance: SweepProvenance) -> dict[str, Any]
         row["robustMeanMs"] = ""
         row["iters"] = ""
 
+    # Copied through untouched. The runtime logs raw values -- a string feature stays
+    # a string -- and encoding one here would put a second, invisible encoding between
+    # the sweep and the feature extractor that owns the real one (RFC 0019 §7).
+    row.update(feature_items(record))
+
     return row
 
 
@@ -163,26 +188,34 @@ def convert(
             for record in iter_candidate_records(handle, stats):
                 row = row_from_record(record, provenance)
                 stats.problems.add(row["benchmark"])
+                stats.feature_keys.update(key for key, _ in feature_items(record))
                 if row["is_valid"] == "True":
                     stats.valid += 1
                 else:
                     stats.failed += 1
                 rows.append(row)
 
+    # The header is the union across every row, sorted: two kernels of one sweep can
+    # carry different KMD fields, and a row that lacks a key another row has must still
+    # line up under the columns it does have rather than shifting every cell after it.
+    # DictWriter fills the gap with its empty restval.
+    fieldnames = list(ENVELOPE_COLUMNS) + sorted(stats.feature_keys)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(ENVELOPE_COLUMNS))
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
     logger.info(
         "Wrote %d row(s) to %s (%d measured, %d failed, %d problem(s), "
-        "%d malformed line(s) skipped)",
+        "%d feature column(s), %d malformed line(s) skipped)",
         len(rows),
         output_path,
         stats.valid,
         stats.failed,
         len(stats.problems),
+        len(stats.feature_keys),
         stats.malformed,
     )
     return stats

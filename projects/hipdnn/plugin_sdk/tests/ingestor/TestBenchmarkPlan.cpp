@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -87,8 +88,11 @@ private:
 using OraclePlanBuilder = GenericPlanBuilder<StubHandle, StubSettings, OracleContext>;
 
 /// Three kernels with no matchers, so every kernel survives catalog construction and
-/// only the heuristic decides rank.
-std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeThreeKernelStubStateManager()
+/// only the heuristic decides rank. @p graphMatchSymbol selects what graph matching
+/// binds: the fixture default binds nothing, and a test wanting problem tokens in the
+/// log registers its own.
+std::unique_ptr<KernelIngestorStateManager<StubHandle>>
+    makeThreeKernelStubStateManager(const char* graphMatchSymbol = GRAPH_MATCH_SYMBOL)
 {
     MetadataSchema schema;
     schema.id = SCHEMA_ID;
@@ -111,7 +115,7 @@ std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeThreeKernelStubState
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        GRAPH_MATCH_SYMBOL);
+        graphMatchSymbol);
 }
 
 /// With benchmarking off, buildPlan() builds one plain GenericPlan for the ranked front
@@ -918,6 +922,224 @@ TEST(TestIngestorBenchmarkPlan, NothingIsLoggedWhenLoggingIsOff)
     plan.execute(handle, nullptr, 0U, nullptr);
 
     EXPECT_TRUE(candidateRecords(recorder).empty());
+}
+
+/// The feature values a row is trained on (RFC 0019.13 §8.3).
+///
+/// Without them the exported CSV is timings with nothing to fit against, and a human has
+/// to join every row back to the problem and kernel it measured by hand. The keys are the
+/// UHD namespaces minus the `$`, so a `features_signature` entry `"$q.seqlen"` names the
+/// column `q.seqlen` directly.
+
+/// One candidate carrying an explicit payload, so the record's shape is proved without
+/// the builder in the picture.
+std::vector<TestBenchmarkPlan::Candidate> oneCandidateWithFeatures(nlohmann::json features)
+{
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01),
+                          std::make_unique<FakePlan>(64),
+                          testId(0xF0),
+                          testId(0xD0),
+                          std::move(features)});
+    return candidates;
+}
+
+TEST(TestIngestorBenchmarkPlan, ACandidatesFeatureValuesAppearInItsRecordVerbatim)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        oneCandidateWithFeatures({{"q.seqlen", 512}, {"kernel.tile_m", 128},
+                                  {"kernel.dtype", "fp16"}}),
+        handle,
+        {4.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 1U);
+
+    ASSERT_TRUE(records[0].contains("q.seqlen"));
+    EXPECT_TRUE(records[0]["q.seqlen"].is_number_integer())
+        << "a number logged as a string forces every reader to guess how to parse it back";
+    EXPECT_EQ(records[0]["q.seqlen"].get<int64_t>(), 512);
+    EXPECT_EQ(records[0]["kernel.tile_m"].get<int64_t>(), 128);
+
+    ASSERT_TRUE(records[0].contains("kernel.dtype"));
+    EXPECT_TRUE(records[0]["kernel.dtype"].is_string())
+        << "encoding a category to a number here would bake one encoding into the corpus "
+           "that the feature extractor would then have to guess and undo";
+    EXPECT_EQ(records[0]["kernel.dtype"].get<std::string>(), "fp16");
+
+    EXPECT_EQ(records[0]["kernel"], toString(testId(0x01)))
+        << "the envelope's identity must survive the merge";
+}
+
+TEST(TestIngestorBenchmarkPlan, ACandidateWithNoFeaturesLogsExactlyTheRecordItAlwaysDid)
+{
+    // A test double and a direct construction hand over no payload, and neither may see
+    // the record grow a key. Asserted as the whole key set, not as an absence of the two
+    // keys the test above used: a stray "features": {} wrapper would pass that weaker
+    // check and still break every consumer reading columns by name.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    const auto plan = makeDeterministicPlan(std::move(candidates), handle, {4.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 1U);
+
+    std::vector<std::string> keys;
+    for(const auto& entry : records[0].items())
+    {
+        keys.push_back(entry.key());
+    }
+    EXPECT_THAT(keys,
+                ::testing::UnorderedElementsAre("event",
+                                                "benchmark",
+                                                "kernel",
+                                                "pack",
+                                                "dispatch",
+                                                "status",
+                                                "min_ms",
+                                                "avg_ms",
+                                                "stddev_ms",
+                                                "robust_mean_ms",
+                                                "iters"));
+}
+
+TEST(TestIngestorBenchmarkPlan, AFailedCandidateStillCarriesItsFeatures)
+{
+    // A kernel that could not run is a row the corpus needs -- it is the only evidence
+    // that the pair was tried at all, and the winner cache structurally drops it. Without
+    // its features the row cannot be placed in feature space, so it can only be thrown
+    // away, which silently biases the corpus towards kernels that happened to work.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        oneCandidateWithFeatures({{"q.seqlen", 512}, {"kernel.dtype", "fp16"}}),
+        handle,
+        {std::nullopt});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 1U);
+    ASSERT_EQ(records[0]["status"], "failed");
+    EXPECT_EQ(records[0]["q.seqlen"].get<int64_t>(), 512);
+    EXPECT_EQ(records[0]["kernel.dtype"].get<std::string>(), "fp16");
+}
+
+/// Binds two problem tokens of different types, so a record proves both that graph
+/// matching's bindings reach the log and that neither was coerced on the way.
+std::optional<BoundTokens> bindTestProblemTokens(const MatchContext& /*context*/)
+{
+    return BoundTokens{{"seqlen", MetadataValue{int64_t{512}}},
+                       {"layout", MetadataValue{std::string{"nhwc"}}}};
+}
+
+/// Registers @p implementation under @p symbol for the object's lifetime. The shared
+/// fixture's graph matcher binds nothing, and it is used by every other test in the
+/// suite, so this installs a second symbol beside it rather than replacing it.
+class ScopedGraphMatchRegistration
+{
+public:
+    ScopedGraphMatchRegistration(std::string symbol, GraphMatchFn implementation)
+        : _symbol(std::move(symbol))
+    {
+        GraphMatchRegistry::registerSymbol(_symbol, implementation);
+    }
+
+    ~ScopedGraphMatchRegistration()
+    {
+        GraphMatchRegistry::unregisterSymbol(_symbol);
+    }
+
+    ScopedGraphMatchRegistration(const ScopedGraphMatchRegistration&) = delete;
+    ScopedGraphMatchRegistration& operator=(const ScopedGraphMatchRegistration&) = delete;
+
+private:
+    std::string _symbol;
+};
+
+TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsOwnProblemAndKernelFeatures)
+{
+    // The bootstrap case, and the only one that matters: this engine ships no UHD, no
+    // features_signature and no model -- a NativeKernelHeuristic orders the catalog. A
+    // corpus collectable only by a build that already had the model would never produce
+    // the first model.
+    constexpr const char* BOUND_GRAPH_MATCH_SYMBOL
+        = "hipdnn.kernel_ingestor.test.bound_graph_match";
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter forceBenchmarking(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1");
+    const ScopedTestSymbols symbols;
+    const ScopedGraphMatchRegistration boundGraphMatch(BOUND_GRAPH_MATCH_SYMBOL,
+                                                       &bindTestProblemTokens);
+
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const auto manager = makeThreeKernelStubStateManager(BOUND_GRAPH_MATCH_SYMBOL);
+    const auto engine = makeEngineWithKnobs({});
+    const StubDeviceResolver resolver;
+    // Every candidate reports the same time: this asserts what was logged, not who won,
+    // and a constant keeps the sweep off a device.
+    const OraclePlanBuilder builder(
+        engine,
+        *manager,
+        resolver,
+        [](const hipdnn_plugin_sdk::IPlan<StubHandle>&,
+           const StubHandle&,
+           const hipdnnPluginDeviceBuffer_t*,
+           uint32_t,
+           void*) -> std::optional<double> { return 1.0; });
+
+    const TestGraph graph(makeGraphId(0x51));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper invalidConfig(nullptr,
+                                                                                          0);
+    StubSettings settings;
+    builder.initializeExecutionSettings(StubHandle{}, graph, invalidConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    OracleContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(StubHandle{}, graph, invalidConfig, context);
+
+    // StubWorkspaceHandler sizes scratch from BLOCK_SIZE, so the sweep needs a real
+    // buffer: GenericPlan refuses to launch a kernel that asked for one and got null.
+    const StubHandle handle;
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0, workspace.data());
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 3U);
+
+    std::vector<int64_t> blockSizes;
+    for(const auto& record : records)
+    {
+        EXPECT_EQ(record["q.seqlen"].get<int64_t>(), 512)
+            << "the problem tokens graph matching bound must reach the row, spelled the way "
+               "a features_signature entry '$q.seqlen' spells them";
+        EXPECT_EQ(record["q.layout"].get<std::string>(), "nhwc");
+        ASSERT_TRUE(record.contains("kernel.block_size"));
+        blockSizes.push_back(record["kernel.block_size"].get<int64_t>());
+        EXPECT_TRUE(record["kernel.dtype"].is_string());
+    }
+
+    EXPECT_THAT(blockSizes, ::testing::UnorderedElementsAre(64, 64, 256))
+        << "each row must carry the metadata of the kernel it measured, not one kernel's "
+           "copied onto all three";
 }
 
 } // namespace

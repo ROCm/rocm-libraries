@@ -106,6 +106,18 @@ public:
         std::unique_ptr<IPlan<THandle>> plan;
         DescriptorId packId{};
         DescriptorId dispatchId{};
+        /// The feature values of the (problem, kernel) pair this candidate measures,
+        /// merged flat into its log record so an exporter can name a CSV column after
+        /// every key it finds. Flat rather than nested because the keys already carry
+        /// their UHD namespace (`q.<name>`, `kernel.<name>`) and every envelope key is
+        /// dotless, so the two sets cannot collide and no consumer has to flatten.
+        ///
+        /// Handed in, never derived: extracting features needs the graph match and the
+        /// kernel descriptor, and this class deliberately knows about neither (see
+        /// @c benchmarkId below). An empty object leaves the record byte-identical to
+        /// what it was before features existed, which is what a test double or a direct
+        /// construction gets.
+        nlohmann::json features = nlohmann::json::object();
     };
 
     /// Times one execute() of a candidate, returning its elapsed milliseconds or nullopt
@@ -462,13 +474,19 @@ protected:
         HIPDNN_PLUGIN_LOG_INFO(record.dump());
     }
 
-    /// The fields every candidate record carries, however it ended.
+    /// The fields every candidate record carries, however it ended, plus whatever
+    /// features the candidate was handed.
     ///
     /// `event` is the grep handle an exporter selects on; `benchmark` groups the rows of
     /// one sweep, since a process can benchmark several graphs and the lines interleave.
+    ///
+    /// The features go in first and the envelope over the top, so the envelope always
+    /// wins: a payload that somehow carried a `kernel` key would otherwise overwrite the
+    /// row's identity, and the row would be attributed to the wrong kernel in the corpus
+    /// rather than merely carrying a bad column.
     nlohmann::json candidateRecord(const Candidate& candidate) const
     {
-        nlohmann::json record;
+        nlohmann::json record = candidate.features;
         record["event"] = "ingestor.benchmark.candidate";
         record["benchmark"] = _benchmarkId;
         record["kernel"] = toString(candidate.kernelId);
