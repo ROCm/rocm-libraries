@@ -728,10 +728,6 @@ namespace TensileLite
         TensorDescriptor const& metadata   = problem.metadata();
         bool const pointerArrayBatch
             = problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY;
-        if(pointerArrayBatch && problemType.sparse)
-            throw std::invalid_argument("pointer-array batching does not support sparse GEMM");
-        if(pointerArrayBatch && problemType.groupedGemm)
-            throw std::invalid_argument("pointer-array batching does not support grouped GEMM");
 
         auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
             = calculateAutoWGM(problem, hardware, sk.grid);
@@ -739,10 +735,6 @@ namespace TensileLite
             = calculateAutoStaggerU(problem, hardware, sk.grid, autoWGM);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
-        if(pointerArrayBatch && sizeMapping.streamK == 0 && gsu > 1
-           && sizeMapping.globalAccumulation != 2)
-            throw std::invalid_argument(
-                "pointer-array batching with GSU>1 requires MultipleBuffer reduction");
         AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, hardware);
 
         {
