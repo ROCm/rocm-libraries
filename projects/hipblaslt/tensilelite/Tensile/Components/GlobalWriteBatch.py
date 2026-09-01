@@ -391,14 +391,18 @@ class GlobalWriteBatchWriter:
     # drain+barrier before the _emitAdd subtile stores; non-multi-DU emits
     # _emitAdd first.
     isMultiDU = isSubtileMultiDU(self.kernel)
-    drainBiasSav = self.kernel.get("UseSubtileImpl") and \
+    needsBiasSavDrain = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
+    # SBarrier is only needed for multi-DU paths where ds_bpermute from one
+    # sub-iteration can alias LDS banks still being read by bias/SAV loads in
+    # a sibling wave. Single-DU paths use per-element dscnt tracking instead.
+    needsCrossWaveBarrier = needsBiasSavDrain and isMultiDU
     if not isMultiDU:
       self._emitAdd(module)
-    if drainBiasSav:
-      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
-      module.add(SBarrier(comment="sync waves before subtile paired stores"))
+    if needsCrossWaveBarrier:
+      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads (multi-DU only)"))
+      module.add(SBarrier(comment="sync waves before subtile paired stores (multi-DU only)"))
     if isMultiDU:
       self._emitAdd(module)
     self._epilog(module)
@@ -464,12 +468,14 @@ class GlobalWriteBatchWriter:
         waitLoadCnt += self.gateLoadIssued[elementIdx]
         waitLoadCntStrList.append("%d (load Gate)"%self.gateLoadIssued[elementIdx])
       # Calculate local loads
-      # UseSubtileImpl with bias/SAV: skip bias/SAV LDS loads from interleaved
-      # waitcnt and rely on the batch-start barrier for LDS synchronization.
+      # For single-DU subtile paths the batch-start SBarrier was removed; use
+      # per-element dscnt tracking instead. For multi-DU paths the cross-wave
+      # barrier still drains bias/SAV, so skip per-element tracking there.
       subtileBarrierDrains = self.kernel.get("UseSubtileImpl") and \
         (self.parentWriter.states.useBias != DataDirection.NONE or \
          self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
-      if self.parentWriter.states.useBias == DataDirection.READ and not subtileBarrierDrains:
+      needsCrossWaveBarrier = subtileBarrierDrains and isSubtileMultiDU(self.kernel)
+      if self.parentWriter.states.useBias == DataDirection.READ and not needsCrossWaveBarrier:
         waitLocalLoadCnt += self.biasLoadIssued[elementIdx]
         waitLocalLoadCntStrList.append("%d (bias)"%self.biasLoadIssued[elementIdx])
       if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
@@ -477,8 +483,8 @@ class GlobalWriteBatchWriter:
         waitLocalLoadCntStrList.append("%d (scaleAVec)"%self.scaleAVecLoadIssued[elementIdx])
         waitLocalLoadCnt += self.scaleBVecLoadIssued[elementIdx]
         waitLocalLoadCntStrList.append("%d (scaleBVec)"%self.scaleBVecLoadIssued[elementIdx])
-      # Skip scaleAlphaVec when subtileBarrierDrains
-      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel and not subtileBarrierDrains:
+      # Skip scaleAlphaVec only when the cross-wave barrier drains it (multi-DU)
+      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel and not needsCrossWaveBarrier:
         waitLocalLoadCnt += self.scaleAlphaVecLoadIssued[elementIdx]
         waitLocalLoadCntStrList.append("%d (scaleAlphaVec)"%self.scaleAlphaVecLoadIssued[elementIdx])
       # Get vlcnt and dscnt
