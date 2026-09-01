@@ -31,12 +31,30 @@
 
 #include "ModifierSerializer.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
+namespace {
+
+/// Register classes \p inst's attached SSA was built for, which decides how many
+/// slots each operand consumes.
+///
+/// An instruction printed outside a function has no arena to ask, so it falls
+/// back to every liftable class — the answer that predates lift scoping. Printing
+/// is diagnostic, so a wrong guess there misreads a dump rather than the program.
+const RegClassSet& ssaClassesOf(const StinkyInstruction& inst) {
+    static const RegClassSet kAllClasses = RegClassSet::all();
+    const BasicBlock* block = inst.getParentBlock();
+    const Function* function = block == nullptr ? nullptr : block->getParentFunc();
+    return function == nullptr ? kAllClasses : function->ssaArena().liftedClasses();
+}
+
+}  // namespace
+
 //----------------------------------------------------------------------
 // AsmPrinter implementation
 //----------------------------------------------------------------------
@@ -195,7 +213,7 @@ bool AsmPrinter::printsSSA(const StinkyInstruction& inst) const {
 
 void AsmPrinter::printSSAOperandGroup(const StinkyInstruction& inst, const StinkyRegister& reg,
                                       bool isDestination, size_t& cursor) {
-    const size_t units = liftedSSAUnits(reg);
+    const size_t units = liftedSSAUnits(reg, ssaClassesOf(inst));
     const size_t available = isDestination ? inst.getNumSSAResults() : inst.getNumSSAOperands();
 
     if (units == 0) {

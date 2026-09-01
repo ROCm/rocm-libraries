@@ -22,25 +22,22 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
 
 #include "PhiTestFixtures.hpp"
 #include "TestHelpers.hpp"
-#include "stinkytofu/analysis/AnalysisRegistration.hpp"
-#include "stinkytofu/analysis/ssa/SSAAllocation.hpp"
 #include "stinkytofu/core/Function.hpp"
-#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/ssa/AllocationResult.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
-#include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
-#include "stinkytofu/transforms/ssa/ReplayLegacyColoringPass.hpp"
-#include "stinkytofu/transforms/ssa/SSADestruction.hpp"
+#include "stinkytofu/transforms/asm/ra/LegacyColoring.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
+#include "stinkytofu/transforms/asm/ssa/SSADestruction.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -119,6 +116,40 @@ TEST_F(SSADestructionTest, LegacyColoringAssignsEveryValueItsOrigin) {
     }
 }
 
+TEST_F(SSADestructionTest, SuccessfulReplayRecordsRewrittenOperands) {
+    BasicBlock* entry = makeEntry();
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    lift();
+
+    const SSADestructionResult result = destroyAttachedSSA(*func, createLegacyColoring(*func));
+    ASSERT_TRUE(result.ok()) << result.toString();
+    ASSERT_FALSE(result.rewritten.empty());
+    EXPECT_EQ(result.rewritten.front().beforeIdx, result.rewritten.front().afterIdx);
+}
+
+TEST_F(SSADestructionTest, AllocationResultPrintsEveryValueInIdOrder) {
+    BasicBlock* entry = makeEntry();
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    lift();
+
+    // v0 and v1 arrive as live-ins, the add defines v2: three values, all bound.
+    EXPECT_EQ(createLegacyColoring(*func).toString(),
+              "values=3 unassigned=0 lifted=v,s\n%1 v0\n%2 v1\n%3 v2\n");
+}
+
+TEST_F(SSADestructionTest, AllocationResultPrintsAnUnassignedValueAsADash) {
+    BasicBlock* entry = makeEntry();
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    lift();
+
+    // A partial colouring has to be readable, because "which value is missing"
+    // is the question a rejected destruction raises.
+    AllocationResult partial(*func);
+    partial.assign(2, RegKey{RegType::V, 7, RegHalf::NONE});
+
+    EXPECT_EQ(partial.toString(), "values=3 unassigned=2 lifted=v,s\n%1 -\n%2 v7\n%3 -\n");
+}
+
 TEST_F(SSADestructionTest, LiftThenReplayIsAnIdentityTransform) {
     BasicBlock* entry = makeEntry();
     createDsReadB128InBlock(entry, kArch, 4, 0);
@@ -127,7 +158,7 @@ TEST_F(SSADestructionTest, LiftThenReplayIsAnIdentityTransform) {
     const std::string before = physicalIR();
 
     lift();
-    const SSADestructionResult result = replayLegacyColoring(*func);
+    const SSADestructionResult result = destroyAttachedSSA(*func, createLegacyColoring(*func));
 
     ASSERT_TRUE(result.ok()) << result.toString();
     EXPECT_EQ(physicalIR(), before);
@@ -141,7 +172,7 @@ TEST_F(SSADestructionTest, ReplayIsAnIdentityTransformAcrossControlFlow) {
 
     lift();
     ASSERT_GT(blockArgumentCount(*func), 0u);
-    const SSADestructionResult result = replayLegacyColoring(*func);
+    const SSADestructionResult result = destroyAttachedSSA(*func, createLegacyColoring(*func));
 
     ASSERT_TRUE(result.ok()) << result.toString();
     EXPECT_EQ(physicalIR(), before);
@@ -250,7 +281,7 @@ TEST_F(SSADestructionTest, RejectsAGraphThatNoLongerDescribesTheFunction) {
     add->setSrcReg(0, StinkyRegister("v", 9, 1));
     const std::string before = physicalIR();
 
-    const SSADestructionResult result = replayLegacyColoring(*func);
+    const SSADestructionResult result = destroyAttachedSSA(*func, createLegacyColoring(*func));
 
     EXPECT_FALSE(result.ok());
     EXPECT_TRUE(contains(result.toString(), "the function changed after it was lifted"))
@@ -278,50 +309,56 @@ TEST_F(SSADestructionTest, RejectsAnAllocationComputedAgainstAnotherGraph) {
     EXPECT_EQ(physicalIR(), before);
 }
 
-TEST_F(SSADestructionTest, PassReportsAMissingGraph) {
+TEST_F(SSADestructionTest, AScopedLiftLeavesOutOfScopeOperandsUntouched) {
     BasicBlock* entry = makeEntry();
-    createVAddInBlock(entry, kArch, 2, 0, 1);
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
+    mov->addDestReg(StinkyRegister("v", 0, 1));
+    mov->addSrcReg(StinkyRegister("s", 4, 1));
 
-    PassContext passCtx;
-    passCtx.setRemarksEnabled(true);
-    AnalysisManager am;
-    registerAllAnalyses(am);
+    LiftAsmRegistersToSSAOptions options;
+    options.classes = RegClassSet::only(RegType::S);
+    Expected<LiftAttachedSSAResult> lifted = liftAsmRegistersToAttachedSSA(*func, options);
+    ASSERT_TRUE(lifted.hasValue()) << lifted.getError();
 
-    std::ostringstream captured;
-    std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
-    createReplayLegacyColoringPass()->run(*func, passCtx, am);
-    std::cerr.rdbuf(previous);
+    // Move every value this lift produced, which can only be the scalar operand.
+    AllocationResult moved(*func);
+    for (StinkySSAValue* value : func->ssaArena().values()) {
+        ASSERT_TRUE(value->hasPhysicalBinding());
+        const StinkySSAValue::PhysicalBinding& binding = value->physical();
+        moved.assign(value->valueId(), RegKey{binding.type, binding.idx + 10, RegHalf::NONE});
+    }
 
-    const std::string text = captured.str();
-    EXPECT_TRUE(contains(text, "missed: ReplayLegacyColoring")) << text;
-    EXPECT_TRUE(contains(text, "no attached SSA")) << text;
+    const SSADestructionResult result = destroyAttachedSSA(*func, moved);
+
+    ASSERT_TRUE(result.ok()) << result.toString();
+    // The scalar moved; the vector destination is exactly as the producer wrote
+    // it, because an out-of-scope operand contributes no slot to rewrite.
+    EXPECT_TRUE(contains(physicalIR(), "v0 = \"st.v_mov_b32\"(s14)")) << physicalIR();
 }
 
-TEST_F(SSADestructionTest, PassRoundTripsThroughThePassManager) {
+TEST_F(SSADestructionTest, RejectsAnAllocationFromAnotherLiftScope) {
     BasicBlock* entry = makeEntry();
-    createDsReadB128InBlock(entry, kArch, 4, 0);
-    createVAddInBlock(entry, kArch, 8, 4, 5);
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
+    mov->addDestReg(StinkyRegister("v", 0, 1));
+    mov->addSrcReg(StinkyRegister("s", 4, 1));
+
+    LiftAsmRegistersToSSAOptions scalarOnly;
+    scalarOnly.classes = RegClassSet::only(RegType::S);
+    ASSERT_TRUE(liftAsmRegistersToAttachedSSA(*func, scalarOnly).hasValue());
+    const AllocationResult scalarColouring = createLegacyColoring(*func);
+
+    // Re-lift the same program for both classes. The physical program did not
+    // change, so the shape fingerprint still matches and only the scope differs -
+    // but the value IDs now mean something else.
+    ASSERT_TRUE(liftAsmRegistersToAttachedSSA(*func).hasValue());
     const std::string before = physicalIR();
 
-    PassManager pm;
-    registerAllAnalyses(pm.getAnalysisManager());
-    pm.addPass(createLiftAsmRegistersToSSAPass());
-    pm.addPass(createReplayLegacyColoringPass());
-    pm.run(*func);
+    const SSADestructionResult result = destroyAttachedSSA(*func, scalarColouring);
 
-    EXPECT_EQ(physicalIR(), before);
-    EXPECT_FALSE(func->hasAttachedSSA());
-}
-
-TEST_F(SSADestructionTest, PassIsANoOpWithoutAGraph) {
-    BasicBlock* entry = makeEntry();
-    createVAddInBlock(entry, kArch, 2, 0, 1);
-    const std::string before = physicalIR();
-
-    PassContext passCtx;
-    AnalysisManager am;
-    registerAllAnalyses(am);
-    createReplayLegacyColoringPass()->run(*func, passCtx, am);
-
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(contains(result.toString(), "computed against a lift of s but this SSA covers v,s"))
+        << result.toString();
     EXPECT_EQ(physicalIR(), before);
 }
