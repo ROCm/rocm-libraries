@@ -1775,12 +1775,10 @@ class GlobalWriteBatchWriter:
       # otherwise the M-guard branch skips the fmacs and the next N-group stores zeros.
       if isSubtileNonEdge and not self.kernel["GroupLoadStore"]:
         blockIdxN = element[0]
+        # Emit the N-group skip label and its deferred SrdD increment in the same module as the stores.
+        _ngTarget = storeCode if (self.kernel["GroupLoadStore"] or is16bitSubtile) else module
         if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
-          module.add(self._subtileNGroupSkipLabel)
-          self._subtileNGroupSkipLabel = None
-          if self._subtilePendingSrdDInc is not None:
-            module.add(self._subtilePendingSrdDInc)
-            self._subtilePendingSrdDInc = None
+          self._flushNGroupSkipLabel(_ngTarget)
 
       # apply in-bounds exec mask
       if self.edge and not self.kernel["BufferStore"]:
@@ -2214,7 +2212,10 @@ class GlobalWriteBatchWriter:
         #   element 2: tt0=2 (sba=0)   (if MIWaveTile[0]>2)
         #   ...
         # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
-        storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
+
+        # separate `storeCode` module so the whole store body can be wrapped by an interior
+        # fast-path peel (guard-free/mask-free) selected at runtime below.
+        storeCodeModule = storeCode if (self.kernel["GroupLoadStore"] or is16bitSubtile) else module
         if is16bitSubtile:
           tt0 = element[1]  # d0: thread-tile index along M
           # Epilogue (bias/activation) is applied per-element in iteration order.
@@ -2362,11 +2363,73 @@ class GlobalWriteBatchWriter:
             self.storesIssued += 1
 
     # Close the last N-group OOB skip label (if any) opened by _emitSubtileOobGuard.
-    self._finalizeSubtileOobGuards(storeCode if self.kernel["GroupLoadStore"] else module)
+    self._finalizeSubtileOobGuards(storeCode if (self.kernel["GroupLoadStore"] or is16bitSubtile) else module)
     if self.kernel["ProblemType"]["StochasticRounding"]:
       self.parentWriter.vgprPool.checkIn(vgprRND)
 
-    module.add(storeCode)
+    # `storeCode` (built above) is the GUARDED boundary body: per-element M/N OOB branches
+    # plus per-block exec masks.  When the whole wave-group is provably in-bounds (every M
+    # and N block interior) all of that overhead is dead weight.  Emit a runtime test that
+    # branches to a parallel guard-free/mask-free interior body in that case, falling
+    # through to the guarded body otherwise.
+    #
+    # KernelWriter defines SubtileMGuard/SubtileNGuard for every UseSubtileImpl kernel, so the
+    # not-None checks below are defensive rather than selective — tile alignment is a RUNTIME
+    # property and cannot suppress guard emission. An aligned problem still evaluates the
+    # guards; it just passes the interior test and takes the interior body. CompactLoopStore is
+    # the one condition that actually skips the peel (its store increments aren't self-contained).
+    mGuardSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
+    nGuardSgpr = self.parentWriter.states.subtileN16ValidBlocksSgpr
+    # `validM_wave` (clamped row count 0..waveGroupM) is kept alive in this SGPR by
+    # `_emitSubtileGuards` for the exec-mask; use it for a ROW-accurate M interior test
+    # (block-count SubtileMGuard=ceil(rows/MatrixInstM) can't distinguish a partial last block).
+    validMWaveSgpr = self.parentWriter.states.subtileTotalMOffsetSgpr
+    peelInterior = (is16bitSubtile
+                    and not self.kernel["CompactLoopStore"]
+                    and (mGuardSgpr is not None or nGuardSgpr is not None)
+                    and (mGuardSgpr is None or validMWaveSgpr is not None)
+                    and len(self.batchElements) > 0)
+    if peelInterior:
+      maxTt0 = max(e[1] for e in self.batchElements)
+      maxBlockIdxN = max(e[0] for e in self.batchElements)
+      interiorCode = self._buildSubtileInteriorStores()
+      boundaryLabel = Label(self.parentWriter.labels.getNameInc("subtile_peel_boundary"),
+                            "not fully interior -> guarded boundary store body")
+      peelEndLabel = Label(self.parentWriter.labels.getNameInc("subtile_peel_end"),
+                           "end of subtile store peel")
+      peel = Module("subtileInteriorPeel")
+      # Fully interior iff EVERY row/column this batch touches is in-bounds (monotone -> the
+      # largest block covering it is fully valid).  Row/col-accurate (`>= extent`, i.e.
+      # `> extent-1`) so a partial last block never takes the mask-free interior body.
+      if mGuardSgpr is not None:
+        mExtent = (maxTt0 + 1) * self.kernel["MatrixInstM"]  # M rows this batch stores through
+        peel.add(_scmpGtU32(self.parentWriter, sgpr(validMWaveSgpr), mExtent - 1,
+                            comment=f"fully interior in M? (validM_wave >= {mExtent})"))
+        peel.add(SCBranchSCC0(labelName=boundaryLabel.getLabelName(),
+                              comment="M not fully interior -> guarded boundary body"))
+      if nGuardSgpr is not None:
+        if self.parentWriter.states.storeAlign8:
+          # SubtileNGuard = clamped valid-N COLUMN count, so compare in columns.
+          nExtent = (maxBlockIdxN + 1) * 16
+          nCmp = nExtent - 1
+          nComment = f"fully interior in N? (NGuard >= {nExtent})"
+        else:
+          # SubtileNGuard = valid-N BLOCK count; block interior iff count > blockIdxN.
+          nCmp = maxBlockIdxN
+          nComment = f"fully interior in N? (NGuard > {maxBlockIdxN})"
+        peel.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), nCmp,
+                            comment=nComment))
+        peel.add(SCBranchSCC0(labelName=boundaryLabel.getLabelName(),
+                              comment="N not fully interior -> guarded boundary body"))
+      peel.add(interiorCode)
+      peel.add(SBranch(labelName=peelEndLabel.getLabelName(),
+                       comment="interior stores done -> skip guarded boundary body"))
+      peel.add(boundaryLabel)
+      peel.add(storeCode)
+      peel.add(peelEndLabel)
+      module.add(peel)
+    else:
+      module.add(storeCode)
 
     if self.parentWriter.db["CheckStoreC"]>=0:
       useBuffer = self.kernel["BufferStore"]
@@ -2476,6 +2539,18 @@ class GlobalWriteBatchWriter:
 
     return module
 
+  def _flushNGroupSkipLabel(self, targetModule):
+    """Emit the pending N-group end label + its deferred SrdD row-increment into targetModule, then
+    clear them. The label is an M-guard cbranch target and MUST land in the same module as the stores
+    (storeCode for the 16bit paired path) so the branch never crosses a module boundary. No-op when
+    nothing is pending. Single source of truth for this flush (store loop / guard emit / finalize)."""
+    if self._subtileNGroupSkipLabel is not None:
+      targetModule.add(self._subtileNGroupSkipLabel)
+      self._subtileNGroupSkipLabel = None
+    if self._subtilePendingSrdDInc is not None:
+      targetModule.add(self._subtilePendingSrdDInc)
+      self._subtilePendingSrdDInc = None
+
   def _emitSubtileOobGuard(self, targetModule, blockIdxM: int, blockIdxN: int, labelPrefix: str = "subtile_skip_store"):
     """Emit M/N OOB guard branches for UseSubtileImpl NonEdge stores.
 
@@ -2519,12 +2594,7 @@ class GlobalWriteBatchWriter:
     # then every subsequent group is also OOB — no need to test them.
     if guardNSgpr is not None and blockIdxN != self._subtilePrevBlockIdxN:
       # Place the previous N group's end label before starting a new group.
-      if self._subtileNGroupSkipLabel is not None:
-        targetModule.add(self._subtileNGroupSkipLabel)
-        self._subtileNGroupSkipLabel = None
-      if self._subtilePendingSrdDInc is not None:
-        targetModule.add(self._subtilePendingSrdDInc)
-        self._subtilePendingSrdDInc = None
+      self._flushNGroupSkipLabel(targetModule)
       # Create the single end-of-all-stores label on the first N group.
       if self._subtileAllStoresEndLabel is None:
         endLabelName = self.parentWriter.labels.getNameInc("subtile_all_stores_end")
@@ -2570,12 +2640,7 @@ class GlobalWriteBatchWriter:
     Must be called once after all elements have been emitted to close out the last
     N group and anchor the N-cbranch target past all stores.
     """
-    if self._subtileNGroupSkipLabel is not None:
-      targetModule.add(self._subtileNGroupSkipLabel)
-      self._subtileNGroupSkipLabel = None
-    if self._subtilePendingSrdDInc is not None:
-      targetModule.add(self._subtilePendingSrdDInc)
-      self._subtilePendingSrdDInc = None
+    self._flushNGroupSkipLabel(targetModule)
     if self._subtileAllStoresEndLabel is not None:
       targetModule.add(self._subtileAllStoresEndLabel)
       self._subtileAllStoresEndLabel = None
@@ -2692,7 +2757,75 @@ class GlobalWriteBatchWriter:
     module.add(nFullLabel)
     module.add(nMaskDone)
 
-  def _emit16bitSubtilePairedStore(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0) -> Module:
+  def _buildSubtileInteriorStores(self) -> Module:
+    """Guard-free/mask-free interior store body.
+
+    Re-emits the 16bit subtile stores for the current batch WITHOUT `_emitSubtileOobGuard`
+    (no `s_cmp`/`s_cbranch`) and WITHOUT the align8 exec mask (interior blocks yield mask
+    -1), for selection at runtime when the whole wave-group is fully interior.  Mirrors the
+    main store loop's control flow and its DEFERRED SrdD row-increment exactly:
+      - `incrementToNextRow` is a pure function of `addrCalc.rowInc` (no state mutation) and
+        the kernel is CompactLoopStore=False (legacy self-contained increments), so calling
+        it again here is safe and produces an equivalent increment.
+      - the pending inc is flushed at N-group transitions only when the N guard SGPR is set
+        (matching `_emitSubtileOobGuard`), else once at the end (matching
+        `_finalizeSubtileOobGuards`).
+    Only called when guards are set (problem not tile-aligned) — otherwise the baseline
+    body is already guard-free and no peel is emitted.
+    """
+    mod = Module("subtileInteriorStores")
+    prefixOffset = self.parentWriter.states.c.startVgprValu
+    optInc = self.ss.optSrdIncForRow
+    nGuardSet = self.parentWriter.states.subtileN16ValidBlocksSgpr is not None
+    pendingInc = None
+    prevN = -1
+
+    def flushAtTransition(blockIdxN):
+      nonlocal pendingInc, prevN
+      if nGuardSet and blockIdxN != prevN:
+        if pendingInc is not None:
+          mod.add(pendingInc)
+          pendingInc = None
+        prevN = blockIdxN
+
+    for elementIdx, element in enumerate(self.batchElements):
+      tt0 = element[1]
+      blockIdxN = element[0]
+      addrCalc = self.ss.elementAddr[elementIdx]
+      if tt0 % 2 == 1:
+        # sba=1 element: emit the pair (or orphan) store.
+        partnerElementIdx = elementIdx - 1
+        partnerExists = (partnerElementIdx >= 0 and
+                         self.batchElements[partnerElementIdx][1] == tt0 - 1)
+        if partnerExists:
+          flushAtTransition(blockIdxN)
+          partnerAddrCalc = self.ss.elementAddr[partnerElementIdx]
+          sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
+          sumIdx1 = self.ss.elementSumIdx[elementIdx]
+          mod.add(self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1,
+                    prefixOffset, tt0 - 1, blockIdxM=tt0 - 1, blockIdxN=blockIdxN, interior=True))
+        else:
+          flushAtTransition(blockIdxN)
+          sumIdx0 = self.ss.elementSumIdx[elementIdx]
+          mod.add(self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0,
+                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+      else:
+        # sba=0 element: defer the SrdD row increment (as the guarded path does).
+        if optInc and addrCalc.rowInc:
+          pendingInc = addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01)
+        partnerElementIdx = elementIdx + 1
+        partnerExists = (partnerElementIdx < len(self.batchElements) and
+                         self.batchElements[partnerElementIdx][1] == tt0 + 1)
+        if not partnerExists:
+          flushAtTransition(blockIdxN)
+          sumIdx0 = self.ss.elementSumIdx[elementIdx]
+          mod.add(self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0,
+                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+    if pendingInc is not None:
+      mod.add(pendingInc)
+    return mod
+
+  def _emit16bitSubtilePairedStore(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, interior: bool = False) -> Module:
     """Emit a paired 16bit store combining sba=0 and sba=1 subtile data.
 
     Works for both bf16 and fp16 HPA output types.
@@ -2766,7 +2899,9 @@ class GlobalWriteBatchWriter:
     globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
     addrScaleShift = int(log2(bpeCurr // bpeDest)) if bpeCurr > bpeDest else 0
 
-    useAlign8 = self.parentWriter.states.storeAlign8
+    # Lever 1 (SubtileBf16EpilogueOpt Stage2) interior fast-path: a fully-interior
+    # block yields exec mask -1 (no lanes disabled), so skip the mask entirely.
+    useAlign8 = self.parentWriter.states.storeAlign8 and not interior
 
     def emitAddrWhilePermuting(module):
       """Callback emitted between ds_bpermute and s_waitcnt lgkmcnt(0).
@@ -2818,7 +2953,7 @@ class GlobalWriteBatchWriter:
     self._epilogScratchFree(tmpInrSgpr)
     return module
 
-  def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0) -> Module:
+  def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, interior: bool = False) -> Module:
     """Emit a 16bit store for an orphan subtile element with no partner.
 
     Used when MIWaveTile[0] is odd and the last sba=0 element has no sba=1
@@ -2972,7 +3107,8 @@ class GlobalWriteBatchWriter:
     module.add(VCvtPkF32to16(dst=vgpr(vPack+1), src0=vc(2), src1=vc(3), comment=f"M-row+2/+3 -> {typeStr}"))
     module.add(SNop(waitState=0, comment=f"delay after pk_{typeStr}"))
 
-    useAlign8 = self.parentWriter.states.storeAlign8
+    # Lever 1 interior fast-path: skip the exec mask for fully-interior blocks (mask == -1).
+    useAlign8 = self.parentWriter.states.storeAlign8 and not interior
     if useAlign8:
       self._emitAlign8ExecMask(module, tmpInrSgpr, tmpInrSgpr+1*self.laneSGPRC, blockIdxM, blockIdxN,
                                mGuardOffset=1, rowScaleShift=2)
