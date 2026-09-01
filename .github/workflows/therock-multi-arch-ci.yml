@@ -16,6 +16,7 @@ name: TheRock Multi-Arch CI
 
 # TheRock ref: pinned to ROCm/TheRock branch users/geomin12/path-based-external-2 for testing.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
+# TODO: Revert to main branch commit SHA after testing path-based filtering.
 
 on:
   push:
@@ -113,7 +114,6 @@ jobs:
       skip_ci_patterns: ${{ steps.configure.outputs.skip_ci_patterns }}
       test_projects: ${{ steps.test-projects.outputs.test_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
-      skip_tests: ${{ steps.configure.outputs.skip_tests }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -207,8 +207,7 @@ jobs:
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
+        needs.setup.outputs.enable_build_jobs == 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/geomin12/path-based-external-2
     secrets: inherit
@@ -235,8 +234,7 @@ jobs:
     if: >-
       ${{
         needs.setup.outputs.windows_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
+        needs.setup.outputs.enable_build_jobs == 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/geomin12/path-based-external-2
     secrets: inherit
