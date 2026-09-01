@@ -884,7 +884,7 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 
 | rocKE feature | RFC inline expression (schematic) |
 |---|---|
-| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}` of [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) |
+| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` **for an unmasked problem** and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}` of [Section 13.6](#136-auto-deriving-a-first-pass-features_signature). Under a mask, `$sdpa_fwd.flops` counts the effective work instead, which is about half this for square causal ([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)) |
 | `num_tiles_m` = ⌈seqlen_q/tile_m0⌉ | `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` |
 | `num_tiles_k` = ⌈seqlen_k/tile_n0⌉ | `{"ceil_div": ["$k.dims[2]", "$kernel.tile_n0"]}` |
 | `total_tiles` = batch·nhead_q·num_tiles_m·num_tiles_k | product of the above with `$q.*` |
@@ -1691,12 +1691,27 @@ byte counts fit that mechanism, as per-op precomputed fields:
 
 ```jsonc
 // available wherever an sdpa_fwd node is bound — no descriptor declares these
-"$sdpa_fwd.flops"        // 4·B·H·Sq·Sk·D for SDPA forward
+"$sdpa_fwd.flops"        // causal-effective; see the convention note below
 "$sdpa_fwd.bytes"        // sum over Q/K/V/O of element_count × that tensor's dtype size
 
 // so a features_signature entry just divides them
 "arithmetic_intensity": {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}
 ```
+
+**The counting convention is settled: effective, not dense.** A FLOP count is a choice, not a
+measurement, and the choice must be made once because it is the denominator of every TFLOPS number
+the project will ever publish — changing it later reprices every stored measurement.
+
+For masked attention, count the work the mask leaves, not the dense rectangle. With a contiguous
+query suffix the average effective KV length per query is `kv_len - q_len + (q_len + 1) / 2`, so a
+square causal problem does about **half** the dense `4·B·H·Sq·Sk·D`. The reference implementation is
+`attention_flops` in rocKE's `_ua_shape_utils.py`, and it is the convention aiter and Triton use —
+which is the reason to adopt it. A number that means the same thing outside AMD is worth more than
+one that flatters a kernel by crediting it for arithmetic the mask discarded.
+
+This supersedes the dense `4·B·H·Sq·Sk·D` written elsewhere in this document
+([Section 11.2](#112-what-to-measure)); that formula remains correct for an unmasked problem, which
+is the case where the two agree.
 
 These are **not** authored as expression strings in table-level `.fbs` annotations. Embedding an
 expression language inside the schema file is awkward, and changing an `.fbs` requires codegen plus a
