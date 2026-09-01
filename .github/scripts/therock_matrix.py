@@ -85,7 +85,7 @@ project_map = {
             "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
             "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON",
         ],
-        "projects_to_test": ["hipkernelprovider"],
+        "projects_to_test": ["hipkernelprovider", "hipdnn-cudnn-samples"],
     },
     "hipthreads": {
         "cmake_options": ["-DTHEROCK_ENABLE_HIPTHREADS=ON"],
@@ -137,6 +137,7 @@ additional_options = {
             "hipdnn",
             "hipdnn_install",
             "hipdnn-samples",
+            "hipdnn-cudnn-samples",
             "miopenprovider",
             "hipblasltprovider",
             "hipkernelprovider",
@@ -150,7 +151,7 @@ additional_options = {
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
-        "projects_to_test": ["miopenprovider"],
+        "projects_to_test": ["miopenprovider", "hipdnn-cudnn-samples"],
         "project_to_add": "miopen",
     },
     "dnn-provider-integration-tests": {
@@ -159,14 +160,18 @@ additional_options = {
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
         ],
-        "projects_to_test": ["hipdnn-integration-tests", "miopenprovider"],
+        "projects_to_test": [
+            "hipdnn-integration-tests",
+            "miopenprovider",
+            "hipdnn-cudnn-samples",
+        ],
         "project_to_add": "miopen",
     },
     "hipblaslt-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
         ],
-        "projects_to_test": ["hipblasltprovider"],
+        "projects_to_test": ["hipblasltprovider", "hipdnn-cudnn-samples"],
         "project_to_add": "blas",
     },
     "rocwmma": {
