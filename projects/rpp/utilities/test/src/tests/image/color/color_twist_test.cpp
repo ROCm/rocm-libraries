@@ -125,11 +125,6 @@ TEST_P(ColorTwistTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, ColorTwistTest,
     ::testing::ValuesIn(with_params<ColorTwistParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial}),
+        make_shape_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv),
         {ColorTwistParams{1.5f, 20.0f, 90.0f, 1.2f}})),
     op_config_name<ColorTwistParams>);

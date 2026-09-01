@@ -112,11 +112,6 @@ TEST_P(LutTest, Correctness) {
 // Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, LutTest,
-    ::testing::ValuesIn(make_configs({DType::U8, DType::I8},
-                                     {{Layout::PKD3, Layout::PKD3},
-                                      {Layout::PLN3, Layout::PLN3},
-                                      {Layout::PLN1, Layout::PLN1},
-                                      {Layout::PKD3, Layout::PLN3},
-                                      {Layout::PLN3, Layout::PKD3}},
-                                     {Roi::Full, Roi::Partial})),
+    ::testing::ValuesIn(
+        make_shape_configs({DType::U8, DType::I8}, presets::kLayoutsFullConv)),
     config_param_name);

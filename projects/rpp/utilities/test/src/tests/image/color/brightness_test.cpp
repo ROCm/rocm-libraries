@@ -110,14 +110,7 @@ TEST_P(BrightnessTest, Correctness) {
 
 INSTANTIATE_TEST_SUITE_P(Image_Color, BrightnessTest,
                          ::testing::ValuesIn(with_params<BrightnessParams>(
-                             concat_configs({
-                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
-                                              {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
-                                              {Roi::Full, Roi::Partial},
-                                              {presets::kDefaultSize, presets::kSubVectorSize}),
-                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
-                                              {Roi::Full}, {presets::kUnitSize}),
-                             }),
+                             make_shape_configs(presets::kDefaultDTypes,
+                                                presets::kLayoutsFullConv),
                              {BrightnessParams{1.75f, 50.0f}})),
                          op_config_name<BrightnessParams>);

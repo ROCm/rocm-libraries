@@ -150,6 +150,13 @@ inline const std::vector<LayoutConv> kLayoutsFullConv{{Layout::PKD3, Layout::PKD
 // Layout map for most operators, not including packed to planar conversions.
 inline const std::vector<Layout> kLayoutsFull{Layout::PKD3, Layout::PLN3, Layout::PLN1};
 
+// The same map for an operator whose maths needs all three colour channels, so PLN1 is not
+// part of its interface (hue, saturation, colour twist, colour temperature).
+inline const std::vector<LayoutConv> kLayouts3ChConv{{Layout::PKD3, Layout::PKD3},
+                                                    {Layout::PLN3, Layout::PLN3},
+                                                    {Layout::PKD3, Layout::PLN3},
+                                                    {Layout::PLN3, Layout::PKD3}};
+
 // Full standard datatypes for most operators.
 inline const std::vector<DType> kDefaultDTypes{DType::U8, DType::I8, DType::F16, DType::F32};
 }  // namespace presets
@@ -193,6 +200,31 @@ inline std::vector<TestConfig> concat_configs(std::initializer_list<std::vector<
     configs.reserve(total);
     for (const auto& s : sets) configs.insert(configs.end(), s.begin(), s.end());
     return configs;
+}
+
+// The standard shape sweep: an op's own dtype/layout/ROI axes gridded over the four shapes in
+// presets, each of which lands the width somewhere different against the SIMD and HIP block
+// widths. The shapes are not all crossed with every layout, because the point of each differs:
+//
+//   * kTailWidthSize carries the layout conversions. A conversion is a store-side concern, so one
+//     shape exercises it; pairing it with the odd width keeps that shape's cost at one grid.
+//   * kDefaultSize and kSubVectorSize (vector-plus-tail, and tail-only) run the plain layouts,
+//     where the load and store strides are the ones the vector loops were written for.
+//   * kUnitSize is full-ROI only: the w/2, h/2 rule makes a 1x1 image's partial window empty.
+//
+// The plain layouts are the non-converting entries of `layouts`, so an op declares its layout
+// interface once.
+inline std::vector<TestConfig> make_shape_configs(
+    const std::vector<DType>& dtypes, const std::vector<LayoutConv>& layouts,
+    const std::vector<Roi>& rois = {Roi::Full, Roi::Partial}) {
+    std::vector<LayoutConv> plain;
+    for (LayoutConv l : layouts)
+        if (l.in == l.out) plain.push_back(l);
+    return concat_configs({
+        make_configs(dtypes, layouts, rois, {presets::kTailWidthSize}),
+        make_configs(dtypes, plain, rois, {presets::kDefaultSize, presets::kSubVectorSize}),
+        make_configs(dtypes, plain, {Roi::Full}, {presets::kUnitSize}),
+    });
 }
 
 // GTest name generator: turns each TestConfig into its filterable label.

@@ -108,11 +108,7 @@ TEST_P(SaturationTest, Correctness) {
 // both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(Image_Color, SaturationTest,
                          ::testing::ValuesIn(with_params<SaturationParams>(
-                             make_configs({DType::U8, DType::F16, DType::F32},
-                                          {{Layout::PKD3, Layout::PKD3},
-                                           {Layout::PLN3, Layout::PLN3},
-                                           {Layout::PKD3, Layout::PLN3},
-                                           {Layout::PLN3, Layout::PKD3}},
-                                          {Roi::Full, Roi::Partial}),
+                             make_shape_configs({DType::U8, DType::F16, DType::F32},
+                                                presets::kLayouts3ChConv),
                              {SaturationParams{1.5f}})),
                          op_config_name<SaturationParams>);

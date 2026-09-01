@@ -121,12 +121,7 @@ TEST_P(ColorCastTest, Correctness) {
 // doc/kernel discrepancy).
 INSTANTIATE_TEST_SUITE_P(Image_Color, ColorCastTest,
                          ::testing::ValuesIn(with_params<ColorCastParams>(
-                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                          {{Layout::PKD3, Layout::PKD3},
-                                           {Layout::PLN3, Layout::PLN3},
-                                           {Layout::PLN1, Layout::PLN1},
-                                           {Layout::PKD3, Layout::PLN3},
-                                           {Layout::PLN3, Layout::PKD3}},
-                                          {Roi::Full, Roi::Partial}),
+                             make_shape_configs(presets::kDefaultDTypes,
+                                                presets::kLayoutsFullConv),
                              {ColorCastParams{0.6f, 30, 90, 150}})),
                          op_config_name<ColorCastParams>);
