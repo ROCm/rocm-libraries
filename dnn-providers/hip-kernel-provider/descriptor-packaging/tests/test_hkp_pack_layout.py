@@ -1226,3 +1226,262 @@ def test_embedded_source_rejects_a_parent_segment(
 
     with pytest.raises(HkpPackError, match=re.escape(source_file)):
         load_flat_input(root)
+
+
+# --- J. Emitting embedded_source through pass-through and pruning -----------
+_STANDALONE_ID = "ukd-solo-mul-f32-b64"
+_STANDALONE_FILE = "solo_mul.ukd.json"
+_STANDALONE_SOURCE = {
+    "kind": "embedded_source",
+    "source_file": "kernels/PointwiseMul.cpp",
+    "entry_point": "PointwiseMul",
+}
+_GENERICS = (
+    "solo.umd.json",
+    "solo.ued.json",
+    "solo.udd.json",
+    "solo.kmd.json",
+    "solo.uhd.json",
+)
+OTHER_ARCH = "gfx90a"
+
+
+def _make_embedded(folder, arch=None):
+    """Put every kernel in a copied `empty_arch` folder on the embedded kind.
+
+    The KDP keeps one inline UKD and gains a reference to a standalone UKD, so
+    both authoring forms travel the pass-through path. `arch` is the authored
+    KDP arch list; None authors the wildcard. The kernel sources move into a
+    `kernels/` child, which the packer must not carry into a shard.
+    """
+    kernels = folder / "kernels"
+    kernels.mkdir()
+    (folder / "PointwiseAdd.cpp").rename(kernels / "PointwiseAdd.cpp")
+    (kernels / "PointwiseMul.cpp").write_text("// PointwiseMul\n", encoding="utf-8")
+
+    kdp_path = folder / "solo.kdp.json"
+    kdp = _read(kdp_path)
+    kdp["arch"] = [] if arch is None else list(arch)
+    inline = kdp["kernelDescriptors"][0]
+    inline["kernel_source"] = dict(_EMBEDDED_SOURCE)
+    kdp["kernelDescriptors"] = [inline, _STANDALONE_ID]
+    kdp_path.write_text(json.dumps(kdp, indent=2) + "\n", encoding="utf-8")
+
+    (folder / _STANDALONE_FILE).write_text(
+        json.dumps(
+            {
+                "version": "0.1",
+                "id": _STANDALONE_ID,
+                "name": "PointwiseMul f32 block64 (solo)",
+                "kernel_source": dict(_STANDALONE_SOURCE),
+                "metadata": {"dtype": "FLOAT", "block_size": 64},
+                "priority": 0,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return folder
+
+
+def _embedded_root(tmp_path, fixture, arch=None):
+    root = tmp_path / "root"
+    _make_embedded(_nest(root, "pointwise", fixture), arch=arch)
+    return root
+
+
+def _add_wildcard_embedded_kdp(folder):
+    """A second KDP on the same generics, wildcard arch, one inline UKD."""
+    doc = _read(folder / "solo.kdp.json")
+    doc["id"] = "kdp-solo-wild"
+    doc["name"] = "Solo wildcard pack"
+    doc["arch"] = []
+    doc["kernelDescriptors"] = [
+        {
+            "version": "0.1",
+            "id": "ukd-solo-wild-add-f32-b64",
+            "name": "PointwiseAdd f32 block64 (wild)",
+            "kernel_source": dict(_EMBEDDED_SOURCE),
+            "metadata": {"dtype": "FLOAT", "block_size": 64},
+            "priority": 0,
+        }
+    ]
+    (folder / "solo_wild.kdp.json").write_text(
+        json.dumps(doc, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _pack_embedded(root, tmp_path, rocm_kpack_dir, arches, log=print):
+    """Pack a root that compiles nothing, so hipcc must never be invoked."""
+    return run_pipeline(
+        source_root=root,
+        arches=list(arches),
+        out_root=tmp_path / "out",
+        hipcc="hipcc-not-invoked",
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+        log=log,
+    )
+
+
+def test_embedded_source_shard_holds_the_authored_descriptors(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """The shard carries the authored documents plus this shard's arch.
+
+    The KDP and the standalone UKD are arch-stamped; kernel_source is emitted
+    exactly as authored, and the generics are byte-identical to their files.
+    """
+    root = _embedded_root(tmp_path, empty_arch_fixture)
+    authored = root / "pointwise"
+
+    _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
+
+    shard = tmp_path / "out" / ARCH / "pointwise"
+    kdp = _read(shard / "solo.kdp.json")
+    assert kdp["arch"] == [ARCH]
+    inline = kdp["kernelDescriptors"][0]
+    assert inline["arch"] == [ARCH]
+    assert inline["kernel_source"] == _EMBEDDED_SOURCE
+    assert "provenance" not in inline
+    assert kdp["kernelDescriptors"][1] == _STANDALONE_ID
+
+    standalone = _read(shard / _STANDALONE_FILE)
+    assert standalone["arch"] == [ARCH]
+    assert standalone["kernel_source"] == _STANDALONE_SOURCE
+    assert "provenance" not in standalone
+
+    for name in _GENERICS:
+        assert (shard / name).read_bytes() == (authored / name).read_bytes(), name
+
+    # The authored KDP keeps the wildcard; only the emitted copy names an arch.
+    assert _read(authored / "solo.kdp.json")["arch"] == []
+
+
+def test_inline_embedded_ukd_is_narrowed_to_the_shard_arch(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """An inline UKD must not reach past the arch of the KDP that holds it.
+
+    A wildcard KDP admits a wider inline arch list, and the KDP narrows to the
+    shard on emission. An inline list left wider makes the loader reject the
+    whole KDP, so the emitted inline UKD names this shard alone.
+    """
+    root = _embedded_root(tmp_path, empty_arch_fixture)
+    kdp_path = root / "pointwise" / "solo.kdp.json"
+    kdp = _read(kdp_path)
+    kdp["kernelDescriptors"][0]["arch"] = [ARCH, OTHER_ARCH]
+    kdp_path.write_text(json.dumps(kdp, indent=2) + "\n", encoding="utf-8")
+
+    _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
+
+    emitted = _read(tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json")
+    assert emitted["arch"] == [ARCH]
+    inline = emitted["kernelDescriptors"][0]
+    assert inline["arch"] == [ARCH]
+    assert inline["kernel_source"] == _EMBEDDED_SOURCE
+    # The authored list is untouched; only the emitted copy is narrowed.
+    assert _read(kdp_path)["kernelDescriptors"][0]["arch"] == [ARCH, OTHER_ARCH]
+
+
+def test_embedded_source_shard_writes_no_archive_and_no_sources(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    root = _embedded_root(tmp_path, empty_arch_fixture)
+
+    results = _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
+
+    shard = tmp_path / "out" / ARCH
+    assert not (shard / "kpack").exists()
+    assert not list(shard.rglob("*.kpack"))
+    assert results[ARCH].kpack_path is None
+    assert not results[ARCH].skipped
+    assert not (shard / "pointwise" / "kernels").exists()
+    assert not list(shard.rglob("*.cpp"))
+
+
+def test_embedded_source_generics_are_identical_across_shards(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """Two copies of a generic that differ poison the catalogue entry.
+
+    The loader deduplicates untagged descriptors by content equality, so every
+    shard's copy must be byte-identical to every other shard's.
+    """
+    root = _embedded_root(tmp_path, empty_arch_fixture)
+    authored = root / "pointwise"
+
+    _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH, OTHER_ARCH])
+
+    first = tmp_path / "out" / ARCH / "pointwise"
+    second = tmp_path / "out" / OTHER_ARCH / "pointwise"
+    for name in _GENERICS:
+        data = (authored / name).read_bytes()
+        assert (first / name).read_bytes() == data, name
+        assert (second / name).read_bytes() == data, name
+
+
+def test_arch_narrowed_embedded_kdp_is_pruned_from_the_other_shard(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """An authored arch list narrows which shards an embedded KDP reaches.
+
+    The standalone UKD prunes with the only KDP that references it.
+    """
+    root = _embedded_root(tmp_path, empty_arch_fixture, arch=[ARCH])
+    _add_wildcard_embedded_kdp(root / "pointwise")
+
+    _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH, OTHER_ARCH])
+
+    narrowed = tmp_path / "out" / ARCH / "pointwise"
+    assert (narrowed / "solo.kdp.json").is_file()
+    assert (narrowed / "solo_wild.kdp.json").is_file()
+    assert (narrowed / _STANDALONE_FILE).is_file()
+
+    other = tmp_path / "out" / OTHER_ARCH / "pointwise"
+    assert (other / "solo_wild.kdp.json").is_file()
+    assert not (other / "solo.kdp.json").exists()
+    assert not (other / _STANDALONE_FILE).exists()
+
+
+def test_embedded_only_shard_is_emitted_and_logged(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """A shard whose surviving KDPs compile nothing is still written."""
+    root = _embedded_root(tmp_path, empty_arch_fixture)
+    logs = []
+
+    results = _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH], log=logs.append)
+
+    assert not results[ARCH].skipped
+    assert f"no kernels for {ARCH}, skipping" not in logs
+    assert (tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json").is_file()
+    passed_through = [m for m in logs if "emitting kind 'embedded_source'" in m]
+    assert len(passed_through) == 2, logs
+
+
+def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
+    tmp_path, empty_arch_fixture, main_fixture, hipcc, rocm_kpack_dir
+):
+    """One invocation over a root holding both dialects.
+
+    The hip half produces an archive and kpack descriptors; the embedded half
+    keeps its authored kernel_source.
+    """
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    _make_embedded(_nest(root, "embedded/pointwise", empty_arch_fixture))
+
+    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
+
+    out = tmp_path / "out" / ARCH
+    assert (out / "kpack" / f"hip_kernel_provider_{ARCH}.kpack").is_file()
+    hip_kdp = _read(out / "hip" / "pointwise" / "pointwise.kdp.json")
+    assert hip_kdp["kernelDescriptors"][0]["kernel_source"]["kind"] == "kpack"
+
+    embedded = out / "embedded" / "pointwise"
+    emb_kdp = _read(embedded / "solo.kdp.json")
+    assert emb_kdp["kernelDescriptors"][0]["kernel_source"] == _EMBEDDED_SOURCE
+    assert _read(embedded / _STANDALONE_FILE)["kernel_source"] == _STANDALONE_SOURCE
+    assert not (embedded / "kpack").exists()
