@@ -36,7 +36,7 @@ General batched GEMM runs multiple GEMM operations where:
 
 * Each batch has its own matrices in separate memory locations.
 * Matrices are referenced through device pointer arrays (``A[]``, ``B[]``, ``C[]``, ``D[]``).
-* Batch mode (``hipblasltBatchMode_t``) is set to ``HIPBLASLT_BATCH_MODE_POINTER_ARRAY`` ( or ``1``).
+* Batch mode (``hipblasLtBatchMode_t``) is set to ``HIPBLASLT_BATCH_MODE_POINTER_ARRAY`` (or ``1``).
 * Strided-batch offset attributes are not used; each pointer in the array
   identifies the base address of one matrix.
 
