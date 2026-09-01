@@ -780,20 +780,6 @@ struct SelectedKernel {{
                 instance_code += """
     static constexpr bool Preshuffle = false;"""
 
-        if self.kernel_name_prefix == "gemm_aquant":
-            instance_code += f"""
-    static constexpr bool APreshuffleQuant = {"true" if persistent_or_preshuffle_quant in [True, "true"] else "false"};
-    static constexpr bool BPreshuffleQuant = false;
-    static constexpr bool PreshuffleB = false;
-    static constexpr ck_tile::index_t GroupSizeK = {self.group_size_k};"""
-
-        elif self.kernel_name_prefix == "gemm_bquant":
-            instance_code += f"""
-    static constexpr bool APreshuffleQuant = false;
-    static constexpr bool BPreshuffleQuant = {"true" if persistent_or_preshuffle_quant in [True, "true"] else "false"};
-    static constexpr bool PreshuffleB = false;
-    static constexpr ck_tile::index_t GroupSizeK = {self.group_size_k};"""
-
         return instance_code
 
     def populate_initialization(self, base_pipeline_map, pipeline):
