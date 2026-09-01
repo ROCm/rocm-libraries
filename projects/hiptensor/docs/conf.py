@@ -60,4 +60,4 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
 
 exclude_patterns = globals().get("exclude_patterns", []) + [".venv"]
 
-extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]
+extensions = ["rocm_docs", "rocm_docs.selector"]

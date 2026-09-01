@@ -1,672 +1,1229 @@
+:selector-toc2: Installation environment
+:selector-toc2-icon: fa-solid fa-computer
+
 .. meta::
    :description: installation instructions for the hipTensor library
    :keywords: hipTensor, ROCm, library, API, tool, installation
 
 .. _installation:
 
-*********************************
-Installing and building hipTensor
-*********************************
+*****************
+Install hipTensor
+*****************
 
-The quickest way to install hipTensor is to use the prebuilt packages that are released with ROCm.
-Alternatively, this topic includes instructions to build from source.
+hipTensor is supported on AMD Instinct and Radeon GPUs by ROCm. See the `ROCm compatibility matrix
+<https://rocm.docs.amd.com/en/docs-7.14.0/compatibility/compatibility-matrix.html>`__ for support information.
 
-The available ROCm packages are:
+.. selector:: Device family
+   :key: fam
 
-*  hiptensor (library and header files for development)
-*  hiptensor-dev (library development package)
-*  hiptensor-samples (sample executables)
-*  hiptensor-tests (test executables)
-*  hiptensor-clients (samples and test executables)
+   .. selector-option:: All
+      :value: all w=compute
+      :width: 3
 
-Prerequisites
-=============
+   .. selector-option:: AMD Instinct™
+      :value: instinct w=compute
+      :width: 3
+      :toc-label: AMD Instinct
 
-hipTensor requires a ROCm-enabled platform, using ROCm version 7.0 or later.
-For more information, see :doc:`ROCm installation <rocm-install-on-linux:index>`
-and the `ROCm GitHub <https://github.com/ROCm/ROCm>`_.
+   .. selector-option:: AMD Radeon™
+      :value: radeon w=compute
+      :width: 3
+      :toc-label: AMD Radeon
 
-Installing prebuilt packages
-============================
+   .. selector-option:: AMD Ryzen™
+      :value: ryzen w=compute
+      :width: 3
+      :toc-label: AMD Ryzen
 
-To install hipTensor on Ubuntu or Debian, use these commands:
+.. selected:: w=compute
 
-.. code-block:: shell
+   .. selected:: fam=instinct fam=radeon fam=ryzen
 
-   sudo apt-get update
-   sudo apt-get install hiptensor hiptensor-dev hiptensor-samples hiptensor-tests
+      .. selector-dropdown:: Instinct GPU
+         :key: gpu
+         :show-cond: fam=instinct
+         :sort: desc
 
-To install hipTensor on RHEL-based systems, use:
+         .. selector-option:: AMD Instinct MI355X (gfx950)
+            :value: mi355x gfx=gfx950
 
-.. code-block:: shell
+         .. selector-option:: AMD Instinct MI350X (gfx950)
+            :value: mi350x gfx=gfx950
 
-   sudo yum update
-   sudo yum install hiptensor hiptensor-dev hiptensor-samples hiptensor-tests
+         .. selector-option:: AMD Instinct MI350P (gfx950)
+            :value: mi350p gfx=gfx950
 
-To install hipTensor on SLES, use:
+         .. selector-option:: AMD Instinct MI325X (gfx942)
+            :value: mi325x gfx=gfx942
 
-.. code-block:: shell
+         .. selector-option:: AMD Instinct MI300X (gfx942)
+            :value: mi300x gfx=gfx942
 
-   sudo dnf upgrade
-   sudo dnf install hiptensor hiptensor-dev hiptensor-samples hiptensor-tests
+         .. selector-option:: AMD Instinct MI300A (gfx942)
+            :value: mi300a gfx=gfx942
 
-After hipTensor is installed, it can be used just like any other library with a C++ API.
+         .. selector-option:: AMD Instinct MI250X (gfx90a)
+            :value: mi250x gfx=gfx90a
 
-Building and installing hipTensor from source
-=============================================
+         .. selector-option:: AMD Instinct MI250 (gfx90a)
+            :value: mi250 gfx=gfx90a
 
-It isn't necessary to build hipTensor from source because it's ready to use after installing
-the prebuilt packages, as described above.
-To build hipTensor from source, follow the instructions in this section.
+         .. selector-option:: AMD Instinct MI210 (gfx90a)
+            :value: mi210 gfx=gfx90a
 
-System requirements
--------------------------------------------
+         .. selector-option:: AMD Instinct MI100 (gfx908)
+            :value: mi100 gfx=gfx908
 
-8GB of system memory is required for a full hipTensor build.
-This value might be lower if hipTensor is built without tests.
+      .. selector-dropdown:: Radeon GPU
+         :key: gpu
+         :show-cond: fam=radeon
+         :sort: desc
 
-GPU support
--------------------------------------------
+         .. selector-option:: AMD Radeon AI PRO R9700S (gfx1201)
+            :value: ai-r9700s gfx=gfx1201
 
-hipTensor is supported on the AMD CDNA class GPUs featuring matrix core support,
-including the gfx908, gfx90a, gfx942, and gfx950 GPUs (collectively labeled as gfx9).
+         .. selector-option:: AMD Radeon AI PRO R9700 (gfx1201)
+            :value: ai-r9700 gfx=gfx1201
 
-Additionally, hipTensor is supported on AMD RDNA GPUs:
- - gfx11-generic: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152 and gfx1153.
- - gfx12-generic: gfx1200, gfx1201 and gfx1250.
+         .. selector-option:: AMD Radeon AI PRO R9600D (gfx1201)
+            :value: ai-r9600d gfx=gfx1201
 
-.. note::
+         .. selector-option:: AMD Radeon RX 9070 XT (gfx1201)
+            :value: rx-9070-xt gfx=gfx1201
 
-   Double precision ``FP64`` datatype support requires the gfx90a, gfx942, or gfx950.
+         .. selector-option:: AMD Radeon RX 9070 GRE (gfx1201)
+            :value: rx-9070-gre gfx=gfx1201
 
-Dependencies
--------------------------------------------
+         .. selector-option:: AMD Radeon RX 9070 (gfx1201)
+            :value: rx-9070 gfx=gfx1201
 
-hipTensor is designed to have minimal external dependencies so it's lightweight and portable.
-The following dependencies are required:
+         .. selector-option:: AMD Radeon RX 9060 XT LP (gfx1200)
+            :value: rx-9060-xt-lp gfx=gfx1200
 
-.. <!-- spellcheck-disable -->
+         .. selector-option:: AMD Radeon RX 9060 XT (gfx1200)
+            :value: rx-9060-xt gfx=gfx1200
 
-*  `ROCm <https://github.com/ROCm/ROCm>`_ (Version 7.0 or later for Linux, Version 7.13 or later for Windows)
-*  `CMake <https://cmake.org/>`_ (Version 3.14 or later)
-*  `rocm-cmake <https://github.com/ROCm/rocm-cmake>`_ (Version 0.8.0 or later)
-*  `HIP runtime <https://github.com/ROCm/hip>`_ (Version 7.0.0 or later) (Or the ROCm hip-runtime-amd package)
-*  LLVM dev package (Version 7.0 or later) (Also available as the ROCm rocm-llvm-dev package)
-*  `composable kernel <https://github.com/ROCm/rocm-libraries/tree/develop/projects/composablekernel>`_ (hipTensor uses the amd-master branch, which is a stable and widely adopted version for development.)
+         .. selector-option:: AMD Radeon RX 9060 (gfx1200)
+            :value: rx-9060 gfx=gfx1200
 
-.. <!-- spellcheck-enable -->
+         .. selector-option:: AMD Radeon PRO W7900 Dual Slot (gfx1100)
+            :value: w7900-dual-slot gfx=gfx1100
 
-.. note::
+         .. selector-option:: AMD Radeon PRO W7900 (gfx1100)
+            :value: w7900 gfx=gfx1100
 
-   It's best to use ROCm packages from the same release where applicable.
+         .. selector-option:: AMD Radeon PRO W7800 48GB (gfx1100)
+            :value: w7800-48gb gfx=gfx1100
 
-.. note::
+         .. selector-option:: AMD Radeon PRO W7800 (gfx1100)
+            :value: w7800 gfx=gfx1100
 
-   If building Composable Kernel from source, adding the cmake parameter ``-DHIPTENSOR_BUILD_TESTS=ON`` will speed up the build by compiling only the targets required by hipTensor.
+         .. selector-option:: AMD Radeon RX 7900 XTX (gfx1100)
+            :value: rx-7900-xtx gfx=gfx1100
 
-Downloading hipTensor
--------------------------------------------
+         .. selector-option:: AMD Radeon RX 7900 XT (gfx1100)
+            :value: rx-7900-xt gfx=gfx1100
 
-The hipTensor source code is available from the `hipTensor GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiptensor>`_.
-ROCm version 7.0 or later is required.
+         .. selector-option:: AMD Radeon RX 7900 GRE (gfx1100)
+            :value: rx-7900-gre gfx=gfx1100
 
-.. note::
+         .. selector-option:: AMD Radeon PRO W7700 (gfx1101)
+            :value: w7700 gfx=gfx1101
 
-  The hipTensor repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/hipTensor>`_.
+         .. selector-option:: AMD Radeon RX 7800 XT (gfx1101)
+            :value: rx-7800-xt gfx=gfx1101
 
-To verify the ROCm version installed on an Ubuntu system, use this command:
+         .. selector-option:: AMD Radeon RX 7700 XT (gfx1101)
+            :value: rx-7700-xt gfx=gfx1101
 
-.. code-block:: shell
+         .. selector-option:: AMD Radeon RX 7700 (gfx1101)
+            :value: rx-7700 gfx=gfx1101
 
-   apt show rocm-libs -a
+         .. selector-option:: AMD Radeon PRO V710 (gfx1101)
+            :value: v710 gfx=gfx1101
 
-For RHEL-related systems, use:
+         .. selector-option:: AMD Radeon RX 7600 (gfx1102)
+            :value: rx-7600 gfx=gfx1102
 
-.. code-block:: shell
 
-   yum info rocm-libs
+      .. selector-dropdown:: Ryzen APU
+         :key: gpu
+         :show-cond: fam=ryzen
+         :sort: desc
 
-The ROCm version has major, minor, and patch fields, possibly followed by a build-specific identifier.
-For example, a ROCm version of ``4.0.0.40000-23`` corresponds to major release = ``4``, minor release = ``0``,
-patch = ``0``, and build identifier ``40000-23``.
-The hipTensor GitHub has branches with names like ``rocm-major.minor.x``,
-where ``major`` and ``minor`` are the same as for the ROCm version.
-To download hipTensor on ROCm version `x.y`, use this command:
+         .. selector-option:: AMD Ryzen AI Max+ PRO 495 (gfx1151)
+            :value: max-plus-pro-495 gfx=gfx1151
 
-.. tab-set::
-    .. tab-item:: ROCm 7.2.0 and later
+         .. selector-option:: AMD Ryzen AI Max PRO 490 (gfx1151)
+            :value: max-pro-490 gfx=gfx1151
 
-        .. code-block:: shell
+         .. selector-option:: AMD Ryzen AI Max PRO 485 (gfx1151)
+            :value: max-pro-485 gfx=gfx1151
 
-           git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
-           cd rocm-libraries/projects/hiptensor
+         .. selector-option:: AMD Ryzen AI Max+ PRO 395 (gfx1151)
+            :value: max-pro-395 gfx=gfx1151
 
-        Alternatively, you can use ``sparse-checkout`` to clone only the hipTensor project from the ``rocm-libraries`` monorepo. For more information, see `Contributing to the ROCm Libraries <https://github.com/ROCm/rocm-libraries/blob/develop/CONTRIBUTING.md#option-b-clone-the-monorepo-with-sparse-checkout>`_.
+         .. selector-option:: AMD Ryzen AI Max PRO 390 (gfx1151)
+            :value: max-pro-390 gfx=gfx1151
 
-    .. tab-item:: ROCm 7.1.1 and prior
+         .. selector-option:: AMD Ryzen AI Max PRO 385 (gfx1151)
+            :value: max-pro-385 gfx=gfx1151
 
-        .. code-block:: shell
+         .. selector-option:: AMD Ryzen AI Max PRO 380 (gfx1151)
+            :value: max-pro-380 gfx=gfx1151
 
-           git clone -b release/rocm-rel-x.y https://github.com/ROCm/hipTensor.git
-           cd hipTensor
+         .. selector-option:: AMD Ryzen AI Max+ 395 (gfx1151)
+            :value: max-395 gfx=gfx1151
 
-Replace ``x.y`` in the above command with the version of ROCm installed on your machine.
-For example, if you have ROCm 7.0 installed, then replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-7.0``.
+         .. selector-option:: AMD Ryzen AI Max+ 392 (gfx1151)
+            :value: max-392 gfx=gfx1151
 
-Building on Linux
--------------------------------------------
+         .. selector-option:: AMD Ryzen AI Max+ 388 (gfx1151)
+            :value: max-388 gfx=gfx1151
 
-.. note::
+         .. selector-option:: AMD Ryzen AI Max 390 (gfx1151)
+            :value: max-390 gfx=gfx1151
 
-   The CMake options and make targets described in this section apply to all platforms.
-   For Windows-specific build instructions, see `Building on Windows`_.
+         .. selector-option:: AMD Ryzen AI Max 385 (gfx1151)
+            :value: max-385 gfx=gfx1151
 
-You can choose to build any of the following combinations:
+         .. selector-option:: AMD Ryzen AI 9 HX PRO 475 (gfx1150)
+            :value: ai-9-hx-pro-475 gfx=gfx1150
 
-* The hipTensor library only
-* The library and samples
-* The library and tests
-* The library, samples, and tests
+         .. selector-option:: AMD Ryzen AI 9 HX PRO 470 (gfx1150)
+            :value: ai-9-hx-pro-470 gfx=gfx1150
 
-You only need the hipTensor library to call and link to hipTensor API from your code.
-The clients contain the tests and sample code.
+         .. selector-option:: AMD Ryzen AI 9 PRO 465 (gfx1150)
+            :value: ai-9-pro-465 gfx=gfx1150
 
-Here are the available options to build the hipTensor library, with or without clients.
+         .. selector-option:: AMD Ryzen AI 7 PRO 450 (gfx1152)
+            :value: ai-7-pro-450 gfx=gfx1152
 
-.. list-table::
+         .. selector-option:: AMD Ryzen AI 5 PRO 440 (gfx1152)
+            :value: ai-5-pro-440 gfx=gfx1152
 
-    *   -   **Option**
-        -   **Description**
-        -   **Default value**
-    *   -   ``GPU_TARGETS``
-        -   Build the code for specific GPU target(s)
-        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1103``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx11-generic``; ``gfx1200``; ``gfx1201``; ``gfx1250``; ``gfx12-generic``
-    *   -   ``HIPTENSOR_BUILD_TESTS``
-        -   Build the tests
-        -   ``ON``
-    *   -   ``HIPTENSOR_BUILD_SAMPLES``
-        -   Build the samples
-        -   ``ON``
-    *   -   ``HIPTENSOR_BUILD_COMPRESSED_DBG``
-        -   Enable compressed debug symbols
-        -   ``ON``
-    *   -   ``HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR``
-        -   Set the hipTensor default data layout to column major
-        -   ``ON``
-    *   -   ``HIPTENSOR_INLINE_UNARY_OPS``
-        -   Inline all contraction unary ops for best runtime performance (slower compilation)
-        -   ``OFF``
-    *   -   ``CREATE_TEST_APP_LOCAL_DEPLOY``
-        -   Copy ROCm runtime DLLs next to test binaries so they take precedence over System32 (Windows only)
-        -   ``OFF``
+         .. selector-option:: AMD Ryzen AI 5 PRO 435 (gfx1153)
+            :value: ai-5-pro-435 gfx=gfx1153
 
-Here are some example project configurations:
+         .. selector-option:: AMD Ryzen AI 9 HX 475 (gfx1150)
+            :value: ai-9-hx-475 gfx=gfx1150
 
-.. csv-table::
-   :header: "Configuration","Command"
-   :widths: 20, 110
+         .. selector-option:: AMD Ryzen AI 9 HX 470 (gfx1150)
+            :value: ai-9-hx-470 gfx=gfx1150
 
-   "Basic", "``CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B<build_dir> .``"
-   "Targeting gfx908", "``CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B<build_dir> . -DGPU_TARGETS=gfx908``"
-   "Debug build", "``CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B<build_dir> . -DCMAKE_BUILD_TYPE=Debug``"
+         .. selector-option:: AMD Ryzen AI 9 465 (gfx1150)
+            :value: ai-9-465 gfx=gfx1150
 
-.. tip::
+         .. selector-option:: AMD Ryzen AI 7 450 (gfx1152)
+            :value: ai-7-450 gfx=gfx1152
 
-   Dockerfiles are available for Ubuntu 24.04 with prebuilt or source-built ROCm (using TheRock).
-   See `docker/README.md <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hiptensor/docker/README.md>`_ for instructions.
+         .. selector-option:: AMD Ryzen AI 9 HX PRO 375 (gfx1150)
+            :value: 9-hx-pro-375 gfx=gfx1150
 
-Building the library alone
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+         .. selector-option:: AMD Ryzen AI 9 HX PRO 370 (gfx1150)
+            :value: 9-hx-pro-370 gfx=gfx1150
 
-By default, the project is configured for Release mode.
+         .. selector-option:: AMD Ryzen AI 7 PRO 350 (gfx1152)
+            :value: ai-7-pro-350 gfx=gfx1152
 
-To build the library alone, run this command:
+         .. selector-option:: AMD Ryzen AI 5 PRO 340 (gfx1152)
+            :value: ai-5-pro-340 gfx=gfx1152
 
-.. code-block:: bash
+         .. selector-option:: AMD Ryzen AI 9 HX 375 (gfx1150)
+            :value: 9-hx-375 gfx=gfx1150
 
-   CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B <build_dir> . -DHIPTENSOR_BUILD_TESTS=OFF -DHIPTENSOR_BUILD_SAMPLES=OFF
+         .. selector-option:: AMD Ryzen AI 9 HX 370 (gfx1150)
+            :value: 9-hx-370 gfx=gfx1150
 
-After configuration, build the library using this command:
+         .. selector-option:: AMD Ryzen AI 9 365 (gfx1150)
+            :value: 9-365 gfx=gfx1150
 
-.. code-block:: bash
+         .. selector-option:: AMD Ryzen AI 7 350 (gfx1152)
+            :value: ai-7-350 gfx=gfx1152
 
-   cmake --build <build_dir> -- -j<nproc>
+         .. selector-option:: AMD Ryzen AI 7 345 (gfx1152)
+            :value: ai-7-345 gfx=gfx1152
 
-And install the built binaries into the system ROCm with:
+         .. selector-option:: AMD Ryzen AI 5 435 (gfx1153)
+            :value: ai-5-435 gfx=gfx1153
 
-.. code-block:: bash
+         .. selector-option:: AMD Ryzen AI 5 430 (gfx1153)
+            :value: ai-5-430 gfx=gfx1153
 
-   cmake --install .
+         .. selector-option:: AMD Ryzen AI 7 445 (gfx1153)
+            :value: ai-7-445 gfx=gfx1153
 
-.. note::
+         .. selector-option:: AMD Ryzen AI 5 340 (gfx1152)
+            :value: ai-5-340 gfx=gfx1152
 
-   It's recommended to use a minimum of 16 threads to build hipTensor with any tests, for example, using ``-j16``.
+         .. selector-option:: AMD Ryzen AI 5 330 (gfx1152)
+            :value: ai-5-330 gfx=gfx1152
 
-Building the library and samples
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+         .. selector-option:: AMD Ryzen 7 PRO 250 (gfx1103)
+            :value: 7-pro-250 gfx=gfx1103
 
-To build the library and samples, run the following command:
+         .. selector-option:: AMD Ryzen 5 PRO 230 (gfx1103)
+            :value: 5-pro-230 gfx=gfx1103
 
-.. code-block:: bash
+         .. selector-option:: AMD Ryzen 5 PRO 220 (gfx1103)
+            :value: 5-pro-220 gfx=gfx1103
 
-   CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B <build_dir> . -DHIPTENSOR_BUILD_TESTS=OFF -DHIPTENSOR_BUILD_SAMPLES=ON
+         .. selector-option:: AMD Ryzen 5 PRO 215 (gfx1103)
+            :value: 5-pro-215 gfx=gfx1103
 
-After configuration, build the library using this command:
+         .. selector-option:: AMD Ryzen 3 PRO 210 (gfx1103)
+            :value: 3-pro-210 gfx=gfx1103
 
-.. code-block:: bash
+         .. selector-option:: AMD Ryzen 9 270 (gfx1103)
+            :value: 9-270 gfx=gfx1103
 
-   cmake --build <build_dir> -- -j<nproc>
+         .. selector-option:: AMD Ryzen 7 260 (gfx1103)
+            :value: 7-260 gfx=gfx1103
 
-The samples folder in ``<build_dir>`` contains the executables in the table below.
+         .. selector-option:: AMD Ryzen 7 250 (gfx1103)
+            :value: 7-250 gfx=gfx1103
 
-.. tabularcolumns::
-   |\X{2}{4}|\X{2}{4}|
+         .. selector-option:: AMD Ryzen 5 240 (gfx1103)
+            :value: 5-240 gfx=gfx1103
 
-================================================================== =======================================================================================================================================================================
-Executable name                                                    Description
-================================================================== =======================================================================================================================================================================
-``simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_bf16``   A simple bilinear contraction [D = alpha * (A x B) + beta * C] using half-precision brain float inputs, output, and compute types
-``simple_bilinear_contraction_f16_f16_f16_f16_compute_f16``        A simple bilinear contraction [D = alpha * (A x B) + beta * C] using half-precision floating point inputs, output, and compute types
-``simple_bilinear_contraction_f32_f32_f32_f32_compute_bf16``       A simple bilinear contraction [D = alpha * (A x B) + beta * C] using single-precision floating point input and output, and half-precision brain float compute types
-``simple_bilinear_contraction_f32_f32_f32_f32_compute_f16``        A simple bilinear contraction [D = alpha * (A x B) + beta * C] using single-precision floating point input and output, and half-precision floating point compute types
-``simple_bilinear_contraction_f32_f32_f32_f32_compute_f32``        A simple bilinear contraction [D = alpha * (A x B) + beta * C] using single-precision floating point input, output, and compute types
-``simple_bilinear_contraction_cf32_cf32_cf32_cf32_compute_cf32``   A simple bilinear contraction [D = alpha * (A x B) + beta * C] using complex single-precision floating point input, output, and compute types
-``simple_bilinear_contraction_f64_f64_f64_f64_compute_f32``        A simple bilinear contraction [D = alpha * (A x B) + beta * C] using double-precision floating point input and output and single-precision floating point compute types
-``simple_bilinear_contraction_f64_f64_f64_f64_compute_f64``        A simple bilinear contraction [D = alpha * (A x B) + beta * C] using double-precision floating point input, output, and compute types
-``simple_scale_contraction_bf16_bf16_bf16_compute_bf16``           A simple scale contraction [D = alpha * (A x B) ] using half-precision brain float inputs, output, and compute types
-``simple_scale_contraction_f16_f16_f16_compute_f16``               A simple scale contraction [D = alpha * (A x B) ] using half-precision floating point inputs, output, and compute types
-``simple_scale_contraction_f32_f32_f32_compute_bf16``              A simple scale contraction [D = alpha * (A x B) ] using single-precision floating point input and output and half-precision brain float compute types
-``simple_scale_contraction_f32_f32_f32_compute_f16``               A simple scale contraction [D = alpha * (A x B) ] using single-precision floating point input and output and half-precision floating point compute types
-``simple_scale_contraction_f32_f32_f32_compute_f32``               A simple scale contraction [D = alpha * (A x B) ] using single-precision floating point input, output, and compute types
-``simple_scale_contraction_cf32_cf32_cf32_compute_cf32``           A simple scale contraction [D = alpha * (A x B) ] using complex single-precision floating point input, output, and compute types
-``simple_scale_contraction_f64_f64_f64_compute_f32``               A simple scale contraction [D = alpha * (A x B) ] using double-precision floating point input and output and single-precision floating point compute types
-``simple_scale_contraction_f64_f64_f64_compute_f64``               A simple scale contraction [D = alpha * (A x B) ] using double-precision floating point input, output, and compute types
-``simple_elementwise_permute``                                     A simple permutation using single-precision floating point input and output types
-``simple_elementwise_binary``                                      A simple element-wise binary operation using single-precision floating point input and output types
-``simple_elementwise_trinary``                                     A simple element-wise trinary operation using single-precision floating point input and output types
-``simple_reduction``                                               A simple reduction using single-precision floating point input and output types
-``simple_contraction_plan_cache``                                  A simple bilinear contraction operation demonstrating plan cache usages
-``simple_contraction_c``                                           A simple bilinear contractionoperation demonstrating how to use the API in C language
-``simple_elementwise_binary_c``                                    A simple element-wise binary operation demonstrating how to use the API in C language
-``simple_reduction_c``                                             A simple reduction operation demonstrating how to use the API in C language
-================================================================== =======================================================================================================================================================================
-
-Building the library and tests
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-To build the library and tests, run the following command:
-
-.. code-block:: bash
-
-   CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B <build_dir> . -DHIPTENSOR_BUILD_TESTS=ON -DHIPTENSOR_BUILD_SAMPLES=OFF
-
-After configuration, build using this command:
-
-.. code-block:: bash
-
-   cmake --build <build_dir> -- -j<nproc>
-
-The tests in ``<build_dir>`` contain executables, as shown in the table below.
-
-.. tabularcolumns::
-   |\X{2}{4}|\X{2}{4}|
-
-================================================ ===========================================================================================================================
-Executable name                                  Description
-================================================ ===========================================================================================================================
-``logger_test``                                  Unit test to validate hipTensor Logger APIs
-``yaml_test``                                    Unit test to validate the YAML functionality used to bundle and run test suites
-``bilinear_contraction_test_m1n1k1``             Bilinear contraction test [D = alpha * (A x B) + beta * C] with half, single, and mixed precision datatypes of rank 2
-``bilinear_contraction_test_m2n2k2``             Bilinear contraction test [D = alpha * (A x B) + beta * C] with half, single, and mixed precision datatypes of rank 4
-``bilinear_contraction_test_m3n3k3``             Bilinear contraction test [D = alpha * (A x B) + beta * C] with half, single, and mixed precision datatypes of rank 6
-``bilinear_contraction_test_m4n4k4``             Bilinear contraction test [D = alpha * (A x B) + beta * C] with half, single, and mixed precision datatypes of rank 8
-``bilinear_contraction_test_m5n5k5``             Bilinear contraction test [D = alpha * (A x B) + beta * C] with half, single, and mixed precision datatypes of rank 10
-``bilinear_contraction_test_m6n6k6``             Bilinear contraction test [D = alpha * (A x B) + beta * C] with half, single, and mixed precision datatypes of rank 12
-``complex_bilinear_contraction_test_m1n1k1``     Bilinear contraction test [D = alpha * (A x B) + beta * C] with complex single and double precision datatypes of rank 2
-``complex_bilinear_contraction_test_m2n2k2``     Bilinear contraction test [D = alpha * (A x B) + beta * C] with complex single and double precision datatypes of rank 4
-``complex_bilinear_contraction_test_m3n3k3``     Bilinear contraction test [D = alpha * (A x B) + beta * C] with complex single and double precision datatypes of rank 6
-``complex_bilinear_contraction_test_m4n4k4``     Bilinear contraction test [D = alpha * (A x B) + beta * C] with complex single and double precision datatypes of rank 8
-``complex_bilinear_contraction_test_m5n5k5``     Bilinear contraction test [D = alpha * (A x B) + beta * C] with complex single and double precision datatypes of rank 10
-``complex_bilinear_contraction_test_m6n6k6``     Bilinear contraction test [D = alpha * (A x B) + beta * C] with complex single and double precision datatypes of rank 12
-``scale_contraction_test_m1n1k1``                Scale contraction test [D = alpha * (A x B)] with half, single, and mixed precision datatypes of rank 2
-``scale_contraction_test_m2n2k2``                Scale contraction test [D = alpha * (A x B)] with half, single, and mixed precision datatypes of rank 4
-``scale_contraction_test_m3n3k3``                Scale contraction test [D = alpha * (A x B)] with half, single, and mixed precision datatypes of rank 6
-``scale_contraction_test_m4n4k4``                Scale contraction test [D = alpha * (A x B)] with half, single, and mixed precision datatypes of rank 8
-``scale_contraction_test_m5n5k5``                Scale contraction test [D = alpha * (A x B)] with half, single, and mixed precision datatypes of rank 10
-``scale_contraction_test_m6n6k6``                Scale contraction test [D = alpha * (A x B)] with half, single, and mixed precision datatypes of rank 12
-``complex_scale_contraction_test_m1n1k1``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 2
-``complex_scale_contraction_test_m2n2k2``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 4
-``complex_scale_contraction_test_m3n3k3``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 6
-``complex_scale_contraction_test_m4n4k4``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 8
-``complex_scale_contraction_test_m5n5k5``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 10
-``complex_scale_contraction_test_m6n6k6``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 12
-``rank2_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 2
-``rank3_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 3
-``rank4_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 4
-``rank5_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 5
-``rank6_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 6
-``rank2_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 2
-``rank3_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 3
-``rank4_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 4
-``rank5_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 5
-``rank6_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 6
-``rank2_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 2
-``rank3_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 3
-``rank4_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 4
-``rank5_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 5
-``rank6_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 6
-``rank1_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 1
-``rank2_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 2
-``rank3_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 3
-``rank4_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 4
-``rank5_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 5
-``rank6_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 6
-``plan_cache_test``                              Plan Cache tests with single precision datatype and different rank of tensors
-================================================ ===========================================================================================================================
-
-Make targets list
-^^^^^^^^^^^^^^^^^
-
-When building hipTensor during the ``make`` step, you can specify the Make targets instead of defaulting to ``make all``.
-The following table highlights the relationships between high-level grouped targets and individual targets.
-
-
-+-----------------------------------+---------------------------------------------------------------------------------+
-|           Group target            |            Individual targets                                                   |
-+===================================+=================================================================================+
-|                                   |``simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_bf16``                 |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_bilinear_contraction_f16_f16_f16_f16_compute_f16``                      |
-|                                   +---------------------------------------------------------------------------------+
-| ``hiptensor_samples``             |``simple_bilinear_contraction_f32_f32_f32_f32_compute_bf16``                     |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_bilinear_contraction_f32_f32_f32_f32_compute_f16``                      |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_bilinear_contraction_f32_f32_f32_f32_compute_f32``                      |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_bilinear_contraction_cf32_cf32_cf32_cf32_compute_cf32``                 |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_bilinear_contraction_f64_f64_f64_f64_compute_f32``                      |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_bilinear_contraction_f64_f64_f64_f64_compute_f64``                      |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_scale_contraction_bf16_bf16_bf16_compute_bf16``                         |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_scale_contraction_f16_f16_f16_compute_f16``                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_scale_contraction_f32_f32_f32_compute_bf16``                            |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_scale_contraction_f32_f32_f32_compute_f16``                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_scale_contraction_f32_f32_f32_compute_f32``                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_scale_contraction_cf32_cf32_cf32_compute_cf32``                         |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_scale_contraction_f64_f64_f64_compute_f32``                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_scale_contraction_f64_f64_f64_compute_f64``                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_elementwise_permute``                                                   |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_elementwise_binary``                                                    |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_elementwise_trinary``                                                   |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_reduction``                                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_contraction_plan_cache``                                                |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_contraction_c``                                                         |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_elementwise_binary_c``                                                  |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``simple_reduction_c``                                                           |
-+-----------------------------------+---------------------------------------------------------------------------------+
-|                                   |``logger_test``                                                                  |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``yaml_test``                                                                    |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``bilinear_contraction_test_m1n1k1``                                             |
-|                                   +---------------------------------------------------------------------------------+
-| ``hiptensor_tests``               |``bilinear_contraction_test_m2n2k2``                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``bilinear_contraction_test_m3n3k3``                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``bilinear_contraction_test_m4n4k4``                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``bilinear_contraction_test_m5n5k5``                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``bilinear_contraction_test_m6n6k6``                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_bilinear_contraction_test_m1n1k1``                                     |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_bilinear_contraction_test_m2n2k2``                                     |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_bilinear_contraction_test_m3n3k3``                                     |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_bilinear_contraction_test_m4n4k4``                                     |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_bilinear_contraction_test_m5n5k5``                                     |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_bilinear_contraction_test_m6n6k6``                                     |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``scale_contraction_test_m1n1k1``                                                |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``scale_contraction_test_m2n2k2``                                                |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``scale_contraction_test_m3n3k3``                                                |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``scale_contraction_test_m4n4k4``                                                |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``scale_contraction_test_m5n5k5``                                                |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``scale_contraction_test_m6n6k6``                                                |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_scale_contraction_test_m1n1k1``                                        |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_scale_contraction_test_m2n2k2``                                        |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_scale_contraction_test_m3n3k3``                                        |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_scale_contraction_test_m4n4k4``                                        |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_scale_contraction_test_m5n5k5``                                        |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``complex_scale_contraction_test_m6n6k6``                                        |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank2_elementwise_permute_test``                                               |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank3_elementwise_permute_test``                                               |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank4_elementwise_permute_test``                                               |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank5_elementwise_permute_test``                                               |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank6_elementwise_permute_test``                                               |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank2_elementwise_binary_op_test``                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank3_elementwise_binary_op_test``                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank4_elementwise_binary_op_test``                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank5_elementwise_binary_op_test``                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank6_elementwise_binary_op_test``                                             |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank2_elementwise_trinary_op_test``                                            |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank3_elementwise_trinary_op_test``                                            |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank4_elementwise_trinary_op_test``                                            |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank5_elementwise_trinary_op_test``                                            |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank6_elementwise_trinary_op_test``                                            |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank1_reduction_test``                                                         |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank2_reduction_test``                                                         |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank3_reduction_test``                                                         |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank4_reduction_test``                                                         |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank5_reduction_test``                                                         |
-|                                   +---------------------------------------------------------------------------------+
-|                                   |``rank6_reduction_test``                                                         |
-+-----------------------------------+---------------------------------------------------------------------------------+
-
-Building on Windows
--------------------------------------------
-
-.. note::
-
-   The CMake options (``GPU_TARGETS``, ``HIPTENSOR_BUILD_TESTS``, etc.) and make targets
-   described in `Building on Linux`_ apply equally on Windows.
-
-Prerequisites
-^^^^^^^^^^^^^
-
-*  **Visual Studio 2026** (VS 18) or **Visual Studio 2022** — open a **"Command Prompt for VS 18"** (or "Command Prompt for VS 2022") terminal for all commands below.
-*  **CMake 4.2.3 or later** — the version bundled with Visual Studio 2026 (msvc3) is recommended.
-*  **vcpkg** — bundled with the VS command prompt. If ``vcpkg --version`` or ``echo %VCPKG_ROOT%`` returns nothing, install it following the `vcpkg getting-started guide <https://learn.microsoft.com/en-us/vcpkg/get_started/get-started>`_.
-*  **ROCm** — version 7.13 or later.
-
-Installing ROCm (TheRock)
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-1. If not already installed, `install ROCm from TheRock <https://github.com/ROCm/TheRock#installing-from-releases>`
-   and set the installation directory as a variable so you can reuse it in subsequent steps:
-
-   .. code-block:: bat
-
-      set ROCM_PATH=C:\dist\TheRock
-
-2. If you choose to `install from prebuilt tarball <https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-from-tarballs>`, create the directory:
-
-   .. code-block:: bat
-
-      mkdir %ROCM_PATH%
-
-   Download the tarball from the `TheRock releases page <https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-from-tarballs>`_
-   and extract it to ``%ROCM_PATH%``.
-
-3. Set the required environment variables:
-
-   .. code-block:: bat
-
-      set HIP_PATH=%ROCM_PATH%
-      set HIP_DEVICE_LIB_PATH=%ROCM_PATH%\lib\llvm\amdgcn\bitcode
-      set HIP_PLATFORM=amd
-
-Configure and build hipTensor
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Change to the hipTensor source directory, create a build directory, and run the CMake configure
-command (the example below targets ``gfx11-generic``):
-
-.. code-block:: bat
-
-   cd hiptensor
-   mkdir build
-   cd build
-
-   cmake -G Ninja ^
-     -DCMAKE_INSTALL_PREFIX=%ROCM_PATH% ^
-     -DCMAKE_BUILD_TYPE=Release ^
-     -DCMAKE_CXX_COMPILER="%ROCM_PATH%/lib/llvm/bin/clang++.exe" ^
-     -DCMAKE_C_COMPILER="%ROCM_PATH%/lib/llvm/bin/clang.exe" ^
-     -DCMAKE_PREFIX_PATH="%ROCM_PATH%" ^
-     -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" ^
-     -DVCPKG_TARGET_TRIPLET=x64-windows-static ^
-     -DGPU_TARGETS=gfx11-generic ^
-     -DHIPTENSOR_BUILD_TESTS=ON ^
-     -B. ..
-
-.. note::
-
-   If your system has a different version of ROCm installed alongside the build toolchain (for
-   example, a system ROCm in ``System32`` and a development build under ``%ROCM_PATH%``), add
-   ``-DCREATE_TEST_APP_LOCAL_DEPLOY=ON`` to the CMake command. This copies the required ROCm
-   runtime DLLs (``amdhip64``, ``amd_comgr``, ``rocm_kpack``, etc.) from ``%ROCM_PATH%\bin``
-   next to the test binaries at configure time, ensuring the correct runtime is loaded instead
-   of the one found in ``System32``.
-
-Then build and install:
-
-.. code-block:: bat
-
-   cmake --build . -- -j%NUMBER_OF_PROCESSORS%
-   cmake --install .
-
-Benchmarking scripts
--------------------------------------------
-
-The benchmarking scripts are located at ``<project root>/scripts/performance/``.
-
-.. csv-table::
-   :header: "Script name","Description"
-   :widths: 40, 60
-
-   "``BenchmarkContraction.sh``", "Benchmarking script for contraction"
-   "``BenchmarkPermutation.sh``", "Benchmarking script for permutation"
-   "``BenchmarkReduction.sh``", "Benchmarking script for reduction"
-
-Build performance
--------------------------------------------
-
-Depending on the resources available to the build machine and the selected build configuration,
-hipTensor build times can take an hour or more. Here are some things you can do to reduce build times:
-
-*  Target a specific GPU, for instance, with ``-D GPU_TARGETS=gfx908``.
-*  Use a large number of threads, for instance, ``-j32``.
-*  If the client builds aren't needed, specify ``HIPTENSOR_BUILD_TESTS`` or ``HIPTENSOR_BUILD_SAMPLES`` as ``OFF`` to disable them.
-*  During the ``make`` command, build a specific target, for instance, ``logger_test``.
-
-Test runtimes
--------------------------------------------
-
-Depending on the resources available to the machine running the selected tests,
-hipTensor test runtimes can last an hour or more. Here are some things you can do to reduce test runtimes:
-
-*  CTest runs the entire test suite, but you can invoke tests individually by name.
-*  Use GoogleTest filters to target specific test cases:
-
-   .. code-block:: bash
-
-      <test_exe> --gtest_filter=*name_filter*
-
-*  Manually adjust the test case coverage. Use a text editor to modify the test YAML configs to adjust the test parameter coverage.
-*  Alternatively, use your own YAML config for testing with a reduced parameter set.
-*  For tests with large tensor ranks, avoid using larger lengths to reduce the computational load.
-
-Test verbosity and file redirection
--------------------------------------------
-
-The tests support logging arguments to control verbosity and output redirection.
-
-.. code-block:: bash
-
-   <test_exe> -y "testing_params.yaml" -o "output.csv" --omit 1
-
-.. tabularcolumns::
-   |C|C|C|
-
-+----------------------------+-------------------------------------+--------------------------------------------------+
-|Compact                     |Verbose                              |  Description                                     |
-+============================+=====================================+==================================================+
-| ``-y <input_file>.yaml``   |                                     | Override read testing parameters from input file |
-+----------------------------+-------------------------------------+--------------------------------------------------+
-| ``-o <output_file>.csv``   |                                     | Redirect GoogleTest output to file               |
-+----------------------------+-------------------------------------+--------------------------------------------------+
-|                            |                                     | code = 1: Omit gtest SKIPPED tests               |
-|                            |                                     +--------------------------------------------------+
-|                            | ``--omit <code>``                   | code = 2: Omit gtest FAILED tests                |
-|                            |                                     +--------------------------------------------------+
-|                            |                                     | code = 4: Omit gtest PASSED tests                |
-|                            |                                     +--------------------------------------------------+
-|                            |                                     | code = 8: Omit all gtest output                  |
-|                            |                                     +--------------------------------------------------+
-|                            |                                     | code = <N>: OR combination of 1, 2, 4            |
-+----------------------------+-------------------------------------+--------------------------------------------------+
+         .. selector-option:: AMD Ryzen 5 230 (gfx1103)
+            :value: 5-230 gfx=gfx1103
+
+         .. selector-option:: AMD Ryzen 5 220 (gfx1103)
+            :value: 5-220 gfx=gfx1103
+
+         .. selector-option:: AMD Ryzen 3 210 (gfx1103)
+            :value: 3-210 gfx=gfx1103
+
+.. selected:: fam=instinct
+
+   .. selector:: Linux distribution
+      :key: os
+      :show-cond: gpu=mi355x gpu=mi350x gpu=mi325x
+
+      .. selector-option:: Ubuntu
+         :value: ubuntu
+         :width: 20%
+
+      .. selector-option:: Debian
+         :value: debian
+         :width: 20%
+
+      .. selector-option:: RHEL
+         :value: rhel
+         :width: 20%
+         :toc-label: Red Hat Enterprise Linux
+
+      .. selector-option:: Oracle Linux
+         :value: oracle-linux
+         :width: 20%
+
+      .. selector-option:: SLES
+         :value: sles
+         :width: 20%
+         :toc-label: SUSE Linux Enterprise Server
+
+   .. selector:: Linux distribution
+      :key: os
+      :show-cond: gpu=mi350p
+
+      .. selector-option:: Ubuntu
+         :value: ubuntu
+         :width: 25%
+
+      .. selector-option:: Debian
+         :value: debian
+         :width: 25%
+
+      .. selector-option:: RHEL
+         :value: rhel
+         :width: 25%
+         :toc-label: Red Hat Enterprise Linux
+
+      .. selector-option:: SLES
+         :value: sles
+         :width: 25%
+         :toc-label: SUSE Linux Enterprise Server
+
+   .. selector:: Linux distribution
+      :key: os
+      :show-cond: gpu=mi300x
+
+      .. selector-option:: Ubuntu
+         :value: ubuntu
+         :width: 4
+
+      .. selector-option:: Debian
+         :value: debian
+         :width: 4
+
+      .. selector-option:: RHEL
+         :value: rhel
+         :width: 4
+         :toc-label: Red Hat Enterprise Linux
+
+      .. selector-option:: Oracle Linux
+         :value: oracle-linux
+         :width: 4
+
+      .. selector-option:: Rocky Linux
+         :value: rocky-linux
+         :width: 4
+
+      .. selector-option:: SLES
+         :value: sles
+         :width: 4
+         :toc-label: SUSE Linux Enterprise Server
+
+   .. selector:: Linux distribution
+      :key: os
+      :show-cond: gpu=mi300a
+
+      .. selector-option:: Ubuntu
+         :value: ubuntu
+         :width: 20%
+
+      .. selector-option:: Debian
+         :value: debian
+         :width: 20%
+
+      .. selector-option:: RHEL
+         :value: rhel
+         :width: 20%
+         :toc-label: Red Hat Enterprise Linux
+
+      .. selector-option:: Rocky Linux
+         :value: rocky-linux
+         :width: 20%
+
+      .. selector-option:: SLES
+         :value: sles
+         :width: 20%
+         :toc-label: SUSE Linux Enterprise Server
+
+   .. selector:: Linux distribution
+      :key: os
+      :show-cond: gpu=mi250x gpu=mi250
+
+      .. selector-option:: Ubuntu
+         :value: ubuntu
+         :width: 25%
+
+      .. selector-option:: Debian
+         :value: debian
+         :width: 25%
+
+      .. selector-option:: RHEL
+         :value: rhel
+         :width: 25%
+         :toc-label: Red Hat Enterprise Linux
+
+      .. selector-option:: SLES
+         :value: sles
+         :width: 25%
+         :toc-label: SUSE Linux Enterprise Server
+
+   .. selector:: Linux distribution
+      :key: os
+      :show-cond: gpu=mi210
+
+      .. selector-option:: Ubuntu
+         :value: ubuntu
+         :width: 4
+
+      .. selector-option:: RHEL
+         :value: rhel
+         :width: 4
+         :toc-label: Red Hat Enterprise Linux
+
+      .. selector-option:: SLES
+         :value: sles
+         :width: 4
+         :toc-label: SUSE Linux Enterprise Server
+
+   .. selector:: Linux distribution
+      :key: os
+      :show-cond: gpu=mi100
+
+      .. selector-option:: Ubuntu
+         :value: ubuntu
+         :width: 4
+
+      .. selector-option:: RHEL
+         :value: rhel
+         :width: 4
+         :toc-label: Red Hat Enterprise Linux
+
+      .. selector-option:: SLES
+         :value: sles
+         :width: 4
+         :toc-label: SUSE Linux Enterprise Server
+
+.. selector:: Linux distribution
+   :key: os
+   :show-cond: fam=radeon
+
+   .. selector-option:: Ubuntu
+      :value: ubuntu
+      :width: 6
+
+   .. selector-option:: RHEL
+      :value: rhel
+      :width: 6
+      :toc-label: Red Hat Enterprise Linux
+
+.. selector:: Operating system
+   :key: os
+   :show-cond: fam=ryzen
+
+   .. selector-option:: Ubuntu
+      :value: ubuntu
+      :width: 12
+
+.. selected:: fam=all
+
+   .. selector:: Operating system
+      :key: os
+
+      .. selector-option:: Ubuntu
+         :value: ubuntu
+         :width: 4
+
+      .. selector-option:: Debian
+         :value: debian
+         :width: 4
+
+      .. selector-option:: RHEL
+         :value: rhel
+         :width: 4
+         :toc-label: Red Hat Enterprise Linux
+
+      .. selector-option:: Oracle Linux
+         :value: oracle-linux
+         :width: 4
+
+      .. selector-option:: Rocky Linux
+         :value: rocky-linux
+         :width: 4
+
+      .. selector-option:: SLES
+         :value: sles
+         :width: 4
+         :toc-label: SUSE Linux Enterprise Server
+
+.. selector:: Installation method
+   :show-cond: os=ubuntu os=debian
+   :key: i
+
+   .. selector-option:: apt
+      :value: pkgman
+      :width: 6
+
+   .. selector-option:: Tarball
+      :value: tar
+      :width: 6
+
+.. selector:: Installation method
+   :show-cond: os=rhel os=oracle-linux os=rocky-linux
+   :key: i
+
+   .. selector-option:: dnf
+      :value: pkgman
+      :width: 6
+
+   .. selector-option:: Tarball
+      :value: tar
+      :width: 6
+
+.. selector:: Installation method
+   :show-cond: os=sles
+   :key: i
+
+   .. selector-option:: zypper
+      :value: pkgman
+      :width: 6
+
+   .. selector-option:: Tarball
+      :value: tar
+      :width: 6
+
+----
+
+Before installing hipTensor, make sure your system meets the ROCm hardware,
+software, and driver requirements. For instructions, see `Install AMD ROCm <https://rocm.docs.amd.com/en/latest/install/rocm.html>`_. Use the selector panel on that page to view instructions appropriate for your system
+environment.
+
+Install the ROCm HPC SDK
+------------------------
+
+hipTensor is part of the ROCm HPC SDK on Linux. It is not included in the ROCm Core SDK. For the most complete installation, we recommend that developers use the ``amdrocm-hpc-sdk`` meta package.
+
+For instructions, see `Install ROCm HPC SDK <https://rocm.docs.amd.com/en/latest/components/hpc-sdk/install.html>`_. Use the selector panel on that page to view instructions appropriate for your system environment.
+
+Install hipTensor on Linux
+--------------------------
+
+.. selected:: i=tar
+
+   The standard ROCm tarball installation includes hipTensor. No
+   additional steps are required. For details on ROCm tarball installation,
+   refer to `Install AMD ROCm <https://rocm.docs.amd.com/en/latest/install/rocm.html>`_ and select Tarball
+   installation method from installation environment selector.
+
+.. selected:: i=pkgman
+
+   If you want to install hipTensor without additional ROCm libraries and tools, install the ``amdrocm-hiptensor`` package.
+
+   1. `Install AMD ROCm <https://rocm.docs.amd.com/en/latest/install/rocm.html>`_. Remember to complete the `ROCm
+      installation prerequisites <https://rocm.docs.amd.com/en/latest/install/rocm.html#prerequisites>`_ to install dependencies
+      and configure GPU access permissions.
+
+   2. Use the following command to install hipTensor:
+
+      .. selected:: fam=all
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx950
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx950 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx950 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx950 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx942
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx942 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx942 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx942 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx90a
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx90a amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx90a amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx90a amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx908
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx908 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx908 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx908 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx1200
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx1200 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx1200 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx1200 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx1201
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx1201 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx1201 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx1201 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx1100
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx1100 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx1100 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx1100 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx1101
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx1101 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx1101 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx1101 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx1102
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx1102 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx1102 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx1102 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx1103
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx1103 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx1103 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx1103 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx1151
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx1151 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx1151 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx1151 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx1150
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx1150 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx1150 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx1150 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx1152
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx1152 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx1152 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx1152 amdrocm-hiptensor-devel7.14
+
+      .. selected:: gfx=gfx1153
+
+         .. selected:: os=ubuntu os=debian
+
+            .. code-block:: bash
+
+               sudo apt install amdrocm-hiptensor7.14-gfx1153 amdrocm-hiptensor-dev7.14
+
+         .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+            .. code-block:: bash
+
+               sudo dnf install amdrocm-hiptensor7.14-gfx1153 amdrocm-hiptensor-devel7.14
+
+         .. selected:: os=sles
+
+            .. code-block:: bash
+
+               sudo zypper install amdrocm-hiptensor7.14-gfx1153 amdrocm-hiptensor-devel7.14
+
+Uninstall hipTensor
+-------------------
+
+.. selected:: i=tar
+
+   The standard ROCm uninstallation process removes hipTensor. No additional steps
+   are required. Refer to the `Uninstalling
+   <https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=all&w=compute&os=ubuntu&ubuntu-ver=26.04&i=tar#uninstalling>`_ section
+   and select the Tarball installation method.
+
+.. selected:: i=pkgman
+
+   .. selected:: fam=all
+
+      Use the following command to uninstall hipTensor for all GPU architectures:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx950
+
+      Use the following command to uninstall hipTensor for your ``gfx950`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx950 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx950 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx950 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx942
+
+      Use the following command to uninstall hipTensor for your ``gfx942`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx942 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx942 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx942 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx90a
+
+      Use the following command to uninstall hipTensor for your ``gfx90a`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx90a amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx90a amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx90a amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx908
+
+      Use the following command to uninstall hipTensor for your ``gfx908`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx908 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx908 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx908 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx1200
+
+      Use the following command to uninstall hipTensor for your ``gfx1200`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx1200 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx1200 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx1200 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx1201
+
+      Use the following command to uninstall hipTensor for your ``gfx1201`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx1201 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx1201 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx1201 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx1100
+
+      Use the following command to uninstall hipTensor for your ``gfx1100`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx1100 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx1100 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx1100 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx1101
+
+      Use the following command to uninstall hipTensor for your ``gfx1101`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx1101 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx1101 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx1101 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx1102
+
+      Use the following command to uninstall hipTensor for your ``gfx1102`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx1102 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx1102 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx1102 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx1103
+
+      Use the following command to uninstall hipTensor for your ``gfx1103`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx1103 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx1103 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx1103 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx1151
+
+      Use the following command to uninstall hipTensor for your ``gfx1151`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx1151 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx1151 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx1151 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx1150
+
+      Use the following command to uninstall hipTensor for your ``gfx1150`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx1150 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx1150 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx1150 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx1152
+
+      Use the following command to uninstall hipTensor for your ``gfx1152`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx1152 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx1152 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx1152 amdrocm-hiptensor-devel7.14
+
+   .. selected:: gfx=gfx1153
+
+      Use the following command to uninstall hipTensor for your ``gfx1153`` GPU:
+
+      .. selected:: os=ubuntu os=debian
+
+         .. code-block:: bash
+
+             sudo apt autoremove amdrocm-hiptensor7.14-gfx1153 amdrocm-hiptensor-dev7.14
+
+      .. selected:: os=rhel os=rocky-linux os=oracle-linux
+
+         .. code-block:: bash
+
+             sudo dnf remove amdrocm-hiptensor7.14-gfx1153 amdrocm-hiptensor-devel7.14
+
+      .. selected:: os=sles
+
+         .. code-block:: bash
+
+             sudo zypper remove amdrocm-hiptensor7.14-gfx1153 amdrocm-hiptensor-devel7.14
+
+Install a nightly build
+-----------------------
+
+The `TheRock <https://github.com/ROCm/TheRock>`_ build system also publishes nightly builds for ROCm and its components, including hipTensor. See `Nightly <https://github.com/ROCm/TheRock#nightly-release-status>`_ release status for details.
