@@ -184,13 +184,14 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
     return false;
 }
 
-// Budget, not an exact size: hipBLASLt picks Stream-K only when offered scratch, and the amount
-// it needs scales with the tile it chooses.
-static constexpr std::size_t nhwc_wrw_gemm_workspace = std::size_t{32} << 20;
-
+#if MIOPEN_USE_GEMM
 static std::size_t NhwcWrwGemmWorkspace(const ProblemDescription& problem)
 {
-#if MIOPEN_USE_GEMM && MIOPEN_USE_HIPBLASLT
+#if MIOPEN_USE_HIPBLASLT
+    // Budget, not an exact size: hipBLASLt picks Stream-K only when offered scratch, and the
+    // amount it needs scales with the tile it chooses.
+    constexpr std::size_t nhwc_wrw_gemm_workspace = std::size_t{32} << 20;
+
     if(problem.IsLayoutNHWC() && problem.GetConv().group_count == 1)
         return nhwc_wrw_gemm_workspace;
 #else
@@ -198,6 +199,7 @@ static std::size_t NhwcWrwGemmWorkspace(const ProblemDescription& problem)
 #endif
     return 0;
 }
+#endif
 
 size_t GemmWrw1x1_stride1::GetWorkspaceSize(const ExecutionContext&,
                                             const ProblemDescription& problem) const
