@@ -67,12 +67,14 @@ function(hkp_resolve_kpack out_var python_exe)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_selected_arches(<out_var>)
+# hkp_selected_arches(<out_var> <rejected_var>)
 #   Normalize GPU_TARGETS (or AMDGPU_TARGETS) into a bare gfx arch list,
 #   stripping feature suffixes (gfx942:xnack-) and dropping anything that is not
-#   a concrete gfx name. Empty result is legal (install nothing, non-error). No
-#   intersection with a fixed fixture set: the tool compiles from authored
-#   sources for whatever arch is requested.
+#   a concrete gfx name. Rejected entries are returned in <rejected_var> so a
+#   caller can tell "nothing was asked for" (legal: install nothing) apart from
+#   "everything asked for was unusable" (a misconfiguration). No intersection
+#   with a fixed fixture set: the tool compiles from authored sources for
+#   whatever arch is requested.
 #
 #   The only consumer of GPU_TARGETS in dnn-providers/. The sibling kpack
 #   producer, src/engines/asm_sdpa_engine/CMakeLists.txt, declares an explicit
@@ -86,7 +88,7 @@ endfunction()
 #   rather than coarse. Hence drop-with-warning, not passthrough, and no
 #   family-to-arch expansion table.
 # ---------------------------------------------------------------------------
-function(hkp_selected_arches out_var)
+function(hkp_selected_arches out_var rejected_var)
     set(_targets "")
     set(_source "")
     if(DEFINED GPU_TARGETS AND GPU_TARGETS)
@@ -98,6 +100,7 @@ function(hkp_selected_arches out_var)
     endif()
 
     set(_selected "")
+    set(_rejected "")
     foreach(_arch IN LISTS _targets)
         string(REGEX REPLACE ":.*$" "" _bare "${_arch}")
         if(NOT _bare)
@@ -109,12 +112,14 @@ function(hkp_selected_arches out_var)
                 "architecture and cannot be passed to hipcc --offload-arch. Nothing "
                 "is packed for it. Name real gfx architectures in ${_source} to pack "
                 "for them.")
+            list(APPEND _rejected "${_arch}")
             continue()
         endif()
         list(APPEND _selected "${_bare}")
     endforeach()
     list(REMOVE_DUPLICATES _selected)
     set(${out_var} "${_selected}" PARENT_SCOPE)
+    set(${rejected_var} "${_rejected}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -295,10 +300,41 @@ function(hkp_stage_all)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_diagnose_no_arches(<name> <install_base> <rejected>)
+#   Report a root that selected no arch, for the two cases that mean different
+#   things. Only a root that SHIPS is diagnosed at all: a test fixture with no
+#   arch is a developer choice.
+#
+#   Nothing was asked for -> warn. Everything asked for was REJECTED -> fatal:
+#   the build was pointed at targets it cannot pack (a family name where a
+#   concrete gfx belongs), and warning there produces a green build that ships
+#   an empty descriptor tree. That is the failure this guard exists to prevent.
+# ---------------------------------------------------------------------------
+function(hkp_diagnose_no_arches name install_base rejected)
+    if(NOT install_base)
+        return()
+    endif()
+    if(rejected)
+        message(FATAL_ERROR
+            "hkp: source root '${name}' ships, but every requested GPU target "
+            "was unusable: ${rejected}. These are not concrete gfx "
+            "architectures and cannot reach hipcc --offload-arch, so packaging "
+            "would install an EMPTY descriptor tree. Name real gfx "
+            "architectures (e.g. gfx942) in GPU_TARGETS. A family name like "
+            "gfx94X-dcgpu is valid only for the ROCm wheel extra, never for "
+            "GPU_TARGETS.")
+    endif()
+    message(WARNING
+        "hkp: source root '${name}' is set but no GPU architectures are "
+        "selected, so descriptor packaging will produce and install NOTHING. "
+        "Set GPU_TARGETS (or AMDGPU_TARGETS) to the arches you want packed.")
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_wire_root(NAME <label> GROUP <archive-group> SOURCE_ROOT <dir>
 #               ENABLE_ROCKE <bool> ARCHES <list> HIPCC <path>
 #               ROCM_KPACK_DIR <dir> STAGE_ROOT <dir>
-#               [INSTALL_BASE <dir>] [REQUIRE_HIPCC <bool>]
+#               [INSTALL_BASE <dir>] [REQUIRE_HIPCC <bool>] [REJECTED <list>]
 #               [ROCKE_INTERP <path>] [ROCKE_COMGR_LIB <path>]
 #               [ROCKE_WHEEL_STAMP <path>])
 #   Wire the compile -> prune -> pack -> stage (-> install) DAG for ONE authored
@@ -337,25 +373,18 @@ endfunction()
 #   packaged artifacts. Without that edge the kpacks would keep shipping kernels
 #   compiled from stale wheel contents.
 #
-#   Empty ARCHES wires nothing.
+#   Empty ARCHES wires nothing. REJECTED carries the targets hkp_selected_arches
+#   threw out, so that case can be told from "nothing was requested" -- see
+#   hkp_diagnose_no_arches.
 # ---------------------------------------------------------------------------
 function(hkp_wire_root)
-    set(_one NAME GROUP SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR
-        INSTALL_BASE STAGE_ROOT REQUIRE_HIPCC ROCKE_INTERP ROCKE_COMGR_LIB
-        ROCKE_WHEEL_STAMP)
+    set(_one NAME GROUP SOURCE_ROOT ENABLE_ROCKE ARCHES REJECTED HIPCC
+        ROCM_KPACK_DIR INSTALL_BASE STAGE_ROOT REQUIRE_HIPCC ROCKE_INTERP
+        ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
     if(NOT ARG_ARCHES)
-        # Only warn for a root that ships. A test fixture with no arch selected
-        # is a developer choice; a release that installs an empty descriptor
-        # tree and says so nowhere is the silent-empty-package failure.
-        if(ARG_INSTALL_BASE)
-            message(WARNING
-                "hkp: source root '${ARG_NAME}' is set but no GPU architectures "
-                "are selected, so descriptor packaging will produce and install "
-                "NOTHING. Set GPU_TARGETS (or AMDGPU_TARGETS) to the arches you "
-                "want packed.")
-        endif()
+        hkp_diagnose_no_arches("${ARG_NAME}" "${ARG_INSTALL_BASE}" "${ARG_REJECTED}")
         return()
     endif()
     if(NOT IS_DIRECTORY "${ARG_SOURCE_ROOT}")
@@ -719,7 +748,7 @@ function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
-    hkp_selected_arches(_arches)
+    hkp_selected_arches(_arches _rejected_arches)
 
     # hipcc is the perl/bat driver that honors --genco; on Windows it is
     # hipcc.exe or hipcc.bat. hipcc.bin.exe is the raw clang driver and is only
@@ -827,6 +856,7 @@ assertion: an unloadable path silently falls through to the next candidate.")
             SOURCE_ROOT "${_source_root}"
             ENABLE_ROCKE "${_enable_rocke}"
             ARCHES "${_arches}"
+            REJECTED "${_rejected_arches}"
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             INSTALL_BASE "${_install_base}"
