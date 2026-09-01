@@ -285,6 +285,52 @@ TEST_F(TestFeatureExtractor, SingleBindAddsVariable)
     EXPECT_DOUBLE_EQ(features[0], 42.0);
 }
 
+TEST_F(TestFeatureExtractor, AStringWhereANumberBelongsIsRefusedRatherThanScoredAsMissing)
+{
+    // RFC 0019 §7.2 fails closed on a type error, and the reason is specific to GBDTs: a
+    // NaN is not inert. The walker treats NaN as a *missing* value and takes default_left,
+    // so a string scored as a number returns an ordinary leaf and the row looks fine. The
+    // feature contract is broken and nothing says so.
+    //
+    // toDouble already threw for this. The `shape` and `rank` operators went through
+    // VariableContext::resolveDouble instead, which returned quiet_NaN -- the same error,
+    // visible on one path and silent on the other.
+    FeatureExtractionContext ctx;
+    ctx.bind("$kernel.dtype", std::string{"float16"});
+
+    const std::vector<std::string> signature = {"\"$kernel.dtype\""};
+    const FeatureExtractor extractor(signature);
+
+    EXPECT_THROW((void)extractor.extract(ctx), hipdnn_plugin_sdk::ingestor::uhd::JsonLogicError);
+}
+
+TEST_F(TestFeatureExtractor, AStringBoundWhereAnExtentBelongsIsRefusedByShape)
+{
+    // The path that was still silent: shape() resolves $tensor.shape_N through
+    // resolveDouble. A string there yielded NaN and flowed into the feature row.
+    FeatureExtractionContext ctx;
+    ctx.bind("$x.shape_0", std::string{"not an extent"});
+
+    const std::vector<std::string> signature = {R"({"shape": ["$x", 0]})"};
+    const FeatureExtractor extractor(signature);
+
+    EXPECT_THROW((void)extractor.extract(ctx), hipdnn_plugin_sdk::ingestor::uhd::JsonLogicError);
+}
+
+TEST_F(TestFeatureExtractor, ANumericExtentStillResolvesThroughShape)
+{
+    // The guard must not refuse the ordinary case it exists to protect.
+    FeatureExtractionContext ctx;
+    ctx.bind("$x.shape_0", int64_t{128});
+
+    const std::vector<std::string> signature = {R"({"shape": ["$x", 0]})"};
+    const FeatureExtractor extractor(signature);
+
+    const auto features = extractor.extract(ctx);
+    ASSERT_EQ(features.size(), 1u);
+    EXPECT_DOUBLE_EQ(features[0], 128.0);
+}
+
 // ========== Consistency and Edge Case Tests ==========
 
 TEST_F(TestFeatureExtractor, ExtractorProducesSameResultsOnMultipleCalls)
