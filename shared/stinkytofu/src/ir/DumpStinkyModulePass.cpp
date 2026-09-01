@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -52,7 +53,13 @@ void dumpAssembly(const std::vector<const stinkytofu::Function*>& functions,
 void dumpFunctions(const std::vector<const stinkytofu::Function*>& functions,
                    const std::string& fallbackName,
                    const stinkytofu::DumpStinkyModulePassConfig& config) {
-    if (!config.stirPath.empty()) {
+    if (config.stirToStdout) {
+        stinkytofu::AsmPrinter printer(std::cout, config.printerOptions);
+        for (size_t i = 0; i < functions.size(); ++i) {
+            if (i > 0) std::cout << "\n";
+            printer.print(*functions[i]);
+        }
+    } else if (!config.stirPath.empty()) {
         std::ofstream out(config.stirPath, std::ios::out | std::ios::trunc);
 
         // use assert
@@ -69,7 +76,10 @@ void dumpFunctions(const std::vector<const stinkytofu::Function*>& functions,
 
 void dumpModule(const stinkytofu::StinkyAsmModule& module,
                 const stinkytofu::DumpStinkyModulePassConfig& config) {
-    if (!config.stirPath.empty()) {
+    if (config.stirToStdout) {
+        stinkytofu::AsmPrinter printer(std::cout, config.printerOptions);
+        printer.print(module);
+    } else if (!config.stirPath.empty()) {
         std::ofstream out(config.stirPath, std::ios::out | std::ios::trunc);
         assert(out && "[DumpStinkyModulePass] Failed to open stirPath");
         stinkytofu::AsmPrinter printer(out, config.printerOptions);

@@ -78,6 +78,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestShallowDeviceOnlyMigratableMemory.cpp
     gpu-ref/TestShallowGpuTensor.cpp
     gpu-ref/TestGpuFpReferenceCommon.cpp
+    gpu-ref/TestGpuFpReferenceBatchnormFwdInf.cpp
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests

@@ -48,6 +48,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/CDNA5ReadyQueueTest.cpp
     unit/asm/ExecMaskGroupingTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
+    unit/asm/StinkyUnreachableBlockElimPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
     unit/asm/EstimateAsmCyclesTest.cpp
@@ -65,6 +66,11 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/StinkyModifiersTest.cpp
     unit/asm/LegalizationUtilsTest.cpp
     unit/asm/VirtualRegisterTest.cpp
+    unit/ssa/AttachedSSATest.cpp
+    unit/ssa/AsmPrinterSSAFormTest.cpp
+    unit/ssa/LiftAsmRegistersToSSATest.cpp
+    unit/asm/DefUseAnalysisCleanupTest.cpp
+    unit/ssa/SSADestructionTest.cpp
     # Parser/Lexer Tests (added for critical testing gaps)
     unit/asm/IRLexerTest.cpp
     unit/asm/IRParserTest.cpp
