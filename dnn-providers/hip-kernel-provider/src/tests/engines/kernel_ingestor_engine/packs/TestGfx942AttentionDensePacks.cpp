@@ -29,35 +29,52 @@ namespace
 
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 
-/// The descriptor set this engine ships, read from the installed tree.
-const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet()
+/// The descriptor set this engine ships, or nullptr when it is not in the tree.
+///
+/// ABSENT IS NOT A FAILURE HERE. The gfx942 attention_dense descriptors under
+/// `descriptor-packaging/examples/` are AUTHORED form: `kind: rocke`, which the runtime
+/// loader rejects by design (`kernelSourceKindFromString` knows `kpack`, `hip`,
+/// `embedded_source` and `hsaco_file` -- there is no rocKE adapter and never will be).
+/// They become loadable only after `hkp_pack` lowers the builder through comgr and
+/// rewrites them to `kind: kpack`, which needs rocKE and hipcc and therefore happens
+/// only for a wired-up source root. No build wires this example in: packaging stages
+/// `testfixture` always and `product` when a production root is configured, so on an
+/// ordinary build the set is legitimately not there.
+///
+/// Failing in that case asserts the developer's build configuration rather than a
+/// property of the descriptors, which is what these six tests were doing on every
+/// platform. The census below is about the SHAPE of a packaged bundle, so it runs when
+/// there is one and skips, loudly, when there is not.
+const hipdnn_plugin_sdk::ingestor::DescriptorSet* loadedSetOrNull()
 {
     const auto& sets = discoverDescriptorSets();
     const auto match = std::find_if(sets.begin(), sets.end(), [](const auto& set) {
         return set.engine.name == "hipkernel:Gfx942AttentionDense";
     });
-    // Fatal rather than a returned optional: every caller here would only
-    // dereference it, and a missing set means the descriptors were never
-    // installed or never registered -- itself the failure this test exists
-    // to catch.
-    if(match == sets.end())
-    {
-        ADD_FAILURE() << "descriptor set 'hipkernel:Gfx942AttentionDense' is not installed";
-        static const hipdnn_plugin_sdk::ingestor::DescriptorSet s_empty{};
-        return s_empty;
-    }
-    return *match;
+    return match == sets.end() ? nullptr : &*match;
 }
+
+/// Skip with a reason a reader can act on, rather than a bare GTEST_SKIP().
+#define REQUIRE_PACKAGED_SET(setRef)                                                     \
+    const auto* setPtr = loadedSetOrNull();                                              \
+    if(setPtr == nullptr)                                                                \
+    {                                                                                    \
+        GTEST_SKIP() << "descriptor set 'hipkernel:Gfx942AttentionDense' is not in the " \
+                        "descriptor tree: the example bundle is authored form "          \
+                        "(kind: rocke) and is only loadable once hkp_pack lowers it to " \
+                        "kind: kpack, which this build does not do";                     \
+    }                                                                                    \
+    const auto& setRef = *setPtr
 
 TEST(TestGfx942AttentionDensePacks, ShipsExactlyTheConfiguredPackCount)
 {
-    const auto& set = loadedSet();
+    REQUIRE_PACKAGED_SET(set);
     EXPECT_EQ(set.packs.size(), 1U);
 }
 
 TEST(TestGfx942AttentionDensePacks, PackAttentionDenseShipsItsConfiguredKernels)
 {
-    const auto& set = loadedSet();
+    REQUIRE_PACKAGED_SET(set);
     const auto match = std::find_if(set.packs.begin(), set.packs.end(), [](const auto& p) {
         // The KDP's own `name`, verbatim. The generator emitted
         // "hipkernel:Gfx942AttentionDense:attention_dense" -- an <engine>:<pack>
@@ -82,7 +99,7 @@ TEST(TestGfx942AttentionDensePacks, PackAttentionDenseShipsItsConfiguredKernels)
 
 TEST(TestGfx942AttentionDensePacks, ExposesTheConfiguredKnobs)
 {
-    const auto& set = loadedSet();
+    REQUIRE_PACKAGED_SET(set);
     // The knobs are the tuning dimensions the matcher may key on, so the contract is
     // that they COVER what the descriptors actually vary -- not that there are N of
     // them. This assertion previously froze 8 and broke when the sweep configs added
@@ -111,7 +128,7 @@ TEST(TestGfx942AttentionDensePacks, ExposesTheConfiguredKnobs)
 /// pass. Mirrors TestConvFwdPack.cpp's HasAGraphMatchAndOneKernelMatcher.
 TEST(TestGfx942AttentionDensePacks, CarriesNoGraphScopedMatcher)
 {
-    const auto& set = loadedSet();
+    REQUIRE_PACKAGED_SET(set);
     EXPECT_FALSE(set.engine.graphMatchNativeSymbol.empty());
     const auto graphScoped
         = std::count_if(set.matchers.begin(), set.matchers.end(), [](const auto& matcher) {
@@ -122,7 +139,7 @@ TEST(TestGfx942AttentionDensePacks, CarriesNoGraphScopedMatcher)
 
 TEST(TestGfx942AttentionDensePacks, CarriesExactlyOneSharedKernelScopedMatcher)
 {
-    const auto& set = loadedSet();
+    REQUIRE_PACKAGED_SET(set);
     const auto kernelScoped
         = std::count_if(set.matchers.begin(), set.matchers.end(), [](const auto& matcher) {
               return matcher.scope == hipdnn_plugin_sdk::ingestor::MatchScope::KERNEL;
@@ -140,7 +157,7 @@ TEST(TestGfx942AttentionDensePacks, CarriesExactlyOneSharedKernelScopedMatcher)
 /// asserts the one thing a packaged bundle guarantees is false.
 TEST(TestGfx942AttentionDensePacks, EveryKernelResolvesToAKpackBlob)
 {
-    const auto& set = loadedSet();
+    REQUIRE_PACKAGED_SET(set);
     for(const auto& pack : set.packs)
     {
         for(const auto& kernel : pack.kernels)
