@@ -190,7 +190,7 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefMissFallsThroughToCpu)
     // capability error either way, so only the call sequence — not the pass/fail
     // outcome — can catch a swapped dispatch order.
     {
-        ::testing::InSequence seq;
+        const ::testing::InSequence seq;
         EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU))
             .WillOnce(ReturnRef(_mocks.gpuReference));
         EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU))
