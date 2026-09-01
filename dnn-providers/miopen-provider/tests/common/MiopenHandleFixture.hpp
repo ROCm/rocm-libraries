@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "MiopenApi.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <miopen/miopen.h>
 
 namespace test_common
 {
