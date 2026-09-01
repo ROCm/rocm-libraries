@@ -22,7 +22,10 @@
 #define HIPRAND_H_
 
 #include <hip/hip_runtime.h>
-#include <hip/hip_fp16.h>
+
+#if defined(__cplusplus)
+    #include <hip/hip_fp16.h>
+#endif
 
 /** \addtogroup hiprandhost
  *
