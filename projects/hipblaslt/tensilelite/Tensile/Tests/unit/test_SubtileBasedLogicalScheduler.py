@@ -32,6 +32,7 @@ from Tensile.Components.Subtile.LogicalScheduler import (
     WaitGRCounts,
     fmt_mt,
 )
+from Tensile.Components.Subtile.SubtileGREmit import useDirectToVgprPreSwizzledB
 from unittest.mock import MagicMock
 from rocisa.code import Module
 
@@ -128,6 +129,111 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         kernel["_DepthUMXSA"] = depthU // mxblock
         kernel["_DepthUMXSB"] = depthU // mxblock
     return kernel
+
+
+def test_direct_pre_swizzled_b_uses_three_complete_pgr2_register_sets():
+    """PGR2 DTVB must retain every B (N,K) operand for three macro iterations."""
+    cfg = SchedulerConfig(
+        numMFMATilesM=2,
+        numMFMATilesN=2,
+        numSubIterK=2,
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=1),
+        partitionSizeM=2,
+        partitionSizeN=2,
+        pgr=2,
+        directToVgprB=True,
+    )
+    scheduler = LogicalScheduler(cfg)
+    scheduler.build()
+
+    assert scheduler.unroll_factor == 3
+    # 3 macro iterations * 2 K operands * 2 N operands.
+    assert scheduler.tile_peaks['B'] == 12
+
+    for slots in scheduler._partitions:
+        for slot in slots:
+            for gr in slot.grs:
+                if gr.tensor != 'B':
+                    continue
+                assert len(gr.vgpr_tile_map) == 3
+                for ui, tile_map in enumerate(gr.vgpr_tile_map):
+                    mfma = scheduler._partitions[gr.partition][
+                        gr.tiles.subIterK_start].mfma
+                    target = mfma.vgpr_tile_maps['B'][
+                        (ui + gr.mtIteration) % scheduler.unroll_factor]
+                    assert tile_map
+                    assert all(target[group] == tile_id
+                               for group, tile_id in tile_map.items())
+
+
+def test_mt256_direct_pre_swizzled_b_uses_two_complete_pgr1_register_sets():
+    """The 1x4 MT256 geometry must fit B in two rolling register banks."""
+    cfg = SchedulerConfig(
+        numMFMATilesM=16,
+        numMFMATilesN=4,
+        numSubIterK=2,
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=2, k=2),
+        grB=ReadGranularity(mn=1, k=1),
+        partitionSizeM=8,
+        partitionSizeN=4,
+        pgr=1,
+        directToVgprB=True,
+    )
+    scheduler = LogicalScheduler(cfg)
+    scheduler.build()
+
+    assert scheduler.unroll_factor == 2
+    # 2 macro iterations * 2 K operands * 4 N operands.
+    assert scheduler.tile_peaks['B'] == 16
+
+    for slots in scheduler._partitions:
+        for slot in slots:
+            for gr in slot.grs:
+                if gr.tensor == 'B':
+                    assert len(gr.vgpr_tile_map) == 2
+
+
+def test_direct_pre_swizzled_b_rejects_tail_and_oversized_wave_tiles():
+    kernel = create_kernel(32, 128, fp4=True, miWaveGroup=[1, 4])
+    kernel.update({
+        "ISA": (9, 5, 0),
+        "UseSubtileImpl": True,
+        "MatrixInstBM": 1,
+        "MIWaveTile": [2, 2],
+        "LocalSplitU": 1,
+        "InnerUnroll": 1,
+        "PrefetchGlobalRead": 2,
+        "AssertSummationElementMultiple": 256,
+    })
+    kernel["ProblemType"].update({
+        "SwizzleTensorB": True,
+        "TransposeA": True,
+        "TransposeB": False,
+    })
+    kernel["ProblemType"]["DataTypeB"].isFloat4.return_value = True
+
+    assert useDirectToVgprPreSwizzledB(kernel)
+    kernel["AssertSummationElementMultiple"] = 32
+    assert not useDirectToVgprPreSwizzledB(kernel)
+    kernel["AssertSummationElementMultiple"] = 256
+    kernel["MIWaveTile"] = [6, 4]
+    kernel["MacroTileB"] = 256
+    assert not useDirectToVgprPreSwizzledB(kernel)
+
+    kernel.update({
+        "MacroTileA": 256,
+        "MIWaveGroup": [1, 4],
+        "MIWaveTile": [16, 4],
+        "PrefetchGlobalRead": 1,
+    })
+    assert useDirectToVgprPreSwizzledB(kernel)
+    kernel["PrefetchGlobalRead"] = 2
+    assert not useDirectToVgprPreSwizzledB(kernel)
 
 
 def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
@@ -1068,6 +1174,32 @@ class TestAssignVgprTiles:
         assert sched.tile_peaks == {'A': 32, 'B': 8, 'SA': 16, 'SB': 4}
         assert sched.needs_unrolling == expect_unrolling
         self._assert_no_conflict_and_unrolling(sched, schedule)
+
+    def test_fp4_1x4_direct_b_pgr1_fits_operand_budget(self):
+        """MT256 DTVB uses two B banks and leaves room for address VGPRs."""
+        kernel = create_kernel(256, 256, fp4=True, miWaveGroup=[1, 4])
+        tile_infos = [makeTileInfo(t, kernel) for t in ('A', 'B', 'MXSA', 'MXSB')]
+        cfg = make_cfg_256x256_fp4(
+            depthU=256, pgr=1, miWaveGroup=[1, 4])
+        cfg.directToVgprB = True
+        sched = LogicalScheduler(cfg)
+        schedule = sched.build(stop_after=Pass.VGPR_TILES)
+
+        assert sched.tile_peaks == {'A': 32, 'B': 16, 'SA': 16, 'SB': 4}
+        assert sched.unroll_factor == 2
+        assert sched.getNumVgpr(*tile_infos) == 212
+        self._assert_no_conflict_and_unrolling(sched, schedule)
+
+        preloop = sched.build_preloop()
+        b_grs = [
+            em.source for partition in preloop for group in partition
+            for em in group
+            if isinstance(em.source, GRPlacement) and em.source.tensor == 'B'
+        ]
+        assert [(gr.tiles.subIterK_start, gr.tiles.subIterK_end)
+                for gr in b_grs] == [(0, 1), (1, 2)]
+        assert set(b_grs[0].vgpr_tile_map[0].values()).isdisjoint(
+            b_grs[1].vgpr_tile_map[0].values())
 
     @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
     def test_fp4_4x1(self, depthU, expect_unrolling):

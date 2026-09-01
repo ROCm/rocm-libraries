@@ -108,6 +108,7 @@ from .SubtileGREmit import (
     graInitPointer, graTileAssignment,
     emitSingleBufferLoad, emitSubtileBufferLoad, globalReadDoSubtile,
     globalReadDTLInitCommonSgpr, globalReadLDSBufferSwap, globalReadPtrUpdates,
+    useDirectToVgprPreSwizzledB,
     tdmGlobalOffsetSubtile, initTDMDescriptorSubtile, tdmApplyStreamKOffsetSubtile,
 )
 from .SubtileLREmit import (
@@ -399,6 +400,11 @@ class TileInfo:
     isAB = tc in ['A', 'B']
     isMXSAB = tc in ['MXSA', 'MXSB']
     _tc = 'A' if isA else 'B'
+    # SwizzleTensor{A,B} means the host has already transformed the data into
+    # the MFMA-friendly 16-row interleaved layout.  The GR/LR emitters must not
+    # apply the ordinary LDS swizzle to these tensors.
+    self.isPreShuffled = isAB and kernel["ProblemType"].get(
+        "SwizzleTensor%s" % _tc, False)
 
     # --- Extract kernel config ---
     if isinstance(geometry, (ABTilePair, MXScaleTilePair)):
@@ -1295,8 +1301,10 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   """
   module = Module("MultiDU tail SRD rewind (partial macro tile)")
   scaleInc = lambda ti: int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
-  incs = [("A", int(numUnroll.get('A', 1)) * int(tiA.depthUBytes)),
-          ("B", int(numUnroll.get('B', 1)) * int(tiB.depthUBytes))]
+  dataInc = lambda ti: int(ti.depthUBytes) * (
+      int(ti.mmaTileShape[0]) if ti.isPreShuffled else 1)
+  incs = [("A", int(numUnroll.get('A', 1)) * dataInc(tiA)),
+          ("B", int(numUnroll.get('B', 1)) * dataInc(tiB))]
   if scaleTiA is not None:
     incs.append(("MXSA", int(numUnroll.get('SA', 1)) * scaleInc(scaleTiA)))
   if scaleTiB is not None:
@@ -1337,6 +1345,7 @@ def mainLoop(writer, kernel):
 
   lrAGran = ReadGranularity(mn=1, k=1)
   lrBGran = ReadGranularity(mn=1, k=1)
+  directToVgprB = useDirectToVgprPreSwizzledB(kernel)
   grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1]
   grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1]
   # TDM: one tensor_load_to_lds covers the full localMMATileGrid.
@@ -1344,7 +1353,10 @@ def mainLoop(writer, kernel):
     grAGran = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])
   else:
     grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
-  if kernel.get("enableTDMB", False):
+  if directToVgprB:
+    # One b128 load is exactly one four-VGPR FP4 B operand.
+    grBGran = ReadGranularity(mn=1, k=1)
+  elif kernel.get("enableTDMB", False):
     grBGran = ReadGranularity(mn=tiB.localMMATileGrid[0], k=tiB.localMMATileGrid[1])
   else:
     grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
@@ -1381,6 +1393,7 @@ def mainLoop(writer, kernel):
           pgr=schedulerPgr,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
+          directToVgprB=directToVgprB,
       )
 
       scheduler = LogicalScheduler(cfg)

@@ -233,6 +233,7 @@ class SchedulerConfig:
     pgr: int = 2              # Prefetch Global Read
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
+    directToVgprB: bool = False  # Host-pre-swizzled B loads directly into MFMA VGPRs
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -444,6 +445,7 @@ class GRPlacement(Emittable):
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
+    vgpr_tile_map: List[dict] = field(default_factory=list)  # DTV: [{tileId: vgprTileId}] per unroll iter
 
     def __post_init__(self):
         self.kind = 'gr'
@@ -1147,14 +1149,26 @@ class LogicalScheduler:
         pgr0 = cfg.pgr == 0
         if pgr0:
             unroll_factor = 1
+        elif cfg.directToVgprB:
+            # PGR2 has B(n), B(n+1), and B(n+2) simultaneously live.  Keep a
+            # complete register set for each macro iteration; unlike LDS-backed
+            # LR, different K chunks cannot reuse one tile before the GR
+            # prefetch has completed.
+            unroll_factor = math.lcm(unroll_factor, cfg.pgr + 1)
 
         def _tile_set_idx(tensor, unroll_iter, k_chunk, gran):
             if pgr0:
                 return 0
+            if tensor == 'B' and cfg.directToVgprB:
+                return unroll_iter % (cfg.pgr + 1)
             nkg = num_k_groups[tensor]
             return (unroll_iter * nkg + k_chunk // gran.k) % 2
 
-        def _tile_id(tensor, set_idx, pos):
+        def _tile_id(tensor, set_idx, pos, k_chunk=0):
+            if tensor == 'B' and cfg.directToVgprB:
+                k_group = k_chunk // lr_grans[tensor].k
+                return ((set_idx * num_k_groups[tensor] + k_group)
+                        * max_groups[tensor] + pos)
             return set_idx * max_groups[tensor] + pos
 
         for unroll_iter in range(unroll_factor):
@@ -1173,7 +1187,7 @@ class LogicalScheduler:
                             for t in tileRange.tileId_list:
                                 group = (t // gran.mn) * gran.mn
                                 pos = group_to_pos[tensor][group]
-                                tile_map[group] = _tile_id(tensor, set_idx, pos)
+                                tile_map[group] = _tile_id(tensor, set_idx, pos, k)
                             slot.mfma.vgpr_tile_maps.setdefault(
                                 tensor, []).append(tile_map)
 
@@ -1190,11 +1204,32 @@ class LogicalScheduler:
                             if group in tile_map:
                                 continue
                             pos = group_to_pos[tensor][group]
-                            tile_map[group] = _tile_id(tensor, set_idx, pos)
+                            tile_map[group] = _tile_id(tensor, set_idx, pos, target_k)
                         lr.vgpr_tile_map.append(tile_map)
+
+                    for gr in slot.grs:
+                        if gr.tensor != 'B' or not cfg.directToVgprB:
+                            continue
+                        tensor = gr.tensor
+                        gran = lr_grans[tensor]
+                        target_mt = unroll_iter + gr.mtIteration
+                        target_k = gr.tiles.subIterK_start
+                        set_idx = _tile_set_idx(tensor, target_mt, target_k, gran)
+                        tile_map = {}
+                        for t in gr.tiles.tileId_list:
+                            group = (t // gran.mn) * gran.mn
+                            if group in tile_map:
+                                continue
+                            pos = group_to_pos[tensor][group]
+                            tile_map[group] = _tile_id(
+                                tensor, set_idx, pos, target_k)
+                        gr.vgpr_tile_map.append(tile_map)
 
         num_sets = 1 if pgr0 else 2
         self.tile_peaks = {t: num_sets * max_groups[t] for t in self.tensors}
+        if cfg.directToVgprB and not pgr0:
+            self.tile_peaks['B'] = ((cfg.pgr + 1) * num_k_groups['B']
+                                    * max_groups['B'])
         self.compact_b_overlay = False
         self.unroll_factor = unroll_factor
         self.needs_unrolling = unroll_factor > 1
@@ -1496,6 +1531,12 @@ class LogicalScheduler:
                                       allowed_slots=[last_uid_slot])
             else:
                 self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid)
+
+        if self.config.directToVgprB:
+            for slots in self._partitions:
+                for slot in slots:
+                    for gr in slot.grs:
+                        self._wire_direct_b_gr_map(gr)
 
         return self._partitions[0]
 
@@ -3078,6 +3119,53 @@ class LogicalScheduler:
         """Wrap Emittable objects (Placements / BaseOps) into EmittedModules."""
         return [EmittedModule(moduleId=mid, source=op) for mid, op in enumerate(ops)]
 
+    def _wire_direct_b_gr_map(self, gr: GRPlacement) -> GRPlacement:
+        """Attach the future MFMA's B register map to a direct-B GR."""
+        if not self.config.directToVgprB or gr.tensor != 'B':
+            return gr
+        if not self._partitions or gr.partition >= len(self._partitions):
+            return gr
+        k = gr.tiles.subIterK_start
+        if k >= len(self._partitions[gr.partition]):
+            return gr
+        mfma = self._partitions[gr.partition][k].mfma
+        maps = mfma.vgpr_tile_maps.get('B', []) if mfma else []
+        if not maps:
+            return gr
+        gr.vgpr_tile_map = []
+        for ui in range(self.unroll_factor):
+            target_ui = (ui + gr.mtIteration) % self.unroll_factor
+            src = maps[target_ui]
+            gr.vgpr_tile_map.append({
+                group: tile_id for group, tile_id in src.items()
+                if gr.tiles.tileId_start <= group < gr.tiles.tileId_end
+            })
+        return gr
+
+    def _make_preloop_gr_placements(self, tensor: str, mt: int,
+                                    tiles: MFMATileRange, uid: int) -> List[GRPlacement]:
+        """Build preloop GR placements, splitting direct B by MFMA K operand.
+
+        LDS-backed GRs may cover the full K range because their destination is
+        selected by the LDS write offset.  Direct B writes its MFMA operand
+        VGPRs, so each K group needs the tile map of the matching MFMA slot.
+        """
+        ranges = [tiles]
+        if self.config.directToVgprB and tensor == 'B':
+            gran_k = self.config.lrB.k
+            ranges = [
+                MFMATileRange(k, min(k + gran_k, tiles.subIterK_end),
+                              tiles.tileId_start, tiles.tileId_end)
+                for k in range(tiles.subIterK_start, tiles.subIterK_end, gran_k)
+            ]
+        return [
+            self._wire_direct_b_gr_map(
+                GRPlacement(tensor=tensor, mtIteration=mt, tiles=tile_range,
+                            subIterK_slot=tile_range.subIterK_start,
+                            unrollId=uid))
+            for tile_range in ranges
+        ]
+
     def _make_gr_all_tensors(self, mt: int, tiles: dict) -> List[GRPlacement]:
         """Create GR placements for all tensors and uids at the given MT iteration.
 
@@ -3101,9 +3189,8 @@ class LogicalScheduler:
                                              tile.tileId_start, tile.tileId_end)
                 else:
                     uid_tile = tile
-                result.append(GRPlacement(tensor=tensor, mtIteration=mt,
-                                          tiles=uid_tile, subIterK_slot=0,
-                                          unrollId=uid))
+                result.extend(self._make_preloop_gr_placements(
+                    tensor, mt, uid_tile, uid))
         return result
 
     def _make_lr_all_tensors(self, tiles: dict) -> List[LRPlacement]:
@@ -3157,9 +3244,8 @@ class LogicalScheduler:
                                          tile.tileId_start, tile.tileId_end)
             else:
                 uid_tile = tile
-            result.append(GRPlacement(tensor=tensor, mtIteration=mt,
-                                      tiles=uid_tile, subIterK_slot=0,
-                                      unrollId=uid))
+            result.extend(self._make_preloop_gr_placements(
+                tensor, mt, uid_tile, uid))
         return result
 
     def _make_depops_uid(self, cls, uid: int) -> List[BaseOp]:
@@ -3218,14 +3304,14 @@ class LogicalScheduler:
                         if key in seen:
                             continue
                         seen.add(key)
-                        result.append(GRPlacement(
+                        result.append(self._wire_direct_b_gr_map(GRPlacement(
                             tensor=tensor,
                             mtIteration=1,
                             tiles=tr,
                             subIterK_slot=k,
                             partition=pi,
                             unrollId=uid,
-                        ))
+                        )))
         return result
 
     def _make_preloop_mt1_grs_uid(self, uid: int) -> List[GRPlacement]:
@@ -3263,14 +3349,14 @@ class LogicalScheduler:
                     if key in seen:
                         continue
                     seen.add(key)
-                    result.append(GRPlacement(
+                    result.append(self._wire_direct_b_gr_map(GRPlacement(
                         tensor=tensor,
                         mtIteration=1,
                         tiles=tr,
                         subIterK_slot=k,
                         partition=pi,
                         unrollId=uid,
-                    ))
+                    )))
         return result
 
     def _make_initC_op(self) -> InlineModuleOp:

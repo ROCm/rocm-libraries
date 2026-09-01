@@ -1321,9 +1321,7 @@ class ProblemType(Mapping):
     gemmType = (self["MacDataTypeA"].toChar(), self["MacDataTypeB"].toChar(),
                 self["DestDataType"].toChar(), self["ComputeDataType"].toChar())
     if gemmType in _HPATypes:
-      dataTypeStr += self["DestDataType"].toChar()
-      dataTypeStr += self["ComputeDataType"].toChar()
-    name.append(dataTypeStr)
+      name[-1] += "".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()])
 
     if not self["F32XdlMathOp"].isSingle() and self["MacDataTypeA"].isSingle():
       name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
@@ -1339,12 +1337,6 @@ class ProblemType(Mapping):
 
     if self["SwizzleTensorB"]:
       name.append("STB")
-
-    if self["MXBlockA"]:
-      name.append(f'MXA{self["MXBlockA"]}')
-
-    if self["MXBlockB"]:
-      name.append(f'MXB{self["MXBlockB"]}')
 
     # Other
     other = ""

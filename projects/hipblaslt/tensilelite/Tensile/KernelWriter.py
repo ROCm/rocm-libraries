@@ -51,6 +51,7 @@ from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
+from .Components.SubtileBasedKernel import ScheduleInfo
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -5111,7 +5112,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Should check for is swizzled instead of usesubtileimpl
     # TODO: Move this calculation to host-side?
-    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockA"] and kernel["UseSubtileImpl"]:
+    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"] and kernel["UseSubtileImpl"]:
       module.addComment("Scale StridesMXSA by 32")
       module.add(SLShiftLeftB32(sgpr("StridesMXSA"), 5, sgpr("StridesMXSA")))
       module.add(SLShiftLeftB32(sgpr("StridesMXSB"), 5, sgpr("StridesMXSB")))
@@ -5393,7 +5394,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Should check for is swizzled instead of usesubtileimpl
     # TODO: Move this calculation to host-side?
-    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockA"] and kernel["UseSubtileImpl"]:
+    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"] and kernel["UseSubtileImpl"]:
       module.addComment("Scale StridesMXSA by 32")
       module.add(SLShiftLeftB32(sgpr("StridesMXSA"), 5, sgpr("StridesMXSA")))
       module.add(SLShiftLeftB32(sgpr("StridesMXSB"), 5, sgpr("StridesMXSB")))
@@ -9747,8 +9748,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ProblemType"]["MXBlockA"]:
       numSgprAddressMXSA = self.states.rpga
     numSgprAddressB = self.states.rpga # til read offsets
-    if kernel["ProblemType"]["MXBlockA"]:
-      numSgprAddressMXSA = self.states.rpga
     if kernel["ProblemType"]["MXBlockB"]:
       numSgprAddressMXSB = self.states.rpga
     numSgprAddressWS = self.states.rpga
@@ -9768,8 +9767,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.mxsa.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsMXSA"])
     self.states.b.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsB"])
-    if kernel["ProblemType"]["MXBlockA"]:
-      self.states.mxsa.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsMXSA"])
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.mxsb.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsMXSB"])
     if not kernel["ProblemType"]["UseInitialStridesCD"]:
@@ -9782,8 +9779,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.mxsa.numSgprStrides -= 1
       self.states.b.numSgprStrides -= 1
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.states.mxsa.numSgprStrides -= 1
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.mxsb.numSgprStrides -= 1
     if kernel["ProblemType"]["Sparse"]:
@@ -10868,7 +10863,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if tP["isSwizzled"]:
       # 16 means bytes of buffer_load_dwordx4
-      tP["swizzlePackK"] = 16 // kernel["MIInputPerThread%s"%cM] // int(kernel["ProblemType"]["DataType%s"%cM].numBytes())
+      dataType = kernel["ProblemType"]["DataType%s"%cM]
+      tP["swizzlePackK"] = int(16 // (kernel["MIInputPerThread%s"%cM] * dataType.numBytes()))
       tP["swizzleK"] = kernel["MatrixInstK"] * tP["swizzlePackK"]
 
   ##############################################################################

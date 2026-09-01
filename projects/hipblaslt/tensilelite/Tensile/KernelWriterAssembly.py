@@ -4651,12 +4651,25 @@ class KernelWriterAssembly(KernelWriter):
                           strideF, comment="numLine * stride"))
                 if isMxSwizzledScaleLayout:
                   module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr(stmp+0), src1=extra_bytes, comment="buffer_load limit for %s"%tc))
+                elif isPreShuffledAB:
+                  # numLine is measured in 16-row blocks.  Convert the logical
+                  # row stride to the physical block stride before adding the
+                  # final DepthU-wide block covered by this SRD.
+                  module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=swizzleSize0,
+                                     comment="numLine * stride * %u (row-block stride)"%swizzleSize0))
+                  module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=extra_bytes,
+                                     comment="+ swizzleBlock*DepthU/swizzleSize1"))
+                  module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]),
+                                               comment="buffer_load limit for %s (pre-shuffled, tile-boundary)"%tc))
                 else:
                   # (numLine * stride + DepthU) * bpe  -- mirrors scale path structure
                   module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=extra_bytes, comment="+ DepthU (one K step)"))
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
+          if isPreShuffledAB:
+            module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
+                      swizzleSize0, comment="pre-shuffled: scale by %u rows per block"%swizzleSize0))
 
         skComponent = Component.StreamK.find(self)
         module.add(skComponent.computeLoadSrd(self, kernel, tP, stmp))
@@ -4729,10 +4742,6 @@ class KernelWriterAssembly(KernelWriter):
                 module.add(SSubU32(dst=sgpr(stmp), src0=size, src1=0x1, comment="(size-1)"))
             else:
               module.add(SSubU32(dst=sgpr(stmp), src0=size, src1=0x1, comment="(size-1)"))
-          elif (idx in kernel["ProblemType"]["IndicesSummation"]):
-            module.add(SSubU32(dst=sgpr(stmp), src0=size, src1=0x1, comment="(size-1)"))
-          else:
-            module.add(SSubU32(dst=sgpr(stmp), src0=size, src1=0x1, comment="(size-1)"))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp), sgpr(stmp+1), stride, \
                     sgpr(stmp), comment="stride x (size-1)"))
           module.add(SAddU32(dst=sgpr(tensor2dSize0), src0=sgpr(tensor2dSize0), src1=sgpr(stmp+0), comment="sum tensor size"))
@@ -15125,6 +15134,23 @@ class KernelWriterAssembly(KernelWriter):
 
     edgeModule.addComment1("UseSubtileImpl NonEdge guards: numValidD1Steps (MatrixInstM=%d) and numValid16NBlocks" % kernel["MatrixInstM"])
 
+    # StreamK remaps the persistent workgroup id to a logical output tile later
+    # in the kernel, so WorkGroup0/1 are not reliable inputs to the ordinary
+    # non-StreamK boundary formulas below.  This is the NonEdge path: every
+    # wave-owned block is valid by construction.  Publish full-wave bounds for
+    # the C-load/store guards and their partial-block exec-mask helper.
+    if kernel.get("StreamK", 0):
+      edgeModule.add(SMovB32(dst=sgpr("SubtileMGuard"), src=kernel["MIWaveTile"][0],
+                             comment="StreamK NonEdge: all M blocks are valid"))
+      edgeModule.add(SMovB32(dst=sgpr("SubtileNGuard"), src=waveGroupN,
+                             comment="StreamK NonEdge: all N columns are valid"))
+      edgeModule.add(SMovB32(dst=sgpr(tmpM), src=waveGroupM,
+                             comment="StreamK NonEdge: full M exec mask"))
+      self.states.subtileTotalMOffsetSgpr = tmpM
+      self.states.subtileMBlockSize = mBlockSize
+      self.sgprPool.checkIn(tmpN)
+      return
+
     # Read waveId once; extract M (lower bits) and N (upper bits) before AND destroys waveId.
     waveSize = kernel["WavefrontSize"]
     log2WaveSize = int(log(waveSize, 2))
@@ -15154,7 +15180,7 @@ class KernelWriterAssembly(KernelWriter):
     edgeModule.add(SAddU32(dst=sgpr(tmpM), src0=sgpr(tmpM), src1=sgpr("SubtileMGuard"),
                            comment="totalMOffset = waveBase + WG0*MT0"))
     edgeModule.add(SSubU32(dst=sgpr("SubtileMGuard"), src0=sgpr("SizeI"), src1=sgpr(tmpM),
-                           comment="validM_wave = SizeI - totalMOffset; SCC=1 if OOB"))
+                           comment="validM_wave = SizeI - totalMOffset; SCC=0 if OOB"))
     edgeModule.add(SCSelectB32(dst=sgpr("SubtileMGuard"), src0=0, src1=sgpr("SubtileMGuard"),
                                comment="remainder = 0 if OOB"))
     # Precompute clamped validM_wave for per-store exec mask (avoids recomputing per store)
@@ -15182,12 +15208,12 @@ class KernelWriterAssembly(KernelWriter):
       edgeModule.add(SMulI32(dst=sgpr(tmpN), src0=sgpr(tmpN), src1=waveGroupN,
                              comment="waveBaseN = waveIdN * waveGroupN(%d)" % waveGroupN))
       edgeModule.add(SSubU32(dst=sgpr("SubtileNGuard"), src0=sgpr("SubtileNGuard"), src1=sgpr(tmpN),
-                             comment="validN - waveBaseN; SCC=1 if OOB"))
+                             comment="validN - waveBaseN; SCC=0 if OOB"))
       edgeModule.add(SCSelectB32(dst=sgpr("SubtileNGuard"), src0=0, src1=sgpr("SubtileNGuard"),
                                  comment="validN_wave = 0 if OOB"))
-    # clamped = min(validN_wave, waveGroupN); SCC=1 on borrow → keep validN_wave, else waveGroupN.
+    # clamped = min(validN_wave, waveGroupN); SCC=1 on no borrow → use waveGroupN.
     edgeModule.add(SSubU32(dst=sgpr(tmpN), src0=sgpr("SubtileNGuard"), src1=waveGroupN,
-                           comment="validN_wave - waveGroupN; SCC=1 if validN_wave < waveGroupN"))
+                           comment="validN_wave - waveGroupN; SCC=1 if validN_wave >= waveGroupN"))
     edgeModule.add(SCSelectB32(dst=sgpr("SubtileNGuard"), src0=sgpr("SubtileNGuard"), src1=waveGroupN,
                                comment="min(validN_wave, waveGroupN)"))
     if self.states.storeAlign8:

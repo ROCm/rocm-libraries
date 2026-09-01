@@ -583,8 +583,6 @@ namespace TensileLite
             = TensorDescriptor("scaleAlphaVec");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::METADATA]   = TensorDescriptor("metadata");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::AMAXD]      = TensorDescriptor("amaxD");
-        gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSA]     = TensorDescriptor("mxScaleA");
-        gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSB]     = TensorDescriptor("mxScaleB");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::COMPRESSED] = TensorDescriptor("compressed");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSA]       = TensorDescriptor("mx-a");
         gemm.m_tensors[ContractionProblemGemm::TENSOR::MXSB]       = TensorDescriptor("mx-b");
@@ -747,45 +745,6 @@ namespace TensileLite
         }
     }
 
-        if (mxBlockA)
-        {
-            std::vector<size_t> saSizes = m_tensors[ContractionProblemGemm::TENSOR::A].sizes();
-            auto boundIdx = m_boundIndices[0].a;
-            // Scale bound dimension: use CeilDivide to handle K not divisible by mxBlock,
-            // then round up to multiple of 8 (= 256 data elements / 32 block size) so
-            // kernels that process K in 256-element chunks have valid scale data.
-            saSizes[boundIdx] = RoundUpToMultiple(
-                CeilDivide(saSizes[boundIdx], (size_t)mxBlockA), (size_t)8);
-            // Scale free dimension: round up M to multiple of 32 so kernels that
-            // process M in 32-element blocks have valid scale data for partial blocks.
-            auto freeIdx = m_freeIndicesA[0].i;
-            saSizes[freeIdx] = RoundUpToMultiple(saSizes[freeIdx], (size_t)32);
-            TensorDescriptor mxsa("mxScaleA", rocisa::DataType::MXScale, saSizes.begin(), saSizes.end(), saStride.begin(), saStride.end());
-            m_tensors[ContractionProblemGemm::TENSOR::MXSA] = mxsa;
-        }
-    }
-
-    void ContractionProblemGemm::setMXScaleB(int mxBlockB, std::vector<size_t> sbStride)
-    {
-        m_mxBlockB = mxBlockB;
-
-        if (mxBlockB)
-        {
-            std::vector<size_t> sbSizes = m_tensors[ContractionProblemGemm::TENSOR::B].sizes();
-            auto boundIdx = m_boundIndices[0].b;
-            // Scale bound dimension: use CeilDivide to handle K not divisible by mxBlock,
-            // then round up to multiple of 8 (= 256 data elements / 32 block size) so
-            // kernels that process K in 256-element chunks have valid scale data.
-            sbSizes[boundIdx] = RoundUpToMultiple(
-                CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB), (size_t)8);
-            // Scale free dimension: round up N to multiple of 32 so kernels that
-            // process N in 32-element blocks have valid scale data for partial blocks.
-            auto freeIdx = m_freeIndicesB[0].i;
-            sbSizes[freeIdx] = RoundUpToMultiple(sbSizes[freeIdx], (size_t)32);
-            TensorDescriptor mxsb("mxScaleB", rocisa::DataType::MXScale, sbSizes.begin(), sbSizes.end(), sbStride.begin(), sbStride.end());
-            m_tensors[ContractionProblemGemm::TENSOR::MXSB] = mxsb;
-        }
-    }
     size_t ContractionProblemGemm::toAPos(size_t idx) const
     {
         if(idx >= d().dimensions())
@@ -1840,8 +1799,6 @@ namespace TensileLite
         , ws(_ws)
         , Synchronizer(_Synchronizer)
         , metadata(_metadata)
-		, mxsa(_mxsa)
-        , mxsb(_mxsb)
         , compressed(_compressed)
         , mxsa(_mxsa)
         , mxsb(_mxsb)

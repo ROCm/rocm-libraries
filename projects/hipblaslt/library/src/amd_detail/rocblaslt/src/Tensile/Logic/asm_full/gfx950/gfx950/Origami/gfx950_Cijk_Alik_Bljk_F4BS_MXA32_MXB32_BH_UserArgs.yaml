@@ -20,6 +20,8 @@
   DataTypeAmaxD: 0
   DataTypeB: 21
   DataTypeE: 7
+  DataTypeMXSA: 22
+  DataTypeMXSB: 22
   DestDataType: 7
   F32XdlMathOp: 0
   Gradient: false
@@ -71,7 +73,7 @@
   StridedBatched: true
   SupportUserArgs: true
   SwizzleTensorA: false
-  SwizzleTensorB: false
+  SwizzleTensorB: true
   TLUA: false
   TLUB: false
   TLUMXSA: false
@@ -82,8 +84,8 @@
   TileAwareSelection: false
   TileB: 1
   TotalIndices: 4
-  TransposeA: 1
-  TransposeB: 0
+  TransposeA: true
+  TransposeB: false
   UseBeta: true
   UseBias: 0
   UseE: false
@@ -109,7 +111,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT64hIsnhFT2L5uw_T8ryWf3mri6PtKpwJ1E97MC3rNtxpw=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -138,7 +140,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 2
@@ -433,7 +435,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT128AMjoHHGnVSJ1fjvuIJeKPVtejro7lpRL6TixtWnDac=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -462,7 +464,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -757,7 +759,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT19tVFE7Mochg2Q71HzQS4tIGctt0Td3p2SmmxHjjWSYTc=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -786,7 +788,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 6
@@ -1081,7 +1083,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT25YgPR4XPaMfFjkFVdEJNxrCtJ2m9IQRE3ggDN5hyNKfg=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -1110,7 +1112,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -1405,7 +1407,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT64yR3-UwlktRfU59ACgTfmpcg_Yk6f2Lb1knA4QU-BsnY=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -1434,7 +1436,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 2
@@ -1729,7 +1731,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT12ZclQEHdRRO1sBJL3TwidM33yIt-WYnDtDgY9P9JYRX4=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -1758,7 +1760,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -2053,7 +2055,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT64hJRTC6QzyytWkHaKB_tyuSMxvHfrHLHmDLGhNVVcILE=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -2082,7 +2084,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 2
@@ -2377,7 +2379,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT19UCUD2vak2YLHvH_Ztg5zXPDJUlX3NzBJWRuGhvKVzu8=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -2406,7 +2408,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 6
@@ -2701,7 +2703,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT64sCK37FdA-O3yvoTtVtg3QFjEpjbAv0RNmVuI_Ry968A=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -2730,7 +2732,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 2
@@ -3025,7 +3027,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT25Tmym63Cp1OVwmuklAuBYLzHtSt0oUezVbK-tmV8hqYs=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -3054,7 +3056,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -3349,7 +3351,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT12Qs31lTSyFaUbDqXQHGpUViUgkCHLEWWfNifVlN3xPcA=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -3378,7 +3380,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -3673,7 +3675,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT191Q3CWl85SU-4agRfSbxDDRYJaTIDmYF_adG8G4wdfNo=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -3702,7 +3704,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 6
@@ -3997,7 +3999,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT12kwdCHpnp9d41ufLMEwnWbNNXbmlKzUrCttuc0YSlgSY=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -4026,7 +4028,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -4321,7 +4323,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT25s2SqPqjqQTrutnl4Fjsck3utFxYLnrt2GxRGoMabbq0=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -4350,7 +4352,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -4645,7 +4647,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT19--ULatdGkaEyMxugPoO0m7KB92W8g0H0S_IE47lq-mE=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -4674,7 +4676,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 6
@@ -4969,7 +4971,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT25H-6yQcCGxSKwn5gmGJAHA93oK-ekIRJm5JqDOya5ASk=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -4998,7 +5000,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -5293,7 +5295,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT649Xx58paO0aNamHRyhpgRWxjDG0kBNJ5sAnNiMy2USyI=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -5322,7 +5324,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 2
@@ -5617,7 +5619,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT32yn2lSZhgGG39-O0tN9XB-c6Nr5kcbdLKPNrKxqSEhVE=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -5646,7 +5648,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 10
@@ -5941,7 +5943,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT64cx8jpYzIAVvV24Gqg4hoX8QdixxbIDmUlvaleHLuajs=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -5970,7 +5972,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 2
@@ -6265,7 +6267,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT38m0Bm4hH2y_fb6-eo4XZRKb5dkkBhjv6q0Rd-CAzTq-Q=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -6294,7 +6296,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 12
@@ -6589,7 +6591,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT64ghBzLJyXgx9oTwgzYUUty2EUDAM9Q1qjBKNRjSDH1Qg=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -6618,7 +6620,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 2
@@ -6913,7 +6915,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT51N7xP8nenZXqX1PoWvPtuxa4rTpP69DwZBgRtHN8axrQ=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -6942,7 +6944,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 16
@@ -7237,7 +7239,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT12Tzx41lFmgkHO5_GDlXlBjYPnuHfWnU6iLujoAD27WHo=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -7266,7 +7268,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -7561,7 +7563,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT329TK1O9xqAG2cUdkJ_6Jkg-kbMKNtFWKGnhC0gVHbf3c=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -7590,7 +7592,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 10
@@ -7885,7 +7887,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT12Ko14x9Bm17skxIK2J-9eSMhxZf1WQTws5W6lZ4ij_RU=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -7914,7 +7916,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -8209,7 +8211,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT38PfCBP4cNoa67MDHKbRKQKP0baWWAor2QL1_1-ioSnxM=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -8238,7 +8240,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 12
@@ -8533,7 +8535,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT32GHMtx7cclUEZq8HXp3EV83TsDigTCOy4HpQzcwTdNNQ=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -8562,7 +8564,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 10
@@ -8857,7 +8859,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT25yENsNJL4B9Vb5GlLD7ofBX9eYUJtt3JL_VzKdaPOs5g=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -8886,7 +8888,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -9181,7 +9183,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT64IqbWxZkPcZWy3vA8g9HsDHfQ7n72vJptvmQ79eUQ7kk=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -9210,7 +9212,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 2
@@ -9505,7 +9507,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT44JIOkXLbpjhS22SFIEupmgY9bhtzcXu69kfhwBJBO5wo=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -9534,7 +9536,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 14
@@ -9829,7 +9831,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT12NCUb78G7QzN6ng2b3-8rphTRtJXo20S1KvmwH6k1FLQ=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -9858,7 +9860,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -10153,7 +10155,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT44K2rcrzW2gkNghqcoHIxk3lU0xSXGNO6q0t-lzqdm54M=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -10182,7 +10184,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 14
@@ -10477,7 +10479,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT197rqXtfRTrgckooWIHV9QRZkAUvBYDajyR7fyXPSaOfI=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -10506,7 +10508,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 6
@@ -10801,7 +10803,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT38M4Hg58ewW76BBGjsIKCCfd9HK3CXsd22WqnddQrMdIo=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -10830,7 +10832,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 12
@@ -11125,7 +11127,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT12pSBqfd5dzj78eX1t5EQJzYZ5aHFVtQ9uJHS361sw3qY=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -11154,7 +11156,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -11449,7 +11451,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT12lYJO4P9-MC57Obi2kvcZAOwe_1ysdtWgX7-VIBNgQpw=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -11478,7 +11480,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -11773,7 +11775,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT25ccxCqQ2dvGclrJYn0QqExpGJSq56GiHUJPL0jzB0qVw=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -11802,7 +11804,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -12097,7 +12099,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT25LD47Rd1FCRkyTzzAeZkhMOPqncN77I3VtqjftUOo3W0=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -12126,7 +12128,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -12421,7 +12423,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT252kruXsNK48kysY3byfZ8nkfbVQgYyySEfltsnGOOr7I=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -12450,7 +12452,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -12745,7 +12747,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT25K1mXD-Z64cKGl1n64cEhRIvEdarIIYY6qzM6iXFNutU=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -12774,7 +12776,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -13069,7 +13071,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT382wXw8HnHr0540PBKyCMkiG1GnHC8Qq6QTA2UY90u0Us=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -13098,7 +13100,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 12
@@ -13393,7 +13395,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT38iWtaR8v4gfASTnshP-7Zt37fJ-3bIKngSBlzEMd0qgE=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -13422,7 +13424,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 12
@@ -13717,7 +13719,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT51My4B9dUWEKuVinUMAqyTn-9nVKbOgw4LZNuajpvbgno=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -13746,7 +13748,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 16
@@ -14035,13 +14037,13 @@
     AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
     AssertKRingShiftTailWrapOnly: 0
-    AssertSummationElementMultiple: 32
+    AssertSummationElementMultiple: 256
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT32dv3nH_ug3zWfzXFJEJHJUvkpjXQjAQVml90QMZvwYvs=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -14070,7 +14072,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 1
@@ -14359,13 +14361,13 @@
     AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
     AssertKRingShiftTailWrapOnly: 0
-    AssertSummationElementMultiple: 32
+    AssertSummationElementMultiple: 256
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT96VdJ139l5ExTu5vrbSyr9YIDnqGsFY6rZMfGBgYGwyok=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -14394,7 +14396,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 3
@@ -14683,13 +14685,13 @@
     AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
     AssertKRingShiftTailWrapOnly: 0
-    AssertSummationElementMultiple: 32
+    AssertSummationElementMultiple: 256
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT32pDTSO9Ei8iprYUZVwZ8MVK8XTu8S8ugrlkQJj7C1FJQ=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -14718,7 +14720,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 1
@@ -15013,7 +15015,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT96Cj2Z80w1PkWDv8Q4NtOmErGoRYnlYoT1xjNw40Qn6y8=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -15042,7 +15044,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 3
@@ -15337,7 +15339,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT16rkdIx0xJ9AdmxSLTSuPL_HwvXURN3d9JBsT0i2N2r4A=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -15366,7 +15368,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 5
@@ -15661,7 +15663,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT28HX9AX04H5gx2Hnt9CFkwE4Io5BNr8Him7sxPkQ6FxSI=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -15690,7 +15692,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 9
@@ -15985,7 +15987,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT323cjBEjqTj-Mu9ZF1RsqJ73WqkJOeA3kpk9e2rgOyJEQ=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -16014,7 +16016,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 1
@@ -16309,7 +16311,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT32k1L8EqrYflL4kvotLP49gssYPXLs5aDdnaskyCeVRw4=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -16338,7 +16340,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 1
@@ -16633,7 +16635,7 @@
     BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_UserArgs_MT9680-vsketBKOwATFxdutsK5i_NcnvLOonACpwOS25BUY=
     BufferLoad: true
-    BufferStore: 1
+    BufferStore: true
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
@@ -16662,7 +16664,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 3
@@ -16933,6 +16935,495 @@
     enableLDSTrB: false
     enableLDSTrMXSA: false
     enableLDSTrMXSB: false
+    numSubTiles: 1
+    reorderGRInstForDTVA: false
+    reorderGRInstForDTVB: false
+    tailLoopOptA: false
+    tailLoopOptB: false
+    tailLoopOptMXSA: false
+    tailLoopOptMXSB: false
+  - 1LDSBuffer: 0
+    ActivationAlt: false
+    ActivationFuncCall: false
+    ActivationFused: true
+    AdaptiveGemm: 0
+    AdaptiveGemmGSUA: 0
+    AdaptiveGemmNTAB: 0
+    AssertAIGreaterThanEqual: -1
+    AssertAILessThanEqual: -1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertSummationElementMultiple: 256
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BaseName: Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STB_BH_UseX4sVGjrepO5tED0WLDcAE7Wf3E9Sun_K16k0p2yrfOE=
+    BufferLoad: true
+    BufferStore: true
+    CUCount: null
+    CUOccupancy: 1
+    ClusterBarrier: false
+    ClusterDim: [1, 1]
+    ClusterLocalRead: 1
+    CodeObjectVersion: '4'
+    CompactLoopStore: false
+    ConvertAfterDS: false
+    CustomKernelName: ''
+    DebugPersistentKernelLoopForever: false
+    DebugStreamK: 0
+    DepthU: 256
+    DirectToLds: 2
+    DirectToLdsA: true
+    DirectToLdsB: false
+    DirectToLdsMXSA: true
+    DirectToLdsMXSB: false
+    DirectToLdsMetadata: 0
+    DirectToVgprA: false
+    DirectToVgprB: false
+    DirectToVgprMXSA: false
+    DirectToVgprMXSB: false
+    DirectToVgprSparseMetadata: false
+    DtlPlusLdsBuf: 0
+    ESMRuntimeGate: false
+    EdgeType: ShiftPtr
+    EnableESM2TrackValuVsrc: false
+    EnableF32XdlMathOp: false
+    EnableMatrixInstruction: true
+    EnableStinkyTofuESM2: false
+    ExpandPointerSwap: true
+    ExpertSchedulingMode: 0
+    ExtraLatencyForLR: 0
+    ExtraMiLatencyLeft: -1
+    ForceDisableShadowInit: false
+    ForceUnrollSubIter: false
+    GlobalReadPerMfma: 1.0
+    GlobalReadVectorWidthA: 32
+    GlobalReadVectorWidthB: 32
+    GlobalReadVectorWidthMXSA: 8
+    GlobalReadVectorWidthMXSB: 8
+    GlobalSplitU: 1
+    GlobalSplitUAlgorithm: SingleBuffer
+    GlobalSplitUCoalesced: false
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 1
+    GroupLoadStore: false
+    GuaranteeNoPartialA: true
+    GuaranteeNoPartialB: true
+    GuaranteeNoPartialMetadata: true
+    HalfPLR: 0
+    HalfPLRA: false
+    HalfPLRB: false
+    ISA: [9, 5, 0]
+    InitCIterWmma: 0
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
+    Kernel: true
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STB_BH_UserArgs_MT256x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM256_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSSI0_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT16_4_MXLIBL_MXSFHPS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR1_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMLWS0_TDMPLB0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMXCC1
+    LDSSegInterleaveOffsets: null
+    LDSSegmentInterleave: 0
+    LDSTrInst: false
+    LSCA: 256
+    LSCB: 256
+    LSCMXSA: 0
+    LSCMXSB: 0
+    LSPA: 32
+    LSPB: 32
+    LSPMXSA: 0
+    LSPMXSB: 0
+    LVCA: 8
+    LVCB: 8
+    LVCMXSA: 0
+    LVCMXSB: 0
+    LVPA: 1
+    LVPB: 1
+    LVPMXSA: 0
+    LVPMXSB: 0
+    LdsBlockSizePerPadA: 0
+    LdsBlockSizePerPadB: 0
+    LdsBlockSizePerPadMXSA: 0
+    LdsBlockSizePerPadMXSB: 0
+    LdsBlockSizePerPadMetadata: 0
+    LdsBytesNoAmax: 73728
+    LdsInitCVgprs: false
+    LdsNumBytes: 73728
+    LdsNumElementsAlignedA: 32768
+    LdsNumElementsAlignedB: 0
+    LdsNumElementsAlignedMXSA: 2048
+    LdsNumElementsAlignedMXSB: 2048
+    LdsNumElementsAlignedMetadata: 0
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 36864
+    LdsOffsetB: 36864
+    LdsOffsetB_Blk: 73728
+    LdsOffsetBias: 0
+    LdsOffsetBiasGSU: 0
+    LdsOffsetBiasNonGSU: 0
+    LdsOffsetMXSA: 32768
+    LdsOffsetMXSA_Blk: 69632
+    LdsOffsetMXSB: 34816
+    LdsOffsetMXSB_Blk: 71680
+    LdsOffsetMetadata: 36864
+    LdsOffsetMetadata_Blk: 73728
+    LdsPadA: 0
+    LdsPadB: 0
+    LdsPadMXSA: 0
+    LdsPadMXSB: 0
+    LdsPadMetadata: 0
+    LocalReadVectorWidth: -1
+    LocalReadVectorWidthA: 32
+    LocalReadVectorWidthB: 32
+    LocalReadVectorWidthMXS: 1
+    LocalReadVectorWidthMXSA: 1
+    LocalReadVectorWidthMXSB: 1
+    LocalSplitU: 1
+    LocalSplitUReuseLDS: 1
+    LocalWritePerMfma: -1
+    LocalWriteUseSgprA: true
+    LocalWriteUseSgprB: false
+    LocalWriteUseSgprMXSA: true
+    LocalWriteUseSgprMXSB: false
+    LocalWriteUseSgprMetadata: false
+    LoopIters: 2
+    LoopUnroll: 256
+    MFMA_BF16_1K: false
+    MIArchVgpr: false
+    MIBlock: [16, 16, 128, 1, 1, 1]
+    MIInputPerThread: 32
+    MIInputPerThreadA: 32
+    MIInputPerThreadB: 32
+    MIInputPerThreadMXSA: 1
+    MIInputPerThreadMXSB: 1
+    MIInputPerThreadMetadata: 32
+    MIOutputVectorWidth: 4
+    MIRegPerOut: 1
+    MIWaveGroup: [1, 4]
+    MIWaveTile: [16, 4]
+    MIWaveTileA: 16
+    MIWaveTileB: 4
+    MIWaveTileMXSA: 16
+    MIWaveTileMXSB: 4
+    MIWaveTileMetadata: 0
+    MXLoadInst: BufferLoad
+    MXScaleFormat: HostPreSwizzle
+    MacroTile0: 256
+    MacroTile1: 256
+    MacroTileA: 256
+    MacroTileB: 256
+    MacroTileMXSA: 256
+    MacroTileMXSB: 256
+    MagicDivAlg: 2
+    MathClocksUnrolledLoop: 0
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstBN: 1
+    MatrixInstK: 128
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MatrixInstruction: [16, 16, 128, 1]
+    MaxLDS: 163840
+    MaxOccupancy: 40
+    MbskPrefetchMethod: 0
+    MfmaInitCVgprs: false
+    MinGRIncPerMfma: 3
+    Multicast: false
+    NoLdsWriteCode: false
+    NoReject: false
+    NoTailLoop: true
+    NonDTLTailLoopA: true
+    NonDTLTailLoopB: false
+    NonDTLTailLoopMXSA: true
+    NonDTLTailLoopMXSB: false
+    NonDTLTailLoopMetadata: false
+    NonTemporal: -1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NonTemporalD: 0
+    NonTemporalE: 0
+    NonTemporalGate: 0
+    NonTemporalMXSA: 0
+    NonTemporalMXSB: 0
+    NonTemporalMetadata: 0
+    NonTemporalWS: 0
+    NonVolatile: -1
+    NonVolatileA: 0
+    NonVolatileB: 0
+    NonVolatileC: 0
+    NonVolatileD: 0
+    NonVolatileE: 0
+    NonVolatileMXSA: 0
+    NonVolatileMXSB: 0
+    NonVolatileMetadata: 0
+    NonVolatileWS: 0
+    NumElementsPerBatchStore: 0
+    NumElementsPerThread: 256
+    NumGlobalWriteVectorsPerThread: 256
+    NumLdsBlk: 2
+    NumLoadsA: 8
+    NumLoadsB: 8
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsCoalescedMXSA: 1
+    NumLoadsCoalescedMXSB: 1
+    NumLoadsPerpendicularA: 8
+    NumLoadsPerpendicularB: 8
+    NumLoadsPerpendicularMXSA: 0
+    NumLoadsPerpendicularMXSB: 0
+    NumThreads: 256
+    NumTotalPackedLoadsA: -1
+    NumTotalPackedLoadsB: -1
+    NumTotalPackedLoadsMXSA: 0
+    NumTotalPackedLoadsMXSB: 0
+    NumWaveSplitK: 1
+    NumWaves: 4
+    OptNoLoadLoop: 1
+    PackedC0IdxChars: [I]
+    PackedC0IndicesX: [0]
+    PackedC1IdxChars: [J]
+    PackedC1IndicesX: [1]
+    PrefetchAcrossPersistent: 0
+    PrefetchGL2: 0
+    PrefetchGlobalRead: 1
+    PrefetchLocalRead: 1
+    PreloadKernArgs: true
+    ProblemType:
+      Activation: false
+      ActivationComputeDataType: 0
+      ActivationNoGuard: false
+      ActivationType: none
+      AllowNoFreeDims: false
+      AssignedDerivedParameters: true
+      Batched: true
+      BetaOnlyUseBias: false
+      BiasDataTypeList: []
+      BiasSrc: D
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 21
+      DataTypeA: 21
+      DataTypeAmaxD: 0
+      DataTypeB: 21
+      DataTypeE: 7
+      DataTypeMXSA: 22
+      DataTypeMXSB: 22
+      DestDataType: 7
+      F32XdlMathOp: 0
+      GateResidualDataTypeList: []
+      Gradient: false
+      GroupedGemm: false
+      HighPrecisionAccumulate: true
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index01MXSA: 0
+      Index01MXSB: 1
+      Index1: 1
+      IndexAssignmentsA: [3, 0, 2]
+      IndexAssignmentsB: [3, 1, 2]
+      IndexAssignmentsLD: [4, 5, 6, 7]
+      IndexAssignmentsMXSA: [3, 0, 2]
+      IndexAssignmentsMXSB: [3, 1, 2]
+      IndexAssignmentsMetadata: [3, 0, 2]
+      IndexUnroll: 3
+      IndexUnrollA: 0
+      IndexUnrollB: 0
+      IndexUnrollM: 0
+      IndexUnrollMXSA: 0
+      IndexUnrollMXSB: 0
+      IndicesBatch: [2]
+      IndicesFree: [0, 1]
+      IndicesSummation: [3]
+      MXBlockA: 32
+      MXBlockB: 32
+      MacDataTypeA: 21
+      MacDataTypeB: 21
+      MetadataLayout: 0
+      MirrorDimsA: []
+      MirrorDimsB: []
+      MirrorDimsMXSA: []
+      MirrorDimsMXSB: []
+      MirrorDimsMetadata: []
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      OutputAmaxD: false
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SetConstStrideBias: []
+      SetConstStrideGate: []
+      SilentHighPrecisionAccumulate: false
+      Sparse: 0
+      StochasticRounding: false
+      StridedBatched: true
+      SupportUserArgs: true
+      SwizzleTensorA: false
+      SwizzleTensorB: true
+      TLUA: false
+      TLUB: false
+      TLUMXSA: false
+      TLUMXSB: false
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: true
+      TransposeB: false
+      UseBeta: true
+      UseBias: 0
+      UseE: false
+      UseGateResidual: false
+      UseInitialStridesAB: false
+      UseInitialStridesCD: false
+      UseScaleAB: ''
+      UseScaleAlphaVec: 0
+      UseScaleCD: false
+      isMixMode: false
+    SFCWGM: [[1, 1], [1, 1]]
+    ScheduleGROverBarrier: 0
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 3
+    ScheduleLocalWrite: 1
+    SolutionIndex: 52
+    SolutionNameMin: Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STB_BH_UserArgs_MT256x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM256_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA1_DTLB1_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSSI0_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT16_4_MXLIBL_MXSFHPS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR1_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMLWS0_TDMPLB0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM8_WGMXCC1_WGMXCCGn1
+    SourceSwap: false
+    SpaceFillingAlgo: []
+    StaggerU: 0
+    StaggerUMapping: 0
+    StaggerUStride: 128
+    StorePriorityOpt: false
+    StoreRemapVectorWidth: 0
+    StoreSwapAddr: false
+    StoreSyncOpt: 0
+    StoreVectorWidth: 4
+    StreamK: 0
+    StreamKAtomic: 0
+    StreamKFixupTreeReduction: 0
+    StreamKForceDPOnly: 0
+    StreamKWorkStealing: 0
+    StreamKXCCMapping: 0
+    SubGroup0: 4
+    SubGroup1: 64
+    SubGroupA: 4
+    SubGroupB: 64
+    SubGroupMXSA: 4
+    SubGroupMXSB: 64
+    SuppressNoLoadLoop: false
+    SwInstructionPrefetch: 1
+    SwapGlobalReadOrder: 0
+    TDMInst: 0
+    TDMIterateMode: 0
+    TDMLoadWaveSync: false
+    TDMPlusLdsBuf: 0
+    TDMSplit: false
+    TailloopInNll: false
+    TemporalHint: -1
+    TemporalHintA: 0
+    TemporalHintB: 0
+    TemporalHintC: 0
+    TemporalHintD: 0
+    TemporalHintE: 0
+    TemporalHintMXSA: 0
+    TemporalHintMXSB: 0
+    TemporalHintMetadata: 0
+    TemporalHintWS: 0
+    ThreadTile: [1, 1]
+    ThreadTile0: 64
+    ThreadTile1: 4
+    ThreadTileA: 64
+    ThreadTileB: 4
+    ThreadTileMXSA: 64
+    ThreadTileMXSB: 4
+    TransposeLDS: 1
+    TransposeLDSMetadata: -1
+    ULSGRODoubleG2L: 0
+    UnrollLoopSwapGlobalReadOrder: 0
+    UnrollMajorLDSA: true
+    UnrollMajorLDSB: true
+    UnrollMajorLDSMXSA: true
+    UnrollMajorLDSMXSB: true
+    Use64bShadowLimit: false
+    Use64bShadowLimitMX: false
+    UseCustomMainLoopSchedule: 0
+    UseDirect32XEmulation: false
+    UseDot2F32XEmulation: false
+    UseDotInstruction: false
+    UseDualFMAC: false
+    UseF32XEmulation: false
+    UseGeneralizedNLCOneA: false
+    UseGeneralizedNLCOneB: false
+    UseGeneralizedNLCOneMXSA: false
+    UseGeneralizedNLCOneMXSB: false
+    UseGeneralizedNLCOneMetadata: false
+    UseInstOffsetForGRO: 0
+    UseMFMAF32XEmulation: false
+    UsePLRPack: 0
+    UseSgprForGRO: -1
+    UseSubtileImpl: true
+    Valid: true
+    VectorStore: -1
+    VectorWidthA: 1
+    VectorWidthB: 1
+    VectorWidthMXSA: 1
+    VectorWidthMXSB: 1
+    WaveSeparateGlobalReadA: 0
+    WaveSeparateGlobalReadB: 0
+    WaveSeparateGlobalReadMXSA: 0
+    WaveSeparateGlobalReadMXSB: 0
+    WaveSeparateGlobalReadMetadata: 0
+    WaveSplitK: false
+    WavefrontSize: 64
+    WorkGroup: [16, 16, 1]
+    WorkGroupMapping: 8
+    WorkGroupMappingXCC: 1
+    WorkGroupMappingXCCGroup: -1
+    WorkGroupReduction: false
+    WorkspaceCheck: [4, 0, 1]
+    _ABTilePairA: AB_B4
+    _ABTilePairB: AB_B4
+    _DepthU: 256
+    _DepthUA: 256
+    _DepthUB: 256
+    _DepthUMXSA: 8
+    _DepthUMXSB: 8
+    _DepthUMetadata: 256
+    _GlobalAccumulation: SingleBuffer
+    _ScheduleIterAlg: 3
+    _StinkyTofuOptLevel: 0
+    _UseSgprForGRO: 0
+    _VectorStore: 1
+    _WorkspaceSizePerElemBias: 0
+    _WorkspaceSizePerElemC: 4
+    _inputVWA_was_auto: false
+    _inputVWB_was_auto: false
+    _staggerStrideShift: 0
+    enableGLTrA: false
+    enableGLTrB: false
+    enableLDSTrA: false
+    enableLDSTrB: false
+    enableLDSTrMXSA: false
+    enableLDSTrMXSB: false
+    enableLDSTrMetadata: 0
+    enableTDMA: false
+    enableTDMB: false
+    enableTDMMetadata: false
+    ldsNumBytesA: 32768
+    ldsNumBytesB: 0
+    ldsNumBytesMXSA: 2048
+    ldsNumBytesMXSB: 2048
+    ldsNumBytesMetadata: 0
     numSubTiles: 1
     reorderGRInstForDTVA: false
     reorderGRInstForDTVB: false

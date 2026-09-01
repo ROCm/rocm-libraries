@@ -964,6 +964,11 @@ class Solution(collections.abc.Mapping):
     # Initialize DTLA, DTLB for tailLoopOpt/NonDTLTailLoop and initial calcLdsBlockSizePerPad() call
     state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
     state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
+    if (state["UseSubtileImpl"]
+        and state["ProblemType"]["SwizzleTensorB"]
+        and tuple(state.get("MIWaveGroup", ())) == (1, 4)
+        and tuple(state.get("MIWaveTile", ())) == (16, 4)):
+      state["DirectToLdsB"] = False
 
     bpeA = state["ProblemType"]["DataTypeA"].numBytes()
     bpeB = state["ProblemType"]["DataTypeB"].numBytes()
@@ -2726,6 +2731,18 @@ class Solution(collections.abc.Mapping):
       Solution.checkAndAssignWaveSeparateGlobalRead(state, 'MXSB', printRejectionReason)
       state["DirectToLdsMXSB"] = state["DirectToLdsB"]
       state["LocalWriteUseSgprMXSB"] = state["DirectToLdsMXSB"]
+      if (state["UseSubtileImpl"]
+          and state["ProblemType"]["SwizzleTensorB"]
+          and tuple(state.get("MIWaveGroup", ())) == (1, 4)
+          and tuple(state.get("MIWaveTile", ())) == (16, 4)
+          and state.get("MacroTile0") == 256
+          and state.get("MacroTile1") == 256):
+        # The MT256 DTVB path stages A and both MX scales, but B data is
+        # consumed directly from its rolling VGPR banks.
+        state["DirectToLdsB"] = False
+        state["LocalWriteUseSgprB"] = False
+        state["DirectToLdsMXSB"] = False
+        state["LocalWriteUseSgprMXSB"] = False
       state["ProblemType"]["MirrorDimsMXSB"]  = list(state["ProblemType"]["MirrorDimsB"])
       state["VectorWidthMXSB"] = state["VectorWidthB"]
       state["MIWaveTileMXSB"] = state["MIWaveTileB"]
@@ -3713,6 +3730,12 @@ class Solution(collections.abc.Mapping):
         tc = mxTc.replace("MXS", "")
         if ("MXS" in mxTc) and (state["ProblemType"]["MXBlock%s"%tc] == 0):
           return (0, 0)
+        if (mxTc == "B"
+            and state["UseSubtileImpl"]
+            and state["ProblemType"]["SwizzleTensorB"]
+            and tuple(state.get("MIWaveGroup", ())) == (1, 4)
+            and tuple(state.get("MIWaveTile", ())) == (16, 4)):
+          return (0, 0)
         if state["DirectToVgpr%s"%mxTc]:
           return (0, 0)
 
@@ -3996,7 +4019,7 @@ class Solution(collections.abc.Mapping):
         return optGRVW
 
       def calSwizzlePackK(state, tc):
-        return 16 // state[f"MIInputPerThread{tc}"] // int(state["ProblemType"][f"DataType{tc}"].numBytes())
+        return int(16 // (state[f"MIInputPerThread{tc}"] * state["ProblemType"][f"DataType{tc}"].numBytes()))
 
       genGRVWA = False
       genGRVWB = False
@@ -4142,6 +4165,30 @@ class Solution(collections.abc.Mapping):
         # TODO- NN fails validation due to DTVB + Tail-Loop is not working correctly
         if not (state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN only")
+
+        mt256Dtvb = (
+          tuple(state.get("MIWaveGroup", ())) == (1, 4)
+          and tuple(state.get("MIWaveTile", ())) == (16, 4)
+          and state.get("MacroTile0") == 256
+          and state.get("MacroTile1") == 256)
+        if mt256Dtvb:
+          validMt256Dtvb = (
+            tuple(state.get("ISA", ())) == (9, 5, 0)
+            and state["ProblemType"]["DataTypeB"].isFloat4()
+            and state.get("MatrixInstK") == 128
+            and state.get("DepthU") == 256
+            and state.get("PrefetchGlobalRead") == 1
+            and state.get("LocalSplitU") == 1
+            and state.get("InnerUnroll") == 1
+            and state.get("AssertSummationElementMultiple", 0) % 256 == 0
+            and state.get("DirectToLdsA")
+            and not state.get("DirectToLdsB")
+            and state.get("DirectToLdsMXSA")
+            and not state.get("DirectToLdsMXSB"))
+          if not validMt256Dtvb:
+            reject(state, printRejectionReason,
+                   "MT256 1x4/16x4 SwizzleB DTVB requires gfx950 MXFP4, "
+                   "DU256, PGR1, LSU1, IU1, and K alignment 256")
 
       # Force GRVW the same when UnrollLoopSwapGlobalReadOrder = 1.
       if genGRVWA and state["UnrollLoopSwapGlobalReadOrder"] == 1:
@@ -4618,11 +4665,6 @@ class Solution(collections.abc.Mapping):
           totalVectorsCoalescedMXSB, totalElementsPerpMXSB, state["_DepthUMXSB"], printRejectionReason):
         return
 
-    if state["ProblemType"]["MXBlockB"]:
-      if not Solution.setGlobalLoadTileDimClassic(state, "MXSB", state["NumLoadsMXSB"], \
-          totalVectorsCoalescedMXSB, totalElementsPerpMXSB, state["_DepthUMXSB"], printRejectionReason):
-        return
-
     if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
       if state["ProblemType"]["TLUMetadata"]:
         totalElementsCoalescedM = state["MacroTileMetadata"]
@@ -4796,6 +4838,7 @@ class Solution(collections.abc.Mapping):
       tcmx = "MXS%s"%tc
       if state["UseSubtileImpl"] and state["ProblemType"]["MXBlock%s"%tc]:
         state["DirectToLds%s"%tcmx] = False
+        state["LocalWriteUseSgpr%s"%tcmx] = False
       if state["DirectToLds%s"%tc]:
         isDtlDoable = Solution.isDirectToLdsDoable(state, tc, isaInfoMap, printRejectionReason)
         if (not state["DirectToVgpr%s"%tc]) and isDtlDoable:
@@ -4805,6 +4848,7 @@ class Solution(collections.abc.Mapping):
           if state["ProblemType"]["MXBlock%s"%tc]:
             isDtlMxDoable = Solution.isDirectToLdsDoable(state, tcmx, isaInfoMap, printRejectionReason)
             state["DirectToLds%s"%tcmx] = isDtlMxDoable
+            state["LocalWriteUseSgpr%s"%tcmx] = isDtlMxDoable
         else:
           state["DirectToLds%s"%tc] = False
           state["LocalWriteUseSgpr%s"%tc] = False
@@ -4840,9 +4884,20 @@ class Solution(collections.abc.Mapping):
       state["1LDSBuffer"] = 0
     # MX case
     if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
-      if state["DirectToLdsA"] != state["DirectToLdsMXSA"] or state["DirectToLdsB"] != state["DirectToLdsMXSB"]:
+      mt256Dtvb = (
+        state["UseSubtileImpl"]
+        and state["ProblemType"]["SwizzleTensorB"]
+        and tuple(state.get("MIWaveGroup", ())) == (1, 4)
+        and tuple(state.get("MIWaveTile", ())) == (16, 4)
+        and state.get("MacroTile0") == 256
+        and state.get("MacroTile1") == 256)
+      scalesMatchDataPath = (
+        state["DirectToLdsA"] == state["DirectToLdsMXSA"]
+        and (state["DirectToLdsB"] == state["DirectToLdsMXSB"]
+             or (mt256Dtvb and state["DirectToLdsMXSB"])))
+      if not scalesMatchDataPath:
           reject(state, printRejectionReason, "DirectToLdsA/B and DirectToLdsMXSA/B should match")
-      if state["DirectToLdsA"] != state["DirectToLdsB"]:
+      if state["DirectToLdsA"] != state["DirectToLdsB"] and not mt256Dtvb:
           reject(state, printRejectionReason, "DirectToLdsA and DirectToLdsB should match")
 
     # does not work with UnrollLoopSwapGlobalReadOrder

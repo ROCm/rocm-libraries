@@ -401,12 +401,12 @@ class GSUOn(GSU):
         mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
         isMxSwizzledScaleLayout = ("MXS" in tc) and mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
         depthU = kernel["DepthU"]
-        depthUDiv = kernel["_DepthU%s"%tc] if isMxSwizzledScaleLayout else kernel["_DepthU"]
+        _DepthU = kernel["_DepthU%s"%tc] if isMxSwizzledScaleLayout else kernel["_DepthU"]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
-            depthUDiv = kernel["DepthU"] * kernel["MatrixInstM"]
+            _DepthU = kernel["DepthU"] * kernel["MatrixInstM"]
         elif (tP["isSwizzled"] and tc == 'B'):
-            depthUDiv = kernel["DepthU"] * kernel["MatrixInstN"]
+            _DepthU = kernel["DepthU"] * kernel["MatrixInstN"]
 
         gsuOffsetStr = "gsuOffset = DepthU*bpeGR*GSUSumIdx"
         divider = 1
@@ -464,7 +464,12 @@ class GSUOn(GSU):
                 tmpSgpr = tmpSgprInfo.idx
                 gsuSgpr = tmpSgpr + 2
                 du = kernel["_DepthU%s"%tc]
-                duBpe = int(du * tP["bpeGR"])
+                miDim = 1
+                if tc == "A" and kernel["ProblemType"]["SwizzleTensorA"]:
+                    miDim = kernel["MatrixInstM"]
+                elif tc == "B" and kernel["ProblemType"]["SwizzleTensorB"]:
+                    miDim = kernel["MatrixInstN"]
+                duBpe = int(du * tP["bpeGR"]) * miDim
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(tmpSgpr), src1=duBpe, comment="GSU*DepthU*Bpe"))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))

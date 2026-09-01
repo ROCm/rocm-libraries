@@ -2450,7 +2450,7 @@ class GlobalWriteBatchWriter:
                           2-aligned to satisfy dwordx4 store alignment).
       vPermAddr:          VGPR holding the partner-lane byte address (pre-computed
                           once per batch in the vgprPermAddr slot).
-      addrWhilePermuting: Optional callable() that appends address instructions
+      addrWhilePermuting: Optional callable(module) that appends address instructions
                           to `module` while the ds_bpermute results are in-flight.
 
     Returns:
@@ -2994,7 +2994,7 @@ class GlobalWriteBatchWriter:
     self._epilogScratchFree(tmpInrSgpr)
     return module
 
-  def _emitSubtilePackedPermute(self, vPack: int, vPermAddr: int, addrWhilePermuting=None) -> Module:
+  def _emitSubtilePackedPermute_stale(self, vPack: int, vPermAddr: int, addrWhilePermuting=None) -> Module:
     """Shuffle four packed dwords across wave halves for a subtile dwordx4 store.
 
     After the caller packs 8 f32 accumulator values into four 16bit dwords
@@ -3038,7 +3038,7 @@ class GlobalWriteBatchWriter:
                                comment=f"perm dword {k}"))
 
     if addrWhilePermuting is not None:
-      addrWhilePermuting()
+      addrWhilePermuting(module)
 
     module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
 
@@ -3048,7 +3048,7 @@ class GlobalWriteBatchWriter:
 
     return module
 
-  def _emitSubtileOobGuard(self, targetModule, blockIdxM: int, blockIdxN: int, labelPrefix: str = "subtile_skip_store"):
+  def _emitSubtileOobGuard_stale(self, targetModule, blockIdxM: int, blockIdxN: int, labelPrefix: str = "subtile_skip_store"):
     """Emit M/N OOB guard branches for UseSubtileImpl NonEdge stores.
 
     Background
@@ -3132,7 +3132,7 @@ class GlobalWriteBatchWriter:
                                      comment=f"quick-exit: M OOB at blockIdxM={blockIdxM}, skip store"))
       return skipLabel
 
-  def _finalizeSubtileOobGuards(self, targetModule):
+  def _finalizeSubtileOobGuards_stale(self, targetModule):
     """Place the pending N-group end label and end-of-all-stores label after the element loop.
 
     Must be called once after all elements have been emitted to close out the last
@@ -3144,270 +3144,6 @@ class GlobalWriteBatchWriter:
     if self._subtileAllStoresEndLabel is not None:
       targetModule.add(self._subtileAllStoresEndLabel)
       self._subtileAllStoresEndLabel = None
-
-  def _emit16bitSubtilePairedStore(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0) -> Module:
-    """Emit a paired 16bit store combining sba=0 and sba=1 subtile data.
-
-    Works for both bf16 and fp16 HPA output types.
-
-    sba = subtile block index along A (M dimension).  UseSubtileImpl iterates over
-    two subtile groups (sba=0, sba=1) that share the same (tt1, tt0) element
-    coordinates but draw from different accumulator registers.  The element list
-    therefore contains consecutive pairs with identical (tt1, tt0): sba=0 first
-    (even elementIdx), sba=1 second (odd elementIdx).
-
-    Converts 8 f32 accvgprs (4 from sba=0, 4 from sba=1) to 16bit, shuffles them
-    across wave halves via ds_bpermute + v_permlane32_swap_b32, then issues
-    1 × buffer_store_dwordx4 at the sba=0 element's address.  The cvtVgpr block
-    is 2-aligned (64-bit) in KWA so vgprBf16Temp satisfies the dwordx4 alignment.
-
-    Args:
-      addrCalc:     AddrCalculation for the sba=0 element.
-      sumIdx0:      elementSumIdx for the sba=0 element.
-      sumIdx1:      elementSumIdx for the sba=1 element.
-      prefixOffset: parentWriter.states.c.startVgprValu (offset into ValuC).
-      tt0:          thread-tile M index (same for both sba=0 and sba=1).
-    """
-    module = Module("16bitSubtilePairedStore")
-    isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
-
-    ntd = self.kernel["NonTemporalD"]
-    isGlc = bool(ntd & 0x1)
-    isSlc = bool(ntd & 0x2)
-    isNT  = bool(ntd & 0x4)
-
-    # Reuse cvtVgprStruct.vgprBf16Temp..vgprBf16Inc (+0..+3) as 4 scratch vgprs.
-    # The cvtVgpr block is allocated with 2-alignment (64-bit aligned) in KWA so that
-    # vgprBf16Temp is at an even VGPR index, satisfying buffer_store_dwordx4's
-    # alignment requirement.  The +0..+3 slots are safely overwritten here as pack/perm
-    # staging for each pair.
-    vPack = self.cvtVgprStruct.vgprBf16Temp  # +0..3: packed 16bit dwords, 2-aligned
-
-    vPermAddr    = self.cvtVgprStruct.vgprPermAddr
-    vLGDelta     = self.cvtVgprStruct.vgprLaneGroupDelta
-    vAddrScratch = self.cvtVgprStruct.vgprAddrScratch
-    addrDVgpr    = addrCalc.addrDVgpr
-
-    typeStr = "fp16" if isFp16 else "bf16"
-    VCvtPkF32to16 = VCvtPkF32toFP16 if isFp16 else VCvtPkF32toBF16
-    module.addComment1(f"{typeStr} paired dwordx4 store tt0={tt0} (sba=0+sba=1): pack 8 f32 accvgprs -> 4 {typeStr} dwords")
-
-    # Pack sba=0 subtile: ValuC+sumIdx0+{0,1} → vPack+0; ValuC+sumIdx0+{2,3} → vPack+1
-    # Pack sba=1 subtile: ValuC+sumIdx1+{0,1} → vPack+2; ValuC+sumIdx1+{2,3} → vPack+3
-    def vc(sumIdx, vi):
-      idx = sumIdx + vi - prefixOffset
-      return vgpr("ValuC+" + str(idx))
-
-    def packF32pair(dst, src0, src1, comment):
-      """Pack two f32 VGPRs into one dword of two 16bit values."""
-      module.add(VCvtPkF32to16(dst=vgpr(dst), src0=src0, src1=src1, comment=f"{comment} -> {typeStr}"))
-
-    packF32pair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"sba=0 tt0={tt0}[0:1]")
-    packF32pair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"sba=0 tt0={tt0}[2:3]")
-    packF32pair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"sba=1 tt0={tt0}[0:1]")
-    packF32pair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"sba=1 tt0={tt0}[2:3]")
-
-    # Compute adjusted D address into vgprAddrScratch while ds_bpermute results are in-flight.
-    # addrDVgpr holds the M-byte offset in bpeCexternal units; scale to bpeCexternalGSU1
-    # (16bit=2 bytes) then add lane_group*8 so the dwordx4 store lands at the correct row.
-    # addrDVgpr and vgprPermAddr are left unchanged — vgprAddrScratch is dedicated scratch
-    # for this purpose so no restore is needed.
-    bpeCurr = self.parentWriter.states.bpeCexternal
-    bpeDest = self.parentWriter.states.bpeCexternalGSU1
-    globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
-    addrScaleShift = int(log2(bpeCurr // bpeDest)) if bpeCurr > bpeDest else 0
-
-    def emitAddrWhilePermuting():
-      """Compute vAddrScratch overlapped with the in-flight ds_bpermute."""
-      if addrScaleShift:
-        module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
-                                   src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
-        module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vLGDelta),
-                           comment="adjusted D addr = scaled addrDVgpr + lane_group*8"))
-      else:
-        module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vLGDelta),
-                           comment="adjusted D addr = addrDVgpr + lane_group*8"))
-
-    module.add(self._emitSubtilePackedPermute(vPack, vPermAddr, addrWhilePermuting=emitAddrWhilePermuting))
-
-    module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
-    module.add(BufferStoreB128(
-      src=vgpr(vPack, 4),
-      vaddr=vgpr(vAddrScratch),
-      saddr=sgpr("SrdD", 4),
-      soffset=0,
-      mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
-      comment=f"16bit paired dwordx4 store tt0={tt0},{tt0+1}"
-    ))
-
-    # WAR hazard: buffer_store_dwordx4 reads vPack[0:3] as source operands.
-    # The next paired store's v_cvt_pk_bf16_f32 will overwrite vPack.
-    # Insert nop to ensure the store has latched its source VGPRs.
-    module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
-
-    return module
-
-  def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0) -> Module:
-    """Emit a 16bit store for an orphan sba=0 subtile with no sba=1 partner.
-
-    sba = subtile block index along A (M dimension).  Used when MIWaveTile[0] is
-    odd and the last sba=0 element has no sba=1 partner.
-
-    The layout below is specific to the mfma instruction used here: lane l = LG*16 + r
-    owns 4 output values at M-rows (LG*4 + 0..3) and a single N-column
-    (l % 16 = r = lane_id & 15).  In column-major (row-first in memory) layout
-    these 4 values ARE contiguous
-    in memory (consecutive M-rows at fixed N-col), so we use 2x buffer_store_dwordx2
-    after packing all 4 16bit values into 2 dwords.
-
-    The per-lane vaddr encodes:
-      vaddr = (lane_id & 15) * StrideD1J * bpe   [N-col byte offset within wave tile]
-            + vLGDelta                            [LG*4 M-rows * bpe = LG*8 bytes]
-            + wg0*MT0*bpe                         [workgroup M byte base]
-            + waveId0 * waveM_stride * bpe        [M-wave byte offset within WG]
-            + waveId1 * waveN_stride * StrideD1J * bpe  [N-wave byte offset]
-    and a constant offset12 = globalOffset (encodes d0 M-tile position within wave).
-
-    The SRD base encodes only wg1*MT1*StrideD1J*bpe (N workgroup offset).
-    The M workgroup offset (wg0*MT0*bpe) and wave-within-WG offsets must be
-    included in the vaddr explicitly.
-
-    Args:
-      addrCalc:     AddrCalculation for the element.
-      sumIdx0:      elementSumIdx for the element.
-      prefixOffset: parentWriter.states.c.startVgprValu (offset into ValuC).
-    """
-    module = Module("16bitSubtileScalarStore")
-    isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
-
-    ntd = self.kernel["NonTemporalD"]
-    isGlc = bool(ntd & 0x1)
-    isSlc = bool(ntd & 0x2)
-    isNT  = bool(ntd & 0x4)
-
-    # Scratch vgprs from the cvtVgprStruct block (overwritten each call):
-    #   vPack+0  : 16bit packed dword (vc=0,1)
-    #   vPack+1  : wave ID scratch / 16bit packed dword (vc=2,3)
-    #   vPack+2  : per-lane vaddr (N-col byte offset + M offsets)
-    #   vPack+3  : temp for N-col byte offset computation
-    vPack    = self.cvtVgprStruct.vgprBf16Temp
-    vLGDelta = self.cvtVgprStruct.vgprLaneGroupDelta  # LG*4*bpe = LG*8 bytes (pre-computed)
-
-    # addrCalc.globalOffset was computed with bpeCexternal (may be 4 for _GlobalAccumulation kernels),
-    # but the 16bit orphan store always targets the final 16bit output (bpeCexternalGSU1=2).
-    bpeCurr = self.parentWriter.states.bpeCexternal
-    bpe     = self.parentWriter.states.bpeCexternalGSU1  # always 2 for 16bit dest
-    globalOffset = addrCalc.globalOffset * bpe // bpeCurr
-
-    def vc(vi):
-      idx = sumIdx0 + vi - prefixOffset
-      return vgpr("ValuC+" + str(idx))
-
-    # Derive the D-stride sgpr name (e.g. "StrideDJ") the same way incrementToNextRow does.
-    packedC1  = self.kernel["PackedC1IndicesX"]
-    indexChar = self.parentWriter.states.indexChars[packedC1[0]]
-    strideD1J = "StrideD%s" % indexChar
-
-    ws     = self.kernel["WavefrontSize"]
-    miwg0  = self.kernel["MIWaveGroup"][0]
-    miwg1  = self.kernel["MIWaveGroup"][1]
-    matM   = self.kernel["MatrixInstM"]
-    matN   = self.kernel["MatrixInstN"]
-
-    typeStr = "fp16" if isFp16 else "bf16"
-    VCvtPkF32to16 = VCvtPkF32toFP16 if isFp16 else VCvtPkF32toBF16
-    module.addComment1(f"{typeStr} orphan subtile tt0={tt0}: pack 4 M-rows (vc=0..3) at fixed N-col, store as 2x dwordx2")
-
-    # Build per-lane vaddr:
-    #   vaddr = (lane_id & 15) * StrideD1J * bpe   [N-col]
-    #         + vLGDelta                            [LG*4 M-rows = LG*8 bytes]
-    #         + wg0*MT0*bpe                         [M-WG base]
-    #         + waveId0*waveM_stride*bpe            [M-wave offset, if miwg0>1]
-    #         + waveId1*waveN_stride*StrideD1J*bpe  [N-wave offset, if miwg1>1]
-    # The SRD already encodes wg1*MT1*StrideD1J*bpe (N-WG offset).
-    tmpS = self.tmpS01
-    mt0bpe = self.kernel["MacroTile0"] * bpe
-
-    module.addComment1("compute per-lane orphan vaddr = N_col_off + LG_M_off + wg0_M_off [+ wave offsets]")
-
-    # N-col byte offset: (lane_id & 15) * StrideD1J * bpe
-    module.add(VAndB32(dst=vgpr(vPack+2), src0=15, src1=vgpr("Serial"),
-                       comment="col_in_wave = lane_id & 15  (N-column index)"))
-    module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+2), src1=sgpr(strideD1J),
-                         comment="col_in_wave * StrideD1J"))
-    if bpe == 2:
-      module.add(VLShiftLeftB32(dst=vgpr(vPack+2), shiftHex=1, src=vgpr(vPack+3),
-                                comment="N_col_off = col_in_wave * StrideD1J * 2"))
-    else:
-      module.add(VMulLOU32(dst=vgpr(vPack+2), src0=vgpr(vPack+3), src1=bpe,
-                           comment="N_col_off = col_in_wave * StrideD1J * bpe"))
-
-    # Add LG M-row offset: vLGDelta = LG*4*bpe = LG*8 bytes (pre-computed at batch start)
-    module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=vgpr(vLGDelta),
-                       comment="vaddr += LG_M_off (= vLGDelta = LG*4*bpe)"))
-
-    # Add M-WG offset: wg0 * MT0 * bpe
-    module.add(SMulI32(dst=sgpr(tmpS), src0=sgpr("WorkGroup0"), src1=mt0bpe,
-                       comment="wg0_M_off = WorkGroup0 * MT0 * bpe"))
-    module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=sgpr(tmpS),
-                       comment="vaddr += wg0_M_off"))
-
-    # Add M-wave offset: waveId0 * MIWaveTile[0] * matM * bpe.
-    if miwg0 > 1:
-      wsLog2 = int(log2(ws))
-      waveM_stride_bpe = self.kernel["MIWaveTile"][0] * matM * bpe
-      module.add(VLShiftRightB32(dst=vgpr(vPack+3), shiftHex=wsLog2, src=vgpr("Serial"),
-                                 comment=f"waveId = Serial >> {wsLog2}"))
-      if miwg0 & (miwg0 - 1) == 0:  # power of 2 — use AND mask
-        module.add(VAndB32(dst=vgpr(vPack+3), src0=miwg0 - 1, src1=vgpr(vPack+3),
-                           comment=f"waveId0 = waveId & {miwg0-1}"))
-      else:
-        raise NotImplementedError(f"Non-power-of-2 MIWaveGroup[0]={miwg0} not supported in orphan store")
-      module.add(SMovB32(dst=sgpr(tmpS), src=waveM_stride_bpe,
-                         comment=f"waveM_stride_bpe={waveM_stride_bpe}"))
-      module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=sgpr(tmpS),
-                           comment=f"wave_M_off = waveId0 * {waveM_stride_bpe}"))
-      module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=vgpr(vPack+3),
-                         comment="vaddr += wave_M_off"))
-
-    # Add N-wave offset: waveId1 * MIWaveTile[1] * matN * StrideD1J * bpe.
-    if miwg1 > 1:
-      wsLog2 = int(log2(ws))
-      waveN_stride_bpe = self.kernel["MIWaveTile"][1] * matN * bpe
-      module.add(VLShiftRightB32(dst=vgpr(vPack+3), shiftHex=wsLog2, src=vgpr("Serial"),
-                                 comment=f"waveId = Serial >> {wsLog2}"))
-      if miwg0 & (miwg0 - 1) == 0:  # miwg0 is power of 2
-        module.add(VLShiftRightB32(dst=vgpr(vPack+3), shiftHex=int(log2(miwg0)),
-                                   src=vgpr(vPack+3),
-                                   comment=f"waveId1 = waveId / {miwg0}"))
-      else:
-        raise NotImplementedError(f"Non-power-of-2 MIWaveGroup[0]={miwg0} not supported in orphan store")
-      module.add(SMovB32(dst=sgpr(tmpS), src=waveN_stride_bpe,
-                         comment=f"waveN_stride_bpe={waveN_stride_bpe}"))
-      module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=sgpr(tmpS),
-                           comment=f"waveId1 * {waveN_stride_bpe}"))
-      module.add(VMulLOU32(dst=vgpr(vPack+3), src0=vgpr(vPack+3), src1=sgpr(strideD1J),
-                           comment=f"wave_N_off = waveId1 * {waveN_stride_bpe} * StrideD1J"))
-      module.add(VAddU32(dst=vgpr(vPack+2), src0=vgpr(vPack+2), src1=vgpr(vPack+3),
-                         comment="vaddr += wave_N_off"))
-
-    # Pack all 4 16bit values (consecutive M-rows at fixed N-col) into 2 dwords.
-    # vc=0 → M-row+0 (lo16 of dword0), vc=1 → M-row+1 (hi16 of dword0)
-    # vc=2 → M-row+2 (lo16 of dword1), vc=3 → M-row+3 (hi16 of dword1)
-    #
-    module.add(VCvtPkF32to16(dst=vgpr(vPack+0), src0=vc(0), src1=vc(1), comment=f"M-row+0/+1 -> {typeStr}"))
-    module.add(VCvtPkF32to16(dst=vgpr(vPack+1), src0=vc(2), src1=vc(3), comment=f"M-row+2/+3 -> {typeStr}"))
-    module.add(SNop(waitState=0, comment=f"delay after pk_{typeStr}"))
-    module.addComment1(f"buffer_store_b64: write 4 {typeStr} M-rows at fixed N-col (orphan subtile)")
-    module.add(BufferStoreB64(
-      src=vgpr(vPack+0, 2),
-      vaddr=vgpr(vPack+2),
-      saddr=sgpr("SrdD", 4),
-      soffset=0,
-      mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
-      comment=f"orphan tt0={tt0} vc=0..3: 4 consecutive M-rows at fixed N-col"
-    ))
-    return module
 
   def _emitAtomicAdd(self, module: Module):
     ########################################
@@ -3732,7 +3468,8 @@ class GlobalWriteBatchWriter:
           # Use pk if possible
           if usePK or gwvw > 1:
             if newSumIdx % 2 == 0:
-              module.add(VMulPKF32(dst=vgpr("ValuC+%u"%newSumIdx, 2), src0=sgpr("Alpha",2), src1=vgpr("ValuC+%u"%newSumIdx,2), vop3=VOP3PModifiers(op_sel_hi=[0,1,1]), comment="*= alpha (pk)"))
+              for pairIdx in range(2):
+                module.add(VMulF32(dst=vgpr("ValuC+%u"%(newSumIdx+pairIdx)), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%(newSumIdx+pairIdx)), comment="*= alpha"))
           else:
             module.add(VMulF32(dst=vgpr("ValuC+%u"%newSumIdx), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%newSumIdx), comment="*= alpha" ))
           if self.parentWriter.db["ForceExpectedValue"]:

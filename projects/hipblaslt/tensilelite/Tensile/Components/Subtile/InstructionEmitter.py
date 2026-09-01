@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
 from Tensile.Components.Subtile.SubtileGREmit import (
-    emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
+    emitDirectPreSwizzledBLoad, emitSingleBufferLoad,
+    globalReadPtrUpdates, globalReadLDSBufferSwap,
+    useDirectToVgprPreSwizzledB,
 )
 from Tensile.Components.Subtile.SubtileLREmit import (
     emitSingleDsRead, localReadLDSBufferSwap,
@@ -129,7 +131,7 @@ class InstructionEmitter:
         self._dispatch = {
             'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
             'lr':           lambda em, ui: self.emit_lr(em.source, ui),
-            'gr':           lambda em, ui: self.emit_gr(em.source),
+            'gr':           lambda em, ui: self.emit_gr(em.source, ui),
             'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
             'wait_lr':      lambda em, ui: self.emit_wait_lr(),
             'sync':         lambda em, ui: self.emit_sync(),
@@ -207,6 +209,10 @@ class InstructionEmitter:
         tile_map = placement.vgpr_tile_map[unroll_iter] if placement.vgpr_tile_map else {}
 
         if tensor in ('A', 'B'):
+            if tensor == 'B' and useDirectToVgprPreSwizzledB(self.kernel):
+                # Keep the logical LR as the GR wait/dependency hand-off.  The
+                # data is already in the scheduler-owned MFMA operand VGPR.
+                return []
             ti = self.tileInfoMap[tensor]
             vgprTiles = self.vgprTilesA if tensor == 'A' else self.vgprTilesB
             lrGran = self.config.lrA if tensor == 'A' else self.config.lrB
@@ -248,7 +254,7 @@ class InstructionEmitter:
                     comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
         return list(module.flatitems())
 
-    def emit_gr(self, placement):
+    def emit_gr(self, placement, unroll_iter=0):
         """Emit GR (buffer_load) instructions from GRPlacement."""
         module = Module()
         tensor = placement.tensor
@@ -256,8 +262,19 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             grGran = self.config.grA if tensor == 'A' else self.config.grB
             uid_k_base = placement.unrollId * grGran.k
+            directB = tensor == 'B' and useDirectToVgprPreSwizzledB(self.kernel)
+            tile_map = (placement.vgpr_tile_map[unroll_iter]
+                        if directB and placement.vgpr_tile_map else {})
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
+                    if directB:
+                        group = (tileId // self.config.lrB.mn) * self.config.lrB.mn
+                        assert group in tile_map, \
+                            f"missing DTVB destination for tile {tileId}, K {k}"
+                        dstTile = self.vgprTilesB[tile_map[group]]
+                        module.add(emitDirectPreSwizzledBLoad(
+                            ti, self.kernel, tileId, k, dstTile))
+                        continue
                     subtileK = (k - uid_k_base) // self.subtileShapeK
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
         elif tensor in ('SA', 'SB'):
@@ -287,6 +304,8 @@ class InstructionEmitter:
                  'B':  max(1,int(1.0/self.tileInfoB.loadRatioGR)),
                  'SA': 1, 
                  'SB': 1}  
+        if useDirectToVgprPreSwizzledB(self.kernel):
+            grMap['B'] = 1
         if force_drain:
             grCnt = 0
             label = "full drain"
@@ -318,6 +337,8 @@ class InstructionEmitter:
     def emit_lr_inc(self, source):
         """Emit localReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
+        if tensor == 'B' and useDirectToVgprPreSwizzledB(self.kernel):
+            return []
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
@@ -332,7 +353,8 @@ class InstructionEmitter:
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
         else:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
-        module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
+        if not (tensor == 'B' and useDirectToVgprPreSwizzledB(self.kernel)):
+            module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
     def emit_gl2_prefetch(self):

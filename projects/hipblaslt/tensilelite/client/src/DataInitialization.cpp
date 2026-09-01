@@ -2800,7 +2800,8 @@ namespace TensileLite
                             ptr              = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
                                                    permuted.as<void>(),
-                                                   permuted.getDesc().flattenSize(),
+                                                   permuted.getDesc().flattenSize()
+                                                       * dtInfo.packing,
                                                    hipMemcpyHostToDevice);
                         }
                         else
@@ -2810,7 +2811,13 @@ namespace TensileLite
                     }
                     else
                     {
-                        auto tmpTensor = Tensor({tiledSize, unrolledSize}, dtInfo.elementSize);
+                        // TensorDataManipulation operates on addressable storage
+                        // units.  FP4 packs two logical elements per byte, so use
+                        // one-byte tensor elements after converting unrolledSize
+                        // to packed units above.
+                        auto storageElementSize = dtInfo.elementSize * dtInfo.packing;
+                        auto tmpTensor
+                            = Tensor({tiledSize, unrolledSize}, storageElementSize);
 
                         memcpy(
                             tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
@@ -2826,7 +2833,8 @@ namespace TensileLite
                         ptr             = copyInputBuffers(desc,
                                                p.gpuInput.valid.get(),
                                                permuted.as<void>(),
-                                               permuted.getDesc().flattenSize(),
+                                               permuted.getDesc().flattenSize()
+                                                   * dtInfo.packing,
                                                hipMemcpyHostToDevice);
                         g_swizzleCache.emplace(swizzleKey, std::move(permuted));
                     }

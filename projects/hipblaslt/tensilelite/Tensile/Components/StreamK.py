@@ -863,8 +863,20 @@ class StreamK(Component):
         tileStart = sTmp + 2
         tc = tP["tensorChar"]
         depthU = self._depthUForTc(kernel, tc)
+        # StreamKLocalStart is expressed in logical DepthU iterations.  Host
+        # pre-swizzled data stores one K step across every row in the physical
+        # swizzle block, so convert that logical step to its physical span.
+        layoutMultiplier = 1
+        if tc == "A" and kernel["ProblemType"].get("SwizzleTensorA", False):
+            layoutMultiplier = kernel["MatrixInstM"]
+        elif tc == "B" and kernel["ProblemType"].get("SwizzleTensorB", False):
+            layoutMultiplier = kernel["MatrixInstN"]
+        # _depthUForTc already applies the 32-row physical multiplier to
+        # subtile MXSA/MXSB tensors.
+        depthU *= layoutMultiplier
         # StreamK partial tile - offset to tile start index
-        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("StreamKLocalStart"), src1=depthU, comment="StreamK tile start offset"))
+        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("StreamKLocalStart"), src1=depthU,
+                           comment="StreamK physical tile start offset"))
         strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
         module.add(writer.s_mul_u64_u32(sgpr(sTmp), sgpr(sTmp+1), sgpr(sTmp), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
