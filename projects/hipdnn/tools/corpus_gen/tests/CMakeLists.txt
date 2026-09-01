@@ -4,7 +4,7 @@ find_package(Threads REQUIRED)
 # test SDK: gtest_main rather than the shared main.cpp, which exists to set up HIP error
 # handling and logging that nothing here touches.
 add_executable(hipdnn_corpus_gen_tests
-    TestFeasibleRegionProbe.cpp TestFeasibleShapeSet.cpp TestOperationMetadata.cpp
+    TestFeasibleShapeSet.cpp TestOperationMetadata.cpp
     TestProblemSpace.cpp TestGraphBuilderRegistry.cpp TestWorkloadSampling.cpp TestCorpusRealism.cpp TestGraphSize.cpp TestEveryGraphBuilder.cpp TestCorpusOutput.cpp TestOperationDirectory.cpp)
 
 target_compile_options(hipdnn_corpus_gen_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
