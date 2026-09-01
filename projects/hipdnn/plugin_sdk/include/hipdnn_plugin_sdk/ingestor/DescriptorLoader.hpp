@@ -162,6 +162,14 @@ struct DescriptorCatalog
     DescriptorMap<DispatchDescriptor> dispatches;
     PackMap packs;
     KernelMap kernels;
+
+    /// Each descriptor's declared `version`, by id (RFC 0019 §8.1).
+    ///
+    /// Held here rather than on the descriptors themselves. versionIsSupported() parses the
+    /// field to gate against what this build reads and then discards it; §8.1 needs it kept,
+    /// but only the loader needs it, and adding a member to widely aggregate-initialised
+    /// value types would ripple into every site that builds one positionally.
+    std::map<DescriptorId, hipdnn_data_sdk::utilities::Version> declaredVersions;
 };
 
 namespace detail
@@ -341,6 +349,22 @@ inline bool versionIsSupported(const nlohmann::json& document,
         return false;
     }
     return true;
+}
+
+/// The descriptor's own declared `version`, kept for RFC 0019 §8.1's coupling check.
+///
+/// versionIsSupported() already parses this to gate against what the build reads, then
+/// discards it. §8.1 compares a UHD's trained_against against the descriptor's own
+/// version instead, so it has to survive parsing.
+inline hipdnn_data_sdk::utilities::Version declaredVersionOf(const nlohmann::json& root,
+                                                             const std::string& where)
+{
+    const auto parsed = parseDescriptorVersion(requireString(root, "version", where), where);
+    hipdnn_data_sdk::utilities::Version version;
+    version.major = parsed.major;
+    version.minor = parsed.minor;
+    version.patch = 0; // descriptors are major.minor only (RFC 0020 §11.1)
+    return version;
 }
 
 inline DescriptorId
@@ -604,7 +628,8 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
                                                     const std::filesystem::path& path)
 {
     const std::string where = path.string();
-    requireKnownKeys(root, {"version", "id", "name", "kind", "payload"}, where);
+    requireKnownKeys(root, {"version", "id", "name", "kind", "payload", "trained_against"},
+                     where);
 
     HeuristicDescriptor heuristic;
     heuristic.id = requireId(root, "id", where);
@@ -612,6 +637,34 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
     heuristic.kind = heuristicKindFromString(requireString(root, "kind", where), where);
     heuristic.payload = requireString(root, "payload", where);
     heuristic.baseDir = path.parent_path();
+
+    // RFC 0019 §8.1. Optional: §4's field table makes it conditional on the adapter
+    // carrying features, and a static_order UHD reads no descriptor fields at all.
+    if(const auto found = root.find("trained_against"); found != root.end())
+    {
+        if(!found->is_object() || found->empty())
+        {
+            fail(where + ": 'trained_against' must be a non-empty map of descriptor kind "
+                         "to version");
+        }
+        for(const auto& entry : found->items())
+        {
+            static const std::set<std::string> s_kinds{"ued", "umd", "kmd"};
+            if(s_kinds.count(entry.key()) == 0)
+            {
+                fail(where + ": 'trained_against' names '" + entry.key()
+                     + "', which is not a descriptor kind a heuristic reads through "
+                       "(ued, umd, kmd)");
+            }
+            const auto parsed
+                = parseDescriptorVersion(requireString(*found, entry.key(), where), where);
+            hipdnn_data_sdk::utilities::Version version;
+            version.major = parsed.major;
+            version.minor = parsed.minor;
+            heuristic.trainedAgainst.emplace(entry.key(), version);
+        }
+    }
+
     return heuristic;
 }
 
@@ -714,6 +767,9 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
                       "name",
                       "sdk_version",
                       "heuristic",
+                      "sort_kernel_catalog",
+                      "predict_engine_tflops",
+                      "predict_applicable_kernels",
                       "metadata",
                       "knobs",
                       "behavior_notes",
@@ -725,12 +781,67 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
     engine.id = requireId(root, "id", where);
     engine.name = requireString(root, "name", where);
     requireScopedName(engine.name, where);
-    // Optional: a UED naming no UHD ranks on priority then id, and makeKernelHeuristic()
-    // warns and substitutes UnrankedKernelHeuristic. Absence is the only way out --
-    // a `heuristic` key present but naming nothing is still a parse error below.
-    if(root.find("heuristic") != root.end())
+    // RFC 0019 §3.1: up to three role-scoped UHD references, each an arch -> id map and
+    // each independently optional. A bare string is read as a `default`-only map, which
+    // is what the legacy single-reference `heuristic` key becomes -- so older UEDs keep
+    // loading unchanged rather than needing a rewrite.
+    //
+    // Optional throughout: a UED naming no UHD ranks on priority then id, and
+    // makeKernelHeuristic() warns and substitutes UnrankedKernelHeuristic. Absence is the
+    // only way out -- a role key present but naming nothing is still a parse error.
+    const auto readRole = [&root, &where](const char* key,
+                                          std::map<std::string, DescriptorId>& into) {
+        const auto found = root.find(key);
+        if(found == root.end())
+        {
+            return;
+        }
+        if(found->is_string())
+        {
+            into.emplace("default", requireId(root, key, where));
+            return;
+        }
+        if(!found->is_object() || found->empty())
+        {
+            fail(std::string(where) + ": '" + key
+                 + "' must be a UHD id or a non-empty arch -> id map");
+        }
+        for(const auto& entry : found->items())
+        {
+            if(entry.key().empty())
+            {
+                fail(std::string(where) + ": '" + key
+                     + "' has an entry with an empty architecture key");
+            }
+            into.emplace(entry.key(), requireId(*found, entry.key(), where));
+        }
+    };
+
+    readRole("heuristic", engine.sortKernelCatalog);
+    readRole("sort_kernel_catalog", engine.sortKernelCatalog);
+    readRole("predict_engine_tflops", engine.predictEngineTflops);
+    readRole("predict_applicable_kernels", engine.predictApplicableKernels);
+
+    // Naming the same role twice, once under each spelling, is an authoring mistake
+    // rather than a merge: the two would silently disagree about which model ranks.
+    if(root.find("heuristic") != root.end() && root.find("sort_kernel_catalog") != root.end())
     {
-        engine.heuristicId = requireId(root, "heuristic", where);
+        fail(std::string(where)
+             + ": names both 'heuristic' and 'sort_kernel_catalog'; they are the same role, "
+               "so declare one");
+    }
+
+    // The single reference every existing consumer reads. Arch resolution proper belongs
+    // to the backend registry, which knows the running device; this is the entry that
+    // applies when no arch-specific one does.
+    if(const auto fallback = engine.sortKernelCatalog.find("default");
+       fallback != engine.sortKernelCatalog.end())
+    {
+        engine.heuristicId = fallback->second;
+    }
+    else if(engine.sortKernelCatalog.size() == 1)
+    {
+        engine.heuristicId = engine.sortKernelCatalog.begin()->second;
     }
     engine.metadataSchemaId = requireId(root, "metadata", where);
     engine.knobs = optionalStringArray(root, "knobs", where);
@@ -1308,7 +1419,11 @@ inline constexpr std::array FILE_TYPES{
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.schemas, parseMetadataSchema(d, p.string()), d, p);
+                 // The declared version is kept for RFC 0019 §8.1's coupling check;
+                 // versionIsSupported() has already gated it against this build.
+                 auto parsed = parseMetadataSchema(d, p.string());
+                 c.declaredVersions[parsed.id] = declaredVersionOf(d, p.string());
+                 insertCatalogEntry(c.schemas, std::move(parsed), d, p);
              }},
     FileType{SUFFIX_UHD,
              1,
@@ -1320,13 +1435,21 @@ inline constexpr std::array FILE_TYPES{
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.engines, parseEngineDescriptor(d, p.string()), d, p);
+                 // The declared version is kept for RFC 0019 §8.1's coupling check;
+                 // versionIsSupported() has already gated it against this build.
+                 auto parsed = parseEngineDescriptor(d, p.string());
+                 c.declaredVersions[parsed.id] = declaredVersionOf(d, p.string());
+                 insertCatalogEntry(c.engines, std::move(parsed), d, p);
              }},
     FileType{SUFFIX_UMD,
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.matchers, parseMatchDescriptor(d, p.string()), d, p);
+                 // The declared version is kept for RFC 0019 §8.1's coupling check;
+                 // versionIsSupported() has already gated it against this build.
+                 auto parsed = parseMatchDescriptor(d, p.string());
+                 c.declaredVersions[parsed.id] = declaredVersionOf(d, p.string());
+                 insertCatalogEntry(c.matchers, std::move(parsed), d, p);
              }},
     FileType{SUFFIX_UDD,
              1,
@@ -1698,6 +1821,92 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                 continue;
             }
         }
+
+        // Every role-scoped reference, not just the resolved default. A per-arch entry or
+        // a secondary role naming a UHD no file defines is the same broken install as the
+        // default one: the author asked for a model that did not ship. Letting those load
+        // would defer the failure to whichever device happens to select that arch.
+        bool danglingRole = false;
+        for(const auto* role : {&engine.sortKernelCatalog,
+                                &engine.predictEngineTflops,
+                                &engine.predictApplicableKernels})
+        {
+            for(const auto& [arch, id] : *role)
+            {
+                if(detail::findDescriptor(catalog.heuristics, id) == nullptr)
+                {
+                    HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
+                                            << engine.name << "' names heuristic "
+                                            << toString(id) << " for arch '" << arch
+                                            << "', which no descriptor defines; dropping it");
+                    danglingRole = true;
+                }
+            }
+        }
+        if(danglingRole)
+        {
+            continue;
+        }
+        // RFC 0019 §8.1: the heuristic was generated against particular descriptor
+        // versions, and it reads its inputs through them. Same major, and a minor no older
+        // than the one it was trained against -- a descriptor that has since gained a field
+        // is fine, one that predates the training is not, because a field the model expects
+        // may not be there.
+        //
+        // Checked here rather than at parse because it is a relation between descriptors,
+        // and only at the link step are they resolved together.
+        if(heuristic != nullptr && !heuristic->trainedAgainst.empty())
+        {
+            const auto declared = [&catalog](const DescriptorId& id)
+                -> std::optional<hipdnn_data_sdk::utilities::Version> {
+                const auto found = catalog.declaredVersions.find(id);
+                return found == catalog.declaredVersions.end()
+                           ? std::nullopt
+                           : std::make_optional(found->second);
+            };
+            const auto against = [&](const std::string& kind)
+                -> std::optional<hipdnn_data_sdk::utilities::Version> {
+                if(kind == "ued")
+                {
+                    return declared(engine.id);
+                }
+                if(kind == "kmd")
+                {
+                    return declared(engine.metadataSchemaId);
+                }
+                // umd: a UED names no matcher -- they belong to packs -- so there is no
+                // single UMD to check here. Declaring one is accepted and not enforced
+                // rather than silently treated as a pass.
+                return std::nullopt;
+            };
+
+            bool skew = false;
+            for(const auto& [kind, trained] : heuristic->trainedAgainst)
+            {
+                const auto actual = against(kind);
+                if(!actual.has_value())
+                {
+                    continue;
+                }
+                if(actual->major != trained.major || actual->minor < trained.minor)
+                {
+                    HIPDNN_PLUGIN_LOG_ERROR(
+                        "descriptor loader: engine '"
+                        << engine.name << "' names heuristic '" << heuristic->name
+                        << "' trained against " << kind << " " << trained.major << "."
+                        << trained.minor << ", but its " << kind << " declares "
+                        << actual->major << "." << actual->minor
+                        << "; the model would read its inputs through a descriptor it was "
+                           "not generated for, so the engine is dropped");
+                    skew = true;
+                }
+            }
+            if(skew)
+            {
+                continue;
+            }
+        }
+
         const auto* schema = detail::findDescriptor(catalog.schemas, engine.metadataSchemaId);
         if(schema == nullptr)
         {

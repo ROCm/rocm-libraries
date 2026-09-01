@@ -150,6 +150,17 @@ struct HeuristicDescriptor
     /// Empty for descriptors built in memory rather than parsed from disk, and ignored
     /// by NATIVE, which resolves a symbol rather than a path.
     std::filesystem::path baseDir;
+
+    /// RFC 0019 §8.1: the descriptor versions this heuristic was generated against, keyed
+    /// by kind -- "ued", "umd", "kmd". Empty when the UHD declares none, which §4's field
+    /// table permits for an adapter carrying no features.
+    ///
+    /// The coupling exists because a model reads its inputs *through* those descriptors: a
+    /// KMD that gains a field, or a UED whose knob list moves, changes what `$kernel.*`
+    /// resolves to without changing the model. Nothing else detects it -- features_hash
+    /// covers the signature, not the descriptors the signature resolves against -- so a UHD
+    /// regenerated out of step otherwise loads clean and ranks on stale meaning.
+    std::map<std::string, hipdnn_data_sdk::utilities::Version> trainedAgainst;
 };
 
 /// UED: the engine itself, carrying no logic of its own. `name` hashes into hipDNN's
@@ -158,9 +169,31 @@ struct EngineDescriptor
 {
     DescriptorId id;
     std::string name;
+    /// The engine's catalog-ranking UHD, resolved for the running architecture.
+    ///
     /// nullopt when the engine ships no UHD; selection then falls back to the
     /// descriptor-declared order. Must equal `DescriptorSet::heuristic`'s id when set.
+    /// This is the `default` entry of @ref sortKernelCatalog, or the legacy `heuristic` key.
     std::optional<DescriptorId> heuristicId;
+
+    /// RFC 0019 §3.1: an engine names up to three role-scoped UHDs, each mapped by
+    /// architecture, and each independently optional.
+    ///
+    ///   sort_kernel_catalog        ranks the catalog and picks the kernel
+    ///   predict_engine_tflops      cheap f(graph) -> expected perf, for engine selection
+    ///   predict_applicable_kernels generates the candidate set (future, JIT case)
+    ///
+    /// Keyed by `gcnArchName` with a `default` fallback, matching how the backend's
+    /// EngineRegistry stores them. A bare id in the UED is read as a `default`-only map, so
+    /// the legacy single-reference form is one of these with one entry rather than a
+    /// separate concept.
+    ///
+    /// RFC 0020 §4.4 still describes `heuristic` as an engine's *one* UHD id; that sentence
+    /// predates the multiple-reference model and the two RFCs disagree. This follows
+    /// RFC 0019 while continuing to load the older form.
+    std::map<std::string, DescriptorId> sortKernelCatalog;
+    std::map<std::string, DescriptorId> predictEngineTflops;
+    std::map<std::string, DescriptorId> predictApplicableKernels;
     DescriptorId metadataSchemaId;
     std::vector<std::string> knobs;
     /// `hipdnnBackendBehaviorNote_t` values; int32 so a newer note isn't truncated.

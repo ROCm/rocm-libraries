@@ -362,6 +362,163 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     EXPECT_EQ(set.engine.behaviorNotes.front(), HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
 }
 
+/// RFC 0019 §8.1: a UHD is generated against particular descriptor versions and reads its
+/// inputs through them, so a UHD paired with a descriptor set it was not trained for must not
+/// load. features_hash cannot catch this -- it covers the signature, not the descriptors the
+/// signature resolves against.
+TEST(TestDescriptorLoader, AHeuristicTrainedAgainstAMatchingDescriptorSetLoads)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_ok"));
+    auto documents = makeSetDocuments('1', "test:trained");
+    // The fixtures declare 1.0 throughout, so training against 1.0 is the matching case.
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"ued", "1.0"}, {"kmd", "1.0"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_EQ(loadFrom(dir.path()).size(), 1u);
+}
+
+TEST(TestDescriptorLoader, AHeuristicTrainedAgainstAnOlderMinorStillLoads)
+{
+    // The descriptor has since gained a field. That is forward motion, not skew: everything
+    // the model was trained to read is still there, so §8.1 permits minor >= trained.
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_older"));
+    auto documents = makeSetDocuments('1', "test:older");
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"ued", "1.0"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_EQ(loadFrom(dir.path()).size(), 1u);
+}
+
+TEST(TestDescriptorLoader, AHeuristicTrainedAgainstANewerMinorIsRefused)
+{
+    // The reverse: the model was generated against a UED newer than the one shipped beside
+    // it, so a field it expects may simply not be there. Dropping the engine is the point --
+    // ranking on a descriptor the model was not generated for is silent misranking.
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_newer"));
+    auto documents = makeSetDocuments('1', "test:newer");
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"ued", "1.7"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+TEST(TestDescriptorLoader, AHeuristicTrainedAgainstADifferentMajorIsRefused)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_major"));
+    auto documents = makeSetDocuments('1', "test:major");
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"kmd", "2.0"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+TEST(TestDescriptorLoader, AHeuristicDeclaringNoTrainedAgainstStillLoads)
+{
+    // §4's field table makes it conditional on the adapter carrying features; a static_order
+    // UHD reads no descriptor fields, so requiring it would break the zero-authoring case.
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_absent"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:absent"));
+
+    EXPECT_EQ(loadFrom(dir.path()).size(), 1u);
+}
+
+TEST(TestDescriptorLoader, TrainedAgainstNamingSomethingOtherThanADescriptorKindIsRefused)
+{
+    // A typo like "uhd" or "kdp" would otherwise be silently ignored, leaving the author
+    // believing a coupling is enforced when nothing checks it.
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_typo"));
+    auto documents = makeSetDocuments('1', "test:typo");
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"kdp", "1.0"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// RFC 0019 §3.1 lets a UED name up to three role-scoped UHDs, each mapped by architecture.
+/// The older single `heuristic` key is one of those roles with one entry, so it has to keep
+/// loading unchanged -- every shipped descriptor set uses it.
+TEST(TestDescriptorLoader, TheLegacySingleHeuristicKeyBecomesTheDefaultCatalogRole)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("legacy_role"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:legacy"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& engine = sets.front().engine;
+    ASSERT_TRUE(engine.heuristicId.has_value());
+    ASSERT_EQ(engine.sortKernelCatalog.size(), 1u);
+    EXPECT_EQ(engine.sortKernelCatalog.at("default"), *engine.heuristicId);
+    EXPECT_TRUE(engine.predictEngineTflops.empty());
+    EXPECT_TRUE(engine.predictApplicableKernels.empty());
+}
+
+/// The multiple-reference form: roles are independently optional and each is an arch map.
+TEST(TestDescriptorLoader, LoadsRoleScopedHeuristicsMappedByArchitecture)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("role_scoped"));
+    auto documents = makeSetDocuments('1', "test:roles");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("heuristic").get<std::string>();
+
+    // Same UHD under two arches and under a second role: what matters here is that the
+    // shape parses and every reference resolves, not that they differ.
+    engineDocument.erase("heuristic");
+    engineDocument["sort_kernel_catalog"] = {{"gfx942", uhdId}, {"default", uhdId}};
+    engineDocument["predict_engine_tflops"] = {{"default", uhdId}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& engine = sets.front().engine;
+    EXPECT_EQ(engine.sortKernelCatalog.size(), 2u);
+    EXPECT_EQ(engine.predictEngineTflops.size(), 1u);
+    // The resolved single reference every existing consumer reads is the default entry.
+    ASSERT_TRUE(engine.heuristicId.has_value());
+    EXPECT_EQ(engine.sortKernelCatalog.at("default"), *engine.heuristicId);
+}
+
+/// A per-arch reference to a UHD nothing defines is the same broken install as a dangling
+/// default one. Loading it would defer the failure to whichever device selects that arch.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseArchScopedHeuristicDoesNotResolve)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_arch"));
+    auto documents = makeSetDocuments('1', "test:dangling");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("heuristic").get<std::string>();
+
+    engineDocument.erase("heuristic");
+    engineDocument["sort_kernel_catalog"]
+        = {{"default", uhdId}, {"gfx942", testUuid('9', ROLE_HEURISTIC)}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty())
+        << "an arch-scoped reference to a heuristic no descriptor defines must drop the engine";
+}
+
+/// Both spellings of the same role would silently disagree about which model ranks.
+TEST(TestDescriptorLoader, RefusesAUedThatNamesTheCatalogRoleTwice)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("role_twice"));
+    auto documents = makeSetDocuments('1', "test:twice");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    engineDocument["sort_kernel_catalog"] = engineDocument.at("heuristic");
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
 /// A UED naming no UHD ranks on priority then id instead of failing, so the SDK can adopt a
 /// model later without the engine being unloadable until it does. The UHD is removed with
 /// the reference: a descriptor no engine names is the orphan case, tested separately.
