@@ -9644,6 +9644,123 @@ TEST_F(TestGraph, AutotuneAcceptsExtraUidsInVariantPack)
     }
 }
 
+// Builds a batchnorm graph whose epsilon (UID 4) is supplied by the caller,
+// leaving UIDs 1-3 as the only pointer-backed operands.
+static void createBatchnormGraphWithEpsilon(Graph& graph,
+                                            const std::shared_ptr<TensorAttributes>& epsilon)
+{
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2).set_name("Scale").set_dim(derivedDims).set_stride(derivedStrides);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3).set_name("Bias").set_dim(derivedDims).set_stride(derivedStrides);
+
+    BatchnormAttributes attributes;
+    attributes.set_name("BatchnormNode");
+    attributes.set_epsilon(epsilon);
+    graph.batchnorm(x, scale, bias, attributes);
+}
+
+// UIDs 1-3 only; epsilon is deliberately absent.
+static const std::unordered_map<int64_t, void*> K_PACK_WITHOUT_EPSILON
+    = {{1, reinterpret_cast<void*>(0x1)},
+       {2, reinterpret_cast<void*>(0x2)},
+       {3, reinterpret_cast<void*>(0x3)}};
+
+// A compile-time constant is baked into the op-graph flatbuffer, so it has no
+// pointer to give and autotune() must accept the pack execute() accepts.
+TEST_F(TestGraph, AutotuneDoesNotRequireUidsForCompileTimeConstantScalars)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5F);
+    createBatchnormGraphWithEpsilon(graph, epsilon);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
+    ASSERT_TRUE(epsilon->get_has_compile_time_constant());
+
+    graph.injectDummyPlanSpec();
+
+    const auto result = graph.autotune(_handle, K_PACK_WITHOUT_EPSILON, nullptr, int64_t{0});
+    if(result.is_bad())
+    {
+        EXPECT_EQ(result.err_msg.find("missing"), std::string::npos) << result.err_msg;
+    }
+}
+
+// The other value-carrying kind: runtime flag set *and* a value baked. Also
+// exempt, and the case get_has_compile_time_constant() does not cover.
+TEST_F(TestGraph, AutotuneDoesNotRequireUidsForRuntimeDefaultScalars)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+
+    // set_value() clears the runtime flag, so set the flag after it;
+    // set_as_runtime_parameter() would clear the value instead.
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5F).set_is_pass_by_value(true);
+    createBatchnormGraphWithEpsilon(graph, epsilon);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
+    ASSERT_TRUE(epsilon->get_pass_by_value().has_value());
+    ASSERT_FALSE(epsilon->get_has_compile_time_constant());
+
+    graph.injectDummyPlanSpec();
+
+    const auto result = graph.autotune(_handle, K_PACK_WITHOUT_EPSILON, nullptr, int64_t{0});
+    if(result.is_bad())
+    {
+        EXPECT_EQ(result.err_msg.find("missing"), std::string::npos) << result.err_msg;
+    }
+}
+
+// A runtime user-supplied scalar carries no value and is variantPack-delivered
+// as a host pointer, so it stays required. get_is_pass_by_value() is true for
+// this kind too, which is why it cannot be the exemption predicate.
+TEST_F(TestGraph, AutotuneStillRequiresUidsForRuntimeUserSuppliedScalars)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4)
+        .set_name("Epsilon")
+        .set_dim({1})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT)
+        .set_is_pass_by_value(true);
+    createBatchnormGraphWithEpsilon(graph, epsilon);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
+    ASSERT_TRUE(epsilon->get_is_pass_by_value());
+    ASSERT_FALSE(epsilon->get_has_compile_time_constant());
+    ASSERT_FALSE(epsilon->get_pass_by_value().has_value());
+
+    graph.injectDummyPlanSpec();
+
+    const auto result = graph.autotune(_handle, K_PACK_WITHOUT_EPSILON, nullptr, int64_t{0});
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("missing"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find('4'), std::string::npos) << result.err_msg;
+}
+
 // ============================================================================
 // add_engines() batch method tests
 // ============================================================================

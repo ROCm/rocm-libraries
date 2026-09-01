@@ -48,6 +48,21 @@ void _rocsparse_sptrsv_descr::set_shared_csrsv_info(std::shared_ptr<_rocsparse_c
     this->m_csrsv_info = value;
 }
 
+void _rocsparse_sptrsv_descr::set_ellsv_info(rocsparse_ellsv_info value)
+{
+    this->m_ellsv_info = std::shared_ptr<_rocsparse_ellsv_info>(value);
+}
+
+rocsparse_ellsv_info _rocsparse_sptrsv_descr::get_ellsv_info()
+{
+    return this->m_ellsv_info.get();
+}
+
+void _rocsparse_sptrsv_descr::set_shared_ellsv_info(std::shared_ptr<_rocsparse_ellsv_info> value)
+{
+    this->m_ellsv_info = value;
+}
+
 _rocsparse_sptrsv_descr::~_rocsparse_sptrsv_descr()
 {
     m_stage            = ((rocsparse_sptrsv_stage)-1);
@@ -57,6 +72,7 @@ _rocsparse_sptrsv_descr::~_rocsparse_sptrsv_descr()
     m_compute_datatype = ((rocsparse_datatype)-1);
     m_analysis_policy  = ((rocsparse_analysis_policy)-1);
     this->m_csrsv_info.reset();
+    this->m_ellsv_info.reset();
     this->m_scalar_alpha = nullptr;
 }
 
