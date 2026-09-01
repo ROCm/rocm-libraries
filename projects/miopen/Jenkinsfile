@@ -296,6 +296,15 @@ pipeline {
             name: "BUILD_THEROCK_DOCKER",
             defaultValue: false,
             description: "")
+        // TEMPORARY (ALMIOPEN therock-artifact-docker feasibility spike): lets a PR build
+        // exercise the Build TheRock Docker + Package/Static Checks + Full Tests stages
+        // without pushing to the production rocm/miopen:therock / rocm/miopen-dev:latest
+        // tags. Remove this param (and its `when` guards below) once the artifact-based
+        // Dockerfile path is validated and either adopted or reverted.
+        booleanParam(
+            name: "THEROCK_DOCKER_PROMOTE",
+            defaultValue: true,
+            description: "Promote/publish the TheRock Docker build to production tags. Set false to test-build only.")
         booleanParam(
             name: "BUILD_FULL_TESTS",
             defaultValue: true,
@@ -457,11 +466,16 @@ pipeline {
                 }
             }
         }
-        // Promotes the candidate to :therock only after all CI stages pass.
+        // Promotes the candidate to :therock only after all CI stages pass. The stage ordering
+        // already gates this (a failed Package/Static or Full Tests stage aborts before here);
+        // the explicit currentResult == 'SUCCESS' check makes "publish only on green" auditable
+        // and also skips promotion when the build is merely UNSTABLE (e.g. flaky-test retries).
         stage('Build TheRock Docker: Promote') {
             when {
                 expression {
-                    params.BUILD_THEROCK_DOCKER && env.THEROCK_SKIP_UPDATE != 'true'
+                    params.BUILD_THEROCK_DOCKER && params.THEROCK_DOCKER_PROMOTE \
+                    && env.THEROCK_SKIP_UPDATE != 'true' \
+                    && currentBuild.currentResult == 'SUCCESS'
                 }
             }
             steps {
@@ -470,10 +484,14 @@ pipeline {
                 }
             }
         }
-        // Publishes rocm/miopen-dev:multiarch_dev_<date> and :latest after CI passes.
+        // Publishes rocm/miopen-dev:multiarch_dev_<date> and :latest, only on a green build
+        // (see the Promote stage above for why the explicit currentResult check is kept).
         stage('Publish Dev Image') {
             when {
-                expression { params.BUILD_THEROCK_DOCKER }
+                expression {
+                    params.BUILD_THEROCK_DOCKER && params.THEROCK_DOCKER_PROMOTE \
+                    && currentBuild.currentResult == 'SUCCESS'
+                }
             }
             steps {
                 script {
