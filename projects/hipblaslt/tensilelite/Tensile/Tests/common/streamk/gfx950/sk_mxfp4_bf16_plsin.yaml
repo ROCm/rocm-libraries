@@ -1,0 +1,83 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+# GPU numerical validation for PostLoopStoreInNll (PLSIN) on gfx950.
+#
+# Unlike the FP32-dest MXFP4 configs, this uses a BF16 destination so the fused
+# in-NLL paired store is reachable. It validates the arbitrary-alpha fused path
+# (DataInitTypeAlpha: 2, non-unity) against the reference, and mixes problem
+# geometries so BOTH runtime arms are exercised:
+#   * full tiles with no tail (256x256, 512x512; K multiple of DepthU, beta==0)
+#     -> the FUSED store owner path;
+#   * partial/edge tiles (136x136) and a tail case (K=1056 with DepthU 512)
+#     -> the PLAIN NLL + edge-capable post-loop store fallback.
+# MatrixInstruction 8x8 is PLSIN-eligible; 2x2 stays on the baseline path, so a
+# single sweep covers scoped-on and scoped-off kernels.
+#
+# To additionally validate the alpha==1 case, run with DataInitTypeAlpha: 1
+# (the original supported value) -- the fused epilogue applies the same scalar
+# multiply for every alpha.
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: True
+  SyncsPerBenchmark: 0
+  CpuThreads: 32
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 0
+  PrintLevel: 2
+  ForceGenerateKernel: True
+  MaxWorkspaceSize: 134217728
+  MXScaleFormat: 1
+
+BenchmarkProblems:
+  #######################################
+  # MX-FP4 TN, BF16 destination -- PLSIN reachable. StreamK {3,4,5}.
+  #######################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+
+    - # StreamK modes 3/4/5, eligible (8x8) + ineligible (2x2) tiles
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+        - DepthU: [256, 512]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [false]
+        - DirectToLds: [1]
+        - StreamK: [3, 4, 5]
+        - StaggerU: [0]
+        - WavefrontSize: [64]
+        - WorkGroupMapping: [1]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 512]    # full tile, no tail  -> FUSED
+          - Exact: [512, 512, 1, 512]    # full tile, no tail  -> FUSED
+          - Exact: [136, 136, 1, 1056]   # partial/edge + tail -> PLAIN fallback

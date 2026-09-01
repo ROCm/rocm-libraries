@@ -1,0 +1,78 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# DESIGNED PostLoopStoreInNll (PLSIN) config for gfx950.
+#
+# PLSIN is the fused in-NLL BF16 paired store. It only activates for an MX-FP4
+# input with a BF16 (or FP16) destination, fp32 compute, UseSubtileImpl, PGR>=1,
+# and non-atomic StreamK 3/4/5 -- the common MXFP4 StreamK configs all use a
+# FP32 destination, so none of them exercise the feature. This config uses a
+# BF16 destination so the fused path is reachable, and forks MatrixInstruction so
+# a SINGLE emit produces both PLSIN-eligible and PLSIN-ineligible kernels:
+#
+#   [16,16,128,1,1, 2,2, 2,2]  MIWaveTile 2x2 -> min dim 2: the MX-scale SGPR
+#                              headroom check fails -> PLSIN OFF (baseline path).
+#   [16,16,128,1,1, 8,8, 2,2]  MIWaveTile 8x8 -> register/spill/profit budgets
+#                              pass -> PLSIN ON (fused store, PostLoopFusedStore).
+#
+# StreamK {3,4,5} covers the three supported persistent modes. The paired
+# on/off variants let a characterization test assert the PostLoopFusedStore flag
+# appears only in the eligible kernels and that the ineligible kernels keep the
+# unchanged baseline emission.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # MX-FP4 TN, BF16 destination -- PLSIN reachable.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      MXBlockA: 32
+      MXBlockB: 32
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]   # MIWaveTile 2x2 -> PLSIN OFF
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]   # MIWaveTile 8x8 -> PLSIN ON
+        - DepthU: [256]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [false]
+        - DirectToLds: [1]
+        - StreamK: [3, 4, 5]
+        - StaggerU: [0]
+        - WavefrontSize: [64]
+        - WorkGroupMapping: [1]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 512]

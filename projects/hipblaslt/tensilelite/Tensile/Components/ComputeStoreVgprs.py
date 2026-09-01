@@ -139,24 +139,34 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
         # writer.vgprs.cinRowPtr  : C buffer coulmn offset
         # writer.vgprs.coutRowPtrD : D buffer coulmn offset
 
+        # PLSIN numIter<PGR recompute: the persistent coord/rowPtr VGPRs were already
+        # checked out by the NGLL init-hoist and are still live; reuse them as the
+        # recompute targets (zero extra registers) instead of allocating a fresh set.
+        # The downstream fused store body reads these same fixed VGPRs regardless of
+        # which runtime arm (hoist vs recompute) produced them.
+        reuse = writer.states.subtileRecomputeCoords
         # alloc resources
-        tid0 = writer.vgprPool.checkOut(1, "coord0")
-        tid1 = writer.vgprPool.checkOut(1, "coord1")
-        if kernel["BufferStore"]:
-            writer.vgprs.cinRowPtr   = writer.vgprPool.checkOut(1, "cinRowPtr")
-            writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
-            if kernel["ProblemType"]["UseE"]:
-                writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
-            if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
-                writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
-            if writer.states.useGateResidual:
-                writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
-        if kernel["LocalSplitU"] > 1:
-            writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
-            writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
+        if reuse:
+            tid0 = writer.vgprs.coord0
+            tid1 = writer.vgprs.coord1
         else:
-            writer.vgprs.coord0InMT = tid0
-            writer.vgprs.coord1InMT = tid1
+            tid0 = writer.vgprPool.checkOut(1, "coord0")
+            tid1 = writer.vgprPool.checkOut(1, "coord1")
+            if kernel["BufferStore"]:
+                writer.vgprs.cinRowPtr   = writer.vgprPool.checkOut(1, "cinRowPtr")
+                writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
+                if kernel["ProblemType"]["UseE"]:
+                    writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
+                if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
+                    writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
+                if writer.states.useGateResidual:
+                    writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
+            if kernel["LocalSplitU"] > 1:
+                writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
+                writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
+            else:
+                writer.vgprs.coord0InMT = tid0
+                writer.vgprs.coord1InMT = tid1
         lsuTid0 = writer.vgprs.coord0InMT
         lsuTid1 = writer.vgprs.coord1InMT
 
@@ -247,6 +257,9 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
         if kernel["StoreRemapVectorWidth"]:
             module.add(writer.storeRemapComputeStoreVgprs(kernel))
 
+        # On reuse, tid0/tid1 already ARE writer.vgprs.coord0/coord1 (recompute wrote
+        # into the hoisted VGPRs in place), so this is a no-op; keep it unconditional
+        # for the normal alloc path.
         writer.vgprs.coord0 = tid0
         writer.vgprs.coord1 = tid1
 
@@ -270,24 +283,31 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
         # writer.vgprs.cinRowPtr  : C buffer coulmn offset
         # writer.vgprs.coutRowPtrD : D buffer coulmn offset
 
+        # PLSIN numIter<PGR recompute: reuse the already-live hoisted coord/rowPtr VGPRs
+        # as recompute targets (zero extra registers) -- see the MFMA variant note.
+        reuse = writer.states.subtileRecomputeCoords
         # alloc resources
-        tid0 = writer.vgprPool.checkOut(1, "coord0")
-        tid1 = writer.vgprPool.checkOut(1, "coord1")
-        if kernel["BufferStore"]:
-            writer.vgprs.cinRowPtr  = writer.vgprPool.checkOut(1, "cinRowPtr")
-            writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
-            if kernel["ProblemType"]["UseE"]:
-                writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
-            if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
-                writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
-            if writer.states.useGateResidual:
-                writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
-        if kernel["LocalSplitU"] > 1:
-            writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
-            writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
+        if reuse:
+            tid0 = writer.vgprs.coord0
+            tid1 = writer.vgprs.coord1
         else:
-            writer.vgprs.coord0InMT = tid0
-            writer.vgprs.coord1InMT = tid1
+            tid0 = writer.vgprPool.checkOut(1, "coord0")
+            tid1 = writer.vgprPool.checkOut(1, "coord1")
+            if kernel["BufferStore"]:
+                writer.vgprs.cinRowPtr  = writer.vgprPool.checkOut(1, "cinRowPtr")
+                writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
+                if kernel["ProblemType"]["UseE"]:
+                    writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
+                if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
+                    writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
+                if writer.states.useGateResidual:
+                    writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
+            if kernel["LocalSplitU"] > 1:
+                writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
+                writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
+            else:
+                writer.vgprs.coord0InMT = tid0
+                writer.vgprs.coord1InMT = tid1
         lsuTid0 = writer.vgprs.coord0InMT
         lsuTid1 = writer.vgprs.coord1InMT
 

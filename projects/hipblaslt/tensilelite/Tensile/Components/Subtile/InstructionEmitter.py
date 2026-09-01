@@ -394,9 +394,19 @@ class InstructionEmitter:
                 module.add(cmpCls(
                     src0=sgpr("LoopCounterL"), src1=sgpr(litSgpr),
                     comment=f"LoopCounter {source.compare} {source.value}?"))
-        module.add(SCBranchSCC1(
-            labelName=skipLabel.getLabelName(),
-            comment=source.branchComment or f"skip to {source.target}"))
+        # PostLoopStoreInNll adds the fused-store + epilogue footprint to the kernel,
+        # growing the total distance this preloop skip spans (e.g. SkipToNLL jumps
+        # across the whole preloop+mainloop+NGLL) past the +-simm16 short-branch range.
+        # Emit a 32-bit long branch in that mode; every other kernel keeps the original
+        # short branch (byte-identical).
+        if getattr(self.writer.states, "postLoopStoreInNll", False):
+            module.add(self.writer.longBranchScc1(
+                skipLabel, posNeg=1,
+                comment=(source.branchComment or f"skip to {source.target}") + " (long)"))
+        else:
+            module.add(SCBranchSCC1(
+                labelName=skipLabel.getLabelName(),
+                comment=source.branchComment or f"skip to {source.target}"))
         return list(module.flatitems())
 
     def _mfma_K_constants(self):

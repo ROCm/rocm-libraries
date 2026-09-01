@@ -1164,6 +1164,12 @@ validParameters = { # we need to make sure this matches develop
     # Need certain conditions to use TailloopInNll optimization
     # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
     "TailloopInNll": [False, True],
+    # NOTE: PostLoopStoreInNll (PLSIN) is intentionally NOT a public solution
+    # parameter. It is an internal, subtile-owned decision derived at kernel-writer
+    # init from the already-present solution/problem parameters
+    # (Components/Subtile/Plsin.py::computeSubtilePlsin) and carried on
+    # writer.states.postLoopStoreInNll. Keeping it out of
+    # ValidParameters keeps it out of the kernel name and the tuning search space.
     # Schedule global read instructions over barrier sync.
     # Only for DirectToLdsA+B + PGR>=2.
     # -1: auto (enable this for PGR>=3)

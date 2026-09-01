@@ -36,3 +36,11 @@ MatchTable.yaml
 hsakmt_counters.csv
 hierarchy_runtime_params.conf
 out_runtime_params.conf
+
+# local test / benchmark output and scratch artifacts
+asm_*/
+out/
+out_*/
+debug/
+*.log
+scratch_*.yaml

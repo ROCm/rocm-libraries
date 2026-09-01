@@ -1765,6 +1765,9 @@ class Solution(collections.abc.Mapping):
 
     if "AssignedDerivedParameters" in state:
       if state["AssignedDerivedParameters"]:
+        # PostLoopStoreInNll (PLSIN) is no longer a solution parameter; it is derived
+        # internally at kernel-writer init (Components/Subtile/Plsin.py), so nothing
+        # PLSIN-related needs to run on this pre-tuned short-circuit path.
         return
     state["AssignedDerivedParameters"] = False
 
@@ -6118,6 +6121,11 @@ class Solution(collections.abc.Mapping):
       # Turn off ONLL for now
       # TODO: support ONLL if necessary
       state["OptNoLoadLoop"] = 0
+
+    # NOTE: PostLoopStoreInNll (PLSIN) eligibility is no longer decided here. It is
+    # an internal, subtile-owned decision derived at kernel-writer init from the
+    # already-present solution/problem parameters (Components/Subtile/Plsin.py::
+    # computeSubtilePlsin), including the structural-NLL (PGR >= 1) re-check.
 
     # if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
     #   if state["ProblemType"]["SupportUserArgs"] and state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':

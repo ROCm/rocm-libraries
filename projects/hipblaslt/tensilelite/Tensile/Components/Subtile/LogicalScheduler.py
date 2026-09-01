@@ -38,11 +38,26 @@ from .ScheduleTypes import (
     LogicalSchedule,
     PartitionSchedule,
 )
+from rocisa.instruction import Instruction, SAddCU32, SSubBU32, SCSelectB32, SCSelectB64, \
+    MFMAInstruction, MXMFMAInstruction
 
 from ...Common.GlobalParameters import globalParameters
+from .Plsin import plsinLargeTile
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
+
+# PostLoopStoreInNll store-init weave unit kinds: the split-unit contract
+# between the producer KernelWriterAssembly._splitHoistableStoreInit and the
+# consumer _weaveStoreInitIntoLoop (below). Each hoistable unit is a 2-tuple:
+#   (WEAVE_UNIT_ALU,   inst)      one scatterable pure-ALU / RegSet instruction,
+#                                 dropped one-per-MFMA-gap (SCC carry chains kept
+#                                 together via _readsScc)
+#   (WEAVE_UNIT_BLOCK, [insts])   a self-contained branch/label/compare region,
+#                                 dropped CONTIGUOUSLY into one gap so a taken
+#                                 branch never jumps across an interleaved loop MFMA
+WEAVE_UNIT_ALU = 'alu'
+WEAVE_UNIT_BLOCK = 'block'
 
 def _checkout_tile(pool, numRegs, tag):
     """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
@@ -3533,6 +3548,504 @@ class LogicalScheduler:
                 comment=f"PGR=2 tail align: parity-swap LW_base for {tc}"))
         return module
 
+    def _emitNgllMaybeFused(self, writer, kernel, label, emitted_3d):
+        """Emit the NGLL, optionally as a PostLoopInitInNGLL/plainNGLL dual variant.
+
+        Foundation for the PostLoopStoreInNll init-hoist: the fused NLL store's
+        data-independent prologue (coord0/1, coutRowPtrD, ds_permute partner-lane
+        address -- the VALU work before the first accvgpr_read) is expensive and today
+        runs serially at the top of the fused NLL store. This scaffold splits the NGLL
+        into two runtime arms so a later stage can weave that prologue between the
+        PostLoopInitInNGLL arm's terminal MFMAs (hiding its latency behind the NGLL
+        MFMA window), while non-owner WGs keep the lean plainNGLL.
+
+        The arm is chosen by the SAME loop-invariant guard as the fused NLL store
+        (the hoisted PostLoopFusedStore flag / emitFusedStoreGuard: no-tail && beta==0
+        && full MacroTile in M and N && StreamK full-tile owner), so NGLL and NLL can
+        never disagree about which WG is the fused owner.
+
+        Gating:
+          * non-PLSIN kernels (postLoopStoreInNll False) -> return the stock single
+            _emitLoop (byte-identical to the plain NGLL);
+          * PLSIN kernels -> emit the front guard + dual arms and weave the store's
+            data-independent coord prologue into the owner's PostLoopInitInNGLL arm
+            (see the init-hoist below); non-owner WGs fall through to plainNGLL.
+        """
+        from rocisa.code import Module, Label
+        from rocisa.instruction import SBranch
+
+        plain = self._emitLoop(writer, kernel, label, emitted_3d)
+        if not getattr(writer.states, "postLoopStoreInNll", False):
+            return plain
+        # Default ON for PLSIN kernels: postLoopStoreInNll is already the
+        # fp4-input + UseSubtileImpl (+ gfx950/MI/<=256x256/...) gate
+        # (Components/Subtile/Plsin.py), so the init-hoist NGLL dual-arm is enabled
+        # automatically here.
+        module = Module(f"{label}_MaybeFused")
+        doneLabel = Label(f"{label}_PostInitNGLL", "")
+        plainLabel = Label(f"{label}_PlainNGLL", "")
+        # Owner falls through to PostLoopInitInNGLL; every other WG -> plainNGLL.
+        module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
+        module.addComment0(f"{label}_PostLoopInitInNGLL")
+        initEmitted = copy.deepcopy(emitted_3d)
+        # Init-hoist: compute the fused store's write indices (coord0/1,
+        # cinRowPtr, coutRowPtrD) in the owner's PostLoopInitInNGLL arm. This is pure
+        # data-independent VALU (reads Serial / WorkGroup0/1 / strides only — see
+        # ComputeStoreVgprsMFMA), so it can be INTERLEAVED into the NGLL MFMA stream:
+        # the coord VALU is issued into the gaps AFTER each v_mfma_scale, hiding under
+        # the (long) MFMA compute latency instead of running as an exposed serial
+        # block before the store (exposed VALU before the first
+        # accvgpr_read). The FUSED store then reuses these VGPRs and skips
+        # its own notLocalSplitUGlobalWriteIndices; cleanupGlobalWrite in the store
+        # checks them in exactly once, completing the checkout(NGLL)/checkin(store)
+        # pairing (each NGLL_Cui/NLL_Cui pair is emitted contiguously, so the pool
+        # watermark only grows by the 4 coord VGPRs held across the NLL body, never
+        # accumulates across copies). Coord WEAVING (not PLSIN eligibility) is
+        # restricted to MacroTile <= 256x256: larger tiles already peak at the
+        # arch-VGPR occupancy budget in the loop and cannot afford the extra live
+        # coord registers.
+        largeTile = plsinLargeTile(kernel)
+        ngllInit = self._emitLoop(writer, kernel, f"{label}_INIT", initEmitted)
+        # Coord-hoist weaving runs only when the MacroTile is <= 256x256
+        # (plsinLargeTile is False). computeSubtilePlsin does NOT cap eligibility at
+        # 256x256, so largeTile CAN be True for an eligible kernel; in that case the
+        # INIT arm is emitted without coord weaving and VGPR lending handles the store
+        # register pressure.
+        if not largeTile:
+            from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+            # Generate the coord instructions (also checks out the persistent coord
+            # VGPRs via the writer register pool — that side effect must happen here).
+            coordInsts = list(writer.notLocalSplitUGlobalWriteIndices(kernel).flatitems())
+            writer.states.subtileHoistedWriteIndices = {
+                "coord0":         writer.vgprs.coord0,
+                "coord1":         writer.vgprs.coord1,
+                "cinRowPtr":      writer.vgprs.cinRowPtr,
+                "coutRowPtrD":    writer.vgprs.coutRowPtrD,
+                "coord0InMT":     writer.vgprs.coord0InMT,
+                "coord1InMT":     writer.vgprs.coord1InMT,
+                "coutRowPtrE":    writer.vgprs.coutRowPtrE,
+                "coutRowPtrBias": writer.vgprs.coutRowPtrBias,
+            }
+            # Weave coordInsts into the NGLL MFMA gaps: after each MFMA, drop up to
+            # perGap coord instrs (round-robin, preserving their relative RAW order —
+            # the MFMAs write acc/other regs and never touch the coord temps, so
+            # interleaving is register-safe). perGap is kept small so a gap's total
+            # fillers (existing ds_read + these) stay under the MFMA compute latency
+            # and never delay the next MFMA issue (i.e. never slow the NGLL loop).
+            perGap = 2
+            woven = Module(f"{label}_INIT_hoistwoven")
+            def _emitCoord(_i, _woven):
+                _woven.add(coordInsts[_i])
+                return _i + 1
+            self._weaveFillersIntoMfmaGaps(list(ngllInit.flatitems()), len(coordInsts),
+                                           _emitCoord, woven, perGap=perGap)
+            module.add(woven)
+        else:
+            module.add(ngllInit)
+        # plainNGLL body is small (MFMA/ds_read only) -> short forward branch suffices.
+        module.add(SBranch(labelName=doneLabel.getLabelName(),
+                   comment="PostLoopStoreInNll: PostLoopInitInNGLL done, skip plainNGLL"))
+        module.add(plainLabel)
+        module.add(plain)
+        module.add(doneLabel)
+        return module
+
+    def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d, fusedExitLabel=None):
+        """Emit the NLL, optionally as a FUSED/PLAIN dual variant (PostLoopStoreInNll).
+
+        Non-PLSIN kernels: byte-identical to the stock single-NLL emission (early
+        return of the plain `_emitLoop`).
+
+        PLSIN kernels: emit a runtime front guard, then the FUSED copy, then the
+        PLAIN copy. The guard selects FUSED only when the NLL is terminal (no tail)
+        and beta==0 and this WG owns a full tile; every other case falls through to
+        PLAIN. The FUSED copy relocates the beta0/NonEdge D store into the NLL and
+        dedups it against the post-loop store. FUSED/guard labels carry the site
+        suffix so the two per-unroll emit sites never collide.
+        """
+        from rocisa.code import Module, Label
+        from rocisa.instruction import SBranch
+
+        plain = self._emitLoop(writer, kernel, label, emitted_3d)
+        if not getattr(writer.states, "postLoopStoreInNll", False):
+            return plain
+
+        module = Module(f"{label}_MaybeFused")
+        doneLabel = Label(f"{label}_PostFusedNLL", "")
+        plainLabel = Label(f"{label}_PlainNLL", "")
+        # Runtime front guard: fall through to FUSED only when both hold, else PLAIN.
+        module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
+        # The woven store is generated in capture mode first. Its actual ACC-read
+        # instructions and Phase1/Phase2 gaps then drive terminal-MFMA placement.
+        fusedEmitted = copy.deepcopy(emitted_3d)
+        # Macro tiles larger than 256x256 peak at 256 arch VGPRs in the loop, so the
+        # fused store's temporaries (valuC window, coord0/1, and the element batch)
+        # cannot coexist with the still-live input VGPR tiles without pushing the
+        # arch-VGPR high-water mark past the single-wave occupancy budget. For those
+        # tiles: (a) keep the terminal MFMAs IN the loop (no weave) so every input
+        # tile is dead before the store, and (b) hand the now-dead input-tile VGPRs
+        # to buildSubtileFusedStore to lend to the store pool (non-destructively) so
+        # the store batch reuses the freed holes instead of extending the watermark.
+        # Tiles <= 256x256 keep the existing weave (they already fit at occupancy).
+        largeTile = plsinLargeTile(kernel)
+        # Store-bound small tiles (#1): on shapes where the terminal-MFMA drain is
+        # too small to hide the woven store (drain-MFMA cycles << store-epilogue
+        # cycles), weaving buys nothing but forces the store to run while the input
+        # VGPR tiles are still live -- the store's temp checkouts then collide with
+        # those live tiles and spill into extra register-shuffle VALU (v_mov / v_and
+        # / v_lshlrev / v_permlane). Opt such small tiles into the SAME strategy as
+        # large tiles: keep the terminal MFMAs IN the loop (every input tile dead
+        # before the store) and lend the now-dead input-tile VGPRs to the store pool
+        # so its temps reuse the freed holes instead of shuffling. Only large tiles
+        # take this Lend path today; small tiles keep the weave.
+        if largeTile:
+            weaveGroups = None
+            # Carry (base, size) per input tile so buildSubtileFusedStore can skip
+            # any tile that overlaps the spilled-accumulator arch-VGPR region. For
+            # spill tiles (MIWaveTile product > 64) the loop parks the >256th
+            # accumulators in dead input-tile VGPRs; those must stay reserved so the
+            # store's accvgpr read (and the subsequent post-loop store) can recover
+            # them. Lending such a tile lets a store temp reuse it and clobber a live
+            # spilled accumulator -> wrong D. Non-overlapping input tiles are safe.
+            lendTiles = []
+            for _tl in (self.vgprTilesA, self.vgprTilesB,
+                        self.vgprTilesSA, self.vgprTilesSB):
+                for _t in _tl:
+                    if getattr(_t.regList, "is_vgpr", False) and _t.regList.indices:
+                        lendTiles.append((_t.regList.indices[0], len(_t.regList.indices)))
+            writer.states.subtileFusedLendVgprs = lendTiles
+        else:
+            weaveGroups = {}
+            writer.states.subtileFusedLendVgprs = []
+        savedGroups = writer.states.subtileWeaveMfmaGroups
+        savedMaster = writer.states.subtileWeaveMfmaGroupsMaster
+        savedCaptures = writer.states.subtileWeaveCaptureInstances
+        savedCaptureCurrent = writer.states.subtileWeaveCaptureCurrent
+        savedLookahead = writer.states.subtileWeaveLookahead
+        savedPairCounter = writer.states.subtileWeavePairCounter
+        savedEmitted = writer.states.subtileWeaveEmitted
+        try:
+            # An empty group dict selects paired-store generation without placing
+            # producers. The planner fills each captured gap after generation.
+            writer.states.subtileWeaveMfmaGroupsMaster = weaveGroups
+            writer.states.subtileWeaveMfmaGroups = copy.deepcopy(weaveGroups) if weaveGroups is not None else None
+            writer.states.subtileWeaveLookahead = 0
+            writer.states.subtileWeavePairCounter = 0
+            writer.states.subtileWeaveEmitted = set()
+            writer.states.subtileWeaveCaptureInstances = [] if weaveGroups is not None else None
+            writer.states.subtileWeaveCaptureCurrent = None
+            # 4d-3a/3b: build the real beta0/NonEdge D store exactly once, then use
+            # its captured reads and gaps to perform 4d-3b latency hiding.
+            writer.states.subtileHoistedStoreInit = None
+            storeModule = writer.buildSubtileFusedStore(kernel, writer.tPA, writer.tPB)
+            if weaveGroups is not None:
+                self._planCapturedTerminalMfmas(
+                    fusedEmitted, writer.states.subtileWeaveCaptureInstances,
+                    storeModule,
+                    int(writer.states.archCaps.get("MfmaToAccReadLatency", 0)))
+        finally:
+            writer.states.subtileWeaveMfmaGroups = savedGroups
+            writer.states.subtileWeaveMfmaGroupsMaster = savedMaster
+            writer.states.subtileWeaveCaptureInstances = savedCaptures
+            writer.states.subtileWeaveCaptureCurrent = savedCaptureCurrent
+            writer.states.subtileWeaveLookahead = savedLookahead
+            writer.states.subtileWeavePairCounter = savedPairCounter
+            writer.states.subtileWeaveEmitted = savedEmitted
+        fusedLoopModule = self._emitLoop(writer, kernel, f"{label}_FUSED", fusedEmitted)
+        # Step 4 store-init hoist: buildSubtileFusedStore stashed the branch/memory-free
+        # leading run of the fused store's SrdD address-math prep (when enabled and
+        # eligible). Weave it into the FUSED loop's MFMA gaps so that exposed serial SALU
+        # setup overlaps matrix compute. The remainder (branch/memory-bearing tail) was
+        # already emitted inside storeModule at its original position, before the store
+        # body's use of SrdD, so data dependencies stay intact.
+        hoistUnits = writer.states.subtileHoistedStoreInit
+        if hoistUnits:
+            fusedLoopModule = self._weaveStoreInitIntoLoop(fusedLoopModule, hoistUnits,
+                                                           f"{label}_FUSED")
+            writer.states.subtileHoistedStoreInit = None
+        module.add(fusedLoopModule)
+        module.add(storeModule)
+        # No "did-fuse" flag: the post-loop store dedups by re-evaluating the same
+        # emitFusedStoreGuard (a WG that fused here will re-pass the guard there and
+        # skip the redundant store). See kernelBodySubtile post-loop dedup.
+        # B': the FUSED arm is provably no-tail (the front guard / computePostLoopFusedStore
+        # ANDs in SizesSum % DepthU == 0), so once its store completes the wave has no tail
+        # loop and no other mainloop exit path left to run -- it only needs to reach the
+        # shared post-loop join. When the caller hands us that join label (fusedExitLabel),
+        # branch the FUSED arm STRAIGHT there in a single 32-bit long branch, merging what
+        # used to be two long-branch trampolines: this "skip PLAIN NLL" branch AND the
+        # "skip other exit paths" branch emitted by emitMainAndExitLoops. It also bypasses
+        # the tail-only PGR2 LW-parity re-align (a no-op for a no-tail wave). doneLabel is
+        # kept as the PLAIN arm's fall-through join (it just no longer has an incoming
+        # branch from the FUSED arm). Persistence is preserved: the fused arm still lands
+        # at the join -> closePersistentLoop back-edge, unchanged.
+        # Fused-exit selection: the caller (emitMainAndExitLoops) chooses fusedExitLabel = SkipToEnd
+        # (endSummation runs, then the dedup guard skips the redundant store) OR, when
+        # _plsinCanBypassEndSummation, SkipPostLoopStore -- branching the fused owner past
+        # endSummation and the dedup guard entirely (all skipped work is comptime or dead
+        # for a fused owner; see _plsinCanBypassEndSummation).
+        # Fallback (fusedExitLabel is None): original skip-PLAIN-to-doneLabel branch, so
+        # every non-plsin / legacy caller stays byte-identical.
+        from rocisa.instruction import SLongBranchPositive
+        if fusedExitLabel is not None:
+            fusedBranchTarget = fusedExitLabel
+            fusedBranchComment = "PostLoopStoreInNll: FUSED done, skip PLAIN NLL + exit paths -> %s (long)" % fusedExitLabel.getLabelName()
+        else:
+            fusedBranchTarget = doneLabel
+            fusedBranchComment = "PostLoopStoreInNll: FUSED done, skip PLAIN NLL (long)"
+        with writer.allocTmpSgpr(3, tag="fusedNllDone_longBranch") as tmpSgprInfo:
+            module.add(SLongBranchPositive(fusedBranchTarget, tmpSgprInfo,
+                       comment=fusedBranchComment))
+        module.add(plainLabel)
+        module.add(plain)
+        module.add(doneLabel)
+        return module
+
+    @staticmethod
+    def _plsinRegisterIds(container):
+        """Return concrete (register type, index) identities for a container."""
+        if container is None or container.regName is not None:
+            return None
+        return tuple((container.regType, container.regIdx + i)
+                     for i in range(container.regNum))
+
+    @staticmethod
+    def _plsinTerminalMfmas(emitted_3d):
+        """Inventory terminal MFMAs without mutating the emitted loop."""
+        mfmaEms = []   # (EmittedModule, [all its mfma insts])
+        allInsts = []
+        for partition in emitted_3d:
+            if not partition:
+                continue
+            for em in partition[-1]:  # last subIterK slot's EmittedModules
+                if em.opType == 'mfma' and em.instructions:
+                    mfmaEms.append((em, list(em.instructions)))
+                    allInsts.extend(em.instructions)
+        return mfmaEms, allInsts
+
+    def _planCapturedTerminalMfmas(self, emitted_3d, captures, storeModule,
+                                   requiredCycles):
+        """Move only producers with a safe generated gap in every runtime path."""
+        mfmaEms, allInsts = self._plsinTerminalMfmas(emitted_3d)
+        if not allInsts or not captures or requiredCycles <= 0:
+            return 0
+        producerByReg = {}
+        writesByProducer = {}
+        for inst in allInsts:
+            ids = self._plsinRegisterIds(getattr(inst, "acc", None))
+            if not ids:
+                continue
+            writesByProducer[id(inst)] = set(ids)
+            for reg in ids:
+                if reg in producerByReg:
+                    producerByReg[reg] = None
+                    continue
+                producerByReg[reg] = inst
+
+        flat = list(storeModule.flatitems())
+        position = {id(item): idx for idx, item in enumerate(flat)}
+        plans = []
+        for capture in captures:
+            consumers = {}
+            consumedRegs = {}
+            seenReadIds = set()
+            candidates = []
+            validCapture = True
+            for pair in capture.get("pairs", []):
+                gap = pair.get("gap")
+                anchor = pair.get("gapAnchor")
+                anchorPos = position.get(id(anchor))
+                if gap is not None and anchorPos is not None:
+                    candidates.append((anchorPos, gap))
+                for readInst, source in pair.get("reads", []):
+                    ids = self._plsinRegisterIds(source)
+                    readPos = position.get(id(readInst))
+                    if (ids is None or len(ids) != 1 or readPos is None
+                            or ids[0] in seenReadIds):
+                        validCapture = False
+                        break
+                    seenReadIds.add(ids[0])
+                    producer = producerByReg.get(ids[0])
+                    if producer is not None:
+                        consumedRegs.setdefault(id(producer), set()).add(ids[0])
+                        consumers.setdefault(id(producer), readPos)
+                        consumers[id(producer)] = min(
+                            consumers[id(producer)], readPos)
+                if not validCapture:
+                    break
+            if not validCapture:
+                plans.append({})
+                continue
+
+            capturePlan = {}
+            for producer in allInsts:
+                readPos = consumers.get(id(producer))
+                if (readPos is None or consumedRegs.get(id(producer)) !=
+                        writesByProducer.get(id(producer))):
+                    continue
+                safeGap = None
+                safeGapPos = -1
+                for anchorPos, gap in candidates:
+                    if anchorPos >= readPos:
+                        continue
+                    cycles = sum(
+                        1 for item in flat[anchorPos + 1:readPos]
+                        if isinstance(item, Instruction))
+                    if cycles >= requiredCycles and anchorPos > safeGapPos:
+                        safeGap = gap
+                        safeGapPos = anchorPos
+                if safeGap is not None:
+                    capturePlan[id(producer)] = safeGap
+            plans.append(capturePlan)
+
+        moved = {id(inst) for inst in allInsts}
+        for plan in plans:
+            moved.intersection_update(plan.keys())
+        if not moved:
+            return 0
+
+        # Every activation/runtime path receives its own instruction objects.
+        for plan in plans:
+            for producer in allInsts:
+                if id(producer) in moved:
+                    plan[id(producer)].add(copy.deepcopy(producer))
+        for em, insts in mfmaEms:
+            em.instructions = [inst for inst in insts if id(inst) not in moved]
+        return len(moved)
+
+    def _weaveFillersIntoMfmaGaps(self, flat, numFillers, emitFiller, woven,
+                                  perGap=None, stride=None):
+        """Shared MFMA-gap weaver for the PLSIN hoist passes: the single place that
+        decides WHERE hoisted fillers land relative to the loop's MFMAs. Both the NGLL
+        coord-hoist and the NLL store-init hoist route through here so a placement
+        policy change is made once.
+
+        Walk `flat`, copying each item into `woven`; after each MFMA, drop fillers per
+        the policy. `emitFiller(idx, woven) -> nextIdx` emits ONE filler unit (a single
+        instruction, or a multi-instruction block / SCC carry-chain) into `woven` and
+        returns the next filler index; `numFillers` is the total unit count. Exactly one
+        policy is given:
+          perGap=k    : packed   -- up to k fillers immediately after each MFMA
+          stride=s    : spread   -- one filler after every s-th MFMA
+        Leftover fillers (fewer targeted gaps than fillers) are appended in order.
+        Returns the next filler index consumed."""
+        idx = 0
+        credit = 0
+        for inst in flat:
+            woven.add(inst)
+            isMfma = isinstance(inst, (MFMAInstruction, MXMFMAInstruction))
+            if idx >= numFillers or not isMfma:
+                continue
+            if perGap is not None:
+                for _ in range(perGap):
+                    if idx >= numFillers:
+                        break
+                    idx = emitFiller(idx, woven)
+            else:
+                credit += 1
+                if credit >= stride:
+                    credit = 0
+                    idx = emitFiller(idx, woven)
+        while idx < numFillers:  # fewer targeted gaps than fillers: append the remainder
+            idx = emitFiller(idx, woven)
+        return idx
+
+    def _weaveStoreInitIntoLoop(self, loopModule, units, label):
+        """Step 4 store-init hoist: scatter the fused store's branch/memory-free SrdD
+        address-math prep into the FUSED NLL's MFMA gaps (mirrors the NGLL coord-hoist).
+
+        `units` (from KernelWriterAssembly._splitHoistableStoreInit) are either
+        ('alu', inst) -- a pure-ALU/RegSet instruction that is scattered one-per-slot
+        into an MFMA's issue shadow -- or ('block', [insts]) -- a self-contained
+        branch/label/compare region that is dropped CONTIGUOUSLY into a single gap so a
+        taken branch never jumps across an interleaved loop MFMA. No unit contains a
+        memory/counter op (the splitter fenced those off), so the loop's vmcnt/lgkmcnt
+        waits are unaffected, and MFMAs never touch SCC so relocating the SALU between
+        them is register-safe. SCC producer/consumer adjacency is preserved: a gap is
+        not ended immediately before an SCC-reading alu unit (addc/subb/cselect), so a
+        carry chain is never split by a later-gap loop scalar."""
+        from rocisa.code import Module
+        from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+        woven = Module(f"{label}_storeinit_hoistwoven")
+        nU = len(units)
+        flat = list(loopModule.flatitems())
+        if nU == 0:
+            for inst in flat:
+                woven.add(inst)
+            return woven
+
+        def _readsScc(inst):
+            # SCC-consuming scalar carry / cond-select ops (s_addc/s_subb/s_cselect):
+            # a gap must not end right before one so an add/addc carry chain is never
+            # split across MFMA gaps. Type-based instead of a class-name substring so a
+            # rename fails loudly. VALU carry (VAddCOU32/VAddCCOU32) reads VCC, not SCC,
+            # and never appears in the pure-SALU store-init units, so it is excluded.
+            return isinstance(inst, (SAddCU32, SSubBU32, SCSelectB32, SCSelectB64))
+
+        def _emitUnit(uidx, woven):
+            """Emit units[uidx] (a 'block' drops contiguously; an 'alu' drops one, then
+            greedily pulls any immediately-following SCC-consumer alu units so an
+            add/addc carry chain is never split across MFMA gaps). Returns next uidx."""
+            kind, payload = units[uidx]
+            if kind == WEAVE_UNIT_BLOCK:
+                for bi in payload:
+                    woven.add(bi)
+                return uidx + 1
+            woven.add(payload)
+            uidx += 1
+            while uidx < nU and units[uidx][0] == WEAVE_UNIT_ALU and _readsScc(units[uidx][1]):
+                woven.add(units[uidx][1])
+                uidx += 1
+            return uidx
+
+        # Placement: SPREAD the hoisted address-math units evenly across ALL of the
+        # loop's MFMA gaps rather than packing them into the first few. The terminal
+        # MFMAs of the fused NLL run back-to-back (their operands' local reads are
+        # already done, so there is no LDS work left to interleave) and ATT shows
+        # those exposed MFMAs stall, while an MFMA that follows any
+        # VALU/SALU does not. Spreading fills the terminal gaps too. Placement
+        # itself is delegated to the shared _weaveFillersIntoMfmaGaps.
+        totalMfma = sum(1 for i in flat
+                        if isinstance(i, (MFMAInstruction, MXMFMAInstruction)))
+        # Drop one unit after roughly every `stride`-th MFMA so the units span the
+        # whole loop, including the exposed back-to-back tail.
+        stride = max(1, totalMfma // nU) if totalMfma else 1
+        self._weaveFillersIntoMfmaGaps(flat, nU, _emitUnit, woven, stride=stride)
+        return woven
+
+    def _emitFusedFrontGuard(self, writer, kernel, label, plainLabel):
+        """Loop-invariant front guard for PostLoopStoreInNll: fall through to the
+        FUSED NLL only when the NLL is terminal (no tail loop), beta==0, this WG
+        covers a complete MacroTile in both M and N (requireFullTile, NOT merely
+        NonEdge), and this WG is the StreamK full-tile owner; otherwise branch to
+        `plainLabel` (the PLAIN NLL).
+
+        - PostLoopHasTail (SizesSum % DepthU, computed before the main loop) is 0 iff
+          the NLL is the terminal K-step (no flat tail loop follows).
+        - beta==0 is required because the fused paired store writes D directly without
+          the read-C / alpha*acc+beta*C path.
+        - Full-tile (Option A): the fused store is emitted branch-free (no per-pair
+          OOB guards / scalar fallback / align8 exec mask), which is only correct when
+          THIS workgroup covers a complete MacroTile in both M and N. "NonEdge" is not
+          sufficient — checkIsEdgeSubtile treats an 8-aligned M remainder (and any N
+          remainder under storeAlign8) as NonEdge, but those are partial tiles that need
+          the guards. So the front guard here uses requireFullTile=True: FUSED only when
+          the last WG remainder is exactly 0 (SizeI%MT0==0 && SizeJ%MT1==0); interior WGs
+          are always full and stay FUSED-eligible. Partial edge-strip WGs fall back to the
+          PLAIN NLL + edge-capable post-loop store.
+        """
+        from rocisa.code import Module
+
+        module = Module(f"{label}_FusedFrontGuard")
+        module.addComment1("PostLoopStoreInNll front guard: FUSED iff (no tail) && beta==0 && full-tile, else PLAIN")
+        # Shared guard (single source of truth, also used by the post-loop dedup): the
+        # no-tail test is recomputed transiently from SizesSum here (no persistent
+        # PostLoopHasTail SGPR).
+        # plainLabel sits past the whole FUSED store body; with bias/SAV that body
+        # exceeds the +-simm16 short-branch range, so force 32-bit long branches.
+        module.add(writer.emitFusedStoreGuard(kernel, plainLabel, longBranch=True))
+        return module
+
     def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
         """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
 
@@ -3545,8 +4058,15 @@ class LogicalScheduler:
         """
         from rocisa.code import Module, Label
         from rocisa.instruction import (SSubU32, SCmpEQU32, SCBranchSCC0,
-                                        SCBranchSCC1, SBranch)
+                                        SCBranchSCC1, SBranch, SLongBranchPositive)
         from rocisa.container import sgpr
+
+        # PostLoopStoreInNll adds the fused-store + epilogue footprint (bias/SAV etc.)
+        # to the kernel, growing the total span the exit-loop branches jump across (to
+        # SkipToEnd / ExitC{ui}) past the +-simm16 short-branch range. Emit those as
+        # 32-bit long branches, gated so every other kernel keeps the original short
+        # branches (byte-identical).
+        plsin = getattr(writer.states, "postLoopStoreInNll", False)
 
         assert self._emitter is not None, \
             "populate_instructions() must be called first"
@@ -3620,6 +4140,21 @@ class LogicalScheduler:
         #   PGR=0             : preloop is just initC -> mainloop
         #   K<DepthU          : skip the prefetch GR to initC, then jump to tail
         endLabel = Label("SkipToEnd", "")
+
+        # PostLoopStoreInNll: pick the FUSED arm's exit target. A fused
+        # full-tile owner has already stored D and (when the bypass is safe) needs
+        # none of endSummation's runtime work, so branch it STRAIGHT to the post-loop
+        # store's SkipPostLoopStore join -- past endSummation AND the redundant dedup
+        # guard. Matched by label name (getLabelName is name-derived); KernelWriter
+        # emits the sole SkipPostLoopStore label after the post-loop store body. When
+        # the bypass is unsafe (bias-gradient write / SuppressNoLoadLoop wait / GSU
+        # AddressTD-Synchronizer loads) fall back to SkipToEnd so endSummation still
+        # runs and the dedup guard skips only the redundant store. Non-plsin callers
+        # pass None (byte-identical).
+        plsinFusedExitLabel = endLabel
+        if plsin and writer._plsinCanBypassEndSummation(kernel):
+            plsinFusedExitLabel = Label("SkipPostLoopStore", "")
+
         skipGRLabel = Label("SkipPreloopGR", "")
         skipGRForTail = (not kernel["NoTailLoop"]) and self.config.pgr >= 1
         if skipGRForTail:
@@ -3627,6 +4162,80 @@ class LogicalScheduler:
                                  comment="K < DepthU? skip prefetch GR to initC"))
             module.add(SCBranchSCC1(labelName=skipGRLabel.getLabelName(),
                                     comment="K < DepthU: skip prefetch GR, still run initC"))
+
+        # ── Pre-loop scheduling (Change A): defer LDS read-address setup ──
+        # kernelBodySubtile stashed the A/B + scale LR-offset modules (lraTileAssignment,
+        # its DTL swap-vgpr init, lraTileAssignmentScaleSwizzled) on the writer instead of
+        # emitting them in the prologue. Splice them into the preloop right before the
+        # first wait_gr, so this loop-invariant VALU runs while the prefetch
+        # buffer_loads are in flight (their only consumers -- the post-barrier ds_reads and
+        # main-loop LR swaps -- come after this point). Inserted BEFORE the guard fold so
+        # the address math is front-loaded into the shadow. The preloop is emitted
+        # unscheduled (schedule=False), so the sequential list splice lands them in order.
+        _lraDeferred = getattr(writer, "_deferredPreloopLraModules", None)
+        if (self.config.pgr >= 1
+                and _lraDeferred
+                and not getattr(self, "_lraDeferredIntoPreloop", False)
+                and self._preloop_emitted
+                and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
+            em_list = self._preloop_emitted[0][0]
+            drain_idx = next((i for i, em in enumerate(em_list)
+                              if em.opType == 'wait_gr'), len(em_list))
+            new_id = max((em.moduleId for em in em_list), default=-1) + 1
+            em_list.insert(drain_idx,
+                           EmittedModule(moduleId=new_id,
+                                         instructions=list(_lraDeferred),
+                                         before=None,
+                                         source=None))
+            self._lraDeferredIntoPreloop = True
+
+        # ── PLSIN guard-hoist: fold into the preloop global-read shadow ──
+        # computePostLoopFusedStore is pure loop-invariant SALU/VALU that writes the
+        # persistent PostLoopFusedStore flag (read by the NGLL/NLL front guards and the
+        # post-loop dedup). Emitting it AFTER the MT0 global-read issue but BEFORE the
+        # wait_gr drain lets it execute while the prefetch buffer_loads are in flight,
+        # hiding its latency under the load shadow instead of exposing it on the
+        # pre-main-loop critical path (KernelWriter defers it here when PGR>=1). The
+        # preloop is emitted unscheduled (schedule=False, sequential list order), so a
+        # simple list splice just before the first wait_gr lands the fold in the shadow.
+        # Subtile fused-store path only (guarded by _plsinFusedFlagEligible); PGR==0 and
+        # every other kernel are untouched.
+        #
+        # Must run before the deepcopy below, which snapshots _preloop_emitted.
+        if (self.config.pgr >= 1
+                and not getattr(self, "_foldInjectedIntoPreloop", False)
+                and hasattr(writer, "_plsinFusedFlagEligible")
+                and writer._plsinFusedFlagEligible(kernel)
+                and self._preloop_emitted
+                and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
+            fold_module = writer.computePostLoopFusedStore(kernel)
+            em_list = self._preloop_emitted[0][0]
+            drain_idx = next((i for i, em in enumerate(em_list)
+                              if em.opType == 'wait_gr'), len(em_list))
+            new_id = max((em.moduleId for em in em_list), default=-1) + 1
+            em_list.insert(drain_idx,
+                           EmittedModule(moduleId=new_id,
+                                         instructions=[fold_module],
+                                         before=None,
+                                         source=None))
+            self._foldInjectedIntoPreloop = True
+
+            # Pre-loop scheduling: the arbitrary-alpha fused path no longer defers
+            # scale-pointer loads, so computePostLoopFusedStore always leaves
+            # _plsinDeferredScalePtrLoads == None and this splice is inert. The guarded
+            # block is kept so re-enabling scale-pointer hoisting only needs the stash to
+            # be repopulated (it would splice the load BEFORE the first global_read so its
+            # s_waitcnt kmcnt(0) is covered by the whole prefetch buffer_load window).
+            scalePtrLoad = getattr(writer, "_plsinDeferredScalePtrLoads", None)
+            if scalePtrLoad is not None:
+                gr_idx = next((i for i, em in enumerate(em_list)
+                               if em.opType == 'gr'), 0)
+                new_id = max((em.moduleId for em in em_list), default=-1) + 1
+                em_list.insert(gr_idx,
+                               EmittedModule(moduleId=new_id,
+                                             instructions=[scalePtrLoad],
+                                             before=None,
+                                             source=None))
 
         # ── Preloop (initC + tail jump woven around the single init op) ──
         # Operate on a copy so self._preloop_emitted (read by PAP and the
@@ -3638,14 +4247,28 @@ class LogicalScheduler:
                              if getattr(em.source, 'label', None) == 'initC_overlap'), None)
             assert init_idx is not None, "preloop must contain the canonical initC op"
             next_id = max(em.moduleId for em in em_list) + 1
-            # After initC, jump to the tail loop when K < DepthU.
-            em_list.insert(init_idx + 1, EmittedModule(
+            # Jump to the tail when K<DepthU after all data-independent preloop
+            # setup, but before the global-read wait. PLSIN defers LRA setup and
+            # its fused-store predicate into this prefetch shadow; placing the
+            # jump immediately after initC would bypass both and leave the tail
+            # with invalid LDS read addresses. Non-PLSIN has no intervening setup,
+            # so this remains immediately after initC there.
+            if plsin:
+                tailJump = writer.longBranchScc1(
+                    endLabel, posNeg=1,
+                    comment="K < DepthU: jump to tail loop (long)")
+            else:
+                tailJump = SCBranchSCC1(labelName=endLabel.getLabelName(),
+                                        comment="K < DepthU: jump to tail loop")
+            tail_insert_idx = next(
+                (i for i, em in enumerate(em_list) if em.opType == 'wait_gr'),
+                init_idx + 1)
+            em_list.insert(tail_insert_idx, EmittedModule(
                 moduleId=next_id,
                 instructions=[
                     SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
                                 comment="K < DepthU? initC done, run tail only"),
-                    SCBranchSCC1(labelName=endLabel.getLabelName(),
-                                    comment="K < DepthU: jump to tail loop"),
+                    tailJump,
                 ]))
             next_id += 1
             if skipGRForTail:
@@ -3691,9 +4314,14 @@ class LogicalScheduler:
                           comment=f"counterL == {exitValue}? (copy {ui} exit)"),
             ]
             if ui < uf - 1:
-                branch = SCBranchSCC1(
-                    labelName=exitLabels[ui].getLabelName(),
-                    comment=f"copy {ui} exit → NGLL_C{ui}")
+                if plsin:
+                    branch = writer.longBranchScc1(
+                        exitLabels[ui], posNeg=1,
+                        comment=f"copy {ui} exit → NGLL_C{ui} (long)")
+                else:
+                    branch = SCBranchSCC1(
+                        labelName=exitLabels[ui].getLabelName(),
+                        comment=f"copy {ui} exit → NGLL_C{ui}")
             else:
                 branch = SCBranchSCC0(
                     labelName=loopBegin.getLabelName(),
@@ -3718,33 +4346,45 @@ class LogicalScheduler:
         nll_ft = (last + pgr) % uf
         if hasNGLL:
             module.addComment0(f"NGLL_C{last}")
-            module.add(self._emitLoop(writer, kernel, f"NGLL_C{last}",
+            module.add(self._emitNgllMaybeFused(writer, kernel, f"NGLL_C{last}",
                                       self._ngll_per_unroll[(last + 1) % uf]))
         if nll_ft == 0:
             module.add(Label("SkipToNLL", ""))
         module.addComment0(f"NLL_C{last}")
-        module.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
-                                  inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft])))
+        module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
+                                  inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft]),
+                                  fusedExitLabel=(plsinFusedExitLabel if plsin else None)))
         module.add(self._emit_pgr2_tail_lw_align(kernel))
-        module.add(SBranch(labelName=endLabel.getLabelName(),
-                           comment="skip other exit paths"))
+        if plsin:
+            with writer.allocTmpSgpr(3, tag="nllLastExit_longBranch") as tmpSgprInfo:
+                module.add(SLongBranchPositive(endLabel, tmpSgprInfo,
+                           comment="skip other exit paths (long)"))
+        else:
+            module.add(SBranch(labelName=endLabel.getLabelName(),
+                               comment="skip other exit paths"))
 
         for ui in range(uf - 1):
             nll_idx = (ui + pgr) % uf
             module.add(exitLabels[ui])
             if hasNGLL:
                 module.addComment0(f"NGLL_C{ui}")
-                module.add(self._emitLoop(writer, kernel, f"NGLL_C{ui}",
+                module.add(self._emitNgllMaybeFused(writer, kernel, f"NGLL_C{ui}",
                                           self._ngll_per_unroll[(ui + 1) % uf]))
             if nll_idx == 0:
                 module.add(Label("SkipToNLL", ""))
             module.addComment0(f"NLL_C{ui}")
-            module.add(self._emitLoop(writer, kernel, f"NLL_C{ui}",
-                                      inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx])))
+            module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{ui}",
+                                      inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx]),
+                                      fusedExitLabel=(plsinFusedExitLabel if plsin else None)))
             module.add(self._emit_pgr2_tail_lw_align(kernel))
             if ui < uf - 2:
-                module.add(SBranch(labelName=endLabel.getLabelName(),
-                                   comment="skip other exit paths"))
+                if plsin:
+                    with writer.allocTmpSgpr(3, tag="nllExit_longBranch") as tmpSgprInfo:
+                        module.add(SLongBranchPositive(endLabel, tmpSgprInfo,
+                                   comment="skip other exit paths (long)"))
+                else:
+                    module.add(SBranch(labelName=endLabel.getLabelName(),
+                                       comment="skip other exit paths"))
 
         module.add(endLabel)
 
