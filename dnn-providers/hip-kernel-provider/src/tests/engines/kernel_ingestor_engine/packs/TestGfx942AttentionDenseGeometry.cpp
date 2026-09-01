@@ -80,7 +80,7 @@ AttentionDenseGeometry geometryFor(const Family& family, int64_t persistent)
 /// GQA head counts, batched and unbatched.
 const std::vector<Family>& families()
 {
-    static const std::vector<Family> kFamilies{
+    static const std::vector<Family> s_kFamilies{
         {"sq512_hq32_b1", 512, 32, 1},
         {"sq2048_hq16_b1", 2048, 16, 1},
         {"sq4096_hq32_b1", 4096, 32, 1},
@@ -88,7 +88,7 @@ const std::vector<Family>& families()
         {"sq16384_hq32_b1", 16384, 32, 1},
         {"sq256_hq8_b1", 256, 8, 1},
     };
-    return kFamilies;
+    return s_kFamilies;
 }
 
 } // namespace
@@ -138,8 +138,10 @@ TEST(Gfx942AttentionDenseGeometry, DefaultArmRoundsQueryBlocksUpNotDown)
     // repository, and if it is ever relaxed, rounding down silently drops the last
     // partial query block instead of failing.
     const int64_t ragged = BLOCK_M * 3 + 1;
+    const int64_t persistent = OFF;
+    const int64_t numPersistent = NUM_PERSISTENT;
     const auto geometry
-        = attentionDenseGeometry(BLOCK_M, ragged, 8, 1, OFF, NUM_PERSISTENT, "ragged");
+        = attentionDenseGeometry(BLOCK_M, ragged, 8, 1, persistent, numPersistent, "ragged");
     EXPECT_EQ(geometry.gridX, 4U)
         << "a partial query block must get its own CTA; rounding down leaves those "
            "rows unwritten";
@@ -224,7 +226,10 @@ TEST(Gfx942AttentionDenseGeometry, RefusesNonPositiveBlockM)
     // still a detection -- nobody ships a suite that crashes -- but the guard is what
     // turns it into a NAMED refusal at prepare(), which is the difference between an
     // operator seeing which descriptor is malformed and seeing a dead process.
-    EXPECT_THROW(attentionDenseGeometry(0, 4096, 32, 1, OFF, NUM_PERSISTENT, "k"),
+    // Named for the callee's parameters; OFF/NUM_PERSISTENT read as swapped otherwise.
+    const int64_t persistent = OFF;
+    const int64_t numPersistent = NUM_PERSISTENT;
+    EXPECT_THROW(attentionDenseGeometry(0, 4096, 32, 1, persistent, numPersistent, "k"),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -239,11 +244,14 @@ TEST(Gfx942AttentionDenseGeometry, RefusesADefaultArmThatWouldLaunchZeroCtas)
 {
     // gridY/gridZ come straight from metadata, so a zero head count or batch is a
     // launch of nothing that reports success.
-    EXPECT_THROW(attentionDenseGeometry(BLOCK_M, 4096, 0, 1, OFF, NUM_PERSISTENT, "k"),
+    // Named for the callee's parameters; OFF/NUM_PERSISTENT read as swapped otherwise.
+    const int64_t persistent = OFF;
+    const int64_t numPersistent = NUM_PERSISTENT;
+    EXPECT_THROW(attentionDenseGeometry(BLOCK_M, 4096, 0, 1, persistent, numPersistent, "k"),
                  hipdnn_plugin_sdk::HipdnnPluginException);
-    EXPECT_THROW(attentionDenseGeometry(BLOCK_M, 4096, 32, 0, OFF, NUM_PERSISTENT, "k"),
+    EXPECT_THROW(attentionDenseGeometry(BLOCK_M, 4096, 32, 0, persistent, numPersistent, "k"),
                  hipdnn_plugin_sdk::HipdnnPluginException);
-    EXPECT_THROW(attentionDenseGeometry(BLOCK_M, 0, 32, 1, OFF, NUM_PERSISTENT, "k"),
+    EXPECT_THROW(attentionDenseGeometry(BLOCK_M, 0, 32, 1, persistent, numPersistent, "k"),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
