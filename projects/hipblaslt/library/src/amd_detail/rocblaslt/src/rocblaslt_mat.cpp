@@ -171,6 +171,17 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     {
         workspaceSizeInBytes = std::min<size_t>(workspaceSizeInBytes, algo->max_workspace_bytes);
     }
+
+    void*                  streamKFlags = nullptr;
+    const rocblaslt_status skStatus     = handle->streamKFlagsForStream(stream, 0, &streamKFlags);
+    if(skStatus != rocblaslt_status_success)
+    {
+        log_error(__func__,
+                  "no Stream-K flag region left: this handle has already handed one to "
+                  "c_syncSkStreamSlots distinct streams");
+        return skStatus;
+    }
+
     RocblasltContractionProblem problem{opA,
                                         opB,
                                         m,
@@ -236,7 +247,9 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         batch_mode,
                                         matmul_descr->bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
+                                        effective_sm_count_target(handle, matmul_descr, nullptr),
+                                        effective_uniform_summation_order(handle, matmul_descr)};
+    problem.streamKFlags = streamKFlags;
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 
@@ -432,7 +445,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         batch_mode,
                                         matmul_descr->bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
+                                        effective_sm_count_target(handle, matmul_descr, nullptr),
+                                        effective_uniform_summation_order(handle, matmul_descr)};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -724,13 +738,19 @@ rocblaslt_status
                                         matmul_descr[i]->act0,
                                         matmul_descr[i]->act1,
                                         0,
-                                        (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
+                                        // GSU region, per problem and shared
+                                        // across streams as it has always been.
+                                        // The Stream-K region is separate and is
+                                        // bound per stream in makeArgument().
+                                        (char*)handle->Synchronizer
+                                            + (i * _rocblaslt_handle::c_syncGsuSlotBytes),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
                                         matmul_descr[i]->bias_stride,
                                         matmul_descr[i]->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr[i], nullptr)});
+                                        effective_sm_count_target(handle, matmul_descr[i], nullptr),
+                                        effective_uniform_summation_order(handle, matmul_descr[i])});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -1078,7 +1098,9 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         swizzleB,
         HIPBLASLT_BATCH_MODE_STRIDED,
         0,
-        0}; // streamk_tile_scheduling_ext: OFF (matches struct default)
+        0, // streamk_tile_scheduling_ext: OFF (matches struct default)
+        effective_sm_count_target(handle, nullptr, nullptr),
+        effective_uniform_summation_order(handle, nullptr)};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1399,12 +1421,17 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
+                                        // GSU region, per problem; Stream-K is
+                                        // bound per stream in makeArgument().
+                                        (char*)handle->Synchronizer
+                                            + (i * _rocblaslt_handle::c_syncGsuSlotBytes),
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
                                         0,
-                                        0}); // streamk_tile_scheduling_ext: OFF (matches struct default)
+                                        0, // streamk_tile_scheduling_ext: OFF (matches struct default)
+                                        effective_sm_count_target(handle, nullptr, nullptr),
+                                        effective_uniform_summation_order(handle, nullptr)});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }

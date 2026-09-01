@@ -534,15 +534,18 @@ namespace rocisa
         int              row_bcast;
         int              bound_ctrl;
         std::vector<int> quad_perm;
+        int              row_xmask;
 
         DPPModifiers(int                      row_shr    = -1,
                      int                      row_bcast  = -1,
                      int                      bound_ctrl = -1,
-                     const std::vector<int>&  quad_perm  = {})
+                     const std::vector<int>&  quad_perm  = {},
+                     int                      row_xmask  = -1)
             : row_shr(row_shr)
             , row_bcast(row_bcast)
             , bound_ctrl(bound_ctrl)
             , quad_perm(quad_perm)
+            , row_xmask(row_xmask)
         {
         }
 
@@ -562,6 +565,8 @@ namespace rocisa
                 kStr += " bound_ctrl:" + std::to_string(bound_ctrl);
             if(!quad_perm.empty())
                 kStr += " quad_perm:" + vectorToString(quad_perm);
+            if(row_xmask != -1)
+                kStr += " row_xmask:" + std::to_string(row_xmask);
             return kStr;
         }
 

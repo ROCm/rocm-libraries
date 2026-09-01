@@ -5,8 +5,8 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ## hipTensor 2.4.0
 
 ### Added
-* Added a host-only stub `libhiptensor`, built automatically when `GPU_TARGETS` resolves to an empty target list (or explicitly with `-DHIPTENSOR_DISABLE_DEVICE=ON`), so the package, headers, and CMake config remain available and every API call returns `HIPTENSOR_STATUS_NOT_SUPPORTED` instead of failing to link.
 * Added `ffm-quick` and `ffm-full` test categories for emulation tests.
+* Added a Windows version resource so `hiptensor.dll` exposes file metadata (file description, version, product name, and copyright) in File Explorer properties.
 
 ### Changed
 * Reorganized test configurations per tier and category.
@@ -16,6 +16,9 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 * Enabled `-frtti` on Windows to fix RTTI-related build failures.
+* Fixed batched contractions reporting success while producing incorrect results. `hiptensorCreateContraction` and `hiptensorCreateContractionTrinary` now return `HIPTENSOR_STATUS_NOT_SUPPORTED` when a mode is shared by both inputs and the output of a contraction.
+* Changed `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when an input tensor doesn't carry the same modes as the output tensor. These configurations previously produced a valid descriptor and plan, then failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` at execution.
+* Removed the internal compiler flags `-amdgpu-early-inline-all=true` and `-amdgpu-function-calls=false` from the build, which caused excessive compile-time memory usage (OOM) with newer ROCm/LLVM toolchains (JIRA: LCOMPILER-2589).
 
 ## hipTensor 2.3.0 for ROCm 7.14
 

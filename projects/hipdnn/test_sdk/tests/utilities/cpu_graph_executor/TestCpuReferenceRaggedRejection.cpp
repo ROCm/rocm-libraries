@@ -26,6 +26,10 @@
 #include "LayernormGraphUtils.hpp"
 #include "MatmulGraphUtils.hpp"
 #include "MatmulTensorBundles.hpp"
+#include "MoeGroupedMatmulBwdGraphUtils.hpp"
+#include "MoeGroupedMatmulBwdTensorBundles.hpp"
+#include "MoeGroupedMatmulGraphUtils.hpp"
+#include "MoeGroupedMatmulTensorBundles.hpp"
 #include "PointwiseGraphUtils.hpp"
 #include "RMSNormGraphUtils.hpp"
 #include "ReductionGraphUtils.hpp"
@@ -160,6 +164,22 @@ TEST(TestCpuReferenceRaggedRejection, Matmul)
 {
     MatmulTensorBundle<float> bundle({2, 5, 3}, {2, 3, 4}, {2, 5, 4}, false, false, 1);
     auto [graph, variantPack] = buildMatmulGraph(bundle, DataType::FLOAT, DataType::FLOAT);
+    expectRaggedTensorRejected(serialize(graph));
+}
+
+TEST(TestCpuReferenceRaggedRejection, MoeGroupedMatmul)
+{
+    MoeGroupedMatmulTensorBundle<float> bundle(2, 3, 4, 6, 6, MoeGroupedMatmulMode::NONE, 0);
+    auto [graph, variantPack]
+        = buildMoeGroupedMatmulGraph(bundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    expectRaggedTensorRejected(serialize(graph));
+}
+
+TEST(TestCpuReferenceRaggedRejection, MoeGroupedMatmulBwd)
+{
+    MoeGroupedMatmulBwdTensorBundle<float> bundle(2, 3, 4, 8);
+    auto [graph, variantPack]
+        = buildMoeGroupedMatmulBwdGraph(bundle, DataType::FLOAT, DataType::FLOAT);
     expectRaggedTensorRejected(serialize(graph));
 }
 

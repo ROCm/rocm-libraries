@@ -27,6 +27,8 @@ from pathlib import Path
 
 from Tensile.Toolchain.Validators import ToolchainDefaults
 
+BUNDLED_KNOWN_BUGS = object()
+
 
 def parseArguments():
     """
@@ -64,6 +66,14 @@ def parseArguments():
         default=ToolchainDefaults.CXX_COMPILER,
         help=f"default: {ToolchainDefaults.CXX_COMPILER}",
     )
+    argParser.add_argument(
+        "--architecture",
+        dest="Architecture",
+        action="store",
+        default="all",
+        help="semicolon-separated list of gfx architectures to validate "
+        "(e.g. 'gfx1151;gfx942'); 'all' validates every logic file",
+    )
 
     group = argParser.add_mutually_exclusive_group()
     group.add_argument(
@@ -75,15 +85,24 @@ def parseArguments():
         action="store_true",
         help="run logic file checks only on custom kernels",
     )
-    argParser.add_argument(
+
+    knownBugsGroup = argParser.add_mutually_exclusive_group()
+    knownBugsGroup.add_argument(
         "--known-bugs",
         dest="KnownBugs",
         type=Path,
         default=None,
         metavar="FILE",
-        help="YAML file listing (path, solution_name) pairs to skip validation for "
+        help="YAML file containing (path, solution_name) pairs to skip validation for "
         "(documented exceptions; paths relative to LogicPath). solution_name is the "
         "solution's SolutionNameMin, which is stable across library re-tuning",
+    )
+    knownBugsGroup.add_argument(
+        "--use-bundled-known-bugs",
+        dest="KnownBugs",
+        action="store_const",
+        const=BUNDLED_KNOWN_BUGS,
+        help="use the known-bugs YAML bundled with TensileLogic",
     )
     argParser.add_argument(
         "--strict-known-bugs",

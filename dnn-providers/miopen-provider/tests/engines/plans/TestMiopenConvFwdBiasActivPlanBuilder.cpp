@@ -1,6 +1,7 @@
 /* Copyright © Advanced Micro Devices, Inc., or its affiliates. */
 /* SPDX-License-Identifier:  MIT */
 
+#include "MiopenApi.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -10,8 +11,8 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
@@ -206,7 +207,7 @@ protected:
 
         PointwiseAttributes activAttrs;
         activAttrs.set_name("activation_forward");
-        activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        activAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
         activAttrs.set_compute_data_type(param.dataTypes[TypeKey::ACTIV_COMPUTE]);
         if(activTestCase.reluLowerClip.has_value())
         {
