@@ -56,6 +56,14 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     (priority 10) whenever both would match the same gfx942 fp16 2D problem.
     The registry sorts ascending (lower = higher precedence).
     Callers can also force this path explicitly via algorithm="dense_pipe".
+
+    GEOMETRY OWNERSHIP: this engine owns the per-engine spec builder
+    ``builders.common.attention_spec_builder._spec_gfx942_fp16_flash`` -- the
+    GEMM-style ``spec_fn`` for this cohort. Geometry lives in the builder layer
+    (not here): the dispatcher's identity stays ``(path, head_size, block_size)``
+    and its C++ parity contract is unchanged. Both this candidate and the
+    ``_tiled_spec_from_problem`` cascade route the cohort through that one
+    function (single source).
     """
     spec_id = "gfx942_dense_pipe"
     name = "attention_gfx942_dense_pipe"
@@ -69,7 +77,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem)
+        ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
         if problem.select_path() != "2d":
@@ -111,8 +119,10 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
             # ``_enable_gfx942_fp16_flash`` is the real narrowing; nothing here
-            # claims a feature it turns down, so the full set stays declared.
-            supports_features=ATTENTION_FEATURES,
+            # claims a feature it turns down. fp8 is the one exception -- this is
+            # an fp16-only flash path with no fp8 dequant kernel -- so it is
+            # dropped rather than left for the dtype gate to catch by accident.
+            supports_features=ATTENTION_FEATURES - {"fp8"},
         ),
         _supports=support,
         select_spec=select,
@@ -148,14 +158,16 @@ def _dense_spec(req: OperatorRequest):
     and which the gfx942 builder reads directly. Restating it would reintroduce the
     per-arch duplicate that collapsing the two fields removed.
 
-    Nothing here touches ``Gfx942DenseTuning``: every gfx942-private codegen knob
-    (block_m, the two LDS pads, cfvst / exp2_fast forcing, iglp) stays at its shipped
-    default, so those knobs are sweep-visible and dispatch-invisible. Wiring one of
-    them into this factory would make it a production path and would need its own
-    measured verdict first.
+    Nothing here sets a gfx942-PRIVATE field: every such codegen knob (block_m, the
+    two LDS pads, cfvst / exp2_fast forcing, iglp) stays at its shipped default, so
+    those knobs are sweep-visible and dispatch-invisible. Wiring one of them into this
+    factory would make it a production path and would need its own measured verdict
+    first. That is why this factory builds the SHARED ``AttentionDenseSpec`` and lets
+    the gfx942 builder promote it to :class:`Gfx942AttentionDenseSpec` at those
+    defaults, rather than naming the subclass here.
 
-    The spec dataclass itself is REUSED from the gfx950 kernel module (as the gfx942
-    kernel body reuses it); it is arch-neutral, only its tuned values differ.
+    The base dataclass is REUSED from the gfx950 kernel module (as the gfx942 kernel
+    body reuses it); it is arch-neutral, only its tuned values differ.
     """
     from kernels.gfx942.attention_dense import _tuned_waves_per_eu
     from kernels.gfx950.attention_dense import AttentionDenseSpec, _BLOCK_M
@@ -282,8 +294,8 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
             name="rocke_attention_dense_gfx942",
             # batch-unique: the kernel bakes batch into its buffer extents, which
             # the shared AttentionDenseSpec.kernel_name() omits -- two batches would
-            # otherwise collide in the name cache. gfx942_kernel_name adds it, plus the
-            # wpe/kpad tags for the tuning folded in above.
+            # otherwise collide in the name cache. gfx942_kernel_name promotes the spec
+            # to the gfx942 subclass and adds it, plus the wpe/kpad tags.
             kernel_name_override=gfx942_kernel_name(dense_spec),
         )
 

@@ -92,6 +92,20 @@ def attention_sweep_space(req: OperatorRequest) -> Sequence[AttentionSpec]:
     return tuple(specs)
 
 
+def priority_ranker(
+    request: OperatorRequest, candidates: Sequence[KernelCandidate]
+) -> Sequence[KernelCandidate]:
+    """Default engine-level ranker: honor registered ``(priority, name)`` order.
+
+    ``CandidateRegistry.supported`` already returns candidates sorted ascending by
+    ``(priority, name)``, so this is an identity pass -- the explicit default that
+    ``dispatch_attention`` applies when no ranker is supplied. It exists as a named
+    seam: a heuristic ranker (engine-level selection driven by problem metadata)
+    is a drop-in replacement that reorders these same candidates best-first.
+    """
+    return candidates
+
+
 def dispatch_attention(
     req: AttentionRequest, *, ranker: Ranker | None = None
 ) -> DispatchResult:
@@ -100,8 +114,11 @@ def dispatch_attention(
     Returns the 2D-tiled or 3D split-KV path (a pure function of the problem),
     gated by the native-backend coverage predicate. The CTA geometry is left to
     the instance builder (see :mod:`.common` -- deferred from parity).
+
+    ``ranker`` is the engine-level selection seam; when omitted, the registered
+    priority order is used via :func:`priority_ranker` (behavior-preserving).
     """
-    candidate = ATTENTION_REGISTRY.select(req, ranker=ranker)
+    candidate = ATTENTION_REGISTRY.select(req, ranker=ranker or priority_ranker)
     spec = candidate.select_spec(req)
     kid = _kernel_id(req, candidate, spec)
     # Standalone kernels (gfx1250 WMMA) return their builder's spec, which has
@@ -139,4 +156,5 @@ __all__ = [
     "attention_sweep_space",
     "dense_spec_for_request",
     "dispatch_attention",
+    "priority_ranker",
 ]

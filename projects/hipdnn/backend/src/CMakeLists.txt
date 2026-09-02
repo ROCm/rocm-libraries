@@ -9,6 +9,11 @@ project(hipdnn_backend VERSION ${HIPDNN_BACKEND_VERSION} LANGUAGES CXX)
 
 find_package(hip REQUIRED)
 
+# Logging.cpp builds a spdlog::async_logger, whose thread pool spawns a thread. Spdlog.cmake takes
+# spdlog by include directories only, which drops its Threads::Threads requirement, so name it here.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 set(HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR "${PROJECT_BINARY_DIR}/backend/include/")
 set(HIP_DNN_BACKEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/backend")
 set(HIP_DNN_BACKEND_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
@@ -81,7 +86,13 @@ target_include_directories(
 )
 
 target_compile_options(hipdnn_backend_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
-target_link_libraries(hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk hipdnn_flatbuffers_sdk)
+# Threads::Threads is PUBLIC so it reaches hipdnn_backend.so, whose pthread references otherwise
+# trip --no-allow-shlib-undefined in executables linking it, and the backend tests. It stops at
+# hipdnn_backend, which links this target privately, so the installed export set is unaffected.
+target_link_libraries(
+    hipdnn_backend_private PUBLIC hip::host hipdnn_data_sdk hipdnn_plugin_sdk hipdnn_flatbuffers_sdk
+                                  Threads::Threads
+)
 # Backend implementation files use nlohmann::json unconditionally (graph (de)serialization,
 # JSON logging). Link as PRIVATE so the dep stays inside the .so and isn't propagated to consumers.
 if(NOT TARGET nlohmann_json::nlohmann_json)

@@ -67,7 +67,7 @@ _WARP_TILE_MN = (16, 32)
 _PIPELINES = ("mem", "compv3", "compv4", "wavelet", "basic")
 _EPILOGUES = ("default", "cshuffle")
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
-_SPLIT_K_AUTO = (1, 2, 4, 8, 16, 32, 64, 128)
+_SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -113,11 +113,16 @@ def _grid_for_spec(spec, p):
 
 
 def _grid_for_wgrad_spec(spec, split_k: int):
-    """Derive launch grid from wgrad spec and split-K degree."""
+    """Derive launch grid from wgrad spec and split-K degree.
+
+    gx/gy tile the per-group GEMM (spec.wg_M/wg_N). The group index rides on
+    block_id_z, giving z = groups * split_k (== split_k for the ungrouped
+    groups==1 path).
+    """
     tile_m, tile_n = spec.tile_m, spec.tile_n
     gx = (spec.wg_N + tile_n - 1) // tile_n
     gy = (spec.wg_M + tile_m - 1) // tile_m
-    return (gx, gy, split_k)
+    return (gx, gy, spec.problem.groups * split_k)
 
 
 def _sample_combos(combos: list, frac: float, seed: int) -> list:
@@ -415,10 +420,11 @@ def parse_miopen_cmd(cmd: str):
             -y 11 -x 11 -p 2 -q 2 -u 4 -v 4 -l 1 -j 1 -m conv -g 1 -F 1 \\
             -t 1 -in_layout=NHWC
 
-    Only forward-pass (2-D NHWC) convolutions are supported; the function
-    raises ``ValueError`` for unsupported cases (3-D, NCHW).
-    Returns ``(problem, dtype)`` where ``dtype`` is ``"fp16"``, ``"bf16"``,
-    or ``"fp32"``.
+    Only 2-D NHWC convolutions are supported; the function raises
+    ``ValueError`` for unsupported cases (3-D, NCHW).
+    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``,
+    ``"bf16"``, or ``"fp32"`` and ``forw`` is the raw MIOpenDriver ``-F``
+    value (1=fwd, 2=bwd_data, 4=bwd_weight, 0=all).
     """
     import shlex
 
@@ -497,7 +503,7 @@ def parse_miopen_cmd(cmd: str):
         dW=miopen_args.dW,
         groups=miopen_args.groups,
     )
-    return problem, dtype
+    return problem, dtype, miopen_args.forw
 
 
 # ---------------------------------------------------------------------------
@@ -505,6 +511,18 @@ def parse_miopen_cmd(cmd: str):
 # ---------------------------------------------------------------------------
 
 _CK_DTYPE_STR = {"fp32": "fp32", "fp16": "fp16", "bf16": "bfp16"}
+
+# MIOpenDriver -F flag → rocke direction string.  Values 0/3/5/6 run multiple
+# passes; we expand them at the call site.
+_FORW_TO_DIRECTIONS: dict[int, list[str]] = {
+    0: ["fwd", "dgrad", "wgrad"],
+    1: ["fwd"],
+    2: ["dgrad"],
+    3: ["fwd", "dgrad"],
+    4: ["wgrad"],
+    5: ["fwd", "wgrad"],
+    6: ["dgrad", "wgrad"],
+}
 
 
 def _run_ckprofiler(
@@ -757,6 +775,21 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--split-k-prune",
+        type=float,
+        default=None,
+        dest="split_k_prune",
+        metavar="PCT",
+        help=(
+            "Only effective with --split-k 0 (sweep). "
+            "If a kernel's TFLOPS at a given split-K degree drops by at least PCT%% "
+            "relative to its best split-K seen so far, skip all remaining split-K "
+            "degrees for that tile/warp/pipeline/epilogue configuration. "
+            "Example: --split-k-prune 15 prunes when performance drops by >=15%%."
+        ),
+    )
+
+    parser.add_argument(
         "--csv",
         default=None,
         metavar="FILE",
@@ -965,13 +998,14 @@ def main() -> int:
             if not line or line.startswith("#"):
                 continue
             try:
-                prob, dt = parse_miopen_cmd(line)
-                cases.append((prob, dt))
+                prob, dt, forw = parse_miopen_cmd(line)
+                for _dir in _FORW_TO_DIRECTIONS.get(forw, ["fwd"]):
+                    cases.append((prob, dt, _dir))
             except ValueError as e:
                 print(f"[warn] {path}:{lineno}: skipping — {e}", file=sys.stderr)
     elif args.miopen_cmd is not None:
-        prob, dt = parse_miopen_cmd(args.miopen_cmd)
-        cases = [(prob, dt)]
+        prob, dt, forw = parse_miopen_cmd(args.miopen_cmd)
+        cases = [(prob, dt, _dir) for _dir in _FORW_TO_DIRECTIONS.get(forw, ["fwd"])]
     else:
         problem = ConvProblem(
             N=args.N,
@@ -994,7 +1028,7 @@ def main() -> int:
             dW=args.dW,
             groups=args.groups,
         )
-        cases = [(problem, args.dtype)]
+        cases = [(problem, args.dtype, args.direction)]
 
     _csv_fields = [
         "rank",
@@ -1046,7 +1080,7 @@ def main() -> int:
 
     n_csv_rows = 0
     try:
-        for case_idx, (problem, dtype) in enumerate(cases):
+        for case_idx, (problem, dtype, direction) in enumerate(cases):
             _elem_bytes = 4 if dtype == "fp32" else 2
             _A_bytes = (
                 problem.N
@@ -1077,13 +1111,13 @@ def main() -> int:
                 print(f"\n{'#'*72}", flush=True)
                 print(
                     f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} "
-                    f"dtype={dtype} direction={args.direction}",
+                    f"dtype={dtype} direction={direction}",
                     flush=True,
                 )
                 print(f"{'#'*72}", flush=True)
 
             if args.ckprofiler is not None:
-                _ck_forw = {"fwd": 1, "wgrad": 4}[args.direction]
+                _ck_forw = {"fwd": 1, "dgrad": 2, "wgrad": 4}[direction]
                 ck_rows = _run_ckprofiler(
                     problem=problem,
                     dtype=dtype,
@@ -1093,9 +1127,9 @@ def main() -> int:
                     verify=int(args.verify),
                 )
                 # Keep the best (highest tflops) CK result for this case.
-                _key = (problem.short(), dtype, args.direction)
+                _key = (problem.short(), dtype, direction)
                 for row in ck_rows:
-                    if row["direction"] == args.direction:
+                    if row["direction"] == direction:
                         prev = ck_best.get(_key)
                         if prev is None or row["tflops"] > prev["tflops"]:
                             ck_best[_key] = row
@@ -1118,14 +1152,14 @@ def main() -> int:
                 case_idx=case_idx,
             )
 
-            if args.direction == "wgrad":
+            if direction == "wgrad":
                 rc, rocke_results = _run_wgrad_sweep(
                     **_common,
                     WgradConvSpec=WgradConvSpec,
                     build_implicit_gemm_conv_wgrad=build_implicit_gemm_conv_wgrad,
                     is_valid_wgrad_spec=is_valid_wgrad_spec,
                 )
-            elif args.direction == "dgrad":
+            elif direction == "dgrad":
                 rc = _run_dgrad_sweep(
                     **_common,
                     DgradConvSpec=DgradConvSpec,
@@ -1144,7 +1178,7 @@ def main() -> int:
 
             if _csv_writer is not None and rocke_results:
                 _shape = problem.short()
-                _key = (_shape, dtype, args.direction)
+                _key = (_shape, dtype, direction)
                 _ck = ck_best.get(_key)
                 for rank, r in enumerate(rocke_results[:5], 1):
                     speedup = (r.tflops / _ck["tflops"]) if _ck else None
@@ -1160,7 +1194,7 @@ def main() -> int:
                             "dW": problem.dW,
                             "groups": problem.groups,
                             "dtype": dtype,
-                            "direction": args.direction,
+                            "direction": direction,
                             "tile_m": r.tile_m,
                             "tile_n": r.tile_n,
                             "tile_k": r.tile_k,
@@ -1285,9 +1319,6 @@ def _build_wgrad_one(args_tuple):
         split_k,
     ) = combo
 
-    if split_k > 1 and epilogue == "cshuffle":
-        return None
-
     from rocke.core.arch import ArchTarget
     from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
     from rocke.instances.common.conv_implicit_gemm_wgrad import (
@@ -1297,7 +1328,9 @@ def _build_wgrad_one(args_tuple):
     )
 
     target = ArchTarget.from_gfx(arch)
+    _mma_family = "wmma" if target.wave_size == 32 else "mma"
     atom = target.mma.select_largest_k(
+        family=_mma_family,
         a_dtype=dtype,
         b_dtype=dtype,
         c_dtype="fp32",
@@ -1322,6 +1355,7 @@ def _build_wgrad_one(args_tuple):
             arch=arch,
         ).split_k
     else:
+        # split_k=0 (runtime) or split_k=1 (no-split): pass through as-is.
         resolved_split_k = split_k
 
     spec = WgradConvSpec(
@@ -1336,6 +1370,7 @@ def _build_wgrad_one(args_tuple):
         warp_tile_m=warp_tile_mn,
         warp_tile_n=warp_tile_mn,
         warp_tile_k=warp_tile_k,
+        wave_size=target.wave_size,
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=resolved_split_k,
@@ -1345,6 +1380,99 @@ def _build_wgrad_one(args_tuple):
         return None
     try:
         kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
+    except ValueError:
+        return None
+    return combo, spec, resolved_split_k, kernel
+
+
+def _build_dgrad_one(args_tuple):
+    """Top-level picklable worker: validate + build IR for one dgrad combo.
+
+    Returns ``(combo, spec, resolved_split_k, kernel)`` on success, or ``None``.
+    Must live at module level for pickle.
+    """
+    combo, problem, dtype, arch, vec_a, vec_b, vec_c = args_tuple
+    (
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_tile_mn,
+        pipeline,
+        epilogue,
+        split_k,
+    ) = combo
+
+    if split_k > 1 and epilogue == "cshuffle":
+        return None
+
+    from rocke.core.arch import ArchTarget
+    from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
+    from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        DgradConvSpec,
+        build_implicit_gemm_conv_dgrad,
+        is_valid_dgrad_spec,
+    )
+
+    target = ArchTarget.from_gfx(arch)
+    _mma_family = "wmma" if target.wave_size == 32 else "mma"
+    atom = target.mma.select_largest_k(
+        family=_mma_family,
+        a_dtype=dtype,
+        b_dtype=dtype,
+        c_dtype="fp32",
+        m=warp_tile_mn,
+        n=warp_tile_mn,
+        k_max=tile_k,
+    )
+    if atom is None:
+        return None
+
+    warp_tile_k = atom.k
+    if split_k == -1:
+        if _mma_family == "wmma":
+            resolved_split_k = 1
+        else:
+            from rocke.helpers.split_k import select_split_k_wgrad
+
+            resolved_split_k = select_split_k_wgrad(
+                wg_M=problem.N * problem.Hi * problem.Wi,
+                wg_N=problem.cpg,
+                wg_K=problem.Y * problem.X * problem.kpg,
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                arch=arch,
+            ).split_k
+    else:
+        resolved_split_k = split_k
+
+    spec = DgradConvSpec(
+        problem=problem,
+        name="rocke_bench_igemm_dgrad",
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_tile_m=warp_tile_mn,
+        warp_tile_n=warp_tile_mn,
+        warp_tile_k=warp_tile_k,
+        wave_size=target.wave_size,
+        pipeline=pipeline,
+        epilogue=epilogue,
+        split_k=resolved_split_k,
+        vector_size_a=vec_a,
+        vector_size_b=vec_b,
+        vector_size_c=vec_c,
+    )
+    ok, _ = is_valid_dgrad_spec(spec, arch)
+    if not ok:
+        return None
+    try:
+        kernel = build_implicit_gemm_conv_dgrad(spec, arch=arch)
     except ValueError:
         return None
     return combo, spec, resolved_split_k, kernel
@@ -1854,12 +1982,15 @@ def _run_wgrad_sweep(
     flop = float(p.flops)
 
     sig = conv_args_signature(dtype)
+    # Extended signature for runtime split-K kernels (split_k=0): adds ks i32 arg.
+    sig_rt = sig + [{"name": "ks", "type": "i32", "size_bytes": 4}]
 
-    # split_k degrees to sweep:
-    #   0   → sweep all degrees in _SPLIT_K_AUTO
-    #  -1   → one combo per tile config, degree resolved by CK formula per build
-    #  else → single fixed degree
-    split_k_values = _SPLIT_K_AUTO if args.split_k == 0 else (args.split_k,)
+    # split_k degrees used to build kernel specs:
+    #   0   → compile two variants: split_k=1 (no-atomic) and split_k=0 (runtime-atomic);
+    #          actual degrees from _SPLIT_K_AUTO are swept at launch time via the ks arg.
+    #  -1   → one combo per tile config, degree resolved by CK formula at build time.
+    #  else → single fixed degree baked into the kernel.
+    split_k_values = (0,) if args.split_k == 0 else (args.split_k,)
 
     combos = list(
         itertools.product(
@@ -1901,6 +2032,10 @@ def _run_wgrad_sweep(
         print(f"Building IR for {len(combos)} wgrad combos in parallel ...", flush=True)
     work = [(combo, problem, dtype, arch) for combo in combos]
     pending = _build_ir_parallel(work, _build_wgrad_one, jobs)
+    # _build_ir_parallel returns results in as_completed order (non-deterministic).
+    # Re-sort: group by config (all combo dims except split_k), then split_k descending
+    # so _SPLIT_K_AUTO order (128, 64, ..., 1) is preserved for --split-k-prune.
+    pending.sort(key=lambda r: (r[0][:8], -r[2]))
     n_skipped = len(combos) - len(pending)
 
     # ---------------------------------------------------------------------------
@@ -1928,13 +2063,33 @@ def _run_wgrad_sweep(
 
     ref_out: torch.Tensor | None = None
     if args.verify or args.dump_fail:
-        from rocke.benchmark.conv_reference import wgrad_reference
+        if arch == "gfx1250":
+            from rocke.benchmark.conv_reference import wgrad_reference_gfx1250
 
-        ref_out = wgrad_reference(_X_f32, _dY_f32, p)
-        print(
-            f"Wgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-            flush=True,
-        )
+            ref_out = wgrad_reference_gfx1250(
+                _X_f32, _dY_f32, p, out_dtype=_torch_dtype
+            )
+            print(
+                f"Wgrad reference computed via gfx1250 hand-written wgrad "
+                f"({tuple(ref_out.shape)}, {ref_out.dtype}).",
+                flush=True,
+            )
+        else:
+            from rocke.benchmark.conv_reference import wgrad_reference
+
+            ref_out = wgrad_reference(_X_f32, _dY_f32, p)
+            print(
+                f"Wgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+                flush=True,
+            )
+
+    _do_prune = args.split_k == 0 and args.split_k_prune is not None
+    _prune_threshold = (args.split_k_prune or 0.0) / 100.0
+    # Maps (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue)
+    # -> best TFLOPS seen so far across split-K degrees for that config.
+    _best_tflops: dict = {}
+    # Set of config keys that have been pruned (skip remaining split-K degrees).
+    _pruned_configs: set = set()
 
     n_run = 0
     for combo, spec, resolved_split_k, kernel in pending:
@@ -1943,12 +2098,29 @@ def _run_wgrad_sweep(
         )
         warp_tile_k = spec.warp_tile_k
         artifact = artifact_map[kernel.name]
+        _is_rt = resolved_split_k == 0  # runtime split-K kernel
 
+        if _do_prune:
+            _cfg_key = (
+                tile_m,
+                tile_n,
+                tile_k,
+                warp_m,
+                warp_n,
+                warp_tile_mn,
+                pipeline,
+                epilogue,
+            )
+            if _cfg_key in _pruned_configs:
+                n_skipped += 1
+                continue
+
+        _kernel_sig = sig_rt if _is_rt else sig
         try:
             launcher = KernelLauncher(
                 hsaco=artifact.hsaco,
                 kernel_name=artifact.kernel_name,
-                signature=sig,
+                signature=_kernel_sig,
             )
         except HipError as e:
             n_skipped += 1
@@ -1963,99 +2135,152 @@ def _run_wgrad_sweep(
             )
             continue
 
-        grid = _grid_for_wgrad_spec(spec, resolved_split_k)
-        block = (spec.block_size, 1, 1)
-        stream = 0
+        # For runtime kernels iterate over _SPLIT_K_AUTO degrees at launch time;
+        # for fixed kernels there is exactly one degree (resolved_split_k itself).
+        _rt_degrees = _SPLIT_K_AUTO if _is_rt else (resolved_split_k,)
 
-        values = {
-            "A": dY_dev,
-            "B": X_dev,
-            "D": dW_dev,
-            "A_bytes": dY_t.nbytes,
-            "B_bytes": X_t.nbytes,
-            "D_bytes": dW_t.nbytes,
-        }
-        cfg = LaunchConfig(grid=grid, block=block, stream=stream)
+        for _i, _launch_sk in enumerate(_rt_degrees):
+            if _do_prune and _is_rt and _cfg_key in _pruned_configs:
+                n_skipped += len(_rt_degrees) - _i
+                break
+            block = (spec.block_size, 1, 1)
+            stream = 0
 
-        if args.verify or args.dump_fail:
-            stopped, _ = _verify_kernel(
-                rt=rt,
-                launcher=launcher,
-                values=values,
-                grid=grid,
-                block=block,
-                out_dev=dW_dev,
-                out_t=dW_t,
-                zero_init_out=(resolved_split_k > 1),
-                ref_out=ref_out,
-                kernel_name=artifact.kernel_name,
-                dump_fail=args.dump_fail,
-                extra_tensors={"dY": dY_t, "X": X_t},
-                u8=_u8,
-                arch=arch,
+            if _is_rt:
+                wg_K_padded = spec.wg_K_padded(split_k=_launch_sk)
+                _ks_val = wg_K_padded // _launch_sk
+                grid = _grid_for_wgrad_spec(spec, _launch_sk)
+                values = {
+                    "A": dY_dev,
+                    "B": X_dev,
+                    "D": dW_dev,
+                    "A_bytes": dY_t.nbytes,
+                    "B_bytes": X_t.nbytes,
+                    "D_bytes": dW_t.nbytes,
+                    "ks": _ks_val,
+                }
+                _is_atomic_launch = True
+            else:
+                grid = _grid_for_wgrad_spec(spec, _launch_sk)
+                values = {
+                    "A": dY_dev,
+                    "B": X_dev,
+                    "D": dW_dev,
+                    "A_bytes": dY_t.nbytes,
+                    "B_bytes": X_t.nbytes,
+                    "D_bytes": dW_t.nbytes,
+                }
+                _is_atomic_launch = _launch_sk > 1
+
+            cfg = LaunchConfig(grid=grid, block=block, stream=stream)
+
+            if args.verify or args.dump_fail:
+                stopped, _ = _verify_kernel(
+                    rt=rt,
+                    launcher=launcher,
+                    values=values,
+                    grid=grid,
+                    block=block,
+                    out_dev=dW_dev,
+                    out_t=dW_t,
+                    zero_init_out=_is_atomic_launch,
+                    ref_out=ref_out,
+                    kernel_name=artifact.kernel_name,
+                    dump_fail=args.dump_fail,
+                    extra_tensors={"dY": dY_t, "X": X_t},
+                    u8=_u8,
+                    arch=arch,
+                )
+                if stopped:
+                    rt.free(dY_dev)
+                    rt.free(X_dev)
+                    rt.free(dW_dev)
+                    return 1, []
+
+            if _is_atomic_launch:
+                _vals_snap = dict(values)
+                _cfg_snap = cfg
+
+                def _launch_spk(_v=_vals_snap, _c=_cfg_snap):
+                    rt.memset(dW_dev, 0, dW_t.nbytes)
+                    launcher(_v, config=_c)
+
+                timed_fn = _launch_spk
+            else:
+                _vals_snap = dict(values)
+                _cfg_snap = cfg
+                timed_fn = lambda _v=_vals_snap, _c=_cfg_snap: launcher(_v, config=_c)
+
+            ms = time_launches(
+                timed_fn,
+                warmup=args.warmup,
+                iters=args.iters,
+                stream=stream,
             )
-            if stopped:
-                rt.free(dY_dev)
-                rt.free(X_dev)
-                rt.free(dW_dev)
-                return 1, []
+            synchronize_and_release(stream)
 
-        if resolved_split_k > 1:
+            cur_tflops = (flop / ms) * 1e-9
+            cur_gbps = (bytes_xfer / ms) * 1e-6
+            n_run += 1
 
-            def _launch_spk():
-                rt.memset(dW_dev, 0, dW_t.nbytes)
-                launcher(values, config=cfg)
-
-            timed_fn = _launch_spk
-        else:
-            timed_fn = lambda: launcher(values, config=cfg)
-
-        ms = time_launches(
-            timed_fn,
-            warmup=args.warmup,
-            iters=args.iters,
-            stream=stream,
-        )
-        synchronize_and_release(stream)
-
-        cur_tflops = (flop / ms) * 1e-9
-        cur_gbps = (bytes_xfer / ms) * 1e-6
-        n_run += 1
-
-        _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
-            p.C, p.K, dtype, split_k=resolved_split_k
-        )
-        results.append(
-            Result(
-                kernel_name=artifact.kernel_name,
-                tile_m=tile_m,
-                tile_n=tile_n,
-                tile_k=tile_k,
-                warp_m=warp_m,
-                warp_n=warp_n,
-                warp_tile_mn=warp_tile_mn,
-                warp_tile_k=warp_tile_k,
-                pipeline=pipeline,
-                epilogue=epilogue,
-                split_k=resolved_split_k,
-                ms=ms,
-                tflops=cur_tflops,
-                gbps=cur_gbps,
-                vec_a=_va,
-                vec_b=_vb,
-                vec_c=_vc,
+            _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
+                p.C, p.K, dtype, split_k=_launch_sk
             )
-        )
+            results.append(
+                Result(
+                    kernel_name=artifact.kernel_name,
+                    tile_m=tile_m,
+                    tile_n=tile_n,
+                    tile_k=tile_k,
+                    warp_m=warp_m,
+                    warp_n=warp_n,
+                    warp_tile_mn=warp_tile_mn,
+                    warp_tile_k=warp_tile_k,
+                    pipeline=pipeline,
+                    epilogue=epilogue,
+                    split_k=_launch_sk,
+                    ms=ms,
+                    tflops=cur_tflops,
+                    gbps=cur_gbps,
+                    vec_a=_va,
+                    vec_b=_vb,
+                    vec_c=_vc,
+                )
+            )
 
-        print(
-            f"[{n_run:4d}] tile={tile_m}x{tile_n}x{tile_k} "
-            f"warp={warp_m}x{warp_n} "
-            f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
-            f"{pipeline}/{epilogue:9s} spk{resolved_split_k:<3d} "
-            f"vec={_va}/{_vb}/{_vc} "
-            f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
-            flush=True,
-        )
+            _spk_label = f"spk{_launch_sk}rt" if _is_rt else f"spk{_launch_sk}"
+            prune_marker = ""
+            if _do_prune:
+                _cfg_key = (
+                    tile_m,
+                    tile_n,
+                    tile_k,
+                    warp_m,
+                    warp_n,
+                    warp_tile_mn,
+                    pipeline,
+                    epilogue,
+                )
+                best = _best_tflops.get(_cfg_key)
+                if best is None:
+                    _best_tflops[_cfg_key] = cur_tflops
+                else:
+                    if cur_tflops > best:
+                        _best_tflops[_cfg_key] = cur_tflops
+                    elif (best - cur_tflops) / best >= _prune_threshold:
+                        _pruned_configs.add(_cfg_key)
+                        prune_marker = f"  [pruned: {cur_tflops:.1f} < {best:.1f} * {1 - _prune_threshold:.2f}]"
+
+            print(
+                f"[{n_run:4d}] tile={tile_m}x{tile_n}x{tile_k} "
+                f"warp={warp_m}x{warp_n} "
+                f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
+                f"{pipeline}/{epilogue:9s} {_spk_label:<7s} "
+                f"vec={_va}/{_vb}/{_vc} "
+                f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms"
+                f"{prune_marker}",
+                flush=True,
+            )
 
     rt.free(dY_dev)
     rt.free(X_dev)
@@ -2152,7 +2377,10 @@ def _run_dgrad_sweep(
         )
 
     _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-    _W_f32 = _make(p.K, p.Y, p.X, p.C)
+    # Weight is stored per-group packed: KYXC with channel extent cpg = C/groups
+    # (== C when groups == 1), matching the dgrad w_descriptor and the forward
+    # make_b_descriptor.  dY/dX carry full K/C (the group rides the k_out/c index).
+    _W_f32 = _make(p.K, p.Y, p.X, p.cpg)
     dX_t = torch.empty(p.N, p.Hi, p.Wi, p.C, dtype=_torch_dtype)
 
     dY_t = _dY_f32.to(_torch_dtype)
@@ -2161,7 +2389,9 @@ def _run_dgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
 
-    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.C, p.K, dtype)
+    # Per-group channel runs (cpg/kpg) bound the vector widths for grouped dgrad
+    # so loads/stores never straddle a group boundary (cpg==C, kpg==K ungrouped).
+    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.cpg, p.kpg, dtype)
     base_sig = conv_args_signature(dtype)
     ext_sig = base_sig + [
         {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
@@ -2203,89 +2433,16 @@ def _run_dgrad_sweep(
     from rocke.instances.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
     import struct as _struct
 
-    # ---- Phase 1: build + validate all specs, collect kernels ----
-    pending = []  # (spec, resolved_split_k) tuples with their kernels
-    n_skipped = 0
-
-    for (
-        tile_m,
-        tile_n,
-        tile_k,
-        warp_m,
-        warp_n,
-        warp_tile_mn,
-        pipeline,
-        epilogue,
-        split_k,
-    ) in combos:
-        if split_k > 1 and epilogue == "cshuffle":
-            n_skipped += 1
-            continue
-
-        atom = target.mma.select_largest_k(
-            a_dtype=dtype,
-            b_dtype=dtype,
-            c_dtype="fp32",
-            m=warp_tile_mn,
-            n=warp_tile_mn,
-            k_max=tile_k,
-        )
-        if atom is None:
-            n_skipped += 1
-            continue
-
-        warp_tile_k = atom.k
-        if split_k == -1:
-            from rocke.helpers.split_k import select_split_k_wgrad
-
-            resolved_split_k = select_split_k_wgrad(
-                wg_M=p.N * p.Hi * p.Wi,
-                wg_N=p.cpg,
-                wg_K=p.Y * p.X * p.kpg,
-                tile_m=tile_m,
-                tile_n=tile_n,
-                tile_k=tile_k,
-                arch=arch,
-            ).split_k
-        else:
-            resolved_split_k = split_k
-
-        spec = DgradConvSpec(
-            problem=problem,
-            name="rocke_bench_igemm_dgrad",
-            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-            tile_m=tile_m,
-            tile_n=tile_n,
-            tile_k=tile_k,
-            warp_m=warp_m,
-            warp_n=warp_n,
-            warp_tile_m=warp_tile_mn,
-            warp_tile_n=warp_tile_mn,
-            warp_tile_k=warp_tile_k,
-            pipeline=pipeline,
-            epilogue=epilogue,
-            split_k=resolved_split_k,
-            vector_size_a=vec_a,
-            vector_size_b=vec_b,
-            vector_size_c=vec_c,
-        )
-
-        ok, reason = is_valid_dgrad_spec(spec, arch)
-        if not ok:
-            n_skipped += 1
-            continue
-
-        try:
-            kernel = build_implicit_gemm_conv_dgrad(spec, arch=arch)
-        except ValueError:
-            n_skipped += 1
-            continue
-
-        pending.append((spec, resolved_split_k, kernel))
+    # ---- Phase 1: build + validate all specs, collect kernels (parallel) ----
+    if jobs != 1:
+        print(f"Building IR for {len(combos)} dgrad combos in parallel ...", flush=True)
+    work = [(combo, problem, dtype, arch, vec_a, vec_b, vec_c) for combo in combos]
+    pending = _build_ir_parallel(work, _build_dgrad_one, jobs)
+    n_skipped = len(combos) - len(pending)
 
     # ---- Phase 2: compile in parallel ----
     artifact_map = _compile_kernels_parallel(
-        [k for _, _, k in pending], compile_kernel, arch, jobs
+        [k for _, _, _, k in pending], compile_kernel, arch, jobs
     )
     n_built = len(artifact_map)
     n_skipped += len(pending) - n_built
@@ -2309,16 +2466,28 @@ def _run_dgrad_sweep(
 
     ref_out: torch.Tensor | None = None
     if args.verify or args.dump_fail:
-        from rocke.benchmark.conv_reference import dgrad_reference
+        if arch == "gfx1250":
+            from rocke.benchmark.conv_reference import dgrad_reference_gfx1250
 
-        ref_out = dgrad_reference(_dY_f32, _W_f32, p)
-        print(
-            f"Dgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-            flush=True,
-        )
+            ref_out = dgrad_reference_gfx1250(
+                _dY_f32, _W_f32, p, out_dtype=_torch_dtype
+            )
+            print(
+                f"Dgrad reference computed via gfx1250 hand-written dgrad "
+                f"({tuple(ref_out.shape)}, {ref_out.dtype}).",
+                flush=True,
+            )
+        else:
+            from rocke.benchmark.conv_reference import dgrad_reference
+
+            ref_out = dgrad_reference(_dY_f32, _W_f32, p)
+            print(
+                f"Dgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+                flush=True,
+            )
 
     n_measured = 0
-    for spec, resolved_split_k, kernel in pending:
+    for _combo, spec, resolved_split_k, kernel in pending:
         artifact = artifact_map.get(kernel.name)
         if artifact is None:
             continue
@@ -2333,7 +2502,10 @@ def _run_dgrad_sweep(
             len(buf_bytes),
         )
         flat_tiles = sub_gemms[-1].block_end
-        grid = (flat_tiles, 1, resolved_split_k)
+        # Conv group rides blockIdx.y (see conv_implicit_gemm_dgrad); the tilde
+        # sub-GEMM geometry is channel-independent so flat_tiles is per-group.
+        _groups = max(int(spec.problem.groups), 1)
+        grid = (flat_tiles, _groups, resolved_split_k)
         values = {
             "A": dY_dev,
             "B": W_dev,
@@ -2350,7 +2522,7 @@ def _run_dgrad_sweep(
             kernel_name=artifact.kernel_name,
             signature=ext_sig,
         )
-        block = (spec.block_size, 1, 1)
+        block = (spec.launch_block_size, 1, 1)
         stream = 0
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
@@ -2416,7 +2588,7 @@ def _run_dgrad_sweep(
                 tflops=cur_tflops,
                 gbps=cur_gbps,
                 vec_a=vec_a,
-                vec_b=1,
+                vec_b=vec_b,
                 vec_c=vec_c,
             )
         )
@@ -2427,7 +2599,7 @@ def _run_dgrad_sweep(
             f"warp={spec.warp_m}x{spec.warp_n} "
             f"atom={spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k} "
             f"{spec.pipeline}/{spec.epilogue:9s} spk{resolved_split_k:<3d} "
-            f"vec={_lva}/1/{vec_c} "
+            f"vec={_lva}/{vec_b}/{vec_c} "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -2462,7 +2634,7 @@ def _run_dgrad_sweep(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"{r.pipeline}/{r.epilogue} spk{r.split_k} "
-            f"vec={_lva_r}/1/{r.vec_c}"
+            f"vec={_lva_r}/{r.vec_b}/{r.vec_c}"
         )
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
 

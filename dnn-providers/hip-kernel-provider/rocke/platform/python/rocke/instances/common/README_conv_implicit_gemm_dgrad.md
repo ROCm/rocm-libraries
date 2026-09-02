@@ -42,6 +42,15 @@ The tilde decomposition partitions the filter positions `y` into `y_tilde`
 groups such that within each group the integrality constraint is always
 satisfied. Each group becomes one independent sub-GEMM.
 
+## Pipeline Variants
+
+| Pipeline | Description |
+|----------|-------------|
+| `mem` | Single-buffer LDS, synchronous loads, no scheduler hints. Default. |
+| `wavelet` | Load/math wave specialization for **gfx1250/WMMA only**. Extra `num_load_waves` waves handle all DRAM→LDS transfers while the `warp_m × warp_n` math waves run WMMA exclusively. Requires gfx1250's separate VMEM and WMMA issue slots to achieve true hardware concurrency. Incompatible with `async_dma=True` and `split_k > 1`. Single-buffer LDS shared by both roles; synchronization via a `barrier_0 / barrier_A / barrier_B` protocol. |
+
+The MFMA/CDNA pipelines (`compv3`, `compv4`) are not supported for dgrad; `is_valid_spec` rejects them.
+
 ## Kernel Architecture
 
 All convolutions — stride=1 and strided — use a **single unified tiled kernel**:
@@ -108,6 +117,44 @@ The caller must zero-initialise `dX`. Supported dtypes:
 - `fp32` — scalar `global_atomic_add` (f32 fadd)
 - `bf16` — packed `global_atomic_fadd_v2bf16` (`<2 x bfloat>`)
 - `fp16` — packed `global_atomic_fadd_v2f16` (`<2 x half>`)
+
+## Vector Loads
+
+Both A and B tiles are loaded via `CoalescedTileLoader` with dtype-aware vector
+widths. The widths are derived from `DgradConvSpec.default_vector_sizes(C, K, dtype)`
+which returns `(vec_a, vec_b, vec_c)`.
+
+### A (dY, NHWK)
+
+`k_out` is the innermost index of the GEMM-K decomposition, which maps
+contiguously onto the last dim of `dY` (dim K). Vector width is therefore
+constrained by `K % load_vec_a == 0`. Split-K forces `load_vec_a = 1` because
+the per-CTA K-slice boundary may not be K-aligned.
+
+The loader uses `vector_axis="col"` (the standard column-axis path).
+
+### B (W, KYXC)
+
+The GEMM row axis is `N_dg = C` (input channels), which is the **stride-1** axis
+of `W` in `KYXC` layout. Vector loads therefore go along the free (row) axis and
+the loader transposes the tile into row-major LDS layout on store — exactly the
+same mechanism used by wgrad for its B operand (`X`, `NHWC`).
+
+Constraint: `C % load_vec_b == 0`. The loader uses `vector_axis="row"`.
+
+Width selection (Python / C++):
+
+1. Compute `max_from_C` — largest power-of-two dividing `C` up to 8 (fp16/bf16)
+   or 4 (fp32) from `default_vector_sizes`.
+2. Call `CoalescedTileLoader.choose_vec(tile_rows=block_n, tile_cols=block_k, ...,
+   max_vec=max_from_C, vector_axis="row")`.
+3. If `spec.vector_size_b` is set explicitly, use that; else use the chosen value
+   if `> 1`, otherwise fall back to 1 with `vector_axis="col"`.
+
+### D (dX, NHWC)
+
+The epilogue writes `dX` whose last dim is also `C`. Store vector width follows
+`C % store_vec == 0`, derived from `default_vector_sizes` (third element).
 
 ## Key Files
 

@@ -77,8 +77,11 @@ void cpu_lacpy(char uplo, rocblas_int m, rocblas_int n, T* A, rocblas_int lda, T
 template <typename T>
 void cpu_laset(char norm, rocblas_int m, rocblas_int n, T alpha, T beta, T* A, rocblas_int lda);
 
-template <typename T, typename S>
-S cpu_lange(char norm, rocblas_int m, rocblas_int n, T* A, rocblas_int lda, S* work);
+template <typename T, typename S = decltype(std::real(T{}))>
+S cpu_lange(char norm, rocblas_int m, rocblas_int n, const T* A, rocblas_int lda, S* rwork);
+
+template <typename T, typename S = decltype(std::real(T{}))>
+S cpu_lanhb(char norm, char uplo, rocblas_int n, rocblas_int kd, const T* A, rocblas_int lda, S* rwork);
 
 template <typename T, typename S>
 S cpu_gecon(char norm, rocblas_int n, T* A, rocblas_int lda, S anorm, T* work, S* rwork, rocblas_int* iwork);
@@ -636,7 +639,7 @@ void cpu_sbev_hbev(rocblas_evect evect,
                    rocblas_int kd,
                    T* Aband,
                    rocblas_int ldab,
-                   S* W,
+                   S* Lambda,
                    T* Z,
                    rocblas_int ldz,
                    T* work,

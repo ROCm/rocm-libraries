@@ -51,7 +51,11 @@ _needs_logic_dir = pytest.mark.xfail(
     reason="Logic files not found: https://github.com/ROCm/rocm-libraries/issues/7481",
 )
 
-_DEVICE_NAMES_RE = re.compile(r"^\s*-\s*\[\s*Device\s+([^\]]+)\]\s*$")
+# Logic YAMLs come in two header dialects: the positional list form, where
+# DeviceNames is the 4th sequence entry (``- [Device ...]``), and the mapping
+# form used by e.g. Origami (``DeviceNames: [Device ...]``). Match both, or
+# divergence in the mapping-form files is silently skipped.
+_DEVICE_NAMES_RE = re.compile(r"^\s*(?:-|DeviceNames:)\s*\[\s*Device\s+([^\]]+)\]\s*$")
 _ID_SUFFIX_LITERAL = "_ID"
 _GATE_FUNC_NAME = "supportsChipIdPredicate"
 
