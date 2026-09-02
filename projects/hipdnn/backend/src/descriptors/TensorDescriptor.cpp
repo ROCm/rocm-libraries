@@ -134,12 +134,12 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC:
-        getOptionalScalar<HIPDNN_TYPE_INT64>(_data.ragged_offset_tensor_uid,
-                                             attributeType,
-                                             requestedElementCount,
-                                             elementCount,
-                                             arrayOfElements,
-                                             "TensorDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_raggedOffset,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "TensorDescriptor::getAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -220,11 +220,12 @@ void TensorDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                   "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC:
-        setOptionalScalar<HIPDNN_TYPE_INT64>(_data.ragged_offset_tensor_uid,
-                                             attributeType,
-                                             elementCount,
-                                             arrayOfElements,
-                                             "TensorDescriptor::setAttribute()");
+        setOptionalTensorDescriptor(_raggedOffset,
+                                    _data.ragged_offset_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "TensorDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

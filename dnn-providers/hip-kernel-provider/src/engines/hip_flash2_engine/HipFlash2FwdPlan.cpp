@@ -51,30 +51,30 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
         return it->second;
     };
 
-    void* Q = findPtr(_params.qUid, "Q");
-    void* K = findPtr(_params.kUid, "K");
-    void* V = findPtr(_params.vUid, "V");
-    void* O = findPtr(_params.oUid, "O");
+    void* q = findPtr(_params.qUid, "Q");
+    void* k = findPtr(_params.kUid, "K");
+    void* v = findPtr(_params.vUid, "V");
+    void* o = findPtr(_params.oUid, "O");
 
     // -- 2. Populate kernel argument struct -----------------------------------
     Flash2KernelArgs args{};
-    args.ptr_q = Q;
-    args.ptr_k = K;
-    args.ptr_v = V;
-    args.ptr_o = O;
+    args.ptrQ = q;
+    args.ptrK = k;
+    args.ptrV = v;
+    args.ptrO = o;
 
     args.batch = _params.batch;
-    args.num_heads_q = _params.num_heads_q;
-    args.num_heads_k = _params.num_heads_k;
-    args.seq_len_q = _params.seq_len_q;
-    args.seq_len_kv = _params.seq_len_kv;
-    args.head_dim = _params.head_dim;
+    args.numHeadsQ = _params.numHeadsQ;
+    args.numHeadsK = _params.numHeadsK;
+    args.seqLenQ = _params.seqLenQ;
+    args.seqLenKv = _params.seqLenKv;
+    args.headDim = _params.headDim;
     args.causal = _params.causal ? 1 : 0;
 
-    // Attention scale: use provided value or default to 1/sqrt(head_dim)
-    args.scale = (_params.attn_scale != 0.0f)
-                     ? _params.attn_scale
-                     : 1.0f / std::sqrt(static_cast<float>(_params.head_dim));
+    // Attention scale: use provided value or default to 1/sqrt(headDim)
+    args.scale = (_params.attnScale != 0.0f)
+                     ? _params.attnScale
+                     : 1.0f / std::sqrt(static_cast<float>(_params.headDim));
 
     // Strides (in elements, BHSD layout).
     // Guard against int64_t -> int truncation (I9): strides must fit in int.
@@ -91,28 +91,26 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
         }
         return static_cast<int>(s);
     };
-    args.q_stride_batch = checkedStride(_params.q_stride_batch, "q_stride_batch");
-    args.q_stride_head = checkedStride(_params.q_stride_head, "q_stride_head");
-    args.q_stride_seq = checkedStride(_params.q_stride_seq, "q_stride_seq");
-    args.k_stride_batch = checkedStride(_params.k_stride_batch, "k_stride_batch");
-    args.k_stride_head = checkedStride(_params.k_stride_head, "k_stride_head");
-    args.k_stride_seq = checkedStride(_params.k_stride_seq, "k_stride_seq");
-    args.v_stride_batch = checkedStride(_params.v_stride_batch, "v_stride_batch");
-    args.v_stride_head = checkedStride(_params.v_stride_head, "v_stride_head");
-    args.v_stride_seq = checkedStride(_params.v_stride_seq, "v_stride_seq");
-    args.o_stride_batch = checkedStride(_params.o_stride_batch, "o_stride_batch");
-    args.o_stride_head = checkedStride(_params.o_stride_head, "o_stride_head");
-    args.o_stride_seq = checkedStride(_params.o_stride_seq, "o_stride_seq");
-
-    // -- 3. Grid dimensions -------------------------------?
+    args.qStrideBatch = checkedStride(_params.qStrideBatch, "qStrideBatch");
+    args.qStrideHead = checkedStride(_params.qStrideHead, "qStrideHead");
+    args.qStrideSeq = checkedStride(_params.qStrideSeq, "qStrideSeq");
+    args.kStrideBatch = checkedStride(_params.kStrideBatch, "kStrideBatch");
+    args.kStrideHead = checkedStride(_params.kStrideHead, "kStrideHead");
+    args.kStrideSeq = checkedStride(_params.kStrideSeq, "kStrideSeq");
+    args.vStrideBatch = checkedStride(_params.vStrideBatch, "vStrideBatch");
+    args.vStrideHead = checkedStride(_params.vStrideHead, "vStrideHead");
+    args.vStrideSeq = checkedStride(_params.vStrideSeq, "vStrideSeq");
+    args.oStrideBatch = checkedStride(_params.oStrideBatch, "oStrideBatch");
+    args.oStrideHead = checkedStride(_params.oStrideHead, "oStrideHead");
+    args.oStrideSeq = checkedStride(_params.oStrideSeq, "oStrideSeq");
 
     // -- 3. Grid dimensions ----------------------------------------------------
     // Tile size is a property of the SELECTED variant, not a constant.
     const unsigned int qPerCta = _params.qPerCta;
-    const unsigned int gridX = (static_cast<unsigned>(_params.seq_len_q) + qPerCta - 1u) / qPerCta;
+    const unsigned int gridX = (static_cast<unsigned>(_params.seqLenQ) + qPerCta - 1u) / qPerCta;
     // Finding 3 fix: kernel decodes blockIdx.y=batch, blockIdx.z=head_q
-    const unsigned int gridY = static_cast<unsigned>(_params.batch);
-    const unsigned int gridZ = static_cast<unsigned>(_params.num_heads_q);
+    const auto gridY = static_cast<unsigned>(_params.batch);
+    const auto gridZ = static_cast<unsigned>(_params.numHeadsQ);
 
     // Block dim must match the selected variant's __launch_bounds__. A
     // mismatch is not benign: too few threads silently computes wrong results,
