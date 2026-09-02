@@ -273,7 +273,12 @@ def main():
     # Experimental logic the same way _runChecks()'s own per-file loop does.
     corpus_files = [f for f in files if "Experimental" not in f.parts]
     corpus_violations = (
-        check_corpus_invariants(logicPath, corpus_files, args.Architecture.split(";"))
+        check_corpus_invariants(
+            logicPath,
+            corpus_files,
+            args.Architecture.split(";"),
+            overlay_required=args.RequireGfx1250v0Overlay,
+        )
         if check.All
         else []
     )

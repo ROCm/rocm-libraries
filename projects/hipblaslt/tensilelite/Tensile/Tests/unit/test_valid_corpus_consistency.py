@@ -683,6 +683,52 @@ def test_gfx1250v0_overlay_leaking_outside_is_a_violation(tmp_path, vcc):
     assert any("outside the gfx1250v0 overlay" in v for v in violations)
 
 
+def test_gfx1250v0_overlay_respects_a_caller_supplied_file_subset_outside_scan(tmp_path, vcc):
+    # Regression: Run.py excludes "Experimental" logic from the file list it
+    # passes to check_corpus_invariants(), mirroring _runChecks()'s own
+    # per-file loop. An excluded Experimental file that wrongly claims the
+    # v0 schedule name outside the overlay must not trip this check just
+    # because find_gfx1250v0_overlay_violations() re-walked logic_root on
+    # its own instead of honoring the caller's selection.
+    _write_overlay_yaml(
+        tmp_path / vcc.GFX1250V0 / "Equality" / "logic.yaml",
+        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
+    )
+    _write_overlay_yaml(
+        tmp_path / "gfx1250" / "Equality" / "logic.yaml",
+        schedule="gfx1250", gfx=vcc.GFX1250,
+    )
+    _write_overlay_yaml(
+        tmp_path / "gfx1250" / "Experimental" / "probe.yaml",
+        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
+    )
+    selected = [p for p in _all_yaml(tmp_path) if "Experimental" not in p.parts]
+    assert vcc.find_gfx1250v0_overlay_violations(tmp_path, selected) == []
+    # Without the filter, the same corpus does flag it -- confirms the probe
+    # file is a real would-be violation and not just inert.
+    assert any(
+        "outside the gfx1250v0 overlay" in v
+        for v in vcc.find_gfx1250v0_overlay_violations(tmp_path)
+    )
+
+
+def test_gfx1250v0_overlay_respects_a_caller_supplied_file_subset_overlay_contents(tmp_path, vcc):
+    # Same selection contract, but for a file *inside* the overlay: an
+    # excluded Experimental file with a bad header inside the overlay
+    # directory must not be flagged either.
+    _write_overlay_yaml(
+        tmp_path / vcc.GFX1250V0 / "Equality" / "logic.yaml",
+        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
+    )
+    _write_overlay_yaml(
+        tmp_path / vcc.GFX1250V0 / "Experimental" / "probe.yaml",
+        schedule="gfx1250",  # wrong ScheduleName, but excluded from selection
+        gfx=vcc.GFX1250,
+    )
+    selected = [p for p in _all_yaml(tmp_path) if "Experimental" not in p.parts]
+    assert vcc.find_gfx1250v0_overlay_violations(tmp_path, selected) == []
+
+
 # ===========================================================================
 # check_corpus_invariants / report_corpus_invariant_violations
 # ===========================================================================
@@ -710,9 +756,26 @@ def test_check_corpus_invariants_aggregates_sibling_and_overlay_finders(tmp_path
     assert any("ships no logic" in v for v in violations)
 
 
-def test_check_corpus_invariants_requires_overlay_when_gfx1250v0_requested(tmp_path, vcc):
+def test_check_corpus_invariants_does_not_require_overlay_from_archs_alone(tmp_path, vcc):
+    # Regression for the actual bug this shipped with: requesting
+    # architecture gfx1250v0 does not by itself mean the corpus being
+    # validated owns a gfx1250/gfx1250v0 split. hipSPARSELt's shared gfx125X
+    # CI build invokes TensileLogic with --architecture gfx1250v0 against
+    # its own corpus, which never did the split and has no gfx1250v0
+    # directory at all -- that must not be a hard failure just because the
+    # architecture spelling matched.
     (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
-    violations = vcc.check_corpus_invariants(tmp_path, archs=["gfx1250v0"])
+    assert vcc.check_corpus_invariants(tmp_path, archs=["gfx1250v0"]) == []
+
+
+def test_check_corpus_invariants_requires_overlay_only_when_caller_opts_in(tmp_path, vcc):
+    # hipBLASLt's dedicated gfx1250v0 device-library build opts in
+    # explicitly via overlay_required=True (--require-gfx1250v0-overlay);
+    # only then is a missing overlay a violation.
+    (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
+    violations = vcc.check_corpus_invariants(
+        tmp_path, archs=["gfx1250v0"], overlay_required=True
+    )
     assert any("required" in v for v in violations)
 
 

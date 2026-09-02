@@ -29,14 +29,17 @@ Two invariants must hold together; either alone is insufficient:
 2. The ``_ID<chipid>`` placeholder-filename suffix is gated on
    ``supportsChipIdPredicate``, mirroring ``HardwarePredicate.FromHardware``.
 
-The two corpus-wide checks below (sibling-DeviceNames consistency and the
-chip-ID-arch-lock) are also the enforcement point in CI: they run
+Sibling-DeviceNames consistency is the enforcement point in CI: it runs
 unconditionally inside ``TensileLogic --check-all`` via
-``Tensile.TensileLogic.ValidCorpusConsistency``, regardless of whether the
-real ``Logic/asm_full`` directory is present in *this* test environment.
-These pytest copies are a convenience/local-dev signal, not the enforcement
-point -- hence ``skipif`` (an unmet precondition), not ``xfail`` (an expected
-failure).
+``Tensile.TensileLogic.ValidCorpusConsistency.check_corpus_invariants``. The
+chip-ID-arch-lock check is *not* wired into ``--check-all`` (it guards a
+future source-policy change, not the artifact any one build selects -- see
+``check_corpus_invariants``'s docstring); its enforcement point is this
+file's own pytest assertion against the real corpus, run in CI's unit-test
+job. Either way, these pytest copies exercise the real ``Logic/asm_full``
+directory when it's present in *this* test environment, and are a
+convenience/local-dev signal otherwise -- hence ``skipif`` (an unmet
+precondition), not ``xfail`` (an expected failure).
 """
 import ast
 from pathlib import Path

@@ -82,6 +82,10 @@ if(_build_gfx1250v0)
         LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
         OUTPUT_DIR "${_gfx1250v0_output_dir}"
         ARCHES gfx1250v0
+        # hipBLASLt owns the gfx1250/gfx1250v0 split for its own corpus --
+        # this is the one caller allowed to require the overlay directory
+        # to exist (see ValidCorpusConsistency.find_gfx1250v0_overlay_violations).
+        REQUIRE_GFX1250V0_OVERLAY ON
         CXX_COMPILER "${CMAKE_CXX_COMPILER}"
         OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
         JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
