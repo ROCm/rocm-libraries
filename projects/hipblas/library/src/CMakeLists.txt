@@ -38,7 +38,7 @@ endfunction( )
 # ########################################################################
 prepend_path( ".." hipblas_headers_public relative_hipblas_headers_public )
 
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   set( hipblas_source "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblas.cpp" )
 
   message(STATUS "** NOTE: amd_detail/hipblas.cpp is compiled with the verbose flag -v for QC purposes.")
@@ -69,7 +69,7 @@ find_package( hipblas-common REQUIRED CONFIG PATHS ${ROCM_PATH})
 target_link_libraries( hipblas PUBLIC roc::hipblas-common )
 
 # Build hipblas from source on AMD platform
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   if( NOT TARGET rocblas )
     if( CUSTOM_ROCBLAS )
       set ( ENV{rocblas_DIR} ${CUSTOM_ROCBLAS})
@@ -112,15 +112,11 @@ if(HIP_PLATFORM STREQUAL amd)
   endif( )
 
 else( )
-  target_compile_definitions( hipblas PRIVATE ${HIPBLAS_HIP_PLATFORM_COMPILER_DEFINES} )
+  target_compile_definitions( hipblas PRIVATE ${HIPBLAS_CUDA_COMPILER_DEFINES} )
 
-  target_link_libraries( hipblas PRIVATE ${CUDA_CUBLAS_LIBRARIES} )
-
-  # External header includes included as system files
-  target_include_directories( hipblas
-    SYSTEM PRIVATE
-      $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-  )
+  # CUDA::cublas brings in cuBLAS headers and the HIP RT is not used;
+  # link directly via the modern CUDAToolkit imported target (no hipcc).
+  target_link_libraries( hipblas PRIVATE CUDA::cublas )
 endif( )
 
 # External header includes included as system files
@@ -179,7 +175,7 @@ rocm_install_targets(
 )
 #         PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_EXECUTE WORLD_READ
 
-if(HIP_PLATFORM STREQUAL amd )
+if(NOT USE_CUDA )
   rocm_export_targets(
     TARGETS roc::hipblas
     DEPENDS PACKAGE hip

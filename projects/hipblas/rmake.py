@@ -73,7 +73,8 @@ def parse_args():
                         help='Specify path to host compiler. Default is amdclang++.')
 
     parser.add_argument('--cuda', '--use-cuda', dest='use_cuda', required=False, default=False, action='store_true',
-                        help='[DEPRECATED] Build library for CUDA backend. Deprecated, use HIP_PLATFORM environment variable to set platform (default: amd)')
+                        help='Build library for CUDA backend using nvcc directly (sets -DUSE_CUDA=ON). '
+                             'nvcc must be on PATH or specified via --cudapath.')
 
     parser.add_argument(      '--cudapath', type=str, required=False, default='/usr/local/cuda', dest='cuda_path',
                         help='Specify path of CUDA install.')
@@ -284,7 +285,7 @@ def config_cmd():
     # Skip when targeting CUDA: nvcc drives device compilation and g++ is not
     # the right host compiler for CUDA workflows.
     if os.name != "nt" and args.compiler is None:
-        if not args.use_amdclang_compiler and os.environ.get('HIP_PLATFORM') != 'nvidia':
+        if not args.use_amdclang_compiler and not use_cuda_backend:
             cmake_options.append(f"-DCMAKE_CXX_COMPILER=g++")
 
     if args.static_lib:
@@ -339,11 +340,10 @@ def config_cmd():
         rocsolver_path_cmake =  f'"{raw_rocsolver_path}"'
         cmake_options.append( f"-DCUSTOM_ROCSOLVER={rocsolver_path_cmake}")
 
-    # When building for the CUDA backend, locate nvcc directly rather than
-    # relying on hipcc to wrap it.  Pass the CUDA toolkit root and the nvcc
-    # executable to CMake so find_package(CUDA) and find_package(CUDAToolkit)
-    # resolve correctly without any hipcc dependency.
-    if os.environ.get('HIP_PLATFORM') == 'nvidia':
+    # CUDA backend: pass USE_CUDA=ON and locate nvcc so CMake's find_package(CUDAToolkit)
+    # resolves without any hipcc involvement.
+    if use_cuda_backend:
+        cmake_options.append("-DUSE_CUDA=ON")
         cuda_path = args.cuda_path  # defaults to /usr/local/cuda
         nvcc_candidate = os.path.join(cuda_path, 'bin', 'nvcc')
         if not os.path.exists(nvcc_candidate):
@@ -401,14 +401,9 @@ def main():
 
     rocm_path = get_rocm_path()
 
-    # support --cuda flag for now by overwriting HIP_PLATFORM envvar
-    if args.use_cuda:
-        os.environ['HIP_PLATFORM'] = 'nvidia'
-        print("--cuda option is deprecated (use environment variable HIP_PLATFORM=nvidia)")
-    else:
-        os.environ['HIP_PLATFORM'] = 'amd'
+    use_cuda_backend = args.use_cuda
 
-    if os.environ['HIP_PLATFORM'] == 'nvidia' and args.static_lib:
+    if use_cuda_backend and args.static_lib:
         fatal("Static library not supported for CUDA backend. Not continuing.")
 
     if args.install_invoked:

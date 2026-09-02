@@ -166,7 +166,7 @@ if (NOT WIN32)
     target_link_libraries( hipblas-test PRIVATE stdc++fs )
 endif()
 
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   target_link_libraries( hipblas-test PRIVATE hip::host )
 
   if( CUSTOM_TARGET )
