@@ -42,9 +42,16 @@ STALE_TREE_HINT = (
 )
 
 
-def read_key_manifest(path: Path) -> dict[str, str]:
-    """Read the key table of one target. An absent file is an empty table."""
+def read_key_manifest(path: Path | None) -> dict[str, str]:
+    """Read the key table of one target.
+
+    `None` means the target declares no table at all -- it never registered a
+    kernel for embedding. An absent file means it declared one the build has not
+    written yet. Both are empty tables, and the caller keeps the distinction.
+    """
     table: dict[str, str] = {}
+    if path is None:
+        return table
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -230,7 +237,7 @@ def check_object(
 
 def verify(
     target: str,
-    manifest: Path,
+    manifest: Path | None,
     roots: list[Path],
     source_roots: dict[str, str],
 ) -> tuple[list[str], int, int]:
@@ -274,10 +281,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--key-manifest",
-        required=True,
+        default=None,
         help=(
             "The 'key<TAB>absolute file' table the build wrote for the target. "
-            "An absent file reads as an empty table."
+            "An absent file reads as an empty table. Omit it entirely for a target "
+            "that registers no kernel for embedding, so that a target with no table "
+            "is not spelled as a path to a file nothing writes."
         ),
     )
     ap.add_argument(
@@ -306,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
         source_roots = dict(parse_source_root(text) for text in args.source_roots)
         failures, checked, keys = verify(
             args.target,
-            Path(args.key_manifest),
+            Path(args.key_manifest) if args.key_manifest else None,
             [Path(root) for root in args.staged_descriptor_roots],
             source_roots,
         )

@@ -250,8 +250,14 @@ function(embed_kernel_sources)
         endif()
     endforeach()
 
-    _write_kernel_key_manifest(
-        "${CMAKE_CURRENT_BINARY_DIR}/${EMBED_KERNELS_TARGET}_kernel_keys.txt")
+    # Published on the target, because the manifest belongs to the target and not to the
+    # directory that happened to declare it. A consumer in another directory scope reads
+    # the path from here instead of spelling the same rule again, so it cannot end up
+    # naming a file nothing wrote.
+    set(_key_manifest "${CMAKE_CURRENT_BINARY_DIR}/${EMBED_KERNELS_TARGET}_kernel_keys.txt")
+    _write_kernel_key_manifest("${_key_manifest}")
+    set_target_properties(${EMBED_KERNELS_TARGET}
+                          PROPERTIES KERNELEMBEDDING_KEY_MANIFEST "${_key_manifest}")
 
     # Generate kernel source files
     configure_file(

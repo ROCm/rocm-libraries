@@ -135,14 +135,16 @@ def _drop_anchor(path):
 
 
 def _run(manifest, roots, source_roots, target=TARGET):
+    """Invoke the tool. `manifest=None` omits the flag, as a target that
+    registers no kernel for embedding does."""
     argv = [
         sys.executable,
         str(TOOL),
         "--target",
         target,
-        "--key-manifest",
-        str(manifest),
     ]
+    if manifest is not None:
+        argv += ["--key-manifest", str(manifest)]
     for root in roots:
         argv += ["--staged-descriptor-root", str(root)]
     for label, source_root in sorted(source_roots.items()):
@@ -266,6 +268,33 @@ def test_a_table_that_is_not_there_passes(tmp_path):
     result = _run(tmp_path / "no_such_kernel_keys.txt", [root], _labels(tmp_path))
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.quick
+def test_no_table_declared_at_all_passes(tmp_path):
+    root = tmp_path / "integration" / "conv"
+    root.mkdir(parents=True)
+
+    result = _run(None, [root], _labels(tmp_path))
+
+    assert result.returncode == 0, result.stderr
+    assert _count_line(0, 0) in result.stdout
+
+
+@pytest.mark.quick
+def test_no_table_declared_still_fails_a_descriptor_that_names_a_key(tmp_path):
+    """Omitting the table is an empty table, never a skip.
+
+    A target that embeds nothing but serves a descriptor naming a source is the
+    plainest form of the drift the check exists to catch.
+    """
+    root = tmp_path / "unit" / "pointwise"
+    _ukd(root / ARCH, "pointwise_add", KEY)
+
+    result = _run(None, [root], _labels(tmp_path))
+
+    assert result.returncode == 1
+    assert f"embeds no source under the key '{KEY}'" in result.stderr
 
 
 @pytest.mark.quick

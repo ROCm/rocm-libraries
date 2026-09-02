@@ -272,6 +272,47 @@ function(hkp_wire_pack_target)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_key_manifest_args(<out_arg> <out_dep> <target>)
+#   Resolve the key manifest <target> published, as a command argument and a
+#   dependency.
+#
+#   embed_kernel_sources() records the path on the target. Reading it back is
+#   what stops a consumer in another directory scope from spelling the same rule
+#   a second time and naming a file nothing writes -- which reads as an empty
+#   table and passes, exactly as a target that embeds nothing does.
+#
+#   A target that never called embed_kernel_sources() has no property and gets
+#   no flag, which is a fact about the target rather than about a directory. A
+#   target with kernels registered but no manifest is neither case: the check
+#   has been ordered before the embedding.
+# ---------------------------------------------------------------------------
+function(_hkp_key_manifest_args out_arg out_dep target)
+    get_target_property(_manifest ${target} KERNELEMBEDDING_KEY_MANIFEST)
+    if(NOT _manifest)
+        get_target_property(_declared ${target} KERNELEMBEDDING_KERNEL_FILES)
+        if(_declared)
+            message(FATAL_ERROR
+                    "hkp_verify_embedded_sources: target '${target}' has kernels "
+                    "registered for embedding but publishes no key manifest. Call "
+                    "embed_kernel_sources(TARGET ${target} ...) before verifying it.")
+        endif()
+        set(${out_arg} "" PARENT_SCOPE)
+        set(${out_dep} "" PARENT_SCOPE)
+        return()
+    endif()
+
+    set(${out_arg} --key-manifest "${_manifest}" PARENT_SCOPE)
+    # Naming an absent file as a dependency asks the generator for a rule that
+    # produces it. The table is written at configure time, so it is absent only
+    # when the target registered no kernel between the two calls.
+    set(_dep "")
+    if(EXISTS "${_manifest}")
+        set(_dep "${_manifest}")
+    endif()
+    set(${out_dep} "${_dep}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_verify_embedded_sources(TARGET <t> STAGED_DESCRIPTOR_ROOTS <roots>
 #                             PACK_NAMES <names>)
 #   Add a build step that checks <t> against the staged descriptors it serves.
@@ -324,8 +365,9 @@ function(hkp_verify_embedded_sources)
     # Resolved from the defining listfile: the callers are sibling directories that
     # never see this module's include-time variables.
     set(_tool "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/hkp_verify_embedded_sources.py")
-    set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${ARG_TARGET}_kernel_keys.txt")
     set(_stamp "${CMAKE_CURRENT_BINARY_DIR}/hkp-verify-${ARG_TARGET}.stamp")
+
+    _hkp_key_manifest_args(_manifest_arg _manifest_dep "${ARG_TARGET}")
 
     set(_root_args "")
     foreach(_root IN LISTS ARG_STAGED_DESCRIPTOR_ROOTS)
@@ -357,19 +399,11 @@ function(hkp_verify_embedded_sources)
         endif()
     endforeach()
 
-    # A target that embeds nothing has no key table. The tool reads an absent one
-    # as empty; naming it as a dependency would ask the generator for a rule that
-    # produces it.
-    set(_manifest_dep "")
-    if(EXISTS "${_manifest}")
-        set(_manifest_dep "${_manifest}")
-    endif()
-
     add_custom_command(
         OUTPUT "${_stamp}"
         COMMAND "${Python3_EXECUTABLE}" "${_tool}"
                 --target "${ARG_TARGET}"
-                --key-manifest "${_manifest}"
+                ${_manifest_arg}
                 ${_root_args}
                 ${_source_root_args}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
