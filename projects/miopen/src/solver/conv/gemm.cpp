@@ -712,9 +712,6 @@ bool GemmFwd1x1_0_1::IsApplicable(const ExecutionContext& context,
     if(!GemmFwdBase::IsApplicable(context, problem))
         return false;
 
-    if(!problem.IsLayoutDefault())
-        return false;
-
     decltype(auto) conv  = problem.GetConv();
     decltype(auto) wDesc = problem.GetWeights();
 
@@ -725,7 +722,7 @@ bool GemmFwd1x1_0_1::IsApplicable(const ExecutionContext& context,
     // for f8 on every architecture except gfx942. Grouped NHWC has no branch there at all.
     const auto nhwc_supported = problem.IsLayoutNHWC() && conv.group_count == 1 &&
                                 !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
-    if(!problem.IsLayoutDefault() && !nhwc_supported)
+    if(!(problem.IsLayoutDefault() || nhwc_supported))
         return false;
 
     const auto spatial_dim = conv.GetSpatialDimension();
@@ -784,6 +781,7 @@ ConvSolution GemmFwd1x1_0_1::GetSolution(const ExecutionContext& context,
             tmp.strideA         = 0;
             tmp.strideB         = 0;
             tmp.strideC         = 0;
+            tmp.isColMajor      = false;
             tmp.m               = static_cast<int>(in_n * out_spatial_size);
             tmp.n               = static_cast<int>(wei_k);
             tmp.transA          = false;
