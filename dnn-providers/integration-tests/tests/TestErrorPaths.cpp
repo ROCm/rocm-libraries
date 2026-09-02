@@ -1,25 +1,28 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Exception-type routing: EngineNotApplicableError→SKIP,
-// ReferenceCapabilityError→SKIP, generic exception→FAIL.
+// Exception-type routing: EngineOpResult::declinedBy() -> SKIP,
+// ReferenceCapabilityError / isApplicable()==false -> SKIP, generic exception -> FAIL.
 
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
-#include <cstring>
+#include <cstddef>
 #include <filesystem>
-#include <fstream>
-#include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <vector>
+
+#include <gmock/gmock.h>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceNotApplicableError.hpp>
 
+#include "BundleFixtureFiles.hpp"
+#include "HarnessTestSupport.hpp"
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
-#include "harness/EngineNotApplicableError.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
@@ -32,257 +35,175 @@ using namespace hipdnn_integration_tests::bundle;
 namespace
 {
 
-using EngineStub = std::function<void(std::unordered_map<int64_t, void*>&)>;
-using RefStub = std::function<void(ReferenceExecutorType, std::unordered_map<int64_t, void*>&)>;
-
-class ErrorPathHarness : public IntegrationBundleVerificationHarness
-{
-public:
-    ErrorPathHarness(VerificationMode mode, EngineStub engineStub, RefStub refStub)
-        : IntegrationBundleVerificationHarness(/*requiresDevice=*/false)
-        , _mode(mode)
-        , _engineStub(std::move(engineStub))
-        , _refStub(std::move(refStub))
-    {
-    }
-
-    using IntegrationBundleVerificationHarness::SetUp;
-    using IntegrationBundleVerificationHarness::TestBody;
-
-protected:
-    VerificationMode getVerificationMode() const override
-    {
-        return _mode;
-    }
-
-    void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack) override
-    {
-        _engineStub(variantPack);
-    }
-
-    void runReferenceExecutor(ReferenceExecutorType type,
-                              std::unordered_map<int64_t, void*>& variantPack) override
-    {
-        _refStub(type, variantPack);
-    }
-
-    std::unique_ptr<IReferenceGraphExecutor>
-        makeReferenceExecutor(ReferenceExecutorType /*type*/) override
-    {
-        return nullptr;
-    }
-
-    void applyMetadataGuards() const override {}
-
-private:
-    VerificationMode _mode;
-    EngineStub _engineStub;
-    RefStub _refStub;
-};
-
 class TestErrorPaths : public ::testing::Test
 {
 protected:
     std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
     std::filesystem::path _tempDir;
 
-    static constexpr float K_OUTPUT_VALUE = 3.5f;
-    static constexpr int64_t K_OUTPUT_UID = 5;
-    static constexpr size_t K_OUTPUT_ELEMS = 120;
-
     void SetUp() override
     {
-        auto path
-            = std::filesystem::temp_directory_path()
-              / ("err_path_test_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        testing_support::ensureTestConfigInitialized();
+        _scopedDir.emplace(scratch::makeDir("err_path_test_"));
         _tempDir = _scopedDir->path();
     }
 
-    static void writeBundleFiles(const std::filesystem::path& dir,
-                                 const std::string& name,
-                                 bool includeGoldenOutput)
-    {
-        std::filesystem::create_directories(dir);
-        std::ofstream(dir / (name + ".json"))
-            << R"({"nodes": [{"inputs": {"x_tensor_uid": 0, "mean_tensor_uid": 1, )"
-               R"("inv_variance_tensor_uid": 2, "scale_tensor_uid": 3, "bias_tensor_uid": 4}, )"
-               R"("outputs": {"y_tensor_uid": 5}, "type": "BatchnormInferenceAttributes", )"
-               R"("compute_data_type": "float", "name": ""}], "tensors": [)"
-               R"({"name": "", "uid": 0, "strides": [60, 20, 5, 1], "dims": [2, 3, 4, 5], )"
-               R"("data_type": "float", "virtual": false}, )"
-               R"({"name": "", "uid": 1, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
-               R"("data_type": "float", "virtual": false}, )"
-               R"({"name": "", "uid": 2, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
-               R"("data_type": "float", "virtual": false}, )"
-               R"({"name": "", "uid": 3, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
-               R"("data_type": "float", "virtual": false}, )"
-               R"({"name": "", "uid": 4, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
-               R"("data_type": "float", "virtual": false}, )"
-               R"({"name": "", "uid": 5, "strides": [60, 20, 5, 1], "dims": [2, 3, 4, 5], )"
-               R"("data_type": "float", "virtual": false}], "io_data_type": "float", )"
-               R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
-
-        std::ofstream(dir / (name + ".meta.json"))
-            << R"({"format_version": 1, "operation": "BatchnormInference"})";
-
-        const auto basePath = (dir / name).string();
-        const auto writeFloatBin = [&](int64_t uid, size_t elems, float value) {
-            const std::vector<float> data(elems, value);
-            std::ofstream out(basePath + ".tensor" + std::to_string(uid) + ".bin",
-                              std::ios::binary);
-            out.write(reinterpret_cast<const char*>(data.data()),
-                      static_cast<std::streamsize>(data.size() * sizeof(float)));
-        };
-
-        writeFloatBin(0, 120, 0.0f);
-        writeFloatBin(1, 3, 0.0f);
-        writeFloatBin(2, 3, 0.0f);
-        writeFloatBin(3, 3, 0.0f);
-        writeFloatBin(4, 3, 0.0f);
-
-        if(includeGoldenOutput)
-        {
-            writeFloatBin(K_OUTPUT_UID, K_OUTPUT_ELEMS, K_OUTPUT_VALUE);
-        }
-    }
-
+    /// Writes and loads a bundle under the fixture's temp dir.
     std::shared_ptr<IntegrationTestBundle> loadBundle(const std::string& name,
                                                       bool includeGoldenOutput) const
     {
-        const auto dir = _tempDir / name;
-        writeBundleFiles(dir, name, includeGoldenOutput);
-        auto result = loadIntegrationTestBundle(dir / (name + ".json"));
-        EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
-        return std::make_shared<IntegrationTestBundle>(
-            std::move(std::get<IntegrationTestBundle>(result)));
+        return fixtures::loadBundle(_tempDir, name, includeGoldenOutput);
     }
 
-    static void writeOutput(std::unordered_map<int64_t, void*>& variantPack, float value)
-    {
-        auto* ptr = static_cast<float*>(variantPack.at(K_OUTPUT_UID));
-        std::fill(ptr, ptr + K_OUTPUT_ELEMS, value);
-    }
-
-    static bool anyFailed(const ::testing::TestPartResultArray& results)
-    {
-        for(int i = 0; i < results.size(); ++i)
-        {
-            if(results.GetTestPartResult(i).failed())
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    static bool anySkipped(const ::testing::TestPartResultArray& results)
-    {
-        for(int i = 0; i < results.size(); ++i)
-        {
-            if(results.GetTestPartResult(i).skipped())
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    static void runCapturing(std::shared_ptr<IntegrationTestBundle> bundle,
+    /// Builds the real harness on top of `mocks` and drives it through one bundle.
+    static void runCapturing(testing_support::HarnessMocks& mocks,
+                             std::shared_ptr<IntegrationTestBundle> bundle,
                              VerificationMode mode,
-                             EngineStub engineStub,
-                             RefStub refStub,
                              ::testing::TestPartResultArray* results)
     {
-        ErrorPathHarness harness(mode, std::move(engineStub), std::move(refStub));
+        IntegrationBundleVerificationHarness harness(
+            mocks.dependencies(testing_support::hostPolicy(mode)));
         harness.setBundle(std::move(bundle), "err-path-test-bundle");
-
-        const ::testing::ScopedFakeTestPartResultReporter reporter(
-            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
-        harness.SetUp();
-        if(!anySkipped(*results))
-        {
-            harness.TestBody();
-        }
-    }
-
-    static EngineStub matchingEngine()
-    {
-        return [](std::unordered_map<int64_t, void*>& vp) { writeOutput(vp, K_OUTPUT_VALUE); };
-    }
-
-    static RefStub unusedRef()
-    {
-        return [](ReferenceExecutorType, std::unordered_map<int64_t, void*>&) {
-            FAIL() << "Reference executor should not be called";
-        };
+        testing_support::driveHarness(harness, results);
     }
 };
 
+// The engine seam answers "not mine" with EngineOpResult::declinedBy(...) rather
+// than throwing: a decline is an answer, and the harness turns it into a SKIP.
 TEST_F(TestErrorPaths, EngineNotApplicableSkips)
 {
-    ::testing::TestPartResultArray results;
-    runCapturing(
-        loadBundle("eng_not_applicable", /*includeGoldenOutput=*/true),
-        VerificationMode::GOLDEN,
-        [](auto&) { throw EngineNotApplicableError("stub: engine does not support graph"); },
-        unusedRef(),
-        &results);
+    testing_support::HarnessMocks mocks;
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(
+            ::testing::Return(EngineOpResult::declinedBy("stub: engine does not support graph")));
+    EXPECT_CALL(mocks.referenceExecutors, get(::testing::_)).Times(0);
 
-    EXPECT_TRUE(anySkipped(results)) << "EngineNotApplicableError should produce a SKIP";
-    EXPECT_FALSE(anyFailed(results));
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks,
+                 loadBundle("eng_not_applicable", /*includeGoldenOutput=*/true),
+                 VerificationMode::GOLDEN,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results)) << "A declined engine should produce a SKIP";
+    EXPECT_FALSE(testing_support::anyFailed(results));
 }
 
+// A generic engine problem is loud, never silently swallowed as a SKIP. The runner
+// answers with EngineOpResult::failed(message) and the harness turns it into a
+// FailureOrigin::ENGINE outcome carrying that message.
 TEST_F(TestErrorPaths, EngineCrashFails)
 {
-    auto bundle = loadBundle("eng_crash", /*includeGoldenOutput=*/true);
+    testing_support::HarnessMocks mocks;
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(EngineOpResult::failed("stub: unexpected engine crash")));
+    EXPECT_CALL(mocks.referenceExecutors, get(::testing::_)).Times(0);
 
-    EXPECT_THROW(
-        {
-            ::testing::TestPartResultArray results;
-            runCapturing(
-                std::move(bundle),
-                VerificationMode::GOLDEN,
-                [](auto&) { throw std::runtime_error("stub: unexpected engine crash"); },
-                unusedRef(),
-                &results);
-        },
-        std::runtime_error)
-        << "A generic engine exception must propagate, not be silently swallowed";
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks,
+                 loadBundle("eng_crash", /*includeGoldenOutput=*/true),
+                 VerificationMode::GOLDEN,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results))
+        << "A generic engine failure must FAIL the test, not be silently swallowed";
+    EXPECT_THAT(testing_support::allMessages(results),
+                ::testing::HasSubstr("stub: unexpected engine crash"));
 }
 
+// An empty message on a FAILED outcome means "the failure is already on the gtest
+// record with more detail than this could add", which only the comparison can
+// promise. The engine seam cannot, so the harness has to name the failure itself —
+// an engine error that produces a green test is the exact shape this harness
+// exists to rule out.
+TEST_F(TestErrorPaths, EngineFailureWithNoMessageStillFails)
+{
+    testing_support::HarnessMocks mocks;
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(EngineOpResult::failed("")));
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks,
+                 loadBundle("eng_silent_crash", /*includeGoldenOutput=*/true),
+                 VerificationMode::GOLDEN,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results))
+        << "an engine failure with no message must still fail the test";
+    EXPECT_THAT(testing_support::allMessages(results),
+                ::testing::HasSubstr("err-path-test-bundle"));
+}
+
+// One of the two forms the harness maps to CAPABILITY_MISS; the other is
+// isApplicable()==false, covered by RefNotApplicableSkips below.
 TEST_F(TestErrorPaths, RefCapabilityMissSkips)
 {
-    ::testing::TestPartResultArray results;
-    runCapturing(
-        loadBundle("ref_cap_miss", /*includeGoldenOutput=*/false),
-        VerificationMode::CPU,
-        matchingEngine(),
-        [](ReferenceExecutorType, auto&) {
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+    ON_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t, const VariantPack&) {
             throw ReferenceCapabilityError("stub: no plan for this op");
-        },
-        &results);
+        });
 
-    EXPECT_TRUE(anySkipped(results)) << "ReferenceCapabilityError should produce a SKIP";
-    EXPECT_FALSE(anyFailed(results));
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks,
+                 loadBundle("ref_cap_miss", /*includeGoldenOutput=*/false),
+                 VerificationMode::CPU,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results))
+        << "ReferenceCapabilityError should produce a SKIP";
+    EXPECT_FALSE(testing_support::anyFailed(results));
 }
 
+// The other capability-miss form: the reference says up front, via isApplicable(),
+// that it has no plan for this op, without ever being asked to execute.
+TEST_F(TestErrorPaths, RefNotApplicableSkips)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+    ON_CALL(mocks.cpuReference, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(false));
+    EXPECT_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks,
+                 loadBundle("ref_not_applicable", /*includeGoldenOutput=*/false),
+                 VerificationMode::CPU,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results))
+        << "isApplicable()==false should produce a SKIP";
+    EXPECT_FALSE(testing_support::anyFailed(results));
+}
+
+// A reference that breaks on an op it accepted is a real defect in the reference,
+// so it routes to RefStatus::RUNTIME_ERROR and fails the test.
 TEST_F(TestErrorPaths, RefCrashFails)
 {
-    ::testing::TestPartResultArray results;
-    runCapturing(
-        loadBundle("ref_crash", /*includeGoldenOutput=*/false),
-        VerificationMode::CPU,
-        matchingEngine(),
-        [](ReferenceExecutorType, auto&) {
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+    ON_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t, const VariantPack&) -> void {
             throw std::runtime_error("stub: ref crashed on supported op");
-        },
-        &results);
+        });
 
-    EXPECT_TRUE(anyFailed(results))
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(mocks.reporter, refErrors);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks,
+                 loadBundle("ref_crash", /*includeGoldenOutput=*/false),
+                 VerificationMode::CPU,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results))
         << "A generic ref exception must route to RUNTIME_ERROR and FAIL the test";
+    ASSERT_EQ(refErrors.size(), 1U)
+        << "A crashing reference must publish exactly one reference error";
+    EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("stub: ref crashed on supported op"));
 }
 
 TEST_F(TestErrorPaths, AdapterTranslatesNotApplicableToCapabilityError)

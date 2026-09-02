@@ -11,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "ScratchDirectory.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -39,14 +40,13 @@ nlohmann::json makeSweepGroup(const std::vector<std::string>& cases,
     return group;
 }
 
+// Unique-per-test scratch directory. Keyed on pid, clock and a counter rather than
+// the source line: a line-keyed name is identical across two concurrent runs of this
+// binary, and reusing it requires a remove_all() that deletes the other run's
+// fixture. See ScratchDirectory.hpp.
 ScopedDirectory makeScopedTestDir(const std::string& prefix)
 {
-    auto path
-        = std::filesystem::temp_directory_path()
-          / (prefix + "_"
-             + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-    std::filesystem::remove_all(path);
-    return {path};
+    return hipdnn_integration_tests::scratch::makeDir(prefix + "_");
 }
 
 } // namespace
