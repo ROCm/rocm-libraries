@@ -1840,6 +1840,11 @@ class Solution(collections.abc.Mapping):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
+      # Newly generated SK3 / SK5 kernels emit the per-tile extra-iters asm
+      # path. SK4 (dynamic) does not. Older/custom kernels keep the default
+      # False via YAML omission / defaultInternalSupportParams.
+      if state["StreamK"] in (3, 5):
+        state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = True
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if state["ClusterDim"] != [1, 1]:

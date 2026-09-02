@@ -256,8 +256,10 @@ namespace TensileLite
      * a flat iteration space of tiles*itersPerTile, a data-parallel prefix of
      * (tiles - skTiles) whole tiles, and a StreamK region cut into skGrid
      * chunks. extraIters is the leftover skTiles*itersPerTile -
-     * SKItersPerWG*skGrid; workgroups below it get a chunk one iteration
-     * longer than the rest (StreamK.py skExtraIters).
+     * SKItersPerWG*skGrid under the historical global first-E mapping;
+     * kernels with InternalArgsSupport::perTileExtraIters may redistribute
+     * those extras within each tile when skGrid % skTiles == 0
+     * (StreamK.py skAssignIters).
      */
     struct StreamKStaticSplit
     {
@@ -295,13 +297,57 @@ namespace TensileLite
      * is insensitive to how tile indices map to (m-tile, n-tile) -- WGM,
      * SpaceFillingAlgo and XCC swizzling do not enter into it.
      *
-     * @param split        The split streamKStaticSplit() produced.
-     * @param tiles        The same batch-inclusive tile count fed to it.
-     * @param itersPerTile The same clamped iterations per tile fed to it.
+     * @param split             The split streamKStaticSplit() produced.
+     * @param tiles             The same batch-inclusive tile count fed to it.
+     * @param itersPerTile      The same clamped iterations per tile fed to it.
+     * @param skGrid            The resolved StreamK grid packed into the split.
+     * @param perTileExtraIters True when the selected kernel redistributes
+     *                          Stream-K extras within each tile
+     *                          (InternalArgsSupport::perTileExtraIters).
      */
     TENSILELITEHOST_EXPORT bool streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
                                                             size_t                    tiles,
-                                                            size_t itersPerTile);
+                                                            size_t                    itersPerTile,
+                                                            size_t                    skGrid            = 0,
+                                                            bool                      perTileExtraIters = false);
+
+    /**
+     * Whether a resolved Stream-K launch may use parallel reduction under
+     * uniform summation order.
+     *
+     * True when reduction is parallel, streamKAtomic is 0, the ABI is static
+     * two-tile packing (StreamK=3, or StreamK=5 with dynamic sub-mode off),
+     * and the grid is an exact multiple of the tile count with split factor
+     * F = grid/tiles >= 2. Callers must already have cleared the static
+     * Stream-K obstacles (the launch gate checks those first). Does not
+     * consult StaggerU: the device clears it for F >= 2.
+     *
+     * Parallel extras are per PartialIdx and tile-symmetric, so I % F == 0 is
+     * not required (unlike the tree all-partial model without per-tile extras).
+     */
+    TENSILELITEHOST_EXPORT bool streamKParallelReductionRowUniform(StreamKSettings const& sk,
+                                                                   int  streamKAtomic,
+                                                                   bool staticTwoTilePacking,
+                                                                   size_t tiles);
+
+    /**
+     * Iteration range [start, end) assigned to workgroup w under the static
+     * two-tile StreamK mapping. When perTileExtraIters is true and
+     * skGrid % tiles == 0, extras are distributed within each tile;
+     * otherwise the historical global first-E mapping is used.
+     */
+    struct StreamKWorkgroupIterRange
+    {
+        size_t start = 0;
+        size_t end   = 0;
+    };
+
+    TENSILELITEHOST_EXPORT StreamKWorkgroupIterRange streamKWorkgroupIterRange(
+        size_t w,
+        size_t tiles,
+        size_t itersPerTile,
+        size_t skGrid,
+        bool   perTileExtraIters);
 
     /**
      * Thrown when a launch requests uniform summation order but the resolved
@@ -476,6 +522,37 @@ namespace TensileLite
         // available: getSKGridImpl out-param (AMDGPU skFixedGrid override applied).
         bool fixedGridUsed            = false;
     };
+
+    /**
+     * Selection-time diagnostics for uniform summation order.
+     *
+     * Under uniform summation order the library filters out every solution it
+     * cannot prove row-uniform, so a lookup can legitimately return nothing.
+     * That is visible to the caller only as "no solution found", which does not
+     * say whether uniform summation order was responsible or which of its
+     * clauses did the work. These two functions close that gap: the filter tags
+     * each rejection with a short stable token, and the caller that observes an
+     * empty result asks for the tally back.
+     *
+     * The tally is thread-local and covers the candidates examined since the
+     * last reset, which a caller performs immediately before a lookup.
+     *
+     * Everything here is inert unless TENSILE_DB bit 0x200000 is set: recording
+     * is a branch on a cached flag, so no counting, formatting or allocation
+     * happens on a normal run. It is a dedicated bit rather than a log level so
+     * that enabling it does not also switch on per-call tracing.
+     */
+    TENSILELITEHOST_EXPORT void uniformSummationOrderSelectionTallyReset();
+
+    /**
+     * Renders the tally as `<token>:<count>` pairs, most frequent first, joined
+     * by commas; "none" when no candidate reached the filter. The count of
+     * candidates that reached the filter is returned through examined, so a
+     * caller can tell "uniform summation order emptied the set" from "the set
+     * was already empty when the filter ran".
+     */
+    TENSILELITEHOST_EXPORT std::string
+        uniformSummationOrderSelectionTallyReport(size_t& examined, size_t& refused);
 
     /**
      * Represents a single kernel or set of kernels that can perform a single
@@ -656,9 +733,10 @@ namespace TensileLite
         // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
-        // Selection-time filter for uniform summation order. Permissive about
-        // facts that only exist at solve(); checkUniformSummationOrder() is
-        // authoritative. Wired into softwarePredicate().
+        // Selection-time filter for uniform summation order. Resolves StreamK /
+        // GSU / StaggerU the same way solve() does and admits only launches
+        // checkUniformSummationOrder() would accept, except the StreamK
+        // Synchronizer pointer (not allocated yet). Wired into softwarePredicate().
         bool                 uniformSummationOrderSupported(Problem const&  problem,
                                                             Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
@@ -876,12 +954,17 @@ namespace TensileLite
 
         struct InternalArgsSupport
         {
-            int  version          = 0;
-            bool gsu              = true;
-            bool wgm              = true;
-            bool staggerU         = true;
-            bool useUniversalArgs = true;
-            bool useSFC           = false;
+            int  version            = 0;
+            bool gsu                = true;
+            bool wgm                = true;
+            bool staggerU           = true;
+            // Kernel distributes Stream-K extra iters within each tile when
+            // skGrid % skTiles == 0. Older/custom kernels leave this false;
+            // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
+            // grid steering consults the same bit.
+            bool perTileExtraIters  = false;
+            bool useUniversalArgs   = true;
+            bool useSFC             = false;
         };
 
         struct ProblemType
@@ -1012,6 +1095,32 @@ namespace TensileLite
 
     private:
         bool handwrittenCustomKernel() const;
+
+        // Same StreamK grid / reduction solve() packs, including the
+        // insufficient-workspace fall back to tree + grid==tiles.
+        StreamKSettings resolveStreamKSettings(Problem const&  problem,
+                                               Hardware const& hardware) const;
+
+        // Reasons checkUniformSummationOrder() would refuse this launch.
+        // Empty means the launch is row-uniform. requireSynchronizer is the
+        // one clause that exists only at solve() (the pointer is not allocated
+        // at heuristic time); selection passes false.
+        //
+        // obstacleToken, when non-null, receives a short stable identifier for
+        // whichever clause objected, written by that clause itself rather than
+        // recovered from the prose. It points at a string literal with static
+        // storage duration and is left untouched when the return value is
+        // empty. It exists so a diagnostic can name the reason without parsing
+        // the human-readable text, which is free to change.
+        std::string uniformSummationOrderLaunchObstacle(
+            Problem const&         problem,
+            Hardware const&        hardware,
+            StreamKSettings const& sk,
+            size_t                 resolvedGlobalAccumulation,
+            uint32_t               gsu,
+            void const*            synchronizer,
+            bool                   requireSynchronizer,
+            char const**           obstacleToken = nullptr) const;
 
         // Launch gate. Call once sk and resolvedGlobalAccumulation are final.
         void checkUniformSummationOrder(Problem const&         problem,

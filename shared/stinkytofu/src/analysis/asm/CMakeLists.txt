@@ -6,3 +6,5 @@ target_sources(stinkytofu_objs PRIVATE
     HazardGapAnalysisPass.cpp
     WmmaHideBudgetAnalysis.cpp
 )
+
+add_subdirectory(ssa)

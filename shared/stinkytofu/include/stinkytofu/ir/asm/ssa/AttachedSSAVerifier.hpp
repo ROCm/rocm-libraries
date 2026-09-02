@@ -25,15 +25,13 @@
 #include <string>
 #include <vector>
 
-#include "stinkytofu/Export.hpp"
-
 namespace stinkytofu {
 
 class Function;
 
 /// All attached-SSA invariant violations found in one function, in
 /// deterministic order.
-struct STINKYTOFU_EXPORT AttachedSSAVerificationResult {
+struct AttachedSSAVerificationResult {
     std::vector<std::string> errors;
 
     bool ok() const {
@@ -48,6 +46,6 @@ struct STINKYTOFU_EXPORT AttachedSSAVerificationResult {
 /// A function with no attached SSA is valid (pre-lift). Instructions without
 /// attached SSA are skipped. Values in the Function arena are always checked
 /// for use-list symmetry when any SSA is present.
-STINKYTOFU_EXPORT AttachedSSAVerificationResult verifyAttachedSSA(const Function& function);
+AttachedSSAVerificationResult verifyAttachedSSA(const Function& function);
 
 }  // namespace stinkytofu

@@ -36,8 +36,10 @@
 #include "rocsparse_coosv.hpp"
 #include "rocsparse_cscsv.hpp"
 #include "rocsparse_csrsv.hpp"
+#include "rocsparse_diagonal_solve.hpp"
 #include "rocsparse_ellsv.hpp"
 #include "rocsparse_sptrsv_descr.hpp"
+#include "rocsparse_trm_info.hpp"
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_stage value)
@@ -77,6 +79,10 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_input value)
     case rocsparse_sptrsv_input_scalar_datatype:
     case rocsparse_sptrsv_input_compute_datatype:
     case rocsparse_sptrsv_input_analysis_policy:
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    case rocsparse_sptrsv_input_solve_mode:
+    case rocsparse_sptrsv_input_diagonal_modifier:
+#endif
     {
         return false;
     }
@@ -173,6 +179,42 @@ try
         sptrsv_descr->set_scalar_alpha(data);
         return rocsparse_status_success;
     }
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    case rocsparse_sptrsv_input_solve_mode:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_solve_mode),
+                           rocsparse_status_invalid_size);
+        const rocsparse_solve_mode solve_mode
+            = *reinterpret_cast<const rocsparse_solve_mode*>(data);
+        ROCSPARSE_CHECKARG(3,
+                           data,
+                           (solve_mode != rocsparse_solve_mode_triangular
+                            && solve_mode != rocsparse_solve_mode_diagonal),
+                           rocsparse_status_invalid_value);
+        sptrsv_descr->set_solve_mode(solve_mode);
+        return rocsparse_status_success;
+    }
+
+    case rocsparse_sptrsv_input_diagonal_modifier:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(rocsparse_diagonal_modifier),
+                           rocsparse_status_invalid_size);
+        const rocsparse_diagonal_modifier diagonal_modifier
+            = *reinterpret_cast<const rocsparse_diagonal_modifier*>(data);
+        ROCSPARSE_CHECKARG(3,
+                           data,
+                           (diagonal_modifier != rocsparse_diagonal_modifier_none
+                            && diagonal_modifier != rocsparse_diagonal_modifier_absolute),
+                           rocsparse_status_invalid_value);
+        sptrsv_descr->set_diagonal_modifier(diagonal_modifier);
+        return rocsparse_status_success;
+    }
+#endif
 
     case rocsparse_sptrsv_input_compute_datatype:
     {
@@ -846,6 +888,76 @@ namespace rocsparse
 
             const rocsparse_datatype alpha_datatype = sptrsv_descr->get_compute_datatype();
             sptrsv_descr->m_batch_count             = dnvec_descr_y->batch_count;
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+            if(sptrsv_descr->get_solve_mode() != rocsparse_solve_mode_triangular)
+            {
+                const int64_t                     batch_count = dnvec_descr_y->batch_count;
+                const rocsparse_diagonal_modifier modifier = sptrsv_descr->get_diagonal_modifier();
+
+                switch(format)
+                {
+                case rocsparse_format_csr:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::diagonal_solve_csr(handle,
+                                                      operation,
+                                                      modifier,
+                                                      alpha,
+                                                      A,
+                                                      sptrsv_descr->get_csrsv_info(),
+                                                      static_cast<int64_t>(1),
+                                                      dnvec_descr_x->const_values,
+                                                      dnvec_descr_x->inc,
+                                                      static_cast<int64_t>(0),
+                                                      dnvec_descr_x->batch_stride,
+                                                      dnvec_descr_y->values,
+                                                      dnvec_descr_y->inc,
+                                                      static_cast<int64_t>(0),
+                                                      dnvec_descr_y->batch_stride,
+                                                      batch_count,
+                                                      false));
+                    sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
+                    return rocsparse_status_success;
+                }
+                case rocsparse_format_csc:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::diagonal_solve_csc(handle,
+                                                      operation,
+                                                      modifier,
+                                                      alpha,
+                                                      A,
+                                                      sptrsv_descr->get_csrsv_info(),
+                                                      static_cast<int64_t>(1),
+                                                      dnvec_descr_x->const_values,
+                                                      dnvec_descr_x->inc,
+                                                      static_cast<int64_t>(0),
+                                                      dnvec_descr_x->batch_stride,
+                                                      dnvec_descr_y->values,
+                                                      dnvec_descr_y->inc,
+                                                      static_cast<int64_t>(0),
+                                                      dnvec_descr_y->batch_stride,
+                                                      batch_count,
+                                                      false));
+                    sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
+                    return rocsparse_status_success;
+                }
+                case rocsparse_format_coo:
+                case rocsparse_format_coo_aos:
+                case rocsparse_format_bsr:
+                case rocsparse_format_ell:
+                case rocsparse_format_bell:
+                case rocsparse_format_sell:
+                {
+                    // LCOV_EXCL_START
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+                    // LCOV_EXCL_STOP
+                }
+                }
+            }
+#endif
+
             switch(format)
             {
             case rocsparse_format_csr:
