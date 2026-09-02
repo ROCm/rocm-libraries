@@ -15,12 +15,16 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <optional>
+
 #include "../KernelIngestorTestFixtures.hpp"
 
 #include <hipdnn_plugin_sdk/ingestor/KernelHeuristicFactory.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/NativeScorerRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/uhd/UhdLoader.hpp>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/uhd_generated.h>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -118,7 +122,8 @@ hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec preferLargeTilesOnLon
 std::string writeUhd(const std::filesystem::path& dir,
                      const std::string& modelFileName,
                      const std::string& objective,
-                     const std::string& featuresHash)
+                     const std::string& featuresHash,
+                     bool calibrated)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -137,7 +142,7 @@ std::string writeUhd(const std::filesystem::path& dir,
         signature.push_back(builder.CreateString(entry));
     }
     auto signatureVec = builder.CreateVector(signature);
-    auto score = fbs::CreateUhdScoreMetadata(builder, units, true, transform);
+    auto score = fbs::CreateUhdScoreMetadata(builder, units, calibrated, transform);
 
     auto uhd = fbs::CreateUHD(builder,
                               id,
@@ -172,7 +177,11 @@ struct Fixture
 Fixture writeFixture(const std::filesystem::path& dir,
                      const hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec& tree,
                      const std::string& objective = "max",
-                     const std::string& modelHash = {})
+                     const std::string& modelHash = {},
+                     // RFC 0019.13 §15.1 binds these: a calibrated score is cross-engine
+                     // TFLOPS and therefore ascending, so a descending objective defaults to
+                     // uncalibrated. A caller passing the pair explicitly is testing the rule.
+                     std::optional<bool> calibrated = std::nullopt)
 {
     const std::string signatureHash = uhd::FeatureExtractor::computeHash(SIGNATURE);
 
@@ -183,7 +192,12 @@ Fixture writeFixture(const std::filesystem::path& dir,
         .addTree(tree);
     model.buildToFile((dir / "model.bin").string());
 
-    return {writeUhd(dir, "model.bin", objective, signatureHash), signatureHash};
+    return {writeUhd(dir,
+                     "model.bin",
+                     objective,
+                     signatureHash,
+                     calibrated.value_or(objective != "min")),
+            signatureHash};
 }
 
 HeuristicDescriptor modelDescriptor(const std::filesystem::path& dir, const std::string& payload)
@@ -521,6 +535,82 @@ TEST(TestIngestorUhdKernelHeuristic, ArchResolutionIsStableAcrossCalls)
     EXPECT_EQ(first.front().kernelId, again.front().kernelId) << "the cache changed its answer";
     EXPECT_NE(first.front().kernelId, other.front().kernelId)
         << "two architectures were served the same model";
+}
+
+/// RFC 0019.13 §15.2: "an ordered sequence of `(UKD id, score)`, winner first". The score
+/// travels with the id because §15.2's named callers need it -- a knob query reports the
+/// top-ranked value as its default, autotune walks the list, and engine selection reads the top
+/// score as the engine's figure of merit. Returning order alone makes the third impossible.
+TEST(TestIngestorUhdKernelHeuristic, SelectionReturnsIdsWithScoresWinnerFirst)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_scored_form");
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles());
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_EQ(scored.front().kernelId, testId(0x02)) << "winner is not first";
+    // Ordered by score, and the scores are real rather than placeholders -- a caller reading
+    // the top one as a figure of merit has to get the model's number.
+    EXPECT_GT(scored.front().score, scored.back().score);
+    EXPECT_FALSE(std::isnan(scored.front().score));
+
+    // The whole-kernel view reports the same order, since one implementation decides it.
+    const auto ordered = heuristic->rank(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(ordered.size(), scored.size());
+    for(size_t i = 0; i < ordered.size(); ++i)
+    {
+        EXPECT_EQ(ordered[i].kernelId, scored[i].kernelId) << "views disagree at " << i;
+    }
+}
+
+TEST(TestIngestorUhdKernelHeuristic, ADegradedRankingReportsNoScoreRatherThanAFakeOne)
+{
+    // Declared order carries no model score. Reporting 0.0 would let engine selection read a
+    // fallback as a figure of merit and rank the engine last on merit it never claimed.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_scored_degraded");
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles());
+
+    // A knob set the model does not read breaks the §6.3 contract, so ranking degrades.
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {}, {"tile_m", "split_k"});
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_TRUE(std::isnan(scored.front().score))
+        << "a fallback ordering must not report a score it did not compute";
+}
+
+TEST(TestIngestorUhdKernelHeuristic, ACalibratedScoreCannotAlsoBeMinimising)
+{
+    // RFC 0019.13 §15.1: §11.3 requires a cross-engine score to be an absolute metric on a
+    // scale that means the same thing everywhere -- TFLOPS, which ascends. Accepting this pair
+    // would have engine selection compare one engine's throughput against another's latency
+    // and rank the faster engine last, with nothing in the output to show it happened. So the
+    // load fails rather than picking a direction.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_calibrated_min");
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/true);
+
+    EXPECT_FALSE(uhd::UhdLoader::load(dir.path() / fixture.uhdFileName).has_value())
+        << "a calibrated, minimising UHD loaded";
+
+    // The supported pairing -- rank on a cost target, decline cross-engine comparison -- still
+    // loads, so the check rejects the contradiction rather than the objective.
+    const hipdnn_test_sdk::utilities::ScopedDirectory okDir("uhd_uncalibrated_min");
+    const auto ok = writeFixture(okDir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/false);
+    EXPECT_TRUE(uhd::UhdLoader::load(okDir.path() / ok.uhdFileName).has_value());
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

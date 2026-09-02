@@ -196,6 +196,23 @@ inline std::optional<UhdConfig>
             config.scoreUnits = scoreMetadata->units()->str();
         }
         config.scoreCalibrated = scoreMetadata->calibrated();
+
+        // RFC 0019.13 §15.1: `objective: min` is legal only where the score is uncalibrated.
+        // §11.3 requires a cross-engine score to be an absolute metric on a scale that means
+        // the same thing everywhere -- calibrated TFLOPS, which is necessarily ascending. A UHD
+        // claiming both would have engine selection compare one engine's throughput against
+        // another's latency and rank the faster one last, so it is rejected at load rather than
+        // silently preferred one way. Declaring `calibrated: false` alongside `min` is the
+        // supported combination: rank within your own engine, decline cross-engine comparison.
+        if(config.scoreCalibrated && config.objective == "min")
+        {
+            HIPDNN_SDK_LOG_ERROR(
+                "UHD declares score.calibrated=true with objective=min. A calibrated score is "
+                "cross-engine comparable and therefore ascending (TFLOPS); set calibrated=false "
+                "to rank on a cost target within one engine.");
+            return std::nullopt;
+        }
+
         if(scoreMetadata->transform() != nullptr)
         {
             config.scoreTransform = scoreMetadata->transform()->str();
