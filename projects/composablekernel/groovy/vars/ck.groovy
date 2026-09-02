@@ -1404,11 +1404,9 @@ def runComprehensiveConvDatasetTests() {
     )
 }
 
-def runTileEngineBasicTests(String compiler) {
-    buildAndTest(
-        setup_args: "NO_CK_BUILD",
-        build_type: 'Release',
-        execute_cmd: """
+@NonCPS
+String _tileEngineBasicCmd(String compiler) {
+    return """
             cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
                 -D BUILD_CK_TILE_ENGINE="ON" \
                 -D CMAKE_CXX_COMPILER="${compiler}" \
@@ -1423,17 +1421,23 @@ def runTileEngineBasicTests(String compiler) {
                 -D GEMM_PRESHUFFLE_DATATYPE="fp16;fp8;bf16;bf8" \
                 -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
                 -D GEMM_PRESHUFFLE_CONFIG_FILE="default_ci_config.json" .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
+            ninja -j\$(nproc) benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
             python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json"""
+}
+
+def runTileEngineBasicTests(String compiler) {
+    buildAndTest(
+        setup_args: "NO_CK_BUILD",
+        build_type: 'Release',
+        execute_cmd: _tileEngineBasicCmd(compiler)
     )
 }
 
-def runTileEngineGemmTests(String arch, String compiler) {
-    def execute_cmd
-    if (arch == "gfx942") {
-        execute_cmd = """
+@NonCPS
+String _tileEngineGemmCmd_gfx942(String compiler) {
+    return """
             cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
                 -D BUILD_CK_TILE_ENGINE="ON" \
                 -D CMAKE_CXX_COMPILER="${compiler}" \
@@ -1464,7 +1468,7 @@ def runTileEngineGemmTests(String arch, String compiler) {
                 -D BATCHED_GEMM_DATATYPE="fp16" \
                 -D BATCHED_GEMM_LAYOUT="rcr" \
                 -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all  benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_gemm_tensor_quant_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_batched_gemm_all && \
+            ninja -j\$(nproc) benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all  benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_gemm_tensor_quant_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_batched_gemm_all && \
             python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
@@ -1476,8 +1480,11 @@ def runTileEngineGemmTests(String arch, String compiler) {
             python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json && \
             python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json  && \
             python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json batched_gemm_results.json """
-    } else if (arch == "gfx950") {
-        execute_cmd = """
+}
+
+@NonCPS
+String _tileEngineGemmCmd_gfx950(String compiler) {
+    return """
             cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
                 -D BUILD_CK_TILE_ENGINE="ON" \
                 -D CMAKE_CXX_COMPILER="${compiler}" \
@@ -1492,13 +1499,16 @@ def runTileEngineGemmTests(String arch, String compiler) {
                 -D MX_GEMM_DATATYPE="fp4;fp8" \
                 -D MX_GEMM_LAYOUT="rcr" \
                 -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
+            ninja -j\$(nproc) benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
             python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
             python3 ../tile_engine/ops/gemm/mx_gemm/mx_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json mx_gemm_results.json """
-    } else if (arch == "gfx1201") {
-        execute_cmd = """
+}
+
+@NonCPS
+String _tileEngineGemmCmd_gfx1201(String compiler) {
+    return """
             cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
                 -D BUILD_CK_TILE_ENGINE="ON" \
                 -D CMAKE_CXX_COMPILER="${compiler}" \
@@ -1507,10 +1517,101 @@ def runTileEngineGemmTests(String arch, String compiler) {
                 -D GEMM_UNIVERSAL_DATATYPE="fp16" \
                 -D GEMM_UNIVERSAL_LAYOUT="rcr;rrr;crr;ccr" \
                 -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all && \
+            ninja -j\$(nproc) benchmark_gemm_universal_all && \
             python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json"""
+}
+
+def runTileEngineGemmTests(String arch, String compiler) {
+    def execute_cmd
+    if (arch == "gfx942") {
+        execute_cmd = _tileEngineGemmCmd_gfx942(compiler)
+    } else if (arch == "gfx950") {
+        execute_cmd = _tileEngineGemmCmd_gfx950(compiler)
+    } else if (arch == "gfx1201") {
+        execute_cmd = _tileEngineGemmCmd_gfx1201(compiler)
     }
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
+}
+
+@NonCPS
+String _dispatcherPerfCmd(String compiler, String gpuTarget, String samplingTier,
+                          String gemmDatatype, String gemmLayout, String multiLayout,
+                          String quantDatatype, String quantLayout,
+                          String problemSizes, String problemConfigs, String perOpInstances) {
+    if (gpuTarget == "gfx950") {
+        return """
+            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+                -D BUILD_CK_TILE_ENGINE="ON" \
+                -D CMAKE_CXX_COMPILER="${compiler}" \
+                -D CMAKE_BUILD_TYPE=Release \
+                -D GPU_TARGETS="gfx950" \
+                -D GEMM_AQUANT_DATATYPE="${quantDatatype}" \
+                -D GEMM_AQUANT_LAYOUT="${quantLayout}" \
+                -D GEMM_AQUANT_MAX_INSTANCES=${perOpInstances} \
+                -D GEMM_BQUANT_DATATYPE="${quantDatatype}" \
+                -D GEMM_BQUANT_LAYOUT="${quantLayout}" \
+                -D GEMM_BQUANT_MAX_INSTANCES=${perOpInstances} \
+                -D GEMM_ABQUANT_DATATYPE="${quantDatatype}" \
+                -D GEMM_ABQUANT_LAYOUT="${quantLayout}" \
+                -D GEMM_ABQUANT_MAX_INSTANCES=${perOpInstances} \
+                -D MX_GEMM_DATATYPE="${quantDatatype}" \
+                -D MX_GEMM_LAYOUT="${quantLayout}" \
+                -D MX_GEMM_MAX_INSTANCES=${perOpInstances} \
+                -D GEMM_STREAMK_DATATYPE="${gemmDatatype}" \
+                -D GEMM_STREAMK_LAYOUT="${gemmLayout}" \
+                -D GEMM_STREAMK_MAX_INSTANCES=${perOpInstances} \
+                -D TILE_ENGINE_SAMPLING_TIER=${samplingTier} .. && \
+            ninja -j\$(nproc) benchmark_gemm_aquant_all benchmark_gemm_bquant_all benchmark_gemm_abquant_all benchmark_mx_gemm_all benchmark_gemm_streamk_all && \
+            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_aquant/gemm_aquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_aquant_results.json && \
+            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_bquant/gemm_bquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_bquant_results.json && \
+            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_abquant/gemm_abquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_abquant_results.json && \
+            python3 ../tile_engine/ops/gemm/mx_gemm/mx_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json mx_gemm_results.json && \
+            python3 ../tile_engine/ops/gemm_streamk/gemm_streamk_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_streamk_results.json"""
+    }
+    return """
+            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+                -D BUILD_CK_TILE_ENGINE="ON" \
+                -D CMAKE_CXX_COMPILER="${compiler}" \
+                -D CMAKE_BUILD_TYPE=Release \
+                -D GPU_TARGETS="gfx942" \
+                -D GEMM_UNIVERSAL_DATATYPE="${gemmDatatype}" \
+                -D GEMM_UNIVERSAL_LAYOUT="${gemmLayout}" \
+                -D GEMM_UNIVERSAL_MAX_INSTANCES=${perOpInstances} \
+                -D BATCHED_GEMM_DATATYPE="fp16" \
+                -D BATCHED_GEMM_LAYOUT="rcr" \
+                -D BATCHED_GEMM_MAX_INSTANCES=${perOpInstances} \
+                -D BATCHED_CONTRACTION_DATATYPE="fp16" \
+                -D BATCHED_CONTRACTION_LAYOUT="rcr" \
+                -D BATCHED_CONTRACTION_MAX_INSTANCES=${perOpInstances} \
+                -D GEMM_STREAMK_DATATYPE="${gemmDatatype}" \
+                -D GEMM_STREAMK_LAYOUT="${gemmLayout}" \
+                -D GEMM_STREAMK_MAX_INSTANCES=${perOpInstances} \
+                -D GROUPED_GEMM_DATATYPE="${gemmDatatype}" \
+                -D GROUPED_GEMM_LAYOUT="${gemmLayout}" \
+                -D GROUPED_GEMM_MAX_INSTANCES=${perOpInstances} \
+                -D GEMM_MULTI_D_DATATYPE="${gemmDatatype}" \
+                -D GEMM_MULTI_D_LAYOUT="${multiLayout}" \
+                -D GEMM_MULTI_D_MAX_INSTANCES=${perOpInstances} \
+                -D GEMM_MULTI_ABD_DATATYPE="${gemmDatatype}" \
+                -D GEMM_MULTI_ABD_LAYOUT="${multiLayout}" \
+                -D GEMM_MULTI_ABD_MAX_INSTANCES=${perOpInstances} \
+                -D GROUPED_GEMM_ROWCOLQUANT_DATATYPE="${quantDatatype}" \
+                -D GROUPED_GEMM_ROWCOLQUANT_LAYOUT="${quantLayout}" \
+                -D GROUPED_GEMM_ROWCOLQUANT_MAX_INSTANCES=${perOpInstances} \
+                -D GROUPED_GEMM_TENSORQUANT_DATATYPE="${quantDatatype}" \
+                -D GROUPED_GEMM_TENSORQUANT_LAYOUT="${quantLayout}" \
+                -D GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES=${perOpInstances} \
+                -D TILE_ENGINE_SAMPLING_TIER=${samplingTier} .. && \
+            ninja -j\$(nproc) benchmark_gemm_universal_all benchmark_batched_gemm_all benchmark_batched_contraction_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all benchmark_gemm_multi_d_all benchmark_gemm_multi_abd_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all && \
+            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
+            python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json batched_gemm_results.json && \
+            python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs ${problemConfigs} --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
+            python3 ../tile_engine/ops/gemm_streamk/gemm_streamk_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_streamk_results.json && \
+            python3 ../tile_engine/ops/gemm/grouped_gemm/grouped_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json grouped_gemm_results.json && \
+            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
+            python3 ../tile_engine/ops/gemm/gemm_multi_abd/gemm_multi_abd_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_multi_abd_results.json && \
+            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json && \
+            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json"""
 }
 
 // Benchmark ahead-of-time tile_engine instances at smoke coverage: one dtype,
@@ -1580,82 +1681,7 @@ def runDispatcherPerfTests(String compiler, String gpuTarget = "gfx942") {
     // real: it holds the CMakeLists, the instance builder and the benchmark. The
     // nested one contains a lone configs/default_config.json that nothing in the
     // tree reads. Edit the top-level tree.
-    def execute_cmd
-    if (gpuTarget == "gfx950") {
-        execute_cmd = """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx950" \
-                -D GEMM_AQUANT_DATATYPE="${quantDatatype}" \
-                -D GEMM_AQUANT_LAYOUT="${quantLayout}" \
-                -D GEMM_AQUANT_MAX_INSTANCES=${perOpInstances} \
-                -D GEMM_BQUANT_DATATYPE="${quantDatatype}" \
-                -D GEMM_BQUANT_LAYOUT="${quantLayout}" \
-                -D GEMM_BQUANT_MAX_INSTANCES=${perOpInstances} \
-                -D GEMM_ABQUANT_DATATYPE="${quantDatatype}" \
-                -D GEMM_ABQUANT_LAYOUT="${quantLayout}" \
-                -D GEMM_ABQUANT_MAX_INSTANCES=${perOpInstances} \
-                -D MX_GEMM_DATATYPE="${quantDatatype}" \
-                -D MX_GEMM_LAYOUT="${quantLayout}" \
-                -D MX_GEMM_MAX_INSTANCES=${perOpInstances} \
-                -D GEMM_STREAMK_DATATYPE="${gemmDatatype}" \
-                -D GEMM_STREAMK_LAYOUT="${gemmLayout}" \
-                -D GEMM_STREAMK_MAX_INSTANCES=${perOpInstances} \
-                -D TILE_ENGINE_SAMPLING_TIER=${samplingTier} .. && \
-            ninja -j${nthreads()} benchmark_gemm_aquant_all benchmark_gemm_bquant_all benchmark_gemm_abquant_all benchmark_mx_gemm_all benchmark_gemm_streamk_all && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_aquant/gemm_aquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_aquant_results.json && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_bquant/gemm_bquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_bquant_results.json && \
-            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_abquant/gemm_abquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_abquant_results.json && \
-            python3 ../tile_engine/ops/gemm/mx_gemm/mx_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json mx_gemm_results.json && \
-            python3 ../tile_engine/ops/gemm_streamk/gemm_streamk_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_streamk_results.json"""
-    } else {
-        execute_cmd = """
-            cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
-                -D BUILD_CK_TILE_ENGINE="ON" \
-                -D CMAKE_CXX_COMPILER="${compiler}" \
-                -D CMAKE_BUILD_TYPE=Release \
-                -D GPU_TARGETS="gfx942" \
-                -D GEMM_UNIVERSAL_DATATYPE="${gemmDatatype}" \
-                -D GEMM_UNIVERSAL_LAYOUT="${gemmLayout}" \
-                -D GEMM_UNIVERSAL_MAX_INSTANCES=${perOpInstances} \
-                -D BATCHED_GEMM_DATATYPE="fp16" \
-                -D BATCHED_GEMM_LAYOUT="rcr" \
-                -D BATCHED_GEMM_MAX_INSTANCES=${perOpInstances} \
-                -D BATCHED_CONTRACTION_DATATYPE="fp16" \
-                -D BATCHED_CONTRACTION_LAYOUT="rcr" \
-                -D BATCHED_CONTRACTION_MAX_INSTANCES=${perOpInstances} \
-                -D GEMM_STREAMK_DATATYPE="${gemmDatatype}" \
-                -D GEMM_STREAMK_LAYOUT="${gemmLayout}" \
-                -D GEMM_STREAMK_MAX_INSTANCES=${perOpInstances} \
-                -D GROUPED_GEMM_DATATYPE="${gemmDatatype}" \
-                -D GROUPED_GEMM_LAYOUT="${gemmLayout}" \
-                -D GROUPED_GEMM_MAX_INSTANCES=${perOpInstances} \
-                -D GEMM_MULTI_D_DATATYPE="${gemmDatatype}" \
-                -D GEMM_MULTI_D_LAYOUT="${multiLayout}" \
-                -D GEMM_MULTI_D_MAX_INSTANCES=${perOpInstances} \
-                -D GEMM_MULTI_ABD_DATATYPE="${gemmDatatype}" \
-                -D GEMM_MULTI_ABD_LAYOUT="${multiLayout}" \
-                -D GEMM_MULTI_ABD_MAX_INSTANCES=${perOpInstances} \
-                -D GROUPED_GEMM_ROWCOLQUANT_DATATYPE="${quantDatatype}" \
-                -D GROUPED_GEMM_ROWCOLQUANT_LAYOUT="${quantLayout}" \
-                -D GROUPED_GEMM_ROWCOLQUANT_MAX_INSTANCES=${perOpInstances} \
-                -D GROUPED_GEMM_TENSORQUANT_DATATYPE="${quantDatatype}" \
-                -D GROUPED_GEMM_TENSORQUANT_LAYOUT="${quantLayout}" \
-                -D GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES=${perOpInstances} \
-                -D TILE_ENGINE_SAMPLING_TIER=${samplingTier} .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_batched_gemm_all benchmark_batched_contraction_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all benchmark_gemm_multi_d_all benchmark_gemm_multi_abd_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all && \
-            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
-            python3 ../tile_engine/ops/gemm/batched_gemm/batched_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json batched_gemm_results.json && \
-            python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs ${problemConfigs} --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
-            python3 ../tile_engine/ops/gemm_streamk/gemm_streamk_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_streamk_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm/grouped_gemm_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json grouped_gemm_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
-            python3 ../tile_engine/ops/gemm/gemm_multi_abd/gemm_multi_abd_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json gemm_multi_abd_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json && \
-            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes ${problemSizes} --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json"""
-    }
+    def execute_cmd = _dispatcherPerfCmd(compiler, gpuTarget, samplingTier, gemmDatatype, gemmLayout, multiLayout, quantDatatype, quantLayout, problemSizes, problemConfigs, perOpInstances)
     try {
         buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
     } finally {
@@ -1811,28 +1837,9 @@ def dispatcherVariantCmd(String arch, String variant) {
 //                                  derivation from the compile-time layout
 //                                  types (see plan Step 7).
 // ---------------------------------------------------------------------------
-def runDispatcherCorrectnessTests(String arch, String compiler) {
-    def budget = 64
-    // run_ok wraps the script-style tests, which signal a clean skip with exit
-    // 77. execute_cmd is one &&-joined string, so without this an unsupported
-    // arch or a missing ml_dtypes would abort the lane at that point and every
-    // later operator would silently never run. Only 77 is swallowed; any other
-    // non-zero exit still fails the lane. A function definition itself exits 0,
-    // so it chains cleanly ahead of cmake.
-    //
-    // "$@" || rc=$?, not "$@"; rc=$? -- and the difference is not cosmetic.
-    // buildAndTest emits `sh cmd` with no shebang, so the Durable Task plugin
-    // runs this under /bin/sh -xe and set -e is live. set -e is suppressed
-    // inside a function body only while the call is a NON-FINAL element of an
-    // && list; when run_ok is the last element, set -e applies inside the body
-    // and a bare "$@" exiting 77 kills the shell before rc=$? can run. Both
-    // arch chains below end on a run_ok (test_abquant_gpu_correctness on both),
-    // so a legitimate skip there would
-    // fail the lane. `cmd || rc=$?` puts the call in a tested context, which is
-    // immune to set -e regardless of where run_ok is called from. Keep it that
-    // way. rc=0 is a plain assignment, not `local`: /bin/sh is not bash and
-    // local is not POSIX.
-    def execute_cmd = """
+@NonCPS
+String _dispatcherCorrectnessBaseCmd(String arch, String compiler, String dtypes, int budget) {
+    return """
         run_ok() { rc=0; "\$@" || rc=\$?; if [ \$rc -eq 77 ]; then echo "SKIP(77): \$*"; return 0; fi; return \$rc; } && \
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
             -D CMAKE_CXX_COMPILER="${compiler}" \
@@ -1841,10 +1848,10 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
             -D CK_TILE_DISPATCHER=ON \
             -D BUILD_DISPATCHER_BINDINGS=ON \
             -D DISPATCHER_RULE_SET=tests .. && \
-        ninja -j${nthreads()} ck_tile_dispatcher dispatcher_gemm_lib && \
+        ninja -j\$(nproc) ck_tile_dispatcher dispatcher_gemm_lib && \
         python3 ../dispatcher/tests/test_gemm_search_space.py \
             --arch ${arch} \
-            --dtypes ${dispatcherSweepDtypesFor(arch)} \
+            --dtypes ${dtypes} \
             --layouts rcr,rrr,crr,ccr \
             --budget ${budget} \
             --warmup 5 \
@@ -1859,6 +1866,11 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
         run_ok python3 ../dispatcher/tests/test_multi_abd_gpu_correctness.py && \
         run_ok python3 ../dispatcher/tests/test_rowcolquant_gpu_correctness.py --gfx ${arch} && \
         run_ok python3 ../dispatcher/tests/test_tensorquant_gpu_correctness.py --gfx ${arch}"""
+}
+
+def runDispatcherCorrectnessTests(String arch, String compiler) {
+    def budget = 64
+    def execute_cmd = _dispatcherCorrectnessBaseCmd(arch, compiler, dispatcherSweepDtypesFor(arch), budget)
     // The grouped/multi_d/multi_abd tests are the bridge-level companions to the
     // --variant sweeps below: the sweep exercises the search space, they exercise
     // the ctypes bridge. They were registered in ctest but never invoked from
