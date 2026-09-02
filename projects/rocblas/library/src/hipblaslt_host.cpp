@@ -609,8 +609,6 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     int                         row_dim, col_dim;
     hipblasOperation_t          transA           = (hipblasOperation_t)prob.trans_a;
     hipblasOperation_t          transB           = (hipblasOperation_t)prob.trans_b;
-    Ti *                        devicePtrArray_A = nullptr, *devicePtrArray_B = nullptr;
-    To *                        devicePtrArray_C = nullptr, *devicePtrArray_D = nullptr;
     hipblasLtMatmulDesc_t       matmulDesc{};
     hipblasLtMatmulPreference_t pref{};
     size_t                      workspaceSize = 0;
@@ -837,14 +835,6 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                              << e.what());
         status = explicit_solution ? rocblas_status_invalid_value : rocblas_status_internal_error;
     }
-    if(devicePtrArray_D)
-        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_D, prob.handle->get_stream()), status);
-    if(devicePtrArray_C)
-        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_C, prob.handle->get_stream()), status);
-    if(devicePtrArray_B)
-        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_B, prob.handle->get_stream()), status);
-    if(devicePtrArray_A)
-        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_A, prob.handle->get_stream()), status);
     if(pref)
         HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref), status);
     if(matmulDesc)
