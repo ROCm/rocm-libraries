@@ -27,20 +27,6 @@
 #include "rocsparse-version.h"
 #include "rocsparse/rocsparse-export.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-ROCSPARSE_EXPORT rocsparse_status rocsparse_dnmat_copy_data(rocsparse_handle            handle,
-                                                            rocsparse_const_dnvec_descr alpha,
-                                                            rocsparse_const_dnmat_descr X,
-                                                            rocsparse_dnmat_descr       Y,
-                                                            rocsparse_error*            p_error);
-
-#ifdef __cplusplus
-}
-#endif
-
 namespace rocsparse
 {
 
@@ -141,7 +127,7 @@ namespace rocsparse
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::dnmat_copy_data_kernel<512, I, T>),
             dim3(((source->rows * source->cols - 1) / 512 + 1),
-                 std::min(target->batch_count, static_cast<int64_t>(65536))),
+                 std::min(target->batch_count, static_cast<int64_t>(65535))),
             dim3(512),
             0,
             handle->stream,
@@ -349,7 +335,8 @@ rocsparse_status rocsparse::dnmat_copy_data(rocsparse_handle            handle,
     }
 
     const rocsparse_indextype I_indextype
-        = ((source->rows * source->cols) <= std::numeric_limits<int32_t>::max())
+        = (((source->rows * source->cols) <= std::numeric_limits<int32_t>::max())
+           || (target->batch_count <= std::numeric_limits<int32_t>::max()))
               ? rocsparse_indextype_i32
               : rocsparse_indextype_i64;
 
@@ -360,15 +347,15 @@ rocsparse_status rocsparse::dnmat_copy_data(rocsparse_handle            handle,
     }
 
     RETURN_IF_ROCSPARSE_ERROR(f(handle, alpha, source, target));
+
     return rocsparse_status_success;
 }
 
-extern "C" ROCSPARSE_EXPORT rocsparse_status
-    rocsparse_dnmat_copy_data(rocsparse_handle            handle,
-                              rocsparse_const_dnvec_descr alpha,
-                              rocsparse_const_dnmat_descr source,
-                              rocsparse_dnmat_descr       target,
-                              rocsparse_error*            p_error)
+rocsparse_status rocsparse_dnmat_copy_data(rocsparse_handle            handle,
+                                           rocsparse_const_dnvec_descr alpha,
+                                           rocsparse_const_dnmat_descr source,
+                                           rocsparse_dnmat_descr       target,
+                                           rocsparse_error*            p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
