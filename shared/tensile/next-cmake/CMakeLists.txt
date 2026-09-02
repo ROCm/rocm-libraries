@@ -24,6 +24,8 @@
 cmake_minimum_required(VERSION 3.21.2)
 project(tensile VERSION 4.44.0 LANGUAGES CXX)
 
+# Test change for shared_deps optimization validation
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(CMakeDependentOption)
