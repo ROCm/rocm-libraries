@@ -23,16 +23,13 @@ template <typename InputDataType,
           typename OutputDataType,
           typename ComputeDataType,
           unsigned int localSize>
-inline std::vector<std::string>
-    buildReductionDefines(hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode,
-                          unsigned int totalRank)
+inline std::vector<std::string> buildReductionDefines(unsigned int numDims)
 {
     std::vector<std::string> defines;
     defines.emplace_back(std::string("-DINPUT_TYPE=") + HipRtcTypeName<InputDataType>::VALUE);
     defines.emplace_back(std::string("-DOUTPUT_TYPE=") + HipRtcTypeName<OutputDataType>::VALUE);
     defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<ComputeDataType>::VALUE);
-    defines.emplace_back(std::string("-DREDUCTION_MODE=") + std::to_string(static_cast<int>(mode)));
-    defines.emplace_back(std::string("-DTOTAL_RANK=") + std::to_string(totalRank));
+    defines.emplace_back(std::string("-DNUM_DIMS=") + std::to_string(numDims));
     defines.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(localSize));
     return defines;
 }
@@ -47,7 +44,7 @@ public:
     // --- Reduction ---
 
     template <class InputDataType, class OutputDataType, class ComputeDataType = double>
-    static void reduce(const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
+    static void reduce(hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
                        hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
                        hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode)
     {
@@ -65,9 +62,10 @@ public:
 
         auto defines = detail::
             buildReductionDefines<InputDataType, OutputDataType, ComputeDataType, BLOCK_SIZE>(
-                mode, static_cast<unsigned int>(input.dims().size()));
+                static_cast<unsigned int>(input.dims().size()));
 
-        launchReduction(input.memory().deviceData(),
+        launchReduction(mode,
+                        input.memory().deviceData(),
                         input.dims(),
                         input.strides(),
                         output.memory().deviceData(),
@@ -122,7 +120,8 @@ private:
 
         if(!hasReducedDim)
         {
-            throw std::invalid_argument("At least one dimension must be reduced");
+            throw std::invalid_argument("Reduction expects at least one output dimension to be 1 "
+                                        "to indicate a reduced dimension");
         }
 
         // Validate tensor layouts
@@ -163,13 +162,14 @@ private:
 
     // --- Kernel launchers (defined in GpuFpReferenceReduction.cpp) ---
 
-    static void launchReduction(const void* inputPtr,
+    static void launchReduction(hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode,
+                                const void* inputPtr,
                                 const std::vector<int64_t>& inputDims,
                                 const std::vector<int64_t>& inputStrides,
                                 void* outputPtr,
                                 const std::vector<int64_t>& outputDims,
                                 const std::vector<int64_t>& outputStrides,
-                                const std::vector<std::string>& defines);
+                                std::vector<std::string>& defines);
 };
 
 } // namespace hipdnn_gpu_ref

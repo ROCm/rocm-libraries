@@ -65,65 +65,97 @@ void launchKernel(hipFunction_t function, int64_t gridSize, void* argsPtr, size_
 
 // --- Kernel launchers ---
 
-void GpuFpReferenceReduction::launchReduction(const void* inputPtr,
-                                              const std::vector<int64_t>& inputDims,
-                                              const std::vector<int64_t>& inputStrides,
-                                              void* outputPtr,
-                                              const std::vector<int64_t>& outputDims,
-                                              const std::vector<int64_t>& outputStrides,
-                                              const std::vector<std::string>& defines)
+void GpuFpReferenceReduction::launchReduction(
+    hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode,
+    const void* inputPtr,
+    const std::vector<int64_t>& inputDims,
+    const std::vector<int64_t>& inputStrides,
+    void* outputPtr,
+    const std::vector<int64_t>& outputDims,
+    const std::vector<int64_t>& outputStrides,
+    std::vector<std::string>& defines)
 {
+    ReductionMode reductionMode;
+    switch(mode)
+    {
+    case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::ADD:
+        reductionMode = ReductionMode::ADD;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::AVG:
+        reductionMode = ReductionMode::AVG;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::AMAX:
+        reductionMode = ReductionMode::AMAX;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::NORM1:
+        reductionMode = ReductionMode::NORM1;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::NORM2:
+        reductionMode = ReductionMode::NORM2;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MUL:
+        reductionMode = ReductionMode::MUL;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MUL_NO_ZEROS:
+        reductionMode = ReductionMode::MUL_NO_ZEROS;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MIN_OP:
+        reductionMode = ReductionMode::MIN_OP;
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MAX_OP:
+        reductionMode = ReductionMode::MAX_OP;
+        break;
+    default:
+        throw std::invalid_argument("Unsupported reduction mode: "
+                                    + std::to_string(static_cast<int>(mode)));
+    }
+    defines.emplace_back(std::string("-DMODE=") + std::to_string(static_cast<int>(reductionMode)));
+
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     const auto& kernel = compiler.getOrCompile("GpuRefReduction.cpp", defines, "ReductionRef");
 
-    std::vector<long long> inputStridesLL(inputStrides.begin(), inputStrides.end());
-    std::vector<long long> outputStridesLL(outputStrides.begin(), outputStrides.end());
-    std::vector<long long> outputShapeStrides(outputDims.size());
+    ReductionArgs args{};
+    args.input = inputPtr;
+    args.output = outputPtr;
+    std::memcpy(args.inputStrides, inputStrides.data(), inputStrides.size() * sizeof(int64_t));
+    std::memcpy(args.outputStrides, outputStrides.data(), outputStrides.size() * sizeof(int64_t));
+
+    // Compute the output logical strides for unflattening the output index in the kernel
     for(size_t i = 0; i < outputDims.size(); ++i)
     {
-        outputShapeStrides[i] = 1;
+        args.outputLogicalStrides[i] = 1;
         for(size_t j = i + 1; j < outputDims.size(); ++j)
         {
-            outputShapeStrides[i] *= outputDims[j];
+            args.outputLogicalStrides[i] *= static_cast<long long>(outputDims[j]);
         }
     }
 
-    ReductionArgs args{};
-    args.input = inputPtr;
-    args.inputStrides = inputStridesLL.data();
-    args.output = outputPtr;
-    args.outputStrides = outputStridesLL.data();
-    args.outputShapeStrides = outputShapeStrides.data();
-
     // Compute the reduction domain axes, strides and size based on the input and output dimensions
-    std::vector<long long> reductionDomainAxes;
-    std::vector<long long> reductionDomainShape;
+    long long reductionDomainShape[5];
     long long reductionDomainSize = 1;
+    long long reductionRank = 0;
     for(size_t i = 0; i < outputDims.size(); ++i)
     {
         if(outputDims[i] == 1 && inputDims[i] > 1)
         {
-            reductionDomainAxes.push_back(static_cast<long long>(i));
-            reductionDomainShape.push_back(inputDims[i]);
-            reductionDomainSize *= inputDims[i];
+            args.reductionDomainAxes[reductionRank] = static_cast<long long>(i);
+            reductionDomainShape[reductionRank] = static_cast<long long>(inputDims[i]);
+            reductionDomainSize *= static_cast<long long>(inputDims[i]);
+            ++reductionRank;
         }
     }
-
-    std::vector<long long> reductionDomainStride(reductionDomainAxes.size());
-    if(!reductionDomainStride.empty())
-    {
-        reductionDomainStride.back() = 1;
-        for(size_t i = 1; i < reductionDomainStride.size(); ++i)
-        {
-            size_t j = reductionDomainStride.size() - 1 - i;
-            reductionDomainStride[j] = reductionDomainStride[j + 1] * reductionDomainShape[j + 1];
-        }
-    }
-
-    args.reductionRank = static_cast<long long>(reductionDomainAxes.size());
+    args.reductionRank = reductionRank;
     args.reductionDomainSize = reductionDomainSize;
-    args.reductionDomainAxes = reductionDomainAxes.data();
-    args.reductionDomainStride = reductionDomainStride.data();
+
+    if(reductionRank > 0)
+    {
+        args.reductionDomainStride[reductionRank - 1] = 1;
+        for(long long i = reductionRank - 2; i >= 0; --i)
+        {
+            args.reductionDomainStride[i]
+                = args.reductionDomainStride[i + 1] * reductionDomainShape[i + 1];
+        }
+    }
 
     launchKernel(
         kernel.function(),
