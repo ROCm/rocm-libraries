@@ -75,6 +75,14 @@ const rocke_arch_layout_map_t* rocke_mmaop_d_layout(const rocke_mmaop_t* op, roc
 const rocke_arch_layout_map_t* rocke_mmaop_acc_layout(const rocke_mmaop_t* op,
                                                       rocke_ir_builder_t* b);
 
+/* Recurrent builders feed D back as the next C. Validate that the dtype,
+ * fragment width, and any registered physical layout are directly compatible,
+ * then construct a fresh zero using the C-input contract. */
+rocke_status_t rocke_mmaop_require_recurrence(rocke_ir_builder_t* b,
+                                              const rocke_mmaop_t* op,
+                                              const char* where);
+rocke_value_t* rocke_mmaop_zero_c(rocke_ir_builder_t* b, const rocke_mmaop_t* op);
+
 /* LayoutMap.coord(builder, lane, slot) -> (coord0, coord1). Forwards to
  * rocke_layout_map_coord (validates slot in [0, frag_len); emits arith via b). */
 bool rocke_arch_layout_map_coord(const rocke_arch_layout_map_t* m,

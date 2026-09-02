@@ -1369,6 +1369,8 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->op = rocke_conv_resolve_op(b, tmp_fwd_spec, arch);
         if(ctx->op == NULL)
             return false;
+        if(rocke_mmaop_require_recurrence(b, ctx->op, "implicit_gemm_conv_wgrad") != ROCKE_OK)
+            return false;
         ctx->is_wmma = (ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0);
         ctx->atom
             = ctx->is_wmma
@@ -1548,7 +1550,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->k_atoms = spec->tile_k / spec->warp_tile_k;
 
     /* Accumulators */
-    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->d_per_lane);
+    ctx->acc_init = rocke_mmaop_zero_c(b, ctx->op);
     ctx->num_accs = ctx->mfmas_m * ctx->mfmas_n;
     if(ctx->num_accs <= 0 || ctx->num_accs > ROCKE_CONV_MAX_ACCS)
     {

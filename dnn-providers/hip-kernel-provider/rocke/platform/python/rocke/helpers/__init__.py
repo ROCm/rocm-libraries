@@ -89,7 +89,9 @@ from .atoms import (
     MfmaAtom,
     WmmaAtom,
     mfma_atom,
+    require_mma_recurrence,
     wmma_atom,
+    zero_mma_c,
 )
 from .autotune import (
     AutotuneConfig,
@@ -411,7 +413,9 @@ __all__ = [
     "WMMA_BF16_ATOMS",
     "WMMA_F16_ATOMS",
     "WmmaAtom",
+    "require_mma_recurrence",
     "wmma_atom",
+    "zero_mma_c",
     "OnlineSoftmaxState",
     "PagedKvDescriptor",
     "apply_softcap_log2",

@@ -726,6 +726,8 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "WMMA attention atom %s absent on %s", op_id, arch);
         return ROCKE_ERR_VALUE;
     }
+    if(rocke_mmaop_require_recurrence(b, op, "wmma_attention") != ROCKE_OK)
+        return rocke_ir_builder_status(b);
     int wave = op->wave_size;
     const rocke_type_t* dtype_ir = rocke_mfma_attn_ir_type_for_dtype(b, dtype);
     if(dtype_ir == NULL)
@@ -736,7 +738,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     const rocke_layout_map_t* a_map = op->a_layout;
     const rocke_layout_map_t* c_map = op->d_layout;
     int a_frag = op->a_frag_len;
-    int c_frag = op->d_frag_len;
+    int d_frag = op->d_frag_len;
     int n_dk = head_size / 16;
 
     /* Python evaluates b.mod(b.thread_id_x(), b.const_i32(wave)) left-to-right:
@@ -807,7 +809,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     rocke_iter_arg_t iter_args[ROCKE_ATTN_MAX_ITER_ARGS];
     char name_buf[ROCKE_ATTN_MAX_ITER_ARGS][16];
     int n_ia = 0;
-    for(int r = 0; r < c_frag; ++r)
+    for(int r = 0; r < d_frag; ++r)
     {
         snprintf(name_buf[n_ia], sizeof(name_buf[0]), "m%d", r);
         iter_args[n_ia].name = name_buf[n_ia];
@@ -822,7 +824,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     {
         snprintf(name_buf[n_ia], sizeof(name_buf[0]), "acc%d", d);
         iter_args[n_ia].name = name_buf[n_ia];
-        iter_args[n_ia].init = rocke_b_zero_vec_f32(b, c_frag);
+        iter_args[n_ia].init = rocke_mmaop_zero_c(b, op);
         ++n_ia;
     }
 
@@ -840,14 +842,14 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_value_t* ms[ROCKE_ATTN_MAX_LANE];
         rocke_value_t* ls[ROCKE_ATTN_MAX_LANE];
         rocke_value_t* accs[ROCKE_ATTN_MAX_ATOMS];
-        for(int r = 0; r < c_frag; ++r)
+        for(int r = 0; r < d_frag; ++r)
         {
             ms[r] = kloop.iter_vars[2 * r];
             ls[r] = kloop.iter_vars[2 * r + 1];
         }
         for(int d = 0; d < n_dk; ++d)
         {
-            accs[d] = kloop.iter_vars[2 * c_frag + d];
+            accs[d] = kloop.iter_vars[2 * d_frag + d];
         }
 
         rocke_value_t* effective_kt
@@ -881,7 +883,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         }
 
         /* ---- QK^T WMMA chain ---- */
-        rocke_value_t* score = rocke_b_zero_vec_f32(b, c_frag);
+        rocke_value_t* score = rocke_mmaop_zero_c(b, op);
         for(int d = 0; d < n_dk; ++d)
         {
             rocke_value_t* k_addr = rocke_b_add(b, k_addr_row_base, rocke_b_const_i32(b, d * 16));
@@ -904,7 +906,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             new_accs[d] = accs[d];
         }
         rocke_value_t* q_pos_for_mask = (p->q_pos_base != NULL) ? p->q_pos_base : p->q_tile_base;
-        for(int r = 0; r < c_frag; ++r)
+        for(int r = 0; r < d_frag; ++r)
         {
             rocke_value_t* row_rel = NULL;
             rocke_value_t* col_k = NULL;
@@ -975,7 +977,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         }
 
         /* ---- P staging through LDS ---- */
-        for(int r = 0; r < c_frag; ++r)
+        for(int r = 0; r < d_frag; ++r)
         {
             rocke_value_t* row_rel = NULL;
             rocke_value_t* col_k = NULL;
@@ -1044,7 +1046,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
 
         rocke_value_t* yields[ROCKE_ATTN_MAX_ITER_ARGS];
         int ny = 0;
-        for(int r = 0; r < c_frag; ++r)
+        for(int r = 0; r < d_frag; ++r)
         {
             yields[ny++] = new_ms[r];
             yields[ny++] = new_ls[r];
@@ -1059,19 +1061,19 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
 
     rocke_value_t* ls_final[ROCKE_ATTN_MAX_LANE];
     rocke_value_t* accs_final[ROCKE_ATTN_MAX_ATOMS];
-    for(int r = 0; r < c_frag; ++r)
+    for(int r = 0; r < d_frag; ++r)
     {
         ls_final[r] = (kloop.op != NULL) ? kloop.op->results[2 * r + 1] : NULL;
     }
     for(int d = 0; d < n_dk; ++d)
     {
-        accs_final[d] = (kloop.op != NULL) ? kloop.op->results[2 * c_frag + d] : NULL;
+        accs_final[d] = (kloop.op != NULL) ? kloop.op->results[2 * d_frag + d] : NULL;
     }
 
     /* ---- Epilogue ---- */
     for(int d = 0; d < n_dk; ++d)
     {
-        for(int r = 0; r < c_frag; ++r)
+        for(int r = 0; r < d_frag; ++r)
         {
             rocke_value_t* row_rel = NULL;
             rocke_value_t* col_n = NULL;

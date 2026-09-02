@@ -56,7 +56,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from ..core.ir import F16, F32, BF16, IRBuilder, Value
-from .atoms import MfmaAtom
+from .atoms import MfmaAtom, require_mma_recurrence, zero_mma_c
 from .attention import (
     apply_attention_mask,
     safe_inv_l,
@@ -973,6 +973,7 @@ def _wmma_attention_fwd_inner_body(
     op = target.mma.by_op_id(op_id)
     if op is None or op.family != "wmma":
         raise ValueError(f"WMMA attention atom {op_id} absent on {arch}")
+    require_mma_recurrence(op, where="wmma_attention")
     wave = op.wave_size  # 32
     dtype_ir = _ir_type_for_dtype(dtype)
 
@@ -984,7 +985,7 @@ def _wmma_attention_fwd_inner_body(
         op.d_layout()
     )  # (row, col): gfx11 (2i+l//16, l%16); gfx12 ((l//16)*8+i, l%16)
     a_frag = op.a_frag_len  # 16 (gfx11) | 8 (gfx12) -- K elems per lane per step
-    c_frag = op.d_frag_len  # 8  -- accumulator slots per lane (same both)
+    d_frag = op.d_frag_len  # 8 -- result slots per lane
 
     # Number of WMMA steps along the head-dim axis (QK K-dim == PV N-dim).
     n_dk = head_size // 16
@@ -1047,11 +1048,11 @@ def _wmma_attention_fwd_inner_body(
 
     # ---- Online-softmax + PV accumulator iter-args ----
     iter_args = []
-    for r in range(c_frag):
+    for r in range(d_frag):
         iter_args.append((f"m{r}", neg_inf))
         iter_args.append((f"l{r}", zero_f))
     for d in range(n_dk):
-        iter_args.append((f"acc{d}", b.zero_vec_f32(c_frag)))
+        iter_args.append((f"acc{d}", zero_mma_c(b, op)))
 
     c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
     loop_start = k_tile_start if k_tile_start is not None else b.const_i32(0)
@@ -1061,9 +1062,9 @@ def _wmma_attention_fwd_inner_body(
         loop_start, loop_stop, b.const_i32(1), iter_args=iter_args, iv_name="kt"
     )
     with kloop as (kt, state):
-        ms = [state[2 * r] for r in range(c_frag)]
-        ls = [state[2 * r + 1] for r in range(c_frag)]
-        accs = list(state[2 * c_frag :])
+        ms = [state[2 * r] for r in range(d_frag)]
+        ls = [state[2 * r + 1] for r in range(d_frag)]
+        accs = list(state[2 * d_frag :])
 
         if k_block_iter_fn is not None:
             effective_kt = k_block_iter_fn(b, kt)
@@ -1098,7 +1099,7 @@ def _wmma_attention_fwd_inner_body(
             )
 
         # ---- QK^T WMMA chain: score = sum_d Q[d-tile] (x) K[d-tile] ----
-        score = b.zero_vec_f32(c_frag)
+        score = zero_mma_c(b, op)
         for d in range(n_dk):
             k_addr = b.add(k_addr_row_base, b.const_i32(d * 16))
             if k_half_off is not None:
@@ -1110,7 +1111,7 @@ def _wmma_attention_fwd_inner_body(
         new_ms, new_ls, new_accs = [], [], list(accs)
         ps = []  # per-slot scaled probabilities (acc layout)
         q_pos_for_mask = q_pos_base if q_pos_base is not None else q_tile_base
-        for r in range(c_frag):
+        for r in range(d_frag):
             row_rel, col_k = c_map.coord(b, lane, r)  # (q-row in tile, k-col)
             s_r = b.fmul(b.vec_extract(score, r), scale_log2)
             row_q_pos = b.add(q_pos_for_mask, row_rel)
@@ -1172,7 +1173,7 @@ def _wmma_attention_fwd_inner_body(
                 b.smem_store_vN(V_lds, [a_row, b.const_i32(e * 8)], v_g, 8)
 
         # ---- P staging through LDS: acc layout -> A-operand layout ----
-        for r in range(c_frag):
+        for r in range(d_frag):
             row_rel, col_k = c_map.coord(b, lane, r)
             b.smem_store_vN(P_lds, [row_rel, col_k], b.cast_f32_to(ps[r], dtype_ir), 1)
         b.sync()
@@ -1234,19 +1235,19 @@ def _wmma_attention_fwd_inner_body(
             new_accs[d] = b.mma(op, p_a, v_b, new_accs[d])
 
         yields = []
-        for r in range(c_frag):
+        for r in range(d_frag):
             yields.append(new_ms[r])
             yields.append(new_ls[r])
         yields.extend(new_accs)
         b.scf_yield(*yields)
 
     final = kloop.results
-    ls_final = [final[2 * r + 1] for r in range(c_frag)]
-    accs_final = list(final[2 * c_frag :])
+    ls_final = [final[2 * r + 1] for r in range(d_frag)]
+    accs_final = list(final[2 * d_frag :])
 
     # ---- Epilogue: O[q,d] = acc[q,d] / l[q] (zero-denominator guarded) ----
     for d in range(n_dk):
-        for r in range(c_frag):
+        for r in range(d_frag):
             row_rel, col_n = c_map.coord(b, lane, r)  # (q-row in tile, d-col)
             l_safe = ls_final[r]
             zero_mask = b.fcmp("oeq", l_safe, zero_f)

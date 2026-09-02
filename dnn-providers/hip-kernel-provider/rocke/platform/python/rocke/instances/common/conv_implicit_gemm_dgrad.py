@@ -63,7 +63,7 @@ from ...core.ir import (
     Type,
     Value,
 )
-from ...helpers.atoms import MfmaAtom, mfma_atom
+from ...helpers.atoms import MfmaAtom, mfma_atom, require_mma_recurrence, zero_mma_c
 from ...helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from ...helpers.geometry import WarpGrid
 from ...helpers.layouts import LdsLayout
@@ -905,6 +905,7 @@ def _resolve_dgrad_op(spec: DgradConvSpec, arch: str):
             f"no MMA atom for dgrad warp_tile "
             f"({spec.warp_tile_m},{spec.warp_tile_n},{spec.warp_tile_k}) on {arch}"
         )
+    require_mma_recurrence(op, where="implicit_gemm_conv_dgrad")
     return op
 
 
@@ -1190,7 +1191,7 @@ def _build_tilde_dgrad(
     mfmas_n = spec.mfmas_per_warp_n
     k_atoms = spec.k_atoms_per_tile_k
 
-    acc_init = b.zero_vec_f32(d_per_lane)
+    acc_init = zero_mma_c(b, op)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]

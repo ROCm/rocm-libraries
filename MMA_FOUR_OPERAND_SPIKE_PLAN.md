@@ -309,6 +309,30 @@ same registered atom + same kernel inputs
     => same compiled code and numeric result
 ```
 
+### Recurrent-consumer audit
+
+Every MMA emission site was classified by how it uses D. Single-shot calls may
+use distinct C and D contracts directly. A recurrent call feeds D into a later
+C operand and must call the shared recurrence guard before constructing loop
+state; its initial zero must come from C metadata. Output-only consumers use D
+metadata for traversal and stores.
+
+| Consumer family | Classification | Contract owner |
+| --- | --- | --- |
+| universal GEMM and gfx1250 fused-MoE WMMA | recurrent | `_emit_zero_acc_op` |
+| MFMA GEMM/attention, MX and block-scale GEMM | recurrent | `mfma_gemm_inner` recurrence guard |
+| gfx1151/gfx1201 shared wave32 attention | recurrent | `require_mma_recurrence` + `zero_mma_c` |
+| gfx1250 standalone and tiled 2D/3D attention | recurrent | `resolve_wmma` + `zero_mma_c` |
+| implicit convolution forward/dgrad/wgrad | recurrent | per-family resolver + `zero_mma_c` |
+| deep-fused convolution | recurrent | existing family-entry recurrence guard |
+| fixed iu8 WMMA probes | recurrent, fixed op_id | catalog equality assertion for the pinned atom |
+| MMA lowerers and epilogues | single-shot/output-only | C operand verifier / D result metadata |
+
+The shared recurrence contract checks C/D dtype, per-lane fragment width, and
+registered physical layout function. Current catalog rows remain compatible and
+therefore emit identical IR. No `unpack()` signature or serialized `tile.mma`
+operand list is extended.
+
 Validation is staged so a metadata defect fails before expensive compilation or
 GPU execution.
 

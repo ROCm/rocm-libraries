@@ -1657,6 +1657,8 @@ static rocke_kernel_def_t*
     const rocke_mmaop_t* op = _resolve_dgrad_op(b, spec, arch);
     if(!op)
         return NULL;
+    if(rocke_mmaop_require_recurrence(b, op, "implicit_gemm_conv_dgrad") != ROCKE_OK)
+        return NULL;
     bool is_wmma = (op->family && strcmp(op->family, "wmma") == 0);
     const rocke_mfma_atom_t* atom
         = is_wmma ? NULL
@@ -1804,7 +1806,7 @@ static rocke_kernel_def_t*
     int num_accs = mfmas_m * mfmas_n;
 
     // ---- accumulators ----
-    rocke_value_t* acc_init = rocke_b_zero_vec_f32(b, d_per_lane);
+    rocke_value_t* acc_init = rocke_mmaop_zero_c(b, op);
     rocke_iter_arg_t iter_args[ROCKE_CONV_MAX_ACCS];
     char acc_name_bufs[ROCKE_CONV_MAX_ACCS][32];
     for(int i = 0, idx = 0; i < mfmas_m; i++)

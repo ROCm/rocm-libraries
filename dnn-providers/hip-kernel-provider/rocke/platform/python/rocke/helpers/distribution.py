@@ -1856,12 +1856,9 @@ def require_wmma_recurrence(atom, *, where: str) -> None:
     its :class:`WmmaTensor` wrapper as role ``"c"`` on the next iteration, so
     checking only the wrapper role inside :func:`wmma_mma` is insufficient.
     """
-    if atom.c_per_lane != atom.d_per_lane or atom.dtype_c != atom.dtype_d:
-        raise ValueError(
-            f"{where}: cannot feed an MMA D result back as C because C and D "
-            f"fragment types differ (C={atom.dtype_c}[{atom.c_per_lane}], "
-            f"D={atom.dtype_d}[{atom.d_per_lane}])"
-        )
+    from .atoms import require_mma_recurrence
+
+    require_mma_recurrence(atom, where=where)
 
 
 def store_wmma_tile(

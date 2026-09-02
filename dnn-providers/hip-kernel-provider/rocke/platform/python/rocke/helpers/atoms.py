@@ -64,6 +64,49 @@ def _accumulator_ir_type(dtype: str):
         raise ValueError(f"unsupported MMA accumulator input dtype {dtype!r}") from exc
 
 
+def _mma_role_metadata(atom, role: str) -> Tuple[str, int]:
+    """Return the accumulator dtype and per-lane width for ``role``."""
+    dtype = getattr(atom, f"{role}_dtype", None)
+    if dtype is None:
+        dtype = getattr(atom, f"dtype_{role}", None)
+    width = getattr(atom, f"{role}_frag_len", None)
+    if width is None:
+        width = getattr(atom, f"{role}_per_lane", None)
+    if dtype is None or width is None:
+        raise ValueError(f"MMA {role.upper()} metadata is incomplete")
+    return dtype, width
+
+
+def require_mma_recurrence(atom, *, where: str) -> None:
+    """Require an MMA result D to be directly reusable as the next C input."""
+    c_dtype, c_width = _mma_role_metadata(atom, "c")
+    d_dtype, d_width = _mma_role_metadata(atom, "d")
+    mismatch = c_dtype != d_dtype or c_width != d_width
+
+    c_layout = getattr(atom, "_c_layout", None)
+    d_layout = getattr(atom, "_d_layout", None)
+    if c_layout is not None or d_layout is not None:
+        mismatch = mismatch or c_layout is None or d_layout is None
+        if c_layout is not None and d_layout is not None:
+            mismatch = mismatch or (
+                c_layout.frag_len != d_layout.frag_len
+                or c_layout.wave_size != d_layout.wave_size
+                or c_layout.fn is not d_layout.fn
+            )
+
+    if mismatch:
+        raise ValueError(
+            f"{where}: cannot feed MMA D back as C because the C and D "
+            f"contracts differ (C={c_dtype}[{c_width}], D={d_dtype}[{d_width}])"
+        )
+
+
+def zero_mma_c(b: IRBuilder, atom) -> Value:
+    """Construct a fresh zero fragment using the MMA C-input contract."""
+    c_dtype, c_width = _mma_role_metadata(atom, "c")
+    return b.zero_vec(_accumulator_ir_type(c_dtype), c_width)
+
+
 @dataclass(frozen=True)
 class MfmaAtom:
     """One MFMA intrinsic with all the metadata a kernel author needs.

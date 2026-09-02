@@ -18,6 +18,7 @@
 #include <cstring>
 
 #include "rocke/arch_target.h"
+#include "rocke/helper_rocke.core.arch.h"
 #include "rocke/helper_rocke.helpers.atoms.h"
 #include "rocke/ir.h"
 
@@ -27,6 +28,10 @@ extern "C" rocke_value_t* rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b,
                                                       const rocke_mma_op_t* op);
 
 static int g_failures = 0;
+
+static void layout_a(rocke_ir_builder_t*, rocke_value_t*, int, rocke_value_t**, rocke_value_t**) {}
+
+static void layout_b(rocke_ir_builder_t*, rocke_value_t*, int, rocke_value_t**, rocke_value_t**) {}
 
 #define CHECK(cond, msg)                                                      \
     do                                                                        \
@@ -212,6 +217,35 @@ int main(void)
         }
         CHECK(rocke_mfma_atom_require_recurrence(&b, &equal, "test") == ROCKE_OK,
               "equal C/D recurrence must be accepted");
+        rocke_ir_builder_free(&b);
+    }
+
+    {
+        const rocke_layout_map_t c_layout = {ROCKE_MMA_ROLE_C, 2, 32, layout_a};
+        const rocke_layout_map_t d_layout = {ROCKE_MMA_ROLE_D, 2, 32, layout_b};
+        rocke_mma_op_t unequal_layout = {};
+        unequal_layout.c_dtype = "i32";
+        unequal_layout.d_dtype = "i32";
+        unequal_layout.c_frag_len = 2;
+        unequal_layout.d_frag_len = 2;
+        unequal_layout.c_layout = &c_layout;
+        unequal_layout.d_layout = &d_layout;
+        bool rejected = false;
+        if(rocke_ir_builder_init(&b, "rocke_mma_layout_recurrence_reject") != ROCKE_OK)
+        {
+            fprintf(stderr, "rocke_ir_builder_init failed\n");
+            return 1;
+        }
+        try
+        {
+            rejected
+                = rocke_mmaop_require_recurrence(&b, &unequal_layout, "test") == ROCKE_ERR_VALUE;
+        }
+        catch(...)
+        {
+            rejected = true;
+        }
+        CHECK(rejected, "unequal C/D layouts must be rejected for recurrence");
         rocke_ir_builder_free(&b);
     }
 

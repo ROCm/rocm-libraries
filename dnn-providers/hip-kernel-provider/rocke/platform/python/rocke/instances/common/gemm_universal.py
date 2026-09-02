@@ -66,6 +66,7 @@ from ...core.ir import (
     Type,
     Value,
 )
+from ...helpers.atoms import require_mma_recurrence, zero_mma_c
 from ...helpers.io import io_ir_type
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
@@ -695,14 +696,8 @@ def _emit_mma(b: IRBuilder, op, a: Value, bb: Value, c: Value) -> Value:
 
 def _emit_zero_acc_op(b: IRBuilder, op) -> Value:
     """Zero the resolved op's recurrent C-input accumulator fragment."""
-    if op.c_frag_len != op.d_frag_len or op.c_dtype != op.d_dtype:
-        raise ValueError(
-            "universal GEMM cannot feed MMA D back as C when the op's C and D "
-            f"fragment types differ (C={op.c_dtype}[{op.c_frag_len}], "
-            f"D={op.d_dtype}[{op.d_frag_len}])"
-        )
-    c_elem = I32 if op.c_dtype == "i32" else F32
-    return b.zero_vec(c_elem, op.c_frag_len)
+    require_mma_recurrence(op, where="universal GEMM")
+    return zero_mma_c(b, op)
 
 
 def _choose_load_vec(spec: UniversalGemmSpec) -> int:

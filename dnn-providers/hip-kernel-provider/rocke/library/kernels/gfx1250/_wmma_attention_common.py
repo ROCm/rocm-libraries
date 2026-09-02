@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Callable, List, Optional, Tuple
 
 from rocke.core.ir import BF16, F32, FP8E4M3, I32, IRBuilder, Type, Value, VectorType
+from rocke.helpers.atoms import require_mma_recurrence, zero_mma_c
 from rocke.helpers.attention import (
     dequant_fp8x8_to_dtype,
     wave_reduce_max,
@@ -83,6 +84,7 @@ def resolve_wmma(arch: str):
     from rocke.core.arch import ArchTarget
 
     op = ArchTarget.from_gfx(arch).mma.by_op_id(WMMA_OP_ID)
+    require_mma_recurrence(op, where="gfx1250 WMMA attention")
     return op, op.a_layout(), op.d_layout(), op.a_frag_len, op.d_frag_len
 
 
@@ -136,14 +138,14 @@ def compute_qk_scores(
     kv_dtype: Type,
     k_scale: Value,
     dtype: Type,
-    d_frag: int,
+    op,
     phys_block: PhysBlockFn,
     spacing: int = 0,
 ) -> List[Value]:
     """Q*K^T for the two 16-token N-subtiles of a 32-token tile -> [score0, score1]."""
     scores = []
     for nsub in range(2):
-        score = b.zero_vec_f32(d_frag)
+        score = zero_mma_c(b, op)
         k_pos = b.add(b.add(tile_base, b.const_i32(nsub * WMMA_N)), lane_row)
         pblk = phys_block(k_pos)
         token_in_block = b.mod(k_pos, b.const_i32(block_size))

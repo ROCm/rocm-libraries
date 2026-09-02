@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 
 from ..core.ir import F16, F32, BF16, IRBuilder, Value
-from .atoms import MfmaAtom
+from .atoms import MfmaAtom, require_mma_recurrence
 
 
 __all__ = [
@@ -128,12 +128,7 @@ def validate_mfma_atom_in_catalog(atom: MfmaAtom, arch: str, *, where: str) -> N
 
 def _require_recurrent_accumulator_contract(atom: MfmaAtom, *, where: str) -> None:
     """Require a D result to be usable as the next MMA's C operand."""
-    if atom.c_per_lane != atom.d_per_lane or atom.dtype_c != atom.dtype_d:
-        raise ValueError(
-            f"{where} cannot feed MMA D back as C when the atom's C and D "
-            f"fragment types differ (C={atom.dtype_c}[{atom.c_per_lane}], "
-            f"D={atom.dtype_d}[{atom.d_per_lane}])"
-        )
+    require_mma_recurrence(atom, where=where)
 
 
 @dataclass(frozen=True)

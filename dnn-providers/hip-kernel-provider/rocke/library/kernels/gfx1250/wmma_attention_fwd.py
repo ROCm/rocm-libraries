@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from rocke.core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.helpers.atoms import require_mma_recurrence, zero_mma_c
 
 # Experimental direct-LLVM WMMA spacing knob. Default off: fixed v_nop counts did
 # not robustly fix the causal NaN across shapes; Phase-1 causal verification uses
@@ -196,6 +197,7 @@ def build_wmma_attention_fwd(
 
     target = ArchTarget.from_gfx(arch)
     op = target.mma.by_op_id(_WMMA_OP_ID)
+    require_mma_recurrence(op, where="gfx1250 wmma_attention_fwd")
     wave = op.wave_size  # 32
     a_map = op.a_layout()  # (row, k): lane l, slot j -> (l%16, (l//16)*16 + j)
     d_map = op.d_layout()  # (row, col): lane l, slot i -> ((l//16)*8 + i, l%16)
@@ -271,7 +273,7 @@ def build_wmma_attention_fwd(
         iter_args.append((f"m{r}", neg_inf))
         iter_args.append((f"l{r}", zero_f))
     for d in range(n_pv):
-        iter_args.append((f"acc{d}", b.zero_vec_f32(d_frag)))
+        iter_args.append((f"acc{d}", zero_mma_c(b, op)))
 
     c_block_k = b.const_i32(_BLOCK_K)
     loop_stop = b.div(seqlen_k, c_block_k)
@@ -288,7 +290,7 @@ def build_wmma_attention_fwd(
         # ---- QK^T: two N-sub-tiles (k 0..15 and 16..31), each summed over d ----
         scores = []
         for nsub in range(2):
-            score = b.zero_vec_f32(d_frag)
+            score = zero_mma_c(b, op)
             # This lane's K row for sub-tile nsub: k_tile_base + nsub*16 + (l%16).
             k_row = b.add(b.add(k_tile_base, b.const_i32(nsub * _WMMA_N)), a_row)
             k_addr_row_base = b.add(

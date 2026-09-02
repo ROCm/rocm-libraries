@@ -34,6 +34,7 @@ import math
 from typing import Optional, Tuple
 
 from rocke.core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
+from rocke.helpers.atoms import zero_mma_c
 from rocke.helpers.attention import (
     PagedKvDescriptor,
     binary_search_seq_idx,
@@ -693,7 +694,7 @@ def build_unified_attention_3d_tiled(
             else:
                 m_inits.append(neg_inf)
         l_inits = [one_f for _ in range(c_frag)]
-        acc_inits = [b.zero_vec_f32(c_frag) for _ in range(D_BLK)]
+        acc_inits = [zero_mma_c(b, op) for _ in range(D_BLK)]
 
         iter_args = []
         for r in range(c_frag):
@@ -733,7 +734,7 @@ def build_unified_attention_3d_tiled(
                 kv_dtype=kv_dtype,
                 k_scale=k_scale,
                 dtype=dtype,
-                c_frag=c_frag,
+                op=op,
                 phys_block=_phys_block,
                 spacing=spec.wmma_spacing,
             )
@@ -820,12 +821,12 @@ def build_unified_attention_3d_tiled(
                 V_lds,
                 new_accs,
                 a_map=a_map,
-                c_map=c_map,
+                d_map=c_map,
                 lane=lane,
                 lane_row=lane_row,
                 col=col,
                 a_frag=a_frag,
-                c_frag=c_frag,
+                d_frag=c_frag,
                 head_size=HD,
                 dtype=dtype,
                 v_extra_idx=wave_id,
@@ -964,7 +965,7 @@ def build_unified_attention_3d_tiled(
         )
         for _ in range(c_frag)
     ]
-    acc_inits = [b.zero_vec_f32(c_frag) for _ in range(HD // _WMMA_N)]
+    acc_inits = [zero_mma_c(b, op) for _ in range(HD // _WMMA_N)]
 
     iter_args = []
     for r in range(c_frag):
@@ -1071,7 +1072,7 @@ def build_unified_attention_3d_tiled(
             kv_dtype=kv_dtype,
             k_scale=k_scale,
             dtype=dtype,
-            c_frag=c_frag,
+            op=op,
             phys_block=_phys_block,
             spacing=spec.wmma_spacing,
         )
@@ -1183,12 +1184,12 @@ def build_unified_attention_3d_tiled(
                     V_lds,
                     new_accs,
                     a_map=a_map,
-                    c_map=c_map,
+                    d_map=c_map,
                     lane=lane,
                     lane_row=lane_row,
                     col=col,
                     a_frag=a_frag,
-                    c_frag=c_frag,
+                    d_frag=c_frag,
                     head_size=HD,
                     dtype=dtype,
                     v_extra_idx=cur_buf,
@@ -1267,11 +1268,11 @@ def build_unified_attention_3d_tiled(
                     V_lds,
                     new_accs,
                     a_map=a_map,
-                    c_map=c_map,
+                    d_map=c_map,
                     lane=lane,
                     col=col,
                     a_frag=a_frag,
-                    c_frag=c_frag,
+                    d_frag=c_frag,
                     head_size=HD,
                     dtype=dtype,
                     v_extra_idx=v_read if spec.use_wide_kv_load else None,
@@ -1312,12 +1313,12 @@ def build_unified_attention_3d_tiled(
                     V_lds,
                     new_accs,
                     a_map=a_map,
-                    c_map=c_map,
+                    d_map=c_map,
                     lane=lane,
                     lane_row=lane_row,
                     col=col,
                     a_frag=a_frag,
-                    c_frag=c_frag,
+                    d_frag=c_frag,
                     head_size=HD,
                     dtype=dtype,
                     v_extra_idx=v_read if spec.use_wide_kv_load else None,

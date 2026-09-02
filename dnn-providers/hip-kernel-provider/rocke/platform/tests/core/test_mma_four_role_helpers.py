@@ -9,10 +9,15 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from rocke.core.arch import ArchTarget, MmaCatalog, MmaOp
+from rocke.core.arch import ArchTarget, LayoutMap, MmaCatalog, MmaOp
 from rocke.core.ir import F32, I32, IRBuilder, VectorType
 from rocke.core.isa.backend import Gfx11RdnaBackend
-from rocke.helpers.atoms import MfmaAtom, WmmaAtom
+from rocke.helpers.atoms import (
+    MfmaAtom,
+    WmmaAtom,
+    require_mma_recurrence,
+    zero_mma_c,
+)
 from rocke.helpers.distribution import (
     WmmaTensor,
     require_wmma_recurrence,
@@ -256,6 +261,148 @@ class TestFourRoleAtomHelpers(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"C=i32\[2\].*D=fp32\[3\]"):
             _emit_zero_acc_op(builder, unequal)
 
+    def test_mma_op_recurrence_checks_layout_and_zero_uses_c(self):
+        def shared_layout(*_args):
+            return 0, 0
+
+        equal = MmaOp(
+            family="wmma",
+            a_dtype="fp16",
+            b_dtype="fp16",
+            c_dtype="i32",
+            d_dtype="i32",
+            m=1,
+            n=1,
+            k=1,
+            op_id="synthetic_equal",
+            c_frag_len=2,
+            d_frag_len=2,
+            _c_layout=LayoutMap("c", 2, 32, shared_layout),
+            _d_layout=LayoutMap("d", 2, 32, shared_layout),
+        )
+        require_mma_recurrence(equal, where="test")
+        zero = zero_mma_c(IRBuilder("four_role_mma_op_zero"), equal)
+        self.assertEqual(zero.type.count, 2)
+        self.assertIs(zero.type.elem, I32)
+
+        unequal_layout = MmaOp(
+            **{
+                **equal.__dict__,
+                "op_id": "synthetic_unequal_layout",
+                "_d_layout": LayoutMap("d", 2, 32, lambda *_args: (1, 1)),
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "C and D contracts differ"):
+            require_mma_recurrence(unequal_layout, where="test")
+
+    def test_all_generic_recurrent_resolvers_reject_layout_mismatch(self):
+        from kernels.gfx1250 import _wmma_attention_common
+        from rocke.helpers import mfma_attention
+        from rocke.instances.common import (
+            conv_implicit_gemm,
+            conv_implicit_gemm_dgrad,
+            conv_implicit_gemm_wgrad,
+        )
+
+        def c_layout(*_args):
+            return 0, 0
+
+        op = MmaOp(
+            family="wmma",
+            a_dtype="fp16",
+            b_dtype="fp16",
+            c_dtype="fp32",
+            d_dtype="fp32",
+            m=16,
+            n=16,
+            k=16,
+            op_id="wmma_f32_16x16x16_f16",
+            a_frag_len=16,
+            b_frag_len=16,
+            c_frag_len=8,
+            d_frag_len=8,
+            wave_size=32,
+            _c_layout=LayoutMap("c", 8, 32, c_layout),
+            _d_layout=LayoutMap("d", 8, 32, lambda *_args: (1, 1)),
+        )
+        target = SimpleNamespace(wave_size=32, mma=MmaCatalog([op]))
+        spec = SimpleNamespace(
+            data=SimpleNamespace(dtype_a="fp16", dtype_b="fp16"),
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+        )
+
+        resolvers = (
+            (conv_implicit_gemm._resolve_conv_op, "implicit_gemm_conv"),
+            (conv_implicit_gemm_dgrad._resolve_dgrad_op, "implicit_gemm_conv_dgrad"),
+            (conv_implicit_gemm_wgrad._resolve_wgrad_op, "implicit_gemm_conv_wgrad"),
+        )
+        with patch("rocke.core.arch.ArchTarget.from_gfx", return_value=target):
+            for resolve, where in resolvers:
+                with self.subTest(where=where), self.assertRaisesRegex(
+                    ValueError, rf"{where}:.*contracts differ"
+                ):
+                    resolve(spec, "gfx-test")
+
+        gfx1250_op = MmaOp(
+            **{
+                **op.__dict__,
+                "op_id": _wmma_attention_common.WMMA_OP_ID,
+                "k": 32,
+            }
+        )
+        gfx1250_target = SimpleNamespace(mma=MmaCatalog([gfx1250_op]))
+        with patch(
+            "rocke.core.arch.ArchTarget.from_gfx", return_value=gfx1250_target
+        ), self.assertRaisesRegex(
+            ValueError, "gfx1250 WMMA attention:.*contracts differ"
+        ):
+            _wmma_attention_common.resolve_wmma("gfx1250")
+
+        with patch.object(
+            mfma_attention, "require_mma_recurrence", side_effect=ValueError("guarded")
+        ), self.assertRaisesRegex(ValueError, "guarded"):
+            mfma_attention._wmma_attention_fwd_inner_body(
+                object(),
+                Q=None,
+                K=None,
+                V=None,
+                O=None,
+                head_size=16,
+                seqlen_k=None,
+                q_tile_base=None,
+                head_idx=None,
+                kv_head_idx=None,
+                q_pos_base=None,
+                stride_q_token=None,
+                stride_q_head=None,
+                stride_k_token=None,
+                stride_k_head=None,
+                stride_v_token=None,
+                stride_v_head=None,
+                stride_o_token=None,
+                stride_o_head=None,
+                scale_log2=None,
+                dtype="f16",
+                mask_mode="none",
+                sliding_window=0,
+                causal_ctx_offset=None,
+                k_token_offset_elems=None,
+                v_token_offset_elems=None,
+                k_row_base_fn=None,
+                v_row_base_fn=None,
+                k_tile_start=None,
+                k_tile_stop=None,
+                extra_score_transform=None,
+                extra_mask_predicate=None,
+                extra_skip_predicate=None,
+                k_block_iter_fn=None,
+                v_scale=None,
+                arch="gfx1151",
+                target=ArchTarget.from_gfx("gfx1151"),
+            )
+
     def test_zero_acc_uses_c_dtype_and_width(self):
         builder = IRBuilder("four_role_zero")
         mfma = MfmaAtom(1, 1, 1, 1, 1, 2, 5, "f16", "i32", "f32", "synthetic")
@@ -284,7 +431,7 @@ class TestFourRoleAtomHelpers(unittest.TestCase):
         self.assertEqual(d.num_slots, 3)
         self.assertIs(d._layout(), atom.d_map)
 
-        with self.assertRaisesRegex(ValueError, "C and D fragment types differ"):
+        with self.assertRaisesRegex(ValueError, "C and D contracts differ"):
             wmma_mma(
                 object(),
                 WmmaTensor(atom, "a", "a"),

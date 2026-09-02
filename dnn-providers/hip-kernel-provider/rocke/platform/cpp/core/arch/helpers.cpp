@@ -15,8 +15,11 @@
 
 #include "rocke/helper_rocke.core.arch.h"
 
+#include <string.h>
+
 #include "rocke/arch_target.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 
 /* ============================== MmaOp ================================== */
 
@@ -55,6 +58,65 @@ const rocke_arch_layout_map_t* rocke_mmaop_acc_layout(const rocke_mmaop_t* op,
 {
     /* MmaOp.acc_layout(): compatibility spelling for the result D map. */
     return rocke_mma_op_acc_layout(op, b);
+}
+
+rocke_status_t rocke_mmaop_require_recurrence(rocke_ir_builder_t* b,
+                                              const rocke_mmaop_t* op,
+                                              const char* where)
+{
+    bool layout_mismatch = false;
+    if(!rocke_i_live(b))
+        return b ? b->status : ROCKE_ERR_VALUE;
+    if(op == NULL || op->c_dtype == NULL || op->d_dtype == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "MMA recurrence requires C/D metadata");
+        return b->status;
+    }
+    if(op->c_layout != NULL || op->d_layout != NULL)
+    {
+        layout_mismatch = op->c_layout == NULL || op->d_layout == NULL;
+        if(op->c_layout != NULL && op->d_layout != NULL)
+        {
+            layout_mismatch = op->c_layout->frag_len != op->d_layout->frag_len
+                              || op->c_layout->wave_size != op->d_layout->wave_size
+                              || op->c_layout->fn != op->d_layout->fn;
+        }
+    }
+    if(op->c_frag_len != op->d_frag_len || strcmp(op->c_dtype, op->d_dtype) != 0 || layout_mismatch)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s: cannot feed MMA D back as C because the C and D contracts "
+                        "differ (C=%s[%d], D=%s[%d])",
+                        where ? where : "MMA recurrence",
+                        op->c_dtype,
+                        op->c_frag_len,
+                        op->d_dtype,
+                        op->d_frag_len);
+        return b->status;
+    }
+    return ROCKE_OK;
+}
+
+rocke_value_t* rocke_mmaop_zero_c(rocke_ir_builder_t* b, const rocke_mmaop_t* op)
+{
+    const rocke_type_t* elem = NULL;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(op == NULL || op->c_dtype == NULL)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "MMA C metadata is incomplete");
+    if(strcmp(op->c_dtype, "f16") == 0 || strcmp(op->c_dtype, "fp16") == 0)
+        elem = rocke_f16();
+    else if(strcmp(op->c_dtype, "bf16") == 0)
+        elem = rocke_bf16();
+    else if(strcmp(op->c_dtype, "f32") == 0 || strcmp(op->c_dtype, "fp32") == 0)
+        elem = rocke_f32();
+    else if(strcmp(op->c_dtype, "i32") == 0)
+        elem = rocke_i32();
+    else
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "unsupported MMA accumulator input dtype '%s'", op->c_dtype);
+    return rocke_b_zero_vec(b, elem, op->c_frag_len);
 }
 
 bool rocke_arch_layout_map_coord(const rocke_arch_layout_map_t* m,
