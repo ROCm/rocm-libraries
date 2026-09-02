@@ -661,6 +661,9 @@ class Tensor {
 
     Tensor reshapeSharingStorage(Shape shape) const;
 
+    // Inserts a singleton dimension without copying storage.
+    Tensor expandDims(size_t axis) const;
+
     // Returns a shallow NumPy-style broadcast view. Missing leading
     // dimensions and expanded singleton dimensions receive stride zero.
     Tensor broadcastTo(Shape shape) const;
@@ -751,6 +754,17 @@ inline Tensor Tensor::reshapeSharingStorage(Shape shape) const {
         throw std::invalid_argument(
             "Tensor reshape requires a contiguous last-dimension-fastest layout.");
     return shareStorageWithLayout(Layout::contiguousLastDimensionFastest(shape));
+}
+
+inline Tensor Tensor::expandDims(size_t axis) const {
+    if (axis > shape().rank())
+        throw std::out_of_range("Tensor expansion axis exceeds the destination rank.");
+    std::vector<size_t> dimensions(shape().dimensions().begin(), shape().dimensions().end());
+    std::vector<ptrdiff_t> strides(layout().strides().begin(), layout().strides().end());
+    dimensions.insert(dimensions.begin() + static_cast<ptrdiff_t>(axis), 1);
+    strides.insert(strides.begin() + static_cast<ptrdiff_t>(axis), 0);
+    return shareStorageWithLayout(
+        Layout(Shape(std::move(dimensions)), std::move(strides), layout().offset()));
 }
 
 inline Tensor Tensor::broadcastTo(Shape shape) const {

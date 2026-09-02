@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <roc/host_numerics/operation_types.hpp>
+#include <roc/host_numerics/tensor.hpp>
 
 namespace roc::host_numerics {
 enum class ActivationApplication {

@@ -506,8 +506,5 @@ inline void rejectOverlappingTensorStorageUnlessIdenticallyMapped(const Tensor& 
         throw std::invalid_argument(message);
 }
 
-inline size_t axisExtent(MatrixAxis axis, size_t rows, size_t columns) {
-    return axis == MatrixAxis::Row ? rows : columns;
-}
 }  // namespace detail
 }  // namespace roc::host_numerics

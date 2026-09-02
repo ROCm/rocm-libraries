@@ -927,11 +927,11 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     options.epilogue.beta       = static_cast<double>(beta[i]);
                     options.epilogue.activation = toHostNumericsActivation(actType[i]);
                     if(bias_ptr)
-                        options.epilogue.bias = VectorBinding{
-                            Tensor::copyNativeStorage<float>(
-                                Layout::contiguousLastDimensionFastest(Shape{size_t(m[i])}),
-                                std::span<const float>(bias_ptr, size_t(m[i]))),
-                            MatrixAxis::Row};
+                        options.epilogue.bias
+                            = Tensor::copyNativeStorage<float>(
+                                  Layout::contiguousLastDimensionFastest(Shape{size_t(m[i])}),
+                                  std::span<const float>(bias_ptr, size_t(m[i])))
+                                  .expandDims(1);
                     if(actType[i] == ActivationType::SWISH)
                         options.epilogue.activationParameter0 = 1.0;
                     else if(actType[i] == ActivationType::CLAMP)
