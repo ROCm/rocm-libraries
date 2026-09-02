@@ -41,7 +41,7 @@
 #include "stinkytofu/ir/asm/ssa/AttachedSSAVerifier.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
-#include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -666,6 +666,140 @@ TEST_F(LiftAsmRegistersToSSATest, DestinationOverlappingItsOwnSourceReadsTheOldU
     EXPECT_EQ(bindingIndicesOf(written), (std::vector<unsigned>{4, 5}));
     // The v5 that is read is the incoming value, not the one defined here.
     EXPECT_NE(read[0], written[1]);
+}
+
+// ---------------------------------------------------------------------------
+// Lift scope: which register classes become SSA, and what the rest look like
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// v<dest> = v_mov_b32 s<src>: one operand in each class, so a scope decision is
+/// visible on a single instruction.
+StinkyInstruction* createVMovFromSgpr(BasicBlock* bb, int destVgpr, int srcSgpr) {
+    AsmIRBuilder builder(*bb, kArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
+    mov->addDestReg(StinkyRegister("v", destVgpr, 1));
+    mov->addSrcReg(StinkyRegister("s", srcSgpr, 1));
+    return mov;
+}
+
+bool anyOfClass(const Function& function, RegType regClass) {
+    for (StinkySSAValue* value : function.ssaArena().values()) {
+        if (value != nullptr && value->type().regType == regClass) return true;
+    }
+    return false;
+}
+
+LiftAsmRegistersToSSAOptions scopedTo(RegType regClass) {
+    LiftAsmRegistersToSSAOptions options;
+    options.classes = RegClassSet::only(regClass);
+    return options;
+}
+
+}  // namespace
+
+TEST_F(LiftAsmRegistersToSSATest, ScopingToSgprLeavesVectorOperandsPhysical) {
+    createVMovFromSgpr(entry, /*destVgpr=*/0, /*srcSgpr=*/4);
+
+    lift(scopedTo(RegType::S));
+
+    // Only the scalar operand became a value; the vector destination defines
+    // nothing and keeps its physical spelling.
+    EXPECT_TRUE(anyOfClass(*func, RegType::S));
+    EXPECT_FALSE(anyOfClass(*func, RegType::V));
+    EXPECT_TRUE(contains(ssaIR(*func), "v0 = \"st.v_mov_b32\"(%1:s)")) << ssaIR(*func);
+}
+
+TEST_F(LiftAsmRegistersToSSATest, ScopingToVgprLeavesScalarOperandsPhysical) {
+    createVMovFromSgpr(entry, /*destVgpr=*/0, /*srcSgpr=*/4);
+
+    lift(scopedTo(RegType::V));
+
+    EXPECT_TRUE(anyOfClass(*func, RegType::V));
+    EXPECT_FALSE(anyOfClass(*func, RegType::S));
+    EXPECT_TRUE(contains(ssaIR(*func), "%1:v = \"st.v_mov_b32\"(s4)")) << ssaIR(*func);
+}
+
+TEST_F(LiftAsmRegistersToSSATest, AnOutOfScopeClassIsNotAnError) {
+    // The distinction that makes scoping work: a class the lifter cannot model is
+    // an error, but a class deliberately left physical is simply skipped. Lifting
+    // a VGPR-only function for SGPRs is a legal no-op, not a rejection.
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+
+    lift(scopedTo(RegType::S));
+
+    EXPECT_EQ(valueCount(), 0u);
+    EXPECT_FALSE(anyOfClass(*func, RegType::V));
+}
+
+TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfOutsideTheLiftScopeIsNotAnError) {
+    // The selector names a vector operand and this lift covers only scalars, so
+    // the instruction keeps both registers and its modifier verbatim. Rejecting
+    // it would discard the whole function over an operand nothing touches.
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
+    mov->addDestReg(StinkyRegister("v", 0, 1));
+    mov->addSrcReg(StinkyRegister("v", 1, 1));
+    mov->addModifier<True16Modifiers>(
+        True16Modifiers(HighBitSel::HIGH, HighBitSel::NONE, {HighBitSel::NONE}));
+
+    lift(scopedTo(RegType::S));
+
+    EXPECT_EQ(valueCount(), 0u);
+    ASSERT_NE(mov->getModifier<True16Modifiers>(), nullptr);
+    EXPECT_EQ(mov->getModifier<True16Modifiers>()->getDst0(), HighBitSel::HIGH);
+}
+
+TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfOnAnInScopeOperandStillRejects) {
+    // Same scope, but a lifted operand now shares the instruction with the
+    // selector, so the lift cannot leave it physical and must decline. This is
+    // what keeps the guard scoped rather than simply gone.
+    StinkyInstruction* mov = createVMovFromSgpr(entry, /*destVgpr=*/0, /*srcSgpr=*/4);
+    mov->addModifier<True16Modifiers>(
+        True16Modifiers(HighBitSel::NONE, HighBitSel::NONE, {HighBitSel::LOW}));
+
+    const std::string error = liftError(scopedTo(RegType::S));
+    EXPECT_TRUE(contains(error, "True16 half operands")) << error;
+    EXPECT_TRUE(contains(error, "src0 is in the lift scope")) << error;
+}
+
+TEST_F(LiftAsmRegistersToSSATest, AClassTheLifterCannotModelIsStillAnError) {
+    // Scoping selects among the classes lifting can model; it does not widen them.
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
+    mov->addDestReg(StinkyRegister("v", 0, 1));
+    mov->addSrcReg(StinkyRegister("a", 1, 1));
+
+    LiftAsmRegistersToSSAOptions options;
+    options.classes = RegClassSet::all().add(RegType::A);
+
+    EXPECT_TRUE(contains(liftError(options), "register class 'a' is not lifted yet"));
+}
+
+TEST_F(LiftAsmRegistersToSSATest, AnEmptyScopeIsRejected) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+
+    LiftAsmRegistersToSSAOptions options;
+    options.classes = {};
+
+    EXPECT_TRUE(contains(liftError(options), "no register classes to lift"));
+    EXPECT_FALSE(func->hasAttachedSSA());
+}
+
+TEST_F(LiftAsmRegistersToSSATest, ScopeIsRecordedOnTheArena) {
+    createVMovFromSgpr(entry, /*destVgpr=*/0, /*srcSgpr=*/4);
+
+    lift(scopedTo(RegType::S));
+
+    // Every walker that steps operands beside AttachedSSA reads this, because the
+    // shape fingerprint cannot distinguish two scopes over one program.
+    EXPECT_EQ(func->ssaArena().liftedClasses(), RegClassSet::only(RegType::S));
+    EXPECT_EQ(func->ssaArena().liftedClasses().toString(), "s");
+
+    // Clearing drops the claim, so an unlifted function does not appear scoped.
+    func->clearAttachedSSA();
+    EXPECT_EQ(func->ssaArena().liftedClasses(), RegClassSet::all());
 }
 
 // ---------------------------------------------------------------------------

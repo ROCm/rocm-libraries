@@ -28,7 +28,6 @@
 
 #include "InputFlags.hpp"
 #include "driver.hpp"
-#include "miopen_BatchNormHost.hpp"
 #include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
