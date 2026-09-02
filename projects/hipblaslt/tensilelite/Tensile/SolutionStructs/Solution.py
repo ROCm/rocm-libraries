@@ -265,6 +265,95 @@ def _subtileStackForTile(mtTiles):
   return exact
 
 
+# Strip sharing is only policed on gfx950; _validateSubtileGRKPartition returns
+# early elsewhere, and the stack chooser has to agree with it.
+_SUBTILE_STRIP_SHARING_ISA = (9, 5, 0)
+
+
+def _subtileStripSharingReason(state, tc, mtTiles, stack):
+  """Why tensor tc's waves cannot share a strip of `stack`, or None when they can.
+
+  These two rules hold for every subtile geometry, not just TLU=1 fp4, so they
+  stay separate from the fp4-only layout rules below.
+  """
+  wgSize = state["MIWaveGroup"][0 if tc == 'A' else 1]
+  perWaveMTiles = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
+  if _subtileWaveStraddlesStrip(stack, perWaveMTiles):
+    return ("UseSubtileImpl=1 leaves a wave straddling an LDS strip on tensor %s: "
+            "%d MMA tiles per wave against a strip of %d, so the wave neither owns "
+            "whole strips nor shares one"
+            % (tc, perWaveMTiles, stack))
+  # A shared strip is addressed as a whole number of per-wave MFMA windows, so
+  # the strip height has to divide by the wave's MIWaveTile.  perWaveMTiles
+  # above is the padded share, which can hide the misalignment: a 24-tile dim
+  # over 4 waves pads to 8 and looks clean against a strip of 16, while the
+  # wave actually owns 6 and straddles the strip boundary.
+  miWaveTile = int(state["MIWaveTile"][0 if tc == 'A' else 1])
+  wavesPerStrip = max(1, stack // perWaveMTiles) if perWaveMTiles else 1
+  if wavesPerStrip > 1 and miWaveTile and stack % miWaveTile != 0:
+    return ("UseSubtileImpl=1 shares an LDS strip on tensor %s between waves whose "
+            "MIWaveTile %d does not divide the strip of %d, so a wave's MFMA tiles "
+            "cross the strip boundary"
+            % (tc, miWaveTile, stack))
+  return None
+
+
+def _subtileTLU1StackReason(state, tc, mtTiles, stack):
+  """Why `stack` cannot lay out the TLU=1 fp4 operand tc, or None when it can."""
+  mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+  strips = -(-mtTiles // stack)
+  # A partial tail strip has no register list of its own, so the GR emit indexes
+  # past the end of localSubtilesRegister.  Padding is only emittable while the
+  # operand is a single strip.
+  if mtTiles % stack != 0 and strips > 1:
+    return ("UseSubtileImpl=1 TLU=1 fp4 pads tensor %s across more than one "
+            "LDS strip: %d MMA tiles on a stack of %d is %d strips with a "
+            "partial tail, which the GR emit cannot address (MacroTile=%d)"
+            % (tc, mtTiles, stack, strips, mtFree))
+  # The strip-sharing rules are enforced on gfx950 only, in
+  # _validateSubtileGRKPartition.  Apply the same gate here so the chooser never
+  # rejects a height the validator would have let through on another ISA.
+  if tuple(state["ISA"]) == _SUBTILE_STRIP_SHARING_ISA:
+    sharing = _subtileStripSharingReason(state, tc, mtTiles, stack)
+    if sharing:
+      return sharing
+  # A strip offers (blocks per strip) x (K windows) fetch slots.  With fewer
+  # slots than waves in the group the surplus waves reissue a load someone else
+  # made, so the operand comes off memory more than once.  Test the slots, not
+  # the tile shape -- a wide wavefront or a shallow DepthU reaches the same
+  # shortage.
+  wgSize     = state["MIWaveGroup"][0 if tc == 'A' else 1]
+  numWaves   = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
+  otherWaves = max(1, numWaves // wgSize)
+  perWave    = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
+  fetchGroup = max(1, stack // perWave) * otherWaves
+  stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * 0.5
+  slots      = int(stripBytes // (state["WavefrontSize"] * 16)) \
+               * (state["DepthU"] // state["MatrixInstK"])
+  if slots < fetchGroup:
+    return ("UseSubtileImpl=1 TLU=1 fp4 leaves the LDS strip on tensor %s with "
+            "%d (block x K window) slots for a fetch group of %d, so the surplus "
+            "waves refetch it (MacroTile=%d, DepthU=%d, stack=%d)"
+            % (tc, slots, fetchGroup, mtFree, state["DepthU"], stack))
+  return None
+
+
+def _subtileStackForTLU1(state, tc, mtTiles):
+  """Stack height for a TLU=1 fp4 operand, backing off when the geometry refuses it.
+
+  _subtileStackForTile picks purely on cache-line utilization.  A height it
+  likes can still be unlayoutable for this wave group, and a shorter one often
+  is not, so walk down the ladder rather than rejecting the solution outright.
+  The preferred height is tried first, so a solution that is valid today keeps
+  the stack it has today.
+  """
+  preferred = _subtileStackForTile(mtTiles)
+  for stack in [preferred] + [s for s in _SUBTILE_STACK_SIZES if s < preferred]:
+    if _subtileTLU1StackReason(state, tc, mtTiles, stack) is None:
+      return stack
+  return preferred
+
+
 def _validateSubtileGRKPartition(state, printRejectionReason):
   # TODO: TEMPORARY FIX. Reject gfx950 subtile solutions that hit the GR
   # K-partition bug (see _subtileGRKPartitionIsBuggy). Remove once
@@ -279,29 +368,10 @@ def _validateSubtileGRKPartition(state, printRejectionReason):
   for tc in ("A", "B"):
     tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
     stack = int(tileInfo.subtileShape[0])
-    wgSize = state["MIWaveGroup"][0 if tc == 'A' else 1]
     mtTiles = int(tileInfo.macroTile // state["MatrixInstM"])
-    perWaveMTiles = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
-    if _subtileWaveStraddlesStrip(stack, perWaveMTiles):
-      reject(state, printRejectionReason,
-             "UseSubtileImpl=1 leaves a wave straddling an LDS strip on tensor %s: "
-             "%d MMA tiles per wave against a strip of %d, so the wave neither owns "
-             "whole strips nor shares one"
-             % (tc, perWaveMTiles, stack))
-      return False
-    # A shared strip is addressed as a whole number of per-wave MFMA windows, so
-    # the strip height has to divide by the wave's MIWaveTile.  perWaveMTiles
-    # above is the padded share, which can hide the misalignment: a 24-tile dim
-    # over 4 waves pads to 8 and looks clean against a strip of 16, while the
-    # wave actually owns 6 and straddles the strip boundary.
-    miWaveTile = int(state["MIWaveTile"][0 if tc == 'A' else 1])
-    wavesPerStrip = max(1, stack // perWaveMTiles) if perWaveMTiles else 1
-    if wavesPerStrip > 1 and miWaveTile and stack % miWaveTile != 0:
-      reject(state, printRejectionReason,
-             "UseSubtileImpl=1 shares an LDS strip on tensor %s between waves whose "
-             "MIWaveTile %d does not divide the strip of %d, so a wave's MFMA tiles "
-             "cross the strip boundary"
-             % (tc, miWaveTile, stack))
+    sharingReason = _subtileStripSharingReason(state, tc, mtTiles, stack)
+    if sharingReason:
+      reject(state, printRejectionReason, sharingReason)
       return False
     loadRatioGR = tileInfo.loadRatioGR
     localSubtileGrid = tileInfo.localSubtileGrid
@@ -1216,38 +1286,10 @@ class Solution(collections.abc.Mapping):
             # bank-conflict layout covers it, so it falls to the reject below.
             mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
             mtTiles = mtFree // state["MatrixInstM"]
-            stack = _subtileStackForTile(mtTiles)
-
-            # A partial tail strip has no register list of its own, so the GR
-            # emit indexes past the end of localSubtilesRegister.  Padding is
-            # only emittable while the operand is a single strip.
-            if mtTiles % stack != 0 and -(-mtTiles // stack) > 1:
-              reject(state, printRejectionReason,
-                     "UseSubtileImpl=1 TLU=1 fp4 pads tensor %s across more than one "
-                     "LDS strip: %d MMA tiles on a stack of %d is %d strips with a "
-                     "partial tail, which the GR emit cannot address (MacroTile=%d)"
-                     % (tc, mtTiles, stack, -(-mtTiles // stack), mtFree))
-              return
-
-            # A strip offers (blocks per strip) x (K windows) fetch slots.  With
-            # fewer slots than waves in the group the surplus waves reissue a
-            # load someone else made, so the operand comes off memory more than
-            # once.  Test the slots, not the tile shape -- a wide wavefront or a
-            # shallow DepthU reaches the same shortage.
-            wgSize     = state["MIWaveGroup"][0 if tc == 'A' else 1]
-            numWaves   = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
-            otherWaves = max(1, numWaves // wgSize)
-            perWave    = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
-            fetchGroup = max(1, stack // perWave) * otherWaves
-            stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * 0.5
-            slots      = int(stripBytes // (state["WavefrontSize"] * 16)) \
-                         * (state["DepthU"] // state["MatrixInstK"])
-            if slots < fetchGroup:
-              reject(state, printRejectionReason,
-                     "UseSubtileImpl=1 TLU=1 fp4 leaves the LDS strip on tensor %s with "
-                     "%d (block x K window) slots for a fetch group of %d, so the surplus "
-                     "waves refetch it (MacroTile=%d, DepthU=%d, stack=%d)"
-                     % (tc, slots, fetchGroup, mtFree, state["DepthU"], stack))
+            stack = _subtileStackForTLU1(state, tc, mtTiles)
+            stackReason = _subtileTLU1StackReason(state, tc, mtTiles, stack)
+            if stackReason:
+              reject(state, printRejectionReason, stackReason)
               return
             state[f"_ABTilePair{tc}"] = {
               2: "AB_B4_TLU1",
