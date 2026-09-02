@@ -134,6 +134,10 @@ caller-owned destinations when a product needs a particular layout, wants
 in-place operation where it is valid, or needs only selected outputs. Product
 adapters translate raw pointers and enums before calling either form.
 
+Zero-length dimensions are valid. A GEMM with zero M or N does no work, while
+zero K skips A and B and still applies the requested C and epilogue terms.
+Product adapters likewise preserve a zero batch count as empty work.
+
 `linearCombination` implements `alpha * x + beta * y` with NumPy-style input
 broadcasting for the hipBLASLt matrix-transform reference while sharing the
 component's conversion, layout, ownership, and aliasing rules. It is a small
@@ -210,6 +214,9 @@ d = hv.reference_gemm(
 )
 d_np = hv.to_numpy(d)
 ```
+
+Both Python GEMM forms take tensors and ordinary keyword arguments directly;
+there is no public request, operand, or options wrapper to construct.
 
 `from_numpy` creates an owning tensor and `to_numpy` returns an owning decoded
 array. Packed and custom encodings remain packed in `Tensor.storage`; their
