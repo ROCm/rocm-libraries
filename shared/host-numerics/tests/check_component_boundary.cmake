@@ -40,11 +40,11 @@ if(EXISTS
 endif()
 
 if(EXISTS
-   "${HOST_NUMERICS_SOURCE_DIR}/include/roc/host_numerics/detail/reference_axpby.hpp"
+   "${HOST_NUMERICS_SOURCE_DIR}/include/roc/host_numerics/detail/linear_combination.hpp"
 )
     message(
         FATAL_ERROR
-        "Reference AXPBY implementation must remain behind the compiled component boundary."
+        "Linear-combination implementation must remain behind the compiled component boundary."
     )
 endif()
 

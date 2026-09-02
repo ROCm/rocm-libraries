@@ -486,6 +486,11 @@ class Tensor {
         return m_layout.shape().elementCount();
     }
 
+    // Returns an independent scalar snapshot of a rank-zero tensor.
+    Scalar item() const {
+        return Scalar(*this);
+    }
+
     std::span<std::byte> rawEncodedBackingStorage() const {
         return m_storage.bytes;
     }
@@ -844,5 +849,24 @@ inline Tensor Tensor::copyConvertedTo(ScalarType destinationType, Layout destina
         });
     });
     return result;
+}
+
+inline Scalar::Scalar(const Tensor& tensor) : Scalar(tensor.type()) {
+    if (tensor.shape().rank() != 0)
+        throw std::invalid_argument("Scalar conversion requires a rank-zero Tensor.");
+
+    const uint16_t bits = scalarTypeInfo(tensor.type()).storageBits;
+    const ptrdiff_t elementOffset = tensor.layout().elementOffset(std::span<const size_t>{});
+    const uint64_t sourceBitOffset = detail::bitOffset(tensor.type(), elementOffset);
+    if (bits % 8 == 0) {
+        const size_t bytes = bits / 8;
+        const size_t sourceByteOffset = static_cast<size_t>(sourceBitOffset / 8);
+        std::copy_n(tensor.rawEncodedBackingStorage().begin() + sourceByteOffset, bytes,
+                    m_storage.begin());
+    } else {
+        const uint32_t raw =
+            detail::readPackedBits(tensor.rawEncodedBackingStorage(), sourceBitOffset, bits);
+        detail::writePackedBits(m_storage, 0, bits, raw);
+    }
 }
 }  // namespace roc::host_numerics

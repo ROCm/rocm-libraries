@@ -73,7 +73,7 @@ add_library(
 )
 
 add_library(host-numerics STATIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/axpby.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/linear_combination.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/comparison.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/epilogue.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/generation.cpp"
@@ -166,7 +166,7 @@ target_sources(host-numerics
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/axpby.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/linear_combination.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/comparison.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/epilogue.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/generation.hpp"

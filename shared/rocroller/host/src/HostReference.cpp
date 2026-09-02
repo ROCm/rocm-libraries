@@ -99,15 +99,14 @@ namespace rocRoller::HostNumerics
         return Tensor::copyEncodedBackingStorage(scalarType, layout, std::as_bytes(values));
     }
 
-    roc::host_numerics::GemmProblem
-        makeHostReferenceProblem(roc::host_numerics::Tensor                a,
-                                 roc::host_numerics::Tensor                b,
-                                 roc::host_numerics::Tensor                c,
-                                 std::optional<roc::host_numerics::Tensor> scaleA,
-                                 std::optional<roc::host_numerics::Tensor> scaleB,
-                                 size_t                                    scaleBlockSize,
-                                 float                                     alpha,
-                                 float                                     beta)
+    HostReferenceGemm makeHostReferenceProblem(roc::host_numerics::Tensor                a,
+                                               roc::host_numerics::Tensor                b,
+                                               roc::host_numerics::Tensor                c,
+                                               std::optional<roc::host_numerics::Tensor> scaleA,
+                                               std::optional<roc::host_numerics::Tensor> scaleB,
+                                               size_t scaleBlockSize,
+                                               float  alpha,
+                                               float  beta)
     {
         using namespace roc::host_numerics;
 
@@ -136,17 +135,18 @@ namespace rocRoller::HostNumerics
                                                       scaleBlockSize,
                                                       "B");
 
-        GemmProblem result(std::move(operandA),
-                           std::move(operandB),
-                           std::move(c),
-                           ScalarType::Float32,
-                           ScalarType::Float32);
-        result.epilogue.alpha = alpha;
-        result.epilogue.beta  = beta;
+        HostReferenceGemm result{
+            .a       = std::move(operandA),
+            .b       = std::move(operandB),
+            .c       = std::move(c),
+            .options = GemmOptions(ScalarType::Float32),
+        };
+        result.options.epilogue.alpha = alpha;
+        result.options.epilogue.beta  = beta;
         return result;
     }
 
-    roc::host_numerics::GemmProblem
+    HostReferenceGemm
         makeHostReferenceProblem(GeneratedGEMMInputs const&                inputs,
                                  std::optional<roc::host_numerics::Tensor> runtimeScaleA,
                                  std::optional<roc::host_numerics::Tensor> runtimeScaleB,
@@ -171,17 +171,17 @@ namespace rocRoller::HostNumerics
             beta);
     }
 
-    roc::host_numerics::Tensor computeHostReference(roc::host_numerics::GemmProblem const& problem)
+    roc::host_numerics::Tensor computeHostReference(HostReferenceGemm const& problem)
     {
         using namespace roc::host_numerics;
 
         const size_t rows = problem.a.values.shape()[0];
         if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
             throw std::overflow_error("rocRoller host GEMM output stride exceeds ptrdiff_t.");
-        GemmOutputOptions output;
-        output.layout
-            = Layout(Shape{rows, problem.b.values.shape()[1]}, {1, static_cast<ptrdiff_t>(rows)});
-        return referenceGemmWithBlasBackend(problem, output).output;
+        const Layout outputLayout(Shape{rows, problem.b.values.shape()[1]},
+                                  {1, static_cast<ptrdiff_t>(rows)});
+        return referenceGemmWithBlasBackend(
+            problem.a, problem.b, problem.c, ScalarType::Float32, problem.options, outputLayout);
     }
 
     HostComparisonResult compareHostReference(roc::host_numerics::Tensor observed,
@@ -201,7 +201,7 @@ namespace rocRoller::HostNumerics
         options.zeroExpectedNormIsNaN                  = true;
         options.nonFiniteValuesInvalidateRelativeNorms = true;
 
-        ComparisonResult statistics = compare(observed, expected, options);
+        ComparisonReport statistics = compare(observed, expected, options);
 
         return {
             .acceptableError = std::move(acceptableError),

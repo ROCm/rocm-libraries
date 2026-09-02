@@ -347,14 +347,14 @@ namespace hipblaslt::host_numerics
     } // namespace
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-    MxGenerationProblem makeMxGenerationProblem(hipDataType              dataType,
-                                                hipDataType              scaleType,
-                                                Shape                    shape,
-                                                uint64_t                 leadingDimension,
-                                                size_t                   blockAxis,
-                                                size_t                   blockSize,
-                                                hipblaslt_initialization initialization,
-                                                uint32_t                 seed)
+    MxTensor generateMxData(hipDataType              dataType,
+                            hipDataType              scaleType,
+                            Shape                    shape,
+                            uint64_t                 leadingDimension,
+                            size_t                   blockAxis,
+                            size_t                   blockSize,
+                            hipblaslt_initialization initialization,
+                            uint32_t                 seed)
     {
         if(shape.rank() != 2)
             throw std::invalid_argument("hipBLASLt MX generation requires a rank-two shape.");
@@ -366,14 +366,14 @@ namespace hipblaslt::host_numerics
         MxDataGeneration dataGeneration
             = mxDataGeneration(initialization, hostDataType, -1.0f, 1.0f, seed);
 
-        MxGenerationProblem problem(std::move(shape), std::move(dataGeneration));
-        problem.dataType         = hostDataType;
-        problem.scaleType        = hostScaleType;
-        problem.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
-        problem.blockAxis        = blockAxis;
-        problem.blockSize        = blockSize;
-        problem.scale            = mxScaleGenerationMode(initialization);
-        return problem;
+        MxGenerationOptions options;
+        options.dataType         = hostDataType;
+        options.scaleType        = hostScaleType;
+        options.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
+        options.blockAxis        = blockAxis;
+        options.blockSize        = blockSize;
+        options.scale            = mxScaleGenerationMode(initialization);
+        return generateMx(std::move(shape), std::move(dataGeneration), options);
     }
 
     amd_gpu_layout::MxScaleStorageLayout mxScaleStorageLayoutForArchName(std::string_view archName)

@@ -6,84 +6,39 @@
 #include <cstddef>
 #include <optional>
 #include <roc/host_numerics/tensor.hpp>
-#include <utility>
 
 namespace roc::host_numerics {
-// Reusable population-variance LayerNorm descriptor. Optional statistic types
-// request one mean and/or inverse-variance value per normalization slice.
-struct LayerNormProblem {
-    LayerNormProblem(Tensor inputValues, ScalarType resultType, size_t normalizedAxis,
-                     ScalarType accumulator)
-        : input(std::move(inputValues)),
-          outputType(resultType),
-          axis(normalizedAxis),
-          accumulatorType(accumulator) {}
-
-    Tensor input;                                   // Source tensor.
-    ScalarType outputType;                          // Scalar type of the normalized result.
-    std::optional<ScalarType> meanType;             // Requests per-slice means when present.
-    std::optional<ScalarType> inverseVarianceType;  // Requests 1 / sqrt(variance + epsilon).
-    std::optional<Tensor> gamma;  // Optional scale vector indexed by axis coordinate.
-    std::optional<Tensor> beta;   // Optional bias vector indexed by axis coordinate.
-    size_t axis;                  // Nonempty dimension normalized per slice.
-    ScalarType accumulatorType;   // Float32 or Float64 arithmetic.
-    double epsilon = 1e-5;        // Finite nonnegative population-variance offset.
+// Numerical policy and optional affine inputs for population-variance LayerNorm.
+struct LayerNormOptions {
+    size_t axis = 0;                                   // Nonempty dimension normalized per slice.
+    ScalarType accumulatorType = ScalarType::Float32;  // Float32 or Float64 arithmetic.
+    std::optional<Tensor> gamma;                       // Optional scale vector indexed by axis.
+    std::optional<Tensor> beta;                        // Optional bias vector indexed by axis.
+    double epsilon = 1e-5;                             // Finite nonnegative variance offset.
 };
 
-// Binds a LayerNorm problem to caller-owned output and optional statistic
-// destinations. Each destination layout must have provably distinct storage
-// offsets. The primary output may exactly alias the input; every other
-// overlapping input/output or output/output backing-storage range is rejected.
-// Destination presence and scalar types must match the problem.
-struct LayerNormRequest : LayerNormProblem {
-    LayerNormRequest(Tensor inputValues, Tensor outputValues, std::optional<Tensor> meanValues,
-                     std::optional<Tensor> inverseVarianceValues, size_t normalizedAxis,
-                     ScalarType accumulator)
-        : LayerNormProblem(std::move(inputValues), outputValues.type(), normalizedAxis,
-                           accumulator),
-          output(std::move(outputValues)),
-          mean(std::move(meanValues)),
-          inverseVariance(std::move(inverseVarianceValues)) {
-        if (mean) meanType = mean->type();
-        if (inverseVariance) inverseVarianceType = inverseVariance->type();
-    }
-
-    LayerNormRequest(Tensor inputValues, Tensor outputValues, size_t normalizedAxis,
-                     ScalarType accumulator)
-        : LayerNormRequest(std::move(inputValues), std::move(outputValues), std::nullopt,
-                           std::nullopt, normalizedAxis, accumulator) {}
-
-    LayerNormRequest(LayerNormProblem problem, Tensor outputValues,
-                     std::optional<Tensor> meanValues = std::nullopt,
-                     std::optional<Tensor> inverseVarianceValues = std::nullopt)
-        : LayerNormProblem(std::move(problem)),
-          output(std::move(outputValues)),
-          mean(std::move(meanValues)),
-          inverseVariance(std::move(inverseVarianceValues)) {}
-
-    Tensor output;                          // Same-shape normalized destination written in full.
-    std::optional<Tensor> mean;             // Per-slice destination with axis removed.
-    std::optional<Tensor> inverseVariance;  // Per-slice destination with axis removed.
+// Scalar types to allocate for an owning LayerNorm call. Optional statistic
+// types request one value per normalization slice.
+struct LayerNormOutputTypes {
+    ScalarType output = ScalarType::Float32;
+    std::optional<ScalarType> mean;
+    std::optional<ScalarType> inverseVariance;
 };
 
-// A slice fixes every coordinate except axis. Statistics counts are zero when
-// the corresponding optional destination is absent.
-struct LayerNormRunInfo {
-    size_t slicesProcessed = 0;                 // Product of all input extents except axis.
-    size_t outputElementsWritten = 0;           // output.shape().elementCount().
-    size_t meanElementsWritten = 0;             // slicesProcessed when mean is present.
-    size_t inverseVarianceElementsWritten = 0;  // slicesProcessed when present.
-};
-
-// Owning LayerNorm result. Present tensors use contiguous layouts; callers
-// requiring specific destination layouts use LayerNormRequest.
-struct LayerNormResult {
+// Tensors produced by LayerNorm. The statistic tensors have the input shape
+// with the normalized axis removed.
+struct LayerNormOutputs {
     Tensor output;
     std::optional<Tensor> mean;
     std::optional<Tensor> inverseVariance;
-    LayerNormRunInfo runInfo;
 };
 
-LayerNormRunInfo referenceLayerNorm(const LayerNormRequest& request);
-LayerNormResult referenceLayerNorm(const LayerNormProblem& problem);
+LayerNormOutputs referenceLayerNorm(Tensor input, const LayerNormOutputTypes& outputTypes = {},
+                                    const LayerNormOptions& options = {});
+
+// Writes caller-owned output tensors. output may exactly alias input with the
+// same mapping; every other overlapping input/output or output/output range is
+// rejected.
+void referenceLayerNormInto(Tensor input, LayerNormOutputs outputs,
+                            const LayerNormOptions& options = {});
 }  // namespace roc::host_numerics

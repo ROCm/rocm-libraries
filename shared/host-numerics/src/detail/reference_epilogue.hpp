@@ -78,6 +78,32 @@ struct EpiloguePlan {
     size_t selectedElements = 0;
 };
 
+struct EpilogueInvocation : EpilogueOptions {
+    EpilogueInvocation(Tensor inputTensor, EpilogueOutputs outputTensors,
+                       const EpilogueOptions& options)
+        : EpilogueOptions(options),
+          input(std::move(inputTensor)),
+          output(std::move(outputTensors.output)),
+          rawOutput(std::move(outputTensors.rawOutput)),
+          auxiliaryOutput(std::move(outputTensors.auxiliaryOutput)),
+          amax(std::move(outputTensors.amax)),
+          outputType(output.type()),
+          rawOutputType(rawOutput ? std::optional(rawOutput->type()) : std::nullopt),
+          auxiliaryOutputType(auxiliaryOutput ? std::optional(auxiliaryOutput->type())
+                                              : std::nullopt),
+          amaxType(amax ? std::optional(amax->type()) : std::nullopt) {}
+
+    Tensor input;
+    Tensor output;
+    std::optional<Tensor> rawOutput;
+    std::optional<Tensor> auxiliaryOutput;
+    std::optional<Tensor> amax;
+    ScalarType outputType;
+    std::optional<ScalarType> rawOutputType;
+    std::optional<ScalarType> auxiliaryOutputType;
+    std::optional<ScalarType> amaxType;
+};
+
 inline void validateEpilogueValueType(ScalarType type, const char* name) {
     if (!isConcreteScalarType(type))
         throw std::invalid_argument(std::string("Reference epilogue ") + name +
@@ -88,7 +114,7 @@ inline void validateEpilogueValueType(ScalarType type, const char* name) {
                                     " must use a real arithmetic scalar type.");
 }
 
-inline void validateEpilogueActivation(const EpilogueProblem& problem) {
+inline void validateEpilogueActivation(const EpilogueOptions& problem) {
     switch (problem.activationApplication) {
         case ActivationApplication::Forward:
         case ActivationApplication::Gradient:
@@ -123,14 +149,14 @@ inline void validateEpilogueActivation(const EpilogueProblem& problem) {
 }
 
 template <typename Accumulator>
-inline void validateEpilogueScalars(const EpilogueProblem& problem) {
+inline void validateEpilogueScalars(const EpilogueOptions& problem) {
     (void)runtimeScalar<Accumulator>(problem.outputScale, "output scale");
     (void)runtimeScalar<Accumulator>(problem.auxiliaryScale, "auxiliary scale");
     (void)runtimeScalar<Accumulator>(problem.activationParameter0, "activation parameter 0");
     (void)runtimeScalar<Accumulator>(problem.activationParameter1, "activation parameter 1");
 }
 
-inline EpiloguePlan validateEpilogueProblem(const EpilogueProblem& problem) {
+inline EpiloguePlan validateEpilogueInvocation(const EpilogueInvocation& problem) {
     requireRank(problem.input.shape(), 2, "Reference epilogue", "input");
     validateEpilogueValueType(problem.input.type(), "input");
     validateEpilogueValueType(problem.outputType, "output");
@@ -203,51 +229,34 @@ inline EpiloguePlan validateEpilogueProblem(const EpilogueProblem& problem) {
     };
 }
 
-inline void validateEpilogueRequestStorage(const EpilogueRequest& request);
+inline void validateEpilogueInvocationStorage(const EpilogueInvocation& request);
 
-inline EpiloguePlan validateEpilogueRequest(const EpilogueRequest& request) {
-    EpiloguePlan plan = validateEpilogueProblem(request);
+inline EpiloguePlan validateEpilogue(const EpilogueInvocation& request) {
+    EpiloguePlan plan = validateEpilogueInvocation(request);
     requireRank(request.output.shape(), 2, "Reference epilogue", "output");
     if (request.output.shape() != request.input.shape())
         throw std::invalid_argument("Reference epilogue input/output shape mismatch.");
-    if (request.output.type() != request.outputType)
-        throw std::invalid_argument("Reference epilogue output type differs from the problem.");
-    if (request.rawOutput.has_value() != request.rawOutputType.has_value())
-        throw std::invalid_argument(
-            "Reference epilogue raw-output destination does not match the problem.");
-    if (request.auxiliaryOutput.has_value() != request.auxiliaryOutputType.has_value())
-        throw std::invalid_argument(
-            "Reference epilogue auxiliary-output destination does not match the problem.");
-    if (request.amax.has_value() != request.amaxType.has_value())
-        throw std::invalid_argument(
-            "Reference epilogue AMax destination does not match the problem.");
 
-    auto validateOutputMatrix = [&](const std::optional<Tensor>& tensor,
-                                    const std::optional<ScalarType>& type, const char* name) {
+    auto validateOutputMatrix = [&](const std::optional<Tensor>& tensor, const char* name) {
         if (!tensor) return;
         requireRank(tensor->shape(), 2, "Reference epilogue", name);
         if (tensor->shape() != request.input.shape())
             throw std::invalid_argument(std::string("Reference epilogue ") + name +
                                         " shape mismatch.");
-        if (tensor->type() != *type)
-            throw std::invalid_argument(std::string("Reference epilogue ") + name +
-                                        " type differs from the problem.");
     };
-    validateOutputMatrix(request.rawOutput, request.rawOutputType, "raw output");
-    validateOutputMatrix(request.auxiliaryOutput, request.auxiliaryOutputType, "auxiliary output");
+    validateOutputMatrix(request.rawOutput, "raw output");
+    validateOutputMatrix(request.auxiliaryOutput, "auxiliary output");
     if (request.amax) {
         if (request.amax->shape().elementCount() != 1)
             throw std::invalid_argument("Reference epilogue AMax output must contain one element.");
-        if (request.amax->type() != *request.amaxType)
-            throw std::invalid_argument("Reference epilogue AMax type differs from the problem.");
     } else if (request.accumulateAmax) {
         throw std::invalid_argument("Reference epilogue cannot accumulate an absent AMax output.");
     }
-    validateEpilogueRequestStorage(request);
+    validateEpilogueInvocationStorage(request);
     return plan;
 }
 
-inline void validateEpilogueRequestStorage(const EpilogueRequest& request) {
+inline void validateEpilogueInvocationStorage(const EpilogueInvocation& request) {
     const std::array<const Tensor*, 4> outputs{
         &request.output,
         request.rawOutput ? &*request.rawOutput : nullptr,
@@ -293,7 +302,7 @@ inline void initializeOwnedEpilogueTensor(Tensor tensor) {
 }
 
 template <typename Accumulator>
-EpilogueRunInfo referenceEpilogueTyped(const EpilogueRequest& problem) {
+void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     const RuntimeMatrixReader<Accumulator> input(problem.input);
     const RuntimeMatrixOutputWriter<Accumulator> output(problem.output, problem.outputConversion);
     std::optional<RuntimeMatrixWriter<Accumulator>> rawOutput;
@@ -349,13 +358,9 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueRequest& problem) {
     };
 
     const size_t logicalElements = problem.output.shape().elementCount();
-    size_t computedElements = 0;
     if (problem.outputSelection.selectsAll()) {
         for (size_t row = 0; row < rows; ++row) {
-            for (size_t column = 0; column < columns; ++column) {
-                computeOutput(row, column);
-                ++computedElements;
-            }
+            for (size_t column = 0; column < columns; ++column) computeOutput(row, column);
         }
     } else {
         const auto selected = problem.outputSelection.indices(logicalElements);
@@ -364,20 +369,12 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueRequest& problem) {
                 logicalIndex, problem.outputSelection.indexOrder());
             computeOutput(coordinates[0], coordinates[1]);
         }
-        computedElements = selected.size();
     }
 
     if (problem.amax) {
         const std::vector<size_t> indices(problem.amax->shape().rank(), 0);
         problem.amax->storeFrom(std::span<const size_t>(indices), maximum);
     }
-
-    return {
-        .outputElementsWritten = computedElements,
-        .rawOutputElementsWritten = problem.rawOutput ? computedElements : 0,
-        .auxiliaryOutputElementsWritten = problem.auxiliaryOutput ? computedElements : 0,
-        .amaxElementsWritten = problem.amax ? size_t{1} : size_t{0},
-    };
 }
 }  // namespace detail
 }  // namespace roc::host_numerics

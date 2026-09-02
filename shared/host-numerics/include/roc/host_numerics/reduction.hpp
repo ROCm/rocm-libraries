@@ -14,66 +14,20 @@ enum class ReductionOperation {
     MaximumAbsolute,  // Ignores NaN magnitudes and returns the largest remaining magnitude.
 };
 
-// Reusable reduction descriptor. The output shape is the input shape with
-// axes removed, preserving the remaining dimension order.
-struct ReductionProblem {
-    ReductionProblem(Tensor inputTensor, ScalarType resultType, ScalarType accumulator,
-                     std::vector<size_t> reductionAxes,
-                     ReductionOperation reductionOperation = ReductionOperation::Sum)
-        : input(std::move(inputTensor)),
-          outputType(resultType),
-          accumulatorType(accumulator),
-          axes(std::move(reductionAxes)),
-          operation(reductionOperation) {}
+// Allocates a contiguous output whose shape is input.shape() with axes removed.
+Tensor referenceReduce(Tensor input, std::vector<size_t> axes, ReductionOperation operation,
+                       ScalarType outputType, ScalarType accumulatorType);
 
-    Tensor input;                  // Source tensor read once per output/reduction coordinate pair.
-    ScalarType outputType;         // Scalar type of the reduced result.
-    ScalarType accumulatorType;    // Arithmetic type used before output conversion.
-    std::vector<size_t> axes;      // Unique input dimensions removed by the reduction.
-    ReductionOperation operation;  // Reduction applied to each output coordinate.
-};
+// Writes the reduction into caller-owned output storage. Exact same-layout
+// input/output aliasing is allowed; differently mapped overlap is rejected.
+void referenceReduceInto(Tensor input, Tensor output, std::vector<size_t> axes,
+                         ReductionOperation operation, ScalarType accumulatorType);
 
-// Binds a reduction problem to caller-owned destination storage. Every logical
-// output element is overwritten and must have a layout with provably distinct
-// storage offsets. The output may exactly alias the input when their type,
-// layout, and complete backing-storage range match; every other overlapping
-// output/input backing-storage range is rejected.
-struct ReductionRequest : ReductionProblem {
-    ReductionRequest(Tensor inputTensor, Tensor outputTensor, ScalarType accumulator,
-                     std::vector<size_t> reductionAxes,
-                     ReductionOperation reductionOperation = ReductionOperation::Sum)
-        : ReductionProblem(std::move(inputTensor), outputTensor.type(), accumulator,
-                           std::move(reductionAxes), reductionOperation),
-          output(std::move(outputTensor)) {}
+Tensor referenceSum(Tensor input, std::vector<size_t> axes, ScalarType outputType,
+                    ScalarType accumulatorType);
+void referenceSumInto(Tensor input, Tensor output, std::vector<size_t> axes,
+                      ScalarType accumulatorType);
 
-    ReductionRequest(ReductionProblem problem, Tensor outputTensor)
-        : ReductionProblem(std::move(problem)), output(std::move(outputTensor)) {}
-
-    Tensor output;
-};
-
-// Counts logical output writes and logical input reads. inputElementsRead is
-// outputElementsWritten times the product of the reduced extents.
-struct ReductionRunInfo {
-    size_t outputElementsWritten = 0;  // output.shape().elementCount().
-    size_t inputElementsRead = 0;      // Logical reads performed by the nested reduction loops.
-};
-
-// Owning reduction result. output uses a contiguous layout; callers requiring
-// a specific destination layout use ReductionRequest.
-struct ReductionResult {
-    Tensor output;
-    ReductionRunInfo runInfo;
-};
-
-ReductionRunInfo referenceReduce(const ReductionRequest& request);
-ReductionResult referenceReduce(const ReductionProblem& problem);
-
-ReductionRunInfo referenceSum(const ReductionRequest& request);
-ReductionResult referenceSum(const ReductionProblem& problem);
-
-ReductionRunInfo referenceMaximumAbsolute(const ReductionRequest& request);
-ReductionRunInfo referenceMaximumAbsolute(Tensor input, Tensor output, ScalarType accumulatorType);
-ReductionResult referenceMaximumAbsolute(Tensor input, ScalarType outputType,
-                                         ScalarType accumulatorType);
+Tensor referenceMaximumAbsolute(Tensor input, ScalarType outputType, ScalarType accumulatorType);
+void referenceMaximumAbsoluteInto(Tensor input, Tensor output, ScalarType accumulatorType);
 }  // namespace roc::host_numerics

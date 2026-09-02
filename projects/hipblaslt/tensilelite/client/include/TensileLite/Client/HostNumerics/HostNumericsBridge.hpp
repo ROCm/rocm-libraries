@@ -172,10 +172,10 @@ namespace TensileLite::Client
             roc::host_numerics::IndexOrder::FirstDimensionFastest);
     }
 
-    inline roc::host_numerics::ComparisonResult
-        compareHostBuffers(rocisa::DataType                               type,
-                           const void*                                    observed,
-                           const void*                                    expected,
+    inline roc::host_numerics::ComparisonReport
+        compareHostBuffers(rocisa::DataType                             type,
+                           const void*                                  observed,
+                           const void*                                  expected,
                            const roc::host_numerics::Layout&            layout,
                            const roc::host_numerics::ComparisonOptions& options)
     {

@@ -31,7 +31,7 @@ struct ConstantGenerationParameters {
     double value = 0.0;
 };
 
-struct CandidateSetGenerationParameters {
+struct ChoiceGenerationParameters {
     // Values are selected deterministically from the list. Repeated entries
     // make that value appear more often.
     std::vector<double> values;
@@ -158,8 +158,8 @@ class GenerationRecipe {
         struct ConstantPattern {
             ConstantGenerationParameters parameters;
         };
-        struct CandidateSetPattern {
-            CandidateSetGenerationParameters parameters;
+        struct ChoicePattern {
+            ChoiceGenerationParameters parameters;
         };
         struct UniformIntegerPattern {
             UniformIntegerGenerationParameters parameters;
@@ -213,7 +213,7 @@ class GenerationRecipe {
         };
 
         using Pattern =
-            std::variant<ZeroPattern, ConstantPattern, CandidateSetPattern, UniformIntegerPattern,
+            std::variant<ZeroPattern, ConstantPattern, ChoicePattern, UniformIntegerPattern,
                          AbsoluteUniformIntegerPattern, UniformRealPattern, NormalPattern,
                          SinePattern, CosinePattern, AbsoluteSinePattern, AbsoluteCosinePattern,
                          SerialIndexPattern, SerialDimensionPattern, AffineIndexRemainderPattern,
@@ -246,7 +246,7 @@ class GenerationRecipe {
 
     [[nodiscard]] static Component zero();
     [[nodiscard]] static Component constant(ConstantGenerationParameters parameters);
-    [[nodiscard]] static Component candidateSet(CandidateSetGenerationParameters parameters);
+    [[nodiscard]] static Component choice(ChoiceGenerationParameters parameters);
     [[nodiscard]] static Component uniformInteger(UniformIntegerGenerationParameters parameters);
     [[nodiscard]] static Component absoluteUniformInteger(
         UniformIntegerGenerationParameters parameters);

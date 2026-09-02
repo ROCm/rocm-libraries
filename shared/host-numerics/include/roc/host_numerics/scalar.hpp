@@ -16,6 +16,8 @@
 #include <utility>
 
 namespace roc::host_numerics {
+class Tensor;
+
 // Scalar types define the runtime numeric vocabulary shared by every host-numerics component.
 // This header owns type identity, metadata, native C++ mappings, runtime dispatch, conversion
 // policy, and the owning Scalar value. Scalar and Tensor templates require the definitions in
@@ -384,6 +386,9 @@ Target convertScalar(Source source, const ScalarConversionOptions& options = {})
 // semantics, no shape or strides, and never aliases external storage.
 class Scalar {
    public:
+    // Snapshots one rank-zero tensor value. Tensor storage is never retained.
+    Scalar(const Tensor& tensor);
+
     template <typename Source>
         requires(!std::is_same_v<std::remove_cvref_t<Source>, Scalar> &&
                  requires { nativeScalarType<std::remove_cvref_t<Source>>; })

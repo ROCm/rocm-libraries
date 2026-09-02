@@ -1846,7 +1846,7 @@ namespace TensileLite
                                                      scaleDesc.totalAllocatedBytes(),
                                                      b * scaleBatchStrideBytes,
                                                      scaleBatchStrideBytes);
-                    auto mxProblem = HostNumerics::detail::makeMxGenerationProblem(
+                    auto generated   = HostNumerics::detail::generateMxData(
                         dataDesc.dataType(),
                         scaleEltType,
                         roc::host_numerics::Shape{rows, cols},
@@ -1856,7 +1856,6 @@ namespace TensileLite
                         dataInitMode,
                         effectiveScaleInitMode,
                         m_initializationSeed);
-                    auto generated = roc::host_numerics::generateMx(mxProblem);
                     const auto dataStorage = generated.data.rawEncodedBackingStorage();
                     if(dataOutput.size() < dataStorage.size())
                         throw std::invalid_argument("TensileLite MX data output is too small.");

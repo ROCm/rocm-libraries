@@ -73,26 +73,25 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
                                            batchStrideD,
                                            Layout(Shape{size_t(runner.m), size_t(runner.n)},
                                                   {1, static_cast<ptrdiff_t>(runner.m)}));
-        GemmRequest problem(
-            GemmOperand(
-                copyTensorFromEncodedStorage(aPtr + batchStrideA * b,
-                                             batchStrideA,
-                                             Layout(Shape{size_t(runner.m), size_t(runner.k)},
-                                                    {1, static_cast<ptrdiff_t>(runner.m)}))),
-            GemmOperand(
-                copyTensorFromEncodedStorage(bPtr + batchStrideB * b,
-                                             batchStrideB,
-                                             Layout(Shape{size_t(runner.k), size_t(runner.n)},
-                                                    {1, static_cast<ptrdiff_t>(runner.k)}))),
-            copyTensorFromEncodedStorage(cPtr + batchStrideC * b,
-                                         batchStrideC,
-                                         Layout(Shape{size_t(runner.m), size_t(runner.n)},
-                                                {1, static_cast<ptrdiff_t>(runner.m)})),
-            referenceTensor,
-            ScalarType::Float32);
-        problem.epilogue.alpha = static_cast<double>(runner.alpha) * scaleA;
-        problem.epilogue.beta  = static_cast<double>(runner.beta);
-        referenceGemm(problem);
+        GemmOperand operandA(
+            copyTensorFromEncodedStorage(aPtr + batchStrideA * b,
+                                         batchStrideA,
+                                         Layout(Shape{size_t(runner.m), size_t(runner.k)},
+                                                {1, static_cast<ptrdiff_t>(runner.m)})));
+        GemmOperand operandB(
+            copyTensorFromEncodedStorage(bPtr + batchStrideB * b,
+                                         batchStrideB,
+                                         Layout(Shape{size_t(runner.k), size_t(runner.n)},
+                                                {1, static_cast<ptrdiff_t>(runner.k)})));
+        Tensor c = copyTensorFromEncodedStorage(cPtr + batchStrideC * b,
+                                                batchStrideC,
+                                                Layout(Shape{size_t(runner.m), size_t(runner.n)},
+                                                       {1, static_cast<ptrdiff_t>(runner.m)}));
+        GemmOptions options;
+        options.epilogue.alpha = static_cast<double>(runner.alpha) * scaleA;
+        options.epilogue.beta  = static_cast<double>(runner.beta);
+        referenceGemmInto(
+            std::move(operandA), std::move(operandB), std::move(c), referenceTensor, options);
         copyTensorEncodedBackingStorageToBuffer(
             reference.data() + batchStrideD * b, batchStrideD, referenceTensor);
     }

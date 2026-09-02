@@ -23,7 +23,7 @@ namespace hipblaslt::host_numerics
         }
     } // namespace
 
-    EpilogueRunInfo referenceEpilogue(const EpilogueArguments& arguments)
+    void referenceEpilogue(const EpilogueArguments& arguments)
     {
         if(arguments.rows < 0 || arguments.columns < 0 || arguments.leadingDimension < 0)
             throw std::invalid_argument("hipBLASLt epilogue dimensions must be nonnegative.");
@@ -40,38 +40,31 @@ namespace hipblaslt::host_numerics
         const Layout     matrixLayout(Shape{rows, columns},
                                       {1, static_cast<ptrdiff_t>(leadingDimension)});
 
-        EpilogueRequest request(
-            copyTensorFromEncodedStorage(arguments.input, computeType, matrixLayout),
-            copyTensorFromEncodedStorage(arguments.output, outputType, matrixLayout),
-            computeType);
+        Tensor input = copyTensorFromEncodedStorage(arguments.input, computeType, matrixLayout);
+        EpilogueOutputs outputs{
+            .output = copyTensorFromEncodedStorage(arguments.output, outputType, matrixLayout)};
+        EpilogueOptions options(computeType);
 
         if(arguments.rawOutput != nullptr)
-        {
-            request.rawOutput
+            outputs.rawOutput
                 = copyTensorFromEncodedStorage(arguments.rawOutput, computeType, matrixLayout);
-            request.rawOutputType = request.rawOutput->type();
-        }
 
         if(arguments.auxiliary != nullptr)
         {
             const ScalarType auxiliaryType = scalarType(arguments.auxiliaryType);
             if(arguments.activationApplication == ActivationApplication::Gradient)
-                request.auxiliaryInput = copyTensorFromEncodedStorage(
+                options.auxiliaryInput = copyTensorFromEncodedStorage(
                     arguments.auxiliary, auxiliaryType, matrixLayout);
             else
-            {
-                request.auxiliaryOutput = copyTensorFromEncodedStorage(
+                outputs.auxiliaryOutput = copyTensorFromEncodedStorage(
                     arguments.auxiliary, auxiliaryType, matrixLayout);
-                request.auxiliaryOutputType = request.auxiliaryOutput->type();
-            }
         }
 
         if(arguments.amax != nullptr)
         {
             const Layout amaxLayout = Layout::contiguousLastDimensionFastest(Shape{1});
-            request.amax = copyTensorFromEncodedStorage(arguments.amax, computeType, amaxLayout);
-            request.amaxType       = request.amax->type();
-            request.accumulateAmax = arguments.accumulateAmax;
+            outputs.amax = copyTensorFromEncodedStorage(arguments.amax, computeType, amaxLayout);
+            options.accumulateAmax = arguments.accumulateAmax;
         }
 
         if(arguments.bias != nullptr)
@@ -79,41 +72,40 @@ namespace hipblaslt::host_numerics
             const ScalarType biasType     = scalarType(arguments.biasType);
             const size_t     biasElements = arguments.biasAxis == MatrixAxis::Row ? rows : columns;
             const Layout biasLayout = Layout::contiguousLastDimensionFastest(Shape{biasElements});
-            request.bias
+            options.bias
                 = VectorBinding{copyTensorFromEncodedStorage(arguments.bias, biasType, biasLayout),
                                 arguments.biasAxis};
         }
 
         if(arguments.outputScale != nullptr)
-            request.outputScale = scalarValue(arguments.outputScale, computeType);
+            options.outputScale = scalarValue(arguments.outputScale, computeType);
         if(arguments.auxiliaryScale != nullptr)
-            request.auxiliaryScale = scalarValue(arguments.auxiliaryScale, computeType);
+            options.auxiliaryScale = scalarValue(arguments.auxiliaryScale, computeType);
         if(outputType == ScalarType::Int8)
-            request.outputConversion = OutputConversion::SaturatingInt8;
-        request.activation            = arguments.activation;
-        request.activationApplication = arguments.activationApplication;
-        request.activationParameter0  = arguments.activationParameter0;
-        request.activationParameter1  = arguments.activationParameter1;
-        const EpilogueRunInfo run     = roc::host_numerics::referenceEpilogue(request);
+            options.outputConversion = OutputConversion::SaturatingInt8;
+        options.activation            = arguments.activation;
+        options.activationApplication = arguments.activationApplication;
+        options.activationParameter0  = arguments.activationParameter0;
+        options.activationParameter1  = arguments.activationParameter1;
+        roc::host_numerics::referenceEpilogueInto(input, outputs, options);
         copyTensorEncodedBackingStorageToBuffer(
-            arguments.output, storageBytesForLayout(outputType, matrixLayout), request.output);
+            arguments.output, storageBytesForLayout(outputType, matrixLayout), outputs.output);
         if(arguments.rawOutput != nullptr)
             copyTensorEncodedBackingStorageToBuffer(
                 arguments.rawOutput,
                 storageBytesForLayout(computeType, matrixLayout),
-                *request.rawOutput);
+                *outputs.rawOutput);
         if(arguments.auxiliary != nullptr
            && arguments.activationApplication != ActivationApplication::Gradient)
             copyTensorEncodedBackingStorageToBuffer(
                 arguments.auxiliary,
                 storageBytesForLayout(scalarType(arguments.auxiliaryType), matrixLayout),
-                *request.auxiliaryOutput);
+                *outputs.auxiliaryOutput);
         if(arguments.amax != nullptr)
         {
             const Layout amaxLayout = Layout::contiguousLastDimensionFastest(Shape{1});
             copyTensorEncodedBackingStorageToBuffer(
-                arguments.amax, storageBytesForLayout(computeType, amaxLayout), *request.amax);
+                arguments.amax, storageBytesForLayout(computeType, amaxLayout), *outputs.amax);
         }
-        return run;
     }
 } // namespace hipblaslt::host_numerics

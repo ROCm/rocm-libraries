@@ -70,7 +70,7 @@ namespace
         options.maxReportedMismatches      = 0;
         options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
 
-        const ComparisonResult report
+        const ComparisonReport report
             = compare(copyTensorFromEncodedStorage(hGPU, storageElements, layout),
                       copyTensorFromEncodedStorage(hCPU, storageElements, layout),
                       options);

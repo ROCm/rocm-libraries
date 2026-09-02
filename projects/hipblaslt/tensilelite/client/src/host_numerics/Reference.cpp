@@ -28,10 +28,10 @@ namespace TensileLite
                                         + failure.reason);
         }
 
-        GemmRunInfo executeTranslatedGemm(ContractionProblemGemm const& problem,
+        GemmBackend executeTranslatedGemm(ContractionProblemGemm const& problem,
                                           ContractionInputs const&      inputs,
                                           OutputSelection               outputSelection,
-                                          GemmBackend                    backend)
+                                          GemmBackend                   backend)
         {
             using namespace Client::HostNumerics;
 
@@ -46,9 +46,9 @@ namespace TensileLite
 
     namespace Client
     {
-        roc::host_numerics::GemmRunInfo
-            executeReferenceGemm(ContractionProblemGemm const& problem,
-                                 ContractionInputs const&      inputs,
+        roc::host_numerics::GemmBackend
+            executeReferenceGemm(ContractionProblemGemm const&       problem,
+                                 ContractionInputs const&            inputs,
                                  roc::host_numerics::OutputSelection outputSelection,
                                  roc::host_numerics::GemmBackend     backend)
         {
@@ -56,10 +56,10 @@ namespace TensileLite
                 problem, inputs, std::move(outputSelection), backend);
         }
 
-        roc::host_numerics::GemmRunInfo
-            executeReferenceGemm(ContractionProblemGemm const& problem,
-                                 ContractionInputs const&      inputs,
-                                 size_t                        elementsToValidate,
+        roc::host_numerics::GemmBackend
+            executeReferenceGemm(ContractionProblemGemm const&   problem,
+                                 ContractionInputs const&        inputs,
+                                 size_t                          elementsToValidate,
                                  roc::host_numerics::GemmBackend backend)
         {
             return executeReferenceGemm(problem,
@@ -68,13 +68,11 @@ namespace TensileLite
                                         backend);
         }
 
-        roc::host_numerics::GemmRunInfo SolveGemmCPU(ContractionProblemGemm const& problem,
-                                                     ContractionInputs const&      inputs,
-                                                     roc::host_numerics::OutputSelection
-                                                         outputSelection)
+        roc::host_numerics::GemmBackend
+            SolveGemmCPU(ContractionProblemGemm const&       problem,
+                         ContractionInputs const&            inputs,
+                         roc::host_numerics::OutputSelection outputSelection)
         {
-            using roc::host_numerics::GemmRunInfo;
-
             ScopedTimer timer("solve_cpu_reference");
             return executeReferenceGemm(problem,
                                         inputs,
@@ -82,7 +80,7 @@ namespace TensileLite
                                         roc::host_numerics::GemmBackend::Automatic);
         }
 
-        roc::host_numerics::GemmRunInfo SolveGemmCPU(ContractionProblemGemm const& problem,
+        roc::host_numerics::GemmBackend SolveGemmCPU(ContractionProblemGemm const& problem,
                                                      ContractionInputs const&      inputs,
                                                      size_t elementsToValidate)
         {

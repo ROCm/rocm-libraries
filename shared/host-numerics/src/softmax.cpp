@@ -6,19 +6,26 @@
 #include "detail/reference_softmax.hpp"
 
 namespace roc::host_numerics {
-SoftmaxRunInfo referenceSoftmax(const SoftmaxRequest& request) {
-    detail::validateSoftmaxRequest(request);
-    if (request.accumulatorType == ScalarType::Float32)
-        return detail::referenceSoftmaxTyped<float>(request);
-    return detail::referenceSoftmaxTyped<double>(request);
+void referenceSoftmaxInto(Tensor input, Tensor output, size_t axis, ScalarType accumulatorType) {
+    const detail::SoftmaxInvocation invocation{
+        .input = std::move(input),
+        .output = std::move(output),
+        .axis = axis,
+        .accumulatorType = accumulatorType,
+    };
+    detail::validateSoftmaxInvocation(invocation);
+    if (accumulatorType == ScalarType::Float32)
+        return detail::referenceSoftmaxTyped<float>(invocation);
+    return detail::referenceSoftmaxTyped<double>(invocation);
 }
 
-SoftmaxResult referenceSoftmax(const SoftmaxProblem& problem) {
-    const Shape& outputShape = detail::validateSoftmaxProblem(problem);
-    Tensor output(problem.outputType, Layout::contiguousLastDimensionFastest(outputShape));
-    SoftmaxRequest request(problem, output);
-    const SoftmaxRunInfo runInfo = referenceSoftmax(request);
-    return {.output = std::move(output), .runInfo = runInfo};
+Tensor referenceSoftmax(Tensor input, size_t axis, ScalarType outputType,
+                        ScalarType accumulatorType) {
+    const Shape outputShape =
+        detail::validateSoftmaxArguments(input, outputType, axis, accumulatorType);
+    Tensor output(outputType, Layout::contiguousLastDimensionFastest(outputShape));
+    referenceSoftmaxInto(std::move(input), output, axis, accumulatorType);
+    return output;
 }
 
 }  // namespace roc::host_numerics

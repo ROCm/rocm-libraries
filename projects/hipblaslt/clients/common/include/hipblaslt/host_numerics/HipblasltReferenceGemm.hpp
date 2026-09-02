@@ -48,11 +48,10 @@ namespace hipblaslt::host_numerics
                                                     size_t             batch,
                                                     bool               separateBatchStorage);
 
-    roc::host_numerics::GemmRunInfo
-        referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,
-                            const hipblaslt::client::MatmulDataTypes&       dataTypes,
-                            const hipblaslt::client::PreparedMatmulProblem& preparation,
-                            MatmulReferenceInputs                            inputs,
-                            hipblaslt_scaling_format                         scaleAMode,
-                            hipblaslt_scaling_format                         scaleBMode);
+    void referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,
+                             const hipblaslt::client::MatmulDataTypes&       dataTypes,
+                             const hipblaslt::client::PreparedMatmulProblem& preparation,
+                             MatmulReferenceInputs                           inputs,
+                             hipblaslt_scaling_format                        scaleAMode,
+                             hipblaslt_scaling_format                        scaleBMode);
 } // namespace hipblaslt::host_numerics

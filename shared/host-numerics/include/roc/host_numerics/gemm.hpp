@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <complex>
 #include <cstddef>
 #include <optional>
 #include <roc/host_numerics/operation_types.hpp>
@@ -75,51 +74,19 @@ struct GemmEpilogue {
     Scalar activationParameter1;  // Second activation-specific scalar.
 };
 
-// Reusable numerical GEMM descriptor. It contains A, B, C, arithmetic policy,
-// and D's scalar type, but no destination tensor, output selection, or backend
-// policy.
-struct GemmProblem {
-    GemmProblem(GemmOperand aOperand, GemmOperand bOperand, Tensor cTensor, ScalarType output,
-                ScalarType accumulator)
-        : a(std::move(aOperand)),
-          b(std::move(bOperand)),
-          c(std::move(cTensor)),
-          outputType(output),
-          accumulatorType(accumulator),
-          epilogue(accumulator) {}
+// Arithmetic, epilogue, and output-selection policy for one GEMM.
+struct GemmOptions {
+    explicit GemmOptions(ScalarType accumulator = ScalarType::Float32)
+        : accumulatorType(accumulator), epilogue(accumulator) {}
 
-    GemmOperand a;               // Rank-two [M,K] operand.
-    GemmOperand b;               // Rank-two [K,N] operand.
-    Tensor c;                    // Rank-two [M,N] addend read when beta is nonzero.
-    ScalarType outputType;       // Required scalar type of a request's D tensor.
     ScalarType accumulatorType;  // Dot-product and epilogue arithmetic type.
     AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
     MathMode mathMode = MathMode::Default;  // Operand transform after compute-type quantization.
     GemmEpilogue epilogue;
-};
-
-// One GEMM invocation. It extends GemmProblem with the caller-owned D
-// destination and the coordinates allowed to change.
-struct GemmRequest : GemmProblem {
-    GemmRequest(GemmOperand aOperand, GemmOperand bOperand, Tensor cTensor, Tensor dTensor,
-                ScalarType accumulator)
-        : GemmProblem(std::move(aOperand), std::move(bOperand), std::move(cTensor), dTensor.type(),
-                      accumulator),
-          d(std::move(dTensor)) {}
-
-    GemmRequest(GemmProblem problem, Tensor dTensor,
-                OutputSelection selection = OutputSelection::all())
-        : GemmProblem(std::move(problem)),
-          d(std::move(dTensor)),
-          outputSelection(std::move(selection)) {}
-
-    // Rank-two [M,N] destination with distinct logical element offsets. D must
-    // not overlap operands or scales. Exact same-type, same-layout C=D is allowed.
-    Tensor d;
     OutputSelection outputSelection = OutputSelection::all();  // Logical D coordinates to write.
 };
 
-// Result of validating one request against one execution policy.
+// Report from validating one GEMM invocation against one execution policy.
 struct GemmSupportInfo {
     bool supported = false;  // True only when validation and backend restrictions pass.
     std::string reason;      // Empty when supported; rejection text otherwise.
@@ -132,41 +99,22 @@ struct GemmSupportInfo {
     }
 };
 
-// Reports the strategy used and its completed output work.
-struct GemmRunInfo {
-    // Concrete strategy for one request. A product-level aggregate may report
-    // Mixed when its independently dispatched requests used different strategies.
-    GemmBackend backendUsed = GemmBackend::Pointwise;
-    std::optional<std::string> fallbackReason;  // Rejection that caused Automatic fallback.
-    size_t outputElementsWritten = 0;           // Logical D coordinates overwritten.
-    // Logical output coordinates covered by the strategy: selected coordinates
-    // for Pointwise, touched output blocks for Blocked, and full D for Blas.
-    size_t outputElementsCovered = 0;
-};
-
-// Output allocation and logical-write policy for an owning GEMM call.
-struct GemmOutputOptions {
-    std::optional<Layout> layout;  // Null selects contiguous [M,N] storage.
-    OutputSelection selection = OutputSelection::all();
-};
-
-// Owning GEMM output and completed-work metadata.
-struct GemmResult {
-    Tensor output;
-    GemmRunInfo runInfo;
-};
-
-// Validates the request and selected built-in strategy without mutating any
-// tensor. The optional BLAS component provides queryGemmSupportWithBlasBackend.
-GemmSupportInfo queryGemmSupport(const GemmRequest& request,
+// Validates the complete invocation and selected built-in strategy without
+// mutating any tensor. Backend support can depend on D's layout and aliases.
+GemmSupportInfo queryGemmSupport(const GemmOperand& a, const GemmOperand& b, const Tensor& c,
+                                 const Tensor& d, const GemmOptions& options = GemmOptions{},
                                  GemmBackend backend = GemmBackend::Automatic);
 
-// Executes the request, mutates selected D coordinates, and returns completed-work metadata.
-// The optional BLAS component provides referenceGemmWithBlasBackend.
-GemmRunInfo referenceGemm(const GemmRequest& request, GemmBackend backend = GemmBackend::Automatic);
+// Writes selected coordinates into caller-owned D and reports the concrete
+// backend used. Exact same-layout C/D aliasing is supported.
+GemmBackend referenceGemmInto(GemmOperand a, GemmOperand b, Tensor c, Tensor d,
+                              const GemmOptions& options = GemmOptions{},
+                              GemmBackend backend = GemmBackend::Automatic);
 
-// Allocates and zero-initializes D, then delegates to the caller-owned request
-// path. Unselected logical coordinates remain zero.
-GemmResult referenceGemm(const GemmProblem& problem, const GemmOutputOptions& output = {},
-                         GemmBackend backend = GemmBackend::Automatic);
+// Allocates and zero-initializes D, then executes the owning GEMM. Unselected
+// logical coordinates remain zero.
+Tensor referenceGemm(GemmOperand a, GemmOperand b, Tensor c, ScalarType outputType,
+                     const GemmOptions& options = GemmOptions{},
+                     std::optional<Layout> outputLayout = std::nullopt,
+                     GemmBackend backend = GemmBackend::Automatic);
 }  // namespace roc::host_numerics

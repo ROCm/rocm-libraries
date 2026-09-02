@@ -96,7 +96,7 @@ SelectedOutputBlockPlan planSelectedOutputBlocks(const OutputSelection& selectio
     return plan;
 }
 
-void validateBlocked(const GemmRequest& problem) {
+void validateBlocked(const GemmInvocation& problem) {
     const GemmSupportInfo pointwise = queryGemmSupport(problem, GemmBackend::Pointwise);
     if (!pointwise) throw std::invalid_argument(pointwise.reason);
     if (problem.accumulatorType != ScalarType::Float32 &&
@@ -117,7 +117,7 @@ void validateBlocked(const GemmRequest& problem) {
 }
 
 template <typename Accumulator>
-GemmRunInfo runBlocked(const GemmRequest& problem, Tensor* selectedOutput = nullptr) {
+GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutput = nullptr) {
     using namespace detail;
 
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
@@ -306,7 +306,7 @@ GemmRunInfo runBlocked(const GemmRequest& problem, Tensor* selectedOutput = null
 }
 }  // namespace
 
-GemmSupportInfo detail::queryBlockedGemmSupport(const GemmRequest& problem) {
+GemmSupportInfo detail::queryBlockedGemmSupport(const GemmInvocation& problem) {
     try {
         validateBlocked(problem);
         return {
@@ -319,7 +319,7 @@ GemmSupportInfo detail::queryBlockedGemmSupport(const GemmRequest& problem) {
     }
 }
 
-bool detail::isBlockedGemmPreferredForAutomaticExecution(const GemmRequest& problem) {
+bool detail::isBlockedGemmPreferredForAutomaticExecution(const GemmInvocation& problem) {
     const size_t selectedOutputCount =
         problem.outputSelection.selectedCount(problem.d.shape().elementCount());
     if (selectedOutputCount == 0) return false;
@@ -353,7 +353,7 @@ bool detail::isBlockedGemmPreferredForAutomaticExecution(const GemmRequest& prob
     return blockedCost < pointwiseCost;
 }
 
-GemmRunInfo detail::runBlockedGemm(const GemmRequest& problem) {
+GemmExecutionInfo detail::runBlockedGemm(const GemmInvocation& problem) {
     const GemmSupportInfo support = queryBlockedGemmSupport(problem);
     if (!support) throw std::invalid_argument(support.reason);
     switch (problem.accumulatorType) {
@@ -366,8 +366,8 @@ GemmRunInfo detail::runBlockedGemm(const GemmRequest& problem) {
     }
 }
 
-GemmRunInfo detail::runBlockedGemmToSelectedOutput(const GemmRequest& problem,
-                                                   Tensor& selectedOutput) {
+GemmExecutionInfo detail::runBlockedGemmToSelectedOutput(const GemmInvocation& problem,
+                                                         Tensor& selectedOutput) {
     validateBlocked(problem);
     if (problem.outputSelection.selectsAll())
         throw std::invalid_argument("Streaming blocked GEMM requires a partial selection.");

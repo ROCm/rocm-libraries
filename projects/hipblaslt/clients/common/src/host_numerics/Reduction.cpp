@@ -11,7 +11,7 @@ namespace hipblaslt::host_numerics
 {
     using namespace ::roc::host_numerics;
 
-    ReductionRunInfo referenceSum(const ReductionArguments& arguments)
+    void referenceSum(const ReductionArguments& arguments)
     {
         if(arguments.rows < 0 || arguments.columns < 0)
             throw std::invalid_argument("hipBLASLt reduction dimensions must be nonnegative.");
@@ -27,13 +27,12 @@ namespace hipblaslt::host_numerics
                                   {static_cast<ptrdiff_t>(arguments.outputStride)});
 
         Tensor output = copyTensorFromEncodedStorage(arguments.output, outputType, outputLayout);
-        const ReductionRunInfo run = roc::host_numerics::referenceSum(
-            ReductionRequest(copyTensorFromEncodedStorage(arguments.input, inputType, inputLayout),
-                             output,
-                             accumulatorType,
-                             {1}));
+        roc::host_numerics::referenceSumInto(
+            copyTensorFromEncodedStorage(arguments.input, inputType, inputLayout),
+            output,
+            {1},
+            accumulatorType);
         copyTensorEncodedBackingStorageToBuffer(
             arguments.output, storageBytesForLayout(outputType, outputLayout), output);
-        return run;
     }
 } // namespace hipblaslt::host_numerics

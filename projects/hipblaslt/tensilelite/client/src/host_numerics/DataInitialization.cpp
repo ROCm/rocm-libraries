@@ -42,8 +42,8 @@ namespace TensileLite::Client
         using roc::host_numerics::Layout;
         using roc::host_numerics::ScalarType;
         using roc::host_numerics::Shape;
+        using roc::host_numerics::StructuredSparseTensor;
         using roc::host_numerics::StructuredSparsityPattern;
-        using roc::host_numerics::StructuredSparsityRequest;
         using roc::host_numerics::StructuredSparsitySelection;
         using roc::host_numerics::StructuredSparsitySliceRange;
         using roc::host_numerics::Tensor;
@@ -459,14 +459,12 @@ namespace TensileLite::Client
             std::ranges::fill(compressedTensor.rawEncodedBackingStorage(), std::byte{0});
         if(tensorMeta.totalAllocatedElements() > tensorMeta.totalLogicalElements())
             std::ranges::fill(metadataTensor.rawEncodedBackingStorage(), std::byte{0});
-        StructuredSparsityRequest request(prunedTensor,
-                                          prunedTensor,
-                                          compressedTensor,
-                                          std::nullopt,
-                                          metadataTensor,
-                                          sparsePattern(mode, dim));
-
-        roc::host_numerics::applyStructuredSparsity(request);
+        roc::host_numerics::applyStructuredSparsityInto(
+            prunedTensor,
+            StructuredSparseTensor{.pruned            = prunedTensor,
+                                   .compressed        = compressedTensor,
+                                   .twoOfFourMetadata = metadataTensor},
+            sparsePattern(mode, dim));
         std::ranges::copy(prunedTensor.rawEncodedBackingStorage(), prunedStorage.begin());
         std::ranges::copy(compressedTensor.rawEncodedBackingStorage(), compressedStorage.begin());
         std::ranges::copy(metadataTensor.rawEncodedBackingStorage(), metadataStorage.begin());

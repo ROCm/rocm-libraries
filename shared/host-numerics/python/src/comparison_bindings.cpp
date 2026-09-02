@@ -65,34 +65,34 @@ void registerComparisonBindings(nb::module_& module) {
         .def_ro("tolerance", &Mismatch::tolerance)
         .def_ro("matched", &Mismatch::matched);
 
-    nb::class_<ComparisonResult>(module, "ComparisonResult")
-        .def_ro("compared", &ComparisonResult::compared)
-        .def_ro("mismatches", &ComparisonResult::mismatches)
-        .def_ro("matched_nans", &ComparisonResult::matchedNaNs)
-        .def_ro("matched_infinities", &ComparisonResult::matchedInfinities)
-        .def_ro("non_finite_mismatches", &ComparisonResult::nonFiniteMismatches)
-        .def_ro("signed_zero_mismatches", &ComparisonResult::signedZeroMismatches)
-        .def_ro("max_absolute_difference", &ComparisonResult::maxAbsoluteDifference)
-        .def_ro("max_relative_difference", &ComparisonResult::maxRelativeDifference)
+    nb::class_<ComparisonReport>(module, "ComparisonReport")
+        .def_ro("compared", &ComparisonReport::compared)
+        .def_ro("mismatches", &ComparisonReport::mismatches)
+        .def_ro("matched_nans", &ComparisonReport::matchedNaNs)
+        .def_ro("matched_infinities", &ComparisonReport::matchedInfinities)
+        .def_ro("non_finite_mismatches", &ComparisonReport::nonFiniteMismatches)
+        .def_ro("signed_zero_mismatches", &ComparisonReport::signedZeroMismatches)
+        .def_ro("max_absolute_difference", &ComparisonReport::maxAbsoluteDifference)
+        .def_ro("max_relative_difference", &ComparisonReport::maxRelativeDifference)
         .def_ro("max_symmetric_relative_difference",
-                &ComparisonResult::maxSymmetricRelativeDifference)
-        .def_ro("maximum_observed_magnitude", &ComparisonResult::maximumObservedMagnitude)
-        .def_ro("maximum_expected_magnitude", &ComparisonResult::maximumExpectedMagnitude)
-        .def_ro("frobenius_difference", &ComparisonResult::frobeniusDifference)
-        .def_ro("frobenius_observed", &ComparisonResult::frobeniusObserved)
-        .def_ro("frobenius_expected", &ComparisonResult::frobeniusExpected)
-        .def_ro("relative_frobenius_error", &ComparisonResult::relativeFrobeniusError)
-        .def_ro("relative_maximum_error", &ComparisonResult::relativeMaximumError)
-        .def_ro("maximum_ulp", &ComparisonResult::maximumUlp)
-        .def_ro("sum_ulp", &ComparisonResult::sumUlp)
-        .def_ro("average_ulp", &ComparisonResult::averageUlp)
-        .def_ro("ulp_compared", &ComparisonResult::ulpCompared)
-        .def_ro("pointwise_passed", &ComparisonResult::pointwisePassed)
-        .def_ro("frobenius_passed", &ComparisonResult::frobeniusPassed)
-        .def_ro("ulp_passed", &ComparisonResult::ulpPassed)
-        .def_ro("reported_mismatches", &ComparisonResult::reportedMismatches)
-        .def_ro("reported_comparisons", &ComparisonResult::reportedComparisons)
-        .def_prop_ro("passed", &ComparisonResult::passed);
+                &ComparisonReport::maxSymmetricRelativeDifference)
+        .def_ro("maximum_observed_magnitude", &ComparisonReport::maximumObservedMagnitude)
+        .def_ro("maximum_expected_magnitude", &ComparisonReport::maximumExpectedMagnitude)
+        .def_ro("frobenius_difference", &ComparisonReport::frobeniusDifference)
+        .def_ro("frobenius_observed", &ComparisonReport::frobeniusObserved)
+        .def_ro("frobenius_expected", &ComparisonReport::frobeniusExpected)
+        .def_ro("relative_frobenius_error", &ComparisonReport::relativeFrobeniusError)
+        .def_ro("relative_maximum_error", &ComparisonReport::relativeMaximumError)
+        .def_ro("maximum_ulp", &ComparisonReport::maximumUlp)
+        .def_ro("sum_ulp", &ComparisonReport::sumUlp)
+        .def_ro("average_ulp", &ComparisonReport::averageUlp)
+        .def_ro("ulp_compared", &ComparisonReport::ulpCompared)
+        .def_ro("pointwise_passed", &ComparisonReport::pointwisePassed)
+        .def_ro("frobenius_passed", &ComparisonReport::frobeniusPassed)
+        .def_ro("ulp_passed", &ComparisonReport::ulpPassed)
+        .def_ro("reported_mismatches", &ComparisonReport::reportedMismatches)
+        .def_ro("reported_comparisons", &ComparisonReport::reportedComparisons)
+        .def_prop_ro("passed", &ComparisonReport::passed);
 
     nb::class_<ComparisonTolerance>(module, "ComparisonTolerance")
         .def_ro("absolute", &ComparisonTolerance::absolute)
@@ -109,11 +109,11 @@ void registerComparisonBindings(nb::module_& module) {
         .def_ro("index", &SentinelMismatch::index)
         .def_ro("observed", &SentinelMismatch::observed);
 
-    nb::class_<SentinelResult>(module, "SentinelResult")
-        .def_ro("checked", &SentinelResult::checked)
-        .def_ro("mismatches", &SentinelResult::mismatches)
-        .def_ro("reported_mismatches", &SentinelResult::reportedMismatches)
-        .def_prop_ro("passed", &SentinelResult::passed);
+    nb::class_<SentinelReport>(module, "SentinelReport")
+        .def_ro("checked", &SentinelReport::checked)
+        .def_ro("mismatches", &SentinelReport::mismatches)
+        .def_ro("reported_mismatches", &SentinelReport::reportedMismatches)
+        .def_prop_ro("passed", &SentinelReport::passed);
 
     module.def(
         "compare",
