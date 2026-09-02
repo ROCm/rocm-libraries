@@ -58,7 +58,12 @@ from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfx
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from Tensile.SolutionStructs.Naming import (
+    getKernelCompileKey,
+    getKernelFileBase,
+    getKeyNoInternalArgs,
+    getKernelNameMin,
+)
 
 from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch, load_logic_schedule_name
 from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
@@ -176,6 +181,60 @@ class KernelMinResult(NamedTuple):
     mathclk: int
 
 
+class KernelCompileGroup(NamedTuple):
+    key: str
+    representative: Solution
+    aliases: tuple
+    baseName: str
+
+
+def groupKernelRecords(kernels, splitGSU: bool):
+    """Group placement/runtime aliases by generated-assembly identity."""
+    groups = {}
+    artifactOwners = {}
+    for kernel in kernels:
+        key = getKernelCompileKey(kernel, splitGSU)
+        symbol = getKernelNameMin(kernel, splitGSU)
+        base = getKernelFileBase(splitGSU, kernel)
+        owner = artifactOwners.setdefault(base, key)
+        if owner != key:
+            raise RuntimeError(
+                f"Distinct kernel compile keys share generated artifact {base!r}"
+            )
+        if key not in groups:
+            kernel["BaseName"] = base
+            groups[key] = {
+                "representative": kernel,
+                "aliases": [kernel],
+                "symbol": symbol,
+                "base": base,
+            }
+            continue
+        group = groups[key]
+        if group["symbol"] != symbol or group["base"] != base:
+            raise RuntimeError(f"Compile key {key!r} maps to inconsistent kernel names")
+        if all(alias is not kernel for alias in group["aliases"]):
+            group["aliases"].append(kernel)
+    return [
+        KernelCompileGroup(
+            key,
+            group["representative"],
+            tuple(group["aliases"]),
+            group["base"],
+        )
+        for key, group in groups.items()
+    ]
+
+
+def _normalizeKernelGroups(kernelsOrGroups, splitGSU: bool):
+    entries = list(kernelsOrGroups)
+    if all(isinstance(entry, KernelCompileGroup) for entry in entries):
+        return entries
+    if any(isinstance(entry, KernelCompileGroup) for entry in entries):
+        raise TypeError("Kernel inputs must be all groups or all raw kernels")
+    return groupKernelRecords(entries, splitGSU)
+
+
 def _stinky_asm_verify_wanted(isa: IsaVersion) -> bool:
     """Return True if asm/.o Stinky size check should run for this kernel.
 
@@ -284,7 +343,7 @@ def _checkInvalidSolutions(splitGSU, removeKernelNames, solutions):
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, splitGSU)
+            kName = getKernelCompileKey(kernel, splitGSU)
             if kName in removeKernelNames:
                 invalids.append(True)
                 break
@@ -298,7 +357,7 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
     if any(removeKernelsAndResultsFlag) and not errorTolerant:
         printExit("** kernel generation failure **")
 
-    removeKernelNames = {getKeyNoInternalArgs(kernel, splitGSU) for invalid, kernel in zip(removeKernelsAndResultsFlag, kernels) if invalid}
+    removeKernelNames = {getKernelCompileKey(kernel, splitGSU) for invalid, kernel in zip(removeKernelsAndResultsFlag, kernels) if invalid}
     kernels[:] = [kernel for invalid, kernel in zip(removeKernelsAndResultsFlag, kernels) if not invalid]
 
     removeSolutionsFlag = []
@@ -310,7 +369,7 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
         solutionKernels = solution.getKernels()
         flag = False
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, splitGSU)
+            kName = getKernelCompileKey(kernel, splitGSU)
             if kName in removeKernelNames:
                 flag = True
                 break
@@ -322,12 +381,12 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
 def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
     resultDict = {}
     for kernIdx, r in enumerate(results):
-        kName = getKernelNameMin(kernels[kernIdx], splitGSU)
+        kName = getKernelCompileKey(kernels[kernIdx], splitGSU)
         resultDict["%s"%kName] = r
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKernelNameMin(kernel, splitGSU)
+            kName = getKernelCompileKey(kernel, splitGSU)
             result = resultDict["%s"%kName]
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
@@ -336,13 +395,13 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
     resultDict = {}
     for kernIdx, r in enumerate(results):
-        kName = getKernelFileBase(splitGSU, kernels[kernIdx])
+        kName = getKernelCompileKey(kernels[kernIdx], splitGSU)
         resultDict["%s"%kName] = r
     for archName, masterLibrary in masterLibraries.items():
         for solIdx, sol in masterLibrary.solutions.items():
             solutionKernels = sol.originalSolution.getKernels()
             for kernel in solutionKernels:
-                kName = getKernelFileBase(splitGSU, kernel)
+                kName = getKernelCompileKey(kernel, splitGSU)
                 try:
                     result = resultDict["%s"%kName]
                     sol.sizeMapping.CUOccupancy = result.cuoccupancy
@@ -372,7 +431,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
             for solIdx, sol in lib.solutions.items():
                 solutionKernels = sol.originalSolution.getKernels()
                 for kernel in solutionKernels:
-                    kName = getKernelFileBase(splitGSU, kernel)
+                    kName = getKernelCompileKey(kernel, splitGSU)
                     try:
                         result = resultDict["%s"%kName]
                         sol.sizeMapping.CUOccupancy = result.cuoccupancy
@@ -482,18 +541,14 @@ def writeSolutionsAndKernels(
             buildTmpPath / "code_object_tmp"
         )  # Temp path for HSA code object files (.hsaco)
 
-        asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
-
-        visited = set()
-        duplicates = 0
-        for k in asmKernels:
-            base = getKernelFileBase(splitGSU, k)
-            k.duplicate = True if base in visited else False
-            if not k.duplicate:
-                k["BaseName"] = base
-            duplicates += k.duplicate
-            print2(f"Duplicate: {base}")
-            visited.add(base)
+        kernelGroups = _normalizeKernelGroups(kernels, splitGSU)
+        asmGroups = [
+            group
+            for group in kernelGroups
+            if group.representative["KernelLanguage"] == "Assembly"
+        ]
+        asmKernels = [group.representative for group in asmGroups]
+        duplicates = sum(len(group.aliases) - 1 for group in asmGroups)
         print1(f"Number of duplicate kernels: {duplicates}")
 
         outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
@@ -516,6 +571,10 @@ def writeSolutionsAndKernels(
         removeInvalidSolutionsAndKernels(
             asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
         )
+        validKeys = {
+            getKernelCompileKey(kernel, splitGSU) for kernel in asmKernels
+        }
+        asmGroups[:] = [group for group in asmGroups if group.key in validKeys]
         passPostKernelInfoToSolution(
             asmResults, asmKernels, solutions, splitGSU
         )
@@ -544,13 +603,17 @@ def writeSolutionsAndKernels(
             multiArg=False,
         )
 
-    # Remove solutions whose kernels failed to assemble (no .o file produced)
-    failedBases = {k["BaseName"] for k in asmKernels
-                   if not k.duplicate and not (assemblyTmpPath / (k["BaseName"] + ".o")).exists()}
-    if failedBases:
+    # Remove solutions whose representative kernel failed to assemble.
+    failedKeys = {
+        group.key
+        for group in asmGroups
+        if not (assemblyTmpPath / (group.baseName + ".o")).exists()
+    }
+    if failedKeys:
         solutions[:] = [s for s in solutions
-                        if getKernelFileBase(splitGSU, s.getKernels()[0]) not in failedBases]
-        asmKernels[:] = [k for k in asmKernels if k.get("BaseName", None) not in failedBases]
+                        if getKernelCompileKey(s.getKernels()[0], splitGSU) not in failedKeys]
+        asmGroups[:] = [group for group in asmGroups if group.key not in failedKeys]
+        asmKernels[:] = [group.representative for group in asmGroups]
 
     with timing_context("python_kernel_write_helpers"):
         writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
@@ -570,7 +633,7 @@ def writeSolutionsAndKernels(
             codeObjectFiles += buildAssemblyCodeObjectFiles(
                 asmToolchain.linker,
                 asmToolchain.bundler,
-                [k for k in asmKernels if not k.duplicate],
+                asmGroups,
                 destRoot,
                 assemblyTmpPath,
                 compress,
@@ -626,21 +689,16 @@ def writeSolutionsAndKernelsTCL(
         buildTmpPath / "code_object_tmp"
     )  # Temp path for HSA code object files (.hsaco)
 
-    asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
-
-    visited = set()
-    duplicates = 0
     splitGSU = False
-    for k in asmKernels:
-        base = getKernelFileBase(splitGSU, k)
-        k["BaseName"] = base
-        k.duplicate = True if base in visited else False
-        duplicates += k.duplicate
-        print2(f"Duplicate: {base}")
-        visited.add(base)
+    kernelGroups = _normalizeKernelGroups(kernels, splitGSU)
+    asmGroups = [
+        group
+        for group in kernelGroups
+        if group.representative["KernelLanguage"] == "Assembly"
+    ]
+    uniqueAsmKernels = [group.representative for group in asmGroups]
+    duplicates = sum(len(group.aliases) - 1 for group in asmGroups)
     print1(f"Number of duplicate kernels: {duplicates}")
-
-    uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
 
     def assemble(ret, removeTemporaries: bool):
         asmPath, isa, wavefrontsize, result = ret
@@ -687,7 +745,7 @@ def writeSolutionsAndKernelsTCL(
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
         asmToolchain.bundler,
-        asmKernels,
+        asmGroups,
         destRoot,
         assemblyTmpPath,
         compress,
@@ -1169,7 +1227,11 @@ def run():
     print(f"Time to load yaml files (s): {(stop_glds-start_glds):3.2f}")
 
 
-    kernels = generateKernelObjectsFromSolutions(solutions)
+    kernels = [
+        kernel
+        for solution in solutions
+        for kernel in solution.getKernels()
+    ]
     kernelHelperObjs = generateKernelHelperObjects(kernels, str(asmToolchain.assembler.path), isaInfoMap)
     kernelWriterAssembly = KernelWriterAssembly(asmToolchain.assembler, DebugConfig())
 

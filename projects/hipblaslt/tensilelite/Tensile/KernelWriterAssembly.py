@@ -171,10 +171,6 @@ class KernelWriterAssembly(KernelWriter):
 
   def getSourceFileString(self, kernel) -> Tuple[int, str]:
     assert kernel["KernelLanguage"] == "Assembly"
-    # Skip if .o files will have already been built for this file
-    if kernel.duplicate:
-      self.language = "ASM"
-      return (0, "") # should this be an non zero number
 
     isCustom = isCustomKernelConfig(kernel)
     try:

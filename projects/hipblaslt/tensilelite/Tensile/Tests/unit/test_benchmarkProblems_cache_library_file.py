@@ -33,7 +33,11 @@ def test_cache_yaml_write_path_persists_LibraryFile():
 def test_readCacheIfValid_returns_both_CodeObjectFiles_and_LibraryFile(tmp_path):
     """_readCacheIfValid must return both fields, not just CodeObjectFiles."""
     from Tensile import LibraryIO
-    from Tensile.BenchmarkProblems import _readCacheIfValid, _CACHE_FIELDS
+    from Tensile.BenchmarkProblems import (
+        _CACHE_FIELDS,
+        _KERNEL_NAMING_VERSION,
+        _readCacheIfValid,
+    )
 
     cachePath = str(tmp_path / "cache.yaml")
     # Build a cache yaml with all required fields. The fixture values must
@@ -47,6 +51,7 @@ def test_readCacheIfValid_returns_both_CodeObjectFiles_and_LibraryFile(tmp_path)
         customKernelWildcard = False
 
     cacheData = {f: getattr(StubBenchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
+    cacheData["KernelNamingVersion"] = _KERNEL_NAMING_VERSION
     cacheData["CodeObjectFiles"] = ["library/gfx1201/TensileLibrary_gfx1201.co"]
     cacheData["LibraryFile"] = "library/gfx1201/TensileLibrary.yaml"
     LibraryIO.writeYAML(cachePath, cacheData)

@@ -73,6 +73,9 @@ def buildAssemblyCodeObjectFiles(
             destRoot/<stepping>/ keeping the ISA filename. Identity for ordinary.
     """
 
+    def representative(entry):
+      return getattr(entry, "representative", entry)
+
     extObj = ".o"
     extCo = ".co"
     extCoRaw = ".co.raw"
@@ -80,25 +83,31 @@ def buildAssemblyCodeObjectFiles(
     outArchNames = outputArchNames or {}
     destRoot = Path(destRoot)
     archKernelMap = collections.defaultdict(list)
-    for k in kernels:
-      archKernelMap[tuple(k['ISA'])].append(k)
+    for entry in kernels:
+      archKernelMap[tuple(representative(entry)['ISA'])].append(entry)
 
     coFiles = []
-    for arch, archKernels in archKernelMap.items():
-      if len(archKernels) == 0:
+    for arch, archEntries in archKernelMap.items():
+      if len(archEntries) == 0:
         continue
 
       gfx = isaToGfx(arch)
       destDir = Path(ensurePath(destRoot / outArchNames.get(gfx, gfx)))
 
-      objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
-      coFileMap = collections.defaultdict(set)
-      if len(objectFiles):
-        coFileMap[asmDir / ("TensileLibrary_"+ gfx + extCoRaw)] = objectFiles
-      for kernel in archKernels:
-        coName = kernel.get("codeObjectFile", None)
-        if coName:
-          coFileMap[asmDir / (coName + extCoRaw)].add(str(asmDir / (kernel["BaseName"] + extObj)))
+      coFileMap = collections.defaultdict(list)
+      for entry in archEntries:
+        kernel = representative(entry)
+        baseName = getattr(entry, "baseName", kernel["BaseName"])
+        objectFile = str(asmDir / (baseName + extObj))
+        aliases = getattr(entry, "aliases", (kernel,))
+        for alias in aliases:
+          if "codeObjectFile" not in alias:
+            destination = asmDir / ("TensileLibrary_" + gfx + extCoRaw)
+          else:
+            coName = alias.get("codeObjectFile", None)
+            destination = asmDir / (coName + extCoRaw) if coName else None
+          if destination is not None and objectFile not in coFileMap[destination]:
+            coFileMap[destination].append(objectFile)
 
       for coFileRaw, objFiles in coFileMap.items():
         linker(objFiles, str(coFileRaw))
