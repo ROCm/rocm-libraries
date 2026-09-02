@@ -491,10 +491,15 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
 //print_device_matrix(std::cout,"bounds",1,n+2,work,1);
 
     // find values and vectors with divide & conquer
+    /** TODO: Although stedc accepts batched calls (with C as an array of pointers), in practice it
+            only works for strided-batched (a simple array C). This was never caught in tests because 
+            syevd always calls stedc as strided-batched. For this reason, we cannot call stedc using C
+            directly; we need to pass a temporary array tmpT. We need to decide if we want to fix this
+            in the future. **/  
+    constexpr bool ISBATCHED = BATCHED || STRIDED;
     /** TODO: at the last level of the merge tree, we could skip computations of
             eigen values and vectors that are out of the desired range. Whether this could be
             exploited somehow to improve performance must be explored in the future. **/
-    constexpr bool ISBATCHED = BATCHED || STRIDED;
     rocsolver_stedc_template<false, ISBATCHED, T>(
         handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, 
         tmpT, 0, ldt, strideT, info, batch_count, work_stack, tempvect, 
