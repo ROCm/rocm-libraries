@@ -16598,23 +16598,6 @@ class KernelWriterAssembly(KernelWriter):
 
     edgeModule.addComment1("UseSubtileImpl NonEdge guards: numValidD1Steps (MatrixInstM=%d) and numValid16NBlocks" % kernel["MatrixInstM"])
 
-    # StreamK remaps the persistent workgroup id to a logical output tile later
-    # in the kernel, so WorkGroup0/1 are not reliable inputs to the ordinary
-    # non-StreamK boundary formulas below.  This is the NonEdge path: every
-    # wave-owned block is valid by construction.  Publish full-wave bounds for
-    # the C-load/store guards and their partial-block exec-mask helper.
-    if kernel.get("StreamK", 0):
-      edgeModule.add(SMovB32(dst=sgpr("SubtileMGuard"), src=kernel["MIWaveTile"][0],
-                             comment="StreamK NonEdge: all M blocks are valid"))
-      edgeModule.add(SMovB32(dst=sgpr("SubtileNGuard"), src=waveGroupN,
-                             comment="StreamK NonEdge: all N columns are valid"))
-      edgeModule.add(SMovB32(dst=sgpr(tmpM), src=waveGroupM,
-                             comment="StreamK NonEdge: full M exec mask"))
-      self.states.subtileTotalMOffsetSgpr = tmpM
-      self.states.subtileMBlockSize = mBlockSize
-      self.sgprPool.checkIn(tmpN)
-      return
-
     # Read waveId once; extract M (lower bits) and N (upper bits) before AND destroys waveId.
     waveSize = kernel["WavefrontSize"]
     log2WaveSize = int(log(waveSize, 2))
