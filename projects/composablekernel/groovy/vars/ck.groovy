@@ -1966,6 +1966,48 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
     }
 }
 
+// Orchestrate correctness and perf dispatcher lanes in parallel.
+// Called from the Jenkinsfile as a scripted step to keep the declarative
+// pipeline method small enough to avoid the JVM 64KB method-size limit.
+def runDispatcherTests(boolean runCorrectness, boolean runPerf, String compiler) {
+    def branches = [:]
+    if (runCorrectness) {
+        branches["DISPATCHER_CORRECTNESS gfx942"] = {
+            runOnHealthyNode(rocmnode("gfx942")) {
+                deleteDir()
+                runDispatcherCorrectnessTests("gfx942", compiler)
+                cleanWs()
+            }
+        }
+        branches["DISPATCHER_CORRECTNESS gfx950"] = {
+            runOnHealthyNode(rocmnode("gfx950")) {
+                deleteDir()
+                runDispatcherCorrectnessTests("gfx950", compiler)
+                cleanWs()
+            }
+        }
+    }
+    if (runPerf) {
+        branches["DISPATCHER_PERF gfx942"] = {
+            runOnHealthyNode(rocmnode("gfx942")) {
+                deleteDir()
+                runDispatcherPerfTests(compiler, "gfx942")
+                cleanWs()
+            }
+        }
+        branches["DISPATCHER_PERF gfx950"] = {
+            runOnHealthyNode(rocmnode("gfx950")) {
+                deleteDir()
+                runDispatcherPerfTests(compiler, "gfx950")
+                cleanWs()
+            }
+        }
+    }
+    if (branches) {
+        parallel branches
+    }
+}
+
 def runBuildCKAndTests(String arch) {
     def gpuTarget
     def extraSetupArgs = ""

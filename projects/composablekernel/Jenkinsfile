@@ -742,81 +742,16 @@ pipeline {
         {
             when {
                 beforeAgent true
-                expression { env.SHOULD_RUN_CI.toBoolean() }
+                expression { env.SHOULD_RUN_CI.toBoolean() && (params.RUN_DISPATCHER_CORRECTNESS_TESTS.toBoolean() || params.RUN_DISPATCHER_PERF_TESTS.toBoolean()) }
             }
-            parallel
-            {
-                stage("Run DISPATCHER_CORRECTNESS Tests on gfx942")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_DISPATCHER_CORRECTNESS_TESTS.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx942")) {
-                                deleteDir()
-                                ck.runDispatcherCorrectnessTests("gfx942", params.BUILD_COMPILER)
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-                stage("Run DISPATCHER_CORRECTNESS Tests on gfx950")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_DISPATCHER_CORRECTNESS_TESTS.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx950")) {
-                                deleteDir()
-                                ck.runDispatcherCorrectnessTests("gfx950", params.BUILD_COMPILER)
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-                stage("Run DISPATCHER_PERF Tests on gfx942")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_DISPATCHER_PERF_TESTS.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx942")) {
-                                deleteDir()
-                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "gfx942")
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-                stage("Run DISPATCHER_PERF Tests on gfx950")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_DISPATCHER_PERF_TESTS.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx950")) {
-                                deleteDir()
-                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "gfx950")
-                                cleanWs()
-                            }
-                        }
-                    }
+            agent none
+            steps {
+                script {
+                    loadCk()
+                    ck.runDispatcherTests(
+                        params.RUN_DISPATCHER_CORRECTNESS_TESTS.toBoolean(),
+                        params.RUN_DISPATCHER_PERF_TESTS.toBoolean(),
+                        params.BUILD_COMPILER)
                 }
             }
         }
