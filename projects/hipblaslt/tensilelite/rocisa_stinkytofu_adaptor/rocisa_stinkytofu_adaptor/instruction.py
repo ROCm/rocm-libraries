@@ -4185,6 +4185,60 @@ class SAtomicCmpswapX2(Instruction):
         dup.smem = _deepcopy(self.smem, memo) if self.smem is not None else None
         return dup
 
+
+# logicalIR: SAtomicUmaxX2
+class SAtomicUmaxX2(Instruction):
+    """``s_atomic_umax_x2 dst, base, soffset`` shim."""
+
+    __slots__ = ("dst", "base", "soffset", "smem")
+
+    def __init__(self, dst=None, base=None, soffset=None, smem=None, comment="", **kw):
+        _ = kw
+        super().__init__(InstType.INST_B64, comment)
+        self.dst = dst
+        self.base = base
+        self.soffset = soffset
+        self.smem = smem
+        self.setInst("s_atomic_umax_x2")
+
+    def getParams(self):
+        return [self.dst, self.base, self.soffset]
+
+    def getDstParams(self):
+        return [self.dst] if self.dst else []
+
+    def getSrcParams(self):
+        return [self.dst, self.base, self.soffset]
+
+    def toString(self) -> str:
+        parts = [_input_to_str(self.dst), _input_to_str(self.base), _input_to_str(self.soffset)]
+        kstr = self.instStr + " " + ", ".join(parts)
+        if self.smem is not None and hasattr(self.smem, "toString"):
+            kstr += self.smem.toString()
+        return self.formatWithComment(kstr)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        return _st.SAtomicUmaxX2(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.base),
+            _to_stinky_register(self.soffset),
+            self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = self.__class__.__new__(self.__class__)
+        memo[id(self)] = dup
+        Instruction.__init__(dup, self.instType, self.comment)
+        dup.instStr = self.instStr
+        dup.dst = _deepcopy(self.dst, memo) if self.dst is not None else None
+        dup.base = _deepcopy(self.base, memo) if self.base is not None else None
+        dup.soffset = self.soffset if isinstance(self.soffset, (int, float, str, bool)) else _deepcopy(self.soffset, memo)
+        dup.smem = _deepcopy(self.smem, memo) if self.smem is not None else None
+        return dup
+
+
 # --- TensorLoadToLds: rocisa(group0, group1, group2, group3, comment) ---
 def _make_tensor_load_class():
     def __init__(self, group0: Any = None, group1: Any = None,
