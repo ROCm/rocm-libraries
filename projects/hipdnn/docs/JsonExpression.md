@@ -103,7 +103,9 @@ A json-like tagged value with no external dependency. Alternatives: null, bool,
 `int64_t`, `double`, `std::string`, and `Array` (`std::vector<Value>`). Numeric
 results are stored as integers when exactly integral (so `1 + 1` is `2`, not
 `2.0`). Key members: the `is*()` / `as*()` inspectors, `truthy()`, `toNumber()`,
-`dump()`, strict `operator==`, and the static `compare`.
+`dump()`, strict `operator==`, and the static `compare`, which returns a
+`Value::Ordering` (`LESS` / `EQUAL` / `GREATER` / `UNORDERED`, the last being the
+NaN case that makes every ordering test false).
 
 There is intentionally no object alternative — nested structure is reached
 through the data source's path accessor, not carried in a `Value`.
@@ -125,8 +127,8 @@ can:
 | `"$"`        | whole document — rejected at compile time  |
 | `"$$text"`   | escaped string literal `"$text"`           |
 
-Pass a different sigil as the second argument to `compile` / `evaluate` if your
-keys begin with `$`.
+Pass a different sigil as the second argument to `compile` if your keys begin
+with `$`.
 
 ## Layout aliases
 
