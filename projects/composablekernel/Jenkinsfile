@@ -91,7 +91,7 @@ def showCompilerInfo(boolean deferBinaryInfo = false, String dockerImage = "") {
 
 //launch develop branch daily jobs
 CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 23 * * * % RUN_FULL_QA=true;RUN_CK_TILE_FMHA_TESTS=true;RUN_PERFORMANCE_TESTS=true;FORCE_CI=true
-                                              0 22 * * * % RUN_FULL_QA=true;DISABLE_DL_KERNELS=true;RUN_TILE_ENGINE_BASIC_TESTS=true;RUN_TILE_ENGINE_GEMM_TESTS=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
+                                              0 22 * * * % RUN_FULL_QA=true;DISABLE_DL_KERNELS=true;RUN_TILE_ENGINE_BASIC_TESTS=true;RUN_TILE_ENGINE_GEMM_TESTS=true;RUN_DISPATCHER_PERF_TESTS=true;RUN_DISPATCHER_CORRECTNESS_TESTS=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
                                               0 21 * * * % RUN_GROUPED_CONV_LARGE_CASES_TESTS=true;hipTensor_test=true;BUILD_GFX101=false;BUILD_GFX908=false;BUILD_GFX942=true;BUILD_GFX950=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true;BUILD_PACKAGES=true
                                               0 19 * * * % BUILD_DOCKER=true;COMPILER_VERSION=develop;BUILD_COMPILER=/llvm-project/build/bin/clang++;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
                                               0 17 * * * % BUILD_DOCKER=true;COMPILER_VERSION=therock;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
@@ -190,13 +190,13 @@ pipeline {
             defaultValue: false,
             description: "Run the tile_engine_gemm tests (default: OFF)")
         booleanParam(
-            name: "RUN_DISPATCHER_PERF_TESTS",
-            defaultValue: true,
-            description: "Smoke-tier AOT benchmark on gfx942+gfx950: 64 instances/op, one problem size. gfx942: gemm_universal, batched_gemm, batched_contraction, gemm_streamk, grouped_gemm (fp16/rcr), gemm_multi_d, gemm_multi_abd (fp16/rcrr), grouped_gemm_rowcolquant, grouped_gemm_tensorquant (fp8/rcr). gfx950: gemm_aquant, gemm_bquant, gemm_abquant, mx_gemm (fp8/rcr), gemm_streamk (fp16/rcr). (default: OFF)")
-        booleanParam(
             name: "RUN_DISPATCHER_CORRECTNESS_TESTS",
             defaultValue: true,
-            description: "Smoke-tier JIT correctness on gfx942+gfx950: gemm_universal (budget 64), grouped_gemm, multi_d, multi_abd, batched_gemm, batched_contraction, stream_k, grouped_gemm_rowcolquant/tensorquant/aquant/abquant on both arches; mx_gemm + grouped_gemm_bquant on gfx950 only (ISA limitation). Does NOT cover preshuffled_gemm, block_scale_gemm ops, or batched_contraction_multi_abd (no bridge on develop). (default: OFF)")
+            description: "Run Correctness Tier for Dispatcher")
+        booleanParam(
+            name: "RUN_DISPATCHER_PERF_TESTS",
+            defaultValue: true,
+            description: "Run Performance Tier for Dispatcher")
         booleanParam(
             name: "BUILD_INSTANCES_ONLY",
             defaultValue: false,
@@ -674,52 +674,6 @@ pipeline {
                 }
             }
         }
-        stage("Run DISPATCHER_PERF Tests")
-        {
-            when {
-                beforeAgent true
-                expression { env.SHOULD_RUN_CI.toBoolean() }
-            }
-            parallel
-            {
-                stage("Run DISPATCHER_PERF Tests on gfx942")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_DISPATCHER_PERF_TESTS.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx942")) {
-                                deleteDir()
-                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "gfx942")
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-                stage("Run DISPATCHER_PERF Tests on gfx950")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_DISPATCHER_PERF_TESTS.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx950")) {
-                                deleteDir()
-                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "gfx950")
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-            }
-        }
         stage("Run TILE_ENGINE_GEMM Tests")
         {
             when {
@@ -784,11 +738,6 @@ pipeline {
                 }
             }
         }
-        // The lane fans out to gfx942 and gfx950. The quant operators (mx_gemm,
-        // aquant, bquant, abquant) are gfx950-only, so covering the full operator
-        // surface is impossible from a single node type. Cost is held down by the
-        // search budget, not by dropping operators -- see the budget note on
-        // runDispatcherCorrectnessTests in groovy/vars/ck.groovy.
         stage("Run DISPATCHER_CORRECTNESS Tests")
         {
             when {
@@ -833,9 +782,52 @@ pipeline {
                         }
                     }
                 }
-                // No gfx1201 dispatcher stage: the dispatcher has no RDNA4 tile
-                // coverage, so such a stage could only ever run red. See the
-                // arch note on dispatcherGemmVariantsFor in groovy/vars/ck.groovy.
+            }
+        }
+        stage("Run DISPATCHER_PERF Tests")
+        {
+            when {
+                beforeAgent true
+                expression { env.SHOULD_RUN_CI.toBoolean() }
+            }
+            parallel
+            {
+                stage("Run DISPATCHER_PERF Tests on gfx942")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_DISPATCHER_PERF_TESTS.toBoolean() }
+                    }
+                    agent none
+                    steps{
+                        script {
+                            loadCk()
+                            ck.runOnHealthyNode(rocmnode("gfx942")) {
+                                deleteDir()
+                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "gfx942")
+                                cleanWs()
+                            }
+                        }
+                    }
+                }
+                stage("Run DISPATCHER_PERF Tests on gfx950")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_DISPATCHER_PERF_TESTS.toBoolean() }
+                    }
+                    agent none
+                    steps{
+                        script {
+                            loadCk()
+                            ck.runOnHealthyNode(rocmnode("gfx950")) {
+                                deleteDir()
+                                ck.runDispatcherPerfTests(params.BUILD_COMPILER, "gfx950")
+                                cleanWs()
+                            }
+                        }
+                    }
+                }
             }
         }
 
