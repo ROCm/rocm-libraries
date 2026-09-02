@@ -66,6 +66,8 @@ float Im2d2ColGPU(const Handle& handle,
 
     const int data_size_bound = c * in_h * in_w;
 
+    // NHWC variants use the common argument list below. NCHW launch parameters are
+    // shape-dependent, so rebuild that launch to supply its additional kernel arguments.
     if(!kernels.empty() && layoutNHWC)
     {
         auto kernel = kernels.front();
@@ -255,9 +257,8 @@ float Im2d2ColGPU(const Handle& handle,
             std::vector<size_t> vgd;
 
             const int bytes_per_pixel = c * get_data_size(type);
-            // TODO: Currently, we just pick whatever. In theory this
-            // should correspond with the cache line size for maximum
-            // efficiency.
+            // The many-channel kernel processes 16, 8, or 4 contiguous bytes per thread.
+            // Require the pixel stride to support the widest vectorization candidate.
             const int min_aligned_bytes = 16;
 
             bool selected = false;
@@ -297,14 +298,9 @@ float Im2d2ColGPU(const Handle& handle,
                     bytes_per_pixel % min_aligned_bytes == 0)
             {
 
-                // Arbitrary chosen: We expect the kernel to not use a lot of
-                // registers and have the maximum occupancy, therefore we can
-                // schedule at least 4 (with group_size_x hardcoded to 256) kernels
-                // on a single CU. Most AMD GPUs have in the order of 100-300 CUs,
-                // and we want to have at least one block for CU. This seems like
-                // a decent random value.
-                // TODO: This should be based on the GPU's CU count.
-                const int min_blocks = 256;
+                // Keep enough independent blocks to occupy every CU before reducing
+                // the amount of channel data processed by each thread.
+                const size_t min_blocks = handle.GetMaxComputeUnits();
 
                 int items_per_thread = 0;
                 int threads_per_ch   = 0;
@@ -399,7 +395,6 @@ float Im2d2ColGPU(const Handle& handle,
                 // OUTPUT PIXEL BASED VERSION
                 vgd = {
                     static_cast<size_t>(out_h) * out_w * group_size_x, 1, 1}; // outputpixel based
-                selected = true;
             }
 
             assert(vgd.size() == 3);
