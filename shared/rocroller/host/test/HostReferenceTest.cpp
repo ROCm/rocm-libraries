@@ -61,9 +61,8 @@ namespace
             std::nullopt,
         };
 
-        const auto problem
-            = makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 2.0f, 3.0f);
-        const Tensor reference = computeHostReference(problem);
+        const Tensor reference
+            = computeHostReference(inputs, std::nullopt, std::nullopt, 0, 2.0f, 3.0f);
         require(convertHostReference<float>(reference) == std::vector<float>({41, 89, 47, 103}),
                 "Unscaled rocroller-gemm host reference mismatch.");
     }
@@ -82,8 +81,8 @@ namespace
                 std::nullopt,
             };
 
-            const Tensor reference = computeHostReference(
-                makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 1.0f, 0.0f));
+            const Tensor reference
+                = computeHostReference(inputs, std::nullopt, std::nullopt, 0, 1.0f, 0.0f);
             require(reference.shape() == Shape{0, 3}
                         && convertHostReference<float>(reference).empty(),
                     "M-zero rocroller-gemm host reference mismatch.");
@@ -99,8 +98,8 @@ namespace
                 std::nullopt,
             };
 
-            const Tensor reference = computeHostReference(
-                makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 1.0f, 0.0f));
+            const Tensor reference
+                = computeHostReference(inputs, std::nullopt, std::nullopt, 0, 1.0f, 0.0f);
             require(reference.shape() == Shape{2, 0}
                         && convertHostReference<float>(reference).empty(),
                     "N-zero rocroller-gemm host reference mismatch.");
@@ -116,8 +115,8 @@ namespace
                 std::nullopt,
             };
 
-            const Tensor reference = computeHostReference(
-                makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 7.0f, -2.0f));
+            const Tensor reference
+                = computeHostReference(inputs, std::nullopt, std::nullopt, 0, 7.0f, -2.0f);
             require(convertHostReference<float>(reference) == std::vector<float>({-2, -4, -6, -8}),
                     "K-zero rocroller-gemm host reference did not apply beta to C.");
         }
@@ -136,36 +135,34 @@ namespace
             scaleTensor(Shape{1, 2}, {130, 131}),
         };
 
-        const auto problem
-            = makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 2, 1.0f, 0.0f);
-        const Tensor reference = computeHostReference(problem);
+        const Tensor reference
+            = computeHostReference(inputs, std::nullopt, std::nullopt, 2, 1.0f, 0.0f);
         require(convertHostReference<float>(reference) == std::vector<float>({160}),
                 "Block-scaled rocroller-gemm host reference mismatch.");
 
         const std::array<uint8_t, 1> singleScaleA{128};
         const std::array<uint8_t, 1> singleScaleB{130};
-        auto                         singleScaleProblem
-            = makeHostReferenceProblem(inputs,
-                                       hostScaleTensor(DataType::E8M0, singleScaleA, 1, 4, 4),
-                                       hostScaleTensor(DataType::E8M0, singleScaleB, 1, 4, 4),
-                                       4,
-                                       1.0f,
-                                       0.0f);
-        const Tensor singleScaleReference = computeHostReference(singleScaleProblem);
+        const Tensor                 singleScaleReference
+            = computeHostReference(inputs,
+                                   hostScaleTensor(DataType::E8M0, singleScaleA, 1, 4, 4),
+                                   hostScaleTensor(DataType::E8M0, singleScaleB, 1, 4, 4),
+                                   4,
+                                   1.0f,
+                                   0.0f);
         require(convertHostReference<float>(singleScaleReference) == std::vector<float>({64}),
                 "Single-scale rocroller-gemm host reference mismatch.");
 
         GeneratedGEMMInputs onlyA = inputs;
         onlyA.scaleB.reset();
-        const Tensor onlyAReference = computeHostReference(
-            makeHostReferenceProblem(onlyA, std::nullopt, std::nullopt, 2, 1.0f, 0.0f));
+        const Tensor onlyAReference
+            = computeHostReference(onlyA, std::nullopt, std::nullopt, 2, 1.0f, 0.0f);
         require(convertHostReference<float>(onlyAReference) == std::vector<float>({12}),
                 "One-sided A scaling did not use a unity B scale.");
 
         GeneratedGEMMInputs onlyB = inputs;
         onlyB.scaleA.reset();
-        const Tensor onlyBReference = computeHostReference(
-            makeHostReferenceProblem(onlyB, std::nullopt, std::nullopt, 2, 1.0f, 0.0f));
+        const Tensor onlyBReference
+            = computeHostReference(onlyB, std::nullopt, std::nullopt, 2, 1.0f, 0.0f);
         require(convertHostReference<float>(onlyBReference) == std::vector<float>({48}),
                 "One-sided B scaling did not use a unity A scale.");
     }
@@ -195,8 +192,8 @@ namespace
                     && inputs.scaleB->layout() == Layout(Shape{3, 2}, {1, 3}),
                 "Logical-K generation returned the wrong canonical scale layouts.");
 
-        const Tensor reference = computeHostReference(
-            makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 2, 1.0f, 0.0f));
+        const Tensor reference
+            = computeHostReference(inputs, std::nullopt, std::nullopt, 2, 1.0f, 0.0f);
         require(convertHostReference<float>(reference) == std::vector<float>({4, 4, 4, 4, 4, 4}),
                 "Generated logical-K scales produced the wrong host reference.");
     }
