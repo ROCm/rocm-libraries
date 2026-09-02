@@ -375,6 +375,13 @@ else()
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT clients)
+    # GPU-free dbsync (StaticFDBSync) rocjitsu runner. Ships in the MIOpen dist so TheRock's
+    # `miopen-dbsync` test component can invoke it from share/miopen/bin/ (pulled via the --miopen
+    # artifact) and run dbsync GPU-free on a CPU runner. See the script header for the mechanism.
+    install(FILES dbsync/run_dbsync_rocjitsu.py
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+        DESTINATION ${DATA_INSTALL_DIR}/bin
+        COMPONENT clients)
   endif()
 endif()
 

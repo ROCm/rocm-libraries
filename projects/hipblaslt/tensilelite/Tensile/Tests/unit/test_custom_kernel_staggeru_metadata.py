@@ -32,6 +32,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -703,3 +704,153 @@ def test_a_lying_declaration_is_caught(tmp_path):
             f"{name}: flipping {key} made the declaration a lie, but the check accepted "
             f"it instead of refusing with '{expected}'"
         )
+
+
+# ---------------------------------------------------------------------------
+# The generated-kernel arm.
+#
+# Everything above is about the 119 handwritten custom kernels.  The same
+# question has to be answered for generated kernels, because the uniform
+# summation order gate admits a solution whose StaggerU the host clamps to 0 and
+# that admission is only sound if the kernel reads StaggerU from the packed
+# argument the clamp writes.  For a generated kernel that is a property of the
+# code generator rather than of a checked-in file, so it is checked by running
+# the generator: emit a solution that declares SupportCustomStaggerU: False with
+# a non-zero StaggerU -- the shape that used to be refused outright -- and hold
+# the emitted assembly to the same clampCannotReach predicate.
+#
+# supportsCustomStaggerU is passed as True on purpose.  Passing the solution's
+# own False would take the branch that means "the gate refuses this outright",
+# which is vacuous here: under the narrowed predicate the gate no longer
+# refuses it, so the assertion that has to hold is the clamp-based one.
+# ---------------------------------------------------------------------------
+
+_CODEGEN_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "characterization", "_codegen"
+)
+
+_LOGIC_ROOT = os.path.normpath(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        *([".."] * 4),
+        "library",
+        "src",
+        "amd_detail",
+        "rocblaslt",
+        "src",
+        "Tensile",
+        "Logic",
+        "asm_full",
+    )
+)
+
+# Shipped tuning logic known to contain solutions with SupportCustomStaggerU:
+# False and a non-zero StaggerU.  Two files rather than one so a retune that
+# drops the shape from either still leaves the check with something to assert.
+COMPILED_IN_STAGGERU_LOGIC = (
+    "gfx950/gfx950_id75a3/Equality/"
+    "gfx950_Cijk_Ailk_Bjlk_BSS_BH_BiasS_HAS_SAV_UserArgs.yaml",
+    "gfx950/gfx950_id75a3/Equality/"
+    "gfx950_Cijk_Alik_Bljk_F8B8SS_BH_BiasS_HAS_SAB_SAV_UserArgs.yaml",
+)
+
+
+def _logicSolutions(document):
+    """Solutions out of either tuning-logic schema.
+
+    Equality logic is a mapping with a 'Solutions' key; the positional schema
+    used by the StreamK and Origami files keeps them at index 5.
+    """
+    if isinstance(document, dict):
+        return document["Solutions"]
+    return document[5]
+
+
+def _declaresCompiledInStaggerU(solution) -> bool:
+    """The shape the CompiledInStaggerU clause used to refuse."""
+    support = solution.get("InternalSupportParams", {})
+    staggerU = solution.get("StaggerU", DEFAULT_STAGGERU)
+    return support.get("SupportCustomStaggerU", DEFAULT_SUPPORT_CUSTOM_STAGGERU) is False and (
+        staggerU != 0
+    )
+
+
+def _writeSingleSolutionLogic(document, solution, path):
+    """A logic file holding just this solution, so emitting is cheap."""
+    import copy
+
+    import yaml
+
+    trimmed = copy.deepcopy(document)
+    only = copy.deepcopy(solution)
+    only["SolutionIndex"] = 0
+    if isinstance(trimmed, dict):
+        trimmed["Solutions"] = [only]
+        # The exact-match table indexes into the solution list this replaces, so
+        # its entries have to go.  The key itself has to stay: for Equality,
+        # GridBased and Range logic prepareLibraryLogicDict() reads
+        # data["ExactLogic"] unconditionally, so dropping the key raises
+        # KeyError.  Emptying it is what the positional branch below already
+        # does to the same table, which sits at index 7.
+        trimmed["ExactLogic"] = []
+    else:
+        trimmed[5] = [only]
+        for i in range(6, len(trimmed)):
+            if isinstance(trimmed[i], list):
+                trimmed[i] = []
+    with open(path, "w") as f:
+        yaml.safe_dump(trimmed, f, default_flow_style=None, width=200)
+    return path
+
+
+@pytest.mark.parametrize("rel", COMPILED_IN_STAGGERU_LOGIC)
+def test_generated_kernels_read_stagger_from_the_packed_argument(rel, tmp_path):
+    """A generated kernel that staggers must unpack the value the host clamps.
+
+    This is the premise the narrowed CompiledInStaggerU clause rests on:
+    SupportCustomStaggerU: False means only that the host declines to write the
+    packed field, leaving it 0.  It does not mean the kernel took its stagger
+    from somewhere the clamp cannot reach.  If the generator ever learns to bake
+    a literal StaggerU into a wrap site, this fails and the clause has to widen
+    again."""
+    logic = os.path.join(_LOGIC_ROOT, rel)
+    if not os.path.exists(logic):
+        pytest.skip(f"tuning logic tree not present: {rel}")
+    if not os.path.isdir(_CODEGEN_DIR):
+        pytest.skip("the code generation harness is not present")
+    if _CODEGEN_DIR not in sys.path:
+        sys.path.insert(0, _CODEGEN_DIR)
+    codegen_harness = pytest.importorskip("codegen_harness")
+
+    yaml = pytest.importorskip("yaml")
+    with open(logic) as f:
+        document = yaml.safe_load(f)
+    disqualified = [s for s in _logicSolutions(document) if _declaresCompiledInStaggerU(s)]
+    assert disqualified, (
+        f"{rel} no longer declares SupportCustomStaggerU: False with a non-zero StaggerU, "
+        f"so it cannot exercise the narrowed clause: repoint COMPILED_IN_STAGGERU_LOGIC at "
+        f"logic that still does"
+    )
+
+    workDir = str(tmp_path)
+    for solution in disqualified:
+        path = _writeSingleSolutionLogic(
+            document, solution, os.path.join(workDir, "logic-%s.yaml" % solution["SolutionIndex"])
+        )
+        emitted = codegen_harness.emit_kernels_from_logic(path, canonical=True)
+        assert len(emitted) == 1, f"expected one kernel from {path}, got {len(emitted)}"
+        name, source, err = emitted[0]
+        assert err == 0 and source, f"{name}: code generation returned {err}"
+
+        code = _analyzeSource(name, source, workDir)
+        assert code.staggers, (
+            f"{name} declares StaggerU: {solution.get('StaggerU')} but the generated code has no "
+            f"wrap site, so this solution no longer exercises the check"
+        )
+        unreachable = clampCannotReach(
+            code,
+            KernelMetadata(
+                declaredStaggerU=solution.get("StaggerU"), supportsCustomStaggerU=True
+            ),
+        )
+        assert unreachable is None, unreachable
