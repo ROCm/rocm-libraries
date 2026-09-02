@@ -1779,8 +1779,11 @@ def dispatcherVariantCmd(String arch, String variant) {
 //   batched_gemm, batched_contraction (fp16+bf16+fp32), stream_k,
 //   grouped_gemm_rowcolquant, grouped_gemm_tensorquant,
 //   grouped_gemm_aquant, grouped_gemm_abquant (both arches),
-//   grouped_gemm_bquant C4 (fp8/bf8, both arches),
-//   grouped_gemm_bquant H3 (mx_*) + mx_gemm (gfx950 only, ISA limitation).
+//   grouped_gemm_bquant C4 (fp8/bf8) + C (fp8i4/bf8i4) + H3 (mx_*),
+//   mx_gemm.
+// The last two lines are gfx950 only -- mx_gemm and bquant H3 for an ISA
+// limitation (no scale-MFMA builtins on gfx942), bquant C4/C pending one
+// validating gfx942 run. See the gate comment further down.
 //
 // Operators NOT covered by this lane (no dispatcher bridge on develop yet):
 //   preshuffled_gemm, gemm_aquant, gemm_abquant, gemm_bquant,
