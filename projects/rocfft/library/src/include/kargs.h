@@ -51,13 +51,12 @@
 class KernelArgsBuffer
 {
 public:
-    bool create(const std::vector<size_t>& length,
-                const std::vector<size_t>& inStride,
-                const std::vector<size_t>& outStride,
-                size_t                     iDist,
-                size_t                     oDist,
-                KIntType                   itype);
-
+    bool  create(const std::vector<size_t>& length,
+                 const std::vector<size_t>& inStride,
+                 const std::vector<size_t>& outStride,
+                 size_t                     iDist,
+                 size_t                     oDist,
+                 KIntType                   itype);
     void* lengths() const
     {
         return buf.data_offset(0);
@@ -84,6 +83,7 @@ private:
         return KERN_ARGS_ARRAY_WIDTH * rtc_kint_type_size(itype);
     }
 
+    // buf layout is as follows: | lengths | stride_in | stride_out |
     gpubuf   buf;
     KIntType itype = KIntType::U32;
 };
