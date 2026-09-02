@@ -35,10 +35,6 @@
 #include "rocke/helper_rocke.helpers.layouts.h" /* rocke_layout_map_coord (via arch_target.h) */
 #include "rocke/helper_rocke.helpers.schedule.h" /* rocke_schedule_policy_t + ROCKE_SCHED_DS_READ/MFMA */
 #include "rocke/instance_conv_implicit_gemm_internal.h" /* rocke_conv_emit_frag_smem_load (peer _emit_frag_smem_load) */
-#include "rocke/ir_internal.h" /* rocke_i_set_err */
-
-#include <string.h>
-
 /* ------------------------------------------------------------------ *
  * Module-pinned geometry constants (Python module-level names).
  * ------------------------------------------------------------------ */
@@ -48,17 +44,9 @@
 
 static rocke_value_t* dfcp_zero_recurrent_mma_acc(rocke_ir_builder_t* b, const rocke_mma_op_t* op)
 {
-    const rocke_type_t* elem;
-    if(op == NULL || op->c_dtype == NULL || op->d_dtype == NULL || op->c_frag_len != op->d_frag_len
-       || strcmp(op->c_dtype, op->d_dtype) != 0)
-    {
-        return (rocke_value_t*)rocke_i_set_err(
-            b,
-            ROCKE_ERR_VALUE,
-            "gfx1151 deep_fused_conv_pool cannot feed MMA D back as C with incompatible metadata");
-    }
-    elem = strcmp(op->c_dtype, "i32") == 0 ? rocke_i32() : rocke_f32();
-    return rocke_b_zero_vec(b, elem, op->c_frag_len);
+    if(rocke_mmaop_require_recurrence(b, op, "gfx1151 deep_fused_conv_pool") != ROCKE_OK)
+        return NULL;
+    return rocke_mmaop_zero_c(b, op);
 }
 
 /* ------------------------------------------------------------------ *

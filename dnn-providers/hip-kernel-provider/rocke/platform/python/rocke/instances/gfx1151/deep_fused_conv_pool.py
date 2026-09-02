@@ -47,7 +47,8 @@ import struct
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
-from ...core.ir import F16, F32, I8, I16, I32, IRBuilder, PtrType, Value, VectorType
+from ...core.ir import F16, I8, I16, I32, IRBuilder, PtrType, Value, VectorType
+from ...helpers.atoms import require_mma_recurrence, zero_mma_c
 from ...helpers.geometry import WarpGrid
 from ...helpers.schedule import DS_READ, MFMA, SchedulePolicy
 from ...helpers.spec import kernel_name_join
@@ -73,14 +74,8 @@ _I4_PER_I32 = 8  # int4 K-values packed per i32 fragment slot
 
 def _zero_recurrent_mma_acc(b: IRBuilder, op, *, where: str) -> Value:
     """Construct C for an MMA loop that feeds each D result into the next C."""
-    if op.c_frag_len != op.d_frag_len or op.c_dtype != op.d_dtype:
-        raise ValueError(
-            f"{where} cannot feed MMA D back as C when the op's C and D "
-            f"fragment types differ (C={op.c_dtype}[{op.c_frag_len}], "
-            f"D={op.d_dtype}[{op.d_frag_len}])"
-        )
-    c_elem = I32 if op.c_dtype == "i32" else F32
-    return b.zero_vec(c_elem, op.c_frag_len)
+    require_mma_recurrence(op, where=where)
+    return zero_mma_c(b, op)
 
 
 @dataclass(frozen=True)

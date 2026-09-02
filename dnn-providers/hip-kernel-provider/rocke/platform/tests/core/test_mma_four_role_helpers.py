@@ -295,6 +295,40 @@ class TestFourRoleAtomHelpers(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "C and D contracts differ"):
             require_mma_recurrence(unequal_layout, where="test")
 
+    def test_deep_fused_recurrent_initializers_reject_layout_mismatch(self):
+        from rocke.instances.common.deep_fused_conv_pool import (
+            _zero_recurrent_mma_acc as common_zero,
+        )
+        from rocke.instances.gfx1151.deep_fused_conv_pool import (
+            _zero_recurrent_mma_acc as gfx1151_zero,
+        )
+
+        def c_layout(*_args):
+            return 0, 0
+
+        op = MmaOp(
+            family="wmma",
+            a_dtype="fp16",
+            b_dtype="fp16",
+            c_dtype="fp32",
+            d_dtype="fp32",
+            m=16,
+            n=16,
+            k=16,
+            op_id="synthetic_deep_fused_layout_mismatch",
+            c_frag_len=8,
+            d_frag_len=8,
+            wave_size=32,
+            _c_layout=LayoutMap("c", 8, 32, c_layout),
+            _d_layout=LayoutMap("d", 8, 32, lambda *_args: (1, 1)),
+        )
+
+        for name, zero in (("common", common_zero), ("gfx1151", gfx1151_zero)):
+            with self.subTest(name=name), self.assertRaisesRegex(
+                ValueError, rf"{name}:.*C and D contracts differ"
+            ):
+                zero(IRBuilder(f"deep_fused_{name}"), op, where=name)
+
     def test_all_generic_recurrent_resolvers_reject_layout_mismatch(self):
         from kernels.gfx1250 import _wmma_attention_common
         from rocke.helpers import mfma_attention

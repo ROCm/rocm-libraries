@@ -233,7 +233,9 @@ class ArchTarget:
     # Hardware predicates that policies compose. These speak in bytes,
     # dtypes, and shapes — never in kernel-family vocabulary.
     def fits_lds(self, bytes_in_use: int) -> bool: ...
-    def supports_dtype_combo(self, a: DType, b: DType, c: DType) -> bool: ...
+    def supports_dtype_combo(
+        self, a: DType, b: DType, c: DType, d: DType
+    ) -> bool: ...
     def max_vector_load_dwords(self, dtype: DType) -> int: ...
 ```
 
@@ -289,7 +291,7 @@ That vocabulary is pipeline policy and lives in `instances/` — see
   math, max-block-size) usable by any kernel family;
 - vector-load / vector-store alignment limits;
 - a small set of **capability predicates** that policies compose, e.g.
-  `arch.fits_lds(bytes)`, `arch.supports_dtype_combo(a, b, c)`,
+  `arch.fits_lds(bytes)`, `arch.supports_dtype_combo(a, b, c, d)`,
   `arch.max_threads_per_block`.
 
 What `ArchTarget` does **not** carry:
@@ -321,13 +323,13 @@ the K-search behaviour kernels need today:
 ```python
 arch.mma.enumerate(
     family="mma",                       # "mma" | "wmma"
-    a_dtype="fp8e4m3", b_dtype="bf8e5m2", c_dtype="f32",
+    a_dtype="fp8e4m3", b_dtype="bf8e5m2", c_dtype="f32", d_dtype="f32",
     m=32, n=32,
 ) -> list[MmaOp]
 
 arch.mma.select_largest_k(
     family="mma",
-    a_dtype="fp8e4m3", b_dtype="bf8e5m2", c_dtype="f32",
+    a_dtype="fp8e4m3", b_dtype="bf8e5m2", c_dtype="f32", d_dtype="f32",
     m=32, n=32,
     k_max=64,
 ) -> MmaOp | None
@@ -342,9 +344,9 @@ matching the shape of entries we describe in
 
 - shape `(m, n, k)`;
 - dtypes;
-- per-lane operand widths and accumulator vector width;
+- per-lane A/B/C/D fragment widths;
 - an opaque `op_id: MmaOpId` consumed by the backend;
-- references to the operand and accumulator layouts (see "Physical Data Layout").
+- references to the A/B/C/D operand and result layouts (see "Physical Data Layout").
 
 `MmaOp` does **not** expose LLVM intrinsic text. If a target does not support a
 requested combination, `select_*` returns `None` and the instance builder must
@@ -383,7 +385,7 @@ Three forces push pipeline metadata out of `ArchTarget`:
 | core/arch/                       hardware facts and predicates|
 |   ArchTarget                                                  |
 |     wave_size, lds_capacity_bytes, mma, memory, limits        |
-|     fits_lds(bytes), supports_dtype_combo(a, b, c), ...       |
+|     fits_lds(bytes), supports_dtype_combo(a, b, c, d), ...    |
 +--------------------------------------------------------------+
                             ^  (read-only)
                             |
@@ -441,7 +443,7 @@ def validate(self, target, spec):
         return ValidationResult.reject("pipeline-not-on-arch")
     if (spec.pipeline, spec.scheduler) in self.invalid_combos(target):
         return ValidationResult.reject("forbidden-combo")
-    if not target.supports_dtype_combo(spec.a, spec.b, spec.c):
+    if not target.supports_dtype_combo(spec.a, spec.b, spec.c, spec.d):
         return ValidationResult.reject("dtype-not-on-arch")
     bytes_lds = ab_bytes(spec) * self.lds_budget_factor(spec.pipeline)
     if not target.fits_lds(bytes_lds + c_bytes(spec)):
@@ -541,16 +543,17 @@ All layout protocols use these unit conventions:
 - LDS offsets are returned in **bytes**, not elements. This matches existing
   XOR-swizzle code in `helpers/layouts.py`.
 
-### `OperandLayout` (A / B / C)
+### `OperandLayout` (A / B / C / D)
 
 Per-MMA-operand mapping from a logical fragment index to a per-lane element
-index, and back. Today's `MfmaAtom.lane_to_output` covers only C; A and B
-mappings live implicitly inside loaders (`f16_16x16x32` K-packing is an
-example). This protocol makes them first-class:
+index, and back. Today's `MfmaAtom.lane_to_output` covers only D; A and B
+mappings live implicitly inside loaders and the recurrent C input shares D's
+layout for current atoms (`f16_16x16x32` K-packing is an example). This protocol
+makes all four roles first-class:
 
 ```python
 class OperandLayout(Protocol):
-    role: Literal["a", "b", "c"]
+    role: Literal["a", "b", "c", "d"]
 
     def lane_to_logical(
         self, lane: Value, slot: int
@@ -559,7 +562,7 @@ class OperandLayout(Protocol):
         does this lane's `slot`-th register element live?"""
 ```
 
-Each `MmaOp` owns three `OperandLayout` instances (`a`, `b`, `c`).
+Each `MmaOp` owns four `OperandLayout` instances (`a`, `b`, `c`, `d`).
 
 ### `LdsProducerLayout`
 
@@ -614,7 +617,7 @@ The existing `LdsLayout`, `TransposeLdsReader`, XOR swizzle tables, and
 
 | Today | Becomes |
 | --- | --- |
-| `MfmaAtom.lane_to_output` | `MmaOp.operands["c"]: OperandLayout` |
+| `MfmaAtom.lane_to_output` | `MmaOp` D-result `OperandLayout` |
 | `LdsLayout.padded_k`, `LdsLayout.xor_*` | `LdsConsumerLayout` (sync path) |
 | `TransposeLdsReader` | `LdsConsumerLayout` (transpose-LDS variant) |
 | `helpers/loads.py` lane-contiguous producers | `LdsProducerLayout` |

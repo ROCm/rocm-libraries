@@ -134,7 +134,7 @@ at runtime. **Write modern typing; do not maintain the legacy `typing`-module fo
 |---|---|---|
 | Function / method / variable | `snake_case` | `build_mfma_gemm`, `lane_decode` |
 | Class / dataclass | `PascalCase` | `MfmaGemmSpec`, `ISABackend`, `MfmaAtom` |
-| Module-private helper | `_leading_underscore` | `_binop`, `_operand`, `_mma_c_frag_len` |
+| Module-private helper | `_leading_underscore` | `_binop`, `_operand`, `_mma_d_frag_len` |
 | Module-private constant | `_UPPER_SNAKE` | `_SUPPORTED_DTYPES`, `_CATALOG_DTYPE` |
 | Public constant | `UPPER_SNAKE` | `F16`, `I32`, `BF16` |
 

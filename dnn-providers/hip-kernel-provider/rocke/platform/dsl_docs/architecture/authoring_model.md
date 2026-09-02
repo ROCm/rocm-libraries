@@ -381,7 +381,7 @@ resolves its operation using the shape and dtypes used for `art`:
 ```python
 target = ArchTarget.from_gfx("gfx950")
 selected_op = target.mma.op_for_shape(
-    family="mma", a_dtype="f16", b_dtype="f16", c_dtype="fp32",
+    family="mma", a_dtype="f16", b_dtype="f16", c_dtype="fp32", d_dtype="fp32",
     m=spec.tile.warp_tile_m, n=spec.tile.warp_tile_n,
     k=spec.tile.warp_tile_k,
 )
