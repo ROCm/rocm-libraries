@@ -757,9 +757,6 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             throw rocblas_status_invalid_value;
         if(!prob.strided_batch)
         {
-            //void *ptrA = (void*)prob.batch_A, *ptrB = (void*)prob.batch_B,
-            //     *ptrC = (void*)prob.batch_C, *ptrD = (void*)prob.batch_D;
-
             THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
                                                      matmulDesc,
                                                      &alpha,
