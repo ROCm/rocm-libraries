@@ -233,6 +233,11 @@ class AttentionDenseSpec:
     #   VGPR for deeper software pipelining; Q is L2-resident on prefill so reload is
     #   cheap. Off by default (byte-identical to the resident-q path).
     q_reload: bool = False
+    # qk_pipeline: depth-1 software pipeline over the QK cluster's K LDS reads --
+    #   issue step ks+1's ds_read before step ks's MFMA and name a DS_READ/MFMA
+    #   sched template, mirroring what the PV cluster already does. Off by
+    #   default (the unpipelined chain is byte-identical to the shipped kernel).
+    qk_pipeline: bool = False
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -387,6 +392,8 @@ class AttentionDenseSpec:
             raise ValueError("q_reload is not yet supported with varlen")
         if self.persistent and self.q_reload and self.paged:
             raise ValueError("q_reload is not yet supported with paged KV")
+        if self.qk_pipeline and not self.persistent:
+            raise ValueError("qk_pipeline is only implemented on the persistent path")
         if self.use_sinks and self.paged:
             raise ValueError("use_sinks is not yet supported with paged KV")
         if self.use_sinks and self.varlen:
@@ -462,6 +469,8 @@ class AttentionDenseSpec:
                 parts.append("intl")
             if self.q_reload:
                 parts.append("qreload")
+            if self.qk_pipeline:
+                parts.append("qkpipe")
         return kernel_name_join(*parts)
 
 
@@ -1257,6 +1266,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     LAZY_RESCALE = spec.lazy_rescale
     use_sinks = spec.use_sinks
     Q_RELOAD = spec.q_reload
+    QK_PIPELINE = spec.qk_pipeline
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -1499,13 +1509,44 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     krow = b.add(b.const_i32(nsub * 32), lane_m)
                 else:
                     krow = b.add(b.const_i32(nsub * (32 // K_GROUP)), k_lane_grp)
-                for ks in range(K_STEPS):
+
+                def k_col(ks):
                     col = b.add(b.const_i32(ks * 16), d_base)
-                    if K_GROUP > 1:
-                        col = b.add(k_sub_col, col)
-                    k_pack = b.smem_load_vN(K_lds, kbuf, krow, col, dtype=dtype, n=8)
-                    q_pack = _load_q_pack(ks) if Q_RELOAD else q_packs[ks]
-                    acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_pack, acc)
+                    return b.add(k_sub_col, col) if K_GROUP > 1 else col
+
+                def q_pack_for(ks):
+                    return _load_q_pack(ks) if Q_RELOAD else q_packs[ks]
+
+                if QK_PIPELINE:
+                    # Depth-1 K prefetch. Unpipelined, each step reads its K pack
+                    # from LDS and immediately MFMAs on it down one acc chain, so
+                    # every MFMA waits on its own lgkmcnt: measured 21% of all
+                    # kernel stall cycles, the single largest site, versus ~0 for
+                    # the PV cluster which already names a sched template.
+                    # Issuing step ks+1's read ahead of step ks's MFMA puts that
+                    # latency in the MFMA's shadow, for one extra live pack.
+                    nxt = b.smem_load_vN(
+                        K_lds, kbuf, krow, k_col(0), dtype=dtype, n=8
+                    )
+                    for ks in range(K_STEPS):
+                        k_pack = nxt
+                        if ks + 1 < K_STEPS:
+                            nxt = b.smem_load_vN(
+                                K_lds, kbuf, krow, k_col(ks + 1), dtype=dtype, n=8
+                            )
+                        acc = mfma_32x32x16_for_dtype(
+                            b, dtype, k_pack, q_pack_for(ks), acc
+                        )
+                        b.sched_group_barrier(DS_READ, 1, 0)
+                        b.sched_group_barrier(MFMA, 1, 0)
+                else:
+                    for ks in range(K_STEPS):
+                        k_pack = b.smem_load_vN(
+                            K_lds, kbuf, krow, k_col(ks), dtype=dtype, n=8
+                        )
+                        acc = mfma_32x32x16_for_dtype(
+                            b, dtype, k_pack, q_pack_for(ks), acc
+                        )
                 s_reg.append([b.vec_extract(acc, i) for i in range(16)])
             return s_reg
 

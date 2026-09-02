@@ -16,6 +16,7 @@
   "num_persistent": 256,
   "lazy_rescale": true,
   "persist_decode": "auto",
-  "q_reload": true,
+  "q_reload": false,
+  "qk_pipeline": true,
   "causal": true
 }

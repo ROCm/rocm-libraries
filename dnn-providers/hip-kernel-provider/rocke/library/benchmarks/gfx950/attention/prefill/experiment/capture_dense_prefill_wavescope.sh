@@ -66,7 +66,11 @@ docker run --rm \
     "${IMAGE}" \
     bash -lc "
 set -eu
-PY='${VENV}/bin/python'
+# The image's own torch is linked against this /opt/rocm, so rocprofv3 loads one
+# rocprofiler. A pip torch wheel bundles a second copy and aborts in
+# rocprofiler_configure, so the venv is deliberately not used for capture
+# (rocke itself is pure Python and comes in over PYTHONPATH).
+PY=/opt/venv/bin/python
 \${PY} '${TOOLS}/wavescope/capture_wavescope_trace.py' \
   --output-dir '${OUT}' \
   --kernel-regex 'rocke_attention_dense' \
