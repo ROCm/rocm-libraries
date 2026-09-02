@@ -1007,8 +1007,9 @@ Week 3 and beyond follows an **optimization sprint** model:
 The optimization tooling lives under
 `dsl_docs/optimization/`. Two things to anchor on:
 
-1. **The runbook** — `optimization/optimization_runbook.md`. Read "The Loop
-   (one-page summary)" first; it's the discipline the rest of Week 3 follows.
+1. **The wiki** — `optimization/SKILL.md` and `wiki/families/overview.md`.
+   Query `python3 scripts/query.py --operator … --architecture …`; do not
+   dump `optimization_runbook.md` (that file is the deep appendix).
 2. **The probes** — `optimization/utilities/tools/dsl_probes/`. These are real,
    runnable tools (verified on gfx950): `probe_occupancy.py`,
    `probe_isa_inspect.py`, `probe_config_sweep.py`, `probe_targeted_bench.py`,
@@ -1550,7 +1551,9 @@ python/rocke/
 
 dsl_docs/
 ├── optimization/
-│   ├── optimization_runbook.md             # the loop + lever catalog
+│   ├── SKILL.md                            # optimization wiki entry (query, don't dump)
+│   ├── wiki/families/overview.md           # operator × architecture routing
+│   ├── optimization_runbook.md             # deep appendix
 │   ├── arch/                               # per-arch guides (gfx942, gfx950)
 │   └── utilities/
 │       ├── skills/                         # focused playbooks (gemm/lds/isa/...)

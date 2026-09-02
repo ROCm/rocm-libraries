@@ -1,0 +1,152 @@
+## Controlled vocabulary. Unknown values are rejected by scripts/validate.py.
+
+architectures:
+  - gfx90a
+  - gfx942
+  - gfx950
+  - gfx1151
+  - gfx1201
+  - gfx1250
+  - gfx11-generic
+
+architecture_families:
+  - cdna
+  - rdna
+  - gfx12
+
+operator_families:
+  - gemm
+  - attention
+  - convolution
+  - moe
+  - small-ops
+
+hardware_features:
+  - mfma
+  - wmma
+  - agpr
+  - lds
+  - async-lds
+  - ds-read-tr
+  - buffer-rsrc
+  - chiplet-xcd
+  - wave32
+  - wave64
+  - fp8
+  - fp4
+  - mx-scale
+  - block-scale
+  - tdm
+  - cluster-barrier
+  - asynccnt
+  - ds-load-tr
+  - split-waitcnt
+  - vgpr-acc
+
+techniques:
+  - tiling
+  - software-pipeline
+  - double-buffering
+  - lds-swizzle
+  - async-copy
+  - vectorized-io
+  - occupancy
+  - epilogue
+  - persistent-kernel
+  - stream-k
+  - fusion
+  - isa-inspect
+  - mfma-atom
+  - wmma-atom
+  - ds-read-tr
+  - chiplet-swizzle
+  - wave32-mapping
+  - waitcnt
+  - algorithm-break
+  - ds-load-tr
+  - asynccnt-pipeline
+  - producer-consumer
+  - tile-schedule
+  - cache-policy
+  - split-waitcnt
+
+kernel_types:
+  - gemm
+  - batched-gemm
+  - grouped-gemm
+  - streamk-gemm
+  - flatmm
+  - block-scale-gemm
+  - mx-gemm
+  - attention
+  - fmha
+  - convolution
+  - implicit-gemm-conv
+  - direct-conv
+  - moe
+  - reduce
+  - layernorm
+  - rmsnorm
+  - elementwise
+  - transpose
+
+languages:
+  - rocke
+  - hip
+  - assembly
+  - tensile
+  - ck-tile
+
+confidence:
+  - verified
+  - source-reported
+  - inferred
+  - experimental
+
+reproducibility:
+  - concept
+  - pseudocode
+  - snippet
+  - runnable
+  - benchmarked
+
+symptoms:
+  - memory-bound
+  - compute-bound
+  - register-pressure
+  - lds-stall
+  - pipeline-stalls
+  - tail-oob
+  - occupancy-loss
+  - missing-waitcnt
+  - low-mfma-count
+  - valu-plumbing
+  - launch-bound
+  - sync-bound
+  - catalog-exhausted
+  - wrong-waitcnt-abi
+  - silent-ds-load-tr
+  - mfma-on-gfx1250
+  - async-without-asynccnt
+  - wmma-lane-map
+  - tail-grid
+  - expert-imbalance
+  - low-cu-util
+  - low-wmma-count
+
+tags:
+  - routing
+  - common
+  - arch-specific
+  - rocke
+  - hipblaslt
+  - tensile
+  - stinkytofu
+  - rocroller
+  - origami
+  - miopen
+  - hipdnn
+  - composablekernel
+  - escape-hatch
+  - gfx1250
+  - migration

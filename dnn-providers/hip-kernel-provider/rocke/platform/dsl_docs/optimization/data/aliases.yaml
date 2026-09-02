@@ -1,0 +1,128 @@
+## Canonical term -> aliases used by query.py
+
+cdna:
+  - CDNA
+  - "cdna family"
+
+rdna:
+  - RDNA
+  - "rdna family"
+
+gfx12:
+  - GFX12
+  - "gfx12 isa"
+
+gfx942:
+  - cdna3
+  - CDNA3
+  - gfx940
+
+gfx950:
+  - cdna4
+  - CDNA4
+
+gfx1151:
+  - rdna3.5
+  - RDNA3.5
+  - gfx11
+
+gfx1201:
+  - rdna4
+  - RDNA4
+  - gfx12-rdna
+
+gfx1250:
+  - "gfx12 cdna"
+
+mfma:
+  - MFMA
+  - "matrix core"
+  - "matrix fma"
+
+wmma:
+  - WMMA
+  - "wave matrix"
+
+lds:
+  - LDS
+  - "shared memory"
+  - "local data share"
+
+async-lds:
+  - "buffer_load_lds"
+  - "global_load_lds"
+  - "async dma"
+  - prefetch
+
+ds-read-tr:
+  - "ds_read_tr"
+  - "transpose read"
+  - "ds_load_tr"
+
+agpr:
+  - AGPR
+  - accvgpr
+  - accumulator
+
+gemm:
+  - GEMM
+  - matmul
+  - "matrix multiply"
+
+attention:
+  - fmha
+  - SDPA
+  - mha
+  - prefill
+  - decode
+
+convolution:
+  - conv
+  - "implicit gemm"
+  - hipconv
+
+moe:
+  - MoE
+  - "mixture of experts"
+  - grouped-gemm
+
+small-ops:
+  - elementwise
+  - reduce
+  - layernorm
+  - rmsnorm
+  - transpose
+  - norm
+
+catalog-exhausted:
+  - stuck
+  - roadblock
+  - "out of the box"
+  - "new algorithm"
+  - "structural gap"
+  - "catalog exhausted"
+  - "escape hatch"
+
+asynccnt:
+  - s_wait_asynccnt
+  - ASYNCcnt
+  - "async count"
+
+ds-load-tr:
+  - ds_load_tr16_b128
+  - "gfx1250 transpose"
+  - "ds_load_tr"
+
+split-waitcnt:
+  - s_wait_dscnt
+  - s_wait_loadcnt
+  - "split waitcnt"
+
+wmma-gfx1250:
+  - "16x16x32"
+  - "wmma k32"
+
+stream-k:
+  - streamk
+  - "stream k"
+  - persistent

@@ -107,29 +107,34 @@ conventions. Build and test references: [`BUILDING.md`](BUILDING.md),
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
 [`style/CPP_STYLE.md`](style/CPP_STYLE.md).
 
-## Optimization doc routing — READ the matching doc BEFORE optimizing a kernel
+## Optimization doc routing — query the wiki, do not dump the runbook
 
-The optimization docs under `platform/dsl_docs/optimization/` are the authoritative
-kernel-perf playbook but are **not** auto-loaded (the tree is far larger than the
-context window). When a task involves optimizing / profiling / tuning a kernel, open
-the matching doc first.
+The playbook is `platform/dsl_docs/optimization/` (skill root: [`SKILL.md`](platform/dsl_docs/optimization/SKILL.md)).
+It is **not** auto-loaded. Route operator family × architecture to a technique
+with the query scripts; do **not** read `optimization_runbook.md` linearly.
 
-| Task | Doc |
+From `platform/dsl_docs/optimization/`:
+
+```bash
+python3 scripts/query.py --operator gemm --family cdna
+python3 scripts/query.py --symptom lds-stall --architecture gfx950
+python3 scripts/get_page.py family-overview
+```
+
+| Task | Page / tool |
 |---|---|
-| Optimizing ANY kernel — **start here** (Step 0 exhaustive lever sweep + The Loop are mandatory) | [optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md) |
-| Runbook section ⇄ DSL primitive/helper/op mapping (concept → code) | [runbook_compliance.md](platform/dsl_docs/optimization/runbook_compliance.md) |
-| Section-by-section primitive table | [runbook_mapping.md](platform/dsl_docs/optimization/runbook_mapping.md) |
-| Last validated measurement numbers | [measured_results.md](platform/dsl_docs/optimization/measured_results.md) |
-| GEMM perf | [gemm-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/gemm-optimization-rocke.md) |
-| LDS / bank conflicts | [lds-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/lds-optimization-rocke.md) |
-| Prefetch / async DRAM→LDS | [prefetch-data-load-rocke.md](platform/dsl_docs/optimization/utilities/skills/prefetch-data-load-rocke.md) |
-| ISA / occupancy / resource inspection | [isa-inspection-rocke.md](platform/dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md) |
-| Capture a kernel trace (rocprof) | [capture-kernel-trace-rocke.md](platform/dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md) |
-| Analyze a kernel trace (ATT) | [kernel-trace-analysis.md](platform/dsl_docs/optimization/utilities/skills/kernel-trace-analysis.md) |
-| Launch / benchmark harness | [kernel-launch-guide.md](platform/dsl_docs/optimization/utilities/skills/kernel-launch-guide.md) |
-| Bisect a perf regression | [bisect-perf-regression.md](platform/dsl_docs/optimization/utilities/skills/bisect-perf-regression.md) |
-| Real bug signatures + measured wins | [empirical-case-studies.md](platform/dsl_docs/optimization/utilities/skills/empirical-case-studies.md) |
-| Per-arch facts (MFMA atoms, LDS banks, occupancy caps, sched intrinsics) | [arch/gfx942.md](platform/dsl_docs/optimization/arch/gfx942.md), [arch/gfx950.md](platform/dsl_docs/optimization/arch/gfx950.md) |
+| Start here — routing tables | [family-overview](platform/dsl_docs/optimization/wiki/families/overview.md) |
+| Step 0 + one-lever loop | [process-optimization-loop](platform/dsl_docs/optimization/wiki/process/optimization-loop.md) |
+| Catalog exhausted — invent a new mapping | [process-escape-hatch](platform/dsl_docs/optimization/wiki/process/escape-hatch.md) |
+| gfx1250 (KernelWiki-shaped analog) | [hw-gfx1250](platform/dsl_docs/optimization/wiki/hardware/gfx1250.md) + `wiki/migration/` |
+| Probe order | [process-probe-sequence](platform/dsl_docs/optimization/wiki/process/probe-sequence.md) |
+| GEMM / attention / conv / MoE / small-ops tables | `wiki/families/*.md` |
+| Common vs arch-specific techniques | `wiki/techniques/common/`, `cdna/`, `rdna/`, `gfx1250/` |
+| gfx facts | `wiki/hardware/` (appendix: `arch/gfx942.md`, `arch/gfx950.md`) |
+| hipBLASLt, Tensile, stinkytofu, hipDNN, CK | `sources/projects/` |
+| Long-form checklist (appendix only) | [optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md) |
+| ATT capture / WaveScope | [capture-kernel-trace-rocke.md](platform/dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md) |
+| ISA probes | [isa-inspection-rocke.md](platform/dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md) |
 
 Hard rule from the runbook: **never report speed without correctness** — run the
 relevant parity/verify harness (attention → `library/builders/**/parity_*.py`;

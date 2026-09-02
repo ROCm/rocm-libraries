@@ -79,7 +79,7 @@ New to the DSL? Read in this order:
 16. [`runtime/manifest_schema.md`](./runtime/manifest_schema.md)
 17. [`runtime/comgr_and_hipmodule.md`](./runtime/comgr_and_hipmodule.md)
 18. [`runtime/limitations.md`](./runtime/limitations.md)
-19. [`optimization/optimization_runbook.md`](./optimization/optimization_runbook.md) — current evidence-first optimization workflow
+19. [`optimization/SKILL.md`](./optimization/SKILL.md) — optimization wiki (query `family-overview`; runbook is the appendix)
 20. [`optimization/runbook_compliance.md`](./optimization/runbook_compliance.md) — code and test anchors for each workflow stage
 21. [`optimization/runbook_mapping.md`](./optimization/runbook_mapping.md) — compatibility pointer to the compliance map
 22. [`optimization/measured_results.md`](./optimization/measured_results.md) — measurement retention policy and scoped evidence index
@@ -198,8 +198,9 @@ Conventional anchors:
   [`python/rocke/helpers/compile.py`](../python/rocke/helpers/compile.py).
 - Manifest schema:
   [`python/rocke/helpers/manifest.py`](../python/rocke/helpers/manifest.py).
-- Optimization runbook:
-  [`dsl_docs/optimization/optimization_runbook.md`](./optimization/optimization_runbook.md).
+- Optimization wiki (agent entry):
+  [`dsl_docs/optimization/SKILL.md`](./optimization/SKILL.md).
+  Query `family-overview`; the long-form runbook is the appendix.
 - DSL runbook compliance table:
   [`dsl_docs/optimization/runbook_compliance.md`](./optimization/runbook_compliance.md).
 - Coordinate-transform DAG walkthrough:

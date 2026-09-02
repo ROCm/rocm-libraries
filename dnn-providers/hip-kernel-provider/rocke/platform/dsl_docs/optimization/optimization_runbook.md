@@ -1,5 +1,10 @@
 # CK DSL Optimization Runbook
 
+> **Agents: do not read this file linearly.** Enter through
+> [`SKILL.md`](SKILL.md) and [`wiki/families/overview.md`](wiki/families/overview.md)
+> (`python3 scripts/query.py --operator … --architecture …`). This runbook is
+> the deep appendix behind those pages.
+
 This runbook is a long-form checklist for optimizing GPU kernels written
 with `rocke`.
 
@@ -44,7 +49,8 @@ For the specific shape you are optimizing:
    knob). If the swept ceiling still falls short, you now *know* the gap is
    genuinely structural, a body/algorithm redesign is justified, and the sweep
    has told you which config to redesign *from* and against which resource
-   budget.
+   budget. Agents: that redesign is `process-escape-hatch` — do not keep
+   spinning family-table tiles.
 
 > **Caveat — the shipped preset bench is NOT this sweep.** The live benchmark
 > most people reach for
