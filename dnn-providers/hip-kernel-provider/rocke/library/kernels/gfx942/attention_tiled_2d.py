@@ -6043,7 +6043,23 @@ def build_gfx942_4warp_gqa(
     _FOLD = HD128_PIPE and gfx942_gqa_fold_eligible(
         HD, GQAG, spec.sliding_window, spec.dtype, BS
     )
-    TOKBLK = 32 if _FOLD else 128  # query tokens per CTA (fold packs 4 heads/tile)
+    # How many heads share the M-tile. This is TILE GEOMETRY -- 128 M-rows split
+    # into FOLD_HEADS heads x TOKBLK tokens -- and is deliberately NOT spelled
+    # GQAG. The two are equal only because ``gfx942_gqa_fold_eligible`` pins
+    # num_queries_per_kv == 4. Widening that predicate moves GQAG, but the 128-row
+    # tile cannot follow (8:1 would need 8 heads x 32 tokens = 256 rows), so the
+    # row split must stay a geometry constant and the head BASE must stay
+    # ``kv_head * GQAG``. The guard below makes that coupling a build error rather
+    # than silent address corruption.
+    FOLD_HEADS = 4
+    if _FOLD and GQAG != FOLD_HEADS:
+        raise ValueError(
+            f"GQA head-fold is wired for exactly {FOLD_HEADS} query heads per KV "
+            f"head (128-row M-tile = {FOLD_HEADS} heads x {128 // FOLD_HEADS} "
+            f"tokens), got num_queries_per_kv={GQAG}. Widening the fold cohort "
+            f"requires re-deriving the M-tile row split, not just the predicate."
+        )
+    TOKBLK = (128 // FOLD_HEADS) if _FOLD else 128  # query tokens per CTA
 
     b = IRBuilder(spec.kernel_name() + ("_4wgqa_fold" if _FOLD else "_4wgqa"))
     b.kernel.attrs["max_workgroup_size"] = 256  # 4 wave64 warps
@@ -6335,10 +6351,14 @@ def build_gfx942_4warp_gqa(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
             if _FOLD:
-                # m-map: M-row (wq + n_in_atom) -> (tok=m//4, head=m%4), head-fastest.
+                # m-map: M-row (wq + n_in_atom) -> (tok=m//FOLD_HEADS,
+                # head=m%FOLD_HEADS), head-fastest. Split by FOLD_HEADS (tile
+                # geometry); head BASE strides by GQAG (the GQA group).
                 _m = b.add(wq, ld.n_in_atom)
-                _tok = b.add(qstart, b.div(_m, b.const_i32(4)))
-                _hd = b.add(b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(4)))
+                _tok = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
+                _hd = b.add(
+                    b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
+                )
                 q_off, _ = q_desc.offset(b, token=_tok, head=_hd, dim=koff)
             else:
                 q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
@@ -6369,10 +6389,14 @@ def build_gfx942_4warp_gqa(
                         b.add(b.mul(kv, b.const_i32(BN)), b.const_i32(kt * 32)), rr
                     )
                     if _FOLD:
-                        # fold: token = qbase + (wq+cc)//4 (mask is head-independent)
+                        # fold: token = qbase + (wq+cc)//FOLD_HEADS
+                        # (mask is head-independent)
                         q_g = b.add(
                             context_off,
-                            b.add(qbase, b.div(b.add(wq, cc), b.const_i32(4))),
+                            b.add(
+                                qbase,
+                                b.div(b.add(wq, cc), b.const_i32(FOLD_HEADS)),
+                            ),
                         )
                     else:
                         q_g = b.add(context_off, b.add(qbase, b.add(wq, cc)))
@@ -6493,10 +6517,11 @@ def build_gfx942_4warp_gqa(
             r, c = at.lane_to_output(b, lane, i)
             dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
             if _FOLD:
-                # inverse m-map: token = qstart + (wq+c)//4, head = kvh*GQAG + (wq+c)%4
+                # inverse m-map: token = qstart + (wq+c)//FOLD_HEADS,
+                # head = kvh*GQAG + (wq+c)%FOLD_HEADS
                 _m = b.add(wq, c)
-                _tl = b.div(_m, b.const_i32(4))
-                _hl = b.mod(_m, b.const_i32(4))
+                _tl = b.div(_m, b.const_i32(FOLD_HEADS))
+                _hl = b.mod(_m, b.const_i32(FOLD_HEADS))
                 q_inseq = b.add(qbase, _tl)
                 oi = b.add(
                     b.mul(b.add(qstart, _tl), b.const_i32(H)),
