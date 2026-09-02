@@ -142,16 +142,15 @@ namespace rocRoller::Client::GEMMClient
                                             scaleBlockSize);
         }
 
-        const auto referenceProblem = makeHostReferenceProblem(generatedInputs,
-                                                               runtimeScaleA,
-                                                               runtimeScaleB,
-                                                               scaleBlockSize,
-                                                               problemParams.alpha,
-                                                               problemParams.beta);
-        const auto floatReference   = computeHostReference(referenceProblem);
-        const auto hostReference    = convertHostReference<D>(floatReference);
-        const auto acceptableError  = acceptableGEMMError<A, B, D>(problemParams.k, arch.target());
-        const auto comparison       = compareHostReference(
+        const auto floatReference  = computeHostReference(generatedInputs,
+                                                         runtimeScaleA,
+                                                         runtimeScaleB,
+                                                         scaleBlockSize,
+                                                         problemParams.alpha,
+                                                         problemParams.beta);
+        const auto hostReference   = convertHostReference<D>(floatReference);
+        const auto acceptableError = acceptableGEMMError<A, B, D>(problemParams.k, arch.target());
+        const auto comparison      = compareHostReference(
             hostOutputTensor<D>(std::span<const D>(hostD), problemParams.m, problemParams.n),
             hostOutputTensor<D>(
                 std::span<const D>(hostReference), problemParams.m, problemParams.n),

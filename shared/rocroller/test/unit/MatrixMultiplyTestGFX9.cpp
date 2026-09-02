@@ -833,7 +833,7 @@ namespace MatrixMultiplyTest
         TensorDescriptor referenceDescB(dataTypeB, {K, N}, transB ? "T" : "N");
         TensorDescriptor descC(DataType::Float, {M, N}, "N");
 
-        auto scaledProblem = HostNumerics::makeHostReferenceProblem(
+        auto D = HostNumerics::convertHostReference<float>(HostNumerics::computeHostReference(
             HostNumerics::hostTensor(referenceDescA, A),
             HostNumerics::hostTensor(referenceDescB, B),
             HostNumerics::hostTensor(descC, C),
@@ -841,23 +841,19 @@ namespace MatrixMultiplyTest
             HostNumerics::hostScaleTensor(DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize),
             scaleBlockSize,
             alpha,
-            0.0f);
-        auto D = HostNumerics::convertHostReference<float>(
-            HostNumerics::computeHostReference(scaledProblem));
+            0.0f));
 
         alpha *= std::pow(2.0f, int(scaleA) - 127) * std::pow(2.0f, int(scaleB) - 127);
 
-        auto unscaledProblem
-            = HostNumerics::makeHostReferenceProblem(HostNumerics::hostTensor(referenceDescA, A),
-                                                     HostNumerics::hostTensor(referenceDescB, B),
-                                                     HostNumerics::hostTensor(descC, C),
-                                                     std::nullopt,
-                                                     std::nullopt,
-                                                     0,
-                                                     alpha,
-                                                     0.0f);
         auto reference = HostNumerics::convertHostReference<float>(
-            HostNumerics::computeHostReference(unscaledProblem));
+            HostNumerics::computeHostReference(HostNumerics::hostTensor(referenceDescA, A),
+                                               HostNumerics::hostTensor(referenceDescB, B),
+                                               HostNumerics::hostTensor(descC, C),
+                                               std::nullopt,
+                                               std::nullopt,
+                                               0,
+                                               alpha,
+                                               0.0f));
 
         double rnorm = relativeNormL2(D, reference);
         Log::info("RNorm is {}", rnorm);
