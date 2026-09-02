@@ -16,6 +16,7 @@
 namespace roc::host_numerics {
 namespace {
 using detail::GemmOperand;
+using detail::GemmSupportInfo;
 
 constexpr size_t outputBlockRows = 32;
 constexpr size_t outputBlockColumns = 32;

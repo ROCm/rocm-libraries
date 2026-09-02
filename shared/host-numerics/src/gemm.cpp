@@ -48,7 +48,8 @@ void initializeOwnedGemmOutput(const Tensor& output, size_t requiredStorageBytes
 }
 }  // namespace
 
-GemmSupportInfo detail::queryGemmSupport(const GemmInvocation& request, GemmBackend backend) {
+detail::GemmSupportInfo detail::queryGemmSupport(const GemmInvocation& request,
+                                                 GemmBackend backend) {
     try {
         detail::validateRuntimeGemm(request);
     } catch (const std::exception& error) {
@@ -100,11 +101,6 @@ detail::GemmExecutionInfo detail::executeGemm(const GemmInvocation& request, Gem
     GemmExecutionInfo runInfo = detail::runPointwiseGemm(request);
     runInfo.fallbackReason = std::move(fallbackReason);
     return runInfo;
-}
-
-GemmSupportInfo queryGemmSupport(const Tensor& a, const Tensor& b, const Tensor& c, const Tensor& d,
-                                 const GemmOptions& options, GemmBackend backend) {
-    return detail::queryGemmSupport(detail::GemmInvocation(a, b, c, d, options), backend);
 }
 
 GemmBackend referenceGemmInto(Tensor a, Tensor b, Tensor c, Tensor d, const GemmOptions& options,

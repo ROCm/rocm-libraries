@@ -21,6 +21,7 @@
 namespace roc::host_numerics {
 namespace {
 using detail::GemmOperand;
+using detail::GemmSupportInfo;
 
 // Executes the subset of dense GEMM requests that CBLAS can consume directly.
 // A, B, C, D, and the accumulator must already use one matching BLAS scalar
@@ -502,12 +503,6 @@ detail::GemmExecutionInfo detail::executeBlasGemm(const GemmInvocation& problem,
     GemmExecutionInfo runInfo = detail::executeGemm(problem, GemmBackend::Automatic);
     if (!blasSupport) runInfo.fallbackReason = blasSupport.reason;
     return runInfo;
-}
-
-GemmSupportInfo queryGemmSupportWithBlasBackend(const Tensor& a, const Tensor& b, const Tensor& c,
-                                                const Tensor& d, const GemmOptions& options,
-                                                GemmBackend backend) {
-    return detail::queryBlasGemmSupport(GemmInvocation(a, b, c, d, options), backend);
 }
 
 GemmBackend referenceGemmIntoWithBlasBackend(Tensor a, Tensor b, Tensor c, Tensor d,
