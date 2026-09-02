@@ -50,6 +50,7 @@ from rocke.helpers import (
     make_global_view,
     make_lds_view,
     make_tile_window,
+    require_wmma_recurrence,
     store_wmma_tile,
     wmma_mma,
 )
@@ -141,6 +142,7 @@ def _declare_params(b: IRBuilder):
 
 def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> KernelDef:
     atom = WmmaAtom.f16_16x16x16()
+    require_wmma_recurrence(atom, where="wmma_fmha_pipelined")
     wave = atom.wave_size  # 32
     a_map = atom.a_layout(arch)
     d_map = atom.d_layout(arch)

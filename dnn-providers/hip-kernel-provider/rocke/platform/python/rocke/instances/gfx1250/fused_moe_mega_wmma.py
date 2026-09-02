@@ -30,7 +30,7 @@ gfx1250 WMMA 16x16x32 atom instead of the CDNA MFMA atom:
   same logical ``(m, inter)`` element of a row-major LDS tile).
 
 The WMMA wave32 deltas vs the MFMA wave64 mega (same 16x16x32 atom shape):
-``a_frag_len``/``b_frag_len`` = 16 (not 8), ``c_frag_len`` = 8 (not 4),
+``a_frag_len``/``b_frag_len`` = 16 (not 8), ``d_frag_len`` = 8 (not 4),
 ``block_size`` = warp_m*warp_n*32 = 128 (not 256), and the accumulator scatter
 is driven by ``op.d_layout()`` (column-distributed) instead of the MFMA
 ``_CWarpDecode``. The k-loop / cshuffle / atomic-reduce *structure* is a 1:1
@@ -295,7 +295,7 @@ class _WmmaMoePlan:
 
     Same static-geometry carrier the loader / store / WMMA phases share, but
     the per-lane fragment widths come from the resolved WMMA op contract
-    (``op.a_frag_len`` / ``b_frag_len`` / ``c_frag_len`` = 16 / 16 / 8 for the
+    (``op.a_frag_len`` / ``b_frag_len`` / ``d_frag_len`` = 16 / 16 / 8 for the
     gfx1250 16x16x32 atom) instead of the wave64 ``shape // waves`` MFMA
     formula. The coalesced global-load / LDS-store decode (``a_vecs_per_thread``
     / ``b_vecs_per_thread`` / ``_rowcol``) is byte-identical to the MFMA plan,

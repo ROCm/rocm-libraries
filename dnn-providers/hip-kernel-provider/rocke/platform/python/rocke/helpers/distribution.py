@@ -1838,20 +1838,30 @@ def wmma_mma(
             "wmma_mma expects tensor roles ('a', 'b', 'c' or compatible 'd'), got "
             f"({a.role!r}, {bb.role!r}, {acc.role!r})"
         )
-    if acc.role == "d" and (
-        acc.atom.c_per_lane != acc.atom.d_per_lane
-        or acc.atom.dtype_c != acc.atom.dtype_d
-    ):
-        raise ValueError(
-            "cannot feed a D result back as C when the atom's C and D "
-            "fragment types differ"
-        )
+    if acc.role == "d":
+        require_wmma_recurrence(acc.atom, where="wmma_mma")
     return WmmaTensor(
         atom=acc.atom,
         role="d",
         value=acc.atom.emit(b, a.value, bb.value, acc.value),
         arch=acc.arch,
     )
+
+
+def require_wmma_recurrence(atom, *, where: str) -> None:
+    """Reject an atom whose D result cannot be carried into its next C input.
+
+    Recurrent builders must call this before constructing their loop. Some
+    builders intentionally serialize only the accumulator value and reconstruct
+    its :class:`WmmaTensor` wrapper as role ``"c"`` on the next iteration, so
+    checking only the wrapper role inside :func:`wmma_mma` is insufficient.
+    """
+    if atom.c_per_lane != atom.d_per_lane or atom.dtype_c != atom.dtype_d:
+        raise ValueError(
+            f"{where}: cannot feed an MMA D result back as C because C and D "
+            f"fragment types differ (C={atom.dtype_c}[{atom.c_per_lane}], "
+            f"D={atom.dtype_d}[{atom.d_per_lane}])"
+        )
 
 
 def store_wmma_tile(

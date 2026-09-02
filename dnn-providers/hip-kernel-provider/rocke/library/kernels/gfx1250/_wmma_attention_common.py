@@ -79,7 +79,7 @@ def check_wmma_arch(arch: str) -> Tuple[bool, str]:
 
 
 def resolve_wmma(arch: str):
-    """Return ``(op, a_layout, c_layout, a_frag_len, c_frag_len)`` for the atom."""
+    """Return ``(op, a_layout, d_layout, a_frag_len, d_frag_len)`` for the atom."""
     from rocke.core.arch import ArchTarget
 
     op = ArchTarget.from_gfx(arch).mma.by_op_id(WMMA_OP_ID)

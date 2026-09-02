@@ -13,7 +13,12 @@ from rocke.core.arch import ArchTarget, MmaCatalog, MmaOp
 from rocke.core.ir import F32, I32, IRBuilder, VectorType
 from rocke.core.isa.backend import Gfx11RdnaBackend
 from rocke.helpers.atoms import MfmaAtom, WmmaAtom
-from rocke.helpers.distribution import WmmaTensor, store_wmma_acc, wmma_mma
+from rocke.helpers.distribution import (
+    WmmaTensor,
+    require_wmma_recurrence,
+    store_wmma_acc,
+    wmma_mma,
+)
 from rocke.helpers.mfma_gemm_inner import (
     _require_recurrent_accumulator_contract,
     mfma_k_loop,
@@ -169,6 +174,72 @@ class TestFourRoleAtomHelpers(unittest.TestCase):
             dtype_d="f32",
         )
         _require_recurrent_accumulator_contract(atom, where="test")
+
+    def test_wmma_recurrence_contract_rejects_distinct_c_and_d(self):
+        atom = _Atom()
+
+        with self.assertRaisesRegex(ValueError, r"test:.*C=i32\[2\].*D=f32\[3\]"):
+            require_wmma_recurrence(atom, where="test")
+
+        atom.c_per_lane = atom.d_per_lane
+        atom.dtype_c = atom.dtype_d
+        require_wmma_recurrence(atom, where="test")
+
+    def test_wmma_loop_state_relabel_does_not_replace_builder_guard(self):
+        atom = _Atom()
+        carried_d_value = "loop-carried-d"
+
+        # Attention builders serialize only the value and reconstruct the
+        # wrapper as C in unpack(). That relabeling bypasses wmma_mma's
+        # role-sensitive defense, so recurrent builders must validate the atom
+        # once before constructing their scf.for_iter loop.
+        relabeled = WmmaTensor(atom, "c", carried_d_value)
+        self.assertEqual(relabeled.role, "c")
+        with self.assertRaisesRegex(ValueError, r"attention:.*C=i32\[2\].*D=f32\[3\]"):
+            require_wmma_recurrence(atom, where="attention")
+
+    def test_gfx1151_attention_builders_validate_before_loop_unpack(self):
+        from builders.gfx1151.attention import (
+            fmha_blockn,
+            fmha_multiwave,
+            fmha_pipelined,
+            fmha_regblocked,
+            fmha_singlewave,
+        )
+
+        cases = (
+            (
+                fmha_blockn,
+                fmha_blockn.build_wmma_fmha_blockn,
+                fmha_blockn.BlockNCfg(head_size=64, num_query_heads=1),
+            ),
+            (
+                fmha_multiwave,
+                fmha_multiwave.build_wmma_fmha_multiwave,
+                fmha_multiwave.MultiWaveCfg(head_size=64, num_query_heads=1),
+            ),
+            (
+                fmha_pipelined,
+                fmha_pipelined.build_wmma_fmha_pipelined,
+                fmha_pipelined.PipelinedCfg(head_size=64, num_query_heads=1),
+            ),
+            (
+                fmha_regblocked,
+                fmha_regblocked.build_wmma_fmha_regblocked,
+                fmha_regblocked.RegBlockedCfg(head_size=64, num_query_heads=1),
+            ),
+            (
+                fmha_singlewave,
+                fmha_singlewave.build_wmma_fmha_singlewave,
+                fmha_singlewave.SingleWaveCfg(head_size=64, num_query_heads=1),
+            ),
+        )
+
+        for module, build, cfg in cases:
+            with self.subTest(module=module.__name__), patch.object(
+                module.WmmaAtom, "f16_16x16x16", return_value=_Atom()
+            ), self.assertRaisesRegex(ValueError, r"C=i32\[2\].*D=f32\[3\]"):
+                build(cfg)
 
     def test_universal_gemm_zero_uses_c_and_rejects_incompatible_recurrence(self):
         builder = IRBuilder("four_role_universal_zero")

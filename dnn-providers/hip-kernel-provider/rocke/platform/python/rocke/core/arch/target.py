@@ -91,9 +91,9 @@ class LayoutMap:
     Attributes
     ----------
     role
-        ``"acc"`` (accumulator C/D, coords are ``(row, col)``), ``"a"`` (A
-        operand, coords are ``(row, k)``) or ``"b"`` (B operand, coords are
-        ``(k, col)``).
+        ``"a"`` (A operand, coords are ``(row, k)``), ``"b"`` (B operand,
+        coords are ``(k, col)``), ``"c"`` (accumulator input, coords are
+        ``(row, col)``), or ``"d"`` (result, coords are ``(row, col)``).
     frag_len
         Number of fragment slots per lane for this role (the per-lane vector
         length: e.g. 4 for an MFMA 16x16x16 accumulator, 8 for the WMMA

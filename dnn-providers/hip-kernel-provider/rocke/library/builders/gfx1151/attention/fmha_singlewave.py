@@ -13,7 +13,7 @@ added address-arithmetic op costs TFLOP/s). The helper primitives it reuses:
     carries the per-head stride (which cannot fold into the token stride) and
     whose token axis folds the batch offset.
   * :class:`~rocke.helpers.WmmaAtom` (``wmma_f32_16x16x16_f16``) for the WMMA
-    contract, with its hardware-verified ``a_layout``/``b_layout``/``c_layout``
+    contract, with its hardware-verified ``a_layout``/``b_layout``/``d_layout``
     maps driving every lane decode.
   * :class:`~rocke.helpers.WmmaTensor` — a packed distributed tensor carrying
     one lane's fragment/accumulator as a single SSA vector — together with
@@ -56,6 +56,7 @@ from rocke.helpers import (
     make_global_view,
     make_lds_view,
     make_tile_window,
+    require_wmma_recurrence,
     store_wmma_tile,
     wmma_mma,
 )
@@ -148,6 +149,7 @@ def _declare_params(b: IRBuilder):
 
 def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> KernelDef:
     atom = WmmaAtom.f16_16x16x16()
+    require_wmma_recurrence(atom, where="wmma_fmha_singlewave")
     wave = atom.wave_size  # 32
     a_map = atom.a_layout(arch)
     d_map = atom.d_layout(arch)
