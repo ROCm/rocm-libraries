@@ -129,6 +129,7 @@ def make_spec_from_shape(shape: dict[str, Any]) -> AttentionDenseSpec:
         persist_decode=str(shape.get("persist_decode", "auto")),
         q_reload=bool(shape.get("q_reload", False)),
         qk_pipeline=bool(shape.get("qk_pipeline", False)),
+        k_prefetch_early=bool(shape.get("k_prefetch_early", False)),
     )
 
 
@@ -298,6 +299,11 @@ def main():
         help="depth-1 software pipeline over the QK cluster's K LDS reads",
     )
     ap.add_argument(
+        "--k-prefetch-early",
+        action="store_true",
+        help="issue the next tile's K DMA at the top of the KV loop body",
+    )
+    ap.add_argument(
         "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
     )
     ap.add_argument("--use-sinks", action="store_true", help="enable attention sinks")
@@ -334,6 +340,7 @@ def main():
             "persist_decode": args.persist_decode,
             "q_reload": args.q_reload,
             "qk_pipeline": args.qk_pipeline,
+            "k_prefetch_early": args.k_prefetch_early,
         }
         spec = make_spec_from_shape(shape)
         result = run_benchmark(
