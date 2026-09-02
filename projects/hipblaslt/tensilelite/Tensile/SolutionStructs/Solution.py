@@ -1210,6 +1210,17 @@ class Solution(collections.abc.Mapping):
             mtTiles = mtFree // state["MatrixInstM"]
             stack = _subtileStackForTile(mtTiles)
 
+            # A partial tail strip has no register list of its own, so the GR
+            # emit indexes past the end of localSubtilesRegister.  Padding is
+            # only emittable while the operand is a single strip.
+            if mtTiles % stack != 0 and -(-mtTiles // stack) > 1:
+              reject(state, printRejectionReason,
+                     "UseSubtileImpl=1 TLU=1 fp4 pads tensor %s across more than one "
+                     "LDS strip: %d MMA tiles on a stack of %d is %d strips with a "
+                     "partial tail, which the GR emit cannot address (MacroTile=%d)"
+                     % (tc, mtTiles, stack, -(-mtTiles // stack), mtFree))
+              return
+
             # A strip offers (blocks per strip) x (K windows) fetch slots.  With
             # fewer slots than waves in the group the surplus waves reissue a
             # load someone else made, so the operand comes off memory more than
