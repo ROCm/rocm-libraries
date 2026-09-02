@@ -637,8 +637,25 @@ class AsyncTileLoader:
         return self.dwords * 4
 
     @property
-    def cols_per_chunk(self) -> int:
-        return self.elems_per_chunk
+    def chunks_per_row(self) -> int:
+        """Chunks needed to cover one tile row of ``tile_cols`` elements.
+
+        This is the divisor that decodes a flat chunk index into a tile
+        coordinate in :meth:`AsyncTileLoaderSlot.issue`::
+
+            row = chunk_idx // chunks_per_row
+            col = (chunk_idx % chunks_per_row) * elems_per_chunk
+
+        It is *not* ``elems_per_chunk``. The two coincide only when
+        ``tile_cols == elems_per_chunk ** 2`` (e.g. tile_cols=64 for a 2-byte
+        dtype at dwords=4), which is why 64 used to be the only tile width the
+        async path loaded correctly -- every other width silently decoded to
+        the wrong row and to a column past the end of the tile.
+
+        ``choose_dwords`` guarantees ``tile_cols % elems_per_chunk == 0``, so
+        this division is exact.
+        """
+        return self.tile_cols // self.elems_per_chunk
 
     @property
     def wave_bytes(self) -> int:
@@ -716,7 +733,7 @@ class AsyncTileLoaderSlot:
         c_elem_bytes = b.const_i32(elem_bytes)
         c_oob = b.const_i32(oob_sentinel)
         c0 = b.const_i32(0)
-        c_cols_per_chunk = b.const_i32(L.cols_per_chunk)
+        c_chunks_per_row = b.const_i32(L.chunks_per_row)
 
         for p in range(L.passes):
             # Per-pass LDS base = per_wave_lds_base + p * pass_bytes.
@@ -734,8 +751,8 @@ class AsyncTileLoaderSlot:
 
             # chunk_idx = tid + p * block_size
             chunk_idx = b.add(tid, b.const_i32(p * L.block_size))
-            row = b.div(chunk_idx, c_cols_per_chunk)
-            col_v = b.mod(chunk_idx, c_cols_per_chunk)
+            row = b.div(chunk_idx, c_chunks_per_row)
+            col_v = b.mod(chunk_idx, c_chunks_per_row)
             col = b.mul(col_v, b.const_i32(L.elems_per_chunk))
 
             off_elems, valid = descriptor(b, row, col)

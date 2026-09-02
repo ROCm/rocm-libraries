@@ -88,6 +88,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from ...core.ir import (
     BF16,
+    F16,
     F32,
     I32,
     IRBuilder,
@@ -313,6 +314,29 @@ class WgradConvSpec:
 
     lds_layout: Optional[LdsLayout] = None
 
+    # Store the A/B tiles K-outer -- ``LDS[k][m]`` / ``LDS[k][n]`` -- instead of
+    # the default M-outer ``LDS[m][k]``, and feed the MFMA with gfx950
+    # ``ds_read_b64_tr_b16`` transpose reads.
+    #
+    # Why: wgrad's stride-1 global axis is the GEMM *free* axis (k_out for dY,
+    # inner C for X), never the reduction axis K_wg. The M-outer tile therefore
+    # forces a transpose *on store*: one ``ds_write_b16`` per element, 32 of them
+    # per K-step per wave, and -- because the M-outer row stride is a multiple of
+    # the 32-dword bank period -- every one of them bank-conflicts. The forward
+    # conv runs the identical machinery with no bank conflicts at all, because
+    # its reduction axis is stride-1 in global and it needs no transpose.
+    #
+    # K-outer removes the transpose from the store side entirely: the 8 elements
+    # a thread loads along the free axis are LDS-contiguous, so one
+    # ``ds_write_b128`` replaces eight ``ds_write_b16``. The transpose then
+    # happens for free inside the read instruction: the store side becomes a few
+    # wide vector writes with no cross-lane permutes, and the transpose cost
+    # moves into the ds_read_b64_tr_b16 operand fetch.
+    #
+    # Default False: the flag is strictly additive, so every existing config
+    # emits byte-identical IR.
+    lds_k_outer: bool = False
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -400,6 +424,7 @@ class WgradConvSpec:
             self.acc_epilogue.tag(),
             flags={
                 "async": self.async_dma,
+                "kouter": self.lds_k_outer,
                 f"spk{self.split_k}": self.split_k > 1,
                 "spkauto": self.split_k == -1,
                 "spkrt": self.split_k == 0,
@@ -447,9 +472,55 @@ class WgradConvSpec:
                 f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
                 f"scattered MFMA layout; cshuffle produces contiguous pairs)"
             )
-        layout = self.effective_lds_layout()
         if self.async_dma:
-            layout.validate_for_async()
+            # Direct global->LDS load is NOT correct for wgrad and must not be
+            # emitted. `raw_ptr_buffer_load_lds` moves N *contiguous global*
+            # elements into N *contiguous LDS* elements, so the LDS axis that is
+            # contiguous has to be the global stride-1 axis. The loader is driven
+            # with (row=m, col=k_wg), but for wgrad the reduction axis K_wg is
+            # stride-K in dY (NHWK) and stride-C in X (NHWC) -- never stride-1.
+            # Each lane therefore deposits `elems_per_chunk` consecutive
+            # *channels* where consecutive *spatial positions* were required.
+            # The result is numerically wrong (the synchronous loader on the
+            # identical spec is correct), and the boundary pad predicate is lost
+            # as well because one buffer_load...lds carries a single predicate
+            # for elements that have different (hi,wi) validity.
+            #
+            # Making this correct needs the K-outer LDS tile (LDS[k_wg][m]) plus
+            # gfx950 `ds_read_b64_tr_b16` fragment reads; until that lands, fail
+            # loudly rather than return a silently wrong dW.
+            raise NotImplementedError(
+                "wgrad does not support async_dma: direct global->LDS load "
+                "requires the GEMM reduction axis to be stride-1 in global "
+                "memory, but wgrad reduces over K_wg=N*Ho*Wo which is stride-K "
+                "in dY and stride-C in X. Emitting it produces numerically "
+                "wrong dW. Use the default synchronous loader (async_dma=False)."
+            )
+        if self.lds_k_outer:
+            # ds_read_b64_tr_b16 is a gfx950 MFMA-class instruction operating on
+            # 16-bit lanes; the validated fragment formula assumes an 8-element
+            # fragment drawn from a 16- or 32-wide atom edge.
+            if self.data.dtype_a not in ("bf16", "fp16") or self.data.dtype_b not in (
+                "bf16",
+                "fp16",
+            ):
+                raise ValueError(
+                    "lds_k_outer requires 16-bit A/B dtypes (ds_read_b64_tr_b16 "
+                    f"is a 16-bit transpose read); got dtype_a={self.data.dtype_a!r} "
+                    f"dtype_b={self.data.dtype_b!r}"
+                )
+            if self.warp_tile_m not in (16, 32) or self.warp_tile_n not in (16, 32):
+                raise ValueError(
+                    "lds_k_outer requires warp_tile_m/n in (16, 32) -- the "
+                    "transpose-read lane mapping is derived per 16-lane group "
+                    f"over the atom edge; got {self.warp_tile_m}x{self.warp_tile_n}"
+                )
+            if self.wave_size != 64:
+                raise ValueError(
+                    "lds_k_outer requires wave_size=64 (ds_read_b64_tr_b16 is a "
+                    f"wave64 instruction); got {self.wave_size}"
+                )
+        layout = self.effective_lds_layout()
         if self.async_dma and self.lds_k_pad not in (None, 0):
             raise ValueError(
                 "async_dma requires lds_k_pad to be 0/None because "
@@ -573,6 +644,16 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"split_k atomic with dtype_d={spec.data.dtype_d!r} requires "
             f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
             f"scattered MFMA layout; cshuffle produces contiguous pairs)"
+        )
+
+    if spec.async_dma:
+        # Mirror of the WgradConvSpec.validate() rejection: the async intrinsic
+        # maps contiguous-global to contiguous-LDS, and wgrad's reduction axis
+        # K_wg is stride-K (dY) / stride-C (X). Emitting it yields wrong dW.
+        return False, (
+            "wgrad does not support async_dma: the direct global->LDS load "
+            "requires a stride-1 reduction axis, but wgrad reduces over "
+            "K_wg=N*Ho*Wo (stride K in dY, stride C in X)"
         )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
@@ -889,20 +970,35 @@ def build_implicit_gemm_conv_wgrad(
     lds_layout = spec.effective_lds_layout()
     if spec.async_dma:
         lds_layout.validate_for_async()
-    A_smem = b.smem_alloc(
-        ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem"
-    )
-    B_smem = b.smem_alloc(
-        ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem"
-    )
+
+    if spec.lds_k_outer:
+        # K-outer: rows are K, columns are the free axis (M for A, N for B).
+        #
+        # The row stride must NOT be a multiple of the 32-dword LDS bank period,
+        # or the transpose read degenerates. Lane l reads 8 bytes at
+        #   (k_base + ((l%16)//4)) * stride + mn_base + ((l%MN)//16)*16 + (l%4)*4
+        # so the ((l%16)//4) term -- the only term that walks rows -- contributes
+        # zero bank spread whenever (stride_elems * 2 / 4) % 32 == 0, i.e. exactly
+        # the pathology the M-outer tile already has. A pad of 8 elements makes
+        # the stride 36 dwords for a 64-wide tile (36 % 32 == 4), which spreads
+        # the four row-groups across banks. 8 elements also keeps the row 16-byte
+        # aligned, which the b128 store side needs.
+        _KOUTER_PAD = 8
+        a_kouter_stride = block_m + _KOUTER_PAD
+        b_kouter_stride = block_n + _KOUTER_PAD
+        _a_shape = (block_k, a_kouter_stride)
+        _b_shape = (block_k, b_kouter_stride)
+    else:
+        a_kouter_stride = b_kouter_stride = 0
+        _a_shape = lds_layout.storage_shape(block_m)
+        _b_shape = lds_layout.storage_shape(block_n)
+
+    A_smem = b.smem_alloc(ir_dtype_a, _a_shape, name_hint="A_smem")
+    B_smem = b.smem_alloc(ir_dtype_b, _b_shape, name_hint="B_smem")
     double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
     if double_buffer:
-        A_smem2 = b.smem_alloc(
-            ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
-        )
-        B_smem2 = b.smem_alloc(
-            ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem2"
-        )
+        A_smem2 = b.smem_alloc(ir_dtype_a, _a_shape, name_hint="A_smem2")
+        B_smem2 = b.smem_alloc(ir_dtype_b, _b_shape, name_hint="B_smem2")
     else:
         A_smem2 = A_smem
         B_smem2 = B_smem
@@ -1048,21 +1144,50 @@ def build_implicit_gemm_conv_wgrad(
     else:
         a_loader = None
         b_loader = None
+        if spec.lds_k_outer:
+            # K-outer tile: rows are K_wg, columns are the free axis (M for dY,
+            # inner-C of N_wg for X). The free axis is stride-1 in global AND
+            # contiguous in LDS, so the classic vector_axis="col" loader applies
+            # directly and its store collapses to a single wide smem_store_vN --
+            # no transpose-on-store, no per-element scatter.
+            a_tile_rows, a_tile_cols = block_k, block_m
+            b_tile_rows, b_tile_cols = block_k, block_n
+            a_axis = b_axis = "col"
+            a_vec = CoalescedTileLoader.choose_vec(
+                tile_rows=a_tile_rows,
+                tile_cols=a_tile_cols,
+                block_size=threads,
+                max_vec=_free_axis_vec(p_load.kpg, spec.data.dtype_a),
+                vector_axis="col",
+            )
+            b_vec = CoalescedTileLoader.choose_vec(
+                tile_rows=b_tile_rows,
+                tile_cols=b_tile_cols,
+                block_size=threads,
+                max_vec=_free_axis_vec(p_load.cpg, spec.data.dtype_b),
+                vector_axis="col",
+            )
+        else:
+            a_tile_rows, a_tile_cols = block_m, block_k
+            b_tile_rows, b_tile_cols = block_n, block_k
+            a_axis, b_axis = axis_a, axis_b
+            a_vec, b_vec = load_vec_a, load_vec_b
+
         a_sync_loader = CoalescedTileLoader(
-            tile_rows=block_m,
-            tile_cols=block_k,
+            tile_rows=a_tile_rows,
+            tile_cols=a_tile_cols,
             block_size=threads,
-            load_vec=load_vec_a,
+            load_vec=a_vec,
             elem_dtype=ir_dtype_a,
-            vector_axis=axis_a,
+            vector_axis=a_axis,
         )
         b_sync_loader = CoalescedTileLoader(
-            tile_rows=block_n,
-            tile_cols=block_k,
+            tile_rows=b_tile_rows,
+            tile_cols=b_tile_cols,
             block_size=threads,
-            load_vec=load_vec_b,
+            load_vec=b_vec,
             elem_dtype=ir_dtype_b,
-            vector_axis=axis_b,
+            vector_axis=b_axis,
         )
 
     schedule = SchedulePolicy.for_pipeline(
@@ -1090,11 +1215,25 @@ def build_implicit_gemm_conv_wgrad(
             )
             return
 
+        if spec.lds_k_outer:
+            # The K-outer tile is indexed (k, free); the descriptors take
+            # (free, k). Swap the two coordinates -- the descriptors themselves
+            # are unchanged, so the global addressing stays byte-identical.
+            def _dy_kouter(b_, row, col):
+                return dy_descriptor(b_, col, row)
+
+            def _x_kouter(b_, row, col):
+                return x_descriptor(b_, col, row)
+
+            a_desc_fn, b_desc_fn = _dy_kouter, _x_kouter
+        else:
+            a_desc_fn, b_desc_fn = dy_descriptor, x_descriptor
+
         a_sync_loader.load(
-            b, tid=tid, smem_dst=A_dst, descriptor=dy_descriptor, rsrc=dy_rsrc
+            b, tid=tid, smem_dst=A_dst, descriptor=a_desc_fn, rsrc=dy_rsrc
         )
         b_sync_loader.load(
-            b, tid=tid, smem_dst=B_dst, descriptor=x_descriptor, rsrc=x_rsrc
+            b, tid=tid, smem_dst=B_dst, descriptor=b_desc_fn, rsrc=x_rsrc
         )
 
     def emit_wmma_phase(
@@ -1146,6 +1285,49 @@ def build_implicit_gemm_conv_wgrad(
                     flat += 1
         return new_accs
 
+    # ---- K-outer transpose-read fragment feed -------------------------------
+    # For a K-outer tile ``T[k][mn]`` the MFMA operand of lane ``l`` is obtained
+    # with two ``ds_read_b64_tr_b16`` at
+    #     row(r) = k_base + (l // MN)*8 + ((l % 16)//4) + 4*r     r in {0,1}
+    #     col    = mn_base + ((l % MN)//16)*16 + (l % 4)*4
+    # after which lane ``l`` holds ``T[k_base .. k_base+7][mn_base + l % MN]`` --
+    # exactly the 8 K-contiguous elements the atom wants for its column.
+    # The mapping is exact for both 16-bit atoms (32x32x16 and 16x16x32) at any
+    # k/mn offset; test_lds_k_outer_matches_default pins it against the M-outer
+    # path.
+    # These are only materialised on the K-outer path: emitting them
+    # unconditionally would add IR ops to every existing config and move the
+    # golden. Guarded so the default path stays byte-identical.
+    if spec.lds_k_outer:
+        _tr_lane_mod4 = b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4))
+        _tr_grp16 = b.div(b.mod(lane, b.const_i32(16)), b.const_i32(4))
+
+    def _tr_frag(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
+        """One MFMA operand fragment from a K-outer tile via transpose reads."""
+        c_mn = b.const_i32(mn_atom)
+        col = b.add(
+            mn_base,
+            b.add(
+                b.mul(b.div(b.mod(lane, c_mn), b.const_i32(16)), b.const_i32(16)),
+                _tr_lane_mod4,
+            ),
+        )
+        row0 = b.add(k_base, b.add(b.mul(b.div(lane, c_mn), b.const_i32(8)), _tr_grp16))
+        # ``_smem_dtype`` is None for fp16 (the legacy "default is F16"
+        # convention used by _emit_smem_load); ds_read_tr16_b64 needs a concrete
+        # element type, so resolve it here.
+        tr_dtype = _smem_dtype if _smem_dtype is not None else F16
+        parts = [
+            b.ds_read_tr16_b64(
+                smem, b.add(row0, b.const_i32(4 * r)), col, dtype=tr_dtype
+            )
+            for r in range(n // 4)
+        ]
+        out = parts[0]
+        for pt in parts[1:]:
+            out = b.vec_concat(out, pt)
+        return out
+
     def emit_mfma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -1168,6 +1350,17 @@ def build_implicit_gemm_conv_wgrad(
             )
             a_rows = []
             for mi in range(mfmas_m):
+                if spec.lds_k_outer:
+                    a_rows.append(
+                        _tr_frag(
+                            A_src,
+                            b.add(warp_m_off, b.const_i32(mi * spec.warp_tile_m)),
+                            b.const_i32(kk * spec.warp_tile_k),
+                            spec.warp_tile_m,
+                            a_per_lane,
+                        )
+                    )
+                    continue
                 a_row = b.add(
                     warp_m_off, b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom)
                 )
@@ -1179,6 +1372,17 @@ def build_implicit_gemm_conv_wgrad(
 
             b_cols = []
             for ni in range(mfmas_n):
+                if spec.lds_k_outer:
+                    b_cols.append(
+                        _tr_frag(
+                            B_src,
+                            b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n)),
+                            b.const_i32(kk * spec.warp_tile_k),
+                            spec.warp_tile_n,
+                            b_per_lane,
+                        )
+                    )
+                    continue
                 b_row = b.add(
                     warp_n_off, b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom)
                 )

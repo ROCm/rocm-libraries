@@ -17,7 +17,7 @@
  *     .from_tile     (classmethod)    rocke_async_tile_loader_from_tile()
  *     .halves_per_chunk (property)    rocke_async_tile_loader_halves_per_chunk()
  *     .bytes_per_chunk  (property)    rocke_async_tile_loader_bytes_per_chunk()
- *     .cols_per_chunk   (property)    rocke_async_tile_loader_cols_per_chunk()
+ *     .chunks_per_row   (property)    rocke_async_tile_loader_chunks_per_row()
  *     .wave_bytes       (property)    rocke_async_tile_loader_wave_bytes()
  *     .pass_bytes       (property)    rocke_async_tile_loader_pass_bytes()
  *     .bind          (method)         rocke_async_tile_loader_bind()
@@ -272,7 +272,7 @@ rocke_status_t rocke_async_tile_loader_from_tile(int tile_rows,
 /* AsyncTileLoader properties (pure int arithmetic). */
 int rocke_async_tile_loader_halves_per_chunk(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_bytes_per_chunk(const rocke_async_tile_loader_t* self);
-int rocke_async_tile_loader_cols_per_chunk(const rocke_async_tile_loader_t* self);
+int rocke_async_tile_loader_chunks_per_row(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_wave_bytes(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_pass_bytes(const rocke_async_tile_loader_t* self);
 

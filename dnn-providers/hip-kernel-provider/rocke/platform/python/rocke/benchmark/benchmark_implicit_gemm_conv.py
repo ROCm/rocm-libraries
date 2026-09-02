@@ -760,6 +760,17 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--lds-k-outer",
+        action="store_true",
+        dest="lds_k_outer",
+        help=(
+            "wgrad only: store the A/B LDS tiles K-outer (LDS[k][m]) and feed the "
+            "MFMA with gfx950 ds_read_b64_tr_b16 transpose reads instead of "
+            "transposing on store. Removes the per-element ds_write_b16 scatter "
+            "and its bank conflicts."
+        ),
+    )
+    parser.add_argument(
         "--split-k",
         type=int,
         default=-1,
@@ -1306,7 +1317,7 @@ def _build_wgrad_one(args_tuple):
     Returns ``(combo, spec, resolved_split_k, kernel)`` on success, or ``None``.
     Must live at module level for pickle.
     """
-    combo, problem, dtype, arch = args_tuple
+    combo, problem, dtype, arch, lds_k_outer = args_tuple
     (
         tile_m,
         tile_n,
@@ -1374,6 +1385,7 @@ def _build_wgrad_one(args_tuple):
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=resolved_split_k,
+        lds_k_outer=lds_k_outer,
     )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
@@ -2030,7 +2042,10 @@ def _run_wgrad_sweep(
     # ---------------------------------------------------------------------------
     if jobs != 1:
         print(f"Building IR for {len(combos)} wgrad combos in parallel ...", flush=True)
-    work = [(combo, problem, dtype, arch) for combo in combos]
+    work = [
+        (combo, problem, dtype, arch, bool(getattr(args, "lds_k_outer", False)))
+        for combo in combos
+    ]
     pending = _build_ir_parallel(work, _build_wgrad_one, jobs)
     # _build_ir_parallel returns results in as_completed order (non-deterministic).
     # Re-sort: group by config (all combo dims except split_k), then split_k descending

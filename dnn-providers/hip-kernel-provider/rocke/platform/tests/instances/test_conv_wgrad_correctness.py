@@ -173,7 +173,13 @@ def _wgrad_reference_cpu(X_f32, dY_f32, p):
 
 
 def _make_spec(
-    arch: str, shape: _Shape, dtype: str, pipeline: str, epilogue: str, split_k: int
+    arch: str,
+    shape: _Shape,
+    dtype: str,
+    pipeline: str,
+    epilogue: str,
+    split_k: int,
+    lds_k_outer: bool = False,
 ):
     """Build a (spec, problem, warp_tile_k) triple, or (None, None, reason)."""
     from rocke.core.arch import ArchTarget
@@ -237,7 +243,10 @@ def _make_spec(
         ).split_k
     spec = WgradConvSpec(
         problem=problem,
-        name=f"test_wgrad_{shape.id}_{dtype}_{pipeline}_{epilogue}_spk{split_k}",
+        name=(
+            f"test_wgrad_{shape.id}_{dtype}_{pipeline}_{epilogue}_spk{split_k}"
+            + ("_kouter" if lds_k_outer else "")
+        ),
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
         tile_m=tile_m,
         tile_n=tile_n,
@@ -248,6 +257,7 @@ def _make_spec(
         warp_tile_n=warp_tile_mn,
         warp_tile_k=atom.k,
         wave_size=target.wave_size,
+        lds_k_outer=lds_k_outer,
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=split_k,
@@ -262,6 +272,7 @@ def _run_one(
     pipeline: str,
     epilogue: str,
     split_k: int = 1,
+    lds_k_outer: bool = False,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -278,7 +289,9 @@ def _run_one(
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-    spec, problem, _wtk = _make_spec(arch, shape, dtype, pipeline, epilogue, split_k)
+    spec, problem, _wtk = _make_spec(
+        arch, shape, dtype, pipeline, epilogue, split_k, lds_k_outer
+    )
     if spec is None:
         return True, f"skip (no atom): {_wtk}"
 
@@ -382,14 +395,18 @@ def _run_one(
 class TestConvWgradCorrectness(unittest.TestCase):
     """Wgrad correctness: each pipeline x epilogue x shape x dtype (+ split-K)."""
 
-    def _check(self, shape, dtype, pipeline, epilogue, split_k=1) -> None:
-        passed, reason = _run_one(GPU_ARCH, shape, dtype, pipeline, epilogue, split_k)
+    def _check(
+        self, shape, dtype, pipeline, epilogue, split_k=1, lds_k_outer=False
+    ) -> None:
+        passed, reason = _run_one(
+            GPU_ARCH, shape, dtype, pipeline, epilogue, split_k, lds_k_outer
+        )
         if reason.startswith("skip"):
             self.skipTest(reason)
         self.assertTrue(
             passed,
             f"FAIL {shape.id} {dtype} {pipeline}/{epilogue} spk{split_k} "
-            f"on {GPU_ARCH}: {reason}",
+            f"{'kouter ' if lds_k_outer else ''}on {GPU_ARCH}: {reason}",
         )
 
     def _sweep_pipeline(self, pipeline: str) -> None:
@@ -398,6 +415,33 @@ class TestConvWgradCorrectness(unittest.TestCase):
                 for epilogue in _EPILOGUES:
                     with self.subTest(shape=shape.id, dtype=dtype, epilogue=epilogue):
                         self._check(shape, dtype, pipeline, epilogue)
+
+    def test_lds_k_outer_matches_default(self):
+        """K-outer LDS + ds_read_b64_tr_b16 must match the M-outer result.
+
+        The K-outer path stores the tile in global order (one wide ds_write
+        instead of eight scalar ds_write_b16) and transposes on the read side
+        with the gfx950 ``ds_read_b64_tr_b16`` instruction. It is a pure
+        re-layout: dW must be numerically identical to the default path.
+
+        This is the test that has to exist -- the last change to this LDS path
+        (async_dma) shipped silently wrong because nothing exercised it.
+        """
+        if not _IS_MFMA:
+            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+        for dtype in _DTYPES:
+            for shape in _SHAPES:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(shape, dtype, "mem", "cshuffle", lds_k_outer=True)
+
+    def test_lds_k_outer_split_k(self):
+        """K-outer under split-K atomics (the shipping configuration)."""
+        if not _IS_MFMA:
+            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+        for shape in _SHAPES:
+            with self.subTest(shape=shape.id):
+                self._check(shape, "bf16", "mem", "cshuffle", split_k=8,
+                            lds_k_outer=True)
 
     # One method per pipeline so failures are clearly attributed.
     def test_pipeline_mem(self):

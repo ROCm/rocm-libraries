@@ -47,6 +47,11 @@
 #define ROCKE_INSTANCE_CONV_IMPLICIT_GEMM_WGRAD_H
 
 #include <stdbool.h>
+
+/* Column pad (in elements) for the K-outer wgrad LDS tile. Keeps the row stride
+ * off a multiple of the LDS bank period while staying 16-byte aligned for the
+ * wide store. Mirrors _KOUTER_PAD in conv_implicit_gemm_wgrad.py. */
+#define ROCKE_WGRAD_KOUTER_PAD 8
 #include <stddef.h>
 
 #include "rocke/helper_rocke.instances.common.conv_implicit_gemm.h" /* rocke_conv_problem_t */
@@ -114,6 +119,11 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
     const char* epilogue; /* default "default" */
     bool async_dma; /* default false */
     bool unroll_k; /* default false */
+    /* Store the A/B tiles K-outer (LDS[k][m] / LDS[k][n]) and feed the MFMA with
+     * gfx950 ds_read_b64_tr_b16 transpose reads instead of transposing on store.
+     * Mirrors WgradConvSpec.lds_k_outer. Default false: strictly additive, so
+     * every existing config emits byte-identical IR. */
+    bool lds_k_outer; /* default false */
 
     bool has_lds_k_pad; /* false => Python None */
     int lds_k_pad;

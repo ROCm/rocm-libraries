@@ -125,6 +125,13 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->chiplet_swizzle = true;
         *arch = "gfx950";
         return 0;
+    case 11:
+        /* K-outer LDS tile + gfx950 ds_read_b64_tr_b16 transpose reads. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

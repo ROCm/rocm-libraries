@@ -284,6 +284,12 @@ typedef struct rocke_conv_build_ctx
      * pipeline="wavelet": a_wavelet_loader/b_wavelet_loader are
      *   CoalescedTileLoader sized to num_load_waves * wave_size threads. */
     bool async_dma; /* spec.async_dma (cached)         */
+    /* spec.lds_k_outer (wgrad only). Zeroed by the ctx memset, so the forward
+     * and dgrad drivers keep their exact previous behaviour. */
+    bool lds_k_outer;
+    /* Atom edge + fragment length used by the K-outer transpose-read feed. */
+    rocke_value_t* tr_lane_mod4;
+    rocke_value_t* tr_grp16;
     rocke_async_tile_loader_t a_loader; /* async A loader (valid iff async)*/
     rocke_async_tile_loader_t b_loader; /* async B loader                  */
     bool have_async_loaders; /* true => a_loader/b_loader valid */
