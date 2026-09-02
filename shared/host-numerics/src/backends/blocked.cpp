@@ -15,7 +15,6 @@
 
 namespace roc::host_numerics {
 namespace {
-using detail::GemmOperand;
 using detail::GemmSupportInfo;
 
 constexpr size_t outputBlockRows = 32;
@@ -105,28 +104,28 @@ void validateBlocked(const GemmInvocation& problem) {
     if (problem.accumulatorType != ScalarType::Float32 &&
         problem.accumulatorType != ScalarType::Float64)
         throw std::invalid_argument("Blocked backend supports F32 and F64 accumulation.");
-    const auto validateBlockScale = [&](const GemmOperand& operand) {
-        if (!operand.blockScale) return;
-        const size_t k = problem.a.values.shape()[1];
-        if (operand.blockSize % reductionBlockElements != 0)
+    const auto validateBlockScale = [&](const std::optional<Tensor>& scale, size_t blockSize) {
+        if (!scale) return;
+        const size_t k = problem.a.shape()[1];
+        if (blockSize % reductionBlockElements != 0)
             throw std::invalid_argument(
                 "Blocked backend requires block sizes divisible by its K block.");
-        if (k % operand.blockSize != 0)
+        if (k % blockSize != 0)
             throw std::invalid_argument(
                 "Blocked backend requires K divisible by every block-scale size.");
     };
-    validateBlockScale(problem.a);
-    validateBlockScale(problem.b);
+    validateBlockScale(problem.blockScaleA, problem.blockSizeA);
+    validateBlockScale(problem.blockScaleB, problem.blockSizeB);
 }
 
 template <typename Accumulator>
 GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutput = nullptr) {
     using namespace detail;
 
-    const RuntimeMatrixReader<Accumulator> a(problem.a.values);
-    const RuntimeMatrixReader<Accumulator> b(problem.b.values);
-    const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
-    const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
+    const RuntimeMatrixReader<Accumulator> a(problem.a);
+    const RuntimeMatrixReader<Accumulator> b(problem.b);
+    const RuntimeQuantizer<Accumulator> quantizeA(problem.computeTypeA);
+    const RuntimeQuantizer<Accumulator> quantizeB(problem.computeTypeB);
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
     const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
                                                         problem.epilogue.outputConversion);
@@ -139,18 +138,18 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
     std::vector<RuntimeMatrixReader<Accumulator>> preScalesB;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
-    preScalesA.reserve(problem.a.preQuantizationScales.size());
-    for (const Tensor& scale : problem.a.preQuantizationScales)
-        preScalesA.emplace_back(scale.broadcastTo(problem.a.values.shape()));
-    preScalesB.reserve(problem.b.preQuantizationScales.size());
-    for (const Tensor& scale : problem.b.preQuantizationScales)
-        preScalesB.emplace_back(scale.broadcastTo(problem.b.values.shape()));
-    if (problem.a.blockScale) blockScaleA.emplace(*problem.a.blockScale);
-    if (problem.b.blockScale) blockScaleB.emplace(*problem.b.blockScale);
+    preScalesA.reserve(problem.preQuantizationScalesA.size());
+    for (const Tensor& scale : problem.preQuantizationScalesA)
+        preScalesA.emplace_back(scale.broadcastTo(problem.a.shape()));
+    preScalesB.reserve(problem.preQuantizationScalesB.size());
+    for (const Tensor& scale : problem.preQuantizationScalesB)
+        preScalesB.emplace_back(scale.broadcastTo(problem.b.shape()));
+    if (problem.blockScaleA) blockScaleA.emplace(*problem.blockScaleA);
+    if (problem.blockScaleB) blockScaleB.emplace(*problem.blockScaleB);
 
-    const size_t m = problem.a.values.shape()[0];
-    const size_t k = problem.a.values.shape()[1];
-    const size_t n = problem.b.values.shape()[1];
+    const size_t m = problem.a.shape()[0];
+    const size_t k = problem.a.shape()[1];
+    const size_t n = problem.b.shape()[1];
 
     const auto executeBlock = [&](size_t rowBase, size_t columnBase, bool storeAllOutputs,
                                   std::span<const SelectedOutputLocation> selectedOutputs) {
@@ -169,7 +168,7 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
             for (size_t row = 0; row < rows; ++row) {
                 for (size_t reduction = 0; reduction < reductions; ++reduction) {
                     Accumulator value = conjugateIfNeeded(
-                        a(rowBase + row, reductionBase + reduction), problem.a.conjugate);
+                        a(rowBase + row, reductionBase + reduction), problem.conjugateA);
                     for (const auto& scale : preScalesA)
                         value *= scale(rowBase + row, reductionBase + reduction);
                     aBlock[row * reductions + reduction] = operandMath(quantizeA(value));
@@ -178,7 +177,7 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
             for (size_t reduction = 0; reduction < reductions; ++reduction) {
                 for (size_t column = 0; column < columns; ++column) {
                     Accumulator value = conjugateIfNeeded(
-                        b(reductionBase + reduction, columnBase + column), problem.b.conjugate);
+                        b(reductionBase + reduction, columnBase + column), problem.conjugateB);
                     for (const auto& scale : preScalesB)
                         value *= scale(reductionBase + reduction, columnBase + column);
                     bBlock[reduction * columns + column] = operandMath(quantizeB(value));
@@ -187,8 +186,8 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
 
             const bool startsScaleSegment =
                 hasBlockScale &&
-                (reductionBase == 0 || (blockScaleA && reductionBase % problem.a.blockSize == 0) ||
-                 (blockScaleB && reductionBase % problem.b.blockSize == 0));
+                (reductionBase == 0 || (blockScaleA && reductionBase % problem.blockSizeA == 0) ||
+                 (blockScaleB && reductionBase % problem.blockSizeB == 0));
             if (startsScaleSegment) std::fill(partial.begin(), partial.end(), Accumulator(0));
             std::vector<Accumulator>& destination = hasBlockScale ? partial : accumulator;
             for (size_t row = 0; row < rows; ++row) {
@@ -202,19 +201,19 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
             const size_t reductionEnd = reductionBase + reductions;
             const bool endsScaleSegment =
                 hasBlockScale &&
-                (reductionEnd == k || (blockScaleA && reductionEnd % problem.a.blockSize == 0) ||
-                 (blockScaleB && reductionEnd % problem.b.blockSize == 0));
+                (reductionEnd == k || (blockScaleA && reductionEnd % problem.blockSizeA == 0) ||
+                 (blockScaleB && reductionEnd % problem.blockSizeB == 0));
             if (endsScaleSegment) {
                 std::array<Accumulator, outputBlockColumns> bScales;
                 for (size_t column = 0; column < columns; ++column)
                     bScales[column] = blockScaleB
                                           ? (*blockScaleB)(columnBase + column,
-                                                           reductionBase / problem.b.blockSize)
+                                                           reductionBase / problem.blockSizeB)
                                           : Accumulator(1);
                 for (size_t row = 0; row < rows; ++row) {
                     const Accumulator aScale =
                         blockScaleA
-                            ? (*blockScaleA)(rowBase + row, reductionBase / problem.a.blockSize)
+                            ? (*blockScaleA)(rowBase + row, reductionBase / problem.blockSizeA)
                             : Accumulator(1);
                     for (size_t column = 0; column < columns; ++column) {
                         const Accumulator scale = aScale * bScales[column];
@@ -309,7 +308,7 @@ bool detail::isBlockedGemmPreferredForAutomaticExecution(const GemmInvocation& p
         problem.outputSelection.selectedCount(problem.d.shape().elementCount());
     if (selectedOutputCount == 0) return false;
 
-    const size_t reductionElements = problem.a.values.shape()[1];
+    const size_t reductionElements = problem.a.shape()[1];
     const size_t pointwiseWork = detail::saturatedProduct(selectedOutputCount, reductionElements);
     constexpr size_t minimumBlockedMultiplyAdds = 8'192;
     if (pointwiseWork < minimumBlockedMultiplyAdds) return false;

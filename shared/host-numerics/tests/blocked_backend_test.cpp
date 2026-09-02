@@ -41,17 +41,16 @@ GemmTestCase makeProblem(const std::vector<float>& a, const std::vector<float>& 
                          size_t reductionElements, size_t columns) {
     using namespace roc::host_numerics;
 
-    return GemmTestCase(
-        GemmOperand(Tensor::copyNativeStorage<float>(
-            Layout::contiguousLastDimensionFastest(Shape{rows, reductionElements}),
-            std::span<const float>(a))),
-        GemmOperand(Tensor::copyNativeStorage<float>(
-            Layout::contiguousLastDimensionFastest(Shape{reductionElements, columns}),
-            std::span<const float>(b))),
-        Tensor::copyNativeStorage<float>(
-            Layout::contiguousLastDimensionFastest(Shape{rows, columns}),
-            std::span<const float>(c)),
-        std::move(d), ScalarType::Float32);
+    return GemmTestCase(Tensor::copyNativeStorage<float>(
+                            Layout::contiguousLastDimensionFastest(Shape{rows, reductionElements}),
+                            std::span<const float>(a)),
+                        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(
+                                                             Shape{reductionElements, columns}),
+                                                         std::span<const float>(b)),
+                        Tensor::copyNativeStorage<float>(
+                            Layout::contiguousLastDimensionFastest(Shape{rows, columns}),
+                            std::span<const float>(c)),
+                        std::move(d), ScalarType::Float32);
 }
 
 roc::host_numerics::Tensor makeOutput(size_t rows, size_t columns, float value) {
@@ -127,10 +126,8 @@ void testFinalizerAndSmallEdgeBlock() {
     const std::array<float, 2> bias{1, -1000};
     Tensor d(ScalarType::Float32, Shape{2, 2});
     GemmTestCase problem(
-        GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}),
-                                                     std::span<const float>(a))),
-        GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}),
-                                                     std::span<const float>(b))),
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a)),
+        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)),
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)),
         d.shareStorageWithLayout(Layout(Shape{2, 2}, {1, 2})), ScalarType::Float32);
     problem.epilogue.alpha = 2;
@@ -275,14 +272,14 @@ void testBlockScaledSelectionBlockPlan() {
     const Tensor blockScaleB = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{columns, scaleBlocks}),
         std::span<const float>(scaleB));
-    pointwiseProblem.a.blockScale = blockScaleA;
-    pointwiseProblem.a.blockSize = 8;
-    pointwiseProblem.b.blockScale = blockScaleB;
-    pointwiseProblem.b.blockSize = 8;
-    blockedProblem.a.blockScale = blockScaleA;
-    blockedProblem.a.blockSize = 8;
-    blockedProblem.b.blockScale = blockScaleB;
-    blockedProblem.b.blockSize = 8;
+    pointwiseProblem.blockScaleA = blockScaleA;
+    pointwiseProblem.blockSizeA = 8;
+    pointwiseProblem.blockScaleB = blockScaleB;
+    pointwiseProblem.blockSizeB = 8;
+    blockedProblem.blockScaleA = blockScaleA;
+    blockedProblem.blockSizeA = 8;
+    blockedProblem.blockScaleB = blockScaleB;
+    blockedProblem.blockSizeB = 8;
     pointwiseProblem.outputSelection = selection;
     blockedProblem.outputSelection = selection;
 
@@ -311,10 +308,10 @@ void testBlockScaleAppliedAfterCompleteScaleSegment() {
     GemmTestCase pointwiseProblem = makeProblem(a, b, c, pointwiseOutput, 1, reductionElements, 1);
     GemmTestCase blockedProblem = makeProblem(a, b, c, blockedOutput, 1, reductionElements, 1);
     const Tensor blockScaleA = Tensor::copyNativeValues<float>(Shape{1, 1}, scaleA);
-    pointwiseProblem.a.blockScale = blockScaleA;
-    pointwiseProblem.a.blockSize = reductionElements;
-    blockedProblem.a.blockScale = blockScaleA;
-    blockedProblem.a.blockSize = reductionElements;
+    pointwiseProblem.blockScaleA = blockScaleA;
+    pointwiseProblem.blockSizeA = reductionElements;
+    blockedProblem.blockScaleA = blockScaleA;
+    blockedProblem.blockSizeA = reductionElements;
 
     runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
               "Blocked GEMM applied a one-sided block scale before its complete reduction "
@@ -343,15 +340,15 @@ void testOneSidedBlockScaling() {
         GemmTestCase blockedProblem =
             makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
         if (scaleOperandA) {
-            pointwiseProblem.a.blockScale = blockScale;
-            pointwiseProblem.a.blockSize = 8;
-            blockedProblem.a.blockScale = blockScale;
-            blockedProblem.a.blockSize = 8;
+            pointwiseProblem.blockScaleA = blockScale;
+            pointwiseProblem.blockSizeA = 8;
+            blockedProblem.blockScaleA = blockScale;
+            blockedProblem.blockSizeA = 8;
         } else {
-            pointwiseProblem.b.blockScale = blockScale;
-            pointwiseProblem.b.blockSize = 8;
-            blockedProblem.b.blockScale = blockScale;
-            blockedProblem.b.blockSize = 8;
+            pointwiseProblem.blockScaleB = blockScale;
+            pointwiseProblem.blockSizeB = 8;
+            blockedProblem.blockScaleB = blockScale;
+            blockedProblem.blockSizeB = 8;
         }
 
         runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
@@ -378,10 +375,10 @@ void testOneSidedBlockScalingWithZeroReductionExtent() {
     GemmTestCase pointwiseProblem = makeProblem(empty, empty, c, pointwiseOutput, rows, 0, columns);
     GemmTestCase blockedProblem = makeProblem(empty, empty, c, blockedOutput, rows, 0, columns);
     const Tensor emptyScale(ScalarType::Float32, Shape{rows, 0});
-    pointwiseProblem.a.blockScale = emptyScale;
-    pointwiseProblem.a.blockSize = 8;
-    blockedProblem.a.blockScale = emptyScale;
-    blockedProblem.a.blockSize = 8;
+    pointwiseProblem.blockScaleA = emptyScale;
+    pointwiseProblem.blockSizeA = 8;
+    blockedProblem.blockScaleA = emptyScale;
+    blockedProblem.blockSizeA = 8;
     pointwiseProblem.epilogue.beta = 2.0f;
     blockedProblem.epilogue.beta = 2.0f;
 
@@ -528,7 +525,7 @@ void testOutputAliasingContract() {
 
     GemmTestCase overlapsA =
         makeProblem(a, b, c, makeOutput(extent, extent, 0), extent, extent, extent);
-    overlapsA.d = overlapsA.a.values;
+    overlapsA.d = overlapsA.a;
     require(!queryGemmSupport(overlapsA, GemmBackend::Pointwise) &&
                 !queryGemmSupport(overlapsA, GemmBackend::Blocked),
             "GEMM accepted destination storage that overlaps A.");

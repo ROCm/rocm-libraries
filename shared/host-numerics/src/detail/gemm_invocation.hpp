@@ -19,31 +19,9 @@ struct GemmSupportInfo {
     }
 };
 
-struct GemmOperand {
-    explicit GemmOperand(Tensor tensor) : values(std::move(tensor)) {}
-
-    GemmOperand(Tensor tensor, std::optional<ScalarType> compute,
-                std::vector<Tensor> preQuantizationScaleTensors,
-                std::optional<Tensor> blockScaleTensor, size_t reductionBlockSize,
-                bool conjugateValues)
-        : values(std::move(tensor)),
-          computeType(compute),
-          preQuantizationScales(std::move(preQuantizationScaleTensors)),
-          blockScale(std::move(blockScaleTensor)),
-          blockSize(reductionBlockSize),
-          conjugate(conjugateValues) {}
-
-    Tensor values;
-    std::optional<ScalarType> computeType;
-    std::vector<Tensor> preQuantizationScales;
-    std::optional<Tensor> blockScale;
-    size_t blockSize = 0;
-    bool conjugate = false;
-};
-
 // Private numerical specification used to share validation and execution code
 // between owning and caller-output entry points.
-struct GemmSpecification {
+struct GemmSpecification : GemmOptions {
     GemmSpecification(Tensor aTensor, Tensor bTensor, Tensor cTensor, ScalarType output,
                       ScalarType accumulator)
         : GemmSpecification(std::move(aTensor), std::move(bTensor), std::move(cTensor), output,
@@ -51,39 +29,16 @@ struct GemmSpecification {
 
     GemmSpecification(Tensor aTensor, Tensor bTensor, Tensor cTensor, ScalarType output,
                       const GemmOptions& options)
-        : GemmSpecification(
-              GemmOperand(std::move(aTensor), options.computeTypeA, options.preQuantizationScalesA,
-                          options.blockScaleA, options.blockSizeA, options.conjugateA),
-              GemmOperand(std::move(bTensor), options.computeTypeB, options.preQuantizationScalesB,
-                          options.blockScaleB, options.blockSizeB, options.conjugateB),
-              std::move(cTensor), output, options) {}
-
-    GemmSpecification(GemmOperand aOperand, GemmOperand bOperand, Tensor cTensor, ScalarType output,
-                      ScalarType accumulator)
-        : GemmSpecification(std::move(aOperand), std::move(bOperand), std::move(cTensor), output,
-                            GemmOptions(accumulator)) {}
-
-    GemmSpecification(GemmOperand aOperand, GemmOperand bOperand, Tensor cTensor, ScalarType output,
-                      const GemmOptions& options)
-        : a(std::move(aOperand)),
-          b(std::move(bOperand)),
+        : GemmOptions(options),
+          a(std::move(aTensor)),
+          b(std::move(bTensor)),
           c(std::move(cTensor)),
-          outputType(output),
-          accumulatorType(options.accumulatorType),
-          accumulationRounding(options.accumulationRounding),
-          mathMode(options.mathMode),
-          epilogue(options.epilogue),
-          outputSelection(options.outputSelection) {}
+          outputType(output) {}
 
-    GemmOperand a;
-    GemmOperand b;
+    Tensor a;
+    Tensor b;
     Tensor c;
     ScalarType outputType;
-    ScalarType accumulatorType;
-    AccumulationRounding accumulationRounding;
-    MathMode mathMode;
-    GemmEpilogue epilogue;
-    OutputSelection outputSelection;
 };
 
 // Private bound execution state shared by the built-in and optional BLAS
@@ -96,21 +51,7 @@ struct GemmInvocation : GemmSpecification {
 
     GemmInvocation(Tensor aTensor, Tensor bTensor, Tensor cTensor, Tensor dTensor,
                    const GemmOptions& options)
-        : GemmInvocation(
-              GemmOperand(std::move(aTensor), options.computeTypeA, options.preQuantizationScalesA,
-                          options.blockScaleA, options.blockSizeA, options.conjugateA),
-              GemmOperand(std::move(bTensor), options.computeTypeB, options.preQuantizationScalesB,
-                          options.blockScaleB, options.blockSizeB, options.conjugateB),
-              std::move(cTensor), std::move(dTensor), options) {}
-
-    GemmInvocation(GemmOperand aOperand, GemmOperand bOperand, Tensor cTensor, Tensor dTensor,
-                   ScalarType accumulator)
-        : GemmInvocation(std::move(aOperand), std::move(bOperand), std::move(cTensor),
-                         std::move(dTensor), GemmOptions(accumulator)) {}
-
-    GemmInvocation(GemmOperand aOperand, GemmOperand bOperand, Tensor cTensor, Tensor dTensor,
-                   const GemmOptions& options)
-        : GemmSpecification(std::move(aOperand), std::move(bOperand), std::move(cTensor),
+        : GemmSpecification(std::move(aTensor), std::move(bTensor), std::move(cTensor),
                             dTensor.type(), options),
           d(std::move(dTensor)) {}
 

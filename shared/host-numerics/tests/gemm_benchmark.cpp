@@ -22,7 +22,6 @@
 namespace {
 using Clock = std::chrono::steady_clock;
 using roc::host_numerics::GemmBackend;
-using roc::host_numerics::GemmOperand;
 using roc::host_numerics::GemmTestCase;
 using roc::host_numerics::GemmTestRunInfo;
 using roc::host_numerics::Layout;
@@ -169,17 +168,17 @@ int main(int argc, char** argv) {
         const Tensor b = makeMatrix(profile.inputType, bLayout, 2);
         const Tensor c = makeMatrix(profile.outputType, outputLayout, 0, true);
         const Tensor output(profile.outputType, outputLayout);
-        GemmTestCase request(GemmOperand(a), GemmOperand(b), c, output, profile.accumulatorType);
+        GemmTestCase request(a, b, c, output, profile.accumulatorType);
         request.outputSelection = selection;
         if (profile.blockScaled) {
             constexpr size_t blockSize = 32;
             if (options.reductions % blockSize != 0)
                 throw std::invalid_argument("MX profiles require K divisible by 32.");
             const size_t reductionBlocks = options.reductions / blockSize;
-            request.a.blockScale = makeBlockScales(options.rows, reductionBlocks, 3);
-            request.a.blockSize = blockSize;
-            request.b.blockScale = makeBlockScales(options.columns, reductionBlocks, 4);
-            request.b.blockSize = blockSize;
+            request.blockScaleA = makeBlockScales(options.rows, reductionBlocks, 3);
+            request.blockSizeA = blockSize;
+            request.blockScaleB = makeBlockScales(options.columns, reductionBlocks, 4);
+            request.blockSizeB = blockSize;
         }
 
         const GemmBackend backend = options.backend;
@@ -201,13 +200,12 @@ int main(int argc, char** argv) {
                 ? OutputSelection::primeStride(outputElements, outputElements, 128)
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
-        GemmTestCase expectedRequest(GemmOperand(a), GemmOperand(b), c, expected,
-                                     profile.accumulatorType);
+        GemmTestCase expectedRequest(a, b, c, expected, profile.accumulatorType);
         expectedRequest.outputSelection = validationSelection;
-        expectedRequest.a.blockScale = request.a.blockScale;
-        expectedRequest.a.blockSize = request.a.blockSize;
-        expectedRequest.b.blockScale = request.b.blockScale;
-        expectedRequest.b.blockSize = request.b.blockSize;
+        expectedRequest.blockScaleA = request.blockScaleA;
+        expectedRequest.blockSizeA = request.blockSizeA;
+        expectedRequest.blockScaleB = request.blockScaleB;
+        expectedRequest.blockSizeB = request.blockSizeB;
         referenceGemm(expectedRequest, GemmBackend::Pointwise);
 
         const std::vector<size_t> validationIndices = validationSelection.indices(outputElements);
