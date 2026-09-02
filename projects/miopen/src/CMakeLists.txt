@@ -68,7 +68,6 @@ set( MIOpen_Source
     addlayernorm_api.cpp
     api/find2_0_commons.cpp
     api/tuning.cpp
-    base64.cpp
     batch_norm.cpp
     batch_norm_api.cpp
     batchnorm/problem_description.cpp
@@ -609,7 +608,6 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/conv5x10u2v2b1.s
         kernels/conv7x7c3h224w224k64u2v2p3q3f1.s
         kernels/xform_out.s
-        kernels/gcnAsmBNBwdTrainSpatial.s
         kernels/MIOpenTensorKernelsHip.cpp
         kernels/MIOpenSubTensorOpWithScalarKernel.cpp
         kernels/MIOpenSubTensorOpWithSubTensorKernel.cpp
@@ -898,12 +896,15 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
 
     # Public wrapper library. src/private/wrapper.cpp defines extern "C"
     # pass-through stubs for every MIOPEN_EXPORT entry point in <miopen/miopen.h>,
-    # each forwarding to its renamed _impl symbol in MIOpen_private. PUBLIC
-    # linkage propagates the implementation's include directories and link
-    # interface to consumers of the wrapper, so existing consumers (driver,
-    # tests, CK plugins) that link MIOpen keep resolving MIOpen's internal C++
-    # symbols against libMIOpen_private.so.
-    add_library(MIOpen ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp)
+    # each routing through src/private/routing.cpp to either hipDNN or its
+    # renamed _impl symbol in MIOpen_private. PUBLIC linkage
+    # propagates the implementation's include directories and link interface to
+    # consumers of the wrapper, so existing consumers (driver, tests, CK plugins)
+    # that link MIOpen keep resolving MIOpen's internal C++ symbols against
+    # libMIOpen_private.so.
+    add_library(MIOpen
+        ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
 
     # Deliberately excludes src/include: the wrapper must see only the public

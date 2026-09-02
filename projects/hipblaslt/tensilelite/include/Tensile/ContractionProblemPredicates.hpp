@@ -244,19 +244,20 @@ namespace TensileLite
                                 * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
                                    * value[2] * value[4] * value[3] * problem.d().sizes()[2];
 
+                    // This guards the GSU (MBSK) region, which is sized per
+                    // problem and unchanged from before.
+                    bool ret = synchronizerUsage <= GsuSynchronizerElements;
+                    // A group wider than the block cannot be given a private
+                    // region per problem, so it must not run a solution that
+                    // uses these flags at all.
                     if(problem.groupedGemm())
-                        return synchronizerUsage <= 409600 * 16 / problem.groupedGemmCount();
-                    else
-                        return synchronizerUsage <= 409600 * 16;
+                        ret = ret && (problem.groupedGemmCount() <= SynchronizerGroupedSlots);
+                    return ret;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    uint32_t synchronizerSize = 409600 * 16;
-                    if(problem.groupedGemm())
-                        synchronizerSize /= problem.groupedGemmCount();
-
                     return debugEvalCmp(
                         problem,
                         stream,
@@ -266,7 +267,7 @@ namespace TensileLite
                             * (value[2]) * (value[4]) * value[3] * problem.d().sizes()[2],
                         ">=",
                         "limit",
-                        synchronizerSize);
+                        GsuSynchronizerElements);
                 }
             };
 
