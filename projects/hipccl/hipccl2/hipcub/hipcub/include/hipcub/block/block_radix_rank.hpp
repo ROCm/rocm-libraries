@@ -34,6 +34,8 @@
 #include "../thread/thread_scan.hpp" // IWYU pragma: keep
 #include "block_scan.hpp" // IWYU pragma: keep
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/block/block_radix_rank.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

@@ -151,9 +151,9 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker searc
 
 if(DEFINED BUILD_SHARED_LIBS)
   set(PKG_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-else()  
+else()
   set(PKG_BUILD_SHARED_LIBS ON)
-endif()  
+endif()
 set(BUILD_SHARED_LIBS OFF) # don't build client dependencies as shared
 
 # Get dependencies (required here to get rocm-cmake)
@@ -268,7 +268,7 @@ if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
 
   rocm_create_package(
     NAME rocprim
-    DESCRIPTION "rocPRIM is a header-only library that provides HIP parallel primitives." 
+    DESCRIPTION "rocPRIM is a header-only library that provides HIP parallel primitives."
     MAINTAINER "rocPRIM Maintainer <rocprim-maintainer@amd.com>"
     HEADER_ONLY
   )
@@ -316,12 +316,17 @@ if(BUILD_CODE_COVERAGE)
 
   get_property(LLVM_COV_OBJECT_ARGS GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS)
   add_custom_target(
-    coverage
-    DEPENDS coverage_analysis
+    coverage_summary
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocprim-coverage_*.profraw -o ./coverage-report/rocprim.profdata
     COMMAND ${LLVM_COV} report  ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata
     COMMAND ${LLVM_COV} show  ${LLVM_COV_OBJECT_ARGS}  --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata -format=html -output-dir=coverage-report
     COMMAND ${LLVM_COV} export  ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+
+  add_custom_target(
+    coverage
+    DEPENDS coverage_analysis
+    DEPENDS coverage_summary
   )
 endif()
