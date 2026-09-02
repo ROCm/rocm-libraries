@@ -90,9 +90,7 @@ struct heuristic_defaults_t {
   static constexpr double TARGET_OCCUPANCY                = 4.0;  // waves/SIMD
   static constexpr double TARGET_WG_SLOTS_PER_CU          = 2.0;
   static constexpr size_t L2_FIT_K_MIN                    = 64;
-  static constexpr double STORE_RATE_LOW                  = 0.05;
   static constexpr double STORE_RATE_HIGH                 = 0.30;
-  static constexpr long   K_ITERS_RICH_THRESHOLD          = 4;
   static constexpr double K_ITER_LOOP_OVERHEAD            = 500.0;
   static constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_ETP   = 10.0;
   static constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_SCALE = 0.2;

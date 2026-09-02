@@ -161,6 +161,11 @@ class ORIGAMI_EXPORT hardware_t {
   }
 
   /**
+   * @brief SIMD units per Compute Unit for this hardware instance's architecture.
+   */
+  constexpr size_t simds_per_cu() const noexcept { return get_simds_per_cu(arch); }
+
+  /**
    * @brief gfx950-only architecture constants from optional PCI chip id.
    *
    * When @p pci_chip_id is @c std::nullopt, uses the primary (id75a0) microbenchmark row.
