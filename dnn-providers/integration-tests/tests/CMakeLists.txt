@@ -1,12 +1,23 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# NOTE: FrontendGraphEngineRunner.cpp, ReferenceExecutorPool.cpp and
+# HarnessDependencies.cpp are deliberately absent. They are the only places that
+# touch the frontend Graph, a hipdnnHandle_t, or a real reference executor, so
+# leaving them out makes "these unit tests never reach an engine or a device" a
+# link-time guarantee rather than a convention.
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    ../src/harness/bundle/BundleReferenceValidationHarness.cpp
+    ../src/harness/bundle/GraphSession.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    ../src/harness/bundle/OutputComparison.cpp
+    ../src/harness/bundle/ProductionPolicy.cpp
+    ../src/harness/bundle/ReferenceOpCoverage.cpp
     ../src/harness/bundle/SupportClaimReport.cpp
     ../src/harness/bundle/SupportClaims.cpp
     ../src/harness/bundle/SupportVerdict.cpp
+    ../src/harness/bundle/VariantPackBuilder.cpp
     ../src/harness/input-init/FillInputs.cpp
     TestBundleMetadata.cpp
     TestSupportClaims.cpp
@@ -34,8 +45,16 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestVerificationModePaths.cpp
     TestErrorPaths.cpp
     TestLoadedEngineTable.cpp
+    TestReferenceOpCoverage.cpp
     TestSupportClaimReport.cpp
+    TestSupportClaimEnforcement.cpp
+    TestEnforcementRungs.cpp
     TestSupportVerdict.cpp
+    TestUnpinnedRunEnforcement.cpp
+    TestBundleReferenceValidationHarness.cpp
+    TestProductionPolicy.cpp
+    TestGraphSession.cpp
+    TestOutputComparison.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
@@ -49,6 +68,7 @@ target_link_libraries(hipdnn_integration_tests_unit_tests
         hipdnn_gpu_ref
         hipdnn_test_sdk
         hipdnn_plugin_sdk
+        GTest::gmock
         GTest::gtest
         Threads::Threads
         $<$<PLATFORM_ID:Windows>:shlwapi>
