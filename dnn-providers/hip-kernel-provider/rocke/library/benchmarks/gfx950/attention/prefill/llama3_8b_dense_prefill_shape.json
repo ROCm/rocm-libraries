@@ -1,0 +1,21 @@
+{
+  "model": "Llama-3-8B",
+  "variant": "prefill_fp16",
+  "capability": "flash_gqa_prefill",
+  "dtype": "fp16",
+  "mask": "causal",
+  "batch": 1,
+  "seqlen_q": 8192,
+  "seqlen_kv": 8192,
+  "num_query_heads": 32,
+  "num_kv_heads": 8,
+  "head_size": 128,
+  "block_n": 64,
+  "waves_per_eu": 2,
+  "persistent": true,
+  "num_persistent": 256,
+  "lazy_rescale": true,
+  "persist_decode": "auto",
+  "q_reload": true,
+  "causal": true
+}
