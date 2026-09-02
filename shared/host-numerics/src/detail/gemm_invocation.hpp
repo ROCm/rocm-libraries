@@ -9,6 +9,16 @@
 #include <utility>
 
 namespace roc::host_numerics::detail {
+struct GemmSupportInfo {
+    bool supported = false;
+    std::string reason;
+    bool preferredForAutomaticExecution = true;
+
+    explicit operator bool() const {
+        return supported;
+    }
+};
+
 struct GemmOperand {
     explicit GemmOperand(Tensor tensor) : values(std::move(tensor)) {}
 
