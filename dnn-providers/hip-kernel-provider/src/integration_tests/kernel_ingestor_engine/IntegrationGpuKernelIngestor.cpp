@@ -730,6 +730,31 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesAConvGraphToTheConvEngineAndNotTheP
 // block_size; get_workspace_size cannot serve, being a max across the catalog rather than a
 // property of the selection.
 
+/// The shipped engines are the ones with no way to prove themselves by outcome.
+///
+/// Every UHD failure path degrades to declared order, which is a legal ranking, so a test can
+/// only tell a working UHD from a discarded one if the two produce different kernels. For the
+/// model engine they do -- that is what the next test relies on. For the shipped native engines
+/// they do not: every kernel carries priority=0, so declared order falls to the id tiebreak and
+/// lands on block_size=256, which is exactly what the native scorer picks.
+///
+/// So the assertion has to be on provenance, which RFC 0019 §12 puts in the selection trace.
+/// This matters more since a throwing scorer began degrading instead of propagating (§5 step 7):
+/// that failure used to be an exception and is now silent, and for this engine it is silent
+/// *and* returns the same kernel.
+TEST_F(IntegrationGpuKernelIngestor, TheShippedEngineRanksByItsOwnScorerNotByFallback)
+{
+    const ScopedPluginLogCapture capture(this);
+    auto& recorder = capture.recorder();
+
+    (void)rankedFirstBlockSize(engineId());
+
+    EXPECT_TRUE(recorder.hasLogContaining("decided_by=native"))
+        << "the shipped engine's UHD did not decide this ranking";
+    EXPECT_FALSE(recorder.hasLogContaining("decided_by=declared_order"))
+        << "the shipped engine degraded to declared order without failing any test";
+}
+
 TEST_F(IntegrationGpuKernelIngestor, ModelEngineRanksItsCatalogAheadOfDeclaredOrder)
 {
     // 64 is reachable only by ranking: it is neither the declared-order answer nor the
