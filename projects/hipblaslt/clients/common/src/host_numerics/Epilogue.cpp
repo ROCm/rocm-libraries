@@ -72,9 +72,9 @@ namespace hipblaslt::host_numerics
             const ScalarType biasType     = scalarType(arguments.biasType);
             const size_t     biasElements = arguments.biasAxis == MatrixAxis::Row ? rows : columns;
             const Layout biasLayout = Layout::contiguousLastDimensionFastest(Shape{biasElements});
-            options.bias
-                = VectorBinding{copyTensorFromEncodedStorage(arguments.bias, biasType, biasLayout),
-                                arguments.biasAxis};
+            Tensor bias  = copyTensorFromEncodedStorage(arguments.bias, biasType, biasLayout);
+            options.bias = bias.reshapeSharingStorage(
+                arguments.biasAxis == MatrixAxis::Row ? Shape{rows, 1} : Shape{1, columns});
         }
 
         if(arguments.outputScale != nullptr)

@@ -119,6 +119,13 @@ namespace TensileLite::Client::HostNumerics
             return axis;
         }
 
+        inline Tensor broadcastVectorAsMatrix(const VectorBinding& binding)
+        {
+            const size_t length = binding.values.shape()[0];
+            return binding.values.reshapeSharingStorage(
+                binding.axis == MatrixAxis::Row ? Shape{length, 1} : Shape{1, length});
+        }
+
         enum class ScaleABMode
         {
             None,
@@ -1124,7 +1131,10 @@ namespace TensileLite::Client::HostNumerics
                 TranslatedGemmBatch::BoundEpilogue epilogue(
                     *intermediate, productOutput, accumulatorType);
                 if(!m_state->useGradient)
-                    epilogue.options.bias = source.bias;
+                    epilogue.options.bias
+                        = source.bias
+                              ? std::optional<Tensor>(detail::broadcastVectorAsMatrix(*source.bias))
+                              : std::nullopt;
                 epilogue.options.activation           = m_state->activation;
                 epilogue.options.activationParameter0 = m_state->activationParameter0;
                 epilogue.options.activationParameter1 = m_state->activationParameter1;
