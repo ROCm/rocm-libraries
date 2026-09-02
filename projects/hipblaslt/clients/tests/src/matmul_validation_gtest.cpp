@@ -33,12 +33,11 @@ namespace
         }
 
         double error = 0.0, absolute = 0.0, relative = 0.0, maximumUlp = 0.0, averageUlp = 0.0;
-        const MatmulValidationResult result = validateMatmulOutputs({
-            .options = {.compareNorm = true, .assertNorm = assertNorm},
-            .cases   = std::span(&testCase, 1),
-            .metrics = {error, absolute, relative, maximumUlp, averageUlp},
-        });
-        return {error, result.passed()};
+        const bool passed
+            = validateMatmulOutputs({.compareNorm = true, .assertNorm = assertNorm},
+                                    std::span(&testCase, 1),
+                                    {error, absolute, relative, maximumUlp, averageUlp});
+        return {error, passed};
     }
 
     hipblaslt::host_numerics::HostComparisonRequest scalarComparison(const float* expected,
@@ -58,11 +57,8 @@ namespace
         using namespace hipblaslt::host_numerics;
 
         double error = 0.0, absolute = 0.0, relative = 0.0, maximumUlp = 0.0, averageUlp = 0.0;
-        validateMatmulOutputs({
-            .options = {.searchAllClose = true},
-            .cases   = cases,
-            .metrics = {error, absolute, relative, maximumUlp, averageUlp},
-        });
+        validateMatmulOutputs(
+            {.searchAllClose = true}, cases, {error, absolute, relative, maximumUlp, averageUlp});
         return {absolute, relative};
     }
 }
