@@ -197,15 +197,10 @@ if(HIPSPARSELT_ENABLE_HIP)
         find_package(hipblaslt CONFIG REQUIRED)
         message(STATUS "hipSPARSELt uses the staged hipBLASLt package.")
     else()
-        if(NOT EXISTS "${HIPBLASLT_TENSILELITE_PATH}/CMakeLists.txt")
-            message(FATAL_ERROR
-                "hipSPARSELt source support requires the hipBLASLt tensilelite "
-                "source at '${HIPBLASLT_TENSILELITE_PATH}'.")
-        endif()
-
         message(STATUS
             "hipSPARSELt uses private source-tree TensileLite support.")
-        include("${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt/cmake/hipblaslt_codegen.cmake")
+        cmake_path(GET HIPBLASLT_TENSILELITE_PATH PARENT_PATH _hipblaslt_source_dir)
+        list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/cmake")
         find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
         set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON)
         set(HIPBLASLT_PYTHON_DEPS _rocisa)
@@ -226,6 +221,15 @@ if(HIPSPARSELT_ENABLE_HIP)
                     set(hipblaslt_msgpack_target msgpackc-cxx)
                 endif()
             endif()
+            set(ORIGAMI_BUILD_SHARED_LIBS OFF)
+            set(ORIGAMI_ENABLE_FETCH ON)
+            set(ORIGAMI_BUILD_TESTING OFF)
+            set(ORIGAMI_ENABLE_PYTHON OFF)
+            add_subdirectory(
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami"
+                "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-codegen/origami"
+                EXCLUDE_FROM_ALL
+            )
             set(TENSILELITE_ENABLE_HOST ON)
             set(TENSILELITE_ENABLE_CLIENT OFF)
             set(TENSILELITE_BUILD_TESTING OFF)
@@ -248,6 +252,7 @@ if(HIPSPARSELT_ENABLE_HIP)
                 "'${HIPBLASLT_TENSILELITE_PATH}'; set -DHIPBLASLT_TENSILELITE_PATH.")
         endif()
 
+        include(hipblaslt_codegen)
         set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
         set(_hipsparselt_yaml_format OFF)
         if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
