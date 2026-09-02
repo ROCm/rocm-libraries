@@ -30,6 +30,7 @@
 #define HANDLE_H
 
 #include "rocblaslt.h"
+#include <hipblaslt/hipblaslt-opt-in-features.h>
 //#include "rocblaslt_ostream.hpp"
 #include <atomic>
 #include <fstream>
@@ -235,6 +236,7 @@ struct _rocblaslt_handle
     // Value-initialised so every block starts unowned.
     std::atomic<const void*> m_skSlotOwner[c_syncSkStreamSlots] = {};
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Device communicator, registered once by hipblasLtSetDeviceComm. Every rank
     // registers on its own handle; the W handles form one communicator, of which
     // this is the local view. A world of zero is the absent one: registration
@@ -253,6 +255,7 @@ struct _rocblaslt_handle
     // device pointer, borrowed from the handle that allocated it.
     void* device_comm_peer_flags[HIPBLASLT_DEVICE_COMM_MAX_WORLD]        = {};
     bool  device_comm_peer_flags_mapped[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+#endif
 };
 
 /********************************************************************************
@@ -354,9 +357,11 @@ struct _rocblaslt_matmul_desc
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
     int32_t bias_stride = 0;
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Fused epilogue attached via ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE. Non-owning:
     // the descriptor is the caller's and must outlive every matmul using this desc.
     const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
+#endif
 
     std::shared_ptr<void> m_data; // Tensile data
 
@@ -391,7 +396,9 @@ struct _rocblaslt_matmul_desc
         this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
         this->uniform_summation_order = src.uniform_summation_order;
         this->bias_stride             = src.bias_stride;
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
+#endif
     }
 };
 

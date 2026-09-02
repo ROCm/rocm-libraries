@@ -51,6 +51,7 @@ def test_defaults(monkeypatch):
     assert a["UseCompression"] is True  # NoCompress default False
     assert a["LogicFilter"] == "*"
     assert a["Experimental"] is False
+    assert a["EnableGemmA2AFusion"] is False
     assert a["GenSolTable"] is True
 
 
@@ -69,6 +70,7 @@ def test_quirk_input_param_ignored(monkeypatch):
     "flag,key",
     [
         ("--experimental", "Experimental"),
+        ("--enable-gemm-a2a-fusion", "EnableGemmA2AFusion"),
         ("--enable-marker", "EnableMarker"),
         ("--asm-debug", "AsmDebug"),
         ("--address-sanitizer", "AsanBuild"),
