@@ -126,6 +126,12 @@ public:
     /// document. Throws std::invalid_argument on a malformed path, a
     /// non-numeric index applied to an array, or an index at or above
     /// MAX_ARRAY_INDEX.
+    ///
+    /// All-or-nothing: the path is fully validated before anything is written,
+    /// so a throwing call leaves the document exactly as it was. Validating
+    /// inline instead would let a rejected write destroy data it had already
+    /// passed over -- `setData("q.dims[999999999]")` on `{"q":5}` would replace
+    /// the 5 with `{"dims":null}` on its way to the throw.
     void setData(const std::string& path, const Value& value)
     {
         std::vector<Segment> segs;
@@ -138,19 +144,19 @@ public:
             _doc = toJson(value); // whole-document assignment
             return;
         }
+        validatePath(segs, path);
+
+        // Every failure mode is now ruled out, so this loop cannot throw and
+        // the document cannot be left half-written.
         nlohmann::json* cur = &_doc;
         for(std::size_t i = 0; i < segs.size(); ++i)
         {
             const Segment& seg = segs[i];
             nlohmann::json* target = nullptr;
+            std::size_t idx = 0;
             if(seg.subscript)
             {
-                std::size_t idx = 0;
-                if(!parseIndex(seg.text, idx))
-                {
-                    throw std::invalid_argument("JsonDataSource::setData: bad array index '"
-                                                + seg.text + "' in path '" + path + "'");
-                }
+                parseIndex(seg.text, idx);
                 if(!cur->is_array())
                 {
                     *cur = nlohmann::json::array();
@@ -159,12 +165,7 @@ public:
             }
             else if(cur->is_array())
             {
-                std::size_t idx = 0;
-                if(!parseIndex(seg.text, idx))
-                {
-                    throw std::invalid_argument("JsonDataSource::setData: non-numeric key '"
-                                                + seg.text + "' on array in path '" + path + "'");
-                }
+                parseIndex(seg.text, idx);
                 target = &(*cur)[idx];
             }
             else
@@ -193,8 +194,56 @@ private:
         std::string text;
     };
 
+    /// Reject every index setData's write walk could reject, without touching
+    /// the document. Mirrors that walk's branching exactly: a subscript always
+    /// indexes, and a dotted segment indexes only where the document already
+    /// holds an array -- so it has to descend the existing structure to know
+    /// which segments are index positions. Descent stops at the first segment
+    /// that is not already present, because from there on the write creates
+    /// objects and only explicit subscripts can be index positions.
+    void validatePath(const std::vector<Segment>& segs, const std::string& path) const
+    {
+        const nlohmann::json* cur = &_doc;
+        for(const Segment& seg : segs)
+        {
+            std::size_t idx = 0;
+            if(seg.subscript)
+            {
+                if(!parseIndex(seg.text, idx))
+                {
+                    throw std::invalid_argument("JsonDataSource::setData: bad array index '"
+                                                + seg.text + "' in path '" + path + "'");
+                }
+                cur = (cur != nullptr && cur->is_array() && idx < cur->size()) ? &(*cur)[idx]
+                                                                               : nullptr;
+            }
+            else if(cur != nullptr && cur->is_array())
+            {
+                if(!parseIndex(seg.text, idx))
+                {
+                    throw std::invalid_argument("JsonDataSource::setData: non-numeric key '"
+                                                + seg.text + "' on array in path '" + path + "'");
+                }
+                cur = idx < cur->size() ? &(*cur)[idx] : nullptr;
+            }
+            else if(cur != nullptr && cur->is_object() && cur->contains(seg.text))
+            {
+                cur = &(*cur)[seg.text];
+            }
+            else
+            {
+                // Not present: the write creates objects from here down, so no
+                // later segment can land on an array unless it says so itself.
+                cur = nullptr;
+            }
+        }
+    }
+
     /// Split a path into segments. Strips one optional leading sigil. Returns
-    /// false on a malformed subscript (missing ']').
+    /// false on a malformed path: an unterminated subscript, an empty segment
+    /// (`a..b`, or a trailing `.`), or text wedged between a `]` and the next
+    /// separator (`q.dims[0]bogus`). Accepting those would let setData create
+    /// a key nobody wrote, under a contract that says it throws instead.
     static bool tokenize(const std::string& raw, char sigil, std::vector<Segment>& out)
     {
         std::size_t pos = 0;
@@ -202,6 +251,7 @@ private:
         {
             ++pos; // strip the variable sigil
         }
+        bool afterSubscript = false;
         while(pos < raw.size())
         {
             if(raw[pos] == '[')
@@ -213,6 +263,7 @@ private:
                 }
                 out.push_back({true, raw.substr(pos + 1, close - pos - 1)});
                 pos = close + 1;
+                afterSubscript = true;
             }
             else
             {
@@ -220,10 +271,21 @@ private:
                 {
                     ++pos; // skip the key separator
                 }
+                else if(afterSubscript)
+                {
+                    // A `]` must be followed by `.`, `[`, or the end of the
+                    // path; anything else is trailing garbage, not a key.
+                    return false;
+                }
                 const std::size_t next = raw.find_first_of(".[", pos);
                 const std::size_t end = (next == std::string::npos) ? raw.size() : next;
+                if(end == pos)
+                {
+                    return false; // empty segment
+                }
                 out.push_back({false, raw.substr(pos, end - pos)});
                 pos = end;
+                afterSubscript = false;
             }
         }
         return true;
@@ -237,23 +299,42 @@ private:
     /// the end.
     static constexpr std::size_t MAX_ARRAY_INDEX = (1U << 20U);
 
-    /// Parse a non-negative decimal index below MAX_ARRAY_INDEX. Rejects empty,
-    /// negative, out-of-bounds, and non-numeric (with trailing garbage) text.
+    /// Parse a decimal index below MAX_ARRAY_INDEX. Rejects empty text, any
+    /// non-digit character, and an out-of-bounds value.
     static bool parseIndex(const std::string& s, std::size_t& idx)
     {
         if(s.empty())
         {
             return false;
         }
-        char* endp = nullptr;
-        const long val = std::strtol(s.c_str(), &endp, 10);
-        // strtol saturates at LONG_MAX on overflow rather than failing, so the
-        // bound below is what rejects an absurdly long digit string too.
-        if(*endp != '\0' || val < 0 || static_cast<unsigned long>(val) >= MAX_ARRAY_INDEX)
+        // Digits only, checked by hand rather than with strtol: strtol accepts
+        // leading whitespace and a leading '+', so `[ 3]` and `[+3]` would both
+        // resolve as index 3, and it saturates at LONG_MAX on overflow instead
+        // of failing. Requiring digits only removes all three.
+        for(const char c : s)
+        {
+            if(c < '0' || c > '9')
+            {
+                return false;
+            }
+        }
+        // Bounds-check on the digit count first, so an absurdly long string
+        // never reaches a conversion that would saturate.
+        constexpr std::size_t MAX_INDEX_DIGITS = 7; // MAX_ARRAY_INDEX is 7 digits
+        if(s.size() > MAX_INDEX_DIGITS)
         {
             return false;
         }
-        idx = static_cast<std::size_t>(val);
+        std::size_t val = 0;
+        for(const char c : s)
+        {
+            val = (val * 10U) + static_cast<std::size_t>(c - '0');
+        }
+        if(val >= MAX_ARRAY_INDEX)
+        {
+            return false;
+        }
+        idx = val;
         return true;
     }
 

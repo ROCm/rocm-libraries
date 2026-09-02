@@ -501,6 +501,64 @@ TEST(TestJsonExpression, DivisionAndDomainErrorsFailClosed)
     EXPECT_EQ(eval(json({{"log2", 8}})), V(3));
 }
 
+TEST(TestJsonExpression, UnresolvableNumericOperandsDecline)
+{
+    // A NaN arrives as an OPERAND, not just as a result: Value::toNumber
+    // yields NaN for a non-numeric string ($name is "amd"). A domain guard
+    // written `n <= 0.0` is FALSE for NaN and lets it straight through, so
+    // every numeric operator has to reject a non-finite result, not just the
+    // ones with an obvious domain error.
+    for(const char* op : {"log2", "rsqrt", "abs"})
+    {
+        EXPECT_TRUE(eval(json({{op, "$name"}})).isNull()) << op << " admitted a NaN operand";
+    }
+    for(const char* op : {"+", "-", "*", "/", "%", "ceil_div", "pow"})
+    {
+        EXPECT_TRUE(eval(json({{op, json::array({"$x", "$name"})}})).isNull())
+            << op << " admitted a NaN operand";
+    }
+    // min/max must decline rather than SKIP the operand: a NaN sentinel for
+    // "nothing chosen yet" is indistinguishable from a NaN argument, so the
+    // operator would silently answer from fewer operands than were authored.
+    for(const char* op : {"min", "max"})
+    {
+        EXPECT_TRUE(eval(json({{op, json::array({"$y", "$name"})}})).isNull())
+            << op << " dropped an unresolvable operand instead of declining";
+    }
+    // The whole point: an unresolvable operand must not let a narrowing
+    // predicate's NEGATION pass. Both sides decline.
+    const json narrowing = json({{"<", json::array({json({{"log2", "$name"}}), 8})}});
+    EXPECT_TRUE(eval(narrowing).isNull());
+    EXPECT_TRUE(eval(json({{"!", json::array({narrowing})}})).isNull());
+    // Well-behaved arithmetic is untouched.
+    EXPECT_EQ(eval(json({{"+", json::array({2, 3})}})), V(5));
+    EXPECT_EQ(eval(json({{"min", json::array({3, 9})}})), V(3));
+    EXPECT_EQ(eval(json({{"max", json::array({3, 9})}})), V(9));
+    EXPECT_EQ(eval(json({{"abs", -5}})), V(5));
+}
+
+TEST(TestJsonExpression, IntegersCompareExactlyAboveTwoToThe53)
+{
+    // Routed through double, 2^53 and 2^53+1 are the same value. This language
+    // gates dispatch on sizes, strides and byte offsets, so that is a wrong
+    // decision rather than a rounding error.
+    const std::int64_t big = 9007199254740992LL; // 2^53
+    EXPECT_NE(V(big), V(big + 1));
+    EXPECT_EQ(V::compare(V(big), V(big + 1)), V::Ordering::LESS);
+    EXPECT_EQ(V::compare(V(big + 1), V(big)), V::Ordering::GREATER);
+    EXPECT_EQ(V::compare(V(big), V(big)), V::Ordering::EQUAL);
+
+    const jexpr::JsonDataSource wide{json{{"bytes", big}}};
+    const auto evalWide
+        = [&wide](const json& rule) { return jexpr::compile<jexpr::JsonDataSource>(rule)(wide); };
+    EXPECT_EQ(evalWide(json({{"==", json::array({"$bytes", big + 1})}})), V(false));
+    EXPECT_EQ(evalWide(json({{"<", json::array({"$bytes", big + 1})}})), V(true));
+    EXPECT_EQ(evalWide(json({{">=", json::array({"$bytes", big + 1})}})), V(false));
+    EXPECT_EQ(evalWide(json({{"==", json::array({"$bytes", big})}})), V(true));
+    // Cross-kind numeric equality still coerces, as documented.
+    EXPECT_EQ(eval(json({{"==", json::array({4, 4.0})}})), V(true));
+}
+
 TEST(TestJsonExpression, DeeplyNestedRulesAreRejectedNotFatal)
 {
     // Rules are read from descriptor files on disk, and compilation and
@@ -654,6 +712,29 @@ TEST(TestJsonExpression, VariablesIteratorEqualityComparesPositions)
     ++second;
     EXPECT_TRUE(second == r.end()); // exhausted compares equal to end
     EXPECT_TRUE(r.end() == r.end());
+}
+
+TEST(TestJsonExpression, VariablesRangeSurvivesBeingATemporary)
+{
+    // variables() returns a VarRange by value, so `expr.variables().begin()`
+    // is the natural spelling -- and it is only safe because begin()/end()
+    // return an iterator BY VALUE. Returning a reference into the range's own
+    // members leaves that binding dangling once the temporary dies at the
+    // semicolon; ASAN reports stack-use-after-scope, and hipDNN CI runs it.
+    const auto expr
+        = jexpr::compile<jexpr::JsonDataSource>(json({{"+", json::array({"$x", "$y"})}}));
+
+    auto it = expr.variables().begin();
+    const auto stop = expr.variables().end();
+    std::set<std::string> seen;
+    for(; it != stop; ++it)
+    {
+        seen.insert(*it);
+    }
+    EXPECT_EQ(seen, (std::set<std::string>{"x", "y"}));
+
+    // A second range over the same expression is independent of the first.
+    EXPECT_EQ(std::distance(expr.variables().begin(), expr.variables().end()), 2);
 }
 
 TEST(TestJsonExpression, WholeDocumentReferenceRejected)

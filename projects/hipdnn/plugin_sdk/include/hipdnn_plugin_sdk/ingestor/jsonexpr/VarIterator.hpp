@@ -105,11 +105,15 @@ public:
         : _begin(root)
     {
     }
-    const VarIterator& begin() const
+    /// By value, not by reference: `Expression::variables()` returns a VarRange
+    /// by value, so `expr.variables().begin()` binds to a temporary that dies
+    /// at the end of the full-expression -- returning a reference into the
+    /// range's own members leaves that binding dangling.
+    VarIterator begin() const
     {
         return _begin;
     }
-    const VarIterator& end() const
+    VarIterator end() const
     {
         return _end;
     }

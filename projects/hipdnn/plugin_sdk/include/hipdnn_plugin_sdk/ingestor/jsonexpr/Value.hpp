@@ -180,6 +180,14 @@ public:
     /// compare equal; differing kinds do not.
     bool operator==(const Value& o) const
     {
+        if(isInt() && o.isInt())
+        {
+            // Exactly, not through double: above 2^53 a double cannot tell two
+            // adjacent int64 apart, and this language gates dispatch on sizes,
+            // strides and byte offsets, where that is a wrong decision rather
+            // than a rounding error.
+            return asInt() == o.asInt();
+        }
         if(isNumber() && o.isNumber())
         {
             return toNumber() == o.toNumber();
@@ -211,6 +219,19 @@ public:
         {
             const auto& x = a.asString();
             const auto& y = b.asString();
+            if(x < y)
+            {
+                return Ordering::LESS;
+            }
+            return x > y ? Ordering::GREATER : Ordering::EQUAL;
+        }
+        if(a.isInt() && b.isInt())
+        {
+            // Exactly, for the same reason operator== does: routing two int64
+            // through double reports adjacent values above 2^53 as EQUAL, which
+            // makes <= and >= both hold on a pair that is neither.
+            const std::int64_t x = a.asInt();
+            const std::int64_t y = b.asInt();
             if(x < y)
             {
                 return Ordering::LESS;

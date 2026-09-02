@@ -40,6 +40,27 @@ using EagerFn = Value (*)(const std::vector<Value>&);
 /// argument means and which arguments run at all.
 using LazyFn = Value (*)(const std::vector<NodePtr>&, const IDataSource&);
 
+/// Every eager numeric operator funnels its result through here.
+///
+/// A NaN or infinite result compares UNORDERED, so every ordering test on it is
+/// false and its NEGATION is true -- a criterion would ACCEPT input it never
+/// meaningfully evaluated. Declining instead keeps an undecidable computation
+/// unresolved, which is what null already means here.
+///
+/// This has to be the single exit for all of them, not a guard per operator:
+/// NaN arrives as an *operand* too (Value::toNumber yields NaN for a
+/// non-numeric string and for a multi-element array), so a domain check
+/// written `n <= 0.0` silently passes it through -- that comparison is false
+/// for NaN.
+inline Value finiteOrNull(double d)
+{
+    if(!std::isfinite(d))
+    {
+        return {};
+    }
+    return Value::number(d);
+}
+
 inline Value add(const std::vector<Value>& v)
 {
     double a = 0.0;
@@ -47,7 +68,7 @@ inline Value add(const std::vector<Value>& v)
     {
         a += x.toNumber();
     }
-    return Value::number(a);
+    return finiteOrNull(a);
 }
 
 inline Value multiply(const std::vector<Value>& v)
@@ -57,7 +78,7 @@ inline Value multiply(const std::vector<Value>& v)
     {
         a *= x.toNumber();
     }
-    return Value::number(a);
+    return finiteOrNull(a);
 }
 
 /// Unary negation on one argument, subtraction on two.
@@ -65,9 +86,9 @@ inline Value subtract(const std::vector<Value>& v)
 {
     if(v.size() == 1)
     {
-        return Value::number(-v[0].toNumber());
+        return finiteOrNull(-v[0].toNumber());
     }
-    return Value::number(v[0].toNumber() - v[1].toNumber());
+    return finiteOrNull(v[0].toNumber() - v[1].toNumber());
 }
 
 /// What a division operator makes of a numerator/denominator pair whose
@@ -89,35 +110,59 @@ inline Value divide(const std::vector<Value>& v, DivisionResult combine)
 
 inline Value quotient(const std::vector<Value>& v)
 {
-    return divide(v, [](double num, double den) { return Value::number(num / den); });
+    return divide(v, [](double num, double den) { return finiteOrNull(num / den); });
 }
 inline Value remainder(const std::vector<Value>& v)
 {
-    return divide(v, [](double num, double den) { return Value::number(std::fmod(num, den)); });
+    return divide(v, [](double num, double den) { return finiteOrNull(std::fmod(num, den)); });
 }
 inline Value ceilDiv(const std::vector<Value>& v)
 {
-    return divide(v, [](double num, double den) { return Value::number(std::ceil(num / den)); });
+    return divide(v, [](double num, double den) { return finiteOrNull(std::ceil(num / den)); });
 }
 inline Value divisible(const std::vector<Value>& v)
 {
     // Exactly {"==": [{"%": [a, b]}, 0]}, the longhand the RFCs give for the
     // same check, so the short-hand and the spelled-out form agree on every
-    // input -- including declining on a zero divisor.
-    return divide(v, [](double num, double den) { return Value(std::fmod(num, den) == 0.0); });
+    // input -- including declining on a zero divisor, and on the NaN operand
+    // that would otherwise make `fmod(...) == 0.0` a plain false.
+    return divide(v, [](double num, double den) {
+        const double r = std::fmod(num, den);
+        if(!std::isfinite(r))
+        {
+            return Value();
+        }
+        return Value(r == 0.0);
+    });
 }
 
-/// NaN never wins, so a NaN argument is skipped unless every argument is one.
+/// Declines unless every argument is finite.
+///
+/// A NaN sentinel cannot serve as "nothing chosen yet" here: a NaN *argument*
+/// is then indistinguishable from the seed and is simply overwritten, so the
+/// operator would answer from FEWER operands than were authored, with nothing
+/// to signal it. An explicit flag separates the two, and a non-finite argument
+/// declines outright rather than being skipped.
 inline Value extremum(const std::vector<Value>& v, bool wantMax)
 {
-    double best = std::nan("");
+    double best = 0.0;
+    bool haveBest = false;
     for(const Value& x : v)
     {
         const double n = x.toNumber();
-        if(std::isnan(best) || (wantMax ? n > best : n < best))
+        if(!std::isfinite(n))
+        {
+            return {};
+        }
+        if(!haveBest || (wantMax ? n > best : n < best))
         {
             best = n;
+            haveBest = true;
         }
+    }
+    if(!haveBest)
+    {
+        return {};
     }
     return Value::number(best);
 }
@@ -229,42 +274,37 @@ inline Value membership(const std::vector<Value>& v)
 
 inline Value absoluteValue(const std::vector<Value>& v)
 {
-    return Value::number(std::fabs(v[0].toNumber()));
+    return finiteOrNull(std::fabs(v[0].toNumber()));
 }
 
 inline Value power(const std::vector<Value>& v)
 {
     // A domain error (a negative base under a fractional exponent) or an
-    // overflow yields NaN/inf, which compares UNORDERED and so makes every
-    // ordering test false -- and its negation true, accepting input the
-    // criterion never meaningfully evaluated. Decline instead, as every other
-    // partial operator here does.
-    const double r = std::pow(v[0].toNumber(), v[1].toNumber());
-    if(!std::isfinite(r))
-    {
-        return {};
-    }
-    return Value::number(r);
+    // overflow yields NaN/inf; finiteOrNull declines on both.
+    return finiteOrNull(std::pow(v[0].toNumber(), v[1].toNumber()));
 }
 
 inline Value log2Of(const std::vector<Value>& v)
 {
     const double n = v[0].toNumber();
-    if(n <= 0.0)
+    // `!(n > 0.0)`, not `n <= 0.0`: the latter is FALSE for NaN, so a NaN
+    // operand would slip past the domain check and log2 would return one.
+    if(!(n > 0.0))
     {
-        return {}; // log2 declines on a non-positive argument
+        return {}; // log2 declines on a non-positive or unresolvable argument
     }
-    return Value::number(std::log2(n));
+    return finiteOrNull(std::log2(n));
 }
 
 inline Value reciprocalSqrt(const std::vector<Value>& v)
 {
     const double n = v[0].toNumber();
-    if(n <= 0.0)
+    // Negated form for the same reason log2Of uses it: NaN fails `n > 0.0`.
+    if(!(n > 0.0))
     {
-        return {}; // rsqrt declines on a non-positive argument
+        return {}; // rsqrt declines on a non-positive or unresolvable argument
     }
-    return Value::number(1.0 / std::sqrt(n));
+    return finiteOrNull(1.0 / std::sqrt(n));
 }
 
 /// Condition/result pairs, with an optional trailing else.

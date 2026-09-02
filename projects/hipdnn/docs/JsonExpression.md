@@ -96,8 +96,10 @@ or descends into an object; the empty path replaces the whole document.
 `setData` throws `std::invalid_argument` on a malformed path, a non-numeric
 index applied to an array, or an index at or above `MAX_ARRAY_INDEX` — a `[N]`
 subscript grows the array to `N`, so an unbounded index would turn a typo into
-an allocation of arbitrary size. Objects and null in the document read back as
-`Value` null, matching `Value`'s scalar/array-only model.
+an allocation of arbitrary size. It validates the whole path before writing
+anything, so a throwing call leaves the document unchanged rather than part-way
+written. Objects and null in the document read back as `Value` null, matching
+`Value`'s scalar/array-only model.
 
 ## `Value`
 
@@ -216,7 +218,7 @@ for that case:
 
 | Operator | Operands | Operand types | Description |
 | --- | --- | --- | --- |
-| `==` | 2 | any | Strict equality — no type coercion, so `1 == "1"` is false. An integer and a double of equal value still compare equal. |
+| `==` | 2 | any | Strict equality — no type coercion, so `1 == "1"` is false. An integer and a double of equal value still compare equal. Two integers compare exactly, so magnitudes past 2^53 are not conflated by a detour through `double`. |
 | `!=` | 2 | any | Strict inequality, the negation of `==`. |
 | `<` | 2–3 | number (coerced); strings compare lexicographically | Less-than. The 3-operand form is the between-chain `a < b < c`. |
 | `<=` | 2–3 | number (coerced); strings compare lexicographically | Less-than-or-equal, with the same between-chain form. |
@@ -225,15 +227,19 @@ for that case:
 
 ### Arithmetic
 
+Every operator in this section and the next declines (yields `null`) whenever
+its result would not be finite — see
+[Unresolvable arithmetic declines](#unresolvable-arithmetic-declines).
+
 | Operator | Operands | Operand types | Description |
 | --- | --- | --- | --- |
 | `+` | any | number (coerced) | Sum of all operands; `0` with no operands. |
 | `-` | 1–2 | number (coerced) | Unary negation with one operand, subtraction with two. |
 | `*` | any | number (coerced) | Product of all operands; `1` with no operands. |
-| `/` | 2 | number (coerced) | Division. Declines (yields `null`) on a zero divisor rather than producing `inf`/`NaN`. |
+| `/` | 2 | number (coerced) | Division. Declines on a zero divisor rather than producing `inf`/`NaN`. |
 | `%` | 2 | number (coerced) | Remainder (`fmod`). Declines on a zero divisor. |
-| `min` | 1+ | number (coerced) | Smallest operand. |
-| `max` | 1+ | number (coerced) | Largest operand. |
+| `min` | 1+ | number (coerced) | Smallest operand. Declines if any operand is unresolvable, rather than skipping it. |
+| `max` | 1+ | number (coerced) | Largest operand. Declines if any operand is unresolvable, rather than skipping it. |
 
 ### Math extensions
 
@@ -296,6 +302,29 @@ Once every argument resolves, value semantics follow JavaScript: `false`, `0`,
 `""`, `null` and the empty array are falsy; `Number()`-style coercion drives
 arithmetic and ordering. A `null` root is falsy, so an undecided expression
 declines.
+
+## Unresolvable arithmetic declines
+
+`null` is not the only way a value can fail to resolve. `Number()` coercion
+turns a non-numeric string or a multi-element array into `NaN`, and arithmetic
+can overflow to an infinity — and a `NaN` compares **unordered**, so every
+ordering test on it is `false` **and so is its negation**. A criterion built on
+one would accept input it never meaningfully evaluated:
+
+```json
+{"!": [{"<": [{"log2": "$q.dtype"}, 8]}]}
+```
+
+With `dtype` a name rather than a number, `log2` would yield `NaN`, the `<`
+would be `false`, and the `!` would make the whole criterion `true` — the kernel
+applies on the strength of a question nobody answered.
+
+So every arithmetic and math operator yields `null` unless its result is
+finite, which puts an unresolvable computation back under the ordinary
+propagation rule above: the enclosing predicate declines, and so does its
+negation. `min` and `max` decline outright rather than skipping an unresolvable
+operand, since answering from fewer operands than were written is the same
+failure wearing a quieter face.
 
 Malformed rules (unknown operator, wrong argument count, a non-operator object)
 raise `JsonExpressionCompileError` at `compile` time, so evaluation stays on the
