@@ -390,17 +390,18 @@ def _compile_one_variant(job):
 def _cgroup_v2_cpu_quota():
     """Whole CPUs allowed by cgroup v2, or None when unlimited or absent.
 
+    Linux only; the other probes in `_cpu_budget` bound the pool elsewhere.
     Read from the filesystem because no Python API reports it. A container
     given `--cpus=8` keeps a full affinity mask and is throttled instead, so
     this is the only source that sees the limit at all.
 
     Walked from this process's own cgroup up to the root, taking the tightest
-    limit, because where the limit sits depends on whether a cgroup namespace
-    is in play. Docker and Kubernetes give one, so the container's own cgroup
-    appears as the root and `/sys/fs/cgroup/cpu.max` carries the limit. Slurm
-    and a plain systemd login session do not, so the process sits in a nested
-    scope and the root has no `cpu.max` at all -- reading only the root would
-    report "unlimited" for every limited job on such a host.
+    limit: where the limit sits depends on whether a cgroup namespace is in
+    play, not on which framework imposed it. With one (Docker, Kubernetes) the
+    container's cgroup appears as the root and `/sys/fs/cgroup/cpu.max` carries
+    the limit; without one (Slurm, a systemd login session) the process sits in
+    a nested scope whose root has no `cpu.max` at all, so reading only the root
+    would report "unlimited" for every limited job on such a host.
     """
     root = Path("/sys/fs/cgroup")
     try:
@@ -444,10 +445,10 @@ def _read_cpu_max(path):
 def _cpu_budget():
     """CPUs this process may actually use, rather than the host's core count.
 
-    `os.cpu_count()` reports the machine, but a pack under Docker, Kubernetes
-    or Slurm is usually given a slice of it, and one worker per host core
-    oversubscribes that slice badly. Each source below sees a limit the others
-    cannot, so the smallest wins.
+    `os.cpu_count()` reports the machine, but a containerised or scheduled pack
+    -- Docker, Kubernetes and Slurm alike -- is usually given a slice of it, and
+    one worker per host core oversubscribes that slice badly. Each source below
+    sees a limit the others cannot, so the smallest wins.
     """
     limits = [_cgroup_v2_cpu_quota()]
 
