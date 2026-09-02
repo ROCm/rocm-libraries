@@ -559,7 +559,11 @@ def test_example_tree_is_self_consistent():
     ids = [d.id for d in flat.descriptors]
     assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
     rel_dirs = {d.rel_dir.as_posix() for d in flat.kdps()}
-    assert rel_dirs == {"hip/pointwise_add", "rocKE/gfx942_tiled_attention"}
+    assert rel_dirs == {
+        "hip/pointwise_add",
+        "rocKE/gfx942_tiled_attention",
+        "rocKE/gfx942_attention_dense",
+    }
 
 
 # --- F. Toolchain provenance ------------------------------------------------
