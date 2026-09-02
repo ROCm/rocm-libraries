@@ -493,6 +493,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // -1 = unknown.
     int currentMsb_ = -1;
 
+    // ds_reads still unissued in this region; with wmmaIssueConfig.issuedCount (WMMAs
+    // remaining) it gives the per-window fair share the relief paces against.
+    int dsRemainingThisRegion_ = 0;
+
     // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
@@ -814,6 +818,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         if (globalReadQueueDepth() > 0) globalReadInflight_.push(globalReadDrainLatency());
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
+        if (dsRemainingThisRegion_ > 0) --dsRemainingThisRegion_;
         dsReadInflight_.pushWithThrottle(dsReadThrottleLatency());
         dsInsertedSinceLastWmma_++;
     } else if (pickKind == kOther) {
@@ -1206,12 +1211,14 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         windowCap = dsTargetPerWindow_[w];
     }
     const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
-    // mode2 WAR gate: hold back a ds_load too close after its WMMA reader (while WMMAs remain).
-    // Exempts the first ds_load of each window -- and of each region, where activeWmmaNode_ is
-    // null so coIssueSlots is 0. EMPIRICAL: the co-issue count is not the mechanism.
-    const int coIssueSlots = activeWmmaNode_ ? popcount16(activeWmmaNode_->inst->coIssueWindow) : 0;
-    const bool feederNoSlot = coIssueSlots <= 1 && dsInsertedSinceLastWmma_ == 0;
-    const bool warTooClose = !wmmaQueue.empty() && !feederNoSlot && pipeOpGateBlocks(pickedDS);
+    // mode2 WAR gate: hold back a ds_load too close after its WMMA reader (while WMMAs remain),
+    // unless this window still owes its share of the region's remaining loads. The share is
+    // self-correcting: deferring keeps dsRemaining high while wmmaRemaining falls, so it rises
+    // until the loads are released, which paces the ds stream instead of letting it batch.
+    const int wmmaRemaining = std::max(1, wmmaIssueConfig.issuedCount);
+    const int fairShare = dsRemainingThisRegion_ / wmmaRemaining;
+    const bool warGateRelief = dsInsertedSinceLastWmma_ < fairShare;
+    const bool warTooClose = !wmmaQueue.empty() && !warGateRelief && pipeOpGateBlocks(pickedDS);
     const bool dsBaseOk =
         pickedDS && !dsCapReached && !warTooClose && !destOverlapsActiveWmmaSrc(pickedDS);
     int dsThrottleWait = 0;
@@ -2212,6 +2219,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     seedWmmaDsLatencyFromPrefix(blockBegin, regionStart, regDataReadyCounters, crossBBDsResiduals_);
 
     wmmaIssueConfig.issuedCount = 0;
+    dsRemainingThisRegion_ = 0;
     hasWMMAInRegion_ = false;
     int wmmaHideBudgetBase = 0;
     bool hasWmmaHideBudgetBase = false;
@@ -2232,6 +2240,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     std::max(0, inst.latencyCycles - inst.issueCycles - ldScaleCycles);
                 hasWmmaHideBudgetBase = true;
             }
+        } else if (isDSRead(inst)) {
+            ++dsRemainingThisRegion_;
         }
     }
 
