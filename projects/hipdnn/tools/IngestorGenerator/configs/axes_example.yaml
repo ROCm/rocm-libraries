@@ -1,0 +1,84 @@
+# Worked example: pack-level `axes` (finding H14).
+#
+# An enumerated variant set is fine at roughly a hundred kernels -- one YAML block
+# per kernel, hand-picked and hand-readable. It stops being fine the moment the
+# variant set is driven by tuning axes instead of hand-picked shapes: a sweep over
+# a handful of two-valued knobs across a few hundred base shapes explodes into a
+# six-figure line count that no build step reads and no reviewer reads either. The
+# actual information content of that sweep is the axes plus the one kernel that
+# varies over them -- about 30 lines, however many kernels the cross-product turns
+# into.
+#
+# `axes` declares that directly. The loader expands the cross-product of every
+# axis's value list against `kernel_template` at LOAD TIME, into the exact same
+# per-kernel dicts a hand-authored `kernels:` entry would produce -- so
+# generator.py, the emitters, and the dedup pass never see `axes` at all; they see
+# ordinary enumerated kernels, one per combination. `kernel_defaults` still applies
+# underneath an axis-expanded kernel exactly as it does under a hand-authored one.
+#
+# This file's two axes (2 values each) expand to 4 kernels. See
+# `tests/test_config_loader.py::TestAxisExpansion` for the load-time contract:
+# unique names, axis rejection against kmd_fields, and single-valued/empty-axis
+# guards.
+
+dialect: packaged
+authored_subpath: rocKE/axes_example
+
+engine:
+  name: hipkernel:AxesExample
+  sdk_version: "1.0.0"
+  knobs: [block_n]
+  heuristic: native
+
+kmd_fields:
+  - name: dtype
+    type: string
+  - name: seqlen_q
+    type: int
+    default_value: 256
+  - name: block_n
+    type: int
+    default_value: 64
+  - name: waves_per_eu
+    type: int
+    default_value: 2
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: rocke
+workspace_policy: none
+delegates_to_existing_plan: false
+
+packs:
+  - name: axes_example
+    arch: [gfx942]
+    # Fields every expanded kernel shares -- merged in underneath the template
+    # exactly as it would be under a hand-authored kernel.
+    kernel_defaults:
+      kind: rocke
+      source: kernels/gfx942/dense_example.py
+      builder: build_dense_example
+      spec:
+        dtype: bf16
+
+    # The tuning knobs to cross. Two axes x two values each = 4 kernels; adding a
+    # third two-valued axis would make it 8 without adding a single YAML line
+    # beyond the one new axis entry.
+    axes:
+      block_n: [64, 32]
+      waves_per_eu: [2, 4]
+
+    # The one kernel that varies over the axes above. Each axis value is written
+    # into both `kernel_source.spec` and `metadata` unless this template already
+    # states the field -- so a combination that needs to pin one axis value
+    # (rather than let it vary) can still do so here.
+    kernel_template:
+      name: dense_example
+      kernel_source:
+        spec:
+          seqlen_q: 256
+      metadata:
+        dtype: BF16
+        seqlen_q: 256

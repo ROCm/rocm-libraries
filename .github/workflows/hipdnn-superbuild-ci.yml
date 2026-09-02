@@ -162,6 +162,12 @@ jobs:
 
       - name: Configure superbuild
         run: |
+          # GITHUB_WORKSPACE is a backslash path on Windows
+          # (C:\home\runner\_work\...). CMake compares PATH cache entries
+          # literally, so a backslash spelling fails IS_DIRECTORY and the
+          # production root would be rejected as "not a directory" despite
+          # existing. Forward slashes are accepted on both platforms.
+          WORKSPACE="${GITHUB_WORKSPACE//\\//}"
           cmake --preset hipdnn-dev-all -GNinja \
             -DROCM_PATH="$ROCM_SDK_PATH" \
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
@@ -173,6 +179,8 @@ jobs:
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
+            -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
+            -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP=ON \
             -DENABLE_CLANG_TIDY=OFF \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
@@ -183,7 +191,19 @@ jobs:
         run: cmake --build build
 
       # Packing is skipped with a STATUS message, so a resolution regression
-      # would otherwise pass CI while producing no archives.
+      # would otherwise pass CI while producing no archives. Only the ASM SDPA
+      # producer is asserted here: its arch list is hardcoded in its own
+      # CMakeLists, so it packs on every lane.
+      #
+      # The hkp PRODUCT root is wired here for the HIP producer only; rocKE
+      # production packing stays OFF on this lane. rocKE lowers through
+      # libamd_comgr resolved by ctypes, and only the Linux job locates that
+      # library (HKP_ROCKE_COMGR_LIB, from the _rocm_sdk_core wheel), so
+      # PRODUCTION_ENABLE_ROCKE here fails configure outright. Nothing is lost:
+      # every shipped KDP declares arch gfx942 and this lane builds gfx1151, so
+      # all of them prune and the packer would emit no archive either way. The
+      # Linux job asserts the product tree, because there the arch matches and
+      # an empty tree really is a defect.
       - name: Verify kpack archives were produced
         shell: bash
         run: |
@@ -249,8 +269,14 @@ jobs:
     name: HipDNN Linux Superbuild
     runs-on: azure-linux-scale-rocm
     env:
-      GPU_TARGET: gfx94X-dcgpu
-      # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
+      # DEVICE_TARGET is the concrete gfx arch, and it is what -DGPU_TARGETS
+      # gets. The multi-arch nightly extra (rocm[...,device-<family>]) is the
+      # only place the gfxNNX-dcgpu FAMILY name is valid; passing that family
+      # to CMake instead silently selects NO arch, because hkp_selected_arches
+      # rejects anything that is not a concrete gfx and hipcc cannot take it as
+      # --offload-arch. Descriptor packaging then produces nothing and the
+      # build still succeeds.
+      WHEEL_FAMILY: gfx94X-dcgpu
       DEVICE_TARGET: gfx942
     steps:
       - name: Runner health status
@@ -383,7 +409,7 @@ jobs:
           cmake --preset hipdnn-dev-all -GNinja \
             -DROCM_PATH="$ROCM_SDK_PATH" \
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
-            -DGPU_TARGETS="$GPU_TARGET" \
+            -DGPU_TARGETS="$DEVICE_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
             -DENABLE_CLANG_TIDY=ON \
@@ -408,14 +434,27 @@ jobs:
         run: cmake --build build
 
       # Packing is skipped with a STATUS message, so a resolution regression
-      # would otherwise pass CI while producing no archives.
+      # would otherwise pass CI while producing no archives. Both producers are
+      # checked: the ASM SDPA engine, whose arch list is hardcoded in its own
+      # CMakeLists and so cannot regress with GPU_TARGETS, and the hkp product
+      # tree, which can and did -- a family name in GPU_TARGETS selected no
+      # arch and packed zero descriptors while this step still passed.
       - name: Verify kpack archives were produced
         run: |
           set -euo pipefail
           shopt -s nullglob
-          kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
-          test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
-          printf '%s\n' "${kpacks[@]}"
+          asm=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
+          test "${#asm[@]}" -gt 0 || { echo "no ASM SDPA .kpack archives produced" >&2; exit 1; }
+          printf '%s\n' "${asm[@]}"
+
+          hkp_root=build/dnn-providers/hip-kernel-provider/descriptor-packaging/hkp-product-descriptors
+          product=("$hkp_root/$DEVICE_TARGET"/kpack/*.kpack)
+          test "${#product[@]}" -gt 0 || {
+            echo "no hkp product .kpack under $hkp_root/$DEVICE_TARGET/kpack" >&2
+            echo "the production descriptor root packed nothing for $DEVICE_TARGET" >&2
+            exit 1
+          }
+          printf '%s\n' "${product[@]}"
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
