@@ -144,7 +144,9 @@ low-precision input quantization and accumulation behavior, scaling, bias,
 activation, block scales, and selected-output validation. A built-in blocked
 CPU implementation accelerates common cases, and an optional CBLAS backend can
 accelerate compatible dense problems. Backend choice changes execution, not the
-numerical request.
+numerical request. Bias and non-block scale tensors use the same trailing-axis
+broadcasting rules as ordinary tensor operations; callers express row factors
+with shape `[M, 1]` and column factors with `[N]` or `[1, N]`.
 
 ## Numerical comparison
 

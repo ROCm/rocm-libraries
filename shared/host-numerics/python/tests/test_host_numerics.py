@@ -546,6 +546,14 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(broadcast), np.full((2, 3), 3.5, dtype=np.float32)
         )
 
+        vector = hv.from_numpy(np.asarray([1.0, 2.0], dtype=np.float32))
+        expanded = vector.expand_dims(1)
+        self.assertEqual(expanded.shape, [2, 1])
+        self.assertEqual(expanded.strides, [1, 0])
+        np.testing.assert_array_equal(
+            hv.to_numpy(expanded), np.asarray([[1.0], [2.0]], dtype=np.float32)
+        )
+
         with self.assertRaisesRegex(ValueError, "rank-zero"):
             hv.from_numpy(np.asarray([1.0], dtype=np.float32)).item()
 
@@ -1921,24 +1929,16 @@ class TensorAndGemmTests(unittest.TestCase):
 
         def make_arguments():
             operand_a = hv.GemmOperand(hv.from_numpy(a_values))
-            operand_a.pre_quantization_scales = [
-                hv.VectorBinding(hv.from_numpy(pre_scale_a), hv.MatrixAxis.Row)
-            ]
+            operand_a.pre_quantization_scales = [hv.from_numpy(pre_scale_a[:, None])]
             operand_b = hv.GemmOperand(hv.from_numpy(b_values))
-            operand_b.pre_quantization_scales = [
-                hv.VectorBinding(hv.from_numpy(pre_scale_b), hv.MatrixAxis.Column)
-            ]
+            operand_b.pre_quantization_scales = [hv.from_numpy(pre_scale_b)]
             options = hv.GemmOptions(hv.ScalarType.Float32)
             options.epilogue.alpha = 0.5
             options.epilogue.beta = -1.0
-            options.epilogue.scale_alpha = hv.VectorBinding(
-                hv.from_numpy(scale_alpha), hv.MatrixAxis.Row
-            )
-            options.epilogue.scale_a = hv.from_numpy(scale_a)
+            options.epilogue.scale_alpha = hv.from_numpy(scale_alpha[:, None])
+            options.epilogue.scale_a = hv.from_numpy(scale_a[:, None])
             options.epilogue.scale_b = hv.from_numpy(scale_b)
-            options.epilogue.bias = hv.VectorBinding(
-                hv.from_numpy(bias), hv.MatrixAxis.Row
-            )
+            options.epilogue.bias = hv.from_numpy(bias[:, None])
             options.epilogue.output_scale = 0.25
             return operand_a, operand_b, hv.from_numpy(c_values), options
 
@@ -1996,10 +1996,7 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         operand_a.compute_type = hv.ScalarType.Float16
         operand_a.pre_quantization_scales = [
-            hv.VectorBinding(
-                hv.from_numpy(np.asarray([2.0], dtype=np.float32)),
-                hv.MatrixAxis.Row,
-            )
+            hv.from_numpy(np.asarray([2.0], dtype=np.float32))
         ]
         operand_a.block_scale = hv.BlockScaleBinding(
             hv.from_numpy(np.asarray([[2.0, 4.0]], dtype=np.float32)), 4
@@ -2010,10 +2007,7 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         operand_b.compute_type = hv.ScalarType.BFloat16
         operand_b.pre_quantization_scales = [
-            hv.VectorBinding(
-                hv.from_numpy(np.asarray([0.5], dtype=np.float32)),
-                hv.MatrixAxis.Column,
-            )
+            hv.from_numpy(np.asarray([0.5], dtype=np.float32))
         ]
         operand_b.block_scale = hv.BlockScaleBinding(
             hv.from_numpy(np.asarray([[3.0, 5.0]], dtype=np.float32)), 4
@@ -2443,7 +2437,6 @@ class TensorAndGemmTests(unittest.TestCase):
             pre_quantization_scales_a=[
                 hv.from_numpy(np.asarray([3.0, 4.0], dtype=np.float32))
             ],
-            pre_quantization_axes_a=[hv.MatrixAxis.Row],
         )
         np.testing.assert_array_equal(
             hv.to_numpy(vector_pre_scaled),
@@ -2497,20 +2490,12 @@ class TensorAndGemmTests(unittest.TestCase):
             compute_type_a=hv.ScalarType.Float16,
             compute_type_b=hv.ScalarType.BFloat16,
             pre_quantization_scales_a=[
-                hv.from_numpy(scale_a_row),
-                hv.from_numpy(scale_a_reduction),
-            ],
-            pre_quantization_axes_a=[
-                hv.MatrixAxis.Row,
-                hv.MatrixAxis.Column,
+                hv.from_numpy(scale_a_row[:, None]),
+                hv.from_numpy(scale_a_reduction[None, :]),
             ],
             pre_quantization_scales_b=[
-                hv.from_numpy(scale_b_reduction),
+                hv.from_numpy(scale_b_reduction[:, None]),
                 hv.from_numpy(scale_b_column),
-            ],
-            pre_quantization_axes_b=[
-                hv.MatrixAxis.Row,
-                hv.MatrixAxis.Column,
             ],
         )
         backend_outputs = []

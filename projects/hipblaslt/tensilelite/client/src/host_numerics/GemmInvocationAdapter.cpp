@@ -109,6 +109,12 @@ namespace TensileLite::Client::HostNumerics
                     descriptorStorageBytes(type, descriptor)};
         }
 
+        enum class MatrixAxis
+        {
+            Row,
+            Column,
+        };
+
         inline MatrixAxis inferBiasAxis(size_t length, size_t rows, size_t columns, int factorDim)
         {
             MatrixAxis axis = factorDim == 0 ? MatrixAxis::Row : MatrixAxis::Column;
@@ -119,11 +125,9 @@ namespace TensileLite::Client::HostNumerics
             return axis;
         }
 
-        inline Tensor broadcastVectorAsMatrix(const VectorBinding& binding)
+        inline Tensor broadcastVectorAsMatrix(const Tensor& values, MatrixAxis axis)
         {
-            const size_t length = binding.values.shape()[0];
-            return binding.values.reshapeSharingStorage(
-                binding.axis == MatrixAxis::Row ? Shape{length, 1} : Shape{1, length});
+            return values.expandDims(axis == MatrixAxis::Row ? 1 : 0);
         }
 
         enum class ScaleABMode
@@ -140,7 +144,7 @@ namespace TensileLite::Client::HostNumerics
             Tensor                              c;
             Tensor                              d;
             OutputSelection                     outputSelection;
-            std::optional<VectorBinding>        bias;
+            std::optional<Tensor>                bias;
             std::optional<MatrixAxis>            biasAxis;
             std::optional<Tensor>               biasOutput;
             std::optional<Tensor>               auxiliaryInput;
@@ -251,7 +255,7 @@ namespace TensileLite::Client::HostNumerics
         using Activation = roc::host_numerics::Activation;
         using Layout     = roc::host_numerics::Layout;
         using MathMode   = roc::host_numerics::MathMode;
-        using MatrixAxis = roc::host_numerics::MatrixAxis;
+        using MatrixAxis      = detail::MatrixAxis;
         using OutputSelection = roc::host_numerics::OutputSelection;
         using ScalarType = roc::host_numerics::ScalarType;
         using Tensor     = roc::host_numerics::Tensor;
@@ -813,15 +817,15 @@ namespace TensileLite::Client::HostNumerics
             Tensor currentC = makeAddendTensor(plan.c.layout, plan.c.storage);
             Tensor currentD = makeOutputTensor(plan.d.layout);
 
-            std::optional<VectorBinding>        runtimeBias;
+            std::optional<Tensor>               runtimeBias;
             std::optional<Tensor>               runtimeBiasOutput;
             std::optional<std::span<std::byte>> runtimeBiasOutputDestination;
             if(plan.bias)
             {
-                runtimeBias = VectorBinding{
+                runtimeBias = detail::broadcastVectorAsMatrix(
                     Tensor::copyEncodedBackingStorage(
                         *biasType, plan.bias->layout, plan.bias->storage),
-                    plan.biasAxis};
+                    plan.biasAxis);
             }
             if(plan.biasOutput)
             {
@@ -1051,15 +1055,9 @@ namespace TensileLite::Client::HostNumerics
                 operandB.computeType = m_state->computeTypeB;
 
             if(m_state->scaleA && m_state->preQuantizationScaleA)
-            {
-                operandA.preQuantizationScales.push_back(
-                    VectorBinding{*m_state->scaleA, MatrixAxis::Row});
-            }
+                operandA.preQuantizationScales.push_back(m_state->scaleA->expandDims(1));
             if(m_state->scaleB && m_state->preQuantizationScaleB)
-            {
-                operandB.preQuantizationScales.push_back(
-                    VectorBinding{*m_state->scaleB, MatrixAxis::Column});
-            }
+                operandB.preQuantizationScales.push_back(m_state->scaleB->expandDims(0));
             operandA.conjugate = m_state->aConjugate;
             operandB.conjugate = m_state->bConjugate;
 
@@ -1113,14 +1111,16 @@ namespace TensileLite::Client::HostNumerics
                 request.epilogue.outputScale          = m_state->outputScale;
             }
             if(m_state->scaleAlpha)
-            {
-                request.epilogue.scaleAlpha
-                    = VectorBinding{*m_state->scaleAlpha, m_state->scaleAlphaAxis};
-            }
+                request.epilogue.scaleAlpha = detail::broadcastVectorAsMatrix(
+                    *m_state->scaleAlpha, m_state->scaleAlphaAxis);
             if(!m_state->preQuantizationScaleA)
-                request.epilogue.scaleA = m_state->scaleA;
+                request.epilogue.scaleA
+                    = m_state->scaleA ? std::optional<Tensor>(m_state->scaleA->expandDims(1))
+                                      : std::nullopt;
             if(!m_state->preQuantizationScaleB)
-                request.epilogue.scaleB = m_state->scaleB;
+                request.epilogue.scaleB
+                    = m_state->scaleB ? std::optional<Tensor>(m_state->scaleB->expandDims(0))
+                                      : std::nullopt;
             if(source.bias && !m_state->useStandaloneEpilogue)
                 request.epilogue.bias = source.bias;
             request.mathMode       = m_state->mathMode;
@@ -1131,10 +1131,7 @@ namespace TensileLite::Client::HostNumerics
                 TranslatedGemmBatch::BoundEpilogue epilogue(
                     *intermediate, productOutput, accumulatorType);
                 if(!m_state->useGradient)
-                    epilogue.options.bias
-                        = source.bias
-                              ? std::optional<Tensor>(detail::broadcastVectorAsMatrix(*source.bias))
-                              : std::nullopt;
+                    epilogue.options.bias = source.bias;
                 epilogue.options.activation           = m_state->activation;
                 epilogue.options.activationParameter0 = m_state->activationParameter0;
                 epilogue.options.activationParameter1 = m_state->activationParameter1;
@@ -1176,8 +1173,8 @@ namespace TensileLite::Client::HostNumerics
                             *translated.epilogue->outputs.rawOutput,
                             biasOutput,
                             accumulatorType,
-                            std::vector<size_t>{biasAxis == MatrixAxis::Row ? size_t(1)
-                                                                            : size_t(0)});
+                            std::vector<size_t>{biasAxis == detail::MatrixAxis::Row ? size_t(1)
+                                                                                    : size_t(0)});
                     }
                     else if(m_state->biasSource == ContractionProblemGemm::A)
                     {

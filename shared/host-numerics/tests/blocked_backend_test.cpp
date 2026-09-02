@@ -77,12 +77,9 @@ void configureFinalizer(GemmTestCase& problem, const std::vector<float>& columnB
 
     problem.epilogue.alpha = 1.25;
     problem.epilogue.beta = -0.5;
-    problem.epilogue.bias = VectorBinding{
-        Tensor::copyNativeStorage<float>(
-            Layout::contiguousLastDimensionFastest(Shape{columnBias.size()}),
-            std::span<const float>(columnBias)),
-        MatrixAxis::Column,
-    };
+    problem.epilogue.bias = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{columnBias.size()}),
+        std::span<const float>(columnBias));
     problem.epilogue.activation = Activation::Relu;
 }
 
@@ -138,11 +135,10 @@ void testFinalizerAndSmallEdgeBlock() {
         d.shareStorageWithLayout(Layout(Shape{2, 2}, {1, 2})), ScalarType::Float32);
     problem.epilogue.alpha = 2;
     problem.epilogue.beta = 3;
-    problem.epilogue.bias = VectorBinding{
+    problem.epilogue.bias =
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
-                                         std::span<const float>(bias)),
-        MatrixAxis::Row,
-    };
+                                         std::span<const float>(bias))
+            .expandDims(1);
     problem.epilogue.activation = Activation::Relu;
 
     require(queryGemmSupport(problem, GemmBackend::Blocked).supported,

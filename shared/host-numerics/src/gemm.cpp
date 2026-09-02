@@ -24,14 +24,12 @@ void validateOwnedGemmStorage(const GemmSpecification& problem, const Tensor& ou
         &problem.b.values,
         &problem.c,
     };
-    for (const VectorBinding& binding : problem.a.preQuantizationScales)
-        inputs.push_back(&binding.values);
-    for (const VectorBinding& binding : problem.b.preQuantizationScales)
-        inputs.push_back(&binding.values);
+    for (const Tensor& scale : problem.a.preQuantizationScales) inputs.push_back(&scale);
+    for (const Tensor& scale : problem.b.preQuantizationScales) inputs.push_back(&scale);
     if (problem.a.blockScale) inputs.push_back(&problem.a.blockScale->values);
     if (problem.b.blockScale) inputs.push_back(&problem.b.blockScale->values);
-    if (problem.epilogue.bias) inputs.push_back(&problem.epilogue.bias->values);
-    if (problem.epilogue.scaleAlpha) inputs.push_back(&problem.epilogue.scaleAlpha->values);
+    if (problem.epilogue.bias) inputs.push_back(&*problem.epilogue.bias);
+    if (problem.epilogue.scaleAlpha) inputs.push_back(&*problem.epilogue.scaleAlpha);
     if (problem.epilogue.scaleA) inputs.push_back(&*problem.epilogue.scaleA);
     if (problem.epilogue.scaleB) inputs.push_back(&*problem.epilogue.scaleB);
 

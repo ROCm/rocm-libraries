@@ -70,13 +70,14 @@ void testRuntimeReferenceGemm() {
         ScalarType::Float32);
     problem.epilogue.beta = 1.0;
     problem.epilogue.scaleC = 2.0;
-    problem.epilogue.bias = VectorBinding{
+    problem.epilogue.bias =
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
-                                         std::span<const float>(bias)),
-        MatrixAxis::Row,
-    };
-    problem.epilogue.scaleA = Tensor::copyNativeStorage<float>(
-        Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(scaleA));
+                                         std::span<const float>(bias))
+            .expandDims(1);
+    problem.epilogue.scaleA =
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
+                                         std::span<const float>(scaleA))
+            .expandDims(1);
     problem.epilogue.scaleB = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(scaleB));
     problem.epilogue.activation = Activation::Relu;
@@ -190,7 +191,7 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
                 .passed(),
             "Zero alpha evaluated a broadcast scale or non-finite GEMM operand.");
     alphaZero.epilogue.scaleA =
-        Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{nan, nan});
+        Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{nan, nan}).expandDims(1);
     referenceGemm(alphaZero);
     require(compare(output, Tensor::copyNativeStorage<float>(
                                 Layout::contiguousLastDimensionFastest(Shape{2, 2}),
@@ -206,7 +207,7 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
             "A zero broadcast scale did not preserve IEEE multiplication of a non-finite dot "
             "product.");
     alphaZero.epilogue.scaleA =
-        Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{0.0f, 0.0f});
+        Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{0.0f, 0.0f}).expandDims(1);
     referenceGemm(alphaZero);
     require(std::isnan(output.loadAs<float>({0, 0})),
             "Broadcast and expanded zero scales produced different non-finite behavior.");
@@ -456,11 +457,8 @@ void testRuntimeComplexAndExplicitAxisGemm() {
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 2}),
                                          std::span<const float>(realC)),
         realD, ScalarType::Float32);
-    axisProblem.epilogue.bias = VectorBinding{
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
-                                         std::span<const float>(columnBias)),
-        MatrixAxis::Column,
-    };
+    axisProblem.epilogue.bias = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(columnBias));
     referenceGemm(axisProblem);
     require(compare(realD, Tensor::copyNativeStorage<float>(
                                Layout::contiguousLastDimensionFastest(Shape{1, 2}),
