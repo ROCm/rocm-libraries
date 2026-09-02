@@ -20,7 +20,7 @@ struct LinearCombinationOptions {
 };
 
 // Allocates a contiguous output tensor. At least one input must be present;
-// when both are present their shapes must match.
+// two inputs use NumPy-style trailing-dimension broadcasting.
 Tensor linearCombination(std::optional<Tensor> x, std::optional<Tensor> y, ScalarType outputType,
                          const LinearCombinationOptions& options = LinearCombinationOptions{});
 

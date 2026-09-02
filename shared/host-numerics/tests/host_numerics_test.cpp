@@ -1143,6 +1143,38 @@ void testLinearCombination() {
     require(tensorCoefficientOutput.loadAs<float>({1, 0, 1}) == 3.0f * x.loadAs<float>({1, 0, 1}),
             "Rank-zero Tensor coefficient did not retain snapshot semantics.");
 
+    const std::array<float, 2> columnValues{1.0f, 2.0f};
+    const std::array<float, 3> rowValues{10.0f, 20.0f, 30.0f};
+    const Tensor column = Tensor::copyNativeValues<float>(Shape{2, 1}, columnValues);
+    const Tensor row = Tensor::copyNativeValues<float>(Shape{1, 3}, rowValues);
+    LinearCombinationOptions broadcastOptions(ScalarType::Float32);
+    broadcastOptions.alpha = 2.0f;
+    broadcastOptions.beta = -1.0f;
+    const Tensor broadcastOutput =
+        linearCombination(column, row, ScalarType::Float32, broadcastOptions);
+    require(broadcastOutput.shape() == Shape{2, 3} &&
+                broadcastOutput.loadAs<float>({0, 0}) == -8.0f &&
+                broadcastOutput.loadAs<float>({0, 2}) == -28.0f &&
+                broadcastOutput.loadAs<float>({1, 0}) == -6.0f &&
+                broadcastOutput.loadAs<float>({1, 2}) == -26.0f,
+            "Linear combination did not apply NumPy-style broadcasting.");
+
+    const Tensor emptyBroadcast = linearCombination(
+        Tensor(ScalarType::Float32, Shape{0, 3}),
+        Tensor::copyNativeValues<float>(Shape{1, 3}, rowValues), ScalarType::Float32);
+    require(emptyBroadcast.shape() == Shape{0, 3} && emptyBroadcast.elementCount() == 0,
+            "Linear combination did not preserve a broadcast zero extent.");
+
+    bool rejectedIncompatibleBroadcast = false;
+    try {
+        (void)linearCombination(Tensor(ScalarType::Float32, Shape{2}),
+                                Tensor(ScalarType::Float32, Shape{3}), ScalarType::Float32);
+    } catch (const std::invalid_argument&) {
+        rejectedIncompatibleBroadcast = true;
+    }
+    require(rejectedIncompatibleBroadcast,
+            "Linear combination accepted incompatible broadcast shapes.");
+
     const std::array<std::complex<float>, 1> complexXValues{std::complex<float>(1, 2)};
     const std::array<std::complex<float>, 1> complexYValues{std::complex<float>(3, -1)};
     Tensor complexX = Tensor::copyNativeValues<std::complex<float>>(Shape{1}, complexXValues);
