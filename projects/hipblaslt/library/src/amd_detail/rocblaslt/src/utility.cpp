@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include "utility.hpp"
+#include <hipblaslt/hipblaslt-opt-in-features.h>
 #include <sys/types.h>
 #include <time.h>
 
@@ -280,8 +281,10 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT";
     case ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT:
         return "MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT";
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
     case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
         return "MATMUL_DESC_FUSED_EPILOGUE";
+#endif
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
     case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:
