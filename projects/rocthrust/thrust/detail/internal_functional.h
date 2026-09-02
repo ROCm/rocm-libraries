@@ -32,6 +32,7 @@
 #endif // no system header
 
 #include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/memory_wrapper.h> // for ::new
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/static_assert.h>
@@ -42,6 +43,8 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
+#  include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
+#  include _THRUST_LIBCXX_INCLUDE(__iterator/transform_output_iterator.h)
 #else
 #  include <type_traits>
 #endif
@@ -94,18 +97,21 @@ struct tuple_binary_predicate
   mutable Predicate pred;
 };
 
+// We need to mark proxy iterators as such
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+template <>
+inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::discard_iterator::__discard_proxy> = true;
+
+template <class Fn, class Index>
+inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__tabulate_proxy<Fn, Index>> = true;
+
+template <class Iter, class Fn>
+inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__transform_output_proxy<Iter, Fn>> = true;
+#endif
+
 template <typename T>
 inline constexpr bool is_non_const_reference_v =
   !_THRUST_STD::is_const_v<T> && (_THRUST_STD::is_reference_v<T> || detail::is_proxy_reference_v<T>);
-
-// We treat the discarding proxy of cuda/hip's discard_iterator as a const reference, we discard the value
-template <typename T>
-inline constexpr bool is_discard_proxy = false;
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-template <>
-inline constexpr bool is_discard_proxy<_THRUST_LIBCXX::discard_iterator::__discard_proxy> = true;
-#endif
 
 template <typename T>
 inline constexpr bool is_tuple_of_iterator_references_v = false;
@@ -117,8 +123,7 @@ inline constexpr bool is_tuple_of_iterator_references_v<tuple_of_iterator_refere
 // XXX revisit this problem with c++11 perfect forwarding
 template <typename T>
 using enable_if_assignable_ref =
-  _THRUST_STD::enable_if_t<is_non_const_reference_v<T> || is_tuple_of_iterator_references_v<T> || is_discard_proxy<T>,
-                           int>;
+  _THRUST_STD::enable_if_t<is_non_const_reference_v<T> || is_tuple_of_iterator_references_v<T>, int>;
 
 template <typename UnaryFunction>
 struct unary_transform_functor
@@ -219,8 +224,8 @@ struct device_destroy_functor
 template <typename System, typename T>
 struct destroy_functor
     : thrust::detail::eval_if<_THRUST_STD::is_convertible<System, thrust::host_system_tag>::value,
-                              thrust::detail::identity_<host_destroy_functor<T>>,
-                              thrust::detail::identity_<device_destroy_functor<T>>>
+                              ::internal::type_identity<host_destroy_functor<T>>,
+                              ::internal::type_identity<device_destroy_functor<T>>>
 {};
 
 template <typename T>

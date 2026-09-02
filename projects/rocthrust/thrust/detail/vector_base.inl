@@ -247,13 +247,6 @@ vector_base<T, Alloc>& vector_base<T, Alloc>::operator=(_THRUST_STD::initializer
 } // end vector_base::operator=()
 
 template <typename T, typename Alloc>
-template <typename IteratorOrIntegralType>
-void vector_base<T, Alloc>::init_dispatch(IteratorOrIntegralType n, IteratorOrIntegralType value, true_type)
-{
-  fill_init(n, value);
-} // end vector_base::init_dispatch()
-
-template <typename T, typename Alloc>
 void vector_base<T, Alloc>::value_init(size_type n)
 {
   if (n > 0)
@@ -279,13 +272,6 @@ void vector_base<T, Alloc>::fill_init(size_type n, const T& x)
 
 template <typename T, typename Alloc>
 template <typename InputIterator>
-void vector_base<T, Alloc>::init_dispatch(InputIterator first, InputIterator last, false_type)
-{
-  range_init(first, last);
-} // end vector_base::init_dispatch()
-
-template <typename T, typename Alloc>
-template <typename InputIterator>
 void vector_base<T, Alloc>::range_init(InputIterator first, InputIterator last)
 {
   using traversal = typename iterator_traversal<InputIterator>::type;
@@ -306,29 +292,23 @@ void vector_base<T, Alloc>::range_init(InputIterator first, InputIterator last)
 } // end vector_base::range_init()
 
 template <typename T, typename Alloc>
-template <typename InputIterator, _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int>>
+template <typename InputIterator, _THRUST_STD::enable_if_t<::internal::has_input_traversal<InputIterator>, int>>
 vector_base<T, Alloc>::vector_base(InputIterator first, InputIterator last)
     : m_storage()
     , m_size(0)
 {
-  // check the type of InputIterator: if it's an integral type,
-  // we need to interpret this call as (size_type, value_type)
-  using Integer = ::internal::is_integral<InputIterator>;
-
-  init_dispatch(first, last, Integer());
+  static_assert(!_THRUST_STD::is_integral_v<InputIterator>); // TODO(bgruber): remove, just for testing
+  range_init(first, last);
 } // end vector_base::vector_base()
 
 template <typename T, typename Alloc>
-template <typename InputIterator, _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int>>
+template <typename InputIterator, _THRUST_STD::enable_if_t<::internal::has_input_traversal<InputIterator>, int>>
 vector_base<T, Alloc>::vector_base(InputIterator first, InputIterator last, const Alloc& alloc)
     : m_storage(alloc)
     , m_size(0)
 {
-  // check the type of InputIterator: if it's an integral type,
-  // we need to interpret this call as (size_type, value_type)
-  using Integer = ::internal::is_integral<InputIterator>;
-
-  init_dispatch(first, last, Integer());
+  static_assert(!_THRUST_STD::is_integral_v<InputIterator>); // TODO(bgruber): remove, just for testing
+  range_init(first, last);
 } // end vector_base::vector_base()
 
 template <typename T, typename Alloc>
@@ -658,11 +638,15 @@ template <typename T, typename Alloc>
 template <typename InputIterator>
 void vector_base<T, Alloc>::assign(InputIterator first, InputIterator last)
 {
-  // we could have received assign(n, x), so disambiguate on the
-  // type of InputIterator
-  using integral = typename ::internal::is_integral<InputIterator>;
-
-  assign_dispatch(first, last, integral());
+  // we could have received assign(n, x), so disambiguate on the type of InputIterator
+  if constexpr (_THRUST_STD::is_integral_v<InputIterator>)
+  {
+    fill_assign(first, last);
+  }
+  else
+  {
+    range_assign(first, last);
+  }
 } // end vector_base::assign()
 
 template <typename T, typename Alloc>
@@ -702,20 +686,6 @@ void vector_base<T, Alloc>::insert(iterator position, InputIterator first, Input
 
   insert_dispatch(position, first, last, integral());
 } // end vector_base::insert()
-
-template <typename T, typename Alloc>
-template <typename InputIterator>
-void vector_base<T, Alloc>::assign_dispatch(InputIterator first, InputIterator last, false_type)
-{
-  range_assign(first, last);
-} // end vector_base::assign_dispatch()
-
-template <typename T, typename Alloc>
-template <typename Integral>
-void vector_base<T, Alloc>::assign_dispatch(Integral n, Integral x, true_type)
-{
-  fill_assign(n, x);
-} // end vector_base::assign_dispatch()
 
 template <typename T, typename Alloc>
 template <typename InputIterator>

@@ -31,6 +31,8 @@
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/system/detail/adl/malloc_and_free.h>
 
+#include _THRUST_STD_INCLUDE(type_traits)
+
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -48,9 +50,15 @@ THRUST_HOST_DEVICE void malloc(thrust::execution_policy<DerivedPolicy>&, Size)
 template <typename T, typename DerivedPolicy>
 THRUST_HOST_DEVICE thrust::pointer<T, DerivedPolicy> malloc(thrust::execution_policy<DerivedPolicy>& exec, std::size_t n)
 {
-  thrust::pointer<void, DerivedPolicy> void_ptr = thrust::malloc(exec, sizeof(T) * n);
-
-  return pointer<T, DerivedPolicy>(static_cast<T*>(void_ptr.get()));
+  if constexpr (_THRUST_STD::is_void_v<T>)
+  {
+    // We cannot determine sizeof(void), but if void is the target type we are allocating bytes anyway
+    return pointer<void, DerivedPolicy>(thrust::malloc(exec, n).get());
+  }
+  else
+  {
+    return pointer<T, DerivedPolicy>(static_cast<T*>(thrust::malloc(exec, sizeof(T) * n).get()));
+  }
 } // end malloc()
 
 template <typename DerivedPolicy, typename Pointer>

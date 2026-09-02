@@ -32,6 +32,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/random/detail/random_core_access.h>
 #include <thrust/random/detail/xor_combine_engine_max.h>
@@ -99,8 +100,8 @@ public:
    */
   using result_type = typename thrust::detail::eval_if<
     (sizeof(typename base2_type::result_type) > sizeof(typename base1_type::result_type)),
-    thrust::detail::identity_<typename base2_type::result_type>,
-    thrust::detail::identity_<typename base1_type::result_type>>::type;
+    ::internal::type_identity<typename base2_type::result_type>,
+    ::internal::type_identity<typename base1_type::result_type>>::type;
 
   /*! The size of the first shift used in the generation algorithm.
    */

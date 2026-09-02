@@ -100,7 +100,7 @@ using device_memory_resource = detail::hip_memory_resource<hipMalloc, hipFree, t
 using managed_memory_resource =
   detail::hip_memory_resource<detail::hipMallocManaged, hipFree, thrust::hip::universal_pointer<void>>;
 using pinned_memory_resource =
-  detail::hip_memory_resource<hipHostMalloc, hipHostFree, thrust::hip::universal_pointer<void>>;
+  detail::hip_memory_resource<hipHostMalloc, hipHostFree, thrust::hip::universal_host_pinned_pointer<void>>;
 
 } // namespace detail
 //! \endcond

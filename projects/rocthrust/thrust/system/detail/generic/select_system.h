@@ -28,6 +28,7 @@
 #endif // no system header
 
 #include <thrust/detail/execution_policy.h>
+#include <thrust/detail/libcxx_wrapper/std/__cccl/unreachable.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/iterator/detail/device_system_tag.h>
@@ -67,11 +68,19 @@ select_system(thrust::execution_policy<System1>& system1, thrust::execution_poli
   {
     return thrust::detail::derived_cast(system1);
   }
-  else
+  else if constexpr (_THRUST_STD::is_same_v<System2, min_sys>)
   {
-    static_assert(_THRUST_STD::is_same_v<System2, min_sys>);
     return thrust::detail::derived_cast(system2);
   }
+  else if constexpr (thrust::detail::is_unrelated_systems<min_sys>)
+  {
+    static_assert(!sizeof(System1), "Cannot select a system: System1 and System2 are unrelated");
+  }
+  else
+  {
+    static_assert(!sizeof(System1), "select_system failed. Please file a bug report!");
+  }
+  THRUST_UNREACHABLE();
 }
 
 template <typename System1,

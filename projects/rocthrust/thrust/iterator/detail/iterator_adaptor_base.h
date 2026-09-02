@@ -27,6 +27,7 @@
 #endif // no system header
 
 #include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/use_default.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -53,7 +54,7 @@ namespace detail
 // If T is use_default, return the result of invoking DefaultNullaryFn, otherwise return T.
 template <class T, class DefaultNullaryFn>
 using replace_if_use_default =
-  typename ::internal::If<_THRUST_STD::is_same_v<T, use_default>, DefaultNullaryFn, identity_<T>>::type;
+  typename ::internal::If<_THRUST_STD::is_same_v<T, use_default>, DefaultNullaryFn, ::internal::type_identity<T>>::type;
 
 // A metafunction which computes an iterator_adaptor's base class, a specialization of iterator_facade.
 template <typename Derived,

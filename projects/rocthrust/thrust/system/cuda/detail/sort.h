@@ -61,17 +61,6 @@
 #  include <cuda/cmath>
 #  include <cuda/std/cstdint>
 
-#  if _CCCL_HAS_NVFP16()
-#    include <cuda_fp16.h>
-#  endif // _CCCL_HAS_NVFP16()
-
-#  if _CCCL_HAS_NVBF16()
-_CCCL_DIAG_PUSH
-_CCCL_DIAG_SUPPRESS_CLANG("-Wunused-function")
-#    include <cuda_bf16.h>
-_CCCL_DIAG_POP
-#  endif // _CCCL_HAS_NVBF16()
-
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {
@@ -374,7 +363,7 @@ THRUST_RUNTIME_FUNCTION void smart_sort(
       keys_last - keys_first,
       compare_op);
 
-    if (!is_contiguous_iterator<ItemsIt>::value)
+    if (!is_contiguous_iterator_v<ItemsIt>)
     {
       cuda_cub::copy(policy, values.begin(), values.end(), items_first);
     }
@@ -390,7 +379,7 @@ THRUST_RUNTIME_FUNCTION void smart_sort(
   }
 
   // copy results back, if necessary
-  if (!is_contiguous_iterator<KeysIt>::value)
+  if (!is_contiguous_iterator_v<KeysIt>)
   {
     cuda_cub::copy(policy, keys.begin(), keys.end(), keys_first);
   }

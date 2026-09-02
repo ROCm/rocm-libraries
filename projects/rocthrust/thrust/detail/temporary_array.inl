@@ -39,27 +39,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-namespace temporary_array_detail
-{
-
-template <typename T>
-struct avoid_initialization : _THRUST_STD::is_trivially_copy_constructible<T>
-{};
-
-template <typename T, typename TemporaryArray, typename Size>
-THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<avoid_initialization<T>::value> construct_values(TemporaryArray&, Size)
-{
-  // avoid the overhead of initialization
-} // end construct_values()
-
-template <typename T, typename TemporaryArray, typename Size>
-THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<!avoid_initialization<T>::value> construct_values(TemporaryArray& a, Size n)
-{
-  a.value_initialize_n(a.begin(), n);
-} // end construct_values()
-
-} // namespace temporary_array_detail
-
 template <typename T, typename System>
 THRUST_HOST_DEVICE temporary_array<T, System>::temporary_array(thrust::execution_policy<System>& system)
     : super_t(alloc_type(temporary_allocator<T, System>(system)))
@@ -69,7 +48,10 @@ template <typename T, typename System>
 THRUST_HOST_DEVICE temporary_array<T, System>::temporary_array(thrust::execution_policy<System>& system, size_type n)
     : super_t(n, alloc_type(temporary_allocator<T, System>(system)))
 {
-  temporary_array_detail::construct_values<T>(*this, n);
+  if constexpr (!_THRUST_STD::is_trivially_copy_constructible_v<T>)
+  {
+    super_t::value_initialize_n(super_t::begin(), n);
+  }
 } // end temporary_array::temporary_array()
 
 template <typename T, typename System>

@@ -70,8 +70,9 @@ using counting_iterator_difference_type =
 template <typename Incrementable, typename System, typename Traversal, typename Difference, typename StrideHolder>
 struct make_counting_iterator_base
 {
-  using system =
-    typename eval_if<_THRUST_STD::is_same<System, use_default>::value, identity_<any_system_tag>, identity_<System>>::type;
+  using system = typename eval_if<_THRUST_STD::is_same<System, use_default>::value,
+                                  ::internal::type_identity<any_system_tag>,
+                                  ::internal::type_identity<System>>::type;
 
   using traversal = replace_if_use_default<Traversal, ::internal::type_identity<random_access_traversal_tag>>;
   using difference =

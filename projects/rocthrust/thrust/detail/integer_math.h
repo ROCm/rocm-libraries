@@ -31,10 +31,18 @@
 #include _THRUST_STD_INCLUDE(limits)
 #include _THRUST_STD_INCLUDE(type_traits)
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__bit/countl.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/make_unsigned.h)
+#endif
+
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+// TODO(libhipcxx): drop this fallback (matching upstream's removal of `clz` in favor of
+// `_THRUST_STD::countl_zero`) once libhipcxx is ready and _THRUST_HAS_DEVICE_SYSTEM_STD is always 1.
 template <typename Integer>
 THRUST_HOST_DEVICE THRUST_FORCEINLINE Integer clz(Integer x)
 {
@@ -54,6 +62,7 @@ THRUST_HOST_DEVICE THRUST_FORCEINLINE Integer clz(Integer x)
 
   return result;
 }
+#endif
 
 template <typename Integer>
 THRUST_HOST_DEVICE THRUST_FORCEINLINE bool is_power_of_2(Integer x)
@@ -85,7 +94,11 @@ THRUST_HOST_DEVICE THRUST_FORCEINLINE Integer log2(Integer x)
   Integer num_bits           = 8 * sizeof(Integer);
   Integer num_bits_minus_one = num_bits - 1;
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  return num_bits_minus_one - _THRUST_STD::countl_zero(_THRUST_STD::__to_unsigned_like(x));
+#else
   return num_bits_minus_one - clz(x);
+#endif
 }
 
 template <typename Integer>

@@ -32,6 +32,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/reference_forward_declaration.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
@@ -76,23 +77,23 @@ struct pointer_base
   // void pointers should have no element type
   // note that we remove_cv from the Element type to get the value_type
   using value_type = typename thrust::detail::eval_if<_THRUST_STD::is_void<::internal::remove_cvref_t<Element>>::value,
-                                                      thrust::detail::identity_<void>,
+                                                      ::internal::type_identity<void>,
                                                       _THRUST_STD::remove_cv<Element>>::type;
 
   // if no Derived type is given, just use pointer
   using derived_type =
     typename thrust::detail::eval_if<_THRUST_STD::is_same<Derived, use_default>::value,
-                                     thrust::detail::identity_<pointer<Element, Tag, Reference, Derived>>,
-                                     thrust::detail::identity_<Derived>>::type;
+                                     ::internal::type_identity<pointer<Element, Tag, Reference, Derived>>,
+                                     ::internal::type_identity<Derived>>::type;
 
   // void pointers should have no reference type
   // if no Reference type is given, just use reference
   using reference_type = typename thrust::detail::eval_if<
     _THRUST_STD::is_void<::internal::remove_cvref_t<Element>>::value,
-    thrust::detail::identity_<void>,
+    ::internal::type_identity<void>,
     thrust::detail::eval_if<_THRUST_STD::is_same<Reference, use_default>::value,
-                            thrust::detail::identity_<reference<Element, derived_type>>,
-                            thrust::detail::identity_<Reference>>>::type;
+                            ::internal::type_identity<reference<Element, derived_type>>,
+                            ::internal::type_identity<Reference>>>::type;
 
   using type =
     thrust::iterator_adaptor<derived_type,

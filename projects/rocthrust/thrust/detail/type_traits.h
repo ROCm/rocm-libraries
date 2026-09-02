@@ -35,6 +35,7 @@
 #include _THRUST_STD_INCLUDE(type_traits)
 
 #include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD && _THRUST_USE_ROCPRIM
 // #  include <rocprim/type_traits.hpp>
@@ -186,7 +187,7 @@ struct largest_available_float
 // T1 wins if they are both the same size
 template <typename T1, typename T2>
 struct larger_type
-    : thrust::detail::eval_if<(sizeof(T2) > sizeof(T1)), thrust::detail::identity_<T2>, thrust::detail::identity_<T1>>
+    : thrust::detail::eval_if<(sizeof(T2) > sizeof(T1)), ::internal::type_identity<T2>, ::internal::type_identity<T1>>
 {};
 
 template <class F, class... Us>

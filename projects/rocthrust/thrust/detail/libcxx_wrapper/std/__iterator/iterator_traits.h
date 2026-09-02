@@ -43,6 +43,8 @@ template <typename Tp>
 using is_cpp17_input_iterator = _THRUST_STD::__is_cpp17_input_iterator<Tp>;
 template <typename Tp>
 using is_cpp17_random_access_iterator = _THRUST_STD::__is_cpp17_random_access_iterator<Tp>;
+template <typename Tp>
+inline constexpr bool has_input_traversal = _THRUST_STD::__has_input_traversal<Tp>;
 
 #else
 
@@ -72,6 +74,27 @@ struct has_iterator_category_convertible_to
 template <typename Tp, typename Up>
 struct has_iterator_category_convertible_to<Tp, Up, false> : ::std::false_type
 {};
+
+template <typename Tp>
+struct has_iterator_concept
+{
+private:
+  template <typename Up>
+  inline THRUST_HOST_DEVICE static ::std::false_type test(...);
+  template <typename Up>
+  inline THRUST_HOST_DEVICE static ::std::true_type test(typename Up::iterator_concept* = nullptr);
+
+public:
+  static const bool value = decltype(test<Tp>(nullptr))::value;
+};
+
+template <typename Tp, typename Up, bool = has_iterator_concept<Tp>::value>
+struct has_iterator_concept_convertible_to : ::std::is_convertible<typename Tp::iterator_concept, Up>
+{};
+
+template <typename Tp, typename Up>
+struct has_iterator_concept_convertible_to<Tp, Up, false> : ::std::false_type
+{};
 } // namespace detail
 
 template <typename Tp>
@@ -82,6 +105,11 @@ template <typename Tp>
 struct is_cpp17_random_access_iterator
     : public detail::has_iterator_category_convertible_to<Tp, detail::random_access_iterator_tag>
 {};
+
+template <typename Tp>
+inline constexpr bool has_input_traversal =
+  detail::has_iterator_category_convertible_to<Tp, detail::input_iterator_tag>::value
+  || detail::has_iterator_concept_convertible_to<Tp, detail::input_iterator_tag>::value;
 
 #endif
 

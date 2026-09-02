@@ -75,7 +75,7 @@ struct make_zip_iterator_base
 template <typename... Its>
 struct make_zip_iterator_base<_THRUST_STD::tuple<Its...>>
 {
-  // We need this to make discard iterator work because that has a void reference type
+  // We need this to make proxy iterators work because those have a void reference type
   template <class Iter>
   using zip_iterator_reference_t =
     _THRUST_STD::conditional_t<_THRUST_STD::is_same_v<it_reference_t<Iter>, void>,

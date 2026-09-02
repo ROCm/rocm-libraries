@@ -214,8 +214,7 @@ public:
    *  \param first The beginning of the range.
    *  \param last The end of the range.
    */
-  template <typename InputIterator,
-            _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
+  template <typename InputIterator, _THRUST_STD::enable_if_t<::internal::has_input_traversal<InputIterator>, int> = 0>
   vector_base(InputIterator first, InputIterator last);
 
   /*! This constructor builds a vector_base from a range.
@@ -223,8 +222,7 @@ public:
    *  \param last The end of the range.
    *  \param alloc The allocator to use by this vector_base.
    */
-  template <typename InputIterator,
-            _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
+  template <typename InputIterator, _THRUST_STD::enable_if_t<::internal::has_input_traversal<InputIterator>, int> = 0>
   vector_base(InputIterator first, InputIterator last, const Alloc& alloc);
 
   /*! The destructor erases the elements.
@@ -529,13 +527,6 @@ protected:
   size_type m_size;
 
 private:
-  // these methods resolve the ambiguity of the constructor template of form (Iterator, Iterator)
-  template <typename IteratorOrIntegralType>
-  void init_dispatch(IteratorOrIntegralType begin, IteratorOrIntegralType end, false_type);
-
-  template <typename IteratorOrIntegralType>
-  void init_dispatch(IteratorOrIntegralType n, IteratorOrIntegralType value, true_type);
-
   template <typename InputIterator>
   void range_init(InputIterator first, InputIterator last);
 
@@ -562,14 +553,6 @@ private:
   // this method performs insertion from a range
   template <typename InputIterator>
   void copy_insert(iterator position, InputIterator first, InputIterator last);
-
-  // these methods resolve the ambiguity of the assign() template of form (InputIterator, InputIterator)
-  template <typename InputIterator>
-  void assign_dispatch(InputIterator first, InputIterator last, false_type);
-
-  // these methods resolve the ambiguity of the assign() template of form (InputIterator, InputIterator)
-  template <typename Integral>
-  void assign_dispatch(Integral n, Integral x, true_type);
 
   // this method performs assignment from a range
   template <typename InputIterator>

@@ -187,7 +187,7 @@ mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, Inp
   const auto transform_first =
     detail::transform_pair_of_input_iterators_t<bool, InputIt1, InputIt2, BinaryPred>(first1, first2, binary_pred);
   const auto result = cuda_cub::find_if_not(
-    policy, transform_first, transform_first + _THRUST_STD::distance(first1, last1), ::cuda::std::__identity{});
+    policy, transform_first, transform_first + _THRUST_STD::distance(first1, last1), ::cuda::std::identity{});
   return thrust::make_pair(first1 + _THRUST_STD::distance(transform_first, result),
                            first2 + _THRUST_STD::distance(transform_first, result));
 

@@ -30,6 +30,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_member_function.h>
@@ -222,7 +223,7 @@ struct allocator_traits
 
   using pointer = typename eval_if<allocator_traits_detail::has_pointer<allocator_type>::value,
                                    allocator_traits_detail::nested_pointer<allocator_type>,
-                                   identity_<value_type*>>::type;
+                                   ::internal::type_identity<value_type*>>::type;
 
 private:
   template <typename T>
@@ -259,17 +260,17 @@ public:
   using propagate_on_container_copy_assignment =
     typename eval_if<allocator_traits_detail::has_propagate_on_container_copy_assignment<allocator_type>::value,
                      allocator_traits_detail::nested_propagate_on_container_copy_assignment<allocator_type>,
-                     identity_<false_type>>::type;
+                     ::internal::type_identity<false_type>>::type;
 
   using propagate_on_container_move_assignment =
     typename eval_if<allocator_traits_detail::has_propagate_on_container_move_assignment<allocator_type>::value,
                      allocator_traits_detail::nested_propagate_on_container_move_assignment<allocator_type>,
-                     identity_<false_type>>::type;
+                     ::internal::type_identity<false_type>>::type;
 
   using propagate_on_container_swap =
     typename eval_if<allocator_traits_detail::has_propagate_on_container_swap<allocator_type>::value,
                      allocator_traits_detail::nested_propagate_on_container_swap<allocator_type>,
-                     identity_<false_type>>::type;
+                     ::internal::type_identity<false_type>>::type;
 
   using is_always_equal =
     typename eval_if<allocator_traits_detail::has_is_always_equal<allocator_type>::value,
@@ -341,7 +342,7 @@ struct allocator_system
   using get_result_type =
     typename eval_if<allocator_traits_detail::has_member_system<Alloc>::value,
                      _THRUST_STD::add_lvalue_reference<type>,
-                     identity_<type>>::type;
+                     ::internal::type_identity<type>>::type;
 
   THRUST_HOST_DEVICE inline static get_result_type get(Alloc& a);
 };

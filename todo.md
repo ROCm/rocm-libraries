@@ -1147,35 +1147,1165 @@ fix a bug the earlier commit itself introduced).
       local-only include drops (`conditional.h`, and the 5
       `minimum_system.h` include removals map 1:1 to upstream's own). All
       12 files staged.
-- [ ] 5973d44bd59e1c438ccba4c09725df4f023dcf35 Port `thrust::constant_iterator` to cuda (#4812)
-- [ ] 6210162082bb2064e4e76b8632b42708f3e250af Use `cuda::std::type_identity` instead of *identity-like* types (#4893)
-- [ ] 599d21f090af655d2b0061f3202ed59eaa3517d1 Drop cuda::std::__identity (#4887)
-- [ ] 7371801fb23623fb1f536a23d9749a519fc2de79 Fix RadixEncoder<int> operator() signature for radix sort (#4921)
-- [ ] 9d5b5c5508cf4ba7348914ed7541d6c7321fe415 Improve RFA PR 2234 (#4888)
-- [ ] 450622a74f6ca55e6884a02fb179cf9583e06c1a Drop dead code in Thrust reduce (#4969)
-- [ ] 5e610b0ce8f3175ca01b4211917f9197ed4d97a5 replace `_LIBCUDACXX_HIDE_FROM_ABI` with `_CCCL_API inline` (#4936)
-- [ ] a0ac7eadf8470ffdd68a4ea858c389e229230252 Port `thrust::tabulate_output_iterator` to `cuda` (#4879)
-- [ ] 3314a70aa01e477c8f645da810e9810002f80483 Refactor thrust::sequential::sort (#4925)
-- [ ] 3935bb637c036bac4c817d4a7b369e12aa020e9a Add load-bearing semicolon for MSVC in openMP sort (#5024)
-- [ ] 6b7ab3b6d8b7445c436b0fe066ec0d9c594041a1 Refactor around `thrust::vector` (#5044)
-- [ ] a6282e9cf4f8d2a20a3328b9473edf7b7cdbe9cd Handle upcoming vector type change (#5036)
-- [ ] cd1b8dcbb1c7d679a625ef0def9be54448d81d1d Apply `remove_cvref` in `thrust::is_contiguous_iterator` and refactor all uses (#5050)
-- [ ] 71da83a25c2451bf8db7db2ac1e45b63c0742d80 `thrust::cuda::pinned_memory_resource` should dispatch to the host system (#5045)
-- [ ] 6ccee554169d39f19105d6ef65f68f4e9e220a5e Add vectorized `cub::DeviceTransform` algorithm (#4815)
-- [ ] c16a2e1623e632c986d20ba5715d00f098b77b45 Port `thrust::transform_output_iterator` to `cuda` (#5051)
-- [ ] 0788bf61e2b586703f8c839f75c73f64a0fbfdbf Fix `thrust::make_discard_iterator` (#5093)
-- [ ] 0cf03e41303bb49d3822ec0d2aa4fbc9f9acb489 Port `thrust::permutation_iterator` (#4835)
-- [ ] 11486dea25276ac29b3bee5eeaf8c1d03a186f0d Refactor generic sequence (#5156)
-- [ ] e703c48ced0b5ba23daf4bb8d87eb328e483ed72 Update doc errors set_operations.h (#5177)
-- [ ] 9e4cd939db12d7d7ae8027c0df5bf2f89a3c8851 [pre-commit.ci] pre-commit autoupdate (#4365)
-- [ ] 74dac60f7db268d2a221e42e218c283d9ef3ce34 Refactor thrust cuda replace (#5180)
-- [ ] 77eb9a6414c62799914c8983455a2cb2897309a1 Implement transform[_if]_n in the generic system (#5182)
-- [ ] 961efabbc7a60b892d93e9c91af5fdddc1f1adaa Replace cuda version checks with `_CCCL_CTK_XXX()` macro (#5204)
-- [ ] 9b34fe9249cbb1b308d4d2b9d99faacc4cf86983 Implement `thrust::swap_ranges` via `transform` in CUDA system (#5243)
-- [ ] 33900a1fb128269148bfa78edd8d53d4ca3557b4 Add a macro to disable PDL (#5316) (#5329)
-- [ ] 7296b79e16f148cd2c8c3114971d9a9ecbb59372 [Backport branch/3.1.x] PR #5396 and #5566 (#5611)
-- [ ] 7edde877f8f4b15c55568beb973a7654e48ba06b Fix `thrust::malloc` for `void` (#5698) (#5718)
-- [ ] 62b14d19b77cfc5b549c97177ea80030e25ba5ec [BACKPORT 3.1] Use forward declarations of extended floating point types instead of including the headers (#5846) (#5978)
-- [ ] 5fefb30bc8e597a288352372e9786496bb2f733f [Backport 3.1]  Backport iterator fixes (#5977)
-- [ ] ecce794c363cf65c97e59faf5caf376abf8da340 [Backport to 3.1] Fix dereferencing nullptr in thrust::device_reference (#4226) (#6002)
-- [ ] 30ae2aca9d54c51262f06e5ebce598562ceb884b [Backport 3.1]: [CUB] Replace several direct uses of `__clz` (#6099) (#6202)
+- [X] 5973d44bd59e1c438ccba4c09725df4f023dcf35 Port `thrust::constant_iterator` to cuda (#4812)
+      Small, single-file diff. Added `iterator_system<::cuda::constant_iterator<T,Index>>`
+      (`= any_system_tag`) and `iterator_traversal<...>` (`= random_access_traversal_tag`)
+      specializations to `thrust/iterator/iterator_traits.h`, inserted
+      immediately after the existing `discard_iterator` pair, matching
+      upstream's placement (right before `counting_iterator`). Translated
+      `::cuda::constant_iterator<T, Index>` -> `_THRUST_LIBCXX::constant_iterator<T,
+      Index>`, consistent with the file's existing guarded
+      `#if _THRUST_HAS_DEVICE_SYSTEM_STD` block that already specializes
+      `discard_iterator`/`counting_iterator`/`strided_iterator`/`transform_iterator`
+      the same way. No new include needed (specializing a template only
+      requires the primary template's declaration, and the file doesn't
+      include `discard_iterator.h`/`counting_iterator.h` either, confirming
+      the existing pattern of not needing one). `clang-format --style=file`
+      clean. `git diff` matches upstream line-for-line modulo the
+      `::cuda::` -> `_THRUST_LIBCXX::` macro translation. Staged.
+- [X] 6210162082bb2064e4e76b8632b42708f3e250af Use `cuda::std::type_identity` instead of *identity-like* types (#4893)
+      Upstream replaces every `identity_<T>`/local *identity-like* helper
+      call site with `::cuda::std::type_identity<T>`, touching 14 files.
+      Translated all 14 local files, but with a convention split, not a
+      single blanket substitution:
+      - In the 13 dual-mode (host/device-agnostic) files -
+        `allocator_traits.h`, `internal_functional.h`, `pointer.h`,
+        `raw_reference_cast.h`, `temporary_array.h`, `type_traits.h`,
+        `type_traits/pointer_traits.h`, `iterator/constant_iterator.h`,
+        `iterator/counting_iterator.h`, `iterator/detail/iterator_adaptor_base.h`,
+        `iterator/detail/iterator_facade_category.h`,
+        `random/detail/xor_combine_engine_max.h`, `random/xor_combine_engine.h`
+        - every `identity_<X>` (bare or `thrust::detail::`-qualified) was
+        translated to `::internal::type_identity<X>`, **not**
+        `_THRUST_STD::type_identity<X>`. Reason: `_THRUST_STD` resolves to
+        bare `::std` in the non-device-system-std fallback branch, and this
+        codebase's confirmed minimum standard is C++17
+        (`thrust/detail/config/cpp_dialect.h` hard-errors below
+        `THRUST_STD_VER 2017`), while `std::type_identity` is a C++20
+        feature - so `_THRUST_STD::type_identity` would fail to compile in
+        that fallback. `::internal::type_identity`
+        (`thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h`)
+        is the existing ROCm-local polyfill built exactly for this: it
+        aliases `_THRUST_STD::type_identity` when a device-system-std or
+        C++20 is available, and falls back to a hand-written
+        `template<typename Tp> struct type_identity { using type = Tp; };`
+        otherwise - safe in all 3 branches. This wasn't a guess: it matches
+        `iterator/counting_iterator.h`'s own pre-existing (untouched by this
+        commit) `traversal`/`difference` fields, which already use
+        `::internal::type_identity`. Added
+        `#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>`
+        to each of the 13 files (already present in `counting_iterator.h`).
+      - In `system/cuda/detail/core/util.h` - a CUDA-backend-only file that
+        uses bare `::cuda::std::` throughout with zero `_THRUST_STD`/
+        `_THRUST_STD_INCLUDE` usage anywhere (confirmed via grep, e.g. the
+        same struct's pre-existing `::cuda::std::conditional`) - translated
+        `thrust::detail::identity_<AgentPlan>` to bare
+        `::cuda::std::type_identity<AgentPlan>`, matching upstream exactly.
+        Also swapped its now-unneeded
+        `#include <cuda/std/__type_traits/void_t.h>` for
+        `#include <cuda/std/type_traits>`, matching upstream's own include
+        change in this commit.
+      - `type_traits.h`'s `identity_` struct **definition itself was kept**,
+        diverging intentionally from upstream (which deletes it) - only its
+        one remaining upstream-touched call site (`larger_type`) was
+        translated. Confirmed via `git ls-tree -r v3.1.0` that
+        `thrust/unique_ptr.h` (a ROCm-local file with no upstream
+        counterpart) still depends on `identity_`, and `zip_iterator.h` has
+        an untouched `#else`-branch call site (~line 193) that also depends
+        on it - deleting the struct would break both.
+      - `::internal::If<...>` (the separate polyfill for `::cuda::std::_If`,
+        used in `iterator_adaptor_base.h`'s `replace_if_use_default` and
+        `iterator_facade_category.h`'s `iterator_facade_category`) was left
+        untouched - only the nested `identity_<T>` argument inside each was
+        translated.
+      Verified zero stray `identity_<` call sites remain across all 14
+      files (only the intentional `type_traits.h` struct definition
+      remains). `clang-format --style=file` clean on all 14 (one unrelated
+      pre-existing quirk in `pointer.h`, far from these edits, confirmed via
+      `git diff` to be untouched). All 14 files staged.
+- [X] 599d21f090af655d2b0061f3202ed59eaa3517d1 Drop cuda::std::__identity (#4887)
+      Small, mechanical, 3-file diff, unrelated to item 47's
+      `identity_`/`type_identity` work despite the similar name - this
+      replaces the deprecated/internal `::cuda::std::__identity{}` functor
+      with the standard `::cuda::std::identity{}` (C++20's `std::identity`,
+      exposed early by libcu++). All 3 touched files -
+      `system/cuda/detail/gather.h`, `system/cuda/detail/mismatch.h`,
+      `system/cuda/detail/scatter.h` - are CUDA-backend-only files (same
+      category as item 47's `util.h`), so the bare `::cuda::std::identity{}`
+      form was used to match upstream exactly, no `_THRUST_STD`/
+      `::internal::` translation needed. 7 call sites total (3 in
+      `gather.h`, 1 in `mismatch.h`, 3 in `scatter.h`) via a straight
+      `__identity` -> `identity` substring replace. `mismatch.h`'s
+      pre-existing `_THRUST_STD::distance` (vs. upstream's bare
+      `::cuda::std::distance`) is an unrelated, untouched local divergence,
+      left as-is. `git diff` matches upstream line-for-line.
+      `clang-format --style=file --Werror` clean on all 3. All 3 files
+      staged.
+- [X] 7371801fb23623fb1f536a23d9749a519fc2de79 Fix RadixEncoder<int> operator() signature for radix sort (#4921)
+      No-op locally. Upstream fixes a bug in `RadixEncoder<int>::operator()`
+      (was mistakenly typed `unsigned long operator()(long x)` instead of
+      `unsigned int operator()(int x)`, mismatching the `int` specialization
+      it belongs to). Checked
+      `thrust/system/detail/sequential/stable_radix_sort.inl` locally:
+      `RadixEncoder<int>` already has the correct signature (`unsigned int
+      operator()(int x)`) - the local codebase never carried this bug (or
+      it was already fixed independently). Nothing to change; verified via
+      direct read, no port needed.
+- [X] 9d5b5c5508cf4ba7348914ed7541d6c7321fe415 Improve RFA PR 2234 (#4888)
+      Large upstream commit (RFA = deterministic reduce accumulator
+      follow-up PR), but almost all of it lives in `cub`/benchmarks/tests
+      outside the `thrust/thrust/*` path filter - only 1 file touched
+      here: `type_traits/unwrap_contiguous_iterator.h`. Upstream swaps its
+      `contiguous_iterator_traits::raw_pointer` alias's bare
+      `std::declval<Iterator>()` for `::cuda::std::declval<Iterator>()`,
+      adding `#include <cuda/std/utility>`. Local file matched upstream's
+      pre-commit state exactly (same bare `std::declval`, no include for
+      it). Translated to the established dual-mode convention (confirmed
+      via grep across e.g. `detail/functional/actor.h`,
+      `iterator/transform_iterator.h`,
+      `detail/type_traits/has_member_function.h`): added
+      `#include _THRUST_STD_INCLUDE(utility)` and changed the call site to
+      `_THRUST_STD::declval<Iterator>()`. `clang-format --style=file
+      --Werror` clean. `git diff` matches upstream modulo the macro
+      translations. Staged.
+- [X] 450622a74f6ca55e6884a02fb179cf9583e06c1a Drop dead code in Thrust reduce (#4969)
+      Pure deletion, single file: upstream removes the old
+      `__reduce::doit_step`/`__reduce::reduce` functions from
+      `system/cuda/detail/reduce.h` (179 lines, right after `DrainAgent`'s
+      struct closes, before `namespace detail`) as dead code - the real
+      CUDA entry point (`cuda_cub::reduce`, further down the same file)
+      dispatches through `reduce_n` -> `detail::reduce_n_impl` ->
+      `cub::DeviceReduce::Reduce` instead, and nothing else in the CUDA
+      backend called the old kernel-based path.
+      Before deleting, applied the "never assume upstream deleted something
+      without checking" rule: grepped the whole `rocthrust` tree for
+      `__reduce::reduce`/`__reduce::doit_step` callers. Found one hit -
+      `system/hip/detail/reduce.h:149` calls `__reduce::reduce(...)` - but
+      traced it and confirmed this is a **different, unrelated**
+      `__reduce` namespace: HIP's own `hip_rocprim::__reduce::reduce`
+      (defined locally in that same file, wrapping `rocprim::reduce`, a
+      completely separate rocPRIM-based implementation), not
+      `cuda_cub::__reduce::reduce` from the CUDA file. `extrema.h`'s
+      references to `__reduce::ReduceAgent`/`__reduce::DrainAgent` (kept
+      upstream, only `doit_step`/`reduce` themselves are removed) were also
+      checked and are unaffected. Confirmed the CUDA-side dead code truly
+      has zero local callers. Deleted local lines 606-784 (the exact
+      `doit_step` + `reduce` block, bounded by `}; // struct DrainAgent;`
+      above and `} // namespace __reduce` below, matching upstream's hunk
+      boundaries exactly). `clang-format --style=file --Werror` clean.
+      Staged.
+- [X] 5e610b0ce8f3175ca01b4211917f9197ed4d97a5 replace `_LIBCUDACXX_HIDE_FROM_ABI` with `_CCCL_API inline` (#4936)
+      No-op locally. Pure libcu++/CCCL-internal ABI-linkage macro rename
+      (`_LIBCUDACXX_HIDE_FROM_ABI` -> `_CCCL_API`) on 3 deprecated
+      thin-wrapper functions in `advance.h`/`distance.h`/`functional.h`
+      that forward to `::cuda::std::advance`/`next`/`prev`/`distance`/
+      `not_fn`. Grepped the whole `rocthrust` tree for both
+      `_LIBCUDACXX_HIDE_FROM_ABI` and `_CCCL_API` - zero hits either way.
+      The local dual-mode convention never adopted either CUDA-only ABI
+      macro for these wrappers in the first place; they're already written
+      using the codebase's own `THRUST_HOST_DEVICE`/`inline`/
+      `THRUST_DEPRECATED_BECAUSE` conventions (confirmed by direct read of
+      `advance.h`, `distance.h`, `functional.h`), which are valid identically
+      across all 3 backend branches. Nothing to change.
+- [X] a0ac7eadf8470ffdd68a4ea858c389e229230252 Port `thrust::tabulate_output_iterator` to `cuda` (#4879)
+      Registers the libcu++/libhipcxx-native `::cuda::tabulate_output_iterator`
+      (distinct from the pre-existing, untouched Thrust-native
+      `thrust::tabulate_output_iterator` in
+      `iterator/tabulate_output_iterator.h`, which is its own
+      `iterator_adaptor`-based type and out of scope here) with Thrust's
+      iterator-traits/proxy-reference machinery, matching the same pattern
+      item 46 used for `constant_iterator`. 3 files:
+      - `detail/internal_functional.h`: added
+      `#include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)`
+      under the existing `#if _THRUST_HAS_DEVICE_SYSTEM_STD` guard
+      (alongside `discard_iterator.h`'s). Generalized the old
+      bespoke-and-narrow `is_discard_proxy<T>` trait into 2 specializations
+      of the pre-existing, more general primary template
+      `is_proxy_reference_v` (defined in `detail/type_traits.h:125`, already
+      used by the native `tabulate_output_iterator.h`/
+      `transform_output_iterator.h`/`transform_input_output_iterator.h`
+      proxies) - one for `_THRUST_LIBCXX::discard_iterator::__discard_proxy`
+      (replacing the old `is_discard_proxy` specialization 1:1) and one new
+      one for `_THRUST_LIBCXX::__tabulate_proxy<Fn, Index>`, both guarded by
+      `#if _THRUST_HAS_DEVICE_SYSTEM_STD` (since `_THRUST_LIBCXX::` expands
+      to nothing otherwise). Dropped `is_discard_proxy` entirely (dead after
+      the generalization) and removed its `|| is_discard_proxy<T>` disjunct
+      from `enable_if_assignable_ref` - `is_non_const_reference_v` already
+      covers proxy references generally via `is_proxy_reference_v`.
+      - `iterator/iterator_traits.h`: added `iterator_system` (`=
+      any_system_tag`) / `iterator_traversal` (`= random_access_traversal_tag`)
+      specializations for `_THRUST_LIBCXX::tabulate_output_iterator<Fn,
+      Index>`, inserted alphabetically between `strided_iterator` and
+      `transform_iterator`, matching upstream's placement and the existing
+      `discard_iterator`/`constant_iterator`/`counting_iterator` pattern.
+      - `iterator/zip_iterator.h`: comment-only rewording ("discard
+      iterator" -> "proxy iterators") on `make_zip_iterator_base`'s
+      `zip_iterator_reference_t`, reflecting that this void-reference-type
+      workaround now also covers `tabulate_output_iterator`'s proxy, not
+      just `discard_iterator`'s. No code change.
+      `clang-format --style=file --Werror` clean on all 3 (one unrelated
+      pre-existing violation at `zip_iterator.h:500`, far from this edit
+      and confirmed untouched via `git diff`). `git diff` matches upstream
+      modulo the `::cuda::`/`::cuda::std::` -> `_THRUST_LIBCXX::`/
+      `_THRUST_STD::` macro translations. All 3 files staged.
+- [X] 3314a70aa01e477c8f645da810e9810002f80483 Refactor thrust::sequential::sort (#4925)
+      Single-file change:
+      `system/detail/sequential/sort.inl`. Pure refactor, no behavior
+      change, matching upstream's own framing.
+      - `namespace system { namespace detail { namespace sequential {` ->
+      C++17 nested `namespace system::detail::sequential {`. Purely
+      stylistic, safe given the codebase's confirmed C++17 minimum
+      standard (`thrust/detail/config/cpp_dialect.h`); matches upstream
+      exactly, not a CUDA/HIP translation concern.
+      - `sort_detail::needs_reverse<KeyType, Compare>` and
+      `sort_detail::use_primitive_sort<KeyType, Compare>`: converted from
+      old-style tag-dispatch `struct ... : is_same<...>{}` /
+      `struct ... : ::internal::_And<::internal::is_arithmetic<KeyType>,
+      disjunction<...>>{}` into plain `inline constexpr bool` variable
+      templates using `_THRUST_STD::is_same_v`/`is_arithmetic_v`. Upstream
+      uses bare `::cuda::std::is_arithmetic_v`/`is_same_v`; translated to
+      `_THRUST_STD::` per established convention (valid unconditionally in
+      all 3 backends).
+      - Deliberate convention decision: upstream's *old* code used
+      `::internal::_And<...>`/`::internal::is_arithmetic<...>` (this
+      repo's pre-existing local aliases, not present in the same form
+      upstream even historically — actually upstream's old code used
+      `::cuda::std::_And`/`is_arithmetic` directly; this repo's fork used
+      the `::internal::` wrapper). Read
+      `thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h` and
+      `thrust/detail/type_traits.h` (lines 45-94): both `::internal::_And`
+      and `::internal::is_arithmetic` carry an explicit
+      `// TODO(libhipcxx): remove this file/namespace and replace
+      ::internal* with _THRUST_STD* in rocThrust once libhipcxx gets
+      ready` comment, i.e. temporary workarounds the codebase itself wants
+      gone. Since this refactor rewrites this code from scratch anyway
+      (not preserving a reference to old code), used `_THRUST_STD::`
+      directly instead of perpetuating the deprecated `::internal::`
+      wrapper — aligned with the codebase's own stated direction, and
+      functionally identical in both branches (device-system-std branch:
+      `::internal::X` is a bare `using _THRUST_STD::X;` alias;  fallback
+      branch: `_THRUST_STD` resolves to `::std` too, so both spellings are
+      equivalent for `is_arithmetic`/`is_same`, which are C++11-safe
+      traits).
+      - Old tag-dispatch overloads (`stable_sort(..., true_type)` /
+      `stable_sort(..., false_type)` and the `_by_key` equivalents, plus
+      the `thrust::detail::true_type`/`false_type use_primitive_sort;`
+      dispatch objects in the public entry points) deleted entirely,
+      replaced with a single `if constexpr (sort_detail::use_primitive_sort<...>)
+      { ... } else { ... }` per public function body. Safe: `if constexpr`
+      is C++17, unconditionally available.
+      - `NV_IF_TARGET`/`NV_IS_HOST`/`NV_IS_DEVICE` -> `_THRUST_IF_TARGET`/
+      `_THRUST_IS_HOST`/`_THRUST_IS_DEVICE` per established macro
+      translation (defined in `thrust/detail/config/libcxx.h`).
+      - `StrictWeakOrdering comp` parameter marked
+      `[[maybe_unused]]` with a `// GCC 7-9 warn that comp is unused`
+      comment, plus a `#if _CCCL_COMPILER(GCC, <, 10) (void) comp; #endif`
+      workaround block added only inside `stable_sort` (not
+      `stable_sort_by_key`) — this asymmetry is exactly upstream's; ported
+      faithfully rather than "fixed": old GCC (7-9) doesn't fully fold
+      away the unused-parameter warning across `NV_IF_TARGET`/
+      `_THRUST_IF_TARGET` branches for `stable_sort` even though `comp`
+      is used in both its branches, but not for `stable_sort_by_key`.
+      `_CCCL_COMPILER(GCC, <, 10)` used bare/untranslated, matching
+      existing precedent in `thrust/complex.h`.
+      - Removed the now-dead
+      `#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>`
+      (only prior consumer, `::internal::_And`, no longer used in this
+      file). Kept the existing `#include <thrust/detail/type_traits.h>`
+      and the `#if !_THRUST_HAS_DEVICE_SYSTEM_STD / #include <type_traits>`
+      fallback (both already sufficient for `is_arithmetic_v`/`is_same_v`
+      in the fallback branch).
+      `clang-format --style=file --Werror` clean. `git diff` matches
+      upstream line-for-line modulo the macro translations above. Grepped
+      for other callers of `sort_detail::` in this file's namespace and of
+      the deleted `stable_sort(..., true_type/false_type)` overloads —
+      none found outside this file (other `*_detail::` namespace hits in
+      sibling files are unrelated: `stable_primitive_sort_detail`,
+      `stable_merge_sort_detail`, `radix_sort_detail`, and OMP/TBB's own
+      distinct `sort_detail` namespaces). Staged.
+- [X] 3935bb637c036bac4c817d4a7b369e12aa020e9a Add load-bearing semicolon for MSVC in openMP sort (#5024)
+      No-op. `system/omp/detail/sort.inl` already matches upstream's
+      target state exactly: the `// #5020: For some reason, MSVC may
+      yield an error unless we include this meaningless semicolon here`
+      comment text, and the extra `;` after the second
+      `THRUST_PRAGMA_OMP(barrier)` inside the `while (nseg > 1)` loop, are
+      both already present in both `stable_sort` (lines 131-134, 161-164)
+      and `stable_sort_by_key` (lines 218-221, 253-256). `git diff HEAD`
+      confirms zero delta on this file. Verified.
+- [X] 6b7ab3b6d8b7445c436b0fe066ec0d9c594041a1 Refactor around `thrust::vector` (#5044)
+      7-file pure refactor (`if constexpr`/tag-dispatch cleanup + struct ->
+      `inline constexpr bool` variable-template conversions), no behavior
+      change, matching upstream's own framing.
+      - `detail/temporary_array.inl`: deleted the
+      `temporary_array_detail::avoid_initialization<T>`/
+      `construct_values<T>(...)` SFINAE-overload pair, inlined into
+      `temporary_array`'s size-taking constructor as
+      `if constexpr (!_THRUST_STD::is_trivially_copy_constructible_v<T>) { super_t::value_initialize_n(...); }`.
+      `::cuda::std::is_trivially_copy_constructible_v` ->
+      `_THRUST_STD::is_trivially_copy_constructible_v`.
+      - `detail/type_traits/is_thrust_pointer.h`: `struct is_thrust_pointer
+      : is_metafunction_defined<...>{}` -> `inline constexpr bool
+      is_thrust_pointer_v = is_metafunction_defined<...>::value`. Grepped
+      the whole tree for `is_thrust_pointer` (case-sensitive, non-`_v`) to
+      confirm only the 2 files upstream also touches call it.
+      - `detail/type_traits/pointer_traits.h`:
+      `lazy_is_pointer_convertible`/`lazy_is_void_pointer_system_convertible`
+      updated to call `is_thrust_pointer_v<FromPtr>`/`<ToPtr>` instead of
+      `is_thrust_pointer<FromPtr>::value`/`<ToPtr>::value`. Their
+      `::internal::type_identity<thrust::detail::false_type>` (upstream:
+      bare `::cuda::std::type_identity<...>`) left untouched — this file
+      already used the item-47-established `::internal::type_identity`
+      dual-mode translation before this commit, unrelated to today's
+      change, not reverted.
+      - `detail/vector_base.h`/`vector_base.inl`: removed the
+      `init_dispatch(..., false_type/true_type)` overload-pair
+      declarations/definitions (constructor ambiguity resolution) and the
+      `assign_dispatch(..., false_type/true_type)` pair, replacing both
+      call sites with `if constexpr`. The 2 `vector_base(InputIterator,
+      InputIterator[, Alloc])` constructor bodies became
+      `static_assert(!_THRUST_STD::is_integral_v<InputIterator>); //
+      TODO(bgruber): remove, just for testing` + `range_init(first,
+      last);` verbatim per upstream (including the TODO wording — it's
+      upstream's own comment, not mine). `assign()`'s body became
+      `if constexpr (_THRUST_STD::is_integral_v<InputIterator>)
+      fill_assign(first, last); else range_assign(first, last);` — used
+      `_THRUST_STD::is_integral_v` directly rather than the local
+      `::internal::is_integral` wrapper (grepped `type_traits.h`: confirmed
+      `::internal::is_integral` is a bare `using _THRUST_STD::is_integral;`
+      alias under the same libhipcxx-readiness TODO as `_And`/
+      `is_arithmetic` from item 54 — same "new code -> prefer
+      `_THRUST_STD::` directly" convention decision applies). The
+      untouched `insert_dispatch(..., false_type/true_type)` pair (upstream
+      doesn't refactor `insert()` in this commit) and its
+      `::internal::is_integral` call site in `insert()` were left exactly
+      as-is — confirmed by diffing against upstream, which also leaves
+      `insert_dispatch`/`insert()` untouched here.
+      - `system/cuda/detail/internal/copy_device_to_device.h`
+      (CUDA-only, `#if _CCCL_HAS_CUDA_COMPILER()`): collapsed the
+      `device_to_device(..., true_type/false_type)` tag-dispatch pair into
+      one function with `if constexpr
+      (is_indirectly_trivially_relocatable_to<InputIt, OutputIt>::value)`.
+      Removed now-unused `<thrust/distance.h>`/`<thrust/functional.h>`
+      includes, added `<cuda/std/iterator>` (bare `::cuda::std::distance`
+      kept, CUDA-only file convention, matches item 51's precedent for
+      this same file's neighborhood). Grepped all callers of
+      `device_to_device`: only the 4-arg entry point is called
+      (`cuda/detail/copy.h`); HIP's `copy.h` calls its own
+      self-contained `hip_rocprim::__copy::device_to_device`, a distinct
+      file/namespace, out of scope (same HIP-vs-CUDA namespace-boundary
+      check as item 51).
+      - `type_traits/is_contiguous_iterator.h`: moved the public
+      `is_contiguous_iterator`/`is_contiguous_iterator_v` aliases to after
+      the `detail` namespace (upstream reorders them to depend on the new
+      `detail::is_contiguous_iterator_impl_v`); converted
+      `is_libcxx_wrap_iter`/`is_libstdcxx_normal_iterator`/
+      `is_msvc_contiguous_iterator`/`is_contiguous_iterator_impl` structs
+      to `_v` variable templates; `is_contiguous_iterator` alias changed
+      from `detail::is_contiguous_iterator_impl<Iterator>` to
+      `_THRUST_STD::bool_constant<detail::is_contiguous_iterator_impl_v<Iterator>>`
+      (upstream: bare `::cuda::std::bool_constant`). Preserved 2
+      pre-existing local-only divergences untouched by this commit
+      upstream too: (1) the `#if _THRUST_HAS_DEVICE_SYSTEM_STD ||
+      THRUST_STD_VER > 2020` fallback branch choosing between
+      `contiguous_iterator<Iterator>` (C++20 concept) and
+      `is_pointer_v<Iterator>` for pre-C++20/no-device-std builds —
+      upstream has no such fallback since it always has libcu++; (2) local
+      uses bare `defined(_MSC_VER)` with an explanatory
+      "// Use defined(_MSC_VER) due to Windows CI failures" comment where
+      upstream's context (unchanged by this diff) already reads
+      `#if _CCCL_COMPILER(MSVC)` — an earlier, not-yet-ported upstream
+      commit's divergence, out of scope here. NOTE: this same file is
+      touched again by the very next-but-one todo.md item
+      (`cd1b8dcbb1c7d679a625ef0def9be54448d81d1d`, "Apply remove_cvref in
+      thrust::is_contiguous_iterator") — expect further changes there.
+      Grepped the tree for stale references to all removed struct names
+      (`temporary_array_detail`, `avoid_initialization`,
+      `is_contiguous_iterator_impl` (non-`_v`), `is_libcxx_wrap_iter`,
+      `is_libstdcxx_normal_iterator`, `is_msvc_contiguous_iterator`, all
+      non-`_v`) — none found outside the edited files.
+      `clang-format --style=file --Werror` clean on all 7 files except 2
+      pre-existing, untouched-by-this-diff violations (confirmed via
+      `git diff` hunks not covering those lines): `temporary_array.inl`
+      line 58 (`int, execution_policy<System>&, size_type` ctor
+      signature) and `vector_base.inl` lines 295/305 (the
+      `is_cpp17_input_iterator` SFINAE template line, over the 120-column
+      limit already before this commit). All 7 files staged (note:
+      `temporary_array.h` also shows staged in `git status` but that is
+      leftover from item 47's `identity_` -> `::internal::type_identity`
+      conversion, not touched in this item).
+- [X] a6282e9cf4f8d2a20a3328b9473edf7b7cdbe9cd Handle upcoming vector type change (#5036)
+    - No-op, already ported. This exact commit's entire diff (71 lines, all
+      within `thrust/thrust/type_traits/is_trivially_relocatable.h`) wraps
+      `long4`/`ulong4`/`longlong4`/`ulonglong4`/`double4`'s
+      `THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE` declarations in
+      `_CCCL_SUPPRESS_DEPRECATED_PUSH`/`_POP` (guarding against upstream's
+      deprecation of these vector types) and adds new
+      `xxx4_16a`/`xxx4_32a` variant declarations gated by
+      `#if _CCCL_CTK_AT_LEAST(13, 0)`. `git blame` on
+      `is_trivially_relocatable.h` lines 263-269 shows this content was
+      already introduced by the earlier bulk squash-merge commit
+      `1eb022d06b` ("feat(rocthrust): CCCL 3.0.x changes (#3773)"),
+      translated to the local macro names per the established convention
+      (`THRUST_SUPPRESS_DEPRECATED_PUSH`/`_POP` from
+      `detail/libcxx_wrapper/std/__cccl/diagnostic.h`,
+      `THRUST_CTK_AT_LEAST` from
+      `detail/libcxx_wrapper/std/__cccl/cuda_toolkit.h`, both bare
+      `#define`-to-`_CCCL_*` forwards). Diffed upstream's patch line-by-line
+      against the current local file: identical modulo that macro-name
+      translation. `git diff HEAD` on this file is empty — nothing to
+      stage. (This todo.md previously listed this same commit SHA twice as
+      a generation artifact; collapsed to one entry.)
+- [X] cd1b8dcbb1c7d679a625ef0def9be54448d81d1d Apply `remove_cvref` in `thrust::is_contiguous_iterator` and refactor all uses (#5050)
+    - Ported across the same 5 files upstream touches (touches
+      `is_contiguous_iterator.h`, which item 56 also modified — no
+      conflict, item 56's variable-template refactor and this commit's
+      `remove_cvref_t` wrapping compose cleanly).
+      `is_contiguous_iterator<Iterator>`/`is_contiguous_iterator_v<Iterator>`
+      now instantiate `detail::is_contiguous_iterator_impl_v` on
+      `::internal::remove_cvref_t<Iterator>` instead of bare `Iterator`
+      (makes the trait robust to cv/ref-qualified template arguments).
+      Translation note: upstream uses bare `::cuda::std::remove_cvref_t`;
+      used `::internal::remove_cvref_t` instead (from
+      `thrust/detail/type_traits.h`, newly `#include`d here) since it is
+      the established dual-mode-safe form — same reasoning as item 47's
+      `::internal::type_identity` choice: bare `_THRUST_STD::remove_cvref_t`
+      would be unsafe in the non-device-system-std fallback branch, where
+      native `std::remove_cvref_t` is C++20-only but this codebase's
+      minimum standard is C++17; `::internal::remove_cvref_t` already
+      hand-implements the fallback as
+      `::std::remove_cv_t<::std::remove_reference_t<T>>` for exactly this
+      case.
+      `is_trivially_relocatable.h`'s `is_indirectly_trivially_relocatable_to`
+      updated to call the `_v` forms instead of `::value` on the
+      class-template forms (mechanical, no behavior change).
+      `trivial_sequence.h`'s `_trivial_sequence` tag-dispatch struct
+      converted from a `typename is_trivial` (`thrust::detail::true_type`/
+      `false_type`) template parameter to a plain `bool`, matching the
+      `bool`-returning `is_contiguous_iterator_v`; `trivial_sequence`'s base
+      class/`super_t` alias updated from
+      `typename thrust::is_contiguous_iterator<Iterator>::type` to
+      `is_contiguous_iterator_v<Iterator>`.
+      `system/cuda/detail/core/make_load_iterator.h` (CUDA-only): collapsed
+      the `make_load_iterator_impl` true_type/false_type tag-dispatch
+      overload pair into a single `make_load_iterator` using
+      `if constexpr (is_contiguous_iterator_v<It>)`; confirmed via
+      full-tree grep no other caller referenced the now-deleted
+      `make_load_iterator_impl` directly.
+      `system/cuda/detail/sort.h` (CUDA-only): `smart_sort`'s two
+      `is_contiguous_iterator<...>::value` checks (guarding the
+      copy-back-if-non-contiguous logic for items/keys) converted to
+      `is_contiguous_iterator_v<...>`, mechanical.
+      Full-tree grep for other `is_contiguous_iterator<...>` (non-`_v`)
+      call sites found exactly one more:
+      `iterator/detail/tagged_iterator.h`'s
+      `proclaim_contiguous_iterator<tagged_iterator<...>> : is_contiguous_iterator<BaseIterator>`
+      base-class usage — left untouched (upstream doesn't touch it either;
+      the `is_contiguous_iterator` alias itself is unchanged, only its
+      internal impl-lookup argument, so this still compiles/behaves
+      identically). `clang-format --style=file --Werror` clean on all 5
+      files (one manual line-wrap fix needed on
+      `is_contiguous_iterator_v`'s definition to fit the 120-column limit
+      on one line, matching clang-format's own preferred layout). All 5
+      files staged.
+- [X] 71da83a25c2451bf8db7db2ac1e45b63c0742d80 `thrust::cuda::pinned_memory_resource` should dispatch to the host system (#5045)
+    - Upstream introduces `cuda::universal_host_pinned_pointer` as a
+      distinct alias from `cuda::universal_pointer`:
+      `universal_pointer` is `thrust::pointer<T, cuda_cub::tag,
+      ::cuda::std::add_lvalue_reference_t<T>>` (device-tagged), while
+      `universal_host_pinned_pointer` is `thrust::pointer<T, cpp::tag,
+      ::cuda::std::add_lvalue_reference_t<T>>` — the *tag* itself is
+      `cpp::tag`, not `cuda_cub::tag`, so that dispatch on this pointer
+      type resolves to the host (`cpp`) system rather than the device
+      (`cuda`) system. This fixes the underlying bug: pinned memory
+      previously advertised itself as a `cuda`-tagged pointer (it was just
+      an alias for `universal_pointer`), so algorithms over it were
+      dispatched to the device backend instead of the host backend,
+      defeating the point of pinned host memory.
+      `thrust/system/cuda/pointer.h`: added
+      `cuda::universal_host_pinned_pointer<T> = thrust::pointer<T, cpp::tag,
+      ::cuda::std::add_lvalue_reference_t<T>>` (previously
+      `universal_host_pinned_pointer` was just an alias for
+      `universal_pointer`, i.e. wrongly `cuda_cub`-tagged); exported in
+      both `namespace system::cuda` and top-level `namespace cuda`;
+      converted the `universal_pointer` doc comment from `/*! */` block
+      style to `//!` line style and added a clarifying "prefers the cuda
+      system" sentence, matching upstream's doc-comment-style choice on
+      this file (upstream converts to `//!` whenever adding new
+      doc-commented content next to existing `/*! */` blocks — followed
+      here for future-diff parity, not started fresh).
+      `thrust/system/cuda/memory_resource.h`: `pinned_memory_resource` now
+      instantiated with `thrust::cuda::universal_host_pinned_pointer<void>`
+      instead of the old (bugged) type.
+      `thrust/system/cpp/pointer.h`, `thrust/system/omp/pointer.h`,
+      `thrust/system/tbb/pointer.h`: each gained
+      `universal_host_pinned_pointer<T> = universal_pointer<T>` (no
+      device/host distinction on these host-native backends, so trivial
+      alias) + export line, added alphabetically before
+      `universal_pointer` in each namespace's `using` block, matching this
+      file's existing alphabetical-ordering convention.
+      `thrust/universal_allocator.h`: added
+      `universal_host_pinned_ptr<T> = thrust::system::
+      __THRUST_DEVICE_SYSTEM_NAMESPACE::universal_host_pinned_pointer<T>`,
+      mirroring the existing `universal_ptr` alias — this macro expands to
+      whichever backend namespace (`cuda`/`hip`/`omp`/`tbb`/`cpp`) is
+      currently selected as `THRUST_DEVICE_SYSTEM`.
+      **Necessary consequence beyond upstream's literal diff:** rocThrust's
+      default/primary backend is `hip`
+      (`thrust/detail/config/device_system.h`), and CCCL has no HIP
+      backend of its own, so `hip::universal_host_pinned_pointer` did not
+      previously exist — `universal_allocator.h`'s new alias would fail to
+      compile under the HIP backend without it. Added the analogous
+      definition to the local-only, self-contained
+      `thrust/system/hip/pointer.h` (parallel to `cuda/pointer.h`, no
+      upstream counterpart to diff against):
+      `hip::universal_host_pinned_pointer<T> = thrust::pointer<T, cpp::tag,
+      typename std::add_lvalue_reference<T>::type>`, exported in both
+      `namespace system::hip` and top-level `namespace hip`; and updated
+      `thrust/system/hip/memory_resource.h`'s `pinned_memory_resource` to
+      use it, exactly mirroring the `cuda/memory_resource.h` change above.
+      This is treated as a compilation-correctness requirement, not scope
+      creep: any upstream change to a backend-generic/dispatch file
+      (identified by use of `__THRUST_DEVICE_SYSTEM_NAMESPACE`) must be
+      mirrored into the HIP-parallel file for the HIP backend to keep
+      building — new precedent for future items touching such files.
+      Verified via grep that `cpp/memory_resource.h`, `omp/memory_resource.h`,
+      `tbb/memory_resource.h` need no changes (their
+      `universal_host_pinned_memory_resource` was already just an alias
+      to `universal_memory_resource` on these host-native backends), and
+      that all consumers of `universal_host_pinned_memory_resource`/
+      `universal_host_pinned_allocator` tree-wide
+      (`mr/device_memory_resource.h`, `system/*/memory.h`,
+      `system/*/vector.h`) are unaffected by the underlying pointer-type
+      change. `clang-format --style=file --Werror` clean on all 8 touched
+      files. 8 files staged: `system/cpp/pointer.h`,
+      `system/cuda/memory_resource.h`, `system/cuda/pointer.h`,
+      `system/omp/pointer.h`, `system/tbb/pointer.h`,
+      `universal_allocator.h`, `system/hip/pointer.h`,
+      `system/hip/memory_resource.h`.
+- [X] 6ccee554169d39f19105d6ef65f68f4e9e220a5e Add vectorized `cub::DeviceTransform` algorithm (#4815)
+    - Only 2 of upstream's PR files touch `thrust/thrust/*` (the rest of the
+      PR is `cub`-only, out of scope for this file-prefix filter): `system/
+      cuda/detail/core/util.h` and `system/cuda/detail/unique.h`, both
+      CUDA-only files (no HIP-parallel counterpart needed). `core/util.h`'s
+      `uninitialized_array<T, N>`: replaced the `enum { SIZE = N }` +
+      `using ref = T[N]` + private/public split with a single
+      `static constexpr ::cuda::std::integral_constant<size_t, N> size{}`
+      member (usable as a compile-time value via `size()` call syntax,
+      matching upstream) and `alignas(T) char data_[N * sizeof(T)]` made
+      public (was private with a `public:` re-opener — collapsed since
+      there's no longer a private section); `data()`/`const data()` now
+      `reinterpret_cast` instead of implicit array-decay; `operator[]`
+      overloads collapsed to just the `unsigned int` overload (the
+      redundant `int` overload removed) delegating to `data()[idx]`
+      instead of duplicating the cast; removed the `unsigned int size()
+      const` method (superseded by the new `size` member above), the
+      implicit `operator ref&()` conversion, and `get_ref()`, replaced by
+      a single explicit `T (&as_array())[N]` accessor. Verified via
+      tree-wide grep that no caller in `system/cuda/detail/{set_operations,
+      reduce_by_key,unique}.h` (the only local users of
+      `uninitialized_array`) relied on any of the removed members
+      (`get_ref`, `operator ref&`, `.size()`, `int`-indexed `operator[]`,
+      `SIZE` enum) or the new `as_array()` — all local usage is plain
+      `operator[]` indexing, so the change is behavior-preserving for this
+      tree. `unique.h`: removed the now-unnecessary
+      `using core::detail::uninitialized_array;` alias inside
+      `consume_tile_impl` (confirmed unused elsewhere in that function
+      body via grep — upstream removes it as part of the same refactor,
+      unrelated to the `util.h` API change itself, just a leftover unused
+      using-declaration). `clang-format --style=file --Werror` clean on
+      both files; full diff reviewed and matches upstream exactly. Both
+      files staged.
+- [X] c16a2e1623e632c986d20ba5715d00f098b77b45 Port `thrust::transform_output_iterator` to `cuda` (#5051)
+    - Upstream touches `detail/internal_functional.h` and
+      `iterator/iterator_traits.h`, both already using the established
+      `_THRUST_LIBCXX`/`_THRUST_LIBCXX_INCLUDE(LIB)` translation macros
+      (defined in `detail/config/libcxx.h`: `::cuda`/`<cuda/LIB>` for the
+      CUDA branch, `::hip`/`<hip/LIB>` for the HIP branch, empty/no-op in
+      the fallback branch gated by `_THRUST_HAS_DEVICE_SYSTEM_STD == 0`) —
+      this file already ports `discard_iterator`/`tabulate_output_iterator`
+      the same way, so `transform_output_iterator` follows the identical,
+      already-established pattern rather than introducing anything new.
+      `internal_functional.h`: added
+      `#include _THRUST_LIBCXX_INCLUDE(__iterator/transform_output_iterator.h)`
+      alongside the existing discard/tabulate_output includes (inside the
+      `#if _THRUST_HAS_DEVICE_SYSTEM_STD` block), and added
+      `is_proxy_reference_v<_THRUST_LIBCXX::__transform_output_proxy<Iter,
+      Fn>> = true` next to the existing `__tabulate_proxy` specialization.
+      `iterator_traits.h`: added `iterator_system`/`iterator_traversal`
+      specializations for `_THRUST_LIBCXX::transform_output_iterator<Iter,
+      Fn>` (delegating to the wrapped `Iter`'s system/traversal, exactly
+      like the existing `transform_iterator` specializations), placed
+      immediately before the existing `transform_iterator` block, matching
+      upstream's exact placement (not alphabetical — upstream inserts
+      `transform_output_iterator` ahead of `transform_iterator` despite
+      `_i` < `_o` alphabetically, so placement was matched literally
+      rather than re-sorted). Note: this checkout's local ROCm/HIP install
+      (`/opt/rocm-7.1.0`) has no `hip/__iterator/*` headers on disk at
+      present — same as the pre-existing `discard_iterator.h`/
+      `tabulate_output_iterator.h` includes already in this file, which
+      equally have no local counterpart here — so this is consistent with
+      the established pattern of targeting a libhipcxx dependency that is
+      supplied by the real build environment but not vendored into this
+      exploration checkout; not a new gap introduced by this port.
+      `clang-format --style=file --Werror` clean on both files; diffs
+      reviewed and match upstream's translated form exactly. Both files
+      staged.
+- [X] 0788bf61e2b586703f8c839f75c73f64a0fbfdbf Fix `thrust::make_discard_iterator` (#5093)
+    - Bug fix: `make_discard_iterator<System>()` was hardcoded to return
+      `discard_iterator<>` (i.e. always `discard_iterator<use_default>`,
+      ignoring the caller's explicit `System` argument) instead of
+      `discard_iterator<System>`; also simplified the parameter type from
+      `typename discard_iterator<System>::difference_type` to a plain
+      `ptrdiff_t` since that's always what `difference_type` resolves to
+      here anyway. `thrust/iterator/discard_iterator.h`: changed return
+      type `discard_iterator<>` → `discard_iterator<System>`; changed
+      parameter from `typename discard_iterator<System>::difference_type i
+      = {}` to `_THRUST_STD::ptrdiff_t i = 0` (translated from upstream's
+      bare `::cuda::std::ptrdiff_t`, matching this same file's existing
+      `_THRUST_STD::ptrdiff_t` usage at line 52 in
+      `make_discard_iterator_base::incrementable`, and its
+      `_THRUST_STD_INCLUDE(cstddef)` include already present — no new
+      translation invented); changed the return statement from
+      constructor-call syntax `discard_iterator<System>(i)` to brace-init
+      `discard_iterator<System>{i}`, matching upstream exactly. Kept the
+      local `THRUST_HOST_DEVICE` macro name as-is (pre-existing local
+      spelling of upstream's `_CCCL_HOST_DEVICE`, unrelated to this
+      commit's actual fix). Verified via tree-wide grep that no local call
+      site invokes `make_discard_iterator<SomeExplicitSystem>()` with an
+      explicit template argument (all local callers use the default
+      `use_default`), so this bug was latent/inert in this tree and the
+      fix is a pure correctness improvement with no behavior change for
+      any existing caller. `clang-format --style=file --Werror` clean;
+      diff matches upstream exactly. File staged.
+- [X] 0cf03e41303bb49d3822ec0d2aa4fbc9f9acb489 Port `thrust::permutation_iterator` (#4835)
+    - Single-file change, same `iterator_traits.h` already touched by
+      items 61/63 above (this is the third distinct upstream commit to
+      land in that file in this sync, each independent — no conflicts
+      between them since each adds a self-contained block). Added
+      `#include <thrust/iterator/detail/minimum_system.h>` (translated
+      1:1, no macro involved — plain local header, already present
+      elsewhere in the tree, e.g. `zip_iterator.h`,
+      `permutation_iterator.h`, `overlapped_copy.h`, all of which already
+      use `minimum_system_t` for the same "combine two iterators' systems"
+      purpose) in the same alphabetical position upstream inserts it
+      (`thrust/iterator/detail/minimum_system.h` sorts before
+      `thrust/iterator/iterator_categories.h`). Added
+      `iterator_system`/`iterator_traversal` specializations for
+      `_THRUST_LIBCXX::permutation_iterator<Iter, Offset>` (translated
+      from upstream's bare `::cuda::permutation_iterator`), with
+      `iterator_system` computed as
+      `detail::minimum_system_t<iterator_system_t<Iter>,
+      iterator_system_t<Offset>>` — i.e. the "weaker"/more-specific of the
+      two wrapped iterators' systems, matching how `zip_iterator` and
+      `thrust::permutation_iterator` (the pre-existing, non-libcu++-backed
+      local implementation in `iterator/permutation_iterator.h`) already
+      combine iterator systems — and `iterator_traversal` fixed at
+      `random_access_traversal_tag`. Placed immediately after the
+      `counting_iterator` block and before `strided_iterator`, matching
+      upstream's exact insertion point. `clang-format --style=file
+      --Werror` clean; diff matches upstream exactly (only the
+      `::cuda::`→`_THRUST_LIBCXX::` translation differs, per established
+      convention). File staged.
+- [X] 11486dea25276ac29b3bee5eeaf8c1d03a186f0d Refactor generic sequence (#5156)
+    - Upstream merges `system/detail/generic/sequence.inl` into
+      `sequence.h` (deleting the `.inl`) and collapses the previous 3
+      overloads (no-init, init-only, init+step — the first two being
+      trivial forwarders to the third) into a single function with
+      default template/function parameters:
+      `template <typename DerivedPolicy, typename ForwardIterator, typename
+      T = thrust::detail::it_value_t<ForwardIterator>> void sequence(exec,
+      first, last, T init = T{}, T step = T{1})`. Also collapses
+      `compute_sequence_value`'s previous `enable_if`-based tag-dispatch
+      specialization pair (generic vs. `is_arithmetic` fast path) into a
+      single template using `if constexpr (is_arithmetic_v<T>)`.
+      Verified via grep that `thrust/detail/sequence.inl` (the only
+      caller, via `using thrust::system::detail::generic::sequence;` then
+      unqualified calls with 2, 3, or 4 arguments) remains compatible: the
+      2-arg call relies on the new default template argument for `T`
+      (deduced from `ForwardIterator`) plus both default function
+      parameters; the 3-arg call deduces `T` from the explicit `init`
+      argument (deduction from a real argument always wins over the
+      default template argument) with only `step` defaulted; the 4-arg
+      call is unaffected. No changes needed to `sequence.inl` or any other
+      caller. Confirmed no other file directly `#include`s
+      `generic/sequence.inl` before deleting it (`git rm`). Rewrote
+      `sequence.h` translating upstream's bare identifiers to this
+      codebase's established macros: `_CCCL_HOST_DEVICE` →
+      `THRUST_HOST_DEVICE`, `_CCCL_EXEC_CHECK_DISABLE` →
+      `THRUST_EXEC_CHECK_DISABLE`, `::cuda::std::move`/
+      `::cuda::std::is_arithmetic_v` → `_THRUST_STD::move`/
+      `_THRUST_STD::is_arithmetic_v` (added
+      `#include _THRUST_STD_INCLUDE(type_traits)` for the latter); kept
+      upstream's C++17 nested-namespace-definition style
+      (`namespace system::detail::generic`), which is already an
+      established local convention elsewhere in this tree (e.g.
+      `system/detail/generic/generate.inl`,
+      `system/detail/generic/select_system.h`), so not a new pattern being
+      introduced. Dropped the old `#include
+      <thrust/system/detail/generic/tag.h>` and added
+      `<thrust/iterator/iterator_traits.h>` (for `it_value_t`) and
+      `<thrust/tabulate.h>`, exactly matching upstream's include-list
+      change (the `.inl` already had these two includes; `tag.h` is
+      unrelated to this file's actual logic — was only ever needed for
+      declarations, not the always-inline-now definitions). One
+      clang-format line-wrap needed on the `thrust::tabulate(...)` call
+      (fits upstream's own wrapped form once past 120 columns). Diff
+      matches upstream exactly modulo the macro translations above.
+      `sequence.h` staged; `sequence.inl` deletion staged.
+- [X] e703c48ced0b5ba23daf4bb8d87eb328e483ed72 Update doc errors set_operations.h (#5177)
+    - Pure doc-comment typo fix, no code change: 16 occurrences of a
+      copy-paste error (`<tt>[first2, last1)</tt>` should read
+      `<tt>[first2, last2)</tt>` — the second range's begin/end iterators
+      were `first2`/`last1` instead of `first2`/`last2`) across the
+      `set_difference`, `set_symmetric_difference`, and `set_union` doc
+      comments in `thrust/set_operations.h`. Applied identically at the
+      same 16 locations locally (confirmed via grep: exactly 16 matches
+      for the buggy pattern before, 0 after, +16 correct `last2)`
+      occurrences after — matching upstream's exact diff line-for-line,
+      confirmed by comparing hunk context). Note: attempted this fix with
+      `sed -i` first, which twice truncated the file to 0 bytes with no
+      error output (root cause not diagnosed — sandboxing likely
+      intercepts/breaks in-place-rename writes via `sed -i` on repo
+      paths); recovered both times via `git checkout HEAD -- <file>` and
+      completed the fix instead with the `Edit` tool
+      (`replace_all: true`), which worked cleanly. Worth remembering for
+      future items: prefer the `Edit` tool over `sed -i` for editing
+      tracked files in this checkout. `clang-format --style=file --Werror`
+      clean (doc-comment-only change, no formatting impact). File staged.
+- [X] 9e4cd939db12d7d7ae8027c0df5bf2f89a3c8851 [pre-commit.ci] pre-commit autoupdate (#4365)
+    - This upstream commit is a mechanical pre-commit-tool version bump
+      (`mirrors-clang-format` v19.1.6 → v20.1.7, plus ruff/codespell/mypy
+      bumps unrelated to C++ sources) whose diff is a mix of exactly one
+      substantive change and several pure clang-format-version-artifact
+      reformats. Ported **only** the substantive part: fixed 3 occurrences
+      of the typo `denomimator` → `denominator` in
+      `thrust/complex.h`'s doc comments (the `codespell` bump is what
+      caught this; confirmed via grep that all 3 matched upstream exactly,
+      1:1, no local-only occurrences of the typo elsewhere).
+      **Deliberately did NOT port** the `(std::max)(...)` →
+      `(std::max) (...)` / `(::cuda::std::min)(...)` →
+      `(::cuda::std::min) (...)` spacing changes in
+      `mr/disjoint_pool.h`, `mr/pool.h`, `system/cuda/detail/find.h`,
+      `system/detail/generic/find.inl`,
+      `system/detail/sequential/stable_merge_sort.inl`,
+      `system/tbb/detail/reduce_intervals.h` (12 call sites total).
+      Verified this is a genuine clang-format-version behavior difference,
+      not a real style change to adopt: this checkout's installed
+      `clang-format` is v18.1.3, and running it (with this repo's own
+      `.clang-format`, which sets `SpaceAfterCStyleCast: true`) on a
+      snippet reproducing upstream's *new* spacing
+      (`(std::max) (bytes, 5)`) causes clang-format v18 to reformat it
+      right back to `(std::max)(bytes, 5)` — i.e. v18 and v20 disagree on
+      whether `(std::max)` (a parenthesized-to-avoid-macro-collision
+      idiom, not an actual cast) should be treated like a C-style cast for
+      `SpaceAfterCStyleCast` purposes. Introducing v20's spacing here would
+      immediately fail this repo's own `clang-format --style=file
+      --Werror` gate (the source of truth used throughout this sync) and
+      would get silently reverted the next time anyone reformats. No
+      upstream pre-commit-tool version pin exists in this repo to reconcile
+      against. If a future sync needs this specific spacing convention, it
+      should be revisited once this repo's own clang-format/pre-commit
+      pin is bumped to v19+, not forced ahead of that. `clang-format
+      --style=file --Werror` clean on `complex.h`. File staged.
+- [X] 74dac60f7db268d2a221e42e218c283d9ef3ce34 Refactor thrust cuda replace (#5180)
+      Ported to `system/cuda/detail/replace.h` (CUDA-only file, gated by
+      `#if _CCCL_HAS_CUDA_COMPILER()`). Removed the explicit `THRUST_FUNCTION`
+      constructors from `__replace::constant_f<T>` and
+      `__replace::new_value_if_f<Predicate, NewType, OutputType>`, making both
+      plain aggregates (also dropped their trailing `// struct ...` comments,
+      matching upstream). Converted all 5 call sites from constructor-call
+      syntax to brace-init syntax: `__replace::constant_f<T>(new_value)` →
+      `{new_value}` in `replace()`, `replace_if()` (no-stencil), and
+      `replace_if()` (stencil) (3 occurrences), and
+      `new_value_if_t(predicate, new_value)` → `{predicate, new_value}` in
+      both `replace_copy_if()` overloads. Verified via repo-wide grep that no
+      other local file constructs either functor via constructor-call syntax.
+      Purely mechanical/behavior-preserving (aggregate init produces the same
+      member values as the removed constructors did). `clang-format --style=file
+      --Werror` clean. Diff matches upstream's shape exactly (7
+      insertions/18 deletions locally vs. upstream's net removal of the two
+      constructors + comment lines + 5 call-site conversions). File staged.
+- [X] 77eb9a6414c62799914c8983455a2cb2897309a1 Implement transform[_if]_n in the generic system (#5182)
+      Fundamentally a file-reorganization commit, not new algorithm logic:
+      upstream merges each `.h`+`.inl` pair into a single header (eliminates
+      the split) and adds 10 new `transform_n`/`transform_if_n` overloads
+      (4 `transform_n`, 6 `transform_if_n`; policy + non-policy variants) to
+      the generic system, which the public `transform.h` overloads now
+      delegate through instead of doing raw iterator arithmetic directly.
+      Deleted `system/detail/generic/transform.inl` and
+      `detail/transform.inl` (`git rm`, contents fully absorbed into the
+      merged headers). Rewrote `system/detail/generic/transform.h`: added
+      forward declarations (at `THRUST_NAMESPACE_BEGIN` scope) of the 5
+      `thrust::transform`/`transform_if` entry points the generic impl
+      delegates to (can't `#include <thrust/transform.h>` — that header
+      already includes this one), kept the 5 pre-existing function bodies
+      unchanged (already textually identical to upstream modulo macro-name
+      translation), and added the 10 new `transform_n`/`transform_if_n`
+      templates using `_THRUST_STD::iter_difference_t<InputIterator>` for
+      the count parameter, delegating to `thrust::transform`/`transform_if`
+      with `first + count` as the end iterator. Rewrote public
+      `transform.h`: the 10 previously forward-declaration-only
+      `transform`/`transform_if` overloads now have full bodies (moved from
+      the deleted `detail/transform.inl`, `THRUST_EXEC_CHECK_DISABLE` added
+      before each policy-based one, matching pre-existing local
+      convention), and the 10 pre-existing `transform_n`/`transform_if_n`
+      overloads were rewritten to delegate through the generic system's
+      new `transform_n`/`transform_if_n`/`select_system` machinery instead
+      of calling `thrust::transform`/`transform_if` directly via iterator
+      arithmetic. Deliberately did NOT port upstream's
+      `_CCCL_NVTX_RANGE_SCOPE(...)` calls added inside every
+      `transform`/`transform_if`/`transform_n`/`transform_if_n` body —
+      verified via repo-wide `grep -rln "NVTX" projects/rocthrust/thrust/`
+      returning zero results, confirming NVTX profiling instrumentation is
+      entirely absent locally (no macro to translate to, unlike CUDA→HIP
+      intrinsic swaps). Preserved upstream's own self-include artifact in
+      both merged files (each header includes itself; harmless no-op under
+      `#pragma once`, kept as-is to match upstream's actual committed code
+      rather than "fixing" an artifact that isn't mine to fix). Dropped
+      trailing `// end transform()`/`// end transform_if()` comments in the
+      generic-system file, matching upstream's own removal of them in this
+      commit (confirmed by diffing upstream's pre/post file content, not an
+      artifact I introduced). Cleaned up 3 blank lines inside template
+      parameter lists in `transform.h` while touching those same
+      declarations, mirroring upstream's own identical cleanup in its diff
+      (not a gratuitous extra change). `clang-format --style=file --Werror`
+      clean on both files. Diff shapes (316 lines changed in the
+      generic-system header, 182 in the public header) consistent with the
+      expected NVTX-omission and self-include-preservation decisions vs.
+      upstream's larger diff (which also includes NVTX lines). All 4 files
+      staged (`git rm` for the two `.inl` deletions, `git add` for the two
+      rewritten headers).
+- [X] 961efabbc7a60b892d93e9c91af5fdddc1f1adaa Replace cuda version checks with `_CCCL_CTK_XXX()` macro (#5204)
+      Two files, both dead/obsolete version-gate removals (upstream's own
+      minimum supported CTK is now well above the thresholds being checked,
+      so the guards are simply deleted rather than translated to a new
+      macro form — no `_CCCL_CTK_XXX()` calls actually appear in the
+      `thrust/thrust/*` diff itself). `detail/malloc_and_free.h`: removed
+      the dead `// XXX WAR nvbug 992955` block (`#if
+      THRUST_HAS_CUDA_COMPILER() / #if CUDART_VERSION < 5000` spoofed
+      `thrust::free(int* volatile)` overload) — local file had this
+      unconditionally CUDA-only WAR present in identical form to upstream's
+      pre-commit state (confirmed via direct read), so it was removed
+      as-is (translating `_CCCL_HAS_CUDA_COMPILER()` naming is moot since
+      the whole guarded block is deleted, not kept). `system/cuda/error.h`:
+      removed the `#if CUDART_VERSION >= 4020` and `#if CUDART_VERSION >=
+      5000` guards around two blocks of `errc_t` enumerators, making all
+      entries unconditional, and re-aligned the `=` column across the now-
+      single contiguous enum body (clang-format's `AlignConsecutiveAssignments`
+      does not apply to enumerator initializers, so alignment is
+      maintained by hand, matching upstream's own realignment). Verified
+      byte-for-byte identical to upstream's post-commit enum body via `git
+      show <sha>:thrust/thrust/system/cuda/error.h` diffed against the
+      local result. No `CUDART_VERSION` references remain in either file
+      (`grep -rn "CUDART_VERSION" projects/rocthrust/thrust/` now only
+      matches the pre-existing, unrelated `THRUST_CTK()` macro definition
+      in `libcxx_wrapper/std/__cccl/cuda_toolkit.h`, untouched by this
+      commit). `clang-format --style=file --Werror` clean on both files.
+      Diff shape matches upstream exactly (deletions in
+      `malloc_and_free.h`; guard removal + realignment in `error.h`). Both
+      files staged.
+- [X] 9b34fe9249cbb1b308d4d2b9d99faacc4cf86983 Implement `thrust::swap_ranges` via `transform` in CUDA system (#5243)
+      Single file, `system/cuda/detail/swap_ranges.h` — entirely gated by
+      `#if _CCCL_HAS_CUDA_COMPILER()` (real NVIDIA-CUDA-only code path;
+      never compiles under HIP, same category as item 67's `replace.h`).
+      Renamed the pre-existing index-based `__swap_f<ItemsIt1, ItemsIt2>`
+      to `__swap_fallback_f` (unchanged body) and added a new,
+      non-templated `__swap_f` whose `operator()` swaps two values and
+      returns them as a `tuple<T, U>` for use as a `transform` output via a
+      `zip_iterator`. `swap_ranges()` now branches on `if constexpr
+      (is_indirectly_trivially_relocate_to_v<ItemsIt1, ItemsIt2> &&
+      is_indirectly_trivially_relocate_to_v<ItemsIt2, ItemsIt1>)`: the fast
+      path calls `cuda_cub::transform(policy, first1, last1, first2,
+      zip_iterator{first1, first2}, ...proclaim_copyable_arguments(__swap_f{}))`
+      (confirmed the matching binary `cuda_cub::transform(policy, first1,
+      last1, first2, result, op)` overload already exists locally in
+      `system/cuda/detail/transform.h:379-399`, the "two input data
+      streams" section); the fallback path is the original
+      `parallel_for`-based implementation, now under `__swap_fallback_f`.
+      Translated per established conventions: `::cuda::std::swap` →
+      `_THRUST_STD::swap` and `::cuda::std::distance`/`::cuda::std::iter_swap`
+      kept as the file's pre-existing `_THRUST_STD::` translations
+      (already present before this commit, confirmed via direct read —
+      this file's own established local convention keeps `_CCCL_HOST_DEVICE`
+      untranslated but routes std-shaped calls through `_THRUST_STD::`).
+      `::cuda::proclaim_copyable_arguments`/`<cuda/functional>` are
+      libcu++-namespace-shaped (not std::-shaped) identifiers, so
+      translated via the established `_THRUST_LIBCXX`/`_THRUST_LIBCXX_INCLUDE`
+      pair instead: `_THRUST_LIBCXX::proclaim_copyable_arguments` /
+      `#include _THRUST_LIBCXX_INCLUDE(functional)` (verified this exact
+      qualified name is already used the same way in
+      `thrust/detail/libcxx_wrapper/__functional/address_stability.h:39`
+      and that `_THRUST_LIBCXX_INCLUDE(functional)` already resolves to
+      `<cuda/functional>`/`<hip/functional>` per
+      `thrust/detail/config/libcxx.h`). `tuple`/`get<1>`/`zip_iterator`
+      used unqualified, relying on enclosing-namespace lookup from
+      `cuda_cub` up through `thrust` (matches upstream's own unqualified
+      usage). Added includes: `<thrust/iterator/zip_iterator.h>` (replacing
+      the no-longer-needed `<thrust/iterator/iterator_traits.h>`),
+      `<thrust/system/cuda/detail/transform.h>`,
+      `<thrust/type_traits/is_trivially_relocatable.h>`. `clang-format
+      --style=file --Werror` clean (its automatic line-wrapping of the long
+      `cuda_cub::transform(...)` call is the only cosmetic difference from
+      upstream's manual wrapping — otherwise the diff shape matches
+      upstream's insertions/deletions exactly). File staged.
+- [X] 33900a1fb128269148bfa78edd8d53d4ca3557b4 Add a macro to disable PDL (#5316) (#5329)
+      No-op: this commit only renames `_CCCL_HAS_PDL` → `_CCCL_HAS_PDL()`
+      (function-like macro) at both use sites in
+      `system/cuda/detail/core/triple_chevron_launch.h`. Confirmed via
+      direct read that the local file already has `_CCCL_HAS_PDL()` (with
+      parens) at both the `#if` (line 90) and `#endif` comment (line 111)
+      — already in the post-commit form, presumably absorbed by an earlier
+      port in this same sync. Nothing to change; nothing staged.
+- [X] 7296b79e16f148cd2c8c3114971d9a9ecbb59372 [Backport branch/3.1.x] PR #5396 and #5566 (#5611)
+      Rewrote `system/cuda/detail/unique.h`: deleted the entire custom
+      Agent-based `namespace __unique` implementation (`PtxPolicy`, `Tuning`,
+      `items_per_thread`, `UniqueAgent`, `InitAgent`, `doit_step`, `unique()`)
+      and replaced it with a `namespace detail` containing two new
+      templates, `dispatch_select_unique` (two-step query/run over
+      `cub::DispatchSelectIf<InputIt, cub::NullType* /*no flag it*/, OutputIt,
+      OffsetT* /*num selected out*/, cub::NullType /*no select op*/,
+      EqualityOpT, OffsetT, SelectionOpt>::Dispatch(...)`, matching the
+      already-locally-proven dispatch pattern used in `copy_if.h`/
+      `partition.h`/`remove.h`) and `select_unique` (always-64-bit-offset
+      wrapper, per CCCL PR #2400's streaming-partition comment, allocating
+      via `thrust::detail::temporary_array`). This is NOT a call into
+      `copy_if.h`'s existing `DispatchCopyIf`/`copy_if` machinery — confirmed
+      upstream's own diff defines brand-new, separate templates here (unique
+      has no stencil parameter at all, unlike copy_if), so consolidating
+      through copy_if.h would have been an unwarranted architectural
+      deviation from upstream's actual committed code; `remove.h` reuses
+      `copy_if.h` but `unique.h` does not, and that asymmetry is upstream's,
+      not introduced here. Updated the two Thrust-API entry points:
+      `unique_copy(...)` now dispatches to
+      `detail::select_unique<cub::SelectImpl::Select>(...)`, and `unique(...)`
+      now dispatches directly to
+      `detail::select_unique<cub::SelectImpl::SelectPotentiallyInPlace>(...)`
+      (no longer routing through `unique_copy`), both via `THRUST_CDP_DISPATCH`
+      using `return` directly (matching upstream's simplification away from
+      local `result`/`ret` variables). Preserved verbatim (untouched by this
+      commit's diff): the two-argument `unique()`/`unique_copy()` overloads,
+      `zip_adj_not_predicate`, and `unique_count()`. Translation: this file
+      is wrapped in `#if _CCCL_HAS_CUDA_COMPILER()` like `replace.h`/
+      `swap_ranges.h`, and per the file's own strong pre-existing precedent
+      (`_THRUST_STD::distance`/`equal_to`/`next` already used elsewhere in
+      this same file), translated upstream's `::cuda::std::advance`,
+      `::cuda::std::distance`, and `::cuda::std::int64_t` to `_THRUST_STD::`
+      equivalents; left `std::size_t`/`std::uint8_t`/`size_t` untranslated
+      (matching this file's own existing untranslated usage of those basic
+      types); left `cub::` (DispatchSelectIf/SelectImpl/NullType) unqualified
+      as-is, matching the already-ported reference files. No include changes:
+      upstream's own diff does not touch the include block at all (hunk
+      starts after it), and the old code already relied on the same
+      transitively-available utilities (`cub::detail::AliasTemporaries`,
+      `thrust::detail::temporary_array`, `thrust::detail::aligned_reinterpret_cast`)
+      without dedicated includes, so none were added; `<thrust/system/cuda/detail/core/agent_launcher.h>`
+      is now unused (confirmed via grep — no more `AgentLauncher`/
+      `THRUST_AGENT_ENTRY`/`specialize_plan`/`mpl::math` references) but was
+      left in place since upstream's own diff leaves it untouched too (not
+      chasing an unwarranted cleanup upstream didn't make). `clang-format
+      --style=file --dry-run --Werror` clean. `git diff` shape (107
+      insertions/465 deletions here vs. upstream's 107/464 — one line off,
+      immaterial) matches upstream's structure exactly, hunk-for-hunk. File
+      staged.
+- [X] 7edde877f8f4b15c55568beb973a7654e48ba06b Fix `thrust::malloc` for `void` (#5698) (#5718)
+      `system/detail/generic/memory.inl`: `malloc<T>()` now branches on
+      `if constexpr (is_void_v<T>)` — allocates raw bytes directly (no
+      `sizeof(void)`) and returns a `pointer<void, DerivedPolicy>` for the
+      void case, otherwise keeps the existing `sizeof(T) * n` path — matching
+      upstream exactly. Translation: upstream adds
+      `#include <cuda/std/__type_traits/is_void.h>` (a libcu++ private
+      header) purely to get `is_void_v`; no local
+      `libcxx_wrapper/std/__type_traits/is_void.h` shim exists yet (unlike
+      `type_identity.h`/`conjunction.h`/`conditional.h`, which do), and
+      `thrust/detail/type_traits/iterator/is_output_iterator.h` already
+      establishes the simpler, exact precedent for this situation: just
+      `#include _THRUST_STD_INCLUDE(type_traits)` (the public header) and use
+      `_THRUST_STD::is_void_v<T>` — followed that instead of inventing a new
+      private-header wrapper file. This file is not CUDA-only-gated (`generic`,
+      not `system/cuda/detail`), so kept `THRUST_HOST_DEVICE` (not
+      `_CCCL_HOST_DEVICE`) matching this file's own pre-existing macro
+      throughout. `clang-format --style=file --dry-run --Werror` clean; diff
+      shape (11 insertions/3 deletions) matches upstream (11/2 — the one-line
+      difference is the added blank line after the new include, immaterial).
+      File staged.
+- [X] 62b14d19b77cfc5b549c97177ea80030e25ba5ec [BACKPORT 3.1] Use forward declarations of extended floating point types instead of including the headers (#5846) (#5978)
+      `system/cuda/detail/sort.h` (CUDA-only-gated, `#if _CCCL_HAS_CUDA_COMPILER()`
+      at line 39, same category as `replace.h`/`swap_ranges.h`): removed the
+      dead `#if _CCCL_HAS_NVFP16() #include <cuda_fp16.h> #endif` and
+      `#if _CCCL_HAS_NVBF16() ... #include <cuda_bf16.h> ... #endif` blocks
+      (11 lines) right after `<cuda/std/cstdint>`, matching upstream exactly
+      — upstream's rationale (per commit message) is these full headers are
+      unnecessary when only forward declarations of the extended FP types
+      are needed elsewhere in CCCL/CUB. Later `_CCCL_HAS_NVFP16()`/
+      `_CCCL_HAS_NVBF16()` guarded code further down in the file (the
+      half/bfloat16 operator-availability checks) is untouched by this
+      commit's diff and was left as-is. `clang-format --style=file --dry-run
+      --Werror` clean; diff shape (11 deletions) matches upstream exactly.
+      File staged (note: `git diff --cached` for this file also shows
+      unrelated already-staged `is_contiguous_iterator<T>::value` →
+      `is_contiguous_iterator_v<T>` edits from an earlier item in this sync;
+      not part of this commit).
+- [X] 5fefb30bc8e597a288352372e9786496bb2f733f [Backport 3.1]  Backport iterator fixes (#5977)
+      Three-file port:
+      1. `thrust/detail/vector_base.h` + `.inl`: the range-constructor SFINAE
+      guard changed from `::cuda::std::__is_cpp17_input_iterator<InputIterator>::value`
+      to `::cuda::std::__has_input_traversal<InputIterator>` (a bool variable
+      template that additionally accepts C++20 iterators exposing only
+      `iterator_concept`, not just `iterator_category` — verified the real
+      definition directly against the `cccl` remote,
+      `libcudacxx/include/cuda/std/__iterator/iterator_traits.h:520-527`:
+      `__has_input_traversal<T> = __has_iterator_category_convertible_to<T,
+      input_iterator_tag> || __has_iterator_concept_convertible_to<T,
+      input_iterator_tag>`). Local already routed the old check through a
+      hand-rolled `internal::is_cpp17_input_iterator` shim in
+      `libcxx_wrapper/std/__iterator/iterator_traits.h` (device-std branch
+      aliases to `_THRUST_STD::__is_cpp17_input_iterator`; fallback branch is
+      a SFINAE `has_iterator_category_convertible_to` check — this fallback
+      branch is what's actually compiled today per that file's own TODO,
+      since `_THRUST_HAS_DEVICE_SYSTEM_STD` is false until libhipcxx is
+      ready). Added a parallel `internal::has_input_traversal` variable
+      template to that same wrapper file: device-std branch aliases directly
+      to `_THRUST_STD::__has_input_traversal`; fallback branch adds a new
+      `detail::has_iterator_concept_convertible_to` SFINAE helper (mirrors
+      the existing `has_iterator_category_convertible_to` pattern exactly,
+      but detects `Tp::iterator_concept` directly rather than going through
+      `iterator_traits<Tp>::iterator_category`, matching cccl's own
+      structure) and ORs the two checks together — a full behavioral port,
+      not just a symbol rename, since the fallback path is the one that
+      actually matters for the real ROCm build. Left the now-superseded
+      `is_cpp17_input_iterator`/`is_cpp17_random_access_iterator` in place
+      (confirmed via grep `is_cpp17_random_access_iterator` has no call
+      sites at all, and `is_cpp17_input_iterator` has none left after this
+      port; not removing since upstream's own libcu++ still keeps
+      `__is_cpp17_input_iterator` too, and no-op dead code removal here is
+      not in scope for this commit's actual diff). Updated the two call
+      sites each in `vector_base.h`/`vector_base.inl` to
+      `::internal::has_input_traversal<InputIterator>`.
+      2. `thrust/iterator/iterator_traits.h`: fixed a genuine bug in the
+      `transform_iterator`/`transform_output_iterator` `iterator_system`/
+      `iterator_traversal` specializations — the template parameter order
+      used in the specialization pattern (`<Iter, Fn>`) didn't match the
+      real declaration order, so the `Iter` name in the base-class clause
+      (`: iterator_system<Iter>`) was silently binding to the *first*
+      template slot (actually the functor type), not the real iterator.
+      Verified the real declaration order directly against the `cccl`
+      remote, `libcudacxx/include/cuda/__fwd/iterator.h:103-107`:
+      `template <class _Fn, class _Iter> class transform_iterator;` (and
+      same for `transform_output_iterator`) — confirmed `<Fn, Iter>` is
+      correct. Applied the same reorder to both `transform_output_iterator`
+      and `transform_iterator` specializations, translating upstream's
+      `::cuda::` prefix to `_THRUST_LIBCXX::` per the file's own established
+      convention (already used identically for `tabulate_output_iterator`
+      just above).
+      Translation notes: `enable_if_t` stays `_THRUST_STD::` (file's own
+      pre-existing convention); no include changes (upstream's diff doesn't
+      touch includes either). `clang-format --style=file --dry-run --Werror`
+      clean on all touched files; diff shapes for `vector_base.h`/`.inl` and
+      `iterator_traits.h` match upstream's structure exactly (the extra
+      `libcxx_wrapper/std/__iterator/iterator_traits.h` addition, 28 lines,
+      is local-only compatibility-shim work with no upstream counterpart,
+      needed because rocThrust doesn't yet have libhipcxx parity for
+      `__has_input_traversal`). Files staged.
+- [X] ecce794c363cf65c97e59faf5caf376abf8da340 [Backport to 3.1] Fix dereferencing nullptr in thrust::device_reference (#4226) (#6002)
+      8 files touched, matching upstream: `thrust/detail/reference.h`,
+      `thrust/detail/seq.h`, `thrust/iterator/detail/minimum_system.h`,
+      `thrust/system/{cpp,omp,tbb}/detail/execution_policy.h`,
+      `thrust/system/detail/sequential/execution_policy.h`,
+      `thrust/system/detail/generic/select_system.h`.
+      Core fix: `device_reference::swap()`/`operator value_type()`/
+      `assign_from()` previously dispatched via
+      `typename thrust::iterator_system<pointer>::type* system = nullptr;`
+      (a null-pointer stand-in, assuming `get_value`/`assign_value`/
+      `iter_swap` never touch system state — unsafe, see upstream #4226).
+      Replaced with `typename iterator_system_t<pointer>::tag_type tag;` +
+      `&tag`, using each system's now-guaranteed-default-constructible tag
+      type instead of a null pointer. Required adding `tag_type` member
+      typedefs:
+        - `minimum_system.h`: new `is_unrelated_systems<System>` variable
+          template (false by default, true-specialized for
+          `unrelated_systems<Ts...>`), used by `select_system.h`'s new
+          diagnostic branch.
+        - `cpp`/`omp`/`tbb` `execution_policy<tag>` full specializations:
+          added `using tag_type = tag;` (note: the *generic*
+          `execution_policy<Derived>` template in these 3 files already
+          had `using tag_type = tag;` locally — pre-existing, not from
+          this commit — but the `execution_policy<tag>` full
+          specialization doesn't inherit from the generic template, so it
+          still needed its own `tag_type`, matching upstream's diff
+          exactly).
+        - `sequential/execution_policy.h`: added `using tag_type = tag;`
+          to both `execution_policy<tag>` and the generic
+          `execution_policy<Derived>` template; `tag`'s default
+          constructor changed `THRUST_HOST_DEVICE constexpr tag() {}` →
+          `constexpr tag() = default;` (kept `THRUST_HOST_DEVICE`, this
+          file's own convention, not `_CCCL_HOST_DEVICE`); added the new
+          converting constructor `template <typename DerivedPolicy>
+          THRUST_HOST_DEVICE tag(const thrust::execution_policy<DerivedPolicy>&) {}`
+          so any execution_policy can convert to the sequential tag
+          (needed for `minimum_system` to pick it).
+        - `seq.h`: comment-only parity update, no functional change.
+      `select_system.h`: local file already had the `is_same_v`/
+      `if constexpr` refactor applied (from an earlier state, predating
+      this specific upstream commit's original `static_assert(is_same_v<...>)`
+      form), so this port applied the *net* target shape on top of that:
+      the trailing `else` became `else if constexpr (_THRUST_STD::is_same_v<System2, min_sys>)`,
+      followed by a new `else if constexpr (thrust::detail::is_unrelated_systems<min_sys>)`
+      diagnostic branch, a final `else` fallback, and a trailing
+      `THRUST_UNREACHABLE();` (local wrapper macro for `_CCCL_UNREACHABLE()`,
+      defined in `thrust/detail/libcxx_wrapper/std/__cccl/unreachable.h`
+      and already used identically in `__exception/terminate.h` — reused
+      rather than writing raw `_CCCL_UNREACHABLE()`, since this file uses
+      `_THRUST_STD::`-style qualification throughout, not raw `_CCCL_*`).
+      Added the corresponding `#include <thrust/detail/libcxx_wrapper/std/__cccl/unreachable.h>`.
+      `reference.h`: all 3 call sites ported verbatim (comment reworded
+      to match upstream's new comment); `iterator_system_t` alias already
+      available via the file's existing `<thrust/iterator/iterator_traits.h>`
+      include, no new include needed.
+      `clang-format --style=file --dry-run --Werror` clean on every touched
+      file except two pre-existing, out-of-scope violations unrelated to
+      this commit's hunks (verified via `git diff --unified=0` that the
+      flagged lines fall outside my changed regions): `select_system.h`
+      line 63 (the `select_system(...)` signature) and `reference.h` line
+      137 (the `operator=` signature) — both pre-date this port and are
+      left untouched, not part of this commit's scope.
+      Diff shapes match upstream's `ecce794c363cf65c97e59faf5caf376abf8da340`
+      exactly for `reference.h`, `seq.h`, `minimum_system.h`, and the 3
+      backend `execution_policy.h` files; `sequential/execution_policy.h`
+      and `select_system.h` differ only in local-only pre-existing state
+      (as noted above), not in the net target shape. All 8 files staged.
+- [X] 30ae2aca9d54c51262f06e5ebce598562ceb884b [Backport 3.1]: [CUB] Replace several direct uses of `__clz` (#6099) (#6202)
+      Upstream diff spans 5 files: `cub/cub/block/block_radix_rank.cuh`,
+      `cub/cub/warp/specializations/{warp_reduce_shfl,warp_reduce_smem,
+      warp_scan_shfl}.cuh`, and `thrust/thrust/detail/integer_math.h`. The
+      4 `cub/cub/*` files are **out of scope** for this rocThrust sync —
+      this repo has no vendored `cub/` directory (CUB/hipCUB/rocPRIM live
+      in separate projects: `projects/hipcub`, `projects/rocprim`); this
+      commit only matched the `thrust/thrust/` commit-list filter because
+      it also touches `integer_math.h`. Only that one file was ported.
+      Upstream drops the hand-rolled `clz()` helper (device: `::__clz`
+      builtin; host: manual bit-scan loop) entirely, replacing its sole
+      caller (`log2()`) with `::cuda::std::countl_zero(::cuda::std::__to_unsigned_like(x))`.
+      Local port could NOT delete `clz()`/switch unconditionally the way
+      upstream does: `_THRUST_STD_INCLUDE(__bit/countl.h)` and
+      `_THRUST_STD_INCLUDE(__type_traits/make_unsigned.h)` are libcu++
+      *private*-path headers, valid only when `_THRUST_HAS_DEVICE_SYSTEM_STD`
+      is 1 (real libcudacxx/libhipcxx present) — in the fallback branch
+      `_THRUST_STD_INCLUDE(LIB)` expands to bare `<LIB>`, so
+      `_THRUST_STD_INCLUDE(__bit/countl.h)` would emit `#include <__bit/countl.h>`,
+      a libc++-internal path that doesn't exist under libstdc++/fallback
+      and would break the build that's actually in use today (per this
+      session's established finding that libhipcxx isn't ready yet, so
+      `_THRUST_HAS_DEVICE_SYSTEM_STD` is currently 0 on real ROCm builds).
+      Resolved by gating: kept the old `clz()` helper alive but wrapped in
+      `#if !_THRUST_HAS_DEVICE_SYSTEM_STD` (with a TODO(libhipcxx) comment
+      explaining it should be dropped once libhipcxx is ready), added the
+      two private includes wrapped in `#if _THRUST_HAS_DEVICE_SYSTEM_STD`,
+      and made `log2()`'s body an `#if _THRUST_HAS_DEVICE_SYSTEM_STD` /
+      `#else` choosing between `_THRUST_STD::countl_zero(_THRUST_STD::__to_unsigned_like(x))`
+      and the old `clz(x)` call. Confirmed via grep that `clz` has no
+      other call sites in rocThrust, so this is safe. `_THRUST_STD::countl_zero`
+      confirmed to exist (public, `_CUDA_STD` namespace, from
+      `cuda/std/__bit/countl.h`) and `__to_unsigned_like` confirmed to
+      exist (private helper in `cuda/std/__type_traits/make_unsigned.h`)
+      via `git show cccl/main:libcudacxx/include/cuda/std/...`.
+      `clang-format --style=file --dry-run --Werror` clean. Staged.

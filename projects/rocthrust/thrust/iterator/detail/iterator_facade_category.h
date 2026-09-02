@@ -26,6 +26,7 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/iterator/detail/device_system_tag.h>
@@ -197,7 +198,7 @@ struct iterator_facade_category
 {
   using type = typename ::internal::If<
     is_iterator_category<CategoryOrTraversal>,
-    identity_<CategoryOrTraversal>,
+    ::internal::type_identity<CategoryOrTraversal>,
     iterator_facade_category_impl<CategoryOrSystem, CategoryOrTraversal, ValueParam, Reference>>::type;
 }; // end iterator_facade_category
 

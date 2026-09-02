@@ -26,6 +26,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
@@ -110,7 +111,8 @@ namespace raw_reference_detail
 
 // wrapped references are unwrapped using raw_reference, otherwise, return T
 template <typename T>
-struct raw_reference_tuple_helper : eval_if<can_unwrap<_THRUST_STD::remove_cv_t<T>>, raw_reference<T>, identity_<T>>
+struct raw_reference_tuple_helper
+    : eval_if<can_unwrap<_THRUST_STD::remove_cv_t<T>>, raw_reference<T>, ::internal::type_identity<T>>
 {};
 
 // recurse on tuples

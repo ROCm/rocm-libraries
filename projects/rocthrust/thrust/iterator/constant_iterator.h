@@ -28,6 +28,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -44,7 +45,7 @@ namespace detail
 template <typename Value, typename Incrementable, typename System>
 struct make_constant_iterator_base
 {
-  using incrementable = replace_if_use_default<Incrementable, identity_<_THRUST_STD::intmax_t>>;
+  using incrementable = replace_if_use_default<Incrementable, ::internal::type_identity<_THRUST_STD::intmax_t>>;
   using base_iterator = counting_iterator<incrementable, System, random_access_traversal_tag>;
   using type =
     iterator_adaptor<constant_iterator<Value, Incrementable, System>,

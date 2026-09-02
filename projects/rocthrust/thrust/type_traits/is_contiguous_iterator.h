@@ -31,6 +31,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+#include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/is_thrust_pointer.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER > 2020
@@ -48,45 +49,6 @@ THRUST_NAMESPACE_BEGIN
 /*! \addtogroup type_traits Type Traits
  *  \{
  */
-
-/*! \cond
- */
-
-namespace detail
-{
-
-template <typename Iterator>
-struct is_contiguous_iterator_impl;
-
-} // namespace detail
-
-/*! \endcond
- */
-
-/*! \brief <a href="https://en.cppreference.com/w/cpp/named_req/UnaryTypeTrait"><i>UnaryTypeTrait</i></a>
- *  that returns \c true_type if \c Iterator satisfies
- *  <a href="https://en.cppreference.com/w/cpp/named_req/ContiguousIterator">ContiguousIterator</a>,
- *  aka it points to elements that are contiguous in memory, and \c false_type
- *  otherwise.
- *
- * \see is_contiguous_iterator_v
- * \see proclaim_contiguous_iterator
- * \see THRUST_PROCLAIM_CONTIGUOUS_ITERATOR
- */
-template <typename Iterator>
-using is_contiguous_iterator = detail::is_contiguous_iterator_impl<Iterator>;
-
-/*! \brief <tt>constexpr bool</tt> that is \c true if \c Iterator satisfies
- *  <a href="https://en.cppreference.com/w/cpp/named_req/ContiguousIterator">ContiguousIterator</a>,
- *  aka it points to elements that are contiguous in memory, and \c false
- *  otherwise.
- *
- * \see is_contiguous_iterator
- * \see proclaim_contiguous_iterator
- * \see THRUST_PROCLAIM_CONTIGUOUS_ITERATOR
- */
-template <typename Iterator>
-constexpr bool is_contiguous_iterator_v = is_contiguous_iterator<Iterator>::value;
 
 /*! \brief Customization point that can be customized to indicate that an
  *  iterator type \c Iterator satisfies
@@ -120,65 +82,77 @@ struct proclaim_contiguous_iterator : false_type
 
 namespace detail
 {
-
 template <typename Iterator>
-struct is_libcxx_wrap_iter : false_type
-{};
+inline constexpr bool is_libcxx_wrap_iter_v = false;
 
 #if defined(_LIBCPP_VERSION)
 template <typename Iterator>
-struct is_libcxx_wrap_iter<
+inline constexpr bool is_libcxx_wrap_iter_v<
 #  if _LIBCPP_VERSION < 14000
   _VSTD::__wrap_iter<Iterator>
 #  else
   std::__wrap_iter<Iterator>
 #  endif
-  > : true_type
-{};
+  > = true;
 #endif
 
 template <typename Iterator>
-struct is_libstdcxx_normal_iterator : false_type
-{};
+inline constexpr bool is_libstdcxx_normal_iterator_v = false;
 
 #if defined(__GLIBCXX__)
 template <typename Iterator, typename Container>
-struct is_libstdcxx_normal_iterator<::__gnu_cxx::__normal_iterator<Iterator, Container>> : true_type
-{};
+inline constexpr bool is_libstdcxx_normal_iterator_v<::__gnu_cxx::__normal_iterator<Iterator, Container>> = true;
 #endif
 
 // Use defined(_MSC_VER) due to Windows CI failures
 #if defined(_MSC_VER)
-
 template <typename Iterator>
-struct is_msvc_contiguous_iterator : _THRUST_STD::is_pointer<::std::_Unwrapped_t<Iterator>>
-{};
-
+inline constexpr bool is_msvc_contiguous_iterator_v = _THRUST_STD::is_pointer_v<::std::_Unwrapped_t<Iterator>>;
 #else
-
 template <typename Iterator>
-struct is_msvc_contiguous_iterator : false_type
-{};
-
+inline constexpr bool is_msvc_contiguous_iterator_v = false;
 #endif
 
 template <typename Iterator>
-struct is_contiguous_iterator_impl
-    : integral_constant<
-        bool,
+inline constexpr bool is_contiguous_iterator_impl_v =
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER > 2020
-        _THRUST_STD::contiguous_iterator<Iterator> || is_thrust_pointer<Iterator>::value
+  _THRUST_STD::contiguous_iterator<Iterator> || is_thrust_pointer_v<Iterator>
 #else
-        _THRUST_STD::is_pointer<Iterator>::value || is_thrust_pointer<Iterator>::value
+  _THRUST_STD::is_pointer_v<Iterator> || is_thrust_pointer_v<Iterator>
 #endif
-          || is_libcxx_wrap_iter<Iterator>::value || is_libstdcxx_normal_iterator<Iterator>::value
-          || is_msvc_contiguous_iterator<Iterator>::value || proclaim_contiguous_iterator<Iterator>::value>
-{};
+  || is_libcxx_wrap_iter_v<Iterator> || is_libstdcxx_normal_iterator_v<Iterator>
+  || is_msvc_contiguous_iterator_v<Iterator> || proclaim_contiguous_iterator<Iterator>::value;
 
 } // namespace detail
 
 /*! \endcond
  */
+
+/*! \brief <a href="https://en.cppreference.com/w/cpp/named_req/UnaryTypeTrait"><i>UnaryTypeTrait</i></a>
+ *  that returns \c true_type if \c Iterator satisfies
+ *  <a href="https://en.cppreference.com/w/cpp/named_req/ContiguousIterator">ContiguousIterator</a>,
+ *  aka it points to elements that are contiguous in memory, and \c false_type
+ *  otherwise.
+ *
+ * \see is_contiguous_iterator_v
+ * \see proclaim_contiguous_iterator
+ * \see THRUST_PROCLAIM_CONTIGUOUS_ITERATOR
+ */
+template <typename Iterator>
+using is_contiguous_iterator =
+  _THRUST_STD::bool_constant<detail::is_contiguous_iterator_impl_v<::internal::remove_cvref_t<Iterator>>>;
+
+/*! \brief <tt>constexpr bool</tt> that is \c true if \c Iterator satisfies
+ *  <a href="https://en.cppreference.com/w/cpp/named_req/ContiguousIterator">ContiguousIterator</a>,
+ *  aka it points to elements that are contiguous in memory, and \c false
+ *  otherwise.
+ *
+ * \see is_contiguous_iterator
+ * \see proclaim_contiguous_iterator
+ * \see THRUST_PROCLAIM_CONTIGUOUS_ITERATOR
+ */
+template <typename Iterator>
+constexpr bool is_contiguous_iterator_v = detail::is_contiguous_iterator_impl_v<::internal::remove_cvref_t<Iterator>>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
