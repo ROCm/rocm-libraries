@@ -772,65 +772,15 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         {
             void *ptrA = (void*)prob.batch_A, *ptrB = (void*)prob.batch_B,
                  *ptrC = (void*)prob.batch_C, *ptrD = (void*)prob.batch_D;
-            if(prob.batch_A != nullptr)
-            {
-                if(prob.buffer_offset_a > 0)
-                {
-                    THROW_IF_HIP_ERROR(hipMallocAsync(
-                        &devicePtrArray_A, sizeof(void*) * batchCount, prob.handle->get_stream()));
-                    THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_A,
-                                                     devicePtrArray_A,
-                                                     batchCount,
-                                                     prob.buffer_offset_a,
-                                                     prob.handle->get_stream()));
-                    ptrA = devicePtrArray_A;
-                }
-            }
 
-            if(prob.batch_B != nullptr)
-            {
-                if(prob.buffer_offset_b > 0)
-                {
-                    THROW_IF_HIP_ERROR(hipMallocAsync(
-                        &devicePtrArray_B, sizeof(void*) * batchCount, prob.handle->get_stream()));
-                    THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_B,
-                                                     devicePtrArray_B,
-                                                     batchCount,
-                                                     prob.buffer_offset_b,
-                                                     prob.handle->get_stream()));
-                    ptrB = devicePtrArray_B;
-                }
-            }
-
-            if(prob.batch_C != nullptr)
-            {
-                if(prob.buffer_offset_c > 0)
-                {
-                    THROW_IF_HIP_ERROR(hipMallocAsync(
-                        &devicePtrArray_C, sizeof(void*) * batchCount, prob.handle->get_stream()));
-                    THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_C,
-                                                     devicePtrArray_C,
-                                                     batchCount,
-                                                     prob.buffer_offset_c,
-                                                     prob.handle->get_stream()));
-                    ptrC = devicePtrArray_C;
-                }
-            }
-
-            if(prob.batch_D != nullptr)
-            {
-                if(prob.buffer_offset_d > 0)
-                {
-                    THROW_IF_HIP_ERROR(hipMallocAsync(
-                        &devicePtrArray_D, sizeof(void*) * batchCount, prob.handle->get_stream()));
-                    THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_D,
-                                                     devicePtrArray_D,
-                                                     batchCount,
-                                                     prob.buffer_offset_d,
-                                                     prob.handle->get_stream()));
-                    ptrD = devicePtrArray_D;
-                }
-            }
+            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                matA, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_a), sizeof(int64_t)));
+            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                matB, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_b), sizeof(int64_t)));
+            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                matC, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_c), sizeof(int64_t)));
+            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                matD, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_d), sizeof(int64_t)));
 
             THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
                                                      matmulDesc,
