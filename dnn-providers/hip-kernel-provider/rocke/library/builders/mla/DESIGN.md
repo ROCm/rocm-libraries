@@ -349,22 +349,26 @@ amortizes poorly; at large $S_q$ it becomes cheap enough that materializing full
 $K, V$ once and running standard flash attention is cheaper than streaming $W_{UK}$
 through every workgroup in a tiled flash loop.
 
-The crossover point (~171–228 query tokens, reported by SGLang on Hopper and asserted
-there to be approximately hardware-independent) defines two prefill regimes:
+Two axes are in play here and this doc keeps them separate. The **regime** is a
+scheduler mode, fixed by the shape ($S_k \gg S_q$ vs $S_k \approx S_q$); the
+**strategy** is the kernel choice (in-loop expansion vs materialize), and it is what
+the ~200-token crossover is about. The regimes are:
 
 | Regime | $S_q$ | $S_k$ | Strategy |
 |---|---|---|---|
-| **Chunked prefill** | $\lesssim 200$ (the scheduler's chunk) | independent of $S_q$; grows to the full context | Latent expansion inside flash loop (**§3 kernel**) |
-| **Full-prompt prefill** | $\gtrsim 200$ | $S_k \approx S_q$ | Materialize $K, V$ once → standard flash attention (**§3.1**) |
+| **Chunked prefill** | the scheduler's chunk (commonly 512–2048) | $S_k \gg S_q$; grows to the full context | Latent expansion inside flash loop (**§3 kernel**); **§3.1 is admissible only below the footprint bound below** — which side wins is **unmeasured**, see §8.2 family 2 |
+| **Full-prompt prefill** | the whole prompt | $S_k \approx S_q$ | Materialize $K, V$ once → standard flash attention (**§3.1**) |
 
 **Both regimes are in scope.** §9 carries deliverables for each; neither is optional,
 and the dispatch heuristic between them is a launch-time decision in
 `library/dispatch/attention/`, not a kernel property.
 
 > **"Short prefill" would be a misnomer — read the first row as *chunked* prefill.**
-> The regimes are separated by $S_q$, and $S_q$ is decoupled from context length: under
-> chunked prefill the scheduler fixes $S_q$ at the chunk size while $S_k$ grows to the
-> full context. That combination is the *worst* case for materialization and the reason
+> The regimes are separated by the $S_q : S_k$ relationship, not by $S_q$ alone, and
+> $S_q$ is decoupled from context length: under chunked prefill the scheduler fixes
+> $S_q$ at the chunk size — commonly 512–2048, i.e. *above* the ~200 strategy threshold —
+> while $S_k$ grows to the full context. That combination is the *worst* case for
+> materialization and the reason
 > the first row exists. Materializing costs
 > $O(S_k \cdot r_{KV} \cdot H_q \cdot (d_{\text{nope}} + d_V))$ of expansion to serve
 > $O(S_q \cdot S_k)$ of attention, so the expansion overhead per query token scales as
@@ -386,8 +390,24 @@ and the dispatch heuristic between them is a launch-time decision in
 > (§11) report the prefill attention block 2.02× *worse* with absorption at
 > $B = 1, L = 4096$, and the decode block 119× *better* at $B = 256, L = 4096$ —
 > confirming that a crossover exists and which way it runs, but fixing no token count.
+> It is also a figure for one *shape family*, not for $S_q$ in isolation: SGLang measured
+> it where $S_k \approx S_q$, and the $1/S_q$ argument above says the expansion cost
+> scales with $S_k$ and amortizes as $1/S_q$ — so the crossover is a function of the
+> ratio $S_q / S_k$, and importing a square-shape figure as an $S_q$-only bound is the
+> same inference this doc warns against one paragraph up.
 > **Measure it before it is baked into the dispatch heuristic**; §8.2's chunked shapes
 > are the sweep that does so.
+
+> **The dispatch needs a footprint bound, not just an $S_q$ threshold.** §3.1's
+> materialized working set is
+> $S_k \cdot H_q \cdot (d_{\text{nope}} + d_{\text{rope}} + d_V) \cdot
+> \texttt{sizeof(dtype)}$ per layer per sequence — set by $S_k$ and $H_q$ alone, and
+> **independent of $S_q$**. A dispatch keyed on $S_q$ alone therefore sends
+> $(S_q, S_k) = (512, 32768)$ to materialize and asks for **2.5 GiB** of scratch to serve
+> 512 query tokens (§3.1). Chunked shapes stay on the §3 in-loop path regardless of
+> $S_q$ whenever that product exceeds the scratch budget; the $S_q$ threshold only
+> arbitrates below it. The budget bound is a hard admissibility gate, the threshold is a
+> tunable — §9 row 4 implements both.
 
 The materialization path (`c_KV · W_UK → K, V`, then standard flash attention over the
 expanded tensors) incurs a separate GEMM launch; the in-loop path fuses expansion with
@@ -409,10 +429,10 @@ attention but is memory-bandwidth-bound on `W_UK` at large tile counts.
 > (`library/dispatch/attention/common.py`,
 > `library/kernels/common/attention_unified.py`). Reusing `UnifiedAttention` here
 > therefore needs the split carried through the problem, spec and descriptor layers and
-> a widened head-size gate in *both* places — dual-engine work (§9). The request layer is
+> a widened head-size gate in *both* places — spec-layer work (§9). The request layer is
 > already shaped for it; the layers underneath are not. The CK-FMHA `(192,128)` alternative in §3 sidesteps that gap for *measurement*
 > only — it yields no shippable rocKE instance — so that prototype should come first
-> but does not remove the dual-engine work.
+> but does not remove the spec-layer work.
 
 ### 2.6 Online softmax
 
@@ -535,8 +555,8 @@ fixed here.
 > committing to a fully custom kernel — as an external **measurement baseline**, not a
 > shippable rocKE instance: `lower_cktile.py` is parity-only and accepts
 > `UniversalGemmSpec` / `ImplicitGemmConvSpec`, never attention, so a wrapped CK kernel
-> yields no `KernelDef`, no `ATTENTION_REGISTRY` candidate and no byte-identity
-> coverage. What the pair costs at (192,128) differs by variant: plain `fmha_fwd` drops
+> yields no `KernelDef`, no registry candidate and no golden-IR coverage. What the pair
+> costs at (192,128) differs by variant: plain `fmha_fwd` drops
 > **bias** and **dropout** but does emit LSE (`fmha_fwd.py:820`, `check_hdim`) — and it
 > is the *only* generator with a `(192,128)` tile today. `fmha_fwd_splitkv.py` has none,
 > `fmha_pagedkv_prefill.py:587` has its `"192"` entry commented out, and
@@ -585,9 +605,18 @@ V     : 8192 x 128 x 128 x 2 B = 256 MiB
 total                          = 640 MiB
 ```
 
+and at the $S_k = 32768$ upper bound of the §8.2 sweep, 4× that:
+
+```
+K_exp : 32768 x 128 x 192 x 2 B = 1536 MiB
+V     : 32768 x 128 x 128 x 2 B = 1024 MiB
+total                           = 2560 MiB = 2.5 GiB
+```
+
 This is the concrete form of §2.5's $1/S_q$ argument: the footprint is set by $S_k$ and
 $H_q$ alone and does not shrink as the query count shrinks. It is affordable when
-$S_q \approx S_k$ and ruinous under chunked prefill.
+$S_q \approx S_k$ and ruinous under chunked prefill — which is why §2.5's dispatch gates
+this path on a scratch budget rather than on $S_q$.
 
 **Enabling work — the spec layer, and it is the whole cost of this path.** MLA's
 materialized form is asymmetric ($\texttt{hdim\_q} = 192$, $\texttt{hdim\_v} = 128$) and
@@ -602,7 +631,7 @@ five edits *are* this path's deliverable; there is no new tiling to write.
 > loop. Admit 192 per §7.2 instead — the merit argument is there, and FlashInfer's MLA
 > prefill mode runs natively at `(head_dim_k, head_dim_v) = (192, 128)` (§10.5), so the
 > asymmetric shape is the one the ecosystem already targets. This shortcut was taken in
-> an early implementation draft and measured at ~0.33× the AITER Triton baseline; treat
+> an early implementation draft and measured well below the AITER Triton baseline; treat
 > that as a recorded negative result, not as a starting point.
 
 ---
@@ -784,7 +813,7 @@ L2/XCD locality question; rocKE precedent is the `chiplet_*` engine traits (GEMM
 implicit-GEMM-conv paths; the workgroup-ID remap itself is `chiplet_transform_chunked`
 in `platform/python/rocke/helpers/grid.py`) and `use_q_major_grid` on gfx942
 `attention_tiled_2d`. Fold the grid mapping into the new spec rather than retrofitting
-it; as a new spec trait it is a dual-engine change (§9).
+it; as a new spec trait it is a spec-layer change (§9).
 
 > **Engine gap: `attention_tiled_3d` cannot express this spec today.** Beyond the
 > `NQK <= 16` gate above, the existing spec carries a single `head_size` that drives
@@ -1559,7 +1588,8 @@ Prefill sweep, **two families**:
 1. **Full-prompt** — `seqlen_q = seqlen_k ∈ {512, 1024, 2048, 4096, 8192}` at
    `batch = 1`, plus `batch = 4` at the two short lengths.
 2. **Chunked** — `seqlen_q ∈ {128, 256, 512}` × `seqlen_k ∈ {8192, 32768}` at
-   `batch = 1`, plus `batch = 4` at `(seqlen_q, seqlen_k) = (256, 8192)`.
+   `batch = 1`, plus `seqlen_q = 192` at `seqlen_k = 8192` (the one point inside the
+   cited 171–228 band), plus `batch = 4` at `(seqlen_q, seqlen_k) = (256, 8192)`.
 
 > **Family 1 alone cannot measure this design, and an earlier revision of this section
 > shipped only family 1.** Every family-1 shape has $S_q = S_k \ge 512$, so every one of
@@ -1567,18 +1597,25 @@ Prefill sweep, **two families**:
 > the kernel §9 scopes, is never measured in the regime it exists for. Family 2 fixes
 > that and does three things family 1 cannot:
 >
-> - **It brackets the §2.5 threshold.** `seqlen_q = 128` is below it, `256` just above,
->   `512` well above — so the two strategies' cost curves cross inside the sweep and the
->   ~200 figure gets a local number instead of a Hopper citation (§2.5).
+> - **It brackets the §2.5 threshold.** `seqlen_q = 128` is below the cited 171–228 band,
+>   `192` inside it, `256` and `512` above — so the sweep confirms locally that a
+>   crossover exists and which side wins at each end. It does **not** localize the
+>   crossover better than the citation: the straddling points bound it to (128, 192),
+>   width 64, against the citation's width 57. Keep ~200 as the dispatch default until a
+>   denser sweep runs (§9 row 4).
 > - **It is the only place $S_q \neq S_k$.** §3's input table carries `cu_seqlens_k`
 >   separately from `cu_seqlens_q` precisely because chunked prefill decouples them, and
 >   no family-1 shape exercises that. The causal mask against a $S_k \gg S_q$ context is
 >   a distinct code path from the square-mask case, not a parameterisation of it.
 > - **It is where the materialize path is supposed to lose.** §2.5's $1/S_q$ argument
->   and §3.1's 640 MiB footprint predict a large gap at `(128, 32768)`. If the gap is
->   *not* there, §2.5's two-branch dispatch is unjustified and the design should be
->   amended to drop one branch. That is the cheapest falsification available and it
->   should be run before either kernel is tuned.
+>   and §3.1's footprint — **2.5 GiB** at this `seqlen_k`, 4× the 8192 figure — predict a
+>   large gap at `(128, 32768)`. 2.5 GiB of per-layer scratch to serve 128 query tokens is
+>   not a gap, it is infeasible, which is why §2.5 gates the path on a scratch budget.
+>   If the two strategies land within noise **at the extremes** — `(128, 32768)` and
+>   `(512, 8192)` — the §2.5 threshold is not doing work in this regime and the design
+>   should be amended; three $S_q$ points at two $S_k$ values is enough for that endpoint
+>   claim, not for a "within noise across the whole family" one. That is the cheapest
+>   falsification available and it should be run before either kernel is tuned.
 >
 > `seqlen_k = 32768` matches the decode sweep's upper bound, so both kernels are
 > exercised against the same maximum context.
@@ -1644,7 +1681,7 @@ that drive gfx942/gfx950 MLA decode performance.
 | 1 | MLA prefill — chunked (in-loop expansion) | gfx942 | bf16 | §3, §5.1 prefill tiling |
 | 2 | MLA prefill — chunked (in-loop expansion) | gfx950 | bf16 | §3, §5.2 prefill tiling |
 | 3 | MLA prefill — full-prompt (materialize) | arch-independent | bf16 | **§3.1** + §7.2 spec-layer edits |
-| 4 | Prefill strategy dispatch (§2.5 threshold) | arch-independent | — | **§2.5**, `library/dispatch/attention/` |
+| 4 | Prefill strategy dispatch (§2.5 footprint bound + $S_q$ threshold) | arch-independent | — | **§2.5**, `library/dispatch/attention/` |
 | 5 | MLA decode-absorb | gfx942 | bf16 | §4, §5.1 decode tiling |
 | 6 | MLA decode-absorb | gfx950 | bf16 | §4, §5.2 decode tiling |
 | 7 | MLA prefill | gfx950+ | fp8 e4m3 | §6 fp8 plan, §3 struct |
@@ -1667,11 +1704,18 @@ Each bf16 kernel delivers: kernel impl + parity gate + bench run against
 > cheapest of the eight and the one that unblocks a number on the §8.2 family-1 shapes
 > soonest; schedule it accordingly, but see the padding warning in §3.1 before starting.
 >
-> **Row 4 depends on rows 1–3 and on a measurement.** The threshold it implements is a
-> Hopper citation until §8.2's family-2 sweep gives it a local value (§2.5). Ship rows
+> **Row 4 is two conditions, not one threshold.** The heuristic takes
+> $(S_q, S_k, H_q, \texttt{dtype})$ and a scratch budget, not a scalar $S_q$ cut. The
+> footprint bound of §2.5 — $S_k \cdot H_q \cdot (d_{\text{nope}} + d_{\text{rope}} +
+> d_V) \cdot \texttt{sizeof(dtype)}$ against the budget — is a **hard admissibility
+> gate** on the §3.1 branch; the $S_q$ threshold is a tunable that only arbitrates below
+> it. Keying on $S_q$ alone routes `(512, 32768)` to a 2.5 GiB materialization.
+>
+> **Row 4 also depends on rows 1–3 and on a measurement.** The threshold it implements is
+> a Hopper citation until §8.2's family-2 sweep gives it a local value (§2.5). Ship rows
 > 1–3 with a provisional constant, then set it from the sweep; do not treat ~200 as
-> settled. If family 2 shows the two branches within measurement noise across the whole
-> $S_q$ range, row 4 collapses to a constant and one of rows 1/3 should be dropped from
+> settled. If family 2 shows the two branches within measurement noise at both extremes,
+> row 4 collapses to the footprint gate alone and one of rows 1/3 should be dropped from
 > the design — record that outcome rather than shipping a dispatch that chooses between
 > equivalents.
 
@@ -1711,40 +1755,40 @@ reads.
 **The pre-kernels are deliverables too.** Both ops now normatively span two device
 kernels (§3 step 2, §4 pre-step), and neither pre-kernel appears in the table above.
 Before implementation starts, resolve for each: does it reuse an existing rocKE GEMM
-instance — name it, and the byte-identity obligation is already discharged — or is it a
-new instance, in which case it is a seventh and eighth row here under the full
-dual-engine DoD below? The batched-over-`H_q` `[total_q, r_Q] × [r_Q, 192]` and
-`[B, r_Q] × [r_Q, 512]` shapes are not obviously covered by an existing universal-GEMM
-candidate; assume they are not until checked.
+instance — name it, and it costs no new row — or is it a new instance, in which case it
+is a ninth and tenth row here under the DoD below? The batched-over-`H_q`
+`[total_q, r_Q] × [r_Q, 192]` and `[B, r_Q] × [r_Q, 512]` shapes are not obviously
+covered by an existing universal-GEMM candidate; assume they are not until checked.
 
-**Dual-engine definition of done.** Every row above is a *new instance*, so none is
-complete on the Python side alone. Each kernel must land its Python builder under
-`library/kernels/<arch>/` **and** its C++ engine mirror under `platform/cpp/` in the
-same change, be wired into the **MLA registry** (§7.3 — a separate `CandidateRegistry`
-with its own `family` and dim vocabulary, *not* `ATTENTION_REGISTRY`, which
-`CandidateRegistry.register` would reject on the family mismatch) and into the parity
-emit cases under `library/tests/parity/`, and turn the differential `.ll` gate green at
-both flavors:
+**Definition of done — Python only, no C++ mirror.** MLA follows the dense attention
+kernels: it is authored in the Python engine alone. There is **no** `platform/cpp/`
+mirror for any row above, and no `check_byte_identity.py` obligation — the dual-engine
+byte-identity gate does not apply to this family. (§5's and §11's references to
+`platform/cpp/instances/gfx950/…` are citations of existing shipped code for the layout
+and `ds_read_tr` techniques they demonstrate, not work items.)
 
-```bash
-ROCKE_LLVM_FLAVOR=llvm20 python platform/tools/check_byte_identity.py
-ROCKE_LLVM_FLAVOR=llvm22 python platform/tools/check_byte_identity.py
-```
+What each row still owes, in the same change:
 
-Pin the flavor on **both** runs. An unset `ROCKE_LLVM_FLAVOR` is not llvm20: it
-auto-resolves comgr → `torch.version.hip` → `/opt/rocm/.info/version` → `llvm22`
-(`platform/python/rocke/core/lower_llvm.py`, `_detect_llvm_flavor`), so on a
-ROCm 7.2+ box an unset run
-and the `llvm22` run are the same run and the llvm20 intrinsic declares are never
-covered.
+1. the Python builder under `library/kernels/<arch>/`;
+2. wiring into the **MLA registry** (§7.3 — a separate `CandidateRegistry` with its own
+   `family` and dim vocabulary, *not* `ATTENTION_REGISTRY`, which
+   `CandidateRegistry.register` would reject on the family mismatch);
+3. dispatch entry under `library/dispatch/attention/` (row 4 is the strategy heuristic
+   itself; rows 1–3 and 5–8 each need to be *reachable* from it);
+4. a **golden `.ll`** case under `library/tests/golden/`, blessed in the same change and
+   re-blessed with the diff reviewed on any intentional IR change;
+5. parity emit cases under `library/tests/parity/`, plus the numeric parity run of §8.3;
+6. the bench-shape wiring of §8.2 and the support-matrix / doc updates for the new
+   family.
 
 Any new IR op or spec trait required by the latent-space accumulator, the decoupled
 `hdim_kv` / `hdim_out` descriptor, the decode `BLOCK_H` head remap (§4), the *separate*
 prefill `BLOCK_H` head-block grid dim0 (§3 — an independently-sized second spec knob,
-not the §4 one), or the XCD-aware grid mapping (§4) must be mirrored in
-`platform/python/rocke/core/lower_llvm.py` and its C++ twin together, and
-any intentional `.ll` change must be golden-re-blessed from a green state with the diff
-reviewed. This docs-only spike carries no such obligation; the implementation PRs do.
+not the §4 one), or the XCD-aware grid mapping (§4) lands in
+`platform/python/rocke/core/lower_llvm.py` only. It must not regress the goldens of any
+*other* family that shares those paths — run `library/tests/golden/` and
+`platform/tests/` before and after. This docs-only spike carries no such obligation; the
+implementation PRs do.
 
 ---
 
