@@ -2196,6 +2196,8 @@ SCMovB64 = _make_scalar_unary_class("SCMovB64", "s_cmov_b64", InstType.INST_B64)
 SFf1B32 = _make_scalar_unary_class("SFf1B32", "s_ff1_i32_b32", InstType.INST_B32)
 # logicalIR: SBfmB32
 SBfmB32 = _make_scalar_alu_class("SBfmB32", "s_bfm_b32", InstType.INST_B32)
+# logicalIR: SBfmB64
+SBfmB64 = _make_scalar_alu_class("SBfmB64", "s_bfm_b64", InstType.INST_B64)
 # logicalIR: SBfeU32
 SBfeU32 = _make_scalar_alu_class("SBfeU32", "s_bfe_u32", InstType.INST_U32)
 # logicalIR: SFlbitI32B32

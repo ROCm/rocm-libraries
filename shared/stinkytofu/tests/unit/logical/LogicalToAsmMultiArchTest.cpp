@@ -634,6 +634,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SFf1B32(sgpr(0), sgpr(1));
         case logical::SBfmB32:
             return SBfmB32(sgpr(0), sgpr(1), sgpr(2));
+        case logical::SBfmB64:
+            return SBfmB64(sgpr(0), sgpr(1), sgpr(2));
         case logical::SMovkI32:
             return SMovkI32(sgpr(0), sgpr(1));
         case logical::SSExtI16toI32:
@@ -1124,6 +1126,7 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         logical::SCmpKGtU32,
         logical::SCmpKLGU32,
         logical::SFlbitI32B32,
+        logical::SBfmB64,
         logical::VPermlane16SwapB32,
         logical::VPermlane32SwapB32,
         logical::BufferLoadB16,

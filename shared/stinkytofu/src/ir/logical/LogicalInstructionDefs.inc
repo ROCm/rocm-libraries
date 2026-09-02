@@ -2951,6 +2951,16 @@
              false,
              "IF_SALU"},
 
+                                    {"SBfmB64",
+             "SBfmB64",
+             2,
+             true,
+             "Scalar Other",
+             false,
+             false,
+             false,
+             "IF_SALU"},
+
                                     {"SMovkI32",
              "SMovkI32",
              1,
