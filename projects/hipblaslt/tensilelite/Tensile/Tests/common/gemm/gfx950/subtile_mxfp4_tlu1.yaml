@@ -31,6 +31,7 @@ GlobalParameters:
   DataInitTypeBeta: 0
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
+  DataInitTypeBias: 1
   MXScaleFormat: 1
   BoundsCheck: 0
   KeepBuildTmp: True
@@ -165,7 +166,9 @@ BenchmarkProblems:
           - Exact: [512, 256, 1, 1024]
 
   -
-    - # NT, macro tile 96 on either dim: MIWaveTile 6, 3 strips per wave.
+    - # NT, macro tile 96 on either dim: MIWaveTile 6, 3 strips per wave.  A 192
+      # dim appears as MT128x192 / MT192x128: it needs one wave on the 192 side
+      # and a second wave elsewhere, and 96 cannot supply one without going odd.
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -193,13 +196,13 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 6, 8,  1, 1]   # MT96x128 wg1x1
           - [16, 16, 128, 1,  1, 6, 4,  1, 2]   # MT96x128 wg1x2
           - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128 wg1x4
-          - [16, 16, 128, 1,  1, 6, 12, 1, 1]   # MT96x192 wg1x1 (multi-wave straddles)
+          - [16, 16, 128, 1,  1, 4, 12, 2, 1]   # MT128x192 wg2x1 (12 tiles, one wave)
           - [16, 16, 128, 1,  1, 6, 8,  1, 2]   # MT96x256 wg1x2
           - [16, 16, 128, 1,  1, 6, 4,  1, 4]   # MT96x256 wg1x4
           - [16, 16, 128, 1,  1, 8, 6,  1, 1]   # MT128x96 wg1x1
           - [16, 16, 128, 1,  1, 4, 6,  2, 1]   # MT128x96 wg2x1
           - [16, 16, 128, 1,  1, 2, 6,  4, 1]   # MT128x96 wg4x1
-          - [16, 16, 128, 1,  1, 12, 6, 1, 1]   # MT192x96 wg1x1 (multi-wave straddles)
+          - [16, 16, 128, 1,  1, 12, 4, 1, 2]   # MT192x128 wg1x2 (12 tiles, one wave)
           - [16, 16, 128, 1,  1, 8, 6,  2, 1]   # MT256x96 wg2x1
           - [16, 16, 128, 1,  1, 4, 6,  4, 1]   # MT256x96 wg4x1
         - PrefetchGlobalRead: [0]
@@ -307,7 +310,8 @@ BenchmarkProblems:
 
   -
     - # NN: A free-contig (TLU=1, stacked), B K-contig (TLU=0, row-major).  The
-      # two scales take different group spans in the same kernel.
+      # two scales take different group spans in the same kernel.  Only A is
+      # TLU=1, so only M carries the multiple-of-2 assert and N may be odd.
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -327,6 +331,15 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+          - [16, 16, 128, 1,  1, 2, 2,  1, 1]   # MT32x32   wg1x1
+          - [16, 16, 128, 1,  1, 4, 4,  1, 1]   # MT64x64   wg1x1
+          - [16, 16, 128, 1,  1, 8, 8,  1, 1]   # MT128x128 wg1x1
+          - [16, 16, 128, 1,  1, 4, 4,  1, 4]   # MT64x256  wg1x4
+          - [16, 16, 128, 1,  1, 4, 4,  4, 1]   # MT256x64  wg4x1
+          - [16, 16, 128, 1,  1, 6, 6,  1, 1]   # MT96x96   wg1x1
+          - [16, 16, 128, 1,  1, 4, 8,  2, 2]   # MT128x256 wg2x2
+          - [16, 16, 128, 1,  1, 8, 4,  2, 2]   # MT256x128 wg2x2
           # Non-power-of-two on M, the contiguous dim here, so A takes a strip
           # narrower than its tile.  The M wave group has to be 1 for that.
           - [16, 16, 128, 1,  1, 12, 4,  1, 4]  # MT192x256 wg1x4
@@ -346,10 +359,54 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 512]
           - Exact: [192, 256, 1, 256]
           - Exact: [224, 256, 1, 256]
+          - Exact: [256, 255, 1, 256]   # odd N, legal with B on the K-contig side
+          - Exact: [256, 33,  1, 256]   # small odd N
+          - Exact: [256, 200, 2, 256]   # batch with an N edge
+          - Exact: [256, 256, 1, 288]   # 32-element K tail
+          - Exact: [256, 511, 3, 256]   # odd N with batch 3
+          - Exact: [512, 127, 1, 512]   # odd N against a larger M
+          - Exact: [256, 65,  1, 256]   # small odd N
+
+  -
+    - # NN at DepthU 512 and Stream-K, the axes the group above holds fixed.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256, 512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1024]
+          - Exact: [512, 511, 1, 512]    # odd N through Stream-K
+          - Exact: [512, 512, 2, 512]
 
   -
     - # TT: A K-contig (TLU=0, row-major), B free-contig (TLU=1, stacked) -- the
-      # mirror of NN, so the spans land on the opposite scales.
+      # mirror of NN, so the spans land on the opposite scales, and M is the dim
+      # free to be odd.
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -369,6 +426,15 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+          - [16, 16, 128, 1,  1, 2, 2,  1, 1]   # MT32x32   wg1x1
+          - [16, 16, 128, 1,  1, 4, 4,  1, 1]   # MT64x64   wg1x1
+          - [16, 16, 128, 1,  1, 8, 8,  1, 1]   # MT128x128 wg1x1
+          - [16, 16, 128, 1,  1, 4, 4,  1, 4]   # MT64x256  wg1x4
+          - [16, 16, 128, 1,  1, 4, 4,  4, 1]   # MT256x64  wg4x1
+          - [16, 16, 128, 1,  1, 6, 6,  1, 1]   # MT96x96   wg1x1
+          - [16, 16, 128, 1,  1, 4, 8,  2, 2]   # MT128x256 wg2x2
+          - [16, 16, 128, 1,  1, 8, 4,  2, 2]   # MT256x128 wg2x2
           # Mirror of the NN pair: the non-power-of-two goes on N, which is the
           # contiguous dim here, so the N wave group is the one pinned to 1.
           - [16, 16, 128, 1,  1, 4, 12, 4,  1]  # MT256x192 wg4x1
@@ -388,6 +454,49 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 512]
           - Exact: [256, 192, 1, 256]
           - Exact: [256, 224, 1, 256]
+          - Exact: [255, 256, 1, 256]   # odd M, legal with A on the K-contig side
+          - Exact: [33,  256, 1, 256]   # small odd M
+          - Exact: [200, 256, 2, 256]   # batch with an M edge
+          - Exact: [256, 256, 1, 288]   # 32-element K tail
+          - Exact: [511, 256, 3, 256]   # odd M with batch 3
+          - Exact: [127, 512, 1, 512]   # odd M against a larger N
+          - Exact: [65,  256, 1, 256]   # small odd M
+
+  -
+    - # TT at DepthU 512 and Stream-K, the mirror of the NN group above.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256, 512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1024]
+          - Exact: [511, 512, 1, 512]    # odd M through Stream-K
+          - Exact: [512, 512, 2, 512]
 
   -
     - # M/N edge coverage: every other block uses whole macro tiles, so the edge
@@ -397,7 +506,7 @@ BenchmarkProblems:
       # the scale swizzle built its grid as if the row axis were always K -- true
       # for a K-contiguous operand, transposed for a free-dim contiguous one.  The
       # assert never caught it: 320 and 384 are both whole multiples of the MXBlock
-      # 32 that ASEM derives from.
+      # 32 that ASEM derives from.  Tails run down to that multiple, not to 64.
       #
       # Odd M/N cannot live here: two fp4 share a byte, so an odd extent on a
       # contiguous dim leaves the leading stride on a half byte, and the subtile
@@ -440,6 +549,10 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 320]   # K tail (320 = DepthU + 64)
           - Exact: [256, 256, 1, 384]   # K tail (384 = DepthU + 128)
           - Exact: [200, 200, 1, 320]   # M and N edge with a K tail
+          - Exact: [256, 256, 1, 288]   # K tail 32 -- the ASEM floor itself
+          - Exact: [200, 200, 1, 352]   # M and N edge with a 32-element K tail
+          - Exact: [16, 16, 1, 256]     # smallest free dim a TLU=1 operand takes
+          - Exact: [514, 514, 1, 256]   # even, but 2 mod 8 rather than tile-aligned
 
 
   -
@@ -525,3 +638,260 @@ BenchmarkProblems:
           - Exact: [2048, 2048, 1, 2048]   # M tail vs tile 96, operand ends on a page
           - Exact: [1920, 2048, 1, 2048]   # same scale shape, no tail -- the control
           - Exact: [2048, 2000, 1, 2048]   # N tail on the other operand
+
+  -
+    - # Batch and Stream-K: the GR base away from the batch-0 tile-0 origin every
+      # other block starts at.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 2, 256]   # batch 2, whole tiles
+          - Exact: [256, 256, 3, 512]   # batch 3, two K windows
+          - Exact: [200, 256, 2, 256]   # batch 2 with an M edge
+          - Exact: [256, 256, 2, 288]   # batch 2 with a 32-element K tail
+
+  -
+    - # Mapped workgroup order, crossed with Stream-K.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64   wg2x2
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256, 512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [4]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 768]    # K past two DepthU-512 windows
+          - Exact: [256, 256, 1, 1536]   # three of them
+          - Exact: [200, 256, 1, 800]    # M edge with a 32-element K tail
+          - Exact: [256, 256, 2, 768]    # batch through the mapped order
+
+  -
+    - # DepthU 768: three scale K-subtiles, where the scale thread split stops
+      # being a shift.  MT64x64 only -- 128x128 runs past the LDS at this depth.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64 wg2x2
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [768]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0, 3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 768]    # one unroll iteration
+          - Exact: [256, 256, 1, 2304]   # three
+          - Exact: [200, 200, 1, 768]    # M and N edge
+          - Exact: [256, 256, 2, 1536]   # batch, two iterations
+
+  -
+    - # NT: the epilogue and scheduler knobs subtile_mxfp4.yaml varies -- bias,
+      # activation, scaleAlphaVec, 1LDSBuffer, NonTemporalD (TransposeLDS needs a K-contiguous operand, so not here).
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      UseScaleAlphaVec: 1
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64   wg2x2
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
+        - ActivationFuncCall: [false]
+        - DepthU: [256, 512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [4]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[256], [256], [1], [64, 64, 512]]
+        - BiasTypeArgs: ['s']
+
+  -
+    - # NN: the epilogue and scheduler knobs subtile_mxfp4.yaml varies -- bias,
+      # activation, scaleAlphaVec, 1LDSBuffer, NonTemporalD and TransposeLDS.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      UseScaleAlphaVec: 1
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64   wg2x2
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
+        - ActivationFuncCall: [false]
+        - DepthU: [256, 512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [4]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[256], [256], [1], [64, 64, 512]]
+        - BiasTypeArgs: ['s']
+
+  -
+    - # TT: the epilogue and scheduler knobs subtile_mxfp4.yaml varies -- bias,
+      # activation, scaleAlphaVec, 1LDSBuffer, NonTemporalD and TransposeLDS.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      UseScaleAlphaVec: 1
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64   wg2x2
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
+        - ActivationFuncCall: [false]
+        - DepthU: [256, 512]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [4]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[256], [256], [1], [64, 64, 512]]
+        - BiasTypeArgs: ['s']
