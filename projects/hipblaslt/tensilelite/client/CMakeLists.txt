@@ -71,6 +71,7 @@ target_link_libraries(tensilelite-client-common
         hip::device
         hip::host
         roc::host-numerics
+        roc::host-numerics-amd-gpu-layout
         roc::tensilelite-host
         rocisa::rocisa-cpp
         OpenMP::OpenMP_CXX
@@ -89,16 +90,6 @@ if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
     # the fused run fails fast instead of handing the kernel a null queue array.
     target_compile_definitions(tensilelite-client-common
         PRIVATE TENSILELITE_ENABLE_SDMA)
-endif()
-
-if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    target_compile_definitions(
-        tensilelite-client-common PUBLIC HIPBLASLT_ENABLE_MXDATAGENERATOR=1)
-    target_link_libraries(
-        tensilelite-client-common
-        PUBLIC
-            roc::host-numerics-amd-gpu-layout
-    )
 endif()
 
 target_include_directories(tensilelite-client-common

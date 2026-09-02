@@ -18,10 +18,8 @@
 #include <string_view>
 #include <utility>
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 #include <roc/host_numerics/mx.hpp>
-#endif
 
 namespace hipblaslt::host_numerics
 {
@@ -33,9 +31,7 @@ namespace hipblaslt::host_numerics
     using ::roc::host_numerics::storageBytesForLayout;
     using ::roc::host_numerics::Tensor;
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
     using ::roc::host_numerics::MxTensor;
-#endif
 
     enum class MatrixRole
     {
@@ -66,7 +62,6 @@ namespace hipblaslt::host_numerics
         bool                           positiveOnly = false;
     };
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
     inline constexpr uint32_t mxDefaultSeed = 1713573849U;
 
     ::roc::host_numerics::MxTensor generateMxData(hipDataType                 dataType,
@@ -84,7 +79,6 @@ namespace hipblaslt::host_numerics
     ::roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout
         mxScaleStorageLayoutForFormat(hipblaslt_scaling_format scalingFormat,
                                       std::string_view         archName);
-#endif
 
     ::roc::host_numerics::Tensor generateMatrix(const MatrixInitialization& initialization);
 
