@@ -2196,12 +2196,6 @@ SCMovB64 = _make_scalar_unary_class("SCMovB64", "s_cmov_b64", InstType.INST_B64)
 SFf1B32 = _make_scalar_unary_class("SFf1B32", "s_ff1_i32_b32", InstType.INST_B32)
 # logicalIR: SBfmB32
 SBfmB32 = _make_scalar_alu_class("SBfmB32", "s_bfm_b32", InstType.INST_B32)
-# No logicalIR counterpart (stinkytofu stops at SBfmB32), so lowering this would
-# raise from the factory's getattr(_st, "SBfmB64"). Defined anyway because
-# GlobalWriteBatch imports it at module level for every kernel; it is only ever
-# *instantiated* on the wavelen==64 branch, and the adaptor backend is gfx1250,
-# which is wave32.
-SBfmB64 = _make_scalar_alu_class("SBfmB64", "s_bfm_b64", InstType.INST_B64)
 # logicalIR: SBfeU32
 SBfeU32 = _make_scalar_alu_class("SBfeU32", "s_bfe_u32", InstType.INST_U32)
 # logicalIR: SFlbitI32B32
@@ -4137,91 +4131,6 @@ class SAtomicDec(Instruction):
         dup.base = _deepcopy(self.base, memo) if self.base is not None else None
         dup.smem = _deepcopy(self.smem, memo) if self.smem is not None else None
         return dup
-
-
-# --- SMEM wide atomics (SAtomicCmpswapX2 / SAtomicUmaxX2) ---
-# These back the fused-A2A SDMA ring (Tensile/Components/SdmaRingEmitter.py),
-# whose module-level ``from rocisa.instruction import ...`` is reached from
-# Signature.py on *every* kernel -- so without these shims the whole adaptor
-# backend fails to import, not just the A2A path.
-#
-# stinkytofu has no logical-IR opcode for either instruction (its atomic set
-# stops at SAtomicInc/SAtomicDec), so ``to_stinky_logical`` raises rather than
-# being left undefined: ``Module._populate_one_item`` *silently skips* any leaf
-# without the method, which would drop the ring's cursor update and publish
-# stale SDMA packets instead of failing. Loud beats silently wrong.
-class _SMemWideAtomic(Instruction):
-    """Shared shim body for ``s_atomic_<op>_x2 dst, base, soffset``."""
-
-    __slots__ = ("dst", "base", "soffset", "smem")
-
-    _INST_STR = ""
-    _INST_TYPE = InstType.INST_B64
-
-    def __init__(self, dst=None, base=None, soffset=None, smem=None, comment="", **kw):
-        _ = kw
-        super().__init__(self._INST_TYPE, comment)
-        self.dst = dst
-        self.base = base
-        self.soffset = soffset
-        self.smem = smem
-        self.setInst(self._INST_STR)
-
-    def getParams(self):
-        return [self.dst, self.base, self.soffset]
-
-    def getDstParams(self):
-        # Read-modify-write: dst carries the compare/operand value in and the
-        # pre-op memory value out, so it is both a src and a dst (matching the
-        # native AtomicReadWriteInstruction, whose getSrcParams includes dst).
-        return [self.dst] if self.dst else []
-
-    def getSrcParams(self):
-        return [self.dst, self.base, self.soffset]
-
-    def toString(self) -> str:
-        parts = [_input_to_str(self.dst), _input_to_str(self.base), _input_to_str(self.soffset)]
-        kstr = self.instStr + " " + ", ".join(parts)
-        if self.smem is not None and hasattr(self.smem, "toString"):
-            kstr += self.smem.toString()
-        return self.formatWithComment(kstr)
-
-    def to_stinky_logical(self) -> Any:
-        raise NotImplementedError(
-            f"{type(self).__name__} ({self._INST_STR}) has no stinkytofu logical-IR "
-            "opcode; the fused-A2A SDMA ring is not supported on the stinkytofu "
-            "backend. Set ROCISA_BACKEND=rocisa to generate this kernel.")
-
-    def __deepcopy__(self, memo):
-        if id(self) in memo:
-            return memo[id(self)]
-        dup = self.__class__.__new__(self.__class__)
-        memo[id(self)] = dup
-        Instruction.__init__(dup, self.instType, self.comment)
-        dup.instStr = self.instStr
-        dup.dst = _deepcopy(self.dst, memo) if self.dst is not None else None
-        dup.base = _deepcopy(self.base, memo) if self.base is not None else None
-        dup.soffset = self.soffset if isinstance(self.soffset, (int, float, str, bool)) \
-            else _deepcopy(self.soffset, memo)
-        dup.smem = _deepcopy(self.smem, memo) if self.smem is not None else None
-        return dup
-
-
-class SAtomicCmpswapX2(_SMemWideAtomic):
-    """``s_atomic_cmpswap_x2 dst, base, soffset`` shim (dst is a 4-dword pair)."""
-
-    __slots__ = ()
-    _INST_STR = "s_atomic_cmpswap_x2"
-    _INST_TYPE = InstType.INST_B128
-
-
-class SAtomicUmaxX2(_SMemWideAtomic):
-    """``s_atomic_umax_x2 dst, base, soffset`` shim."""
-
-    __slots__ = ()
-    _INST_STR = "s_atomic_umax_x2"
-    _INST_TYPE = InstType.INST_B64
-
 
 # --- TensorLoadToLds: rocisa(group0, group1, group2, group3, comment) ---
 def _make_tensor_load_class():
