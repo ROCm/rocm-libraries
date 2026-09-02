@@ -75,8 +75,10 @@ const auto& GetTestParamsNhwc()
     static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
         p.SetTolerance(Gpu::gfx90A, miopenHalf, 2.0f);
-        // The 14x14 fp32 case reduces over k = 784 and measures 1.17 eps on both gfx90a and
-        // gfx1151, against the 1.0 eps default.
+        // The 14x14 fp32 case reduces over k = 784, which does not fit the 1.0 eps default.
+        //
+        // The margin follows from the reduction length and the order the GEMM backend sums it
+        // in, so it is not architecture specific; gfx90a and gfx1151 both measure 1.17 eps.
         p.SetTolerance(Gpu::All, miopenFloat, 2.0f);
         return p;
     }();
