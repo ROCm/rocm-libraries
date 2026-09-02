@@ -66,9 +66,9 @@ class Repo
     // key structure for 2D twiddles
     struct repo_twd_key_2D_t
     {
-        size_t              length0   = 0;
-        size_t              length1   = 0;
-        rocfft_precision    precision = rocfft_precision_single;
+        size_t           length0   = 0;
+        size_t           length1   = 0;
+        rocfft_precision precision = rocfft_precision_single;
         // whether a half-N section is appended for a dimension; these change
         // the table that twiddles_create_2D generates, so they belong in the key
         bool                attach_halfN1 = false;
