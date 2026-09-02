@@ -3,10 +3,8 @@
 
 #pragma once
 
-#include <cstddef>
 #include <optional>
 #include <roc/host_numerics/operation_types.hpp>
-#include <utility>
 
 namespace roc::host_numerics {
 enum class ActivationApplication {
@@ -14,96 +12,52 @@ enum class ActivationApplication {
     Gradient,  // Multiplies input by activation'(auxiliaryInput).
 };
 
-// Reusable standalone elementwise program applied to a rank-two input.
-// Optional result types request owned per-element or AMax outputs.
-struct EpilogueProblem {
-    EpilogueProblem(Tensor inputTensor, ScalarType resultType, ScalarType compute)
-        : input(std::move(inputTensor)),
-          outputType(resultType),
-          computeType(compute),
+// Numerical policy and optional inputs for the standalone rank-two epilogue.
+struct EpilogueOptions {
+    explicit EpilogueOptions(ScalarType compute = ScalarType::Float32)
+        : computeType(compute),
           outputScale(Scalar::one(compute)),
           auxiliaryScale(Scalar::one(compute)),
           activationParameter0(Scalar::zero(compute)),
           activationParameter1(Scalar::zero(compute)) {}
 
-    Tensor input;            // Rank-two source read at selected coordinates.
-    ScalarType outputType;   // Scalar type of the primary result.
-    ScalarType computeType;  // Bias, activation, scaling, and gate arithmetic type.
-    std::optional<ScalarType> rawOutputType;        // Scaled pre-gate result type.
-    std::optional<ScalarType> auxiliaryOutputType;  // Pre-activation auxiliary result type.
-    std::optional<ScalarType> amaxType;             // Max-absolute scalar result type.
-    std::optional<Tensor> auxiliaryInput;           // Activation inputs required by Gradient mode.
-    std::optional<Tensor> gateResidual;  // Applies gate * value + gate after outputScale.
-    std::optional<VectorBinding> bias;   // Row- or column-indexed pre-activation addend.
-    Scalar outputScale;                  // Applied after activation.
-    Scalar auxiliaryScale;               // Applied to auxiliaryOutput.
-    OutputConversion outputConversion = OutputConversion::Default;  // Final output encoding.
-    Activation activation = Activation::None;  // Forward function or gradient factor.
+    ScalarType computeType;
+    std::optional<Tensor> auxiliaryInput;
+    std::optional<Tensor> gateResidual;
+    std::optional<VectorBinding> bias;
+    Scalar outputScale;
+    Scalar auxiliaryScale;
+    OutputConversion outputConversion = OutputConversion::Default;
+    Activation activation = Activation::None;
     ActivationApplication activationApplication = ActivationApplication::Forward;
-    Scalar activationParameter0;                               // First activation-specific scalar.
-    Scalar activationParameter1;                               // Second activation-specific scalar.
-    OutputSelection outputSelection = OutputSelection::all();  // Coordinates to mutate.
-};
-
-// Binds an epilogue problem to caller-owned destinations. Each destination
-// must use a layout with provably distinct storage offsets, and their complete
-// backing-storage ranges must not overlap. The primary output may exactly
-// alias the primary input; every other overlapping input/output backing-storage
-// range is rejected. Unselected output coordinates are preserved.
-// accumulateAmax includes an existing AMax value.
-struct EpilogueRequest : EpilogueProblem {
-    EpilogueRequest(Tensor inputTensor, Tensor outputTensor, ScalarType compute)
-        : EpilogueProblem(std::move(inputTensor), outputTensor.type(), compute),
-          output(std::move(outputTensor)) {}
-
-    EpilogueRequest(Tensor inputTensor, Tensor outputTensor, std::optional<Tensor> rawOutputTensor,
-                    std::optional<Tensor> auxiliaryOutputTensor, std::optional<Tensor> amaxTensor,
-                    ScalarType compute)
-        : EpilogueProblem(std::move(inputTensor), outputTensor.type(), compute),
-          output(std::move(outputTensor)),
-          rawOutput(std::move(rawOutputTensor)),
-          auxiliaryOutput(std::move(auxiliaryOutputTensor)),
-          amax(std::move(amaxTensor)) {
-        if (rawOutput) rawOutputType = rawOutput->type();
-        if (auxiliaryOutput) auxiliaryOutputType = auxiliaryOutput->type();
-        if (amax) amaxType = amax->type();
-    }
-
-    EpilogueRequest(EpilogueProblem problem, Tensor outputTensor,
-                    std::optional<Tensor> rawOutputTensor = std::nullopt,
-                    std::optional<Tensor> auxiliaryOutputTensor = std::nullopt,
-                    std::optional<Tensor> amaxTensor = std::nullopt)
-        : EpilogueProblem(std::move(problem)),
-          output(std::move(outputTensor)),
-          rawOutput(std::move(rawOutputTensor)),
-          auxiliaryOutput(std::move(auxiliaryOutputTensor)),
-          amax(std::move(amaxTensor)) {}
-
-    Tensor output;                          // Primary selected-coordinate destination.
-    std::optional<Tensor> rawOutput;        // Scaled pre-gate selected-coordinate destination.
-    std::optional<Tensor> auxiliaryOutput;  // Pre-activation selected-coordinate destination.
-    std::optional<Tensor> amax;             // One-element max-absolute destination.
+    Scalar activationParameter0;
+    Scalar activationParameter1;
+    OutputSelection outputSelection = OutputSelection::all();
     bool accumulateAmax = false;
 };
 
-// Counts writes to each caller-owned output.
-struct EpilogueRunInfo {
-    size_t outputElementsWritten = 0;           // Selected primary output coordinates.
-    size_t rawOutputElementsWritten = 0;        // Zero when rawOutput is absent.
-    size_t auxiliaryOutputElementsWritten = 0;  // Zero when auxiliaryOutput is absent.
-    size_t amaxElementsWritten = 0;             // One when amax is present; zero otherwise.
+// Scalar types to allocate for an owning epilogue call. Optional types request
+// the corresponding additional result tensor.
+struct EpilogueOutputTypes {
+    ScalarType output = ScalarType::Float32;
+    std::optional<ScalarType> rawOutput;
+    std::optional<ScalarType> auxiliaryOutput;
+    std::optional<ScalarType> amax;
 };
 
-// Owning result tensors are contiguous and initialized to semantic zero before
-// selected coordinates are computed. Initialization is not included in runInfo.
-struct EpilogueResult {
+struct EpilogueOutputs {
     Tensor output;
     std::optional<Tensor> rawOutput;
     std::optional<Tensor> auxiliaryOutput;
     std::optional<Tensor> amax;
-    EpilogueRunInfo runInfo;
 };
 
-EpilogueRunInfo referenceEpilogue(const EpilogueRequest& request);
-EpilogueResult referenceEpilogue(const EpilogueProblem& problem);
+EpilogueOutputs referenceEpilogue(Tensor input, const EpilogueOutputTypes& outputTypes = {},
+                                  const EpilogueOptions& options = EpilogueOptions{});
+
+// Writes selected coordinates into caller-owned destinations. The primary
+// output may exactly alias input; other overlapping input/output or
+// output/output storage is rejected.
+void referenceEpilogueInto(Tensor input, EpilogueOutputs outputs,
+                           const EpilogueOptions& options = EpilogueOptions{});
 }  // namespace roc::host_numerics

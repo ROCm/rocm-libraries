@@ -174,16 +174,15 @@ namespace TensileLite
                 throw std::invalid_argument("Unsupported TensileLite MX data initialization.");
             }
 
-            inline roc::host_numerics::MxGenerationProblem
-                makeMxGenerationProblem(rocisa::DataType          dataType,
-                                        rocisa::DataType          scaleType,
-                                        roc::host_numerics::Shape shape,
-                                        size_t                    leadingDimension,
-                                        size_t                    blockAxis,
-                                        size_t                    blockSize,
-                                        InitMode                  dataInitialization,
-                                        InitMode                  scaleInitialization,
-                                        uint32_t                  seed)
+            inline roc::host_numerics::MxTensor generateMxData(rocisa::DataType          dataType,
+                                                               rocisa::DataType          scaleType,
+                                                               roc::host_numerics::Shape shape,
+                                                               size_t   leadingDimension,
+                                                               size_t   blockAxis,
+                                                               size_t   blockSize,
+                                                               InitMode dataInitialization,
+                                                               InitMode scaleInitialization,
+                                                               uint32_t seed)
             {
                 using namespace roc::host_numerics;
                 const ScalarType hostDataType = toHostNumericsScalarType(dataType);
@@ -193,14 +192,14 @@ namespace TensileLite
                 MxDataGeneration dataGeneration
                     = mxDataGeneration(dataInitialization, hostDataType, shape, seed);
 
-                MxGenerationProblem problem(std::move(shape), std::move(dataGeneration));
-                problem.dataType         = hostDataType;
-                problem.scaleType        = toHostNumericsMxScaleType(scaleType);
-                problem.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
-                problem.blockAxis        = blockAxis;
-                problem.blockSize        = blockSize;
-                problem.scale            = mxScaleGenerationMode(scaleInitialization);
-                return problem;
+                MxGenerationOptions options;
+                options.dataType         = hostDataType;
+                options.scaleType        = toHostNumericsMxScaleType(scaleType);
+                options.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
+                options.blockAxis        = blockAxis;
+                options.blockSize        = blockSize;
+                options.scale            = mxScaleGenerationMode(scaleInitialization);
+                return generateMx(std::move(shape), std::move(dataGeneration), options);
             }
         } // namespace HostNumerics::detail
     } // namespace Client

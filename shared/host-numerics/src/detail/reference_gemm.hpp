@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "gemm_invocation.hpp"
 #include "reference_common.hpp"
 #include "threading.hpp"
 
@@ -34,7 +35,7 @@ inline bool isRuntimeGemmAccumulator(ScalarType type) {
 }
 
 template <typename Accumulator>
-void validateRuntimeGemmScalars(const GemmProblem& problem) {
+void validateRuntimeGemmScalars(const GemmSpecification& problem) {
     (void)runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha");
     (void)runtimeScalar<Accumulator>(problem.epilogue.beta, "beta");
     (void)runtimeScalar<Accumulator>(problem.epilogue.scaleC, "C scale");
@@ -45,7 +46,7 @@ void validateRuntimeGemmScalars(const GemmProblem& problem) {
                                      "activation parameter 1");
 }
 
-inline void validateRuntimeGemmProblem(const GemmProblem& problem) {
+inline void validateRuntimeGemmProblem(const GemmSpecification& problem) {
     requireRank(problem.a.values.shape(), 2, "Reference GEMM", "A");
     requireRank(problem.b.values.shape(), 2, "Reference GEMM", "B");
     requireRank(problem.c.shape(), 2, "Reference GEMM", "C");
@@ -211,7 +212,7 @@ inline void validateRuntimeGemmProblem(const GemmProblem& problem) {
     }
 }
 
-inline bool canParallelizeGemmOutput(const GemmRequest& problem) {
+inline bool canParallelizeGemmOutput(const GemmInvocation& problem) {
     return hasProvablyIndependentElements(problem.d);
 }
 
@@ -222,7 +223,7 @@ inline bool hasSameStorageTypeAndLayout(const Tensor& left, const Tensor& right)
            leftStorage.data() == rightStorage.data() && leftStorage.size() == rightStorage.size();
 }
 
-inline void validateGemmOutputAliasing(const GemmRequest& problem) {
+inline void validateGemmOutputAliasing(const GemmInvocation& problem) {
     if (!hasProvablyDistinctElementOffsets(problem.d.layout()))
         throw std::invalid_argument(
             "Reference GEMM requires distinct logical destination elements.");
@@ -260,7 +261,7 @@ inline void validateGemmOutputAliasing(const GemmRequest& problem) {
         throw std::invalid_argument("Reference GEMM destination must not overlap scale B.");
 }
 
-inline void validateRuntimeGemm(const GemmRequest& problem) {
+inline void validateRuntimeGemm(const GemmInvocation& problem) {
     validateRuntimeGemmProblem(problem);
     requireRank(problem.d.shape(), 2, "Reference GEMM", "D");
 
@@ -278,7 +279,7 @@ template <typename Accumulator>
 class RuntimeGemmFinalizer {
    public:
     explicit RuntimeGemmFinalizer(
-        const GemmProblem& problem,
+        const GemmSpecification& problem,
         RuntimeQuantizer<Accumulator> quantizeAccumulator = RuntimeQuantizer<Accumulator>())
         : m_problem(problem),
           m_c(problem.c),
@@ -352,7 +353,7 @@ class RuntimeGemmFinalizer {
     }
 
    private:
-    const GemmProblem& m_problem;
+    const GemmSpecification& m_problem;
     RuntimeMatrixReader<Accumulator> m_c;
     RuntimeQuantizer<Accumulator> m_quantizeAccumulator;
     std::optional<RuntimeVectorReader<Accumulator>> m_bias;
@@ -370,7 +371,8 @@ class RuntimeGemmFinalizer {
 };
 
 template <typename Accumulator>
-GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem, Tensor* selectedOutput = nullptr) {
+GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
+                                        Tensor* selectedOutput = nullptr) {
     const RuntimeMatrixReader<Accumulator> a(problem.a.values);
     const RuntimeMatrixReader<Accumulator> b(problem.b.values);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
@@ -524,7 +526,7 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem, Tensor* selectedOu
     };
 }
 
-inline GemmRunInfo runPointwiseGemm(const GemmRequest& problem) {
+inline GemmExecutionInfo runPointwiseGemm(const GemmInvocation& problem) {
     switch (problem.accumulatorType) {
         case ScalarType::Float16:
         case ScalarType::BFloat16:
@@ -543,8 +545,8 @@ inline GemmRunInfo runPointwiseGemm(const GemmRequest& problem) {
     }
 }
 
-inline GemmRunInfo runPointwiseGemmToSelectedOutput(const GemmRequest& problem,
-                                                    Tensor& selectedOutput) {
+inline GemmExecutionInfo runPointwiseGemmToSelectedOutput(const GemmInvocation& problem,
+                                                          Tensor& selectedOutput) {
     if (problem.outputSelection.selectsAll())
         throw std::invalid_argument("Streaming pointwise GEMM requires a partial selection.");
     const size_t selectedCount =

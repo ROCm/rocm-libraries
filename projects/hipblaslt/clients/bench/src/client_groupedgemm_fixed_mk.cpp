@@ -910,39 +910,40 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         d_ptr + i3 * stride_d[i],
                         dElements,
                         Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]}));
-                    GemmRequest problem(GemmOperand(copyTensorFromEncodedStorage(
-                                            a_ptr + i3 * stride_a[i],
-                                            aElements,
-                                            Layout(Shape{size_t(m[i]), size_t(k[i])},
-                                                   {a_stride_1[i], a_stride_2[i]}))),
-                                        GemmOperand(copyTensorFromEncodedStorage(
-                                            b_ptr + i3 * stride_b[i],
-                                            bElements,
-                                            Layout(Shape{size_t(k[i]), size_t(n[i])},
-                                                   {b_stride_1[i], b_stride_2[i]}))),
-                                        copyTensorFromEncodedStorage(
-                                            c_ptr + i3 * stride_c[i],
-                                            cElements,
-                                            Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]})),
-                                        referenceOutput,
-                                        ScalarType::Float32);
-                    problem.epilogue.alpha      = static_cast<double>(alpha[i]);
-                    problem.epilogue.beta       = static_cast<double>(beta[i]);
-                    problem.epilogue.activation = toHostNumericsActivation(actType[i]);
+                    GemmOperand operandA(copyTensorFromEncodedStorage(
+                        a_ptr + i3 * stride_a[i],
+                        aElements,
+                        Layout(Shape{size_t(m[i]), size_t(k[i])}, {a_stride_1[i], a_stride_2[i]})));
+                    GemmOperand operandB(copyTensorFromEncodedStorage(
+                        b_ptr + i3 * stride_b[i],
+                        bElements,
+                        Layout(Shape{size_t(k[i]), size_t(n[i])}, {b_stride_1[i], b_stride_2[i]})));
+                    Tensor      c = copyTensorFromEncodedStorage(
+                        c_ptr + i3 * stride_c[i],
+                        cElements,
+                        Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]}));
+                    GemmOptions options;
+                    options.epilogue.alpha      = static_cast<double>(alpha[i]);
+                    options.epilogue.beta       = static_cast<double>(beta[i]);
+                    options.epilogue.activation = toHostNumericsActivation(actType[i]);
                     if(bias_ptr)
-                        problem.epilogue.bias
-                            = VectorBinding{Tensor::copyNativeStorage<float>(
-                                                Layout::contiguousLastDimensionFastest(Shape{size_t(m[i])}),
-                                                std::span<const float>(bias_ptr, size_t(m[i]))),
-                                            MatrixAxis::Row};
+                        options.epilogue.bias = VectorBinding{
+                            Tensor::copyNativeStorage<float>(
+                                Layout::contiguousLastDimensionFastest(Shape{size_t(m[i])}),
+                                std::span<const float>(bias_ptr, size_t(m[i]))),
+                            MatrixAxis::Row};
                     if(actType[i] == ActivationType::SWISH)
-                        problem.epilogue.activationParameter0 = 1.0;
+                        options.epilogue.activationParameter0 = 1.0;
                     else if(actType[i] == ActivationType::CLAMP)
                     {
-                        problem.epilogue.activationParameter0 = -1.0;
-                        problem.epilogue.activationParameter1 = 1.0;
+                        options.epilogue.activationParameter0 = -1.0;
+                        options.epilogue.activationParameter1 = 1.0;
                     }
-                    referenceGemm(problem);
+                    referenceGemmInto(std::move(operandA),
+                                      std::move(operandB),
+                                      std::move(c),
+                                      referenceOutput,
+                                      options);
                     copyTensorEncodedBackingStorageToBuffer(
                         d_ptr + i3 * stride_d[i], dElements, referenceOutput);
 

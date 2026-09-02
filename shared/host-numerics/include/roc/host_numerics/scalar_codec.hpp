@@ -225,28 +225,28 @@ Target convertToInteger(Source source, const ScalarConversionOptions& options) {
 
 template <typename Target, typename Source>
 Target convertScalarValue(Source source, const ScalarConversionOptions& options) {
-    using Result = std::remove_cv_t<Target>;
+    using Destination = std::remove_cv_t<Target>;
     using Value = std::remove_cvref_t<Source>;
     static_assert(!std::is_reference_v<Target>);
 
-    if constexpr (RuntimeIsComplexV<Result>) {
-        using Component = typename Result::value_type;
+    if constexpr (RuntimeIsComplexV<Destination>) {
+        using Component = typename Destination::value_type;
         if constexpr (RuntimeIsComplexV<Value>)
-            return Result(convertScalarValue<Component>(source.real(), options),
-                          convertScalarValue<Component>(source.imag(), options));
+            return Destination(convertScalarValue<Component>(source.real(), options),
+                               convertScalarValue<Component>(source.imag(), options));
         else
-            return Result(convertScalarValue<Component>(source, options), Component{0});
+            return Destination(convertScalarValue<Component>(source, options), Component{0});
     } else if constexpr (RuntimeIsComplexV<Value>) {
         if (source.imag() != typename Value::value_type{0})
             throw std::domain_error(
                 "A complex value with a nonzero imaginary component cannot be converted to real.");
-        return convertScalarValue<Result>(source.real(), options);
-    } else if constexpr (std::is_same_v<Result, bool>) {
+        return convertScalarValue<Destination>(source.real(), options);
+    } else if constexpr (std::is_same_v<Destination, bool>) {
         return source != Value{0};
-    } else if constexpr (std::is_integral_v<Result>) {
-        return convertToInteger<Result>(std::move(source), options);
+    } else if constexpr (std::is_integral_v<Destination>) {
+        return convertToInteger<Destination>(std::move(source), options);
     } else {
-        return static_cast<Result>(source);
+        return static_cast<Destination>(source);
     }
 }
 

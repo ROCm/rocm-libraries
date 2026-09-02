@@ -50,21 +50,31 @@ namespace TensileLite::Client::HostNumerics
         TranslatedGemmBatch(const TranslatedGemmBatch&)            = delete;
         TranslatedGemmBatch& operator=(const TranslatedGemmBatch&) = delete;
 
-        roc::host_numerics::GemmRequest& gemm()
+        roc::host_numerics::GemmOptions& gemmOptions()
         {
-            return gemmRequest;
+            return options;
         }
 
-        const roc::host_numerics::GemmRequest& gemm() const
+        const roc::host_numerics::GemmOptions& gemmOptions() const
         {
-            return gemmRequest;
+            return options;
         }
 
+        roc::host_numerics::GemmBackend runGemm(roc::host_numerics::GemmBackend backend
+                                                = roc::host_numerics::GemmBackend::Automatic) const;
         void runPostGemmOperationsAndCopyOutputs() const;
 
     private:
-        explicit TranslatedGemmBatch(roc::host_numerics::GemmRequest request)
-            : gemmRequest(std::move(request))
+        explicit TranslatedGemmBatch(roc::host_numerics::GemmOperand aOperand,
+                                     roc::host_numerics::GemmOperand bOperand,
+                                     roc::host_numerics::Tensor      cTensor,
+                                     roc::host_numerics::Tensor      dTensor,
+                                     roc::host_numerics::ScalarType  accumulatorType)
+            : a(std::move(aOperand))
+            , b(std::move(bOperand))
+            , c(std::move(cTensor))
+            , d(std::move(dTensor))
+            , options(accumulatorType)
         {
         }
 
@@ -75,10 +85,49 @@ namespace TensileLite::Client::HostNumerics
             roc::host_numerics::OutputSelection selection;
         };
 
-        roc::host_numerics::GemmRequest                     gemmRequest;
-        std::optional<roc::host_numerics::EpilogueRequest>  epilogue;
-        std::optional<roc::host_numerics::ReductionRequest> biasReduction;
-        std::vector<CopyBack>                               copyBacks;
+        struct BiasReduction
+        {
+            BiasReduction(roc::host_numerics::Tensor     inputTensor,
+                          roc::host_numerics::Tensor     outputTensor,
+                          roc::host_numerics::ScalarType accumulator,
+                          std::vector<size_t>            reductionAxes)
+                : input(std::move(inputTensor))
+                , output(std::move(outputTensor))
+                , accumulatorType(accumulator)
+                , axes(std::move(reductionAxes))
+            {
+            }
+
+            roc::host_numerics::Tensor     input;
+            roc::host_numerics::Tensor     output;
+            roc::host_numerics::ScalarType accumulatorType;
+            std::vector<size_t>            axes;
+        };
+
+        struct BoundEpilogue
+        {
+            BoundEpilogue(roc::host_numerics::Tensor     inputTensor,
+                          roc::host_numerics::Tensor     outputTensor,
+                          roc::host_numerics::ScalarType computeType)
+                : input(std::move(inputTensor))
+                , outputs{.output = std::move(outputTensor)}
+                , options(computeType)
+            {
+            }
+
+            roc::host_numerics::Tensor          input;
+            roc::host_numerics::EpilogueOutputs outputs;
+            roc::host_numerics::EpilogueOptions options;
+        };
+
+        roc::host_numerics::GemmOperand a;
+        roc::host_numerics::GemmOperand b;
+        roc::host_numerics::Tensor      c;
+        roc::host_numerics::Tensor      d;
+        roc::host_numerics::GemmOptions options;
+        std::optional<BoundEpilogue>    epilogue;
+        std::optional<BiasReduction>    biasReduction;
+        std::vector<CopyBack>           copyBacks;
 
         friend class GemmInvocationAdapter;
     };
@@ -106,8 +155,7 @@ namespace TensileLite::Client::HostNumerics
 
         // Executes every preflighted batch in the required order, including
         // post-GEMM operations and copies back to caller-owned storage.
-        roc::host_numerics::GemmRunInfo
-            execute(roc::host_numerics::GemmBackend backend) const;
+        roc::host_numerics::GemmBackend execute(roc::host_numerics::GemmBackend backend) const;
 
         std::variant<TranslatedGemmBatch, TranslationFailure>
             translateBatch(size_t batch) const;

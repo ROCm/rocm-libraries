@@ -178,7 +178,7 @@ void testSeedAndComplexPolicies() {
 }
 
 void testValidationFailures() {
-    requireThrows<std::invalid_argument>([] { (void)GenerationRecipe::candidateSet({}); },
+    requireThrows<std::invalid_argument>([] { (void)GenerationRecipe::choice({}); },
                                          "An empty candidate set was accepted.");
     requireThrows<std::invalid_argument>(
         [] { (void)GenerationRecipe::uniformInteger({.lower = 2, .upper = 1}); },

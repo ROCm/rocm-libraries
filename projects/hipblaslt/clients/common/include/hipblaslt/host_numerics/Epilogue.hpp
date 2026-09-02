@@ -14,7 +14,6 @@ namespace hipblaslt::host_numerics
 {
     using ::roc::host_numerics::Activation;
     using ::roc::host_numerics::ActivationApplication;
-    using ::roc::host_numerics::EpilogueRunInfo;
     using ::roc::host_numerics::MatrixAxis;
 
     struct EpilogueArguments
@@ -43,5 +42,5 @@ namespace hipblaslt::host_numerics
         hipDataType           computeType           = HIP_R_32F;
     };
 
-    EpilogueRunInfo referenceEpilogue(const EpilogueArguments& arguments);
+    void referenceEpilogue(const EpilogueArguments& arguments);
 } // namespace hipblaslt::host_numerics

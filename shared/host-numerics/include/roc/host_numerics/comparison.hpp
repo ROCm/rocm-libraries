@@ -140,7 +140,7 @@ struct Mismatch {
 /// `pointwiseEvaluated`, `frobeniusEvaluated`, and `ulpEvaluated` state whether the corresponding
 /// criterion contributed to `passed()`. An unevaluated criterion retains a `...Passed` value of
 /// true for source compatibility. Evidence can be present while its criterion is unevaluated.
-struct ComparisonResult {
+struct ComparisonReport {
     /// Number of selected logical tensor elements. A complex element counts once.
     size_t compared = 0;
 
@@ -223,7 +223,7 @@ struct SentinelMismatch {
     ComparisonValue observed;
 };
 
-struct SentinelResult {
+struct SentinelReport {
     size_t checked = 0;
     size_t mismatches = 0;
     std::vector<SentinelMismatch> reportedMismatches;
@@ -232,7 +232,7 @@ struct SentinelResult {
         return mismatches == 0;
     }
 
-    void append(const SentinelResult& other, size_t maxReportedMismatches) {
+    void append(const SentinelReport& other, size_t maxReportedMismatches) {
         checked += other.checked;
         mismatches += other.mismatches;
         for (const auto& mismatch : other.reportedMismatches) {
@@ -287,7 +287,7 @@ double ulpDistance(double exact, double approximation, int mantissaBits);
 
 double encodedUlpDistance(double exact, double approximation, ScalarType type);
 
-ComparisonResult compare(const Tensor& observed, const Tensor& expected,
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options = {});
 
 /// Returns the first candidate pair, in absolute-major then relative-minor input order, for which
@@ -307,7 +307,7 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(
 ///
 /// Throws `std::invalid_argument` when the scalar type has no storage, the element range
 /// overflows, or the storage span does not contain the complete range.
-SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
+SentinelReport checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
                                       size_t firstElement, size_t elementCount,
                                       SentinelRegion region = SentinelRegion::Unspecified,
                                       size_t maxReportedMismatches = 10);
@@ -315,7 +315,7 @@ SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte
 /// Checks every element in `[0, allocatedElements)` that is not addressed by `logicalTensor`.
 /// Reported indices are storage element offsets in that same range. Throws `std::invalid_argument`
 /// if the allocated range exceeds storage or any logical tensor coordinate addresses outside it.
-SentinelResult checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allocatedElements,
+SentinelReport checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allocatedElements,
                                         SentinelRegion region = SentinelRegion::Inside,
                                         size_t maxReportedMismatches = 10);
 }  // namespace roc::host_numerics

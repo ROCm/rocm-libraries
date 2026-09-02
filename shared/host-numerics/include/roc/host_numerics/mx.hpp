@@ -60,19 +60,15 @@ enum class MxScaleGenerationMode {
     NaN,
 };
 
-// Describes a rank-two, block-scaled MX tensor in its natural host layout.
-// Data generation and scale selection are independent: data controls source
-// values, while scale controls only how each block scale is selected.
-struct MxGenerationProblem {
-    MxGenerationProblem(Shape shape, MxDataGeneration data);
-
+// Storage and scale policy for a rank-two, block-scaled MX tensor. Data
+// generation is supplied separately so scale selection cannot alter its stream.
+struct MxGenerationOptions {
     // Packed data encoding and per-block scale encoding.
     ScalarType dataType = ScalarType::Float4E2M1;
     ScalarType scaleType = ScalarType::E8M0;
 
-    // Logical data shape. A zero leading dimension selects shape[0], otherwise
-    // data uses strides {1, leadingDimension}.
-    Shape shape;
+    // A zero leading dimension selects shape[0]; otherwise data uses strides
+    // {1, leadingDimension}.
     ptrdiff_t leadingDimension = 0;
 
     // Scales group blockSize consecutive elements along blockAxis. The other
@@ -80,14 +76,12 @@ struct MxGenerationProblem {
     size_t blockAxis = 0;
     size_t blockSize = 32;
 
-    MxDataGeneration data;
-
     // Scale-selection policy. Derived computes scales from data; constant modes
     // use the same encoded scale for every block.
     MxScaleGenerationMode scale = MxScaleGenerationMode::Derived;
 };
 
-struct MxGenerationResult {
+struct MxTensor {
     // Packed data with the requested leading dimension.
     Tensor data;
 
@@ -101,5 +95,6 @@ struct MxGenerationResult {
     Tensor reference;
 };
 
-MxGenerationResult generateMx(const MxGenerationProblem& problem);
+MxTensor generateMx(Shape shape, MxDataGeneration generation,
+                    const MxGenerationOptions& options = {});
 }  // namespace roc::host_numerics

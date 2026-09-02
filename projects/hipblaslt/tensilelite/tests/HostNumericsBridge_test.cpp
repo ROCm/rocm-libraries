@@ -23,12 +23,12 @@ namespace
             = TensileLite::Client::validationComparisonOptions(type, threshold);
         options.computePointwiseStatistics = false;
         options.computeFrobenius           = false;
-        const ComparisonResult report
-            = TensileLite::Client::compareHostBuffers(type,
-                                                      observedStorage.data(),
-                                                      expectedStorage.data(),
-                                                      Layout::contiguousLastDimensionFastest(Shape{1}),
-                                                      options);
+        const ComparisonReport report      = TensileLite::Client::compareHostBuffers(
+            type,
+            observedStorage.data(),
+            expectedStorage.data(),
+            Layout::contiguousLastDimensionFastest(Shape{1}),
+            options);
         return report.passed();
     }
 

@@ -66,7 +66,9 @@ no shape, layout, aliasing, or shared-lifetime behavior. A sub-byte scalar still
 occupies a private whole-byte slot; only the format's defined low bits belong to
 the value. This distinction is about semantics and API clarity rather than a
 measured performance requirement, and mirrors the distinction between a NumPy
-scalar and a zero-dimensional `ndarray`.
+scalar and a zero-dimensional `ndarray`. Operation coefficients accept native
+numbers directly; `Tensor::item()` snapshots a zero-dimensional tensor when a
+tensor-backed scalar is more convenient.
 
 ## Deterministic generation
 
@@ -106,7 +108,7 @@ detail is not part of the caller's seed contract.
 
 Recipes cover constants, uniform and normal distributions, indices,
 trigonometric patterns, type limits, encoded exponents, and raw storage.
-`candidateSet({.values = {...}})` chooses one supplied value for each element;
+`choice({.values = {...}})` chooses one supplied value for each element;
 it is the equivalent of sampling from a finite list, like NumPy's
 `random.choice`. Component modifiers can then apply a transform, affine
 mapping, or coordinate-based sign pattern without introducing mutable global
@@ -120,19 +122,16 @@ compute, accumulator, and result types stay explicit because the purpose is to
 model low-precision behavior rather than silently promote every calculation to
 the host's preferred type.
 
-Operations have two forms. The owning form allocates and returns its output
-tensors. A request form accepts caller-owned destinations when a product needs
-a particular layout, wants in-place operation where it is valid, or needs only
-selected outputs. `Problem` objects hold reusable numerical semantics;
-`Request` objects add destinations; `Result` objects return owned tensors and
-small execution metadata. Product adapters normally construct these objects so
-raw product pointers and enums never enter the shared implementation.
+Operations have two forms. The ordinary form accepts tensors and options, then
+allocates and returns its output tensors. An `...Into` form accepts
+caller-owned destinations when a product needs a particular layout, wants
+in-place operation where it is valid, or needs only selected outputs. Product
+adapters translate raw pointers and enums before calling either form.
 
-AXPBY is intentionally a small numerical primitive, not a second tensor
-algebra. It implements `alpha * x + beta * y` for the hipBLASLt matrix-transform
-reference while sharing the component's conversion, layout, ownership, and
-aliasing rules. Higher-level convenience APIs can present that operation more
-naturally without duplicating its numerical implementation.
+`linearCombination` implements `alpha * x + beta * y` for the hipBLASLt
+matrix-transform reference while sharing the component's conversion, layout,
+ownership, and aliasing rules. It is a small operation rather than a parallel
+tensor-algebra framework.
 
 Reference GEMM supports ordinary and complex arithmetic, explicit
 low-precision input quantization and accumulation behavior, scaling, bias,
@@ -194,7 +193,7 @@ c_np = np.zeros((2, 2), dtype=np.float32)
 a = hv.from_numpy(a_np)
 b = hv.from_numpy(b_np)
 c = hv.from_numpy(c_np)
-d = hv.reference_gemm_flat(
+d = hv.reference_gemm(
     a,
     b,
     c,

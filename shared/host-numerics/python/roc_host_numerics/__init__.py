@@ -117,7 +117,7 @@ def to_numpy(tensor, dtype=None) -> np.ndarray:
     return np.asarray(tensor.values, dtype=dtype).reshape(tensor.shape)
 
 
-def reference_gemm_flat_result(
+def reference_gemm(
     a,
     b,
     c,
@@ -146,7 +146,7 @@ def reference_gemm_flat_result(
     output_conversion=OutputConversion.Default,  # noqa: F405
     accumulation_rounding=AccumulationRounding.TypeDefault,  # noqa: F405
 ):
-    """Build native GEMM descriptors from tensor arguments and return the result."""
+    """Compute a reference GEMM from tensor arguments and return its output tensor."""
 
     operand_a = GemmOperand(a)  # noqa: F405
     operand_b = GemmOperand(b)  # noqa: F405
@@ -205,40 +205,28 @@ def reference_gemm_flat_result(
     elif block_size_b != 0:
         raise ValueError("Python reference_gemm B block size requires a scale tensor.")
 
-    problem = GemmProblem(  # noqa: F405
-        operand_a,
-        operand_b,
-        c,
-        output_type,
-        accumulator_type,
-    )
-    problem.accumulation_rounding = accumulation_rounding
-    problem.math_mode = math_mode
-    problem.epilogue.alpha = alpha
-    problem.epilogue.beta = beta
-    problem.epilogue.scale_c = scale_c
-    problem.epilogue.output_scale = output_scale
-    problem.epilogue.output_conversion = output_conversion
-    problem.epilogue.activation = activation
-    problem.epilogue.activation_parameter0 = activation_parameter0
-    problem.epilogue.activation_parameter1 = activation_parameter1
-
-    output = GemmOutputOptions()  # noqa: F405
-    output.selection = (
+    options = GemmOptions(accumulator_type)  # noqa: F405
+    options.accumulation_rounding = accumulation_rounding
+    options.math_mode = math_mode
+    options.epilogue.alpha = alpha
+    options.epilogue.beta = beta
+    options.epilogue.scale_c = scale_c
+    options.epilogue.output_scale = output_scale
+    options.epilogue.output_conversion = output_conversion
+    options.epilogue.activation = activation
+    options.epilogue.activation_parameter0 = activation_parameter0
+    options.epilogue.activation_parameter1 = activation_parameter1
+    options.output_selection = (
         OutputSelection.all()  # noqa: F405
         if output_selection is None
         else output_selection
     )
-    return reference_gemm_result(problem, output, backend)  # noqa: F405
-
-
-def reference_gemm(*args, **kwargs):
-    """Run a native GEMM request/problem and return only its output tensor."""
-
-    return reference_gemm_result(*args, **kwargs).output
-
-
-def reference_gemm_flat(*args, **kwargs):
-    """Run the tensor-argument GEMM convenience API and return its output tensor."""
-
-    return reference_gemm_flat_result(*args, **kwargs).output
+    return reference_gemm_operands(  # noqa: F405
+        operand_a,
+        operand_b,
+        c,
+        output_type,
+        options,
+        None,
+        backend,
+    )

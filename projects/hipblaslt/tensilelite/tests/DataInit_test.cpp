@@ -454,15 +454,13 @@ TEST(HostNumericsStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
     Tensor componentMetadataTensor = Tensor::copyEncodedBackingStorage(
         ScalarType::UInt8, logicalMetadataLayout,
         std::as_writable_bytes(std::span<uint8_t>(componentMetadata)));
-    StructuredSparsityRequest componentRequest(
+    applyStructuredSparsityInto(
         Tensor::copyEncodedBackingStorage(
             scalarType, layout(denseDescriptor), std::as_bytes(std::span<const int8_t>(original))),
-        componentPrunedTensor,
-        componentCompressedTensor,
-        std::nullopt,
-        componentMetadataTensor,
+        {.pruned            = componentPrunedTensor,
+         .compressed        = componentCompressedTensor,
+         .twoOfFourMetadata = componentMetadataTensor},
         pattern);
-    applyStructuredSparsity(componentRequest);
     std::memcpy(componentPruned.data(),
                 componentPrunedTensor.rawEncodedBackingStorage().data(),
                 componentPrunedTensor.rawEncodedBackingStorage().size());
@@ -859,19 +857,17 @@ TEST(TensileMxGenerationTranslation, MapsTypesAndInitializationPolicy)
 {
     using namespace roc::host_numerics;
 
-    const MxGenerationProblem problem = dt::makeMxGenerationProblem(rocisa::DataType::Float4,
-                                                                    rocisa::DataType::E5M3,
-                                                                    Shape{8, 4},
-                                                                    8,
-                                                                    0,
-                                                                    4,
-                                                                    InitMode::Random,
-                                                                    InitMode::One,
-                                                                    17);
-    EXPECT_EQ(problem.dataType, ScalarType::Float4E2M1);
-    EXPECT_EQ(problem.scaleType, ScalarType::E5M3);
-    EXPECT_EQ(problem.scale, MxScaleGenerationMode::One);
-    EXPECT_EQ(problem.data.recipe().seed(), 17);
+    const MxTensor generated = dt::generateMxData(rocisa::DataType::Float4,
+                                                  rocisa::DataType::E5M3,
+                                                  Shape{8, 4},
+                                                  8,
+                                                  0,
+                                                  4,
+                                                  InitMode::Random,
+                                                  InitMode::One,
+                                                  17);
+    EXPECT_EQ(generated.data.type(), ScalarType::Float4E2M1);
+    EXPECT_EQ(generated.scales.type(), ScalarType::E5M3);
 }
 
 TEST(TensileMxGenerationTranslation, MapsArchitectureToPhysicalScaleLayout)
@@ -889,25 +885,25 @@ TEST(TensileMxGenerationTranslation, RejectsUnsupportedTypesAndModes)
 {
     using namespace roc::host_numerics;
 
-    EXPECT_THROW(generateMx(dt::makeMxGenerationProblem(rocisa::DataType::Float,
-                                                        rocisa::DataType::E8,
-                                                        Shape{8, 4},
-                                                        8,
-                                                        0,
-                                                        4,
-                                                        InitMode::Random,
-                                                        InitMode::One,
-                                                        17)),
+    EXPECT_THROW(dt::generateMxData(rocisa::DataType::Float,
+                                    rocisa::DataType::E8,
+                                    Shape{8, 4},
+                                    8,
+                                    0,
+                                    4,
+                                    InitMode::Random,
+                                    InitMode::One,
+                                    17),
                  std::invalid_argument);
-    EXPECT_THROW(dt::makeMxGenerationProblem(rocisa::DataType::Float4,
-                                             rocisa::DataType::E8,
-                                             Shape{8, 4},
-                                             8,
-                                             0,
-                                             4,
-                                             InitMode::Free,
-                                             InitMode::One,
-                                             17),
+    EXPECT_THROW(dt::generateMxData(rocisa::DataType::Float4,
+                                    rocisa::DataType::E8,
+                                    Shape{8, 4},
+                                    8,
+                                    0,
+                                    4,
+                                    InitMode::Free,
+                                    InitMode::One,
+                                    17),
                  std::invalid_argument);
 }
 

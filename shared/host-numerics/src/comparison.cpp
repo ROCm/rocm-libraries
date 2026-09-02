@@ -432,7 +432,7 @@ class ComparisonAccumulator {
         if (m_options.pointwise && !close) ++m_result.mismatches;
     }
 
-    ComparisonResult finish() {
+    ComparisonReport finish() {
         m_result.pointwisePassed = !m_options.pointwise || m_result.mismatches == 0;
         if (m_options.computeFrobenius) {
             m_result.frobeniusDifference = std::sqrt(static_cast<double>(m_differenceSquares));
@@ -490,7 +490,7 @@ class ComparisonAccumulator {
 
     ComparisonOptions m_options;
     const Shape* m_shape = nullptr;
-    ComparisonResult m_result;
+    ComparisonReport m_result;
     long double m_differenceSquares = 0.0;
     long double m_observedSquares = 0.0;
     long double m_expectedSquares = 0.0;
@@ -749,10 +749,10 @@ inline void validateSentinelRange(ScalarType type, std::span<const std::byte> st
 }
 
 template <typename Tag>
-ComparisonResult comparePointwiseOnlyKnown(const Tensor& observed, const Tensor& expected,
+ComparisonReport comparePointwiseOnlyKnown(const Tensor& observed, const Tensor& expected,
                                            const ComparisonOptions& options) {
     const auto run = [&]<typename Predicate>(Predicate predicate) {
-        ComparisonResult result;
+        ComparisonReport result;
         result.pointwiseEvaluated = true;
         if ((options.selection.selectsAll() ||
              (options.selection.first() == 0 && options.selection.stride() == 1)) &&
@@ -886,14 +886,14 @@ double encodedUlpDistance(double exact, double approximation, ScalarType type) {
     return detail::encodedUlpDistance(exact, approximation, type);
 }
 
-ComparisonResult compare(const Tensor& observed, const Tensor& expected,
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options) {
     detail::validateComparisonOptions(options);
     if (observed.shape() != expected.shape())
         throw std::invalid_argument("Host numerics tensor comparison shape mismatch.");
 
     if (observed.type() == expected.type() && detail::pointwiseOnlyComparison(options)) {
-        ComparisonResult result = visitScalarType(observed.type(), [&]<typename Tag>() {
+        ComparisonReport result = visitScalarType(observed.type(), [&]<typename Tag>() {
             return detail::comparePointwiseOnlyKnown<Tag>(observed, expected, options);
         });
         const bool needsSamples = options.maxReportedMismatches != 0 &&
@@ -997,12 +997,12 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
     return std::nullopt;
 }
 
-SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
+SentinelReport checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
                                       size_t firstElement, size_t elementCount,
                                       SentinelRegion region, size_t maxReportedMismatches) {
     detail::validateSentinelRange(type, storage, firstElement, elementCount);
 
-    SentinelResult result;
+    SentinelReport result;
     result.checked = elementCount;
     result.reportedMismatches.reserve(std::min(maxReportedMismatches, elementCount));
     for (size_t index = 0; index < elementCount; ++index) {
@@ -1023,7 +1023,7 @@ SentinelResult checkUnwrittenSentinel(ScalarType type, std::span<const std::byte
     return result;
 }
 
-SentinelResult checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allocatedElements,
+SentinelReport checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allocatedElements,
                                         SentinelRegion region, size_t maxReportedMismatches) {
     const auto& layout = logicalTensor.layout();
     detail::validateSentinelRange(logicalTensor.type(), logicalTensor.rawEncodedBackingStorage(), 0,
@@ -1037,11 +1037,11 @@ SentinelResult checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allo
             used[static_cast<size_t>(offset)] = true;
         });
 
-    SentinelResult result;
+    SentinelReport result;
     result.reportedMismatches.reserve(maxReportedMismatches);
     for (size_t index = 0; index < allocatedElements; ++index) {
         if (used[index]) continue;
-        const SentinelResult element = checkUnwrittenSentinel(
+        const SentinelReport element = checkUnwrittenSentinel(
             logicalTensor.type(), logicalTensor.rawEncodedBackingStorage(), index, 1, region,
             maxReportedMismatches - result.reportedMismatches.size());
         result.append(element, maxReportedMismatches);
