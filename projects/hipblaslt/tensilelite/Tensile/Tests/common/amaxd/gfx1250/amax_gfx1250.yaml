@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 # OutputAmaxD coverage for gfx1250 (flat_atomic_dec_u32 synchronizer fallback).
+# Mirrors common/amaxd/8rn_amaxd.yaml: every group carries the full bias/scale
+# epilogue with Activation enabled, and the groups differ only by transpose.
+# MIWT stays 1x1 in every group so the store stays single-element -- OutputAmaxD
+# on gfx1250 is only accumulated on the StoreVectorWidth==1 route.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 GlobalParameters:
@@ -22,8 +26,11 @@ GlobalParameters:
   DataInitTypeScaleAlphaVec: 3
   Architecture: gfx1250
 BenchmarkProblems:
+  ########################################
+  # TN - OCP F8 in/out
+  ########################################
   -
-    - # ProblemType  TN - OCP F8 in/out
+    - # ProblemType
       OperationType: GEMM
       DataType: F8
       DestDataType: F8
@@ -39,7 +46,7 @@ BenchmarkProblems:
       UseScaleAB: "Scalar"
       UseScaleCD: True
       UseScaleAlphaVec: 1
-      Activation: True
+      Activation: True # must be true if there is any of bias scale
       ActivationType: all
       BiasDataTypeList: ['h']
     - # BenchmarkProblemSizeGroup
@@ -67,126 +74,186 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128, 128, 128, 128, 128]
           - Exact: [127, 127, 1, 128, 127, 127, 127, 127]
+          # The amax reducer walks the workspace a whole wave at a time, so the
+          # tail slots are only read when the workgroup count is not a multiple
+          # of 32. At MT16x16 these give 11x11=121 and 7x7=49 workgroups, and
+          # the larger one runs first so its partials are still in the reused
+          # workspace when the smaller one reads past its own slots.
+          - Exact: [176, 176, 1, 128, 176, 176, 176, 176]
+          - Exact: [112, 112, 1, 128, 112, 112, 112, 112]
+          - Exact: [256, 256, 1, 256, 256, 256, 256, 256]
         - BiasTypeArgs: ['h']
         - ActivationArgs:
           - [Enum: none]
           - [Enum: relu]
+  ########################################
+  # NT - OCP F8 in/out
+  ########################################
   -
-    - # ProblemType  TN - OCP F8 in/out - minimal UseScaleCD + OutputAmaxD (fp8 reasonable
-      #                version of the misc_params / scale_cd amax groups; those used
-      #                FP16/BF16 output which cannot accumulate amax in the current kernel)
+    - # ProblemType
       OperationType: GEMM
       DataType: F8
       DestDataType: F8
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: True
-      TransposeB: False
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
+      UseBias: 1
       OutputAmaxD: True
       DataTypeAmaxD: s
-      UseScaleCD: True
-    - # BenchmarkProblemSizeGroup
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
-        - DepthU: [128]
-        - WavefrontSize: [32]
-        - LDSTrInst: [True]
-        - TransposeLDS: [1]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - 1LDSBuffer: [0]
-        - GlobalSplitU: [1]
-        - LocalReadVectorWidth: [16]
-        - GlobalReadVectorWidthA: [16]
-        - GlobalReadVectorWidthB: [16]
-        - SourceSwap: [True]
-        - ExpandPointerSwap: [False]
-        - StaggerU: [0]
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [128, 128, 1, 128, 128, 128, 128, 128]
-          - Exact: [256, 256, 1, 256, 256, 256, 256, 256]
-  -
-    - # ProblemType  TN - OCP F8 in/out - UseScaleCD only, no amax
-      #                (fp8 reasonable version of scale_cd group 1: FP16 UseScaleCD, which
-      #                cannot scale correctly on gfx1250 due to even/packed gwvw)
-      OperationType: GEMM
-      DataType: F8
-      DestDataType: F8
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      TransposeA: True
-      TransposeB: False
-      UseBeta: True
-      Batched: True
-      UseScaleCD: True
-    - # BenchmarkProblemSizeGroup
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
-        - DepthU: [128]
-        - WavefrontSize: [32]
-        - LDSTrInst: [True]
-        - TransposeLDS: [1]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - 1LDSBuffer: [0]
-        - GlobalSplitU: [1]
-        - LocalReadVectorWidth: [16]
-        - GlobalReadVectorWidthA: [16]
-        - GlobalReadVectorWidthB: [16]
-        - SourceSwap: [True]
-        - ExpandPointerSwap: [False]
-        - StaggerU: [0]
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [128, 128, 1, 128, 128, 128, 128, 128]
-          - Exact: [256, 256, 1, 256, 256, 256, 256, 256]
-  -
-    - # ProblemType  TN - OCP F8 in/out - UseScaleAB + UseScaleCD, no amax
-      #                (fp8 reasonable version of scale_cd group 4: F8->h UseScaleAB+UseScaleCD)
-      OperationType: GEMM
-      DataType: F8
-      DestDataType: F8
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      TransposeA: True
-      TransposeB: False
-      UseBeta: True
-      Batched: True
       UseScaleAB: "Scalar"
       UseScaleCD: True
+      UseScaleAlphaVec: 1
+      Activation: True # must be true if there is any of bias scale
+      ActivationType: all
+      BiasDataTypeList: ['h']
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
-        - DepthU: [128]
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
         - WavefrontSize: [32]
-        - LDSTrInst: [True]
-        - TransposeLDS: [1]
+        - TransposeLDS: [0]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - 1LDSBuffer: [0]
+        - 1LDSBuffer: [1]
         - GlobalSplitU: [1]
         - LocalReadVectorWidth: [16]
-        - GlobalReadVectorWidthA: [16]
-        - GlobalReadVectorWidthB: [16]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
         - SourceSwap: [True]
-        - ExpandPointerSwap: [False]
         - StaggerU: [0]
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 128, 128, 128, 128, 128]
-          - Exact: [256, 256, 1, 256, 256, 256, 256, 256]
+          - Exact: [127, 127, 1, 128, 127, 127, 127, 127]
+          # The amax reducer walks the workspace a whole wave at a time, so the
+          # tail slots are only read when the workgroup count is not a multiple
+          # of 32. At MT16x16 these give 11x11=121 and 7x7=49 workgroups, and
+          # the larger one runs first so its partials are still in the reused
+          # workspace when the smaller one reads past its own slots.
+          - Exact: [176, 176, 1, 128, 176, 176, 176, 176]
+          - Exact: [112, 112, 1, 128, 112, 112, 112, 112]
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+  ########################################
+  # NN - OCP F8 in/out
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      OutputAmaxD: True
+      DataTypeAmaxD: s
+      UseScaleAB: "Scalar"
+      UseScaleCD: True
+      UseScaleAlphaVec: 1
+      Activation: True # must be true if there is any of bias scale
+      ActivationType: all
+      BiasDataTypeList: ['h']
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - SourceSwap: [True]
+        - StaggerU: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128, 128, 128, 128, 128]
+          - Exact: [127, 127, 1, 128, 127, 127, 127, 127]
+          # The amax reducer walks the workspace a whole wave at a time, so the
+          # tail slots are only read when the workgroup count is not a multiple
+          # of 32. At MT16x16 these give 11x11=121 and 7x7=49 workgroups, and
+          # the larger one runs first so its partials are still in the reused
+          # workspace when the smaller one reads past its own slots.
+          - Exact: [176, 176, 1, 128, 176, 176, 176, 176]
+          - Exact: [112, 112, 1, 128, 112, 112, 112, 112]
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+  ########################################
+  # TT - OCP F8 in/out
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      OutputAmaxD: True
+      DataTypeAmaxD: s
+      UseScaleAB: "Scalar"
+      UseScaleCD: True
+      UseScaleAlphaVec: 1
+      Activation: True # must be true if there is any of bias scale
+      ActivationType: all
+      BiasDataTypeList: ['h']
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - SourceSwap: [True]
+        - StaggerU: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128, 128, 128, 128, 128]
+          - Exact: [127, 127, 1, 128, 127, 127, 127, 127]
+          # The amax reducer walks the workspace a whole wave at a time, so the
+          # tail slots are only read when the workgroup count is not a multiple
+          # of 32. At MT16x16 these give 11x11=121 and 7x7=49 workgroups, and
+          # the larger one runs first so its partials are still in the reused
+          # workspace when the smaller one reads past its own slots.
+          - Exact: [176, 176, 1, 128, 176, 176, 176, 176]
+          - Exact: [112, 112, 1, 128, 112, 112, 112, 112]
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]

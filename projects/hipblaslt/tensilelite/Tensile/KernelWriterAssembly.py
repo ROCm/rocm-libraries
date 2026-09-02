@@ -18022,6 +18022,17 @@ class KernelWriterAssembly(KernelWriter):
     label_final_output = Label("final_output", 'final_output')
     mod.addSpaceLine()
 
+    # The per-workgroup partial written below is consumed by whichever workgroup
+    # wins the flat_atomic_dec_u32 race, i.e. from a different CU. On arches that
+    # default VMEM ops to CU-local scope the partial could be served out of L1,
+    # so force device scope on both sides as the GSU workspace handshake does.
+    culocal = self.states.archCaps["DefaultScopeIsCULocal"]
+    trustBufferOob = self.states.asmCaps["HasPartialOOB"]
+    def wsMubuf():
+      if culocal:
+        return MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV)
+      return MUBUFModifiers(offen=True, glc=True, slc=True)
+
     mod.add(VReadfirstlaneB32(sgpr("Tmp"), vgpr("Serial")))
     mod.add(SCmpEQU32(sgpr("Tmp"), 0))
     mod.add(SCBranchSCC0(label_end.getLabelName()))
@@ -18042,8 +18053,13 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(VMovB32(vgpr("Offset"), 0))
 
     # TODO- select inst
-    mod.add(BufferStoreB32(vgpr("AmaxOut"), vgpr("Offset"), sgpr("Dst",4), sgpr("Offset"), MUBUFModifiers(offen=True, glc=True, slc=True)))
-    mod.add(SWaitCnt(vlcnt=0))
+    mod.add(BufferStoreB32(vgpr("AmaxOut"), vgpr("Offset"), sgpr("Dst",4), sgpr("Offset"), wsMubuf()))
+    if culocal:
+      # The atomic dec below advertises this partial, so the store has to have
+      # landed first; vlcnt does not track stores on these arches.
+      mod.add(SWaitCnt(vlcnt=0, vscnt=0, comment="wait for partial amax store"))
+    else:
+      mod.add(SWaitCnt(vlcnt=0))
     mod.addSpaceLine()
 
     mod.add(SSubI32(sgpr("Tmp"), sgpr("NumGroup"), 1))
@@ -18069,9 +18085,19 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(label_final_loop)
 
     # TODO- select inst
-    mod.add(BufferLoadB32(vgpr(f"Value"), vgpr("Offset"), sgpr("Src",4), 0, MUBUFModifiers(offen=True, glc=True, slc=True)))
+    mod.add(BufferLoadB32(vgpr(f"Value"), vgpr("Offset"), sgpr("Src",4), 0, wsMubuf()))
     mod.add(SWaitCnt(vlcnt=0))
     mod.addSpaceLine()
+
+    # NumGroup is rounded up to a whole wave here, so the last iteration reads
+    # past the partials this launch wrote. Where the buffer SRD does the OOB
+    # clipping those lanes read back as zero, but where it does not the tail
+    # slots still hold a previous launch's larger partials and skew the result.
+    if not trustBufferOob:
+      mod.add(VCmpLtU32(VCC(), vgpr("Offset"), sgpr("Src+2"), comment="slot within NumGroup?"))
+      mod.add(VCndMaskB32(dst=vgpr("Value"), src0=0, src1=vgpr("Value"), src2=VCC(), \
+                          comment="ignore partials past NumGroup"))
+      mod.addSpaceLine()
 
     # TODO- F16?
     mod.add(VMaxF32(vgpr("AmaxOut"), vgpr("AmaxOut"), vgpr("Value", isAbs=True)))
