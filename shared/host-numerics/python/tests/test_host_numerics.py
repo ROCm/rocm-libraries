@@ -517,6 +517,38 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(hv.to_numpy(view), values)
         self.assertTrue(hv.compare(view, hv.from_numpy(values)).passed)
 
+    def test_scalar_item_and_broadcast_view(self):
+        scalar = hv.from_numpy(np.asarray(3.5, dtype=np.float32))
+        self.assertEqual(scalar.item(), 3.5)
+        self.assertEqual(
+            hv.from_numpy(np.asarray(2**63 - 1, dtype=np.int64)).item(),
+            2**63 - 1,
+        )
+        self.assertEqual(
+            hv.from_numpy(np.asarray(2**64 - 1, dtype=np.uint64)).item(),
+            2**64 - 1,
+        )
+        self.assertEqual(
+            hv.from_numpy(np.asarray(1.25 - 2.5j, dtype=np.complex64)).item(),
+            complex(1.25, -2.5),
+        )
+        self.assertEqual(
+            hv.from_numpy(
+                np.asarray(1.5, dtype=np.float32), hv.ScalarType.Float4E2M1
+            ).item(),
+            1.5,
+        )
+
+        broadcast = scalar.broadcast_to([2, 3])
+        self.assertEqual(broadcast.shape, [2, 3])
+        self.assertEqual(broadcast.strides, [0, 0])
+        np.testing.assert_array_equal(
+            hv.to_numpy(broadcast), np.full((2, 3), 3.5, dtype=np.float32)
+        )
+
+        with self.assertRaisesRegex(ValueError, "rank-zero"):
+            hv.from_numpy(np.asarray([1.0], dtype=np.float32)).item()
+
     def test_tensor_conversion_preserves_layout(self):
         values = np.arange(24, dtype=np.float32).reshape(4, 6)[::-1, ::-2]
         view = hv.Tensor.from_numpy(values)
@@ -581,6 +613,17 @@ class TensorAndGemmTests(unittest.TestCase):
             np.float32(3.0) * y_values,
         )
 
+        scalar_coefficient = hv.from_numpy(np.asarray(2.0, dtype=np.float32))
+        tensor_scaled = hv.linear_combination(x=x, alpha=scalar_coefficient)
+        np.testing.assert_array_equal(
+            hv.to_numpy(tensor_scaled), np.float32(2.0) * x_values
+        )
+        options = hv.GemmOptions(hv.ScalarType.Float32)
+        options.epilogue.alpha = scalar_coefficient
+        self.assertEqual(options.epilogue.alpha, complex(2.0, 0.0))
+        with self.assertRaisesRegex(ValueError, "rank-zero"):
+            hv.linear_combination(x=x, alpha=x)
+
         padded_x = hv.Tensor.from_storage(
             hv.ScalarType.Float32,
             [2, 2],
@@ -594,6 +637,22 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(contiguous),
             np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
         )
+
+        column = np.asarray([[1.0], [2.0]], dtype=np.float32)
+        row = np.asarray([[10.0, 20.0, 30.0]], dtype=np.float32)
+        broadcast = hv.linear_combination(
+            x=hv.from_numpy(column),
+            y=hv.from_numpy(row),
+            alpha=2.0,
+            beta=-1.0,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(broadcast), 2.0 * column - row)
+
+        empty = hv.linear_combination(
+            x=hv.from_numpy(np.empty((0, 3), dtype=np.float32)),
+            y=hv.from_numpy(row),
+        )
+        self.assertEqual(empty.shape, [0, 3])
 
     def test_reference_softmax_matches_numpy(self):
         source = np.asarray(

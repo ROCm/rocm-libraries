@@ -139,6 +139,24 @@ class Shape {
     std::vector<size_t> m_dimensions;
 };
 
+// Returns the NumPy-style broadcast shape of two inputs. Dimensions are
+// aligned from the end and must be equal or have extent one. A zero extent
+// broadcasts with one to zero, but not with any other extent.
+inline Shape broadcastShapes(const Shape& left, const Shape& right) {
+    const size_t resultRank = std::max(left.rank(), right.rank());
+    std::vector<size_t> dimensions(resultRank, 1);
+    for (size_t reverseDimension = 0; reverseDimension < resultRank; ++reverseDimension) {
+        const size_t leftExtent =
+            reverseDimension < left.rank() ? left[left.rank() - reverseDimension - 1] : 1;
+        const size_t rightExtent =
+            reverseDimension < right.rank() ? right[right.rank() - reverseDimension - 1] : 1;
+        if (leftExtent != rightExtent && leftExtent != 1 && rightExtent != 1)
+            throw std::invalid_argument("Tensor shapes are not broadcast-compatible.");
+        dimensions[resultRank - reverseDimension - 1] = leftExtent == 1 ? rightExtent : leftExtent;
+    }
+    return Shape(std::move(dimensions));
+}
+
 class Layout;
 
 namespace detail {
@@ -491,6 +509,11 @@ class Tensor {
         return Scalar(*this);
     }
 
+    template <typename Target>
+    Target item(const ScalarConversionOptions& options = {}) const {
+        return Scalar(*this).template as<Target>(options);
+    }
+
     std::span<std::byte> rawEncodedBackingStorage() const {
         return m_storage.bytes;
     }
@@ -638,6 +661,10 @@ class Tensor {
 
     Tensor reshapeSharingStorage(Shape shape) const;
 
+    // Returns a shallow NumPy-style broadcast view. Missing leading
+    // dimensions and expanded singleton dimensions receive stride zero.
+    Tensor broadcastTo(Shape shape) const;
+
     // New storage bits are zero; existing logical elements retain their encodings.
     Tensor copyWithZeroPadding(Shape shape) const;
 
@@ -724,6 +751,24 @@ inline Tensor Tensor::reshapeSharingStorage(Shape shape) const {
         throw std::invalid_argument(
             "Tensor reshape requires a contiguous last-dimension-fastest layout.");
     return shareStorageWithLayout(Layout::contiguousLastDimensionFastest(shape));
+}
+
+inline Tensor Tensor::broadcastTo(Shape shape) const {
+    if (shape.rank() < this->shape().rank())
+        throw std::invalid_argument("Tensor cannot broadcast to a lower-rank shape.");
+
+    std::vector<ptrdiff_t> strides(shape.rank(), 0);
+    const size_t leadingDimensions = shape.rank() - this->shape().rank();
+    for (size_t sourceDimension = 0; sourceDimension < this->shape().rank(); ++sourceDimension) {
+        const size_t destinationDimension = leadingDimensions + sourceDimension;
+        const size_t sourceExtent = this->shape()[sourceDimension];
+        const size_t destinationExtent = shape[destinationDimension];
+        if (sourceExtent != destinationExtent && sourceExtent != 1)
+            throw std::invalid_argument("Tensor cannot broadcast to the requested shape.");
+        if (sourceExtent == destinationExtent)
+            strides[destinationDimension] = layout().stride(sourceDimension);
+    }
+    return shareStorageWithLayout(Layout(std::move(shape), std::move(strides), layout().offset()));
 }
 
 inline Tensor Tensor::copyWithZeroPadding(Shape shape) const {
