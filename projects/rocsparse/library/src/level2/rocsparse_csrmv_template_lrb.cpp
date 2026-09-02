@@ -577,8 +577,9 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                 // Dynamic LDS allocation
                 if(lds_size < CSRMV_LRB_SHORT_ROWS_2_LDS_ELEMS * sizeof(T))
                 {
-                    int64_t num_wgs
-                        = (int64_t)rocsparse::ceil((float)info->lrb.nRowsBins[j] / block_size);
+                    // Overflow-safe integer ceiling division (float ceil loses precision for
+                    // row counts above 2^24). nRowsBins[j] is guaranteed non-zero here.
+                    int64_t  num_wgs   = (int64_t(info->lrb.nRowsBins[j]) - 1) / block_size + 1;
                     uint32_t grid_size = static_cast<uint32_t>(
                         rocsparse::min(num_wgs, int64_t(handle->properties.maxGridSize[0])));
 
@@ -610,8 +611,9 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                 else
                 {
                     uint32_t rows_per_wg = CSRMV_LRB_SHORT_ROWS_2_LDS_ELEMS >> j;
-                    int64_t  num_wgs
-                        = (int64_t)rocsparse::ceil((float)info->lrb.nRowsBins[j] / rows_per_wg);
+                    // Overflow-safe integer ceiling division (float ceil loses precision for
+                    // row counts above 2^24). nRowsBins[j] is guaranteed non-zero here.
+                    int64_t  num_wgs   = (int64_t(info->lrb.nRowsBins[j]) - 1) / rows_per_wg + 1;
                     uint32_t grid_size = static_cast<uint32_t>(
                         rocsparse::min(num_wgs, int64_t(handle->properties.maxGridSize[0])));
 
