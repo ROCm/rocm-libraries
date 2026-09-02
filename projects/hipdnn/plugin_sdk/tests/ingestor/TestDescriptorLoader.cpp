@@ -405,6 +405,35 @@ TEST(TestDescriptorLoader, AHeuristicTrainedAgainstANewerMinorIsRefused)
     EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
+/// RFC 0019 §8.1 applies to every UHD the engine names, not only the one that resolves as the
+/// default. A per-arch model is trained the same way and read the same way, so a version skew in
+/// one is the same defect -- and it used to load unchecked, deferring the failure to whichever
+/// device selected that arch.
+///
+/// The case with no `default` is the one worth asserting, and the only one that exercises the
+/// new code: with a `default` present, the pre-existing check catches the skew whether or not
+/// the per-arch entries are examined. A first version of this pair covered that case too and
+/// passed identically with the fix reverted, so it was removed rather than kept as decoration.
+TEST(TestDescriptorLoader, AnArchScopedHeuristicWithNoDefaultIsVersionCheckedToo)
+{
+    // The case the old code could not reach at all: no `default`, so nothing was resolved into
+    // engine.heuristicId and the skew loop had nothing to run on. The engine still shipped a
+    // model, and it was still read through the UED it was not generated for.
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_skew_nodef"));
+    auto documents = makeSetDocuments('1', "test:arch_skew_nodef");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("heuristic").get<std::string>();
+
+    engineDocument.erase("heuristic");
+    engineDocument["sort_kernel_catalog"] = {{"gfx950", uhdId}};
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"ued", "1.7"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty())
+        << "an arch-scoped model with no default skipped the version check";
+}
+
 TEST(TestDescriptorLoader, AHeuristicTrainedAgainstADifferentMajorIsRefused)
 {
     const ScopedSymbols symbols;

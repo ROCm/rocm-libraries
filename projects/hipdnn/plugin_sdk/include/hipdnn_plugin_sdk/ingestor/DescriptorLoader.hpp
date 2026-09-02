@@ -1853,6 +1853,17 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         {
             continue;
         }
+        // Every arch the UED named, resolved to its descriptor. The dangling check above
+        // already established each id exists, so a miss here cannot happen quietly.
+        std::map<std::string, HeuristicDescriptor> heuristicsByArch;
+        for(const auto& [arch, id] : engine.sortKernelCatalog)
+        {
+            if(const auto* candidate = detail::findDescriptor(catalog.heuristics, id))
+            {
+                heuristicsByArch.emplace(arch, *candidate);
+            }
+        }
+
         // RFC 0019 §8.1: the heuristic was generated against particular descriptor
         // versions, and it reads its inputs through them. Same major, and a minor no older
         // than the one it was trained against -- a descriptor that has since gained a field
@@ -1861,8 +1872,32 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         //
         // Checked here rather than at parse because it is a relation between descriptors,
         // and only at the link step are they resolved together.
-        if(heuristic != nullptr && !heuristic->trainedAgainst.empty())
+        //
+        // Every UHD the engine names, not only the resolved default. A per-arch model is
+        // trained the same way and read the same way, so a version skew in one is the same
+        // defect -- and it used to load unchecked, deferring the failure to whichever device
+        // selected that arch. That mattered little while a UED with no `default` was discarded
+        // wholesale; now that per-arch models are reachable, it is the common case.
+        std::vector<const HeuristicDescriptor*> versioned;
+        if(heuristic != nullptr)
         {
+            versioned.push_back(heuristic);
+        }
+        for(const auto& [arch, candidate] : heuristicsByArch)
+        {
+            if(&candidate != heuristic)
+            {
+                versioned.push_back(&candidate);
+            }
+        }
+
+        bool skew = false;
+        for(const auto* checked : versioned)
+        {
+            if(checked->trainedAgainst.empty())
+            {
+                continue;
+            }
             const auto declared = [&catalog](const DescriptorId& id)
                 -> std::optional<hipdnn_data_sdk::utilities::Version> {
                 const auto found = catalog.declaredVersions.find(id);
@@ -1886,8 +1921,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                 return std::nullopt;
             };
 
-            bool skew = false;
-            for(const auto& [kind, trained] : heuristic->trainedAgainst)
+            for(const auto& [kind, trained] : checked->trainedAgainst)
             {
                 const auto actual = against(kind);
                 if(!actual.has_value())
@@ -1898,7 +1932,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                 {
                     HIPDNN_PLUGIN_LOG_ERROR(
                         "descriptor loader: engine '"
-                        << engine.name << "' names heuristic '" << heuristic->name
+                        << engine.name << "' names heuristic '" << checked->name
                         << "' trained against " << kind << " " << trained.major << "."
                         << trained.minor << ", but its " << kind << " declares "
                         << actual->major << "." << actual->minor
@@ -1907,21 +1941,10 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                     skew = true;
                 }
             }
-            if(skew)
-            {
-                continue;
-            }
         }
-
-        // Every arch the UED named, resolved to its descriptor. The dangling check above
-        // already established each id exists, so a miss here cannot happen quietly.
-        std::map<std::string, HeuristicDescriptor> heuristicsByArch;
-        for(const auto& [arch, id] : engine.sortKernelCatalog)
+        if(skew)
         {
-            if(const auto* candidate = detail::findDescriptor(catalog.heuristics, id))
-            {
-                heuristicsByArch.emplace(arch, *candidate);
-            }
+            continue;
         }
 
         const auto* schema = detail::findDescriptor(catalog.schemas, engine.metadataSchemaId);
