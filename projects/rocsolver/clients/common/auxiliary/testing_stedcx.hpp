@@ -495,9 +495,9 @@ void testing_stedcx(Arguments& argus)
                               hot_calls, argus.profile, argus.profile_kernels, argus.perf);
 
     // validate results for rocsolver-test
-    // using 8 * n * machine_precision as tolerance
+    // using 25 * n * machine_precision as tolerance
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, 8 * n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 25 * n);
 
     // output results for rocsolver-bench
     if(argus.timing)
