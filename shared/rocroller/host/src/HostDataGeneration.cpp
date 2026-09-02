@@ -533,7 +533,7 @@ namespace rocRoller::HostNumerics
             initializationA,
             scaleTypeA == DataType::None ? std::nullopt
                                          : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                             scaleTypeA, 1, scaleBlockSize}},
+                                               scaleTypeA, 1, scaleBlockSize}},
             minimum,
             maximum,
             seed + 1);
@@ -542,7 +542,7 @@ namespace rocRoller::HostNumerics
             initializationB,
             scaleTypeB == DataType::None ? std::nullopt
                                          : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                             scaleTypeB, 0, scaleBlockSize}},
+                                               scaleTypeB, 0, scaleBlockSize}},
             minimum,
             maximum,
             seed + 2);
