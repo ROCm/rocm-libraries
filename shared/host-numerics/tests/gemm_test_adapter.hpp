@@ -9,7 +9,6 @@ namespace roc::host_numerics {
 // Test-only access to the private bound invocation keeps backend conformance
 // tests focused on execution details without restoring that type to the public
 // API.
-using GemmOperand = detail::GemmOperand;
 using GemmSupportInfo = detail::GemmSupportInfo;
 using GemmTestSpecification = GemmSpecification;
 using GemmTestCase = GemmInvocation;
@@ -33,7 +32,7 @@ inline GemmTestRunInfo referenceGemm(const GemmTestCase& request,
 inline GemmTestResult referenceGemm(const GemmTestSpecification& problem,
                                     const GemmTestOutputOptions& output = {},
                                     GemmBackend backend = GemmBackend::Automatic) {
-    const Shape outputShape{problem.a.values.shape()[0], problem.b.values.shape()[1]};
+    const Shape outputShape{problem.a.shape()[0], problem.b.shape()[1]};
     const Layout outputLayout =
         output.layout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
     Tensor destination(problem.outputType, outputLayout);
@@ -55,7 +54,7 @@ inline GemmTestRunInfo referenceGemmWithBlasBackend(const GemmTestCase& request,
 inline GemmTestResult referenceGemmWithBlasBackend(const GemmTestSpecification& problem,
                                                    const GemmTestOutputOptions& output = {},
                                                    GemmBackend backend = GemmBackend::Automatic) {
-    const Shape outputShape{problem.a.values.shape()[0], problem.b.values.shape()[1]};
+    const Shape outputShape{problem.a.shape()[0], problem.b.shape()[1]};
     const Layout outputLayout =
         output.layout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
     Tensor destination(problem.outputType, outputLayout);

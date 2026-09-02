@@ -34,29 +34,24 @@ void testTransformingBlockScaleFallsBack(roc::host_numerics::ScalarType accumula
     Tensor pointwiseD(nativeScalarType<T>, layoutD);
     Tensor transformingD(nativeScalarType<T>, layoutD);
 
-    auto makeOperandA = [&]() {
-        GemmOperand operand(Tensor::copyNativeStorage<T>(layoutA, std::span<const T>(a)));
-        operand.blockScale = Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
-                                                               std::as_bytes(std::span(scaleA)));
-        operand.blockSize = 2;
-        return operand;
-    };
-    auto makeOperandB = [&]() {
-        GemmOperand operand(Tensor::copyNativeStorage<T>(layoutB, std::span<const T>(b)));
-        operand.blockScale = Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
-                                                               std::as_bytes(std::span(scaleB)));
-        operand.blockSize = 2;
-        return operand;
+    auto makeProblem = [&](Tensor output) {
+        GemmTestCase problem(Tensor::copyNativeStorage<T>(layoutA, std::span<const T>(a)),
+                             Tensor::copyNativeStorage<T>(layoutB, std::span<const T>(b)),
+                             Tensor::copyNativeStorage<T>(layoutD, std::span<const T>(c)),
+                             std::move(output), accumulatorType);
+        problem.blockScaleA = Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
+                                                                std::as_bytes(std::span(scaleA)));
+        problem.blockSizeA = 2;
+        problem.blockScaleB = Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
+                                                                std::as_bytes(std::span(scaleB)));
+        problem.blockSizeB = 2;
+        return problem;
     };
 
-    GemmTestCase pointwiseProblem(makeOperandA(), makeOperandB(),
-                                  Tensor::copyNativeStorage<T>(layoutD, std::span<const T>(c)),
-                                  pointwiseD, accumulatorType);
+    GemmTestCase pointwiseProblem = makeProblem(pointwiseD);
     referenceGemm(pointwiseProblem);
 
-    GemmTestCase transformingProblem(makeOperandA(), makeOperandB(),
-                                     Tensor::copyNativeStorage<T>(layoutD, std::span<const T>(c)),
-                                     transformingD, accumulatorType);
+    GemmTestCase transformingProblem = makeProblem(transformingD);
     const GemmSupportInfo support =
         queryGemmSupportWithBlasBackend(transformingProblem, GemmBackend::Blas);
     require(!support.supported &&
@@ -84,11 +79,10 @@ void testPartialOutputSelection() {
     constexpr std::array<float, 4> untouched{-99, -99, -99, -99};
     Tensor d = Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}),
                                                 std::span<const float>(untouched));
-    GemmTestCase problem(GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}),
-                                                                      std::span<const float>(a))),
-                         GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}),
-                                                                      std::span<const float>(b))),
-                         d, d, ScalarType::Float32);
+    GemmTestCase problem(
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a)),
+        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)), d,
+        d, ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
 
     const GemmSupportInfo support = queryGemmSupportWithBlasBackend(problem, GemmBackend::Blas);
@@ -122,8 +116,8 @@ void testTransformingAutomaticCostPolicy() {
     using namespace roc::host_numerics;
 
     auto makeProblem = [](ScalarType inputType, size_t rows, size_t columns, size_t reductions) {
-        return GemmTestCase(GemmOperand(Tensor(inputType, Shape{rows, reductions})),
-                            GemmOperand(Tensor(inputType, Shape{reductions, columns})),
+        return GemmTestCase(Tensor(inputType, Shape{rows, reductions}),
+                            Tensor(inputType, Shape{reductions, columns}),
                             Tensor(ScalarType::Float32, Shape{rows, columns}),
                             Tensor(ScalarType::Float32, Shape{rows, columns}), ScalarType::Float32);
     };
@@ -152,10 +146,9 @@ void testModeratelyLargeExactGemm() {
     const std::vector<float> ones(dimension * dimension, 1.0f);
     Tensor output(ScalarType::Float32, layout);
 
-    GemmTestCase problem(
-        GemmOperand(Tensor::copyNativeStorage<float>(layout, std::span<const float>(ones))),
-        GemmOperand(Tensor::copyNativeStorage<float>(layout, std::span<const float>(ones))), output,
-        output, ScalarType::Float32);
+    GemmTestCase problem(Tensor::copyNativeStorage<float>(layout, std::span<const float>(ones)),
+                         Tensor::copyNativeStorage<float>(layout, std::span<const float>(ones)),
+                         output, output, ScalarType::Float32);
     referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
 
     for (size_t row = 0; row < dimension; ++row)
@@ -172,11 +165,10 @@ int main() {
     const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
     Tensor d = Tensor::copyNativeStorage<float>(
         Layout(Shape{2, 2}, {1, 2}), std::span<const float>(std::array<float, 4>{1, 1, 1, 1}));
-    GemmTestCase problem(GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}),
-                                                                      std::span<const float>(a))),
-                         GemmOperand(Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}),
-                                                                      std::span<const float>(b))),
-                         d, d, ScalarType::Float32);
+    GemmTestCase problem(
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a)),
+        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)), d,
+        d, ScalarType::Float32);
     problem.epilogue.alpha = 2.0;
     problem.epilogue.beta = 3.0;
 
@@ -213,14 +205,14 @@ int main() {
     const std::array<std::complex<float>, 1> complexA{std::complex<float>(1, 2)};
     const std::array<std::complex<float>, 1> complexB{std::complex<float>(3, 4)};
     Tensor complexD(ScalarType::ComplexFloat32, Shape{1, 1});
-    GemmOperand operandA(Tensor::copyNativeStorage<std::complex<float>>(
-        Layout(Shape{1, 1}, {2, 1}), std::span<const std::complex<float>>(complexA)));
-    operandA.conjugate = true;
+    Tensor operandA = Tensor::copyNativeStorage<std::complex<float>>(
+        Layout(Shape{1, 1}, {2, 1}), std::span<const std::complex<float>>(complexA));
     GemmTestCase complexProblem(std::move(operandA),
-                                GemmOperand(Tensor::copyNativeStorage<std::complex<float>>(
+                                Tensor::copyNativeStorage<std::complex<float>>(
                                     Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                    std::span<const std::complex<float>>(complexB))),
+                                    std::span<const std::complex<float>>(complexB)),
                                 complexD, complexD, ScalarType::ComplexFloat32);
+    complexProblem.conjugateA = true;
     referenceGemmWithBlasBackend(complexProblem, GemmBackend::Blas);
     require(complexD.loadAs<std::complex<float>>({0, 0}) == std::complex<float>(11, -2),
             "BLAS backend complex result mismatch.");
@@ -231,23 +223,22 @@ int main() {
     const std::array<float, 1> transformedScaleA{0.7f};
     const std::array<float, 1> transformedAlphaVector{0.6f};
     Tensor transformedD(ScalarType::Float32, Shape{1, 1});
-    GemmOperand transformedOperandA(Tensor::copyNativeStorage<float>(
-        Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(transformedA)));
-    transformedOperandA.computeType = ScalarType::Float8E4M3;
-    transformedOperandA.preQuantizationScales.push_back(
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
-                                         std::span<const float>(transformedScaleA)));
-    transformedOperandA.preQuantizationScales.push_back(
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
-                                         std::span<const float>(transformedAlphaVector)));
+    Tensor transformedOperandA = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(transformedA));
     GemmTestCase transformedProblem(
         std::move(transformedOperandA),
-        GemmOperand(
-            Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                             std::span<const float>(transformedB))),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                         std::span<const float>(transformedB)),
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                          std::span<const float>(transformedC)),
         transformedD, ScalarType::Float32);
+    transformedProblem.computeTypeA = ScalarType::Float8E4M3;
+    transformedProblem.preQuantizationScalesA.push_back(
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
+                                         std::span<const float>(transformedScaleA)));
+    transformedProblem.preQuantizationScalesA.push_back(
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
+                                         std::span<const float>(transformedAlphaVector)));
     transformedProblem.epilogue.alpha = 2.0;
     transformedProblem.epilogue.beta = 3.0;
     transformedProblem.epilogue.scaleC = 2.0;
@@ -279,7 +270,7 @@ int main() {
                 transformedD.loadAs<float>({0, 0}) == 25.0f,
             "Automatic GEMM did not avoid staging a tiny transformed request.");
 
-    transformedProblem.a.values.storeFrom({0, 0}, std::numeric_limits<float>::quiet_NaN());
+    transformedProblem.a.storeFrom({0, 0}, std::numeric_limits<float>::quiet_NaN());
     transformedProblem.epilogue.alpha = 0.0;
     transformedProblem.epilogue.beta = 1.0;
     transformedProblem.epilogue.scaleC = 3.0;
@@ -293,12 +284,10 @@ int main() {
     const std::array<int8_t, 1> saturatingC{};
     Tensor saturatingD(ScalarType::Int8, Shape{1, 1});
     GemmTestCase saturatingProblem(
-        GemmOperand(
-            Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                             std::span<const float>(saturatingA))),
-        GemmOperand(
-            Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                             std::span<const float>(saturatingB))),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                         std::span<const float>(saturatingA)),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                         std::span<const float>(saturatingB)),
         Tensor::copyNativeStorage<int8_t>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                           std::span<const int8_t>(saturatingC)),
         saturatingD, ScalarType::Float32);
