@@ -14,13 +14,13 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "detail/reference_gemm.hpp"
 #include "detail/threading.hpp"
 
 namespace roc::host_numerics {
 namespace {
-using detail::GemmOperand;
 using detail::GemmSupportInfo;
 
 // Executes the subset of dense GEMM requests that CBLAS can consume directly.
@@ -106,16 +106,16 @@ void validateCommon(const GemmInvocation& problem) {
     const GemmSupportInfo pointwise = detail::queryGemmSupport(problem, GemmBackend::Pointwise);
     if (!pointwise) throw std::invalid_argument(pointwise.reason);
 
-    if (problem.a.values.type() != problem.accumulatorType ||
-        problem.b.values.type() != problem.accumulatorType ||
+    if (problem.a.type() != problem.accumulatorType ||
+        problem.b.type() != problem.accumulatorType ||
         problem.c.type() != problem.accumulatorType || problem.d.type() != problem.accumulatorType)
         throw std::invalid_argument(
             "BLAS backend requires A, B, C, D, and accumulator types to match.");
-    if (problem.a.computeType || problem.b.computeType)
+    if (problem.computeTypeA || problem.computeTypeB)
         throw std::invalid_argument("BLAS backend does not support compute-input quantization.");
-    if (!problem.a.preQuantizationScales.empty() || !problem.b.preQuantizationScales.empty())
+    if (!problem.preQuantizationScalesA.empty() || !problem.preQuantizationScalesB.empty())
         throw std::invalid_argument("BLAS backend does not support pre-quantization scaling.");
-    if (problem.a.blockScale || problem.b.blockScale)
+    if (problem.blockScaleA || problem.blockScaleB)
         throw std::invalid_argument("BLAS backend does not support block scaling.");
     if (problem.mathMode != MathMode::Default)
         throw std::invalid_argument("BLAS backend supports only default operand math.");
@@ -137,31 +137,31 @@ void validateCommon(const GemmInvocation& problem) {
             static_cast<ptrdiff_t>(std::max<size_t>(1, problem.d.shape()[0])))
         throw std::invalid_argument("BLAS backend requires column-major C/D storage.");
 
-    const size_t m = problem.a.values.shape()[0];
-    const size_t n = problem.b.values.shape()[1];
-    const size_t k = problem.a.values.shape()[1];
+    const size_t m = problem.a.shape()[0];
+    const size_t n = problem.b.shape()[1];
+    const size_t k = problem.a.shape()[1];
     if (m > static_cast<size_t>(std::numeric_limits<int>::max()) ||
         n > static_cast<size_t>(std::numeric_limits<int>::max()) ||
         k > static_cast<size_t>(std::numeric_limits<int>::max()) ||
         problem.d.layout().strides()[1] > std::numeric_limits<int>::max())
         throw std::invalid_argument("BLAS backend dimensions exceed int.");
 
-    (void)toBlasLayout(problem.a.values, problem.a.conjugate, "A");
-    (void)toBlasLayout(problem.b.values, problem.b.conjugate, "B");
+    (void)toBlasLayout(problem.a, problem.conjugateA, "A");
+    (void)toBlasLayout(problem.b, problem.conjugateB, "B");
 }
 
 template <typename T>
 GemmExecutionInfo runReal(const GemmInvocation& problem) {
-    const auto aLayout = toBlasLayout(problem.a.values, problem.a.conjugate, "A");
-    const auto bLayout = toBlasLayout(problem.b.values, problem.b.conjugate, "B");
-    const int m = static_cast<int>(problem.a.values.shape()[0]);
-    const int n = static_cast<int>(problem.b.values.shape()[1]);
-    const int k = static_cast<int>(problem.a.values.shape()[1]);
+    const auto aLayout = toBlasLayout(problem.a, problem.conjugateA, "A");
+    const auto bLayout = toBlasLayout(problem.b, problem.conjugateB, "B");
+    const int m = static_cast<int>(problem.a.shape()[0]);
+    const int n = static_cast<int>(problem.b.shape()[1]);
+    const int k = static_cast<int>(problem.a.shape()[1]);
     const int ldc = static_cast<int>(problem.d.layout().strides()[1]);
     const T alpha = detail::runtimeScalar<T>(problem.epilogue.alpha, "alpha");
     const T beta = detail::runtimeScalar<T>(problem.epilogue.beta, "beta");
-    const T* a = typedData<T>(problem.a.values, "A");
-    const T* b = typedData<T>(problem.b.values, "B");
+    const T* a = typedData<T>(problem.a, "A");
+    const T* b = typedData<T>(problem.b, "B");
     T* d = typedMutableData<T>(problem.d, "D");
 
     if constexpr (std::is_same_v<T, float>)
@@ -181,16 +181,16 @@ GemmExecutionInfo runReal(const GemmInvocation& problem) {
 
 template <typename T>
 GemmExecutionInfo runComplex(const GemmInvocation& problem) {
-    const auto aLayout = toBlasLayout(problem.a.values, problem.a.conjugate, "A");
-    const auto bLayout = toBlasLayout(problem.b.values, problem.b.conjugate, "B");
-    const int m = static_cast<int>(problem.a.values.shape()[0]);
-    const int n = static_cast<int>(problem.b.values.shape()[1]);
-    const int k = static_cast<int>(problem.a.values.shape()[1]);
+    const auto aLayout = toBlasLayout(problem.a, problem.conjugateA, "A");
+    const auto bLayout = toBlasLayout(problem.b, problem.conjugateB, "B");
+    const int m = static_cast<int>(problem.a.shape()[0]);
+    const int n = static_cast<int>(problem.b.shape()[1]);
+    const int k = static_cast<int>(problem.a.shape()[1]);
     const int ldc = static_cast<int>(problem.d.layout().strides()[1]);
     const T alpha = detail::runtimeScalar<T>(problem.epilogue.alpha, "alpha");
     const T beta = detail::runtimeScalar<T>(problem.epilogue.beta, "beta");
-    const T* a = typedData<T>(problem.a.values, "A");
-    const T* b = typedData<T>(problem.b.values, "B");
+    const T* a = typedData<T>(problem.a, "A");
+    const T* b = typedData<T>(problem.b, "B");
     T* d = typedMutableData<T>(problem.d, "D");
 
     if constexpr (std::is_same_v<T, std::complex<float>>)
@@ -241,16 +241,16 @@ void validateTransforming(const GemmInvocation& problem) {
         throw std::invalid_argument(
             "Transforming BLAS backend supports operand transforms, scalar A/B scales, and "
             "output conversion, but not the general GEMM epilogue.");
-    if (problem.a.blockScale || problem.b.blockScale)
+    if (problem.blockScaleA || problem.blockScaleB)
         throw std::invalid_argument(
             "Transforming BLAS backend cannot preserve block-scale reduction boundaries.");
     if (!problem.outputSelection.selectsAll())
         throw std::invalid_argument(
             "Transforming BLAS backend requires complete output selection.");
 
-    const size_t m = problem.a.values.shape()[0];
-    const size_t n = problem.b.values.shape()[1];
-    const size_t k = problem.a.values.shape()[1];
+    const size_t m = problem.a.shape()[0];
+    const size_t n = problem.b.shape()[1];
+    const size_t k = problem.a.shape()[1];
     if (m == 0 || n == 0 || k == 0)
         throw std::invalid_argument("Transforming BLAS backend requires nonzero M, N, and K.");
     if (m > static_cast<size_t>(std::numeric_limits<int>::max()) ||
@@ -260,25 +260,27 @@ void validateTransforming(const GemmInvocation& problem) {
 }
 
 template <typename Accumulator>
-Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode) {
+Tensor materializeOperand(const Tensor& operand, const std::optional<ScalarType>& computeType,
+                          const std::vector<Tensor>& preQuantizationScales, bool conjugate,
+                          MathMode mathMode) {
     using namespace detail;
-    Tensor output(nativeScalarType<Accumulator>, columnMajorLayout(operand.values.shape()));
-    const RuntimeMatrixReader<Accumulator> input(operand.values);
+    Tensor output(nativeScalarType<Accumulator>, columnMajorLayout(operand.shape()));
+    const RuntimeMatrixReader<Accumulator> input(operand);
     const RuntimeMatrixWriter<Accumulator> writer(output);
-    const RuntimeQuantizer<Accumulator> quantize(operand.computeType);
+    const RuntimeQuantizer<Accumulator> quantize(computeType);
     const RuntimeMathFunction<Accumulator> operandMath = runtimeMathFunction<Accumulator>(mathMode);
     std::vector<RuntimeMatrixReader<Accumulator>> scaleReaders;
-    scaleReaders.reserve(operand.preQuantizationScales.size());
-    for (const Tensor& scale : operand.preQuantizationScales)
-        scaleReaders.emplace_back(scale.broadcastTo(operand.values.shape()));
-    const size_t rows = operand.values.shape()[0];
-    const size_t columns = operand.values.shape()[1];
+    scaleReaders.reserve(preQuantizationScales.size());
+    for (const Tensor& scale : preQuantizationScales)
+        scaleReaders.emplace_back(scale.broadcastTo(operand.shape()));
+    const size_t rows = operand.shape()[0];
+    const size_t columns = operand.shape()[1];
     const size_t elementCount = detail::saturatedProduct(rows, columns);
     detail::forEachParallelIndex(
         elementCount, elementCount, true, 500'000, [&](size_t linearIndex) {
             const size_t column = linearIndex / rows;
             const size_t row = linearIndex % rows;
-            Accumulator value = conjugateIfNeeded(input(row, column), operand.conjugate);
+            Accumulator value = conjugateIfNeeded(input(row, column), conjugate);
             for (const auto& scale : scaleReaders) value *= scale(row, column);
             value = operandMath(quantize(value));
             writer.store(row, column, value);
@@ -287,47 +289,57 @@ Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode) {
 }
 
 template <typename Accumulator>
-bool canUseBlasOperandWithoutMaterialization(const GemmOperand& operand, MathMode mathMode,
-                                             const char* name) {
-    const bool requiresValueTransform =
-        operand.values.type() != nativeScalarType<Accumulator> || operand.computeType ||
-        !operand.preQuantizationScales.empty() || mathMode != MathMode::Default;
+bool canUseBlasOperandWithoutMaterialization(const Tensor& operand,
+                                             const std::optional<ScalarType>& computeType,
+                                             const std::vector<Tensor>& preQuantizationScales,
+                                             bool conjugate, MathMode mathMode, const char* name) {
+    const bool requiresValueTransform = operand.type() != nativeScalarType<Accumulator> ||
+                                        computeType || !preQuantizationScales.empty() ||
+                                        mathMode != MathMode::Default;
     if (requiresValueTransform) return false;
     try {
-        (void)toBlasLayout(operand.values, operand.conjugate, name);
-        (void)typedData<Accumulator>(operand.values, name);
+        (void)toBlasLayout(operand, conjugate, name);
+        (void)typedData<Accumulator>(operand, name);
         return true;
     } catch (const std::invalid_argument&) {
         return false;
     }
 }
 
-bool canUseBlasOperandWithoutMaterialization(const GemmOperand& operand, ScalarType accumulatorType,
+bool canUseBlasOperandWithoutMaterialization(const Tensor& operand,
+                                             const std::optional<ScalarType>& computeType,
+                                             const std::vector<Tensor>& preQuantizationScales,
+                                             bool conjugate, ScalarType accumulatorType,
                                              MathMode mathMode, const char* name) {
     switch (accumulatorType) {
         case ScalarType::Float32:
-            return canUseBlasOperandWithoutMaterialization<float>(operand, mathMode, name);
+            return canUseBlasOperandWithoutMaterialization<float>(
+                operand, computeType, preQuantizationScales, conjugate, mathMode, name);
         case ScalarType::Float64:
-            return canUseBlasOperandWithoutMaterialization<double>(operand, mathMode, name);
+            return canUseBlasOperandWithoutMaterialization<double>(
+                operand, computeType, preQuantizationScales, conjugate, mathMode, name);
         case ScalarType::ComplexFloat32:
-            return canUseBlasOperandWithoutMaterialization<std::complex<float>>(operand, mathMode,
-                                                                                name);
+            return canUseBlasOperandWithoutMaterialization<std::complex<float>>(
+                operand, computeType, preQuantizationScales, conjugate, mathMode, name);
         case ScalarType::ComplexFloat64:
-            return canUseBlasOperandWithoutMaterialization<std::complex<double>>(operand, mathMode,
-                                                                                 name);
+            return canUseBlasOperandWithoutMaterialization<std::complex<double>>(
+                operand, computeType, preQuantizationScales, conjugate, mathMode, name);
         default:
             return false;
     }
 }
 
 template <typename Accumulator>
-GemmOperand prepareBlasOperand(const GemmOperand& operand, MathMode mathMode, const char* name) {
-    if (canUseBlasOperandWithoutMaterialization<Accumulator>(operand, mathMode, name)) {
-        GemmOperand direct(operand.values);
-        direct.conjugate = operand.conjugate;
-        return direct;
-    }
-    return GemmOperand(materializeOperand<Accumulator>(operand, mathMode));
+std::pair<Tensor, bool> prepareBlasOperand(const Tensor& operand,
+                                           const std::optional<ScalarType>& computeType,
+                                           const std::vector<Tensor>& preQuantizationScales,
+                                           bool conjugate, MathMode mathMode, const char* name) {
+    if (canUseBlasOperandWithoutMaterialization<Accumulator>(
+            operand, computeType, preQuantizationScales, conjugate, mathMode, name))
+        return {operand, conjugate};
+    return {materializeOperand<Accumulator>(operand, computeType, preQuantizationScales, conjugate,
+                                            mathMode),
+            false};
 }
 
 template <typename Accumulator>
@@ -340,10 +352,17 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
 
     if (!finalizer.alphaIsZero()) {
-        GemmOperand stagedA = prepareBlasOperand<Accumulator>(problem.a, problem.mathMode, "A");
-        GemmOperand stagedB = prepareBlasOperand<Accumulator>(problem.b, problem.mathMode, "B");
+        auto [stagedA, conjugateA] = prepareBlasOperand<Accumulator>(
+            problem.a, problem.computeTypeA, problem.preQuantizationScalesA, problem.conjugateA,
+            problem.mathMode, "A");
+        auto [stagedB, conjugateB] = prepareBlasOperand<Accumulator>(
+            problem.b, problem.computeTypeB, problem.preQuantizationScalesB, problem.conjugateB,
+            problem.mathMode, "B");
+        GemmOptions stagedOptions(nativeScalarType<Accumulator>);
+        stagedOptions.conjugateA = conjugateA;
+        stagedOptions.conjugateB = conjugateB;
         GemmInvocation stagedProblem(std::move(stagedA), std::move(stagedB), stagedOutput,
-                                     stagedOutput, nativeScalarType<Accumulator>);
+                                     stagedOutput, stagedOptions);
 
         blas.run(stagedProblem);
     }
@@ -375,23 +394,23 @@ GemmSupportInfo BlasGemmBackend::querySupport(const GemmInvocation& problem) con
         validateCommon(problem);
         switch (problem.accumulatorType) {
             case ScalarType::Float32:
-                (void)typedData<float>(problem.a.values, "A");
-                (void)typedData<float>(problem.b.values, "B");
+                (void)typedData<float>(problem.a, "A");
+                (void)typedData<float>(problem.b, "B");
                 (void)typedMutableData<float>(problem.d, "D");
                 break;
             case ScalarType::Float64:
-                (void)typedData<double>(problem.a.values, "A");
-                (void)typedData<double>(problem.b.values, "B");
+                (void)typedData<double>(problem.a, "A");
+                (void)typedData<double>(problem.b, "B");
                 (void)typedMutableData<double>(problem.d, "D");
                 break;
             case ScalarType::ComplexFloat32:
-                (void)typedData<std::complex<float>>(problem.a.values, "A");
-                (void)typedData<std::complex<float>>(problem.b.values, "B");
+                (void)typedData<std::complex<float>>(problem.a, "A");
+                (void)typedData<std::complex<float>>(problem.b, "B");
                 (void)typedMutableData<std::complex<float>>(problem.d, "D");
                 break;
             case ScalarType::ComplexFloat64:
-                (void)typedData<std::complex<double>>(problem.a.values, "A");
-                (void)typedData<std::complex<double>>(problem.b.values, "B");
+                (void)typedData<std::complex<double>>(problem.a, "A");
+                (void)typedData<std::complex<double>>(problem.b, "B");
                 (void)typedMutableData<std::complex<double>>(problem.d, "D");
                 break;
             default:
@@ -426,19 +445,21 @@ GemmSupportInfo queryTransformingBlasGemmSupport(const GemmInvocation& problem) 
         static const BlasGemmBackend directBlas;
         if (directBlas.querySupport(problem)) return {.supported = true, .reason = {}};
 
-        const size_t rows = problem.a.values.shape()[0];
-        const size_t columns = problem.b.values.shape()[1];
-        const size_t reductions = problem.a.values.shape()[1];
+        const size_t rows = problem.a.shape()[0];
+        const size_t columns = problem.b.shape()[1];
+        const size_t reductions = problem.a.shape()[1];
         const size_t multiplyAdds =
             detail::saturatedProduct(detail::saturatedProduct(rows, columns), reductions);
         const size_t stagedAElements =
-            canUseBlasOperandWithoutMaterialization(problem.a, problem.accumulatorType,
-                                                    problem.mathMode, "A")
+            canUseBlasOperandWithoutMaterialization(
+                problem.a, problem.computeTypeA, problem.preQuantizationScalesA, problem.conjugateA,
+                problem.accumulatorType, problem.mathMode, "A")
                 ? 0
                 : detail::saturatedProduct(rows, reductions);
         const size_t stagedBElements =
-            canUseBlasOperandWithoutMaterialization(problem.b, problem.accumulatorType,
-                                                    problem.mathMode, "B")
+            canUseBlasOperandWithoutMaterialization(
+                problem.b, problem.computeTypeB, problem.preQuantizationScalesB, problem.conjugateB,
+                problem.accumulatorType, problem.mathMode, "B")
                 ? 0
                 : detail::saturatedProduct(reductions, columns);
         const size_t stagedOperandElements = saturatedSum(stagedAElements, stagedBElements);
@@ -517,7 +538,7 @@ Tensor referenceGemmWithBlasBackend(Tensor a, Tensor b, Tensor c, ScalarType out
                                     const GemmOptions& options, std::optional<Layout> outputLayout,
                                     GemmBackend backend) {
     const GemmSpecification problem(std::move(a), std::move(b), std::move(c), outputType, options);
-    const Shape outputShape{problem.a.values.shape()[0], problem.b.values.shape()[1]};
+    const Shape outputShape{problem.a.shape()[0], problem.b.shape()[1]};
     const Layout layout =
         outputLayout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
     Tensor destination(outputType, layout);

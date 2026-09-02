@@ -20,14 +20,14 @@ bool gemmTensorStorageOverlaps(const Tensor& left, const Tensor& right) {
 
 void validateOwnedGemmStorage(const GemmSpecification& problem, const Tensor& output) {
     std::vector<const Tensor*> inputs{
-        &problem.a.values,
-        &problem.b.values,
+        &problem.a,
+        &problem.b,
         &problem.c,
     };
-    for (const Tensor& scale : problem.a.preQuantizationScales) inputs.push_back(&scale);
-    for (const Tensor& scale : problem.b.preQuantizationScales) inputs.push_back(&scale);
-    if (problem.a.blockScale) inputs.push_back(&*problem.a.blockScale);
-    if (problem.b.blockScale) inputs.push_back(&*problem.b.blockScale);
+    for (const Tensor& scale : problem.preQuantizationScalesA) inputs.push_back(&scale);
+    for (const Tensor& scale : problem.preQuantizationScalesB) inputs.push_back(&scale);
+    if (problem.blockScaleA) inputs.push_back(&*problem.blockScaleA);
+    if (problem.blockScaleB) inputs.push_back(&*problem.blockScaleB);
     if (problem.epilogue.bias) inputs.push_back(&*problem.epilogue.bias);
     if (problem.epilogue.scaleAlpha) inputs.push_back(&*problem.epilogue.scaleAlpha);
     if (problem.epilogue.scaleA) inputs.push_back(&*problem.epilogue.scaleA);
@@ -116,7 +116,7 @@ Tensor referenceGemm(Tensor a, Tensor b, Tensor c, ScalarType outputType,
                      GemmBackend backend) {
     const GemmSpecification problem(std::move(a), std::move(b), std::move(c), outputType, options);
     detail::validateRuntimeGemmProblem(problem);
-    const Shape outputShape{problem.a.values.shape()[0], problem.b.values.shape()[1]};
+    const Shape outputShape{problem.a.shape()[0], problem.b.shape()[1]};
     const Layout layout =
         outputLayout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
     if (layout.shape() != outputShape)
