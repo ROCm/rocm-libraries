@@ -21,12 +21,11 @@ struct LinearCombinationInvocation {
     LinearCombinationOptions options;
 };
 
-inline const Shape& linearCombinationOutputShape(const std::optional<Tensor>& x,
-                                                 const std::optional<Tensor>& y) {
+inline Shape linearCombinationOutputShape(const std::optional<Tensor>& x,
+                                          const std::optional<Tensor>& y) {
     if (!x && !y)
         throw std::invalid_argument("Linear combination requires at least one input tensor.");
-    if (x && y && x->shape() != y->shape())
-        throw std::invalid_argument("Linear combination input shapes differ.");
+    if (x && y) return broadcastShapes(x->shape(), y->shape());
     return x ? x->shape() : y->shape();
 }
 
@@ -38,11 +37,11 @@ inline void validateLinearCombinationScalars(const std::optional<Tensor>& x,
     if (y) (void)runtimeScalar<Accumulator>(options.beta, "beta");
 }
 
-inline const Shape& validateLinearCombinationArguments(const std::optional<Tensor>& x,
-                                                       const std::optional<Tensor>& y,
-                                                       ScalarType outputType,
-                                                       const LinearCombinationOptions& options) {
-    const Shape& outputShape = linearCombinationOutputShape(x, y);
+inline Shape validateLinearCombinationArguments(const std::optional<Tensor>& x,
+                                                const std::optional<Tensor>& y,
+                                                ScalarType outputType,
+                                                const LinearCombinationOptions& options) {
+    const Shape outputShape = linearCombinationOutputShape(x, y);
     if (!isConcreteScalarType(outputType))
         throw std::invalid_argument("Linear combination output type is invalid.");
 
@@ -66,7 +65,7 @@ inline const Shape& validateLinearCombinationArguments(const std::optional<Tenso
 }
 
 inline void validateLinearCombinationInvocation(const LinearCombinationInvocation& invocation) {
-    const Shape& outputShape = validateLinearCombinationArguments(
+    const Shape outputShape = validateLinearCombinationArguments(
         invocation.x, invocation.y, invocation.output.type(), invocation.options);
     if (invocation.output.shape() != outputShape)
         throw std::invalid_argument("Linear combination input/output shapes differ.");
@@ -86,8 +85,8 @@ template <typename Accumulator>
 void linearCombinationTyped(const LinearCombinationInvocation& invocation) {
     std::optional<RuntimeTensorReader<Accumulator>> x;
     std::optional<RuntimeTensorReader<Accumulator>> y;
-    if (invocation.x) x.emplace(*invocation.x);
-    if (invocation.y) y.emplace(*invocation.y);
+    if (invocation.x) x.emplace(invocation.x->broadcastTo(invocation.output.shape()));
+    if (invocation.y) y.emplace(invocation.y->broadcastTo(invocation.output.shape()));
     const RuntimeTensorWriter<Accumulator> output(invocation.output);
     const Accumulator alpha =
         x ? runtimeScalar<Accumulator>(invocation.options.alpha, "alpha") : Accumulator(0);
