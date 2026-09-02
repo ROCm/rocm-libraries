@@ -19,20 +19,19 @@ using namespace nb::literals;
 namespace roc::host_numerics::python_bindings {
 namespace {
 Tensor linearCombinationOwned(std::optional<Tensor> x, std::optional<Tensor> y,
-                              ScalarType outputType, ScalarType accumulatorType,
-                              std::complex<double> alpha, std::complex<double> beta) {
+                              ScalarType outputType, ScalarType accumulatorType, nb::object alpha,
+                              nb::object beta) {
     LinearCombinationOptions options(accumulatorType);
-    options.alpha = alpha;
-    options.beta = beta;
+    options.alpha = scalarFromPython(alpha);
+    options.beta = scalarFromPython(beta);
     return linearCombination(std::move(x), std::move(y), outputType, options);
 }
 
 void linearCombinationIntoBound(std::optional<Tensor> x, std::optional<Tensor> y, Tensor output,
-                                ScalarType accumulatorType, std::complex<double> alpha,
-                                std::complex<double> beta) {
+                                ScalarType accumulatorType, nb::object alpha, nb::object beta) {
     LinearCombinationOptions options(accumulatorType);
-    options.alpha = alpha;
-    options.beta = beta;
+    options.alpha = scalarFromPython(alpha);
+    options.beta = scalarFromPython(beta);
     linearCombinationInto(std::move(x), std::move(y), std::move(output), options);
 }
 
@@ -60,21 +59,21 @@ EpilogueOutputs referenceEpilogueOwned(
     Tensor input, ScalarType outputType, ScalarType computeType, std::optional<Tensor> bias,
     MatrixAxis biasAxis, Activation activation, ActivationApplication activationApplication,
     std::optional<Tensor> auxiliaryInput, std::optional<ScalarType> auxiliaryOutputType,
-    std::optional<Tensor> gateResidual, std::complex<double> outputScale,
-    std::complex<double> auxiliaryScale, double activationParameter0, double activationParameter1,
+    std::optional<Tensor> gateResidual, nb::object outputScale, nb::object auxiliaryScale,
+    nb::object activationParameter0, nb::object activationParameter1,
     OutputConversion outputConversion, bool includeRawOutput, bool includeAmax,
     OutputSelection outputSelection) {
     EpilogueOptions options(computeType);
     options.auxiliaryInput = std::move(auxiliaryInput);
     options.gateResidual = std::move(gateResidual);
     if (bias) options.bias = VectorBinding{*bias, biasAxis};
-    options.outputScale = outputScale;
-    options.auxiliaryScale = auxiliaryScale;
+    options.outputScale = scalarFromPython(outputScale);
+    options.auxiliaryScale = scalarFromPython(auxiliaryScale);
     options.outputConversion = outputConversion;
     options.activation = activation;
     options.activationApplication = activationApplication;
-    options.activationParameter0 = activationParameter0;
-    options.activationParameter1 = activationParameter1;
+    options.activationParameter0 = scalarFromPython(activationParameter0);
+    options.activationParameter1 = scalarFromPython(activationParameter1);
     options.outputSelection = std::move(outputSelection);
     return referenceEpilogue(
         std::move(input),

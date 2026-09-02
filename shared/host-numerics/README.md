@@ -54,6 +54,11 @@ or sharing externally owned mutable storage. This makes ownership explicit at
 the boundary instead of passing an untracked pointer beside separate type and
 stride metadata.
 
+`broadcastTo()` creates a shallow zero-stride view using NumPy's trailing-axis
+broadcasting rules. Operations that support broadcasting, such as
+`linearCombination`, therefore consume ordinary tensors without separate
+axis or replication descriptors.
+
 `ScalarType` includes ordinary integer, floating-point, and complex types as
 well as the packed FP4, FP6, and Int4 encodings and the scale formats used by
 MX. Strides are measured in logical elements even when several encoded values
@@ -68,7 +73,8 @@ the value. This distinction is about semantics and API clarity rather than a
 measured performance requirement, and mirrors the distinction between a NumPy
 scalar and a zero-dimensional `ndarray`. Operation coefficients accept native
 numbers directly; `Tensor::item()` snapshots a zero-dimensional tensor when a
-tensor-backed scalar is more convenient.
+tensor-backed scalar is more convenient, and `Tensor::item<T>()` returns a
+chosen native C++ type directly.
 
 ## Deterministic generation
 
@@ -128,10 +134,10 @@ caller-owned destinations when a product needs a particular layout, wants
 in-place operation where it is valid, or needs only selected outputs. Product
 adapters translate raw pointers and enums before calling either form.
 
-`linearCombination` implements `alpha * x + beta * y` for the hipBLASLt
-matrix-transform reference while sharing the component's conversion, layout,
-ownership, and aliasing rules. It is a small operation rather than a parallel
-tensor-algebra framework.
+`linearCombination` implements `alpha * x + beta * y` with NumPy-style input
+broadcasting for the hipBLASLt matrix-transform reference while sharing the
+component's conversion, layout, ownership, and aliasing rules. It is a small
+operation rather than a parallel tensor-algebra framework.
 
 Reference GEMM supports ordinary and complex arithmetic, explicit
 low-precision input quantization and accumulation behavior, scaling, bias,
