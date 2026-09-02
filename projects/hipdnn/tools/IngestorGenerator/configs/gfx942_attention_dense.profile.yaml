@@ -1,0 +1,402 @@
+# TOOL PROFILE for the gfx942 attention_dense engine.
+#
+# NOT a generator config. `generate.py` takes a config with `packs:`; this file has none
+# and generate.py correctly rejects it ("packs must declare at least one pack"). The
+# `.profile.yaml` suffix is the distinction. This file is read by the PIPELINE TOOLS --
+# verify_variant_sets.py, dispatch_parity.py, knob_sweep.py, coverage_gate.py,
+# launch_surface.py -- which share it so they cannot disagree about which kernel they
+# are discussing. dispatch_parity.py EMITS a generator config from it.
+#
+# verify_variant_sets.py can check three properties from the artifacts alone (binary
+# nesting, loader-tuple uniqueness, no sentinel). The other two need facts only the
+# kernel knows, and those live here rather than in the tool:
+#
+#   * which spelling the MATCHER compares, so a descriptor written in the builder's
+#     vocabulary ("bf16" where the matcher reads "BF16") is caught -- it otherwise
+#     loads cleanly, reconciles on every count, and matches nothing;
+#   * how each POLICY-OWNED knob resolves when the spec leaves it absent, so
+#     "policy decides" and "explicitly the value the policy would have chosen" are
+#     recognised as the same binary.
+#
+# Adding a knob to a sweep means adding it here, not editing the tool.
+
+bundle: gfx942_attention_dense
+
+# Where the rocKE library lives, so the policy functions below can be imported.
+# A relative path is resolved from the working directory; ROCKE_PROVIDER_ROOT
+# overrides it. Kept out of the tool because it is a checkout location, not a fact
+# about the kernel.
+provider_root: dnn-providers/hip-kernel-provider
+
+vocabulary:
+  # builder spelling -> the hipDNN enum spelling the MATCHER compares. Two
+  # consumers, one declaration: the gate reads the values as the legal set, and
+  # the parity generator reads the mapping to translate a resolved spec into
+  # metadata. Copying the spec's spelling straight across is what made every graph
+  # decline while the engine still loaded and every count reconciled.
+  dtype:
+    bf16: BF16
+    fp16: FP16
+
+policies:
+  # `use_exp2_fast` is tri-state: True, False, or None meaning "ask the policy".
+  # None is NOT False -- the policy is seqlen-dependent and returns True in most of
+  # the range, so pinning the field discards it. Args are spec keys, passed
+  # positionally in the order the kernel's own resolver takes them.
+  use_exp2_fast:
+    module: kernels.gfx942.attention_dense
+    function: _use_exp2_fast
+    args: [head_size, dtype, seqlen_q]
+
+# ---------------------------------------------------------------------------
+# Stage-1 parity (tools/dispatch_parity.py). One profile drives both tools: the
+# gate and the generator must agree about which kernel they are talking about,
+# and two files would be two chances to disagree.
+# ---------------------------------------------------------------------------
+
+arch: gfx942
+slug: gfx942_attention_dense
+source: kernels/gfx942/attention_dense.py
+builder: build_attention_dense
+
+# The library's own production factory. Reading its constants and transcribing
+# them is what missed `persistent`, which is DERIVED from the request
+# (work >= num_persistent) and reads like an ordinary local. Calling it cannot
+# make that mistake.
+dispatch:
+  module: dispatch.attention.gfx942
+  function: dense_spec_for_request
+
+request:
+  module: dispatch.attention.common
+  class: AttentionRequest
+  defaults:
+    # attention_dense is OPT-IN. Without this the dispatcher resolves every shape
+    # to unified_2d/3d and this kernel wins nothing -- "rocKE supports it" and
+    # "attention_dense supports it" are different claims.
+    algorithm: attention_dense
+    op: attention
+
+predicate:
+  module: kernels.gfx942.attention_dense
+  function: supports_attention_dense
+
+# The descriptor skeleton the emitted config carries.
+engine:
+  name: hipkernel:Gfx942AttentionDense
+  knobs: [block_n, waves_per_eu, persistent]
+
+kmd_fields:
+  - {name: dtype, type: string}
+  - {name: batch, type: int, default_value: 1}
+  - {name: num_query_heads, type: int, default_value: 8}
+  - {name: num_kv_heads, type: int, default_value: 8}
+  - {name: seqlen_q, type: int, default_value: 256}
+  - {name: seqlen_kv, type: int, default_value: 256}
+  - {name: head_size, type: int, default_value: 128}
+  - {name: causal, type: int, default_value: 0}
+  - {name: block_n, type: int, default_value: 64}
+  # block_m is read by the ENGINE on two paths and must therefore be in the catalog:
+  # the matcher checks `seqlen_q % block_m == 0` (Gfx942AttentionDenseNative.cpp, the
+  # kernel-match tile predicate) and prepare() passes it to attentionDenseGeometry()
+  # to compute the grid. It was missing from this list on the first pass -- the C++
+  # compiles fine without it, and the descriptor simply never states the tile the
+  # binary was built with. Same trap as persistent below: a restated helper needs its
+  # inputs in the descriptor.
+  - {name: block_m, type: int, default_value: 256}
+  - {name: waves_per_eu, type: int, default_value: 2}
+  # persistent and num_persistent are in the KMD because prepare() BRANCHES on
+  # them: the persistent variant wants a 1-D grid of num_persistent CTAs, and
+  # launching it on the default 3-D grid leaves output rows unwritten. A restated
+  # helper needs its inputs in the descriptor, or the engine cannot take the branch
+  # even once the code exists.
+  - {name: persistent, type: int, default_value: 0}
+  - {name: num_persistent, type: int, default_value: 304}
+  # A tri-state the DISPATCHER never sets: it returns the shared spec and leaves
+  # gfx942-private knobs to the kernel's own policy. The binary is still definite,
+  # so the descriptor has to say which one it is. default_value is -1 because no
+  # real kernel takes it: 0 is a value the policy genuinely returns, so a 0 default
+  # would alias "policy decided off" onto "explicitly off" and collapse two
+  # distinct catalog entries into one.
+  - {name: use_exp2_fast, type: int, default_value: -1}
+
+# Every field the matcher compares. Written from the resolved spec, so a value the
+# dispatcher derived reaches the catalog rather than being defaulted away.
+metadata_fields:
+  - dtype
+  - batch
+  - num_query_heads
+  - num_kv_heads
+  - seqlen_q
+  - seqlen_kv
+  - head_size
+  - causal
+  - block_n
+  - block_m
+  - waves_per_eu
+  - persistent
+  - num_persistent
+  - use_exp2_fast
+
+# The builder's OWN spec class. The dispatcher returns the SHARED spec and touches no
+# arch-private codegen knob -- in the factory's own words those stay "sweep-visible and
+# dispatch-invisible", and wiring one into it would make it a production path needing
+# its own measured verdict first. So the knobs most worth sweeping are exactly the ones
+# missing from what the dispatcher hands back, and reaching them means promoting the
+# spec the way the builder does rather than pretending the field was there.
+arch_spec:
+  module: kernels.gfx942.attention_dense
+  class: Gfx942AttentionDenseSpec
+
+# ---------------------------------------------------------------------------
+# Stage-3 sweep candidates (tools/knob_sweep.py).
+#
+# The spec has 30 fields: 8 are shape, leaving 22. Not all 22 are questions. A knob
+# is excluded from a sweep for one of three reasons, and the reason is recorded here
+# so it travels with the decision instead of living in someone's memory of a commit
+# message:
+#
+#   * `verdict`  -- already measured. "The author swept it" means it was EXPLORED,
+#                   not that it ships. Re-measuring spends GPU time to rediscover
+#                   what the source already says.
+#   * `hazard`   -- swept only with a gate in front, named here.
+#   * absent     -- a feature flag set by the GRAPH, not a tuning axis at all.
+#
+# Knobs the dispatcher varies per shape are excluded automatically: it already moves
+# them, so perturbing them fights the production policy rather than measuring it.
+# ---------------------------------------------------------------------------
+
+sweep:
+  block_m:
+    values: [256]
+    verdict: >-
+      The source says the kernel FAULTS at values other than 256 -- the causal mask
+      and the P relayout both assume it. Not a knob; a baked constant with a
+      one-element domain, listed so nobody re-derives that from a crash.
+
+  block_n:
+    values: [64, 32]
+    hazard: >-
+      128 needs 69,632 B of LDS at D=128 and the predicate rejects it, so the domain
+      is {32, 64}. And 64 is not reachable-versus-32 by measurement alone: every real
+      shape has Skv % 64 == 0, both tiles are applicable, and score ranks the wider
+      one -- so the 32 arm needs a shape where 64 is ILLEGAL (Skv=288) or half the
+      axis is dead weight that reports green.
+
+  waves_per_eu:
+    values: [2, 4]
+    hazard: >-
+      The kernel's own policy resolves this per (head_size, dtype) and BAKES it into
+      kernel_name. Pinning a value the policy disagrees with makes the name tag and
+      the compiled binary disagree, and the name-keyed launcher cache then serves the
+      wrong HSACO. Sweep it only against what the policy would have chosen.
+
+  use_exp2_fast:
+    values: [true, false]
+    hazard: >-
+      TRI-STATE. None means "ask the policy", which is seqlen-dependent and returns
+      False only for bf16/D128 below 4096. Pinning either side discards the policy for
+      every shape where it would have chosen the other way, and the pinned-off arm
+      measured WORSE than leaving it unset on exactly those shapes. Sweep BOTH sides or
+      leave it unset; one side is the only option that can lose.
+
+  lazy_rescale:
+    values: [true, false]
+    hazard: softmax rescale strategy; no measured verdict on record for gfx942.
+
+  iglp:
+    values: [false]
+    verdict: >-
+      Marked "RESOLVED -- do not re-attempt" in the kernel's own notes. Settled.
+
+  interleave:
+    values: [false, true]
+    hazard: no measured verdict on record; isolate before pairing.
+
+  use_cfvst:
+    values: [true, false]
+    hazard: >-
+      Tri-state, same shape of trap as use_exp2_fast: absent means the policy
+      decides, so an explicit value is an override rather than a default.
+
+  use_v_swizzle:
+    values: [true, false]
+    hazard: tri-state; see use_cfvst.
+
+  lds_k_group_pad:
+    values: [8]
+    verdict: >-
+      gfx942 reads the SHARED field, whose default is already the value it wants; a
+      private one was deliberately not set. Restating it reintroduces the per-arch
+      duplicate that collapsing the two fields removed.
+
+  lds_row_pad:
+    values: [8, 16]
+    hazard: LDS layout; interacts with block_n through LDS budget. Pair, do not isolate.
+
+  v_row_pad:
+    values: [null, 8]
+    hazard: >-
+      Default is None, which is a POLICY sentinel and not a value. Same rule as any
+      tri-state: sweep both sides or leave unset.
+
+  persistent:
+    values: [true, false]
+    verdict: >-
+      The DISPATCHER derives this per request (work >= num_persistent) and the kernel
+      marks the lever "KEEP everywhere". It is a production decision, not an axis --
+      excluded automatically because the dispatcher varies it, and listed so the
+      exclusion is visible rather than accidental.
+
+  num_persistent:
+    values: [304]
+    verdict: >-
+      The gfx942 CU count. Sweeping it measures a grid the hardware does not have.
+
+# ---------------------------------------------------------------------------
+# Launch-surface audit (tools/launch_surface.py). H29 closed ONE instance of this
+# class (the grid/persistent coupling, now in Gfx942AttentionDenseGeometry.hpp); this
+# section is the class, for THIS op. Each entry names one thing Python computes at
+# build time that the C++ engine restates by hand, where the restatement lives, which
+# KMD fields the restatement needs to take its branches, what defends it at
+# match/prepare time (or ``none`` if nothing does yet), and which test compares the
+# two halves (or ``none``). Line numbers are approximate anchors for a reader, not a
+# byte-exact contract -- the mechanical checks below compare field NAMES and file
+# EXISTENCE, never line numbers.
+#
+# `block_m` is the reason this file exists: it was missing from kmd_fields above
+# (fixed a few sections up) while Gfx942AttentionDenseNative.cpp read it via
+# getIntMetadata unconditionally on both the kernel-match and prepare paths. That is
+# the `grid` and `applicability` surfaces' kmd_fields entry below, and it is exactly
+# what --check's first pass catches: a name in a surface's kmd_fields that is absent
+# from the profile's own kmd_fields list.
+# ---------------------------------------------------------------------------
+
+launch_surface:
+  - name: grid
+    python_source: >-
+      kernels/gfx942/attention_dense.py:attention_dense_grid (~1803-1819) -- persistent
+      returns (num_persistent, 1, 1); default returns
+      (ceil(seqlen_q/block_m), num_query_heads, batch)
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp:attentionDenseGeometry
+      (~74-124)
+    kmd_fields: [block_m, seqlen_q, num_query_heads, batch, persistent, num_persistent]
+    guard: >-
+      attentionDenseGeometry throws HIPDNN_PLUGIN_STATUS_BAD_PARAM at prepare() on a
+      non-positive block_m/seqlen_q/num_query_heads/batch or an unusable
+      persistent+num_persistent pair (~lines 82-107), rather than launching an empty
+      or negative grid silently.
+    test: >-
+      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseGeometry.cpp
+
+  - name: block
+    python_source: >-
+      kernels/gfx942/attention_dense.py:attention_dense_block (~1822-1827) --
+      (block_m // 32 * 64, 1, 1) wave64 lanes
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp:attentionDenseGeometry
+      (blockX at ~line 110)
+    kmd_fields: [block_m]
+    guard: >-
+      attentionDenseGeometry throws if block_m <= 0 (~lines 82-87); it does not
+      independently verify block_m % 32 == 0, which the Python side enforces at spec
+      construction rather than at launch.
+    test: >-
+      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseGeometry.cpp
+
+  - name: kernargs
+    python_source: >-
+      kernels/gfx942/attention_dense.py:attention_dense_signature (~1831-1849) --
+      (q_ptr, k_ptr, v_ptr, o_ptr, scale), the single definition both the builder and
+      the benchmark call
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp:Gfx942AttentionDenseDispatchHandler::launch
+      (~lines 875-895) -- the file's own comment calls this "a hand-maintained
+      contract with the Python, unchecked by the type system"
+    kmd_fields: []
+    guard: none
+    test: none
+
+  - name: baked_constants
+    python_source: >-
+      kernels/gfx942/attention_dense.py:_build_attention_dense_single_buffer --
+      stride_q_tok = Hq*D, stride_k_tok = Hkv*D (~lines 1167-1168), no stride kernarg;
+      the K/V 32-bit addressing bound (~lines 1084-1090) is the same BSHD assumption
+      restated as a byte-extent check
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp:hasBshdStrides
+      (~lines 224-239), called from gfx942AttentionDenseGraphMatches (~lines 389-392)
+    kmd_fields: []
+    guard: >-
+      hasBshdStrides declines any Q/K/V tensor whose strides do not match the baked
+      BSHD layout (unit-extent axes exempt); prepare() re-checks O's layout
+      separately because the frontend has not populated its shape at match time
+      (~lines 799-811).
+    test: >-
+      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  - name: spec_resolution
+    python_source: >-
+      dispatch/attention/gfx942.py:dense_spec_for_request (~217-229) delegating to
+      _dense_spec (~137-215) -- resolves persistent (work >= num_persistent),
+      num_persistent (304, the gfx942 CU count) and waves_per_eu
+      (_tuned_waves_per_eu policy) per request
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp:prepare
+      (~lines 99-107, 855-860) -- prepare() trusts persistent/num_persistent/
+      waves_per_eu/use_exp2_fast exactly as the KMD states them; the engine has no
+      code path that re-derives what the dispatcher would have resolved for this
+      shape
+    kmd_fields: [persistent, num_persistent, waves_per_eu, use_exp2_fast]
+    guard: none
+    test: >-
+      projects/hipdnn/tools/IngestorGenerator/tests/test_dispatch_parity.py:test_persistent_matches_the_dispatchers_own_rule
+      (also test_waves_per_eu_comes_from_the_kernels_policy) -- an OFFLINE
+      comparison against the real dispatcher at descriptor-generation time, not a
+      runtime check inside the engine
+
+  - name: applicability
+    python_source: >-
+      kernels/gfx942/attention_dense.py:supports_attention_dense (~lines 846-1095) --
+      dtype/head_size scope, shape validators, GQA divisibility, LDS budget, 32-bit
+      addressing
+    cpp_mirror: >-
+      dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp:gfx942AttentionDenseGraphMatches
+      (~lines 358-610) and kernelMatches (~lines 654-706)
+    kmd_fields:
+      [dtype, head_size, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv, batch,
+       causal, block_m, block_n]
+    guard: >-
+      kernelMatches requires strict equality between the graph's derived shape and
+      every one of these KMD fields, plus block_m/block_n dividing the sequence
+      lengths (~lines 683-705); a mismatch on any field declines the candidate
+      rather than launching it.
+    test: >-
+      dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+# ---------------------------------------------------------------------------
+# The APPLICABILITY ORACLE (tools/reconcile_applicability.py).
+#
+# SCOPED TO THE KERNEL FAMILY BEING INTEGRATED, and that scoping is the whole point.
+# rocKE registers eight attention candidates; this integration is a port of ONE of them.
+# A shape only `unified_2d` or `unified_3d` serves is not this integration's coverage
+# gap -- it is a different kernel, and integrating it is separate work with its own
+# variant set. Comparing library-wide was tried and reported 51 decode/head_size shapes
+# as gaps in a dense integration, when the dense kernel declines every one of them for
+# exactly the reasons hipDNN does.
+#
+# `match: algorithm` and not `family`: every rocKE attention candidate shares
+# family="attention_unified", so family cannot discriminate. `algorithm` is what
+# separates attention_dense from unified_2d/unified_3d/d256_decode. Check this for your
+# own op rather than assuming -- print the registry and look.
+#
+# request.defaults ARE inherited here (unlike a library-wide oracle would want), because
+# attention_dense is opt-in: without algorithm= set it declines everything and every
+# decline would reconcile trivially.
+
+reference_candidates:
+  module: dispatch.attention
+  function: attention_candidates
+  match: algorithm
+  family: attention_dense

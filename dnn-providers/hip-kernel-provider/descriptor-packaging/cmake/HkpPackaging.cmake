@@ -968,9 +968,8 @@ silently stop running.")
     # synthetic fixtures, never against a real shipped pack, so a typo in any of the four
     # symbol strings in a real descriptor was invisible to every test that ran.
     #
-    # One entry per attention_dense pack this repo ships. The list is EMPTY on this
-    # branch: it ships the mechanism, not a pack. Each integration adds its own row,
-    # so the table never names a Native.cpp the branch does not carry. Each row targets
+    # One entry per attention_dense pack this repo ships. This branch appends the
+    # gfx942 row to the list the tooling base declares empty. Each row targets
     # the descriptor tree staged under HIPDNN_DESCRIPTOR_BUILD_DIR for its arch; that
     # arch's kind: rocke sources are lowered to a loadable kind: kpack tree only when the
     # arch is in GPU_TARGETS, so a build that did not target the arch never stages one.
@@ -982,11 +981,13 @@ silently stop running.")
     # which arches got packed is a build-time fact HIPDNN_DESCRIPTOR_BUILD_DIR only
     # resolves once hkp_stage_all()'s custom command has actually run.
     # Rows are `<arch>;<pack-dir>;<engine-name>;<Native.cpp>`, one per attention_dense
-    # pack the branch actually ships. Empty here by design -- this branch carries the
-    # cross-check mechanism, not a pack -- and each integration branch sets its own
-    # rows, so the table can never name a Native.cpp absent from the checkout. Rows
-    # escape their separators (`\;`) so each stays ONE list element.
-    set(HKP_NATIVE_SOURCE_PACKS)
+    # pack the branch actually ships. The tooling base leaves this empty; this branch
+    # sets the gfx942 pack it integrates, so the table never names a Native.cpp absent
+    # from the checkout. Separators are escaped (`\;`) so each row stays ONE list
+    # element -- unescaped, the rows flatten into loose fields and `list(GET _ns_spec 1)`
+    # reads past the end of a 1-element list.
+    set(HKP_NATIVE_SOURCE_PACKS
+        "gfx942\;gfx942_attention_dense\;hipkernel:Gfx942AttentionDense\;Gfx942AttentionDenseNative.cpp")
 
     if(TARGET hipdnn_validate_descriptors AND HKP_NATIVE_SOURCE_PACKS)
         set(_ns_native_source_root "${HKP_PKG_DIR}/../src/engines/kernel_ingestor_engine/packs")
