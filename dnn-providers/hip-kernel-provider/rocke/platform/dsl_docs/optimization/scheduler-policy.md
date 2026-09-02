@@ -4,7 +4,7 @@ The AMDGPU machine scheduler can materially change instruction ordering,
 register pressure, memory-clause formation, and occupancy without changing a
 kernel's algorithm. rocKE exposes the scheduler choice as a validated,
 per-kernel code-generation policy so it can be swept as a bounded performance
-tuning knob while remaining part of artifact and cache identity.
+tuning knob.
 
 ## Table of Contents
 
@@ -13,7 +13,7 @@ tuning knob while remaining part of artifact and cache identity.
 - [Apply a policy](#apply-a-policy)
 - [Run a bounded sweep](#run-a-bounded-sweep)
 - [Validate a candidate](#validate-a-candidate)
-- [Artifact and cache identity](#artifact-and-cache-identity)
+- [Artifact and cache handling](#artifact-and-cache-handling)
 - [Raw compiler options](#raw-compiler-options)
 - [Limitations](#limitations)
 
@@ -88,7 +88,7 @@ policies = [CodegenPolicy()] + [
 configs = [
     AutotuneConfig(
         spec=spec,
-        name="baseline-shape",
+        name=f"baseline-shape-{policy.scheduler_strategy or 'default'}",
         extra={"codegen_policy": policy},
     )
     for policy in policies
@@ -96,15 +96,14 @@ configs = [
 
 def build_candidate(config):
     kernel = build_kernel(config.spec, arch="gfx950")
-    apply_codegen_policy(kernel, config.codegen_policy)
+    apply_codegen_policy(kernel, config.extra["codegen_policy"])
     return kernel
 ```
 
-`extra["codegen_policy"]` is reserved and must contain a `CodegenPolicy`.
-`AutotuneConfig.identity` includes its policy key when a non-default policy is
-present. This preserves the existing constructor signature, permits candidates
-with the same human-readable name, and avoids collisions in persistent winner
-caches.
+`extra` is the existing caller-owned extension point, so this does not change
+the `AutotuneConfig(spec, name, extra={})` signature. Use a distinct `name` for
+every policy variant: the current autotuner persists winners by config name and
+does not derive a compiled-object identity from `KernelDef`.
 
 ## Validate a candidate
 
@@ -126,20 +125,22 @@ Reject a candidate that is faster only because correctness changed, spills
 appeared, occupancy collapsed unexpectedly, or results do not reproduce across
 the intended toolchain range.
 
-## Artifact and cache identity
+## Artifact and cache handling
 
-Scheduler policy changes the compiled object, so it is provenance rather than
-an incidental benchmark label:
+Scheduler policy changes the compiled object even though it does not change the
+kernel's launch ABI. Treat policy variants like the existing `agpr_alloc`
+control:
 
-- `KernelArtifact.codegen_policy` records the validated policy used to lower
-  the kernel.
-- Generated manifests contain `codegen_policy` and `codegen_policy_key`.
-- `KernelId.with_codegen_policy(...)` adds the policy key to compile and
-  selection identities.
-- `AutotuneConfig.identity` adds the policy key to persistent tuning records.
+- build a fresh `KernelDef` for each policy;
+- use distinct autotune config names and output/cache locations;
+- retain the serialized IR or LLVM IR with the compiled HSACO when provenance
+  matters; and
+- do not reuse a cached HSACO across policy variants.
 
-The default policy retains existing dispatcher and autotuner identity strings.
-Do not reuse a cached HSACO compiled under one explicit policy for another.
+rocKE does not currently have a generic compiled-object identity that covers
+all compile-affecting kernel attributes and toolchain inputs. Scheduler policy
+does not add a one-off identity field to dispatcher IDs or runtime manifests;
+that broader cache design is tracked separately.
 
 ## Raw compiler options
 
@@ -147,8 +148,8 @@ The typed scheduler policy is the supported path for durable kernel tuning.
 `compile_kernel()` intentionally does not accept an arbitrary `options` list.
 For isolated compiler diagnostics, lower to LLVM IR and call
 `build_hsaco_from_llvm_ir(..., options=[...])` directly. Raw options are not
-automatically validated or included in rocKE artifact identity, so they must
-not be used for persistent dispatch or autotune decisions.
+automatically validated or included in cache identity, so they must not be used
+for persistent dispatch or autotune decisions.
 
 ## Limitations
 

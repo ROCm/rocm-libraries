@@ -1996,8 +1996,7 @@ arch reference §21.4a and §17.4 for the measured occupancy and per-shape numbe
 Default flag list from `runtime/comgr.py` is `["-O3"]`. Durable scheduler
 selection is a typed per-kernel policy; see
 [`scheduler-policy.md`](./scheduler-policy.md). Raw diagnostic overrides use
-`build_hsaco_from_llvm_ir(..., options=[...])` and are not included in artifact
-or cache identity.
+`build_hsaco_from_llvm_ir(..., options=[...])`.
 
 | Flag | Safe? | Effect |
 |---|---|---|

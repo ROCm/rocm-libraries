@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from .ir import KernelDef
 
 SCHEDULER_STRATEGY_ATTR = "scheduler_strategy"
-DEFAULT_CODEGEN_POLICY_KEY = "default"
 
 
 class SchedulerStrategy(str, Enum):
@@ -62,19 +61,6 @@ class CodegenPolicy:
             normalize_scheduler_strategy(self.scheduler_strategy),
         )
 
-    @property
-    def cache_key(self) -> str:
-        """Canonical identity suffix for artifact and tuning caches."""
-
-        if self.scheduler_strategy is None:
-            return DEFAULT_CODEGEN_POLICY_KEY
-        return f"scheduler_strategy={self.scheduler_strategy}"
-
-    def as_dict(self) -> dict[str, str | None]:
-        """Return a stable manifest representation, including the default state."""
-
-        return {SCHEDULER_STRATEGY_ATTR: self.scheduler_strategy}
-
 
 def codegen_policy_from_attrs(attrs: Mapping[str, Any]) -> CodegenPolicy:
     """Construct and validate policy from a kernel attribute mapping."""
@@ -101,7 +87,6 @@ def apply_codegen_policy(kernel: KernelDef, policy: CodegenPolicy) -> None:
 
 __all__ = [
     "CodegenPolicy",
-    "DEFAULT_CODEGEN_POLICY_KEY",
     "SCHEDULER_STRATEGY_ATTR",
     "SchedulerStrategy",
     "apply_codegen_policy",

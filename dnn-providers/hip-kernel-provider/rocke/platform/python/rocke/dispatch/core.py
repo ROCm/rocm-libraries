@@ -12,11 +12,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from typing import Any, Callable, Iterable, Mapping, Sequence, Tuple
 
 from ..core.arch import known_arches
-from ..core.codegen_policy import CodegenPolicy, DEFAULT_CODEGEN_POLICY_KEY
 
 
 def stable_json_hash(payload: Mapping[str, Any], *, n: int = 16) -> str:
@@ -237,12 +236,6 @@ class KernelId:
     abi_version: str
     request_hash: str
     spec_hash: str
-    codegen_policy_key: str = DEFAULT_CODEGEN_POLICY_KEY
-
-    def _policy_suffix(self) -> str:
-        if self.codegen_policy_key == DEFAULT_CODEGEN_POLICY_KEY:
-            return ""
-        return f":codegen:{self.codegen_policy_key}"
 
     @property
     def compile_key(self) -> str:
@@ -251,10 +244,7 @@ class KernelId:
         Problem-independent by construction, so every request that selects the
         same spec shares one compile. This is the key an HSACO cache wants.
         """
-        return (
-            f"{self.arch}:{self.abi_version}:{self.spec_hash}"
-            f"{self._policy_suffix()}"
-        )
+        return f"{self.arch}:{self.abi_version}:{self.spec_hash}"
 
     @property
     def selection_key(self) -> str:
@@ -263,12 +253,11 @@ class KernelId:
         Tuning records, dispatch logs, and benchmark rows index by this, since
         the request is precisely what they need to tell apart.
         """
-        base = (
+        return (
             f"{self.op}:{self.family}:{self.candidate}:{self.arch}:"
             f"{self.algorithm}:{self.spec_id}:{self.abi_version}:"
             f"{self.request_hash}:{self.spec_hash}"
         )
-        return f"{base}{self._policy_suffix()}"
 
     @property
     def cache_key(self) -> str:
@@ -282,19 +271,7 @@ class KernelId:
         return self.selection_key
 
     def as_dict(self) -> dict:
-        data = asdict(self)
-        if self.codegen_policy_key == DEFAULT_CODEGEN_POLICY_KEY:
-            data.pop("codegen_policy_key")
-        return data
-
-    def with_codegen_policy(self, policy: CodegenPolicy) -> "KernelId":
-        """Return this identity specialized for one compiled codegen policy."""
-
-        if not isinstance(policy, CodegenPolicy):
-            raise TypeError(
-                f"policy must be CodegenPolicy, got {type(policy).__name__}"
-            )
-        return replace(self, codegen_policy_key=policy.cache_key)
+        return asdict(self)
 
 
 @dataclass(frozen=True)

@@ -30,7 +30,6 @@ hsaco        : bytes      # HSA code object
 timings      : Dict[str, float]   # per-stage ms
 pass_stats   : PassStats          # constants_folded, common_subexpressions, dead_ops_removed
 isa          : str
-codegen_policy : CodegenPolicy    # validated backend policy used for this object
 kernel_name  : str
 hsaco_bytes  : int
 ```

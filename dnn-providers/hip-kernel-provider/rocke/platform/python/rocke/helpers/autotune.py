@@ -71,11 +71,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from ..core.codegen_policy import CodegenPolicy, DEFAULT_CODEGEN_POLICY_KEY
-
-
-_CODEGEN_POLICY_EXTRA_KEY = "codegen_policy"
-
 
 __all__ = [
     "AutotuneConfig",
@@ -104,42 +99,12 @@ class AutotuneConfig:
     extra
         Free-form dict for things outside the spec — e.g. grid
         overrides, launch-time flags. Forwarded to ``build_fn`` via
-        ``config.extra``. The reserved ``"codegen_policy"`` entry accepts a
-        :class:`CodegenPolicy` and becomes part of the compiled candidate's
-        persistent identity.
+        ``config.extra``.
     """
 
     spec: Any
     name: str
     extra: Dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        # Validate at construction time while retaining the legacy constructor
-        # signature. The property repeats the check because ``extra`` remains a
-        # caller-owned mutable dictionary for backward compatibility.
-        _ = self.codegen_policy
-
-    @property
-    def codegen_policy(self) -> CodegenPolicy:
-        """Validated policy stored in the reserved ``extra`` entry."""
-
-        policy = self.extra.get(_CODEGEN_POLICY_EXTRA_KEY)
-        if policy is None and _CODEGEN_POLICY_EXTRA_KEY not in self.extra:
-            return CodegenPolicy()
-        if not isinstance(policy, CodegenPolicy):
-            raise TypeError(
-                f"extra[{_CODEGEN_POLICY_EXTRA_KEY!r}] must be CodegenPolicy, "
-                f"got {type(policy).__name__}"
-            )
-        return policy
-
-    @property
-    def identity(self) -> str:
-        """Collision-proof persistent identity for this compiled candidate."""
-
-        if self.codegen_policy.cache_key == DEFAULT_CODEGEN_POLICY_KEY:
-            return self.name
-        return f"{self.name}:codegen:{self.codegen_policy.cache_key}"
 
 
 @dataclass(frozen=True)
@@ -297,10 +262,10 @@ def autotune_sweep(
     for cfg in configs:
         try:
             ms = float(bench_fn(cfg))
-            row = AutotuneResult(config_name=cfg.identity, ms_per_iter=ms)
+            row = AutotuneResult(config_name=cfg.name, ms_per_iter=ms)
         except Exception as e:  # pragma: no cover — broad-catch by design
             row = AutotuneResult(
-                config_name=cfg.identity,
+                config_name=cfg.name,
                 ms_per_iter=float("inf"),
                 error=f"{type(e).__name__}: {e}",
             )
@@ -312,7 +277,7 @@ def autotune_sweep(
         joined = "; ".join(f"{r.config_name}={r.error}" for r in results if r.error)
         raise RuntimeError(f"autotune_sweep: every config errored.\n  errors: {joined}")
     best = min(ok_rows, key=lambda r: r.ms_per_iter)
-    winner = next(c for c in configs if c.identity == best.config_name)
+    winner = next(c for c in configs if c.name == best.config_name)
     return winner, results
 
 
@@ -369,9 +334,9 @@ class Autotuner:
         if not configs:
             raise ValueError("Autotuner: empty config list")
         self.configs = list(configs)
-        self._by_identity = {c.identity: c for c in self.configs}
-        if len(self._by_identity) != len(self.configs):
-            raise ValueError("Autotuner: duplicate config identities")
+        self._by_name = {c.name: c for c in self.configs}
+        if len(self._by_name) != len(self.configs):
+            raise ValueError("Autotuner: duplicate config names")
         self.key_fn = key_fn
         self.bench_fn = bench_fn
         self.launch_fn = launch_fn
@@ -388,9 +353,9 @@ class Autotuner:
 
     def _select(self, **runtime_args: Any) -> AutotuneConfig:
         key = tuple(self.key_fn(**runtime_args))
-        cached_identity = self.cache.get(key)
-        if cached_identity is not None and cached_identity in self._by_identity:
-            return self._by_identity[cached_identity]
+        cached_name = self.cache.get(key)
+        if cached_name is not None and cached_name in self._by_name:
+            return self._by_name[cached_name]
         self._emit(f"[autotune] sweeping {len(self.configs)} configs for key={key!r}")
 
         bench_kwargs = dict(runtime_args)
@@ -402,7 +367,7 @@ class Autotuner:
             ms = float(self.bench_fn(cfg, **bench_kwargs))
             elapsed = time.perf_counter() - t_wall_0
             self._emit(
-                f"[autotune]   {cfg.identity:30s}: {ms * 1e3:.2f} us/iter"
+                f"[autotune]   {cfg.name:30s}: {ms * 1e3:.2f} us/iter"
                 f"  (build+bench wall: {elapsed:.2f}s)"
             )
             return ms
@@ -417,19 +382,14 @@ class Autotuner:
             on_progress=_on_progress,
         )
         all_ms = {r.config_name: r.ms_per_iter for r in results}
-        self.cache.put(
-            key,
-            winner.identity,
-            all_ms[winner.identity],
-            all_ms,
-        )
+        self.cache.put(key, winner.name, all_ms[winner.name], all_ms)
         if self.verbose:
             sorted_rows = sorted(
                 (r for r in results if r.is_ok),
                 key=lambda r: r.ms_per_iter,
             )
             self._emit(
-                f"[autotune] winner: {winner.identity} "
+                f"[autotune] winner: {winner.name} "
                 f"({sorted_rows[0].ms_per_iter * 1e3:.2f} us/iter)"
             )
         return winner

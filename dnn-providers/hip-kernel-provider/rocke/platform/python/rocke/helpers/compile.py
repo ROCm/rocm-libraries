@@ -16,7 +16,6 @@ takes a `KernelDef` produced by an instance builder and returns a
                       milliseconds (`ir_build`, `ir_lower_llvm`,
                       `comgr_bc`, `comgr_relocatable`, `comgr_executable`,
                       `total`)
-  - `codegen_policy`: validated backend choices that produced the object
 
 Use `compile_kernel(...)` from a kernel-author script when:
 
@@ -48,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from ..core.codegen_policy import CodegenPolicy, codegen_policy_for_kernel
+from ..core.codegen_policy import codegen_policy_for_kernel
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
 from ..core.lower_hip import lower_kernel_to_hip
@@ -68,7 +67,6 @@ class KernelArtifact:
     timings: Dict[str, float] = field(default_factory=dict)
     pass_stats: PassStats = field(default_factory=PassStats)
     isa: str = "amdgcn-amd-amdhsa--gfx950"
-    codegen_policy: CodegenPolicy = field(default_factory=CodegenPolicy)
 
     @property
     def kernel_name(self) -> str:
@@ -160,7 +158,6 @@ def compile_kernel(
         timings=timings,
         pass_stats=pass_stats,
         isa=isa,
-        codegen_policy=codegen_policy_for_kernel(kernel),
     )
 
 
@@ -334,7 +331,6 @@ def compile_kernel_via_hipcc(
         timings=timings,
         pass_stats=PassStats(),
         isa=isa,
-        codegen_policy=policy,
     )
 
 

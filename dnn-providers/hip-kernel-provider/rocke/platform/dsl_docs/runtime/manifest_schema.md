@@ -31,14 +31,8 @@ Every manifest carries:
 | `ir_authored`        | bool    | `true`                                                       |
 | `engine_build_id`    | string  | content hash of the engine that produced the artifact (`"unknown"` if the `rocke_engine` binding isn't importable) |
 | `engine_version`     | string  | version of the engine that produced the artifact (`"unknown"` fallback) |
-| `codegen_policy`     | object  | validated per-kernel backend policy; `scheduler_strategy` is a string or `null` |
-| `codegen_policy_key` | string  | canonical artifact/cache identity for the policy (`"default"` when unset) |
 
-The `engine_build_id` / `engine_version` fields stamp the engine provenance (from the C++ engine's `rocke_build_id()` / `rocke_engine_version()`, exposed via the `rocke_engine` binding) so a consumer such as the rocke-provider can fail loud on a stale or mixed bundle instead of silently mixing artifacts. They are artifact stamps only and never enter the emitted IR. `codegen_policy` records choices that do affect the compiled object; consumers must not treat artifacts with different policy keys as interchangeable. Helpers: `helpers/manifest.py::engine_build_id()` / `engine_version()`.
-
-The manifest helpers derive `codegen_policy` and `codegen_policy_key` from the
-compiled `KernelArtifact`. These names are reserved and cannot be overridden
-through a helper's `extra` mapping; attempted overrides raise `ValueError`.
+The `engine_build_id` / `engine_version` fields stamp the engine provenance (from the C++ engine's `rocke_build_id()` / `rocke_engine_version()`, exposed via the `rocke_engine` binding) so a consumer such as the rocke-provider can fail loud on a stale or mixed bundle instead of silently mixing artifacts. They are artifact stamps only and never enter the emitted IR. Helpers: `helpers/manifest.py::engine_build_id()` / `engine_version()`.
 
 ## Per-Kind Fields
 

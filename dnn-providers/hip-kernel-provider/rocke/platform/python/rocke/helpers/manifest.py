@@ -37,16 +37,13 @@ Schema (version `ck.dsl.example.manifest/v1`):
       "ck_dependency": false,
       "ir_authored": true,
       "engine_build_id": <str>,   // content hash of the engine that produced this
-      "engine_version": <str>,    // engine version that produced this
-      "codegen_policy": {"scheduler_strategy": <str or null>},
-      "codegen_policy_key": <str>
+      "engine_version": <str>     // engine version that produced this
     }
 
 The `engine_build_id` / `engine_version` fields stamp the engine provenance so a
 consumer (e.g. the rocke-provider) can fail loud on a stale/mixed bundle whose
 engine does not match the engine it is linked against, rather than silently
-mixing artifacts. The codegen-policy fields distinguish objects compiled from
-the same kernel spec under different backend policies.
+mixing artifacts.
 
 The runner cares about `kind`, `kernel_name`, `hsaco`, `block_m/n/k`,
 `threads_per_block`, the shape-providing field (`default_shape` or
@@ -63,7 +60,6 @@ from .compile import KernelArtifact
 
 
 MANIFEST_SCHEMA = "ck.dsl.example.manifest/v1"
-_RESERVED_EXTRA_FIELDS = frozenset({"codegen_policy", "codegen_policy_key"})
 
 
 # Re-exports for examples to use.
@@ -116,28 +112,9 @@ def engine_version() -> str:
     return _engine_provenance()[1]
 
 
-def _provenance_fields(artifact: KernelArtifact) -> Dict[str, Any]:
+def _provenance_fields() -> Dict[str, str]:
     bid, ver = _engine_provenance()
-    return {
-        "engine_build_id": bid,
-        "engine_version": ver,
-        "codegen_policy": artifact.codegen_policy.as_dict(),
-        "codegen_policy_key": artifact.codegen_policy.cache_key,
-    }
-
-
-def _merge_extra(manifest: Dict[str, Any], extra: Optional[Mapping[str, Any]]) -> None:
-    """Merge caller metadata without allowing artifact provenance overrides."""
-
-    if not extra:
-        return
-    conflicts = sorted(_RESERVED_EXTRA_FIELDS.intersection(extra))
-    if conflicts:
-        joined = ", ".join(conflicts)
-        raise ValueError(
-            f"extra cannot override reserved manifest provenance fields: {joined}"
-        )
-    manifest.update(dict(extra))
+    return {"engine_build_id": bid, "engine_version": ver}
 
 
 # ---------------------------------------------------------------------
@@ -289,7 +266,7 @@ def make_simple_op_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         "is_binary": bool(is_binary),
-        **_provenance_fields(artifact),
+        **_provenance_fields(),
     }
     if elems_per_block is not None:
         manifest["elems_per_block"] = int(elems_per_block)
@@ -301,7 +278,8 @@ def make_simple_op_manifest(
         manifest["grid_explicit"] = [int(x) for x in grid_explicit]
     if eps is not None:
         manifest["eps"] = float(eps)
-    _merge_extra(manifest, extra)
+    if extra:
+        manifest.update(dict(extra))
     return manifest
 
 
@@ -356,9 +334,10 @@ def make_gemm_manifest(
         "notes": notes,
         "ck_dependency": False,
         "ir_authored": True,
-        **_provenance_fields(artifact),
+        **_provenance_fields(),
     }
-    _merge_extra(manifest, extra)
+    if extra:
+        manifest.update(dict(extra))
     return manifest
 
 
@@ -428,13 +407,14 @@ def make_conv_manifest(
         "notes": notes,
         "ck_dependency": False,
         "ir_authored": True,
-        **_provenance_fields(artifact),
+        **_provenance_fields(),
     }
     if grid_explicit is not None:
         manifest["grid_explicit"] = [int(x) for x in grid_explicit]
     if grid_order is not None:
         manifest["grid_order"] = grid_order
-    _merge_extra(manifest, extra)
+    if extra:
+        manifest.update(dict(extra))
     return manifest
 
 
@@ -468,9 +448,10 @@ def make_attention_manifest(
         "notes": notes,
         "ck_dependency": False,
         "ir_authored": True,
-        **_provenance_fields(artifact),
+        **_provenance_fields(),
     }
-    _merge_extra(manifest, extra)
+    if extra:
+        manifest.update(dict(extra))
     return manifest
 
 

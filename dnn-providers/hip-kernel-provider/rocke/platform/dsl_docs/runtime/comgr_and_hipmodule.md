@@ -84,7 +84,7 @@ For durable scheduler tuning, attach a validated `CodegenPolicy` to the kernel
 and compile through `compile_kernel()`. See
 [`../optimization/scheduler-policy.md`](../optimization/scheduler-policy.md).
 The policy is emitted as an `amdgpu-sched-strategy` LLVM function attribute and
-is included in artifact, dispatch-cache, and autotune identity.
+survives the serialized-IR handoff to either LLVM lowerer.
 
 `build_hsaco_from_llvm_ir(ir_text, options=[...])` passes any list of strings to `amd_comgr_action_info_set_option_list`. Useful examples:
 
