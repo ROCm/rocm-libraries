@@ -136,7 +136,6 @@ namespace hipblaslt::host_numerics
             return initialization::seedForSequence(seed, operandSequence(role));
         }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
         MxDataGeneration mxDataGeneration(hipblaslt_initialization initialization,
                                           ScalarType               dataType,
                                           float                    minimum,
@@ -202,7 +201,6 @@ namespace hipblaslt::host_numerics
                 return MxScaleGenerationMode::One;
             return MxScaleGenerationMode::Derived;
         }
-#endif
 
         GenerationRecipe matrixGenerationRecipe(const MatrixInitialization& initialization,
                                                 const Tensor&               destination)
@@ -346,7 +344,6 @@ namespace hipblaslt::host_numerics
         }
     } // namespace
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
     MxTensor generateMxData(hipDataType              dataType,
                             hipDataType              scaleType,
                             Shape                    shape,
@@ -392,7 +389,6 @@ namespace hipblaslt::host_numerics
             return amd_gpu_layout::MxScaleStorageLayout::Gfx1250;
         return amd_gpu_layout::MxScaleStorageLayout::Natural;
     }
-#endif
 
     Tensor generateMatrix(const MatrixInitialization& initialization)
     {

@@ -105,10 +105,6 @@ if(HIPBLASLT_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
 endif()
 
-# MX host initialization is used by hipBLASLt and TensileLite clients; default OFF on Windows.
-cmake_dependent_option(HIPBLASLT_ENABLE_MXDATAGENERATOR "Enable MX format data generation for clients/tests." ON "NOT WIN32" OFF)
-message(STATUS "Enable MX format data generation: ${HIPBLASLT_ENABLE_MXDATAGENERATOR}")
-
 set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
 set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
@@ -280,14 +276,6 @@ else()
     endblock()
 endif()
 
-set(_hipblaslt_mx_enabled FALSE)
-if(HIPBLASLT_ENABLE_MXDATAGENERATOR
-        AND (HIPBLASLT_ENABLE_CLIENT
-             OR TENSILELITE_ENABLE_CLIENT
-             OR TENSILELITE_BUILD_TESTING))
-    set(_hipblaslt_mx_enabled TRUE)
-endif()
-
 set(_hipblaslt_host_numerics_enabled FALSE)
 if(HIPBLASLT_ENABLE_CLIENT
         OR TENSILELITE_ENABLE_CLIENT
@@ -305,13 +293,7 @@ if(_hipblaslt_host_numerics_enabled
         if(HIPBLASLT_ENABLE_CLIENT)
             list(APPEND _hipblaslt_host_numerics_components BLAS)
         endif()
-        if(_hipblaslt_mx_enabled)
-            list(
-                APPEND
-                _hipblaslt_host_numerics_components
-                AMDGPULayout
-            )
-        endif()
+        list(APPEND _hipblaslt_host_numerics_components AMDGPULayout)
         find_package(
             ROCHostNumerics
             CONFIG
@@ -361,7 +343,6 @@ if(_hipblaslt_host_numerics_enabled
     roc_host_numerics_enable_blas_backend()
 endif()
 if(_hipblaslt_host_numerics_enabled
-        AND _hipblaslt_mx_enabled
         AND NOT TARGET roc::host-numerics-amd-gpu-layout)
     message(FATAL_ERROR
         "hipBLASLt MX clients require the "
@@ -379,7 +360,8 @@ endif()
 if(_hipblaslt_host_numerics_enabled)
     foreach(_host_numerics_target
             host-numerics
-            host-numerics-blas)
+            host-numerics-blas
+            host-numerics-amd-gpu-layout)
         if(NOT TARGET ${_host_numerics_target})
             continue()
         endif()
