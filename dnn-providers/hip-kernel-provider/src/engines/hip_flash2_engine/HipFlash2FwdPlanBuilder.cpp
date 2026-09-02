@@ -231,7 +231,7 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
         {
             params.splitK = sel.splitK;
             params.workspaceBytes = flash2WorkspaceBytes(
-                params.batch, params.num_heads_q, params.seq_len_q, params.head_dim, params.splitK);
+                params.batch, params.numHeadsQ, params.seqLenQ, params.headDim, params.splitK);
         }
         else
         {
@@ -276,7 +276,7 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
     // Split-K supersedes the variant object: it carries its own split entry
     // point plus the merge pass, both from one module.
     auto kernelOpt = (params.splitK > 1) ? loadKernelModule(splitCoPath,
-                                                            flash2SplitKernelName(params.head_dim),
+                                                            flash2SplitKernelName(params.headDim),
                                                             K_FLASH2_MERGE_FUNC)
                                          : loadKernelModule(coPath, funcName);
     if(params.splitK > 1)

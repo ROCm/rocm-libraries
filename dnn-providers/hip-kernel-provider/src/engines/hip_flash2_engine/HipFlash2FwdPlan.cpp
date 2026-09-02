@@ -147,45 +147,45 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
         // zeroing: chunks with no work still write m = -inf and l = 0, so
         // every slot the merge reads has been initialised by the split pass.
         const size_t rows
-            = static_cast<size_t>(_params.batch) * static_cast<size_t>(_params.num_heads_q)
-              * static_cast<size_t>(_params.splitK) * static_cast<size_t>(_params.seq_len_q);
+            = static_cast<size_t>(_params.batch) * static_cast<size_t>(_params.numHeadsQ)
+              * static_cast<size_t>(_params.splitK) * static_cast<size_t>(_params.seqLenQ);
         auto* po = static_cast<float*>(workspace);
-        auto* pm = po + rows * static_cast<size_t>(_params.head_dim);
+        auto* pm = po + rows * static_cast<size_t>(_params.headDim);
         auto* pl = pm + rows;
 
         Flash2SplitKernelArgs sargs{};
-        sargs.ptr_q = Q;
-        sargs.ptr_k = K;
-        sargs.ptr_v = V;
+        sargs.ptr_q = q;
+        sargs.ptr_k = k;
+        sargs.ptr_v = v;
         sargs.ptr_po = po;
         sargs.ptr_pm = pm;
         sargs.ptr_pl = pl;
         sargs.batch = _params.batch;
-        sargs.num_heads_q = _params.num_heads_q;
-        sargs.num_heads_k = _params.num_heads_k;
-        sargs.seq_len_q = _params.seq_len_q;
-        sargs.seq_len_kv = _params.seq_len_kv;
-        sargs.head_dim = _params.head_dim;
+        sargs.num_heads_q = _params.numHeadsQ;
+        sargs.num_heads_k = _params.numHeadsK;
+        sargs.seq_len_q = _params.seqLenQ;
+        sargs.seq_len_kv = _params.seqLenKv;
+        sargs.head_dim = _params.headDim;
         sargs.scale = args.scale;
         sargs.causal = args.causal;
         sargs.nsplit = _params.splitK;
-        sargs.q_stride_batch = args.q_stride_batch;
-        sargs.q_stride_head = args.q_stride_head;
-        sargs.q_stride_seq = args.q_stride_seq;
-        sargs.k_stride_batch = args.k_stride_batch;
-        sargs.k_stride_head = args.k_stride_head;
-        sargs.k_stride_seq = args.k_stride_seq;
-        sargs.v_stride_batch = args.v_stride_batch;
-        sargs.v_stride_head = args.v_stride_head;
-        sargs.v_stride_seq = args.v_stride_seq;
+        sargs.q_stride_batch = args.qStrideBatch;
+        sargs.q_stride_head = args.qStrideHead;
+        sargs.q_stride_seq = args.qStrideSeq;
+        sargs.k_stride_batch = args.kStrideBatch;
+        sargs.k_stride_head = args.kStrideHead;
+        sargs.k_stride_seq = args.kStrideSeq;
+        sargs.v_stride_batch = args.vStrideBatch;
+        sargs.v_stride_head = args.vStrideHead;
+        sargs.v_stride_seq = args.vStrideSeq;
 
         // Split grid: (query tiles, batch*heads, chunks). Note blockIdx.y is
         // the fused batch-head pair here, unlike the single-pass kernel which
         // takes batch and head as separate grid dimensions.
         const unsigned int splitGridX
-            = (static_cast<unsigned>(_params.seq_len_q) + _params.qPerCta - 1u) / _params.qPerCta;
+            = (static_cast<unsigned>(_params.seqLenQ) + _params.qPerCta - 1u) / _params.qPerCta;
         const unsigned int bh
-            = static_cast<unsigned>(_params.batch) * static_cast<unsigned>(_params.num_heads_q);
+            = static_cast<unsigned>(_params.batch) * static_cast<unsigned>(_params.numHeadsQ);
         if(!launchFlash2SplitKernel(_kernel.function(),
                                     sargs,
                                     splitGridX,
@@ -201,20 +201,20 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
         margs.ptr_po = po;
         margs.ptr_pm = pm;
         margs.ptr_pl = pl;
-        margs.ptr_o = O;
+        margs.ptr_o = o;
         margs.batch = _params.batch;
-        margs.num_heads_q = _params.num_heads_q;
-        margs.seq_len_q = _params.seq_len_q;
-        margs.head_dim = _params.head_dim;
+        margs.num_heads_q = _params.numHeadsQ;
+        margs.seq_len_q = _params.seqLenQ;
+        margs.head_dim = _params.headDim;
         margs.nsplit = _params.splitK;
-        margs.o_stride_batch = args.o_stride_batch;
-        margs.o_stride_head = args.o_stride_head;
-        margs.o_stride_seq = args.o_stride_seq;
+        margs.o_stride_batch = args.oStrideBatch;
+        margs.o_stride_head = args.oStrideHead;
+        margs.o_stride_seq = args.oStrideSeq;
 
         // Merge: 4 query rows per 256-thread CTA.
         constexpr unsigned int K_MERGE_ROWS_PER_CTA = 4;
         const unsigned int mergeGridX
-            = (static_cast<unsigned>(_params.seq_len_q) + K_MERGE_ROWS_PER_CTA - 1u)
+            = (static_cast<unsigned>(_params.seqLenQ) + K_MERGE_ROWS_PER_CTA - 1u)
               / K_MERGE_ROWS_PER_CTA;
         if(!launchFlash2MergeKernel(
                _kernel.mergeFunction(), margs, mergeGridX, bh, handle.getStream()))
