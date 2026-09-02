@@ -248,7 +248,7 @@ jobs:
     name: HipDNN Linux Superbuild
     runs-on: azure-linux-scale-rocm
     env:
-      GPU_TARGET: gfx94X-dcgpu
+      GPU_TARGET: gfx942
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
       DEVICE_TARGET: gfx942
     steps:
