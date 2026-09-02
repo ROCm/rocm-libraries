@@ -40,10 +40,9 @@ namespace rocsparse
         // signed-overflow (which is undefined behaviour) in an ILP64 build, and
         // use a grid-stride loop so a clamped grid still covers all of nnz.
         const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
-        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
-            idx < nnz;
-            idx += stride)
+        for(int64_t idx = gid; idx < nnz; idx += stride)
         {
             const rocsparse_int i = x_ind[idx] - idx_base;
 
