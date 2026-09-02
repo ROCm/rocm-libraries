@@ -20,6 +20,9 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
     install(TARGETS hipdnn_bench_tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
-if(NOT HIPDNN_SKIP_TESTS)
+# The same guard the tool itself carries above. The tests link hipdnn_frontend, so with
+# HIPDNN_BUILD_FRONTEND=OFF this resolved a link against a target that was never created and
+# failed at configure time rather than being skipped.
+if(NOT HIPDNN_SKIP_TESTS AND HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
     add_subdirectory(tests)
 endif()
