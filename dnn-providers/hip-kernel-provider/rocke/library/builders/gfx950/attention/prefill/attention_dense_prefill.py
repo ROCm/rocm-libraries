@@ -129,7 +129,17 @@ def make_spec_from_shape(shape: dict[str, Any]) -> AttentionDenseSpec:
         persist_decode=str(shape.get("persist_decode", "auto")),
         q_reload=bool(shape.get("q_reload", False)),
         qk_pipeline=bool(shape.get("qk_pipeline", False)),
+        qk_interleave=bool(shape.get("qk_interleave", False)),
+        qk_priority=int(shape.get("qk_priority", 0)),
+        pv_interleave=bool(shape.get("pv_interleave", False)),
+        pv_exp_per_mfma=int(shape.get("pv_exp_per_mfma", 1)),
         k_prefetch_early=bool(shape.get("k_prefetch_early", False)),
+        k_prefetch_after_qk=bool(shape.get("k_prefetch_after_qk", False)),
+        kv_prefetch_epilogue=bool(shape.get("kv_prefetch_epilogue", False)),
+        outer_wait_elide=bool(shape.get("outer_wait_elide", False)),
+        rescale_after_prefetch=bool(shape.get("rescale_after_prefetch", False)),
+        vmem_wait_keep=int(shape.get("vmem_wait_keep", -1)),
+        tree_reductions=bool(shape.get("tree_reductions", False)),
     )
 
 
@@ -286,7 +296,7 @@ def main():
     ap.add_argument(
         "--persist-decode",
         default="auto",
-        choices=["auto", "qb_major", "hkv_major"],
+        choices=["auto", "qb_major", "hkv_major", "gqa_pair", "gqa_pair_hkv"],
     )
     ap.add_argument(
         "--q-reload",
@@ -299,9 +309,64 @@ def main():
         help="depth-1 software pipeline over the QK cluster's K LDS reads",
     )
     ap.add_argument(
+        "--qk-interleave",
+        action="store_true",
+        help="interleave independent QK N-subtile accumulator chains",
+    )
+    ap.add_argument(
+        "--qk-priority",
+        type=int,
+        default=0,
+        choices=[0, 1, 2, 3],
+        help="s_setprio level around QK MFMA bursts (0 disables)",
+    )
+    ap.add_argument(
+        "--pv-interleave",
+        action="store_true",
+        help="interleave independent PV output-accumulator chains",
+    )
+    ap.add_argument(
+        "--pv-exp-per-mfma",
+        type=int,
+        default=1,
+        choices=[1, 2],
+        help="softmax exponentials scheduled under each PV MFMA",
+    )
+    ap.add_argument(
         "--k-prefetch-early",
         action="store_true",
         help="issue the next tile's K DMA at the top of the KV loop body",
+    )
+    ap.add_argument(
+        "--k-prefetch-after-qk",
+        action="store_true",
+        help="issue next-tile K after QK and before softmax/PV",
+    )
+    ap.add_argument(
+        "--kv-prefetch-epilogue",
+        action="store_true",
+        help="issue next K/V after PV, before independent register epilogue work",
+    )
+    ap.add_argument(
+        "--outer-wait-elide",
+        action="store_true",
+        help="overlap prior O stores with the next persistent work item",
+    )
+    ap.add_argument(
+        "--rescale-after-prefetch",
+        action="store_true",
+        help="launch next K/V before independent lazy-rescale work",
+    )
+    ap.add_argument(
+        "--vmem-wait-keep",
+        type=int,
+        default=-1,
+        help="loop-head vmcnt threshold (-1 selects shipped formula)",
+    )
+    ap.add_argument(
+        "--tree-reductions",
+        action="store_true",
+        help="use short in-lane max/sum reduction trees",
     )
     ap.add_argument(
         "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
@@ -340,7 +405,17 @@ def main():
             "persist_decode": args.persist_decode,
             "q_reload": args.q_reload,
             "qk_pipeline": args.qk_pipeline,
+            "qk_interleave": args.qk_interleave,
+            "qk_priority": args.qk_priority,
+            "pv_interleave": args.pv_interleave,
+            "pv_exp_per_mfma": args.pv_exp_per_mfma,
             "k_prefetch_early": args.k_prefetch_early,
+            "k_prefetch_after_qk": args.k_prefetch_after_qk,
+            "kv_prefetch_epilogue": args.kv_prefetch_epilogue,
+            "outer_wait_elide": args.outer_wait_elide,
+            "rescale_after_prefetch": args.rescale_after_prefetch,
+            "vmem_wait_keep": args.vmem_wait_keep,
+            "tree_reductions": args.tree_reductions,
         }
         spec = make_spec_from_shape(shape)
         result = run_benchmark(
