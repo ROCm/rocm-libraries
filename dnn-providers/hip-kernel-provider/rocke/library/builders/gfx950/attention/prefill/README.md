@@ -22,11 +22,15 @@ rocke IR DSL. Forward-only, bf16/fp16, head_dim 64/128, MHA or GQA.
   (~94% at Sq=8192) plus a masked diagonal tail.
 - **depth-1 cluster split** fusing exp2 into the PV MFMA loop for MFMA/VALU co-exec.
 - **vectorized O store**.
+- **qualified wide LDS DMA** — the aligned persistent D128/BN64 path can use two
+  `buffer_load_dwordx4 ... lds` operations per operand/wave with 520/544-half
+  slab-padded K/V layouts. IGLP-1 owns this loop schedule and K-major PV traversal
+  keeps the 256-VGPR kernel spill-free.
 
 Shape (batch / seqlen / heads / head_dim / causal / dtype) is baked at build time
 (dense, statically-sized ABI). Tile/resource knobs are `block_n`, `waves_per_eu`,
 and `lds_k_group_pad`; persistent scheduling knobs are `num_persistent`,
-`persist_decode`, and `interleave`.
+`persist_decode`, `interleave`, and `wide_lds_dma`.
 
 ## Persistent (grid-stride) mode
 
@@ -59,6 +63,21 @@ conservative: sinks retain gqa-pair for the exact target; sliding-window request
 fall back to qb-major until separately performance-qualified. MHA (`Hq == Hkv`)
 also falls back because it has no grouped query heads to reuse.
 
+### Wide LDS DMA
+
+`wide_lds_dma=True` is the gfx950 D128/BN64 persistent fast path. It changes the
+per-row 32-bit DMA layout into FlyDSL-compatible slabs:
+
+- K: `8 × 2 × 520` half elements per tile (`+8` padding per 512-half slab);
+- V: `8 × 2 × 544` half elements per tile (`+32` padding);
+- two 128-bit-per-lane DMA instructions per operand/wave;
+- 68,096 B total double-buffered LDS, down from 75,776 B;
+- IGLP-1 instead of the narrow path's manual scheduling directives.
+
+The dispatcher enables it only for the exact measured Llama-3-8B fp16 cohort.
+The explicit builder knob is also available for correctness/performance expansion
+to adjacent aligned persistent D128/BN64 cohorts.
+
 ## Measured (MI355X, bf16, D=128, Hq=128, Hkv=8, causal, Sq=8192)
 
 Absolute MI355X TFLOPS swing **±25–30% with auto-clock**, so only **same-session
@@ -82,16 +101,19 @@ spill and parity-identical vs `torch.nn.functional.scaled_dot_product_attention`
 ## Measured Llama-3-8B target (MI355X, fp16)
 
 For `B=1, Sq=Skv=8192, Hq=32, Hkv=8, D=128, causal`, five-round same-GPU
-ABBA measurements repeated twice:
+ABBA measurements repeated twice for the final wide-DMA+IGLP kernel:
 
-- unchanged qb-major baseline: 750.9–752.5 TFLOPS median;
-- gqa-pair: 870.3–871.5 TFLOPS median;
-- paired ratio: 1.1596–1.1609x;
+- unchanged qb-major baseline: 750.2–752.6 TFLOPS median;
+- gqa-pair + wide DMA + IGLP-1: 903.2–903.7 TFLOPS median;
+- paired ratio: 1.20028–1.20110x;
 - max absolute error: `1.92e-4`;
-- resources: 248 VGPR, 75,776 B LDS, zero scratch/spills, 256 CTAs.
+- resources: 256 VGPR, 68,096 B LDS, zero scratch/spills, 256 CTAs;
+- static load-to-LDS instructions: 64→16; total ISA instructions: 2,239→2,041.
 
-PMC counters explain the gain: estimated L2 hit rate rose 32.0% to 65.1%, fetch
-volume fell 934 MB to 463 MB, and MFMA utilization rose 32.8% to 40.5%.
+The gqa-pair step raised estimated L2 hit rate 32.0%→65.1%, halved fetch volume
+934→463 MB, and raised MFMA utilization 32.8%→40.5%. The final ATT trace shows
+wide DMA + IGLP reducing LDS-wait share 30.3%→7.6% and the mapped PV MFMA
+callsite 19.4%→5.3%.
 
 ## Usage
 
@@ -102,6 +124,7 @@ python attention_dense_prefill.py --persistent    # persistent grid-stride (NP=2
 python attention_dense_prefill.py --bn 128        # sweep block_n
 python attention_dense_prefill.py --persistent --np 256 --interleave
 python attention_dense_prefill.py --persistent --persist-decode gqa_pair
+python attention_dense_prefill.py --persistent --persist-decode gqa_pair --wide-lds-dma
 ```
 
 Programmatic:
@@ -140,8 +163,8 @@ run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
 enough work to fill the grid (`⌈Sq/256⌉·Hq·B >= num_persistent`) — i.e. the large-Sq
 prefill regime — so the dispatcher reaches the persistent path, not the default
 grid. For the exact Llama-3-8B target above, `dense_persist_decode="auto"` resolves
-to gqa-pair and the dispatched kernel name contains `gqapair`. Callers may also
-request it explicitly.
+to gqa-pair, enables wide DMA/IGLP, and the dispatched kernel name contains both
+`gqapair` and `wdma`. Callers may also request gqa-pair explicitly.
 
 ## Tuning — lds_k_group_pad
 

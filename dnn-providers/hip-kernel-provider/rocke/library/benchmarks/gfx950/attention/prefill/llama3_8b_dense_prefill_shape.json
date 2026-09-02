@@ -16,5 +16,6 @@
   "num_persistent": 256,
   "lazy_rescale": true,
   "persist_decode": "auto",
+  "wide_lds_dma": true,
   "causal": true
 }
