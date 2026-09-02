@@ -17,6 +17,15 @@ set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Pa
 
 set(HIPBLASLT_ASIC_REVISION "" CACHE STRING "gfx1250 ASIC revisions to build ('' = both v0 and v1, 'v1' = v1 only, 'v0' = v0 only).")
 
+# This policy belongs to the caller that owns the logic corpus, not to the
+# gfx1250v0 architecture name itself. hipSPARSELt reuses this device-library
+# CMakeLists with a corpus that deliberately has no v0 overlay, while
+# hipBLASLt's own corpus must retain one. The embedding hipSPARSELt CMakeLists
+# overrides this to OFF before adding hipBLASLt as a subdirectory.
+if(NOT DEFINED HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY)
+    set(HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY ON)
+endif()
+
 # Reject an unrecognized value rather than silently building the wrong revisions.
 if(NOT HIPBLASLT_ASIC_REVISION MATCHES "^(v0|v1)?$")
     message(FATAL_ERROR "HIPBLASLT_ASIC_REVISION must be '', 'v0' or 'v1', got '${HIPBLASLT_ASIC_REVISION}'")
@@ -33,9 +42,11 @@ endif()
 # validation on the base name); only the bare gfx1250 reaches here.
 set(_main_arches ${GPU_TARGETS})
 set(_build_gfx1250v0 OFF)
+set(_main_requires_gfx1250v0_overlay OFF)
 if("gfx1250" IN_LIST GPU_TARGETS)
     if(HIPBLASLT_ASIC_REVISION STREQUAL "v0")
         list(TRANSFORM _main_arches REPLACE "^gfx1250$" "gfx1250v0")  # v0 in place of v1
+        set(_main_requires_gfx1250v0_overlay ${HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY})
         message(STATUS "hipBLASLt: gfx1250 ASIC revision v0 only")
     elseif(HIPBLASLT_ASIC_REVISION STREQUAL "v1")
         message(STATUS "hipBLASLt: gfx1250 ASIC revision v1 only")
@@ -53,6 +64,7 @@ hipblaslt_create_device_library(
     LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
     OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
     ARCHES ${_main_arches}
+    REQUIRE_GFX1250V0_OVERLAY ${_main_requires_gfx1250v0_overlay}
     CXX_COMPILER "${CMAKE_CXX_COMPILER}"
     OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
     JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
@@ -82,10 +94,10 @@ if(_build_gfx1250v0)
         LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
         OUTPUT_DIR "${_gfx1250v0_output_dir}"
         ARCHES gfx1250v0
-        # hipBLASLt owns the gfx1250/gfx1250v0 split for its own corpus --
-        # this is the one caller allowed to require the overlay directory
-        # to exist (see ValidCorpusConsistency.find_gfx1250v0_overlay_violations).
-        REQUIRE_GFX1250V0_OVERLAY ON
+        # hipBLASLt owns the gfx1250/gfx1250v0 split for its own corpus, but
+        # hipSPARSELt reuses this CMakeLists with a no-split corpus. Let the
+        # embedding caller choose whether this target requires the directory.
+        REQUIRE_GFX1250V0_OVERLAY ${HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY}
         CXX_COMPILER "${CMAKE_CXX_COMPILER}"
         OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
         JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
