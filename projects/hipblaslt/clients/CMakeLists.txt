@@ -32,11 +32,43 @@ if(HIPBLASLT_ENABLE_BLIS)
     target_link_libraries(hipblaslt-clients-common PUBLIC BLIS::BLIS)
     target_compile_definitions(hipblaslt-clients-common PUBLIC HIPBLASLT_ENABLE_BLIS)
 endif()
+
+# LAPACK_LIBRARIES is a plain Fortran static library. With gfortran this has
+# always linked cleanly, but with LLVM Flang (see invoke's Fortran-compiler
+# auto-detection) the CHARACTER-argument routines it uses (e.g. zlange/clange/
+# dlange) pull in Flang runtime symbols (e.g. _FortranACharacterCompareScalar1)
+# that amdclang++ never links automatically, since Fortran isn't the link
+# driver for these C++/HIP targets. Find that runtime explicitly, matching the
+# approach used in hipsparselt's clients. Leave the working gfortran path
+# untouched.
+set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES)
+if(NOT CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
+    get_filename_component(_hipblaslt_fortran_bin_dir "${CMAKE_Fortran_COMPILER}" DIRECTORY)
+    get_filename_component(_hipblaslt_fortran_root_dir "${_hipblaslt_fortran_bin_dir}" DIRECTORY)
+    find_library(HIPBLASLT_FORTRANRUNTIME_LIBRARY NAMES FortranRuntime
+        PATHS "${_hipblaslt_fortran_root_dir}/lib")
+    if(HIPBLASLT_FORTRANRUNTIME_LIBRARY)
+        find_library(HIPBLASLT_FORTRANDECIMAL_LIBRARY NAMES FortranDecimal
+            PATHS "${_hipblaslt_fortran_root_dir}/lib")
+        set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES
+            ${HIPBLASLT_FORTRANRUNTIME_LIBRARY} ${HIPBLASLT_FORTRANDECIMAL_LIBRARY})
+    else()
+        # Newer LLVM Flang releases merged FortranRuntime/FortranDecimal into
+        # a single flang_rt.runtime library.
+        find_library(HIPBLASLT_FLANGRT_LIBRARY NAMES flang_rt.runtime
+            PATHS "${_hipblaslt_fortran_root_dir}/lib")
+        set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES ${HIPBLASLT_FLANGRT_LIBRARY})
+    endif()
+    unset(_hipblaslt_fortran_bin_dir)
+    unset(_hipblaslt_fortran_root_dir)
+endif()
+
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
         roc::hipblaslt
         OpenMP::OpenMP_CXX
         ${LAPACK_LIBRARIES}
+        ${HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES}
     PRIVATE
         hip::device
         roc::tensilelite-host
