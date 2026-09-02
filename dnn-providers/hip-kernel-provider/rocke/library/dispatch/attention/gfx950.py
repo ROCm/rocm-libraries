@@ -30,15 +30,19 @@ from .common import (
 # block_n (KV tile) the dense candidate ships; 64 is the resource-efficient
 # peak (see AttentionDenseSpec.block_n).
 _DENSE_BLOCK_N = 64
+_DENSE_PERSIST_DECODES = frozenset(
+    {"auto", "qb_major", "hkv_major", "gqa_pair"}
+)
 
 
 def _dense_spec(req: OperatorRequest):
     """Build the ``AttentionDenseSpec`` for a request at its best-performing
     config. Persistent ("auto") turns on the grid-stride ~970-TFLOPS variant once
     there is enough work to fill the persistent grid (``nqb*Hq*B >= num_persistent``
-    -- the large-Sq prefill regime); ``persist_decode`` / ``lazy_rescale`` default
-    to the L2-locality hkv-major decode and always-on lazy rescale. Non-tile-
-    multiple self-attention lengths use the on-chip ragged path (no host pad)."""
+    -- the large-Sq prefill regime). ``persist_decode="auto"`` selects the
+    balanced GQA-pair mapping for the measured Llama-3-8B cohort, hkv-major where
+    its broader balance condition holds, and qb-major otherwise. Non-tile-multiple
+    self-attention lengths use the on-chip ragged path (no host pad)."""
     from kernels.gfx950.attention_dense import AttentionDenseSpec, _BLOCK_M
 
     assert isinstance(req, AttentionRequest)
@@ -46,6 +50,12 @@ def _dense_spec(req: OperatorRequest):
     sw = int(req.sliding_window)
     use_sinks = bool(req.use_sinks)
     bn = _DENSE_BLOCK_N
+    decode = req.dense_persist_decode.strip().lower()
+    if decode not in _DENSE_PERSIST_DECODES:
+        raise ValueError(
+            "dense_persist_decode must be one of "
+            f"{sorted(_DENSE_PERSIST_DECODES)}, got {req.dense_persist_decode!r}"
+        )
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
     ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % bn != 0))
@@ -75,7 +85,7 @@ def _dense_spec(req: OperatorRequest):
         block_n=bn,
         persistent=persistent,
         num_persistent=np,
-        persist_decode=req.dense_persist_decode.strip().lower(),
+        persist_decode=decode,
         ragged=ragged,
         sliding_window=sw,
         use_sinks=use_sinks,
@@ -96,9 +106,10 @@ def _make_gfx950_attention_dense_candidate() -> KernelCandidate:
     ``algorithm="attention_dense"`` (or ``spec_id="gfx950_attention_dense"``), so it
     never auto-overrides the generic unified_2d path (no change to default routing).
     When selected it uses the persistent best-config from :func:`_dense_spec`
-    (grid-stride + hkv-major + lazy for large Sq); the concrete kernel_name (incl.
-    ``persist``/``hkvmaj``/``lazyrs``/``ragged``) is surfaced on the spec so the
-    launched kernel is the fast path, not the default grid. End-to-end launch is
+    (grid-stride + a balance-safe GQA-local decode + lazy rescale for large Sq);
+    the concrete kernel name (including ``gqapair``/``hkvmaj`` where selected) is
+    surfaced on the spec so the launched kernel is the fast path, not the default
+    grid. End-to-end launch is
     ``run_attention_dense_torch(spec=dense_spec_for_request(req), ...)``.
     """
     spec_id = "gfx950_attention_dense"

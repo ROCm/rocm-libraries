@@ -24,8 +24,9 @@ rocke IR DSL. Forward-only, bf16/fp16, head_dim 64/128, MHA or GQA.
 - **vectorized O store**.
 
 Shape (batch / seqlen / heads / head_dim / causal / dtype) is baked at build time
-(dense, statically-sized ABI). `block_n` (KV tile), `waves_per_eu`, and
-`lds_k_group_pad` are the performance knobs.
+(dense, statically-sized ABI). Tile/resource knobs are `block_n`, `waves_per_eu`,
+and `lds_k_group_pad`; persistent scheduling knobs are `num_persistent`,
+`persist_decode`, and `interleave`.
 
 ## Persistent (grid-stride) mode
 
@@ -35,9 +36,28 @@ a 1-D grid of `num_persistent` long-lived CTAs grid-strides over the
 setup + K/V-prime cold-start is amortized once per CU instead of once per query-block.
 This closes the causal fixed-cost amortization gap. `num_persistent=256` = one 8-wave
 block per CU on MI355X (256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail
-loss). The work-item decode is `persist_decode="auto"` by default: it resolves to the
-**hkv-major** L2-locality decode when balance-safe (GQA and `gqa*NQB*B >= 2*NP`, e.g.
-128/8 at Sq=8192) and falls back to **qb-major** otherwise.
+loss). The work-item decode is `persist_decode="auto"` by default. Auto selects:
+
+1. **gqa-pair** for the measured Llama-3-8B fp16 cohort
+   (`B=1, Sq=Skv=8192, Hq=32, Hkv=8, D=128, causal, BN=64, NP=256`);
+2. **hkv-major** when its broader GQA balance condition
+   (`gqa*NQB*B >= 2*NP`) holds; or
+3. **qb-major** otherwise.
+
+### Balanced GQA-pair decode
+
+`persist_decode="gqa_pair"` maps two neighboring CTAs to one
+`(low_qb, high_qb, hkv, batch)` group. Each CTA handles half of the local query
+heads at both complementary query blocks. The complementary blocks have constant
+combined causal cost, while consecutive local query heads reuse the same K/V head
+through L2.
+
+The explicit mode requires persistent causal attention, aligned sequence lengths,
+even `NQB` and GQA ratio, and `NP == NQB*Hkv*B`. It composes numerically with
+`interleave`, attention sinks, and aligned sliding-window attention. Auto remains
+conservative: sinks retain gqa-pair for the exact target; sliding-window requests
+fall back to qb-major until separately performance-qualified. MHA (`Hq == Hkv`)
+also falls back because it has no grouped query heads to reuse.
 
 ## Measured (MI355X, bf16, D=128, Hq=128, Hkv=8, causal, Sq=8192)
 
@@ -59,6 +79,20 @@ The load-bearing, clock-invariant deltas: hkv-major vs qb-major ≈ **1.04×** (
 spill and parity-identical vs `torch.nn.functional.scaled_dot_product_attention`
 (max abs err ~1.46e-3 at Sq=8192).
 
+## Measured Llama-3-8B target (MI355X, fp16)
+
+For `B=1, Sq=Skv=8192, Hq=32, Hkv=8, D=128, causal`, five-round same-GPU
+ABBA measurements repeated twice:
+
+- unchanged qb-major baseline: 750.9–752.5 TFLOPS median;
+- gqa-pair: 870.3–871.5 TFLOPS median;
+- paired ratio: 1.1596–1.1609x;
+- max absolute error: `1.92e-4`;
+- resources: 248 VGPR, 75,776 B LDS, zero scratch/spills, 256 CTAs.
+
+PMC counters explain the gain: estimated L2 hit rate rose 32.0% to 65.1%, fetch
+volume fell 934 MB to 463 MB, and MFMA utilization rose 32.8% to 40.5%.
+
 ## Usage
 
 ```bash
@@ -67,6 +101,7 @@ python attention_dense_prefill.py                 # default (one CTA per query-b
 python attention_dense_prefill.py --persistent    # persistent grid-stride (NP=256)
 python attention_dense_prefill.py --bn 128        # sweep block_n
 python attention_dense_prefill.py --persistent --np 256 --interleave
+python attention_dense_prefill.py --persistent --persist-decode gqa_pair
 ```
 
 Programmatic:
@@ -94,7 +129,7 @@ req = AttentionRequest(
     hdim_q=128, hdim_v=128, arch="gfx950", dtype="bf16", mask_type=1,
     algorithm="attention_dense",   # opt-in; "auto" keeps the unified 2D/3D path
     # dense_persistent="auto"      # "auto"|"on"|"off"; auto => persistent for large Sq
-    # dense_persist_decode="auto"  # "auto"|"qb_major"|"hkv_major"
+    # dense_persist_decode="auto"  # "auto"|"qb_major"|"hkv_major"|"gqa_pair"
 )
 res  = dispatch_attention(req)                 # res.spec.kernel_name() -> ...persist256_hkvmaj
 spec = dense_spec_for_request(req)             # launch-ready best-config AttentionDenseSpec
@@ -103,7 +138,10 @@ run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
 
 `dense_persistent="auto"` turns on the persistent grid-stride variant once there is
 enough work to fill the grid (`⌈Sq/256⌉·Hq·B >= num_persistent`) — i.e. the large-Sq
-prefill regime — so the dispatcher reaches the ~948-TFLOPS path, not the default grid.
+prefill regime — so the dispatcher reaches the persistent path, not the default
+grid. For the exact Llama-3-8B target above, `dense_persist_decode="auto"` resolves
+to gqa-pair and the dispatched kernel name contains `gqapair`. Callers may also
+request it explicitly.
 
 ## Tuning — lds_k_group_pad
 
@@ -146,15 +184,10 @@ original sweep result.
 
 ## TODO / follow-ups
 
-1. **Q-reload (enables the inner-loop unroll)** — the QK B-operand (`q_packs`,
-   `K_STEPS × vec8` ≈ 32 VGPR) is held resident across the whole KV loop. ISA
-   probing shows the kernel is at **243/256 VGPR, 0 spill** (flyDSL fits a *2-tile*
-   pipeline in ~252 VGPR), so a depth-2 software-pipeline unroll — the lever that
-   would lift MFMA utilization ~45% → ~70% and close the flyDSL gap — is
-   register-blocked. Re-reading Q per use (L2-resident) instead of holding all
-   packs frees ~32 VGPR toward that unroll. (Pairs with a P-LDS publish for the
-   lagged relayout, another ~16 VGPR.) Standalone it is perf-neutral; it is a
-   prerequisite for the 2-tile unroll.
+1. **Two-tile pipeline remains register-blocked.** A true Q-reload reduced the
+   target kernel from 248 to 231 VGPR, but repeated global-load/address work
+   dropped performance to ~398 TFLOPS. `NBUF=3` reached 256 VGPR, 85 spills,
+   344 B scratch, and ~288 TFLOPS. Neither experiment ships.
 2. **Improve varlen performance** — the packed `varlen` path (default builder,
    `cu_seqlens_q/kv`) currently trails the dense/persistent path and flyDSL on
    ragged batches. Follow-ups: extend the hkv-major L2-locality decode and the
