@@ -1497,7 +1497,7 @@ struct fmha_fwd_traits_
     // traits but different occupancy still produce DISTINCT instantiations of
     // `fmha_fwd_<traits, arch>`, avoiding `ld: multiple definition` when
     // multiple such tiles are linked into a single shared object.
-    static constexpr int kOccupancy                  = kOccupancy_;
+    static constexpr int kOccupancy = kOccupancy_;
 };
 
 template <ck_tile::index_t HDim_,
@@ -1619,7 +1619,7 @@ struct fmha_fwd_pagedkv_traits_
     static constexpr bool kHasSink                   = kHasSink_;
     // See fmha_fwd_traits_::kOccupancy for rationale (per-tile symbol split
     // to keep occupancy-only variants from colliding at link time).
-    static constexpr int kOccupancy                  = kOccupancy_;
+    static constexpr int kOccupancy = kOccupancy_;
 };
 
 template <typename Traits_, typename Arch = void>
@@ -1674,7 +1674,7 @@ struct fmha_fwd_splitkv_traits_
     static constexpr bool kHasSink                   = kHasSink_;
     // See fmha_fwd_traits_::kOccupancy for rationale (per-tile symbol split
     // to keep occupancy-only variants from colliding at link time).
-    static constexpr int kOccupancy                  = kOccupancy_;
+    static constexpr int kOccupancy = kOccupancy_;
 };
 
 template <typename Traits_, typename Arch = void>
