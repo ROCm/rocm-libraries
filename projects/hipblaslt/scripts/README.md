@@ -72,6 +72,7 @@ directory, and an offline nanobind source:
 ```bash
 docker run --rm --network=none \
   --user "$(id -u):$(id -g)" \
+  -e MATRIX_IMAGE=pr9248-gfx950:33012920661 \
   --mount type=bind,source="$PWD",target=/src,readonly \
   --mount type=bind,source="$PWD/.cmake-configure-matrix",target=/results \
   --mount type=bind,source="$NANOBIND_SOURCE",target=/deps/nanobind,readonly \
@@ -86,3 +87,28 @@ or `--stage-prefix` to include the staged/TheRock cell. The YAML cell requires a
 its zstd dependency closure, so add `--with-yaml` (or use `--all`) only in such an environment.
 Windows, real TheRock superbuild, and packaged Windows import remain separate platform/integration
 validations.
+
+### Matrix JSON artifact
+
+Every invocation writes `<results-dir>/cmake-configure-matrix.json`. It is a schema-versioned,
+machine-readable record for reviewing or comparing configured trees; it is not a replacement for
+the build directories themselves. The runner starts a fresh aggregate on every invocation, even
+with `--keep-results`, so a focused rerun cannot retain stale cells. For every started cell it
+retains:
+
+- the resolved CMake configure argv, source/build/stage paths, matrix settings, status, and any
+  configure failure error/log tail;
+- the full parsed `CMakeCache.txt` (including each entry's CMake type), plus the complete
+  `compile_commands.json` when the generator supports it;
+- `link.txt` commands when CMake creates them, and native CMake File API `codemodel-v2` target/link
+  fragments and `cache-v2` replies as the generator-neutral fallback for Ninja;
+- hashes and paths for the relevant Ninja/Make generator files, generated package configs/exports,
+  CPack files (kept separately), and reachable install scripts.
+
+The runner forces `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` and creates its CMake File API queries before
+each configure. A failed configure leaves a `failed` cell with its partial cache and captured log in
+the aggregate instead of discarding the result. If `--prepare-stage` fails, the `staged-provider`
+cell is recorded as failed and `hipsparselt-staged` remains as a skipped prerequisite consumer.
+
+Set `MATRIX_IMAGE=<published-image-reference>` with Docker's `-e` option to annotate the artifact
+with the image used; it is metadata only and does not alter the configure command.
