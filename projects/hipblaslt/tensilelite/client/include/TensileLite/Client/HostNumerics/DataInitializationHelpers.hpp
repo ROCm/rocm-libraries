@@ -7,8 +7,6 @@
 
 // TensileLite adapter over host-numerics-owned MX generation.
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-
 #include "DataInitialization.hpp"
 #include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
 #include <roc/host_numerics/amd_gpu_layout/mx.hpp>
@@ -204,4 +202,3 @@ namespace TensileLite
         } // namespace HostNumerics::detail
     } // namespace Client
 } // namespace TensileLite
-#endif // HIPBLASLT_ENABLE_MXDATAGENERATOR

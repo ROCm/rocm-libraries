@@ -32,22 +32,13 @@ target_link_libraries(hipblaslt-clients-common
     PUBLIC
         roc::hipblaslt
         roc::host-numerics
+        roc::host-numerics-amd-gpu-layout
         OpenMP::OpenMP_CXX
     PRIVATE
         hip::device
         roc::host-numerics-blas
         roc::tensilelite-host
 )
-
-if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    target_compile_definitions(
-        hipblaslt-clients-common PUBLIC HIPBLASLT_ENABLE_MXDATAGENERATOR=1)
-    target_link_libraries(
-        hipblaslt-clients-common
-        PUBLIC
-            roc::host-numerics-amd-gpu-layout
-    )
-endif()
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
     target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
