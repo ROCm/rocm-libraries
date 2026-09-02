@@ -389,7 +389,7 @@ int runGemm(size_t             m,
         // Drawing from the entire grid (not just the powers of two near zero)
         // exercises the MX-scale path with values whose products span more of
         // the FP4 range, while still being exactly representable.
-        const auto fp4Values = roc::host_numerics::GenerationRecipe::candidateSet(
+        const auto fp4Values = roc::host_numerics::GenerationRecipe::choice(
             {.values
              = {-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0}});
         // Pack all batches as one logical nibble stream. This matches the
@@ -443,10 +443,10 @@ int runGemm(size_t             m,
                   }
                   else
                   {
-                      generateValues(vec,
-                                     roc::host_numerics::GenerationRecipe::candidateSet(
-                                         {.values = {-1.0, 1.0}}),
-                                     initializationStream);
+                      generateValues(
+                          vec,
+                          roc::host_numerics::GenerationRecipe::choice({.values = {-1.0, 1.0}}),
+                          initializationStream);
                   }
               };
 
@@ -455,8 +455,7 @@ int runGemm(size_t             m,
         initOperand(a, quantizesA, InitializationStream::OperandA);
         initOperand(b, quantizesB, InitializationStream::OperandB);
     }
-    const auto binaryValues
-        = roc::host_numerics::GenerationRecipe::candidateSet({.values = {-1.0, 1.0}});
+    const auto binaryValues = roc::host_numerics::GenerationRecipe::choice({.values = {-1.0, 1.0}});
     generateValues(c, binaryValues, InitializationStream::MatrixC);
 
     // Optional feature buffers use the coefficient type described by the
@@ -489,8 +488,8 @@ int runGemm(size_t             m,
         scaleCandidates.push_back(-magnitude);
         scaleCandidates.push_back(magnitude);
     }
-    const auto scaleValues = roc::host_numerics::GenerationRecipe::candidateSet(
-        {.values = std::move(scaleCandidates)});
+    const auto scaleValues
+        = roc::host_numerics::GenerationRecipe::choice({.values = std::move(scaleCandidates)});
 
     if(useScaleAB == "Scalar")
     {
@@ -593,8 +592,8 @@ int runGemm(size_t             m,
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    const auto runInfo = TensileLite::Client::executeReferenceGemm(
-        contraction, inputs, outputSelection, backend);
+    const auto backendUsed
+        = TensileLite::Client::executeReferenceGemm(contraction, inputs, outputSelection, backend);
 
     auto                                      end      = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
@@ -622,11 +621,11 @@ int runGemm(size_t             m,
             validationBackends.push_back(GemmBackend::Pointwise);
         else if(backend == GemmBackend::Automatic)
         {
-            if(runInfo.backendUsed == GemmBackend::Blocked)
+            if(backendUsed == GemmBackend::Blocked)
                 validationBackends.push_back(GemmBackend::Pointwise);
-            else if(runInfo.backendUsed == GemmBackend::Pointwise)
+            else if(backendUsed == GemmBackend::Pointwise)
                 validationBackends.push_back(GemmBackend::Blocked);
-            else if(runInfo.backendUsed == GemmBackend::Mixed)
+            else if(backendUsed == GemmBackend::Mixed)
             {
                 validationBackends.push_back(GemmBackend::Pointwise);
                 validationBackends.push_back(GemmBackend::Blocked);

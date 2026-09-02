@@ -156,11 +156,10 @@ GenerationRecipe::Component GenerationRecipe::constant(ConstantGenerationParamet
     return Component(Component::ConstantPattern{parameters});
 }
 
-GenerationRecipe::Component GenerationRecipe::candidateSet(
-    CandidateSetGenerationParameters parameters) {
+GenerationRecipe::Component GenerationRecipe::choice(ChoiceGenerationParameters parameters) {
     if (parameters.values.empty())
-        throw std::invalid_argument("Candidate-set generation requires at least one value.");
-    return Component(Component::CandidateSetPattern{std::move(parameters)});
+        throw std::invalid_argument("Choice generation requires at least one value.");
+    return Component(Component::ChoicePattern{std::move(parameters)});
 }
 
 GenerationRecipe::Component GenerationRecipe::uniformInteger(

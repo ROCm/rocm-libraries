@@ -17,12 +17,14 @@
 #include <string_view>
 #include <vector>
 
+#include "gemm_test_adapter.hpp"
+
 namespace {
 using Clock = std::chrono::steady_clock;
 using roc::host_numerics::GemmBackend;
 using roc::host_numerics::GemmOperand;
-using roc::host_numerics::GemmRequest;
-using roc::host_numerics::GemmRunInfo;
+using roc::host_numerics::GemmTestCase;
+using roc::host_numerics::GemmTestRunInfo;
 using roc::host_numerics::Layout;
 using roc::host_numerics::OutputSelection;
 using roc::host_numerics::ScalarType;
@@ -169,7 +171,7 @@ int main(int argc, char** argv) {
         const Tensor b = makeMatrix(profile.inputType, bLayout, 2);
         const Tensor c = makeMatrix(profile.outputType, outputLayout, 0, true);
         const Tensor output(profile.outputType, outputLayout);
-        GemmRequest request(GemmOperand(a), GemmOperand(b), c, output, profile.accumulatorType);
+        GemmTestCase request(GemmOperand(a), GemmOperand(b), c, output, profile.accumulatorType);
         request.outputSelection = selection;
         if (profile.blockScaled) {
             constexpr size_t blockSize = 32;
@@ -183,7 +185,7 @@ int main(int argc, char** argv) {
         }
 
         const GemmBackend backend = options.backend;
-        GemmRunInfo runInfo;
+        GemmTestRunInfo runInfo;
         for (size_t iteration = 0; iteration < options.warmups; ++iteration)
             runInfo = referenceGemm(request, backend);
 
@@ -201,8 +203,8 @@ int main(int argc, char** argv) {
                 ? OutputSelection::primeStride(outputElements, outputElements, 128)
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
-        GemmRequest expectedRequest(GemmOperand(a), GemmOperand(b), c, expected,
-                                    profile.accumulatorType);
+        GemmTestCase expectedRequest(GemmOperand(a), GemmOperand(b), c, expected,
+                                     profile.accumulatorType);
         expectedRequest.outputSelection = validationSelection;
         expectedRequest.a.blockScale = request.a.blockScale;
         expectedRequest.b.blockScale = request.b.blockScale;

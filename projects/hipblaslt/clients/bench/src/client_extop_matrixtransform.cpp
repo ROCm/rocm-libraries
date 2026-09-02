@@ -323,12 +323,10 @@ void validation(hipDataType datatype,
     arguments.alpha                  = alpha;
     arguments.beta                   = beta;
 
-    const auto result
-        = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
-    if(!result.comparison.passed())
+    const auto comparison = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
+    if(!comparison.passed())
     {
-        hipblaslt::host_numerics::reportMatrixTransformMismatches(std::cerr,
-                                                                    result.comparison);
+        hipblaslt::host_numerics::reportMatrixTransformMismatches(std::cerr, comparison);
         std::cerr << '\n';
     }
 }

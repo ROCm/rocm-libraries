@@ -102,7 +102,7 @@ int parseArgs(
     return EXIT_SUCCESS;
 }
 
-void reportComparison(const char* title, const roc::host_numerics::ComparisonResult& comparison)
+void reportComparison(const char* title, const roc::host_numerics::ComparisonReport& comparison)
 {
     std::cout << "----- " << title << " result" << " -----" << std::endl;
     std::cout << "status: " << (comparison.passed() ? "PASS" : "FAIL") << std::endl;
@@ -197,22 +197,22 @@ int main(int argc, char** argv)
     const Layout tensorLayout     = Layout::contiguousLastDimensionFastest(Shape{m, n});
     const Layout statisticsLayout = Layout::contiguousLastDimensionFastest(Shape{m});
 
-    LayerNormProblem problem(
-        copyTensorFromEncodedStorage(cpuInput.data(), cpuInput.size(), tensorLayout),
-        ScalarType::Float32,
-        1,
-        ScalarType::Float32);
-    problem.meanType            = ScalarType::Float32;
-    problem.inverseVarianceType = ScalarType::Float32;
-    problem.epsilon             = 1e-5;
+    LayerNormOptions options;
+    options.axis    = 1;
+    options.epsilon = 1e-5;
     if(affine)
     {
         const Layout affineLayout = Layout::contiguousLastDimensionFastest(Shape{n});
-        problem.gamma
+        options.gamma
             = copyTensorFromEncodedStorage(cpuGamma.data(), cpuGamma.size(), affineLayout);
-        problem.beta = copyTensorFromEncodedStorage(cpuBeta.data(), cpuBeta.size(), affineLayout);
+        options.beta = copyTensorFromEncodedStorage(cpuBeta.data(), cpuBeta.size(), affineLayout);
     }
-    const LayerNormResult reference = referenceLayerNorm(problem);
+    const LayerNormOutputs reference = referenceLayerNorm(
+        copyTensorFromEncodedStorage(cpuInput.data(), cpuInput.size(), tensorLayout),
+        {.output          = ScalarType::Float32,
+         .mean            = ScalarType::Float32,
+         .inverseVariance = ScalarType::Float32},
+        options);
 
     const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
     reportComparison(

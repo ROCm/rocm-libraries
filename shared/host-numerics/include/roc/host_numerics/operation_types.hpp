@@ -12,11 +12,9 @@
 #include <vector>
 
 namespace roc::host_numerics {
-// Problem types describe reusable numerical inputs and requested result types.
-// Request types bind a Problem to caller-owned destinations. Owning calls
-// return Result types containing newly allocated outputs plus RunInfo; request
-// calls return RunInfo directly. Execution types select implementation policy
-// without changing numerical semantics.
+// Operation-specific option types describe numerical policy independently of
+// tensor ownership. Owning entry points return newly allocated tensors;
+// corresponding ...Into entry points write caller-owned destinations.
 
 // Shared pointwise activation selector for GEMM and standalone epilogue
 // descriptors. Consumers provide any activation parameters separately.
