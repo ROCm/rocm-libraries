@@ -52,39 +52,35 @@ namespace hipblaslt::host_numerics
     {
         using namespace roc::host_numerics;
 
-        GemmOperand operandA(std::move(inputs.a));
-        GemmOperand operandB(std::move(inputs.b));
-        operandA.conjugate = problem.operationA == HIPBLAS_OP_C;
-        operandB.conjugate = problem.operationB == HIPBLAS_OP_C;
-
-        const ScalarType computeTypeA
-            = isBlockScaling(scaleAMode) ? operandA.values.type()
-                                         : referenceComputeType(dataTypes.computeInputA);
-        const ScalarType computeTypeB
-            = isBlockScaling(scaleBMode) ? operandB.values.type()
-                                         : referenceComputeType(dataTypes.computeInputB);
-        if(computeTypeA != operandA.values.type())
-            operandA.computeType = computeTypeA;
-        if(computeTypeB != operandB.values.type())
-            operandB.computeType = computeTypeB;
-
-        if(inputs.scaleA && !isBlockScaling(scaleAMode))
-            operandA.preQuantizationScales.push_back(inputs.scaleA->expandDims(1));
-        if(inputs.alphaVector)
-            operandA.preQuantizationScales.push_back(inputs.alphaVector->expandDims(1));
-        if(inputs.scaleB && !isBlockScaling(scaleBMode))
-            operandB.preQuantizationScales.push_back(inputs.scaleB->expandDims(0));
+        const ScalarType computeTypeA = isBlockScaling(scaleAMode)
+                                            ? inputs.a.type()
+                                            : referenceComputeType(dataTypes.computeInputA);
+        const ScalarType computeTypeB = isBlockScaling(scaleBMode)
+                                            ? inputs.b.type()
+                                            : referenceComputeType(dataTypes.computeInputB);
 
         const ScalarType accumulatorType = referenceAccumulatorType(dataTypes.coefficient);
         GemmOptions      options(accumulatorType);
+        options.conjugateA = problem.operationA == HIPBLAS_OP_C;
+        options.conjugateB = problem.operationB == HIPBLAS_OP_C;
+        if(computeTypeA != inputs.a.type())
+            options.computeTypeA = computeTypeA;
+        if(computeTypeB != inputs.b.type())
+            options.computeTypeB = computeTypeB;
+        if(inputs.scaleA && !isBlockScaling(scaleAMode))
+            options.preQuantizationScalesA.push_back(inputs.scaleA->expandDims(1));
+        if(inputs.alphaVector)
+            options.preQuantizationScalesA.push_back(inputs.alphaVector->expandDims(1));
+        if(inputs.scaleB && !isBlockScaling(scaleBMode))
+            options.preQuantizationScalesB.push_back(inputs.scaleB->expandDims(0));
         options.epilogue.alpha       = scalarValue(preparation.alpha, dataTypes.coefficient);
         options.epilogue.beta        = scalarValue(preparation.beta, dataTypes.coefficient);
         options.epilogue.scaleC      = inputs.scaleC.value_or(Scalar::one(accumulatorType));
         options.epilogue.outputScale = inputs.scaleD.value_or(Scalar::one(accumulatorType));
         if(inputs.d.type() == ScalarType::Int8)
             options.epilogue.outputConversion = OutputConversion::SaturatingInt8;
-        (void)referenceGemmIntoWithBlasBackend(std::move(operandA),
-                                               std::move(operandB),
+        (void)referenceGemmIntoWithBlasBackend(std::move(inputs.a),
+                                               std::move(inputs.b),
                                                std::move(inputs.c),
                                                std::move(inputs.d),
                                                options);
