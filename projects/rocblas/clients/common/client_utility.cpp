@@ -42,8 +42,6 @@
 
 #ifdef WIN32
 #define strcasecmp(A, B) _stricmp(A, B)
-#define setenv(A, B, C) _putenv_s(A, B)
-#define unsetenv(A) _putenv_s(A, "")
 
 #ifdef __cpp_lib_filesystem
 #include <filesystem>
@@ -428,14 +426,19 @@ thread_local std::unique_ptr<std::function<void(rocblas_handle)>> t_set_stream_c
 
 rocblas_local_handle::rocblas_local_handle()
 {
-    auto status = rocblas_create_handle(&m_handle);
+    rocblas_handle handle;
+    auto           status = rocblas_create_handle(&handle);
     if(status != rocblas_status_success)
         throw std::runtime_error(rocblas_status_to_string(status));
+    m_handle.reset(handle);
 
 #ifdef GOOGLE_TEST
+    // No manual cleanup needed if this throws: m_handle already owns the handle via
+    // rocblas_handle_deleter, so its own destructor (which does run -- it's a fully
+    // constructed member at this point) destroys it.
     if(t_set_stream_callback)
     {
-        (*t_set_stream_callback)(m_handle);
+        (*t_set_stream_callback)(m_handle.get());
         t_set_stream_callback.reset();
     }
 #endif
@@ -457,62 +460,79 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
         m_stream_order_env.activate("ROCBLAS_STREAM_ORDER_ALLOC", "1");
     }
 
-    auto status = rocblas_create_handle(&m_handle);
+    rocblas_handle handle;
+    auto           status = rocblas_create_handle(&handle);
     if(status != rocblas_status_success)
         throw std::runtime_error(rocblas_status_to_string(status));
+    // From here on, m_handle owns the handle: if anything below throws, m_handle's own
+    // destructor (a fully constructed member) destroys it -- no manual cleanup needed.
+    m_handle.reset(handle);
 
-#ifdef GOOGLE_TEST
-    if(t_set_stream_callback)
+    // Everything below can throw (workspace hipMalloc, rocblas_set_math_mode). If it does,
+    // m_memory, a plain field with no destructor of its own, would leak the workspace
+    // allocation for the life of the process unless we free it here.
+    try
     {
-        (*t_set_stream_callback)(m_handle);
-        t_set_stream_callback.reset();
-    }
+#ifdef GOOGLE_TEST
+        if(t_set_stream_callback)
+        {
+            (*t_set_stream_callback)(m_handle.get());
+            t_set_stream_callback.reset();
+        }
 #endif
 
-    // Set the atomics mode
-    status = rocblas_set_atomics_mode(m_handle, arg.atomics_mode);
+        // Set the atomics mode
+        status = rocblas_set_atomics_mode(m_handle.get(), arg.atomics_mode);
 
-    // The check_numerics mode conditional defeat with "rocblas_check_numerics_mode_no_check"
-    // Defeat check numerics when initializing any data with NaN with due to alpha or beta having NaN flags,
-    // or if the arg.initalization is rocblas_initialization::denorm or rocblas_initialization::denorm2
-    // The denorm initialization are sometimes used when testing the gemm_ex and gemm_strided_batched_ex functions
-    if(rocblas_isnan(arg.alpha) || rocblas_isnan(arg.beta)
-       || arg.initialization == rocblas_initialization::denorm
-       || arg.initialization == rocblas_initialization::denorm2)
-    {
-        m_handle->check_numerics = rocblas_check_numerics_mode_no_check;
-    }
-    else if(m_handle->check_numerics != rocblas_check_numerics_mode_no_check)
-    {
-        // bypass denorm reporting for f16 gemms, to be analyzed further
-        if(arg.a_type == rocblas_datatype_f16_r && m_handle->getArchMajor() == 11
-           && strstr(arg.function, "gemm"))
+        // The check_numerics mode conditional defeat with "rocblas_check_numerics_mode_no_check"
+        // Defeat check numerics when initializing any data with NaN with due to alpha or beta having NaN flags,
+        // or if the arg.initalization is rocblas_initialization::denorm or rocblas_initialization::denorm2
+        // The denorm initialization are sometimes used when testing the gemm_ex and gemm_strided_batched_ex functions
+        if(rocblas_isnan(arg.alpha) || rocblas_isnan(arg.beta)
+           || arg.initialization == rocblas_initialization::denorm
+           || arg.initialization == rocblas_initialization::denorm2)
         {
-            m_handle->check_numerics = static_cast<rocblas_check_numerics_mode>(
-                m_handle->check_numerics | rocblas_check_numerics_mode_only_nan_inf);
+            m_handle->check_numerics = rocblas_check_numerics_mode_no_check;
         }
-    }
-
-    if(status == rocblas_status_success)
-    {
-        // If the test specifies user allocated workspace, allocate and use it
-        if(arg.user_allocated_workspace)
+        else if(m_handle->check_numerics != rocblas_check_numerics_mode_no_check)
         {
-            if((hipMalloc)(&m_memory, arg.user_allocated_workspace) != hipSuccess)
-                throw std::bad_alloc();
-            status = rocblas_set_workspace(m_handle, m_memory, arg.user_allocated_workspace);
+            // bypass denorm reporting for f16 gemms, to be analyzed further
+            if(arg.a_type == rocblas_datatype_f16_r && m_handle->getArchMajor() == 11
+               && strstr(arg.function, "gemm"))
+            {
+                m_handle->check_numerics = static_cast<rocblas_check_numerics_mode>(
+                    m_handle->check_numerics | rocblas_check_numerics_mode_only_nan_inf);
+            }
         }
+
+        if(status == rocblas_status_success)
+        {
+            // If the test specifies user allocated workspace, allocate and use it
+            if(arg.user_allocated_workspace)
+            {
+                if((hipMalloc)(&m_memory, arg.user_allocated_workspace) != hipSuccess)
+                    throw std::bad_alloc();
+                status
+                    = rocblas_set_workspace(m_handle.get(), m_memory, arg.user_allocated_workspace);
+            }
+        }
+
+        // memory guard control, with multi-threading should not change values across threads
+        d_vector_set_pad_length(arg.pad);
+
+        if(status != rocblas_status_success)
+            throw std::runtime_error(rocblas_status_to_string(status));
+
+        status = rocblas_set_math_mode(m_handle.get(), rocblas_math_mode(arg.math_mode));
+        if(status != rocblas_status_success)
+            throw std::runtime_error(rocblas_status_to_string(status));
     }
-
-    // memory guard control, with multi-threading should not change values across threads
-    d_vector_set_pad_length(arg.pad);
-
-    if(status != rocblas_status_success)
-        throw std::runtime_error(rocblas_status_to_string(status));
-
-    status = rocblas_set_math_mode(m_handle, rocblas_math_mode(arg.math_mode));
-    if(status != rocblas_status_success)
-        throw std::runtime_error(rocblas_status_to_string(status));
+    catch(...)
+    {
+        if(m_memory)
+            PRINT_IF_HIP_ERROR((hipFree)(m_memory));
+        throw;
+    }
 }
 
 rocblas_local_handle::~rocblas_local_handle()
@@ -525,11 +545,9 @@ rocblas_local_handle::~rocblas_local_handle()
         PRINT_IF_HIP_ERROR((hipFree)(m_memory));
     }
 
-    rocblas_destroy_handle(m_handle);
-
-    // m_hipblaslt_env / m_stream_order_env restore the environment when they are destroyed,
-    // which happens after this body returns (members are destroyed in reverse declaration
-    // order, and they are declared first).
+    // m_handle (rocblas_destroy_handle via its deleter) and the env-var guards
+    // (m_hipblaslt_env / m_stream_order_env) restore/release themselves once this body
+    // returns, in reverse declaration order.
 }
 
 void rocblas_local_handle::rocblas_stream_begin_capture()
@@ -537,14 +555,14 @@ void rocblas_local_handle::rocblas_stream_begin_capture()
     if(m_graph_stream)
         throw std::runtime_error("recursive rocblas_stream_begin_capture");
 
-    CHECK_ROCBLAS_ERROR(rocblas_get_stream(m_handle, &m_old_stream));
+    CHECK_ROCBLAS_ERROR(rocblas_get_stream(m_handle.get(), &m_old_stream));
     CHECK_HIP_ERROR(hipStreamSynchronize(m_old_stream));
 
     // set via env
     // m_handle->set_stream_order_memory_allocation(true);
 
     CHECK_HIP_ERROR(hipStreamCreate(&m_graph_stream));
-    CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_graph_stream));
+    CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle.get(), m_graph_stream));
 
     // BEGIN GRAPH CAPTURE
     CHECK_HIP_ERROR(hipStreamBeginCapture(m_graph_stream, hipStreamCaptureModeGlobal));
@@ -564,7 +582,7 @@ void rocblas_local_handle::rocblas_stream_end_capture()
     CHECK_HIP_ERROR(hipStreamSynchronize(m_graph_stream));
     CHECK_HIP_ERROR(hipGraphExecDestroy(instance));
 
-    CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_old_stream));
+    CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle.get(), m_old_stream));
     CHECK_HIP_ERROR(hipStreamDestroy(m_graph_stream));
     m_graph_stream = nullptr;
 
