@@ -162,8 +162,9 @@ static std::string twiddle_rtc_body(TwiddleTableType type)
 
         if(i < half_N)
         {
-            double c = cos(TWO_PI * i / (2 * N));
-            double s = sin(TWO_PI * i / (2 * N));
+            const double PIoverN = TWO_PI * 0.5 / N;
+            double c = cos(PIoverN * i);
+            double s = sin(PIoverN * i);
 
             output[i].x = c;
             output[i].y = s;
