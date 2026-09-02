@@ -7,7 +7,6 @@
 #include <optional>
 #include <roc/host_numerics/operation_types.hpp>
 #include <roc/host_numerics/tensor.hpp>
-#include <string>
 #include <vector>
 
 namespace roc::host_numerics {
@@ -77,25 +76,6 @@ struct GemmOptions {
     GemmEpilogue epilogue;
     OutputSelection outputSelection = OutputSelection::all();  // Logical D coordinates to write.
 };
-
-// Report from validating one GEMM invocation against one execution policy.
-struct GemmSupportInfo {
-    bool supported = false;  // True only when validation and backend restrictions pass.
-    std::string reason;      // Empty when supported; rejection text otherwise.
-    // A supported optional backend may still be more expensive than Pointwise
-    // for this request. Automatic execution consults this component-owned hint.
-    bool preferredForAutomaticExecution = true;
-
-    explicit operator bool() const {
-        return supported;
-    }
-};
-
-// Validates the complete invocation and selected built-in strategy without
-// mutating any tensor. Backend support can depend on D's layout and aliases.
-GemmSupportInfo queryGemmSupport(const Tensor& a, const Tensor& b, const Tensor& c, const Tensor& d,
-                                 const GemmOptions& options = GemmOptions{},
-                                 GemmBackend backend = GemmBackend::Automatic);
 
 // Writes selected coordinates into caller-owned D and reports the concrete
 // backend used. Exact same-layout C/D aliasing is supported.

@@ -10,6 +10,7 @@ namespace roc::host_numerics {
 // tests focused on execution details without restoring that type to the public
 // API.
 using GemmOperand = detail::GemmOperand;
+using GemmSupportInfo = detail::GemmSupportInfo;
 using GemmTestSpecification = GemmSpecification;
 using GemmTestCase = GemmInvocation;
 using GemmTestRunInfo = GemmExecutionInfo;
