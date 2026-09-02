@@ -204,8 +204,7 @@ std::pair<void*, size_t> Repo::GetTwiddles2D(size_t                     length0,
     std::lock_guard<std::mutex> lck(mtx);
     Repo&                       repo = Repo::GetRepo();
 
-    repo_twd_key_2D_t key{
-        length0, length1, precision, attach_halfN1, attach_halfN2, radices1, radices2};
+    repo_twd_key_2D_t key{length0, length1, precision, attach_halfN1, radices1, radices2};
     return GetTwiddlesInternal(
         key, repo.twiddles_2D, repo.twiddles_2D_reverse, [&](unsigned int deviceId) {
             return twiddles_create_2D(length0,
