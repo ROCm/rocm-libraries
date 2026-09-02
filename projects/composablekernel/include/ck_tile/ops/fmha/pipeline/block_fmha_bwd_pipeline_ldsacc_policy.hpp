@@ -46,9 +46,11 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     // At headdim 128 with bf16 a row is 128 * 2 / 4 = 64 dwords, and gfx1250 has
     // 64 LDS banks, so an unpadded row stride puts *every* row on bank 0 and the
     // reader conflicts across the full width. One 128-bit unit of pad per row
-    // (16 elements = 32 B = 8 dwords) makes the stride 72 dwords, separating
-    // consecutive rows by 8 banks, and a whole number of 16 B units keeps the
-    // row start aligned for ds_read_b128 / ds_load_tr16_b128.
+    // (8 elements = 16 B = 4 dwords) makes the stride 68 dwords, spreading
+    // consecutive rows over 64 / gcd(68, 64) = 16 banks, 2 lanes each -- the
+    // floor for a wave32 ds_read_b128, which moves 32 * 4 = 128 dwords -- and a
+    // whole number of 16 B units keeps the row start aligned for ds_read_b128 /
+    // ds_load_tr16_b128.
     //
     // This is the same failure kAccLdsPad fixes for the accumulators, arrived at
     // from the other direction: there the conflict comes from the C fragment's
@@ -60,7 +62,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
     // without going through the descriptor, so a reader-side XOR would have
     // nothing to cancel against. dS, which IS written through its descriptor by
     // store_tile, keeps its XOR -- measured better there than padding.
-    static constexpr index_t kOperandLdsPad = 16;
+    static constexpr index_t kOperandLdsPad = 8;
 
     // ---- K: one plain box, K^T read back by ds_load_tr ----------------------
     //
