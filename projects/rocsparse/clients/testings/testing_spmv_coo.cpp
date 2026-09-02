@@ -98,10 +98,10 @@ void testing_spmv_coo_extra(const Arguments& arg)
     //
     // The COO atomic SpMV kernels computed the global element id as a product
     // of hipBlockIdx_x and a uint32_t BLOCKSIZE, so the id wrapped at 2^32
-    // regardless of how wide the index type I was, and there was no grid-stride
-    // loop. For a COO matrix declared with a 64-bit index type and nnz beyond
-    // 2^32, non-zeros past the wrap point were never accumulated into y. The
-    // fix casts to I before the multiply and iterates with a grid-stride loop.
+    // regardless of how wide the index type I was. For a COO matrix declared
+    // with a 64-bit index type and nnz beyond 2^32, non-zeros past the wrap
+    // point were never accumulated into y. The fix casts the block index to
+    // int64_t before the multiply.
     //
     // This drives the 64-bit-index atomic path of rocsparse_spmv (COO) with
     // nnz just past the 2^32 boundary and checks that a non-zero beyond that

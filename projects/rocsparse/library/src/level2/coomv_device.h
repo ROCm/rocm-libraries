@@ -54,7 +54,7 @@ namespace rocsparse
         __shared__ T shared_val[BLOCKSIZE];
 
         // Current threads index into COO structure
-        int64_t idx = hipBlockIdx_x * nloops * BLOCKSIZE + tid;
+        int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * nloops * BLOCKSIZE + tid;
 
         I row;
         T val;
@@ -266,7 +266,7 @@ namespace rocsparse
         __shared__ T shared_val[BLOCKSIZE];
 
         // Current threads index into COO structure
-        int64_t idx = hipBlockIdx_x * nloops * BLOCKSIZE + tid;
+        int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * nloops * BLOCKSIZE + tid;
 
         I row;
         T val;
@@ -411,230 +411,56 @@ namespace rocsparse
         __shared__ I shared_row[BLOCKSIZE];
         __shared__ T shared_val[BLOCKSIZE];
 
-        // Each block processes a contiguous chunk of LOOPS * BLOCKSIZE entries.
-        // The chunk size and chunk stride are formed in int64_t (cast before the
-        // multiply) so the running element id cannot wrap at 2^32, and the outer
-        // grid-stride loop lets a grid that has been clamped to maxGridSize[0]
-        // cover an arbitrarily large nnz.
-        const int64_t chunk        = static_cast<int64_t>(LOOPS) * BLOCKSIZE;
-        const int64_t chunk_stride = static_cast<int64_t>(gridDim.x) * chunk;
+        I row;
+        I col;
+        T val;
 
-        for(int64_t block_base = static_cast<int64_t>(hipBlockIdx_x) * chunk; block_base < nnz;
-            block_base += chunk_stride)
+        // Current threads index into COO structure
+        int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * LOOPS * BLOCKSIZE + tid;
+
+        if(idx < nnz)
         {
-            // Ensure all threads finished reading the shared buffers of the
-            // previous chunk before they are overwritten below.
+            row = rocsparse::nontemporal_load(&coo_row_ind[idx]) - idx_base;
+            col = rocsparse::nontemporal_load(&coo_col_ind[idx]) - idx_base;
+            val = static_cast<T>(rocsparse::nontemporal_load(&coo_val[idx]))
+                  * static_cast<T>(x[col]);
+        }
+        else
+        {
+            row = -1;
+            col = 0;
+            val = static_cast<T>(0);
+        }
+
+        shared_row[tid] = row;
+        shared_val[tid] = val;
+        __syncthreads();
+
+        // segmented reduction
+        for(uint32_t j = 1; j < BLOCKSIZE; j <<= 1)
+        {
+            if(tid >= j)
+            {
+                if(row == shared_row[tid - j])
+                {
+                    val = val + shared_val[tid - j];
+                }
+            }
             __syncthreads();
-
-            I row;
-            I col;
-            T val;
-
-            // Current thread's index into COO structure
-            int64_t idx = block_base + tid;
-
-            if(idx < nnz)
-            {
-                row = rocsparse::nontemporal_load(&coo_row_ind[idx]) - idx_base;
-                col = rocsparse::nontemporal_load(&coo_col_ind[idx]) - idx_base;
-                val = static_cast<T>(rocsparse::nontemporal_load(&coo_val[idx]))
-                      * static_cast<T>(x[col]);
-            }
-            else
-            {
-                row = -1;
-                col = 0;
-                val = static_cast<T>(0);
-            }
-
-            shared_row[tid] = row;
             shared_val[tid] = val;
             __syncthreads();
+        }
 
-            // segmented reduction
-            for(uint32_t j = 1; j < BLOCKSIZE; j <<= 1)
+        if(tid < BLOCKSIZE - 1)
+        {
+            if(row != shared_row[tid + 1] && row >= 0)
             {
-                if(tid >= j)
-                {
-                    if(row == shared_row[tid - j])
-                    {
-                        val = val + shared_val[tid - j];
-                    }
-                }
-                __syncthreads();
-                shared_val[tid] = val;
-                __syncthreads();
-            }
-
-            if(tid < BLOCKSIZE - 1)
-            {
-                if(row != shared_row[tid + 1] && row >= 0)
-                {
-                    rocsparse::atomic_add(y, row, m, alpha * val);
-                }
-            }
-
-            if(LOOPS > 1)
-            {
-                for(uint32_t i = 0; i < LOOPS - 1; i++)
-                {
-                    // Keep going for the next iteration
-                    idx += BLOCKSIZE;
-
-                    if(idx < nnz)
-                    {
-                        row = rocsparse::nontemporal_load(&coo_row_ind[idx]) - idx_base;
-                        col = rocsparse::nontemporal_load(&coo_col_ind[idx]) - idx_base;
-                        val = static_cast<T>(rocsparse::nontemporal_load(&coo_val[idx]))
-                              * static_cast<T>(x[col]);
-                    }
-                    else
-                    {
-                        row = -1;
-                        col = 0;
-                        val = static_cast<T>(0);
-                    }
-
-                    // First thread in wavefront checks row index from previous loop
-                    // if it has been completed or if additional rows have to be
-                    // appended.
-                    if(tid == 0)
-                    {
-                        I prevrow = shared_row[BLOCKSIZE - 1];
-                        if(row == prevrow)
-                        {
-                            val = val + shared_val[BLOCKSIZE - 1];
-                        }
-                        else if(prevrow >= 0)
-                        {
-                            rocsparse::atomic_add(y, prevrow, m, alpha * shared_val[BLOCKSIZE - 1]);
-                        }
-                    }
-
-                    __syncthreads();
-                    shared_row[tid] = row;
-                    shared_val[tid] = val;
-                    __syncthreads();
-
-                    // segmented reduction
-                    for(uint32_t j = 1; j < BLOCKSIZE; j <<= 1)
-                    {
-                        if(tid >= j)
-                        {
-                            if(row == shared_row[tid - j])
-                            {
-                                val = val + shared_val[tid - j];
-                            }
-                        }
-                        __syncthreads();
-                        shared_val[tid] = val;
-                        __syncthreads();
-                    }
-
-                    if(tid < BLOCKSIZE - 1)
-                    {
-                        if(row != shared_row[tid + 1] && row >= 0)
-                        {
-                            rocsparse::atomic_add(y, row, m, alpha * val);
-                        }
-                    }
-                }
-            }
-
-            if(tid == BLOCKSIZE - 1)
-            {
-                if(row >= 0)
-                {
-                    rocsparse::atomic_add(y, row, m, alpha * val);
-                }
+                rocsparse::atomic_add(y, row, m, alpha * val);
             }
         }
-    }
 
-    template <uint32_t BLOCKSIZE,
-              uint32_t LOOPS,
-              typename I,
-              typename A,
-              typename X,
-              typename Y,
-              typename T>
-    ROCSPARSE_DEVICE_ILF void coomvn_aos_atomic_loops_device(int64_t nnz,
-                                                             I       m,
-                                                             T       alpha,
-                                                             const I* __restrict__ coo_ind,
-                                                             const A* __restrict__ coo_val,
-                                                             const X* __restrict__ x,
-                                                             Y* __restrict__ y,
-                                                             rocsparse_index_base idx_base)
-    {
-        const int tid = hipThreadIdx_x;
-
-        __shared__ I shared_row[BLOCKSIZE];
-        __shared__ T shared_val[BLOCKSIZE];
-
-        // Each block processes a contiguous chunk of LOOPS * BLOCKSIZE entries.
-        // The chunk size and chunk stride are formed in int64_t (cast before the
-        // multiply) so the running element id cannot wrap at 2^32, and the outer
-        // grid-stride loop lets a grid that has been clamped to maxGridSize[0]
-        // cover an arbitrarily large nnz.
-        const int64_t chunk        = static_cast<int64_t>(LOOPS) * BLOCKSIZE;
-        const int64_t chunk_stride = static_cast<int64_t>(gridDim.x) * chunk;
-
-        for(int64_t block_base = static_cast<int64_t>(hipBlockIdx_x) * chunk; block_base < nnz;
-            block_base += chunk_stride)
+        if(LOOPS > 1)
         {
-            // Ensure all threads finished reading the shared buffers of the
-            // previous chunk before they are overwritten below.
-            __syncthreads();
-
-            I row;
-            I col;
-            T val;
-
-            // Current thread's index into COO structure
-            int64_t idx = block_base + tid;
-
-            if(idx < nnz)
-            {
-                row = rocsparse::nontemporal_load(&coo_ind[2 * idx]) - idx_base;
-                col = rocsparse::nontemporal_load(&coo_ind[2 * idx + 1]) - idx_base;
-                val = static_cast<T>(rocsparse::nontemporal_load(&coo_val[idx]))
-                      * static_cast<T>(x[col]);
-            }
-            else
-            {
-                row = -1;
-                col = 0;
-                val = static_cast<T>(0);
-            }
-
-            shared_row[tid] = row;
-            shared_val[tid] = val;
-            __syncthreads();
-
-            // segmented reduction
-            for(uint32_t j = 1; j < BLOCKSIZE; j <<= 1)
-            {
-                if(tid >= j)
-                {
-                    if(row == shared_row[tid - j])
-                    {
-                        val = val + shared_val[tid - j];
-                    }
-                }
-                __syncthreads();
-                shared_val[tid] = val;
-                __syncthreads();
-            }
-
-            if(tid < BLOCKSIZE - 1)
-            {
-                if(row != shared_row[tid + 1] && row >= 0)
-                {
-                    rocsparse::atomic_add(y, row, m, alpha * val);
-                }
-            }
-
             for(uint32_t i = 0; i < LOOPS - 1; i++)
             {
                 // Keep going for the next iteration
@@ -642,8 +468,8 @@ namespace rocsparse
 
                 if(idx < nnz)
                 {
-                    row = rocsparse::nontemporal_load(&coo_ind[2 * idx]) - idx_base;
-                    col = rocsparse::nontemporal_load(&coo_ind[2 * idx + 1]) - idx_base;
+                    row = rocsparse::nontemporal_load(&coo_row_ind[idx]) - idx_base;
+                    col = rocsparse::nontemporal_load(&coo_col_ind[idx]) - idx_base;
                     val = static_cast<T>(rocsparse::nontemporal_load(&coo_val[idx]))
                           * static_cast<T>(x[col]);
                 }
@@ -659,7 +485,7 @@ namespace rocsparse
                 // appended.
                 if(tid == 0)
                 {
-                    const I prevrow = shared_row[BLOCKSIZE - 1];
+                    I prevrow = shared_row[BLOCKSIZE - 1];
                     if(row == prevrow)
                     {
                         val = val + shared_val[BLOCKSIZE - 1];
@@ -698,13 +524,155 @@ namespace rocsparse
                     }
                 }
             }
+        }
 
-            if(tid == BLOCKSIZE - 1)
+        if(tid == BLOCKSIZE - 1)
+        {
+            if(row >= 0)
             {
-                if(row >= 0)
+                rocsparse::atomic_add(y, row, m, alpha * val);
+            }
+        }
+    }
+
+    template <uint32_t BLOCKSIZE,
+              uint32_t LOOPS,
+              typename I,
+              typename A,
+              typename X,
+              typename Y,
+              typename T>
+    ROCSPARSE_DEVICE_ILF void coomvn_aos_atomic_loops_device(int64_t nnz,
+                                                             I       m,
+                                                             T       alpha,
+                                                             const I* __restrict__ coo_ind,
+                                                             const A* __restrict__ coo_val,
+                                                             const X* __restrict__ x,
+                                                             Y* __restrict__ y,
+                                                             rocsparse_index_base idx_base)
+    {
+        const int tid = hipThreadIdx_x;
+
+        __shared__ I shared_row[BLOCKSIZE];
+        __shared__ T shared_val[BLOCKSIZE];
+
+        I row;
+        I col;
+        T val;
+
+        // Current threads index into COO structure
+        int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * LOOPS * BLOCKSIZE + tid;
+
+        if(idx < nnz)
+        {
+            row = rocsparse::nontemporal_load(&coo_ind[2 * idx]) - idx_base;
+            col = rocsparse::nontemporal_load(&coo_ind[2 * idx + 1]) - idx_base;
+            val = static_cast<T>(rocsparse::nontemporal_load(&coo_val[idx]))
+                  * static_cast<T>(x[col]);
+        }
+        else
+        {
+            row = -1;
+            col = 0;
+            val = static_cast<T>(0);
+        }
+
+        shared_row[tid] = row;
+        shared_val[tid] = val;
+        __syncthreads();
+
+        // segmented reduction
+        for(uint32_t j = 1; j < BLOCKSIZE; j <<= 1)
+        {
+            if(tid >= j)
+            {
+                if(row == shared_row[tid - j])
+                {
+                    val = val + shared_val[tid - j];
+                }
+            }
+            __syncthreads();
+            shared_val[tid] = val;
+            __syncthreads();
+        }
+
+        if(tid < BLOCKSIZE - 1)
+        {
+            if(row != shared_row[tid + 1] && row >= 0)
+            {
+                rocsparse::atomic_add(y, row, m, alpha * val);
+            }
+        }
+
+        for(uint32_t i = 0; i < LOOPS - 1; i++)
+        {
+            // Keep going for the next iteration
+            idx += BLOCKSIZE;
+
+            if(idx < nnz)
+            {
+                row = rocsparse::nontemporal_load(&coo_ind[2 * idx]) - idx_base;
+                col = rocsparse::nontemporal_load(&coo_ind[2 * idx + 1]) - idx_base;
+                val = static_cast<T>(rocsparse::nontemporal_load(&coo_val[idx]))
+                      * static_cast<T>(x[col]);
+            }
+            else
+            {
+                row = -1;
+                col = 0;
+                val = static_cast<T>(0);
+            }
+
+            // First thread in wavefront checks row index from previous loop
+            // if it has been completed or if additional rows have to be
+            // appended.
+            if(tid == 0)
+            {
+                const I prevrow = shared_row[BLOCKSIZE - 1];
+                if(row == prevrow)
+                {
+                    val = val + shared_val[BLOCKSIZE - 1];
+                }
+                else if(prevrow >= 0)
+                {
+                    rocsparse::atomic_add(y, prevrow, m, alpha * shared_val[BLOCKSIZE - 1]);
+                }
+            }
+
+            __syncthreads();
+            shared_row[tid] = row;
+            shared_val[tid] = val;
+            __syncthreads();
+
+            // segmented reduction
+            for(uint32_t j = 1; j < BLOCKSIZE; j <<= 1)
+            {
+                if(tid >= j)
+                {
+                    if(row == shared_row[tid - j])
+                    {
+                        val = val + shared_val[tid - j];
+                    }
+                }
+                __syncthreads();
+                shared_val[tid] = val;
+                __syncthreads();
+            }
+
+            if(tid < BLOCKSIZE - 1)
+            {
+                if(row != shared_row[tid + 1] && row >= 0)
                 {
                     rocsparse::atomic_add(y, row, m, alpha * val);
                 }
+            }
+        }
+
+        if(tid == BLOCKSIZE - 1)
+        {
+            if(row >= 0)
+            {
+                rocsparse::atomic_add(y, row, m, alpha * val);
             }
         }
     }
@@ -721,23 +689,20 @@ namespace rocsparse
                                             Y*                   y,
                                             rocsparse_index_base idx_base)
     {
-        // Cast to int64_t before the multiply so the element id cannot wrap at
-        // 2^32, and use a grid-stride loop so a grid clamped to maxGridSize[0]
-        // still covers an arbitrarily large nnz.
-        const int64_t stride = static_cast<int64_t>(gridDim.x) * hipBlockDim_x;
+        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + hipThreadIdx_x;
 
-        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + hipThreadIdx_x;
-            gid < nnz;
-            gid += stride)
+        if(gid >= nnz)
         {
-            const I row = coo_row_ind[gid] - idx_base;
-            const I col = coo_col_ind[gid] - idx_base;
-            const A val = (trans == rocsparse_operation_conjugate_transpose)
-                              ? rocsparse::conj(coo_val[gid])
-                              : coo_val[gid];
-
-            rocsparse::atomic_add(y, col, n, alpha * val * x[row]);
+            return;
         }
+
+        const I row = coo_row_ind[gid] - idx_base;
+        const I col = coo_col_ind[gid] - idx_base;
+        const A val = (trans == rocsparse_operation_conjugate_transpose)
+                          ? rocsparse::conj(coo_val[gid])
+                          : coo_val[gid];
+
+        rocsparse::atomic_add(y, col, n, alpha * val * x[row]);
     }
 
     template <typename I, typename A, typename X, typename Y, typename T>
@@ -751,22 +716,19 @@ namespace rocsparse
                                                 Y*                   y,
                                                 rocsparse_index_base idx_base)
     {
-        // Cast to int64_t before the multiply so the element id cannot wrap at
-        // 2^32, and use a grid-stride loop so a grid clamped to maxGridSize[0]
-        // still covers an arbitrarily large nnz.
-        const int64_t stride = static_cast<int64_t>(gridDim.x) * hipBlockDim_x;
+        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + hipThreadIdx_x;
 
-        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + hipThreadIdx_x;
-            gid < nnz;
-            gid += stride)
+        if(gid >= nnz)
         {
-            const I row = coo_ind[2 * gid] - idx_base;
-            const I col = coo_ind[2 * gid + 1] - idx_base;
-            const A val = (trans == rocsparse_operation_conjugate_transpose)
-                              ? rocsparse::conj(coo_val[gid])
-                              : coo_val[gid];
-
-            rocsparse::atomic_add(y, col, n, alpha * val * x[row]);
+            return;
         }
+
+        const I row = coo_ind[2 * gid] - idx_base;
+        const I col = coo_ind[2 * gid + 1] - idx_base;
+        const A val = (trans == rocsparse_operation_conjugate_transpose)
+                          ? rocsparse::conj(coo_val[gid])
+                          : coo_val[gid];
+
+        rocsparse::atomic_add(y, col, n, alpha * val * x[row]);
     }
 }

@@ -338,11 +338,6 @@ namespace rocsparse
         // Scale y with beta
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
 
-        // Cap the grid at the device limit. The kernels use a grid-stride loop,
-        // so a clamped grid still covers the whole nnz range; this also avoids
-        // narrowing the (up to 64-bit) block count into dim3's unsigned int.
-        const int64_t max_grid = static_cast<int64_t>(handle->properties.maxGridSize[0]);
-
         // Run different coomv kernels
         switch(trans)
         {
@@ -350,10 +345,9 @@ namespace rocsparse
         {
             if(max_nnz_per_row <= 10 * 256)
             {
-                const int64_t nblocks = rocsparse::min((nnz - 1) / (1 * 256) + 1, max_grid);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::coomvn_atomic_loops<256, 1>),
-                    dim3(nblocks),
+                    dim3((nnz - 1) / (1 * 256) + 1),
                     dim3(256),
                     0,
                     stream,
@@ -370,10 +364,9 @@ namespace rocsparse
             }
             else
             {
-                const int64_t nblocks = rocsparse::min((nnz - 1) / (2 * 256) + 1, max_grid);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::coomvn_atomic_loops<256, 2>),
-                    dim3(nblocks),
+                    dim3((nnz - 1) / (2 * 256) + 1),
                     dim3(256),
                     0,
                     stream,
@@ -393,10 +386,9 @@ namespace rocsparse
         case rocsparse_operation_transpose:
         case rocsparse_operation_conjugate_transpose:
         {
-            const int64_t nblocks = rocsparse::min((nnz - 1) / 1024 + 1, max_grid);
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::coomvt_kernel<1024>),
-                dim3(nblocks),
+                dim3((nnz - 1) / 1024 + 1),
                 dim3(1024),
                 0,
                 handle->stream,
@@ -583,12 +575,9 @@ namespace rocsparse
         case rocsparse_operation_transpose:
         case rocsparse_operation_conjugate_transpose:
         {
-            // Cap the grid at the device limit; coomvt_device grid-strides.
-            const int64_t nblocks = rocsparse::min(
-                (nnz - 1) / 1024 + 1, static_cast<int64_t>(handle->properties.maxGridSize[0]));
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::coomvt_kernel<1024>),
-                dim3(nblocks),
+                dim3((nnz - 1) / 1024 + 1),
                 dim3(1024),
                 0,
                 handle->stream,
