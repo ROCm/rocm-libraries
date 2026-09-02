@@ -32,7 +32,8 @@ from .SubtileGeometry import (
     LRTag_1x1, LRTag_1x2, LRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleLRLDSSwap
-from .SubtileTLUSwizzle import selectTLUSwizzle, selectTLUColScatter, stripStrideBytes
+from .SubtileTLUSwizzle import (selectTLUSwizzle, selectTLUColScatter,
+                                stripStrideBytes, tluElemsPerRead)
 
 
 ################################################################################
@@ -653,26 +654,26 @@ def _lraColScatterBase(writer, module, tc, base, csc):
   writer.vgprPool.checkIn(kcol)
 
 
-# LDS transpose reads for the TLU=1 (NT) layout, keyed by bytes-per-element.
-# regsPerRead is the instruction's VGPR return count, so one read covers
-# regsPerRead * 4 / bpe elements per lane and two reads fill the 4-VGPR operand.
-# gfx950 has no 128-bit transpose-16 form -- ds_read_tr16_b128 is the gfx1250
-# spelling and the gfx950 assembler rejects both it and ds_read_b128_tr_b16 --
-# so bf16 uses the b64 form here.
-_TLU_TR_READ = {
-    0.5: (DSLoadB64TrB4, 2),
-    2.0: (DSLoadB64TrB16, 2),
+# LDS transpose read opcode for the TLU=1 (NT) layout, keyed by bytes-per-element.
+# The matching VGPR return count lives in SubtileTLUSwizzle, which needs it for
+# the col_scatter bit layout and cannot import this module.  gfx950 has no
+# 128-bit transpose-16 form -- ds_read_tr16_b128 is the gfx1250 spelling and the
+# gfx950 assembler rejects both it and ds_read_b128_tr_b16 -- so bf16 takes two
+# b64 reads to fill its 4-VGPR operand.
+_TLU_TR_OPCODE = {
+    0.5: DSLoadB64TrB4,
+    2.0: DSLoadB64TrB16,
 }
 
 
 def _tluTrRead(tileInfo):
   """(opcode, regsPerRead, elemsPerRead) for this operand's TLU=1 transpose read."""
-  entry = _TLU_TR_READ.get(float(tileInfo.bpe))
-  if entry is None:
+  opcode = _TLU_TR_OPCODE.get(float(tileInfo.bpe))
+  elemsPerRead = tluElemsPerRead(tileInfo.bpe)
+  if opcode is None or elemsPerRead is None:
     raise NotImplementedError("No TLU=1 transpose local read for bpe %s on tensor %s"
                               % (tileInfo.bpe, tileInfo.tc))
-  opcode, regsPerRead = entry
-  return opcode, regsPerRead, int(regsPerRead * 4 / float(tileInfo.bpe))
+  return opcode, int(elemsPerRead * float(tileInfo.bpe) / 4), elemsPerRead
 
 
 def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
