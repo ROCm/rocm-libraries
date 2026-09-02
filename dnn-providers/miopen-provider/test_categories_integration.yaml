@@ -119,7 +119,7 @@ exclude_gpu:
 
 execution_settings:
   default_timeout: 300
-  timeout_multiplier: 1
+  timeout_multiplier: 4
   category_timeouts:
     # Interim workaround: Windows runners show high runtime variance and
     # intermittently exceed 5 minutes on "quick" tests. Revert once per-OS

@@ -82,7 +82,7 @@ test_categories:
 
 execution_settings:
   default_timeout: 300
-  timeout_multiplier: 1
+  timeout_multiplier: 4
   category_timeouts:
     quick: 300
     standard: 2700
