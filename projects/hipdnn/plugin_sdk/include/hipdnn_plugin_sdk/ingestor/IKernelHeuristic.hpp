@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -28,10 +29,67 @@ namespace hipdnn_plugin_sdk::ingestor
 /// Chooses which kernel within an engine to run. An implementation supplies only
 /// `score()`, ranking one kernel at a time without seeing the catalog, so filtering
 /// and ranking commute.
+/// RFC 0019.13 §15.2: what selection returns, per candidate -- the kernel's id and the score
+/// that ordered it, winner first.
+struct ScoredKernel
+{
+    DescriptorId kernelId;
+    double score;
+};
+
+namespace detail
+{
+
+/// `priority` descending, then id ascending -- RFC 0019 §5 step 5's deterministic arbitration,
+/// and the order every degraded path falls back to.
+///
+/// Never discovery order: descriptor sets are found by scanning a directory, so discovery order
+/// varies by filesystem and would rank a package differently on two machines.
+inline std::vector<KernelDefinition> declaredOrder(const std::vector<KernelDefinition>& entries)
+{
+    std::vector<KernelDefinition> ordered(entries);
+    std::stable_sort(ordered.begin(),
+                     ordered.end(),
+                     [](const KernelDefinition& a, const KernelDefinition& b) {
+                         if(a.priority != b.priority)
+                         {
+                             return a.priority > b.priority;
+                         }
+                         return a.kernelId < b.kernelId;
+                     });
+    return ordered;
+}
+
+/// Declared order as §15.2's (id, score) pairs, reporting the 0 that RFC 0019 §5 step 7 gives
+/// "no measurement".
+///
+/// Shared by every path that degrades, so a fallback cannot come to describe itself one way in
+/// one place and another way elsewhere.
+inline std::vector<ScoredKernel>
+    asScored(const std::vector<KernelDefinition>& ordered)
+{
+    std::vector<ScoredKernel> scored;
+    scored.reserve(ordered.size());
+    for(const auto& entry : ordered)
+    {
+        scored.push_back({entry.kernelId, 0.0});
+    }
+    return scored;
+}
+
+} // namespace detail
+
 class IKernelHeuristic
 {
 public:
     virtual ~IKernelHeuristic() = default;
+
+private:
+    /// Set the first time a scorer throws. Mutable and atomic because ranking runs through a
+    /// shared_ptr<const> from any thread.
+    mutable std::atomic<bool> _reportedScorerFailure{false};
+
+public:
 
     /// Operands in the pipeline order every stage shares; see NativeRegistry.hpp.
     virtual double score(const MatchContext& context,
@@ -67,14 +125,28 @@ public:
     /// reports the top-ranked value as its default, autotune walks the ranked list, and engine
     /// selection reads the top score as the engine's figure of merit (§11.1). Returning order
     /// alone makes the third impossible, which is what blocked §15 phase 7.
-    struct ScoredKernel
-    {
-        DescriptorId kernelId;
-        double score;
-    };
+    /// Namespace-scope, aliased here so both spellings resolve. It sits outside the class so
+    /// the shared fallback helper can be defined before the members that use it.
+    using ScoredKernel = ingestor::ScoredKernel;
 
     /// What decided the order, for the §12 trace: a compiled scorer, or nothing at all.
     /// Overridden by the unranked fallback, which declines to rank.
+    /// Reports a scorer that threw, once per heuristic.
+    ///
+    /// Once, because the cause is a property of the descriptor set rather than of one graph: a
+    /// scorer reading a metadata field its catalog does not carry throws for every graph that
+    /// reaches it, and a message per selection would bury what it is reporting.
+    void reportScorerFailureOnce(const char* what) const
+    {
+        if(_reportedScorerFailure.exchange(true))
+        {
+            return;
+        }
+        HIPDNN_PLUGIN_LOG_ERROR("uhd: scorer threw while ranking ("
+                                << what << "); kernels rank by priority, then descriptor id. "
+                                << "Further occurrences for this heuristic are not logged.");
+    }
+
     virtual std::string traceDecidedBy() const
     {
         return "native";
@@ -94,18 +166,37 @@ public:
 
         std::vector<Ranked> scored;
         scored.reserve(catalog.entries.size());
-        for(const auto& entry : catalog.entries)
+        try
         {
+            for(const auto& entry : catalog.entries)
+            {
             // A non-finite score sorts last and is reported as 0, the value §5 step 7 gives
             // "no measurement". Keeping the two keys separate is still necessary: NaN in the
             // comparator is undefined behaviour, not merely a wrong order, because it compares
             // false both ways and so is "equivalent" to everything while real scores stay
             // ordered among themselves.
-            const double raw = score(context, catalog.bound, entry);
-            const bool usable = std::isfinite(raw);
-            scored.push_back({usable ? raw : -std::numeric_limits<double>::infinity(),
-                              usable ? raw : 0.0,
-                              &entry});
+                const double raw = score(context, catalog.bound, entry);
+                const bool usable = std::isfinite(raw);
+                scored.push_back({usable ? raw : -std::numeric_limits<double>::infinity(),
+                                  usable ? raw : 0.0,
+                                  &entry});
+            }
+        }
+        catch(const std::exception& e)
+        {
+            // RFC 0019 §5 step 7: "No model, or the scorer errors -> rank by static_order
+            // (priority + id)." A scorer is arbitrary code named by a descriptor -- the shipped
+            // ones read kernel metadata, which throws when a KDP joins the engine with a kernel
+            // that omits the knob -- and this loop had no guard, so the exception propagated out
+            // through rank() and failed the request. Step 7 forbids exactly that: a malformed
+            // descriptor set "must not fail after the engine has already claimed applicability."
+            //
+            // The whole ranking degrades, not the candidates that happened to throw. A mix of
+            // real scores and sentinels is neither order, and step 7 asks for a degraded ranking
+            // rather than a partial one. UhdKernelHeuristic's model path had this guard from the
+            // start; the native path, which is what every shipped UHD uses, did not.
+            reportScorerFailureOnce(e.what());
+            return detail::asScored(detail::declaredOrder(catalog.entries));
         }
 
         std::stable_sort(scored.begin(), scored.end(), [](const auto& lhs, const auto& rhs) {

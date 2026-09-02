@@ -105,37 +105,6 @@ inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefini
     return vars;
 }
 
-/// `priority` descending, then id ascending -- the order rank() falls back to, and the
-/// same one UnrankedKernelHeuristic produces.
-/// Declared order as §15.2's (id, score) pairs, reporting the 0 that means "no measurement".
-///
-/// Shared by every path that degrades, so a fallback cannot come to describe itself one way in
-/// one place and another way elsewhere.
-inline std::vector<IKernelHeuristic::ScoredKernel> asScored(const std::vector<KernelDefinition>& ordered)
-{
-    std::vector<IKernelHeuristic::ScoredKernel> scored;
-    scored.reserve(ordered.size());
-    for(const auto& entry : ordered)
-    {
-        scored.push_back({entry.kernelId, 0.0});
-    }
-    return scored;
-}
-
-inline std::vector<KernelDefinition> declaredOrder(const std::vector<KernelDefinition>& entries)
-{
-    std::vector<KernelDefinition> ordered(entries);
-    std::stable_sort(ordered.begin(),
-                     ordered.end(),
-                     [](const KernelDefinition& a, const KernelDefinition& b) {
-                         if(a.priority != b.priority)
-                         {
-                             return a.priority > b.priority;
-                         }
-                         return a.kernelId < b.kernelId;
-                     });
-    return ordered;
-}
 
 } // namespace detail
 
