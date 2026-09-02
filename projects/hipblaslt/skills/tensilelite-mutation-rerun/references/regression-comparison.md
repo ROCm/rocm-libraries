@@ -37,7 +37,9 @@ population change a test regression.
 A machine identifier must distinguish identical-looking changes that occur more
 than once in one file. Include all four parts:
 
-1. The source path relative to the repository.
+1. The source path relative to the mutation source root: the
+   `mutmut-verify.sh --src` value, which defaults to
+   `projects/hipblaslt/tensilelite`.
 2. The full class and function name, or `<module>`.
 3. The mutation operation and changed body, represented by a full
    cryptographic digest.
@@ -48,7 +50,10 @@ A line number is useful for display, but it cannot be the only location. Line
 numbers change when unrelated lines are added.
 
 Normalize leading `./`, path separators, and diff prefixes such as `a/` and
-`b/`. Reject absolute paths and paths that use `..` to leave the repository.
+`b/`. Reject absolute paths and paths that use `..` to leave the mutation
+source root. That root and the repository are separate checks: after the
+path is joined to the source root, it must also resolve to exactly one file
+tracked in the repository.
 
 Reject an identifier when:
 
