@@ -609,7 +609,7 @@ constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknow
  */
 constexpr target_arch device_target_arch()
 {
-#if defined(__amdgcn_processor__) && !defined(ROCPRIM_EXPERIMENTAL_SPIRV)
+#if defined(__amdgcn_processor__)
     // The terminating zero is not counted in the length of the string
     return get_target_arch_from_name(__amdgcn_processor__,
                                      sizeof(__amdgcn_processor__) - sizeof('\0'));
