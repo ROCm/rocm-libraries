@@ -103,6 +103,10 @@
 #ifndef MIO_DW_RD
 #define MIO_DW_RD 2
 #endif
+// v5 channel-vector width (VARIANT=5): channels per thread, VEC*sizeof(T)==16.
+#ifndef MIO_DW_VEC
+#define MIO_DW_VEC 8
+#endif
 
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
@@ -115,7 +119,9 @@
 // Launch bounds: 256 for the thread-per-output variants (v2/v3a); the block
 // footprint for the two-level-blocked variants (v4/v3b). Derived here so the host
 // need not duplicate the formula — it must still size g_wk with the same block.
-#if NDIMS == 3 && VARIANT == 3
+#if VARIANT == 5
+#define VALU_LB 256
+#elif NDIMS == 3 && VARIANT == 3
 #define VALU_LB \
     ((MIO_DW_BD / MIO_DW_RD) * (MIO_DW_BH / MIO_DW_RH) * (MIO_DW_BW / MIO_DW_RW) * MIO_DW_BK)
 #elif VARIANT == 2 || VARIANT == 3
@@ -213,6 +219,9 @@ extern "C" __global__ void __launch_bounds__(VALU_LB)
 #else
     miopen::conv_depthwise_direct::v2_wstrip_core_nhwc<IO_DTYPE, MIO_DW_WSTRIP>(A, W, D, p);
 #endif
+#elif VARIANT == 5
+    miopen::conv_depthwise_direct::v5_vec_core_nhwc<IO_DTYPE, MIO_DW_KH, MIO_DW_KW, MIO_DW_VEC>(
+        A, W, D, p);
 #elif VARIANT == 1
     miopen::conv_depthwise_direct::
         v3a_microtile_core_nhwc<IO_DTYPE, MIO_DW_KH, MIO_DW_KW, MIO_DW_TH, MIO_DW_TW>(A, W, D, p);

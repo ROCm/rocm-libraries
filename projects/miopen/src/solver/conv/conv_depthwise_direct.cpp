@@ -71,6 +71,7 @@ enum class Variant
     Fused     = 2, // v4_fused      — LDS block stage + register micro-tile
     Lds       = 3, // v3b_lds       — LDS block stage + tap loop from LDS
     Mfma      = 4, // gfx942 MFMA   — SCAFFOLD (cores authored in M3; rows are wip)
+    Vec       = 5, // v5_vec        — channel-vectorised (s=d=1, NHWC, C % VEC == 0)
 };
 
 // A tuning point. Designated-initialiser order below matches this declaration.
@@ -85,6 +86,7 @@ struct Config
     int kd = 0, bd = 0, rd = 0; // 3D LDS (v3b_lds_core_ndhwc): depth kernel/block/register.
                                 // bd > 0 marks a Lds row as the 3D variant.
     int mtile = 0;              // Mfma tile (gfx942 scaffold)
+    int vec   = 0;              // v5 channels per thread (VEC*sizeof(T) == 16)
     // Routing guards (0 = unused). Applied on top of the kernel-size match.
     int n_eq      = 0; // require N == n_eq
     int n_min     = 0; // require N >= n_min
@@ -109,6 +111,49 @@ struct Config
 //   9x9 -> lds 8x8x16 r2x2 (register-light; v4's patch would spill)
 //   everything else (11x11+, stride!=1, non-square) -> v2 floor.
 constexpr Config configs[] = {
+    // 3x3 channel-vectorised (v5). Targets wide-and-short planes with many
+    // channels, where the plane is small enough that the kernel is occupancy-bound
+    // and per-thread halo reuse costs more threads than it saves loads.
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Vec,
+     .kh        = 3,
+     .kw        = 3,
+     .bh        = 8,
+     .bw        = 8,
+     .vec       = 8,
+     .plane_max = 16},
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Vec,
+     .kh        = 3,
+     .kw        = 3,
+     .bh        = 4,
+     .bw        = 16,
+     .vec       = 8,
+     .plane_max = 16},
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Vec,
+     .kh        = 3,
+     .kw        = 3,
+     .bh        = 16,
+     .bw        = 4,
+     .vec       = 8,
+     .plane_max = 16},
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Vec,
+     .kh        = 3,
+     .kw        = 3,
+     .bh        = 4,
+     .bw        = 8,
+     .vec       = 8,
+     .plane_max = 16},
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Vec,
+     .kh        = 3,
+     .kw        = 3,
+     .bh        = 8,
+     .bw        = 4,
+     .vec       = 8,
+     .plane_max = 16},
     // 3x3 microtile
     {.arch    = Arch::Rdna,
      .variant = Variant::Microtile,
@@ -126,6 +171,52 @@ constexpr Config configs[] = {
      .n_min     = 2,
      .plane_max = 7},
     {.arch = Arch::Rdna, .variant = Variant::Microtile, .kh = 3, .kw = 3, .th = 4, .tw = 4},
+    // 3x3 microtile, small output tiles for wide-and-short planes (Ho <= 16, large C):
+    // there the plane is only a few hundred KB and the kernel is occupancy-bound, so
+    // trading threads for per-thread register reuse loses. Guarded by plane_max so the
+    // conventional CNN shapes keep the 2x4 / 4x4 rows.
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Microtile,
+     .kh        = 3,
+     .kw        = 3,
+     .th        = 1,
+     .tw        = 1,
+     .plane_max = 16},
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Microtile,
+     .kh        = 3,
+     .kw        = 3,
+     .th        = 1,
+     .tw        = 2,
+     .plane_max = 16},
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Microtile,
+     .kh        = 3,
+     .kw        = 3,
+     .th        = 1,
+     .tw        = 4,
+     .plane_max = 16},
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Microtile,
+     .kh        = 3,
+     .kw        = 3,
+     .th        = 2,
+     .tw        = 2,
+     .plane_max = 16},
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Microtile,
+     .kh        = 3,
+     .kw        = 3,
+     .th        = 1,
+     .tw        = 8,
+     .plane_max = 16},
+    {.arch      = Arch::Rdna,
+     .variant   = Variant::Microtile,
+     .kh        = 3,
+     .kw        = 3,
+     .th        = 2,
+     .tw        = 1,
+     .plane_max = 16},
     // 5x5 fused
     {.arch      = Arch::Rdna,
      .variant   = Variant::Fused,
@@ -231,6 +322,9 @@ std::string describe(const Config& c)
     switch(c.variant)
     {
     case Variant::WStrip: return "v2_w" + std::to_string(c.wstrip);
+    case Variant::Vec:
+        return "v5_k" + std::to_string(c.kh) + "x" + std::to_string(c.kw) + "_vec" +
+               std::to_string(c.vec) + "_b" + std::to_string(c.bw) + "x" + std::to_string(c.bh);
     case Variant::Microtile:
         return "v3a_k" + std::to_string(c.kh) + "x" + std::to_string(c.kw) + "_t" +
                std::to_string(c.th) + "x" + std::to_string(c.tw);
@@ -303,6 +397,14 @@ bool is_valid_config(Arch dev_arch, const ProblemDescription& problem, const Con
                          (cfg.bw + cfg.kw - 1) * cfg.bk * kIoBytes;
         return lds <= 65536;
     }
+
+    // v5 is channel-vectorised: one 16-byte load per tap, so the channel count
+    // must be a whole number of vectors and the row/plane strides 16B-aligned.
+    // (2D, s=d=1 and the kernel-size match are enforced with the halo variants
+    // just below, which v5 also requires.)
+    if(cfg.variant == Variant::Vec &&
+       (cfg.vec == 0 || PI::GetInputChannelC(problem) % cfg.vec != 0))
+        return false;
 
     // The halo variants bake a compile-time kernel size and s=d=1, and are 2D
     // only (3D routes to the v2 floor).
@@ -378,6 +480,15 @@ LaunchDims get_launch_params(const Config& cfg, const ProblemDescription& proble
         const long total = static_cast<long>(N) * divup(Ho, cfg.th) * divup(Wo, cfg.tw) * C;
         d.block          = 256;
         d.grid           = static_cast<std::size_t>(divup(total, static_cast<long>(d.block)));
+        break;
+    }
+    case Variant::Vec: {
+        // 3D launch: x = channel-vectors, y = output columns, z = n*Ho. Keeps the
+        // per-thread index math division-free (see v5_vec_core_nhwc).
+        d.block = cfg.bw * cfg.bh;
+        d.grid  = static_cast<std::size_t>(divup(C / cfg.vec, cfg.bw)) *
+                 static_cast<std::size_t>(divup(Wo, cfg.bh)) * static_cast<std::size_t>(N) *
+                 static_cast<std::size_t>(Ho);
         break;
     }
     case Variant::Fused:
@@ -557,8 +668,23 @@ ConvDepthwiseDirect::GetSolution(const ExecutionContext& /*ctx*/,
     KernelInfo kernel;
     kernel.kernel_file = is_mfma ? "miopen_depthwise_mfma.cpp" : "miopen_depthwise_valu.cpp";
     kernel.kernel_name = is_mfma ? "miopen_depthwise_mfma" : "miopen_depthwise_valu";
-    kernel.l_wk        = {static_cast<std::size_t>(dims.block), 1, 1};
-    kernel.g_wk        = {dims.grid * static_cast<std::size_t>(dims.block), 1, 1};
+    if(cfg.variant == Variant::Vec)
+    {
+        // 3D NDRange: x = channel-vectors, y = output columns, z = n*Ho.
+        const int cvv = ProblemInterpreter::GetInputChannelC(problem) / cfg.vec;
+        const int wo  = ProblemInterpreter::GetOutputWidthWo(problem);
+        const int ho  = ProblemInterpreter::GetOutputHeightHo(problem);
+        const int nn  = ProblemInterpreter::GetBatchN(problem);
+        kernel.l_wk   = {static_cast<std::size_t>(cfg.bw), static_cast<std::size_t>(cfg.bh), 1};
+        kernel.g_wk   = {static_cast<std::size_t>(divup(cvv, cfg.bw) * cfg.bw),
+                         static_cast<std::size_t>(divup(wo, cfg.bh) * cfg.bh),
+                         static_cast<std::size_t>(nn) * static_cast<std::size_t>(ho)};
+    }
+    else
+    {
+        kernel.l_wk = {static_cast<std::size_t>(dims.block), 1, 1};
+        kernel.g_wk = {dims.grid * static_cast<std::size_t>(dims.block), 1, 1};
+    }
 
     const bool is3d = problem.Is3d();
 
@@ -578,6 +704,11 @@ ConvDepthwiseDirect::GetSolution(const ExecutionContext& /*ctx*/,
     // would textually rewrite the header's template-parameter list. See
     // miopen_depthwise_valu.cpp.
     case Variant::WStrip: build.Define("MIO_DW_WSTRIP", cfg.wstrip); break;
+    case Variant::Vec:
+        build.Define("MIO_DW_KH", cfg.kh);
+        build.Define("MIO_DW_KW", cfg.kw);
+        build.Define("MIO_DW_VEC", cfg.vec);
+        break;
     case Variant::Microtile:
         build.Define("MIO_DW_KH", cfg.kh);
         build.Define("MIO_DW_KW", cfg.kw);

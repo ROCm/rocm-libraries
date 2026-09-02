@@ -309,6 +309,128 @@ v2_core_ncdhw(const T* __restrict__ A, const T* __restrict__ Wt, T* __restrict__
 // Each thread emits a TH×TW output tile and caches the (TH+KH-1)×(TW+KW-1) input
 // patch in registers. Bakes s=d=1 and compile-time KH/KW so the tap loops and the
 // register patch/accumulators fully unroll into named registers.
+// ---------------------------------------------------------------------------
+// v5_vec_core_nhwc — channel-vectorised 3x3-class core (s=d=1, NHWC).
+//
+// The other NHWC cores give one *channel* to a thread and reuse the halo in
+// registers across an output micro-tile. That is the right trade when the plane
+// is large, but on wide-and-short planes with many channels (Ho of a few rows,
+// Wo ~80, C in the hundreds) the whole tensor is a few hundred KB: the kernel is
+// occupancy-bound, per-thread reuse just removes threads, and the scalar channel
+// loads move only sizeof(T)*wavefront bytes per instruction.
+//
+// This core goes the other way: one output pixel per thread, VEC channels wide,
+// so each tap is a single 16-byte (dwordx4) load. Three things keep the emitted
+// code tight, and all three were measured to matter:
+//   - 32-bit element offsets. size_t indexing here costs ~135 extra instructions
+//     of 64-bit address math (v_mad_u64_u32 / v_add_co_u32 / v_lshlrev_b64).
+//     IsApplicable already requires AllTensorsLengthsFitIntoInt.
+//   - Out-of-range taps address past the buffer descriptor's num_records so the
+//     hardware returns zero. A branch split into interior/edge paths instead
+//     duplicates the whole tap body (27 loads instead of 19).
+//   - Accumulating per element with fmaf() on converted halves, rather than
+//     converting whole vectors first, lets the compiler contract each tap into a
+//     single v_fma_mix_f32 (otherwise it emits a separate v_cvt_f32_f16 per tap).
+//
+// Weights are [C][KH*KW], so the VEC channels a thread owns are one contiguous
+// VEC*KH*KW run: it is loaded as whole vectors and transposed by compile-time
+// index, which costs nothing at runtime.
+// ---------------------------------------------------------------------------
+
+// word3 of the raw buffer descriptor: OOB_SELECT=3, so an out-of-range voffset
+// reads zero. Same per-arch constant CK uses (CK_BUFFER_RESOURCE_3RD_DWORD).
+#ifndef MIOPEN_DW_BUF_RSRC_W3
+#if defined(__gfx900__) || defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__) || \
+    defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9__)
+#define MIOPEN_DW_BUF_RSRC_W3 0x00020000
+#elif defined(__gfx101__) || defined(__gfx103__)
+#define MIOPEN_DW_BUF_RSRC_W3 0x31014000
+#else // gfx11xx / gfx120x — the only arches this variant is enabled for
+#define MIOPEN_DW_BUF_RSRC_W3 0x31004000
+#endif
+#endif
+
+template <typename T, int KH, int KW, int VEC>
+__device__ inline void
+v5_vec_core_nhwc(const T* __restrict__ A, const T* __restrict__ Wt, T* __restrict__ D, ValuParams p)
+{
+    static_assert(VEC * sizeof(T) == 16, "v5 moves exactly one 16-byte vector per tap");
+    using v4i_t = int __attribute__((ext_vector_type(4)));
+    struct alignas(16) VecT
+    {
+        T v[VEC];
+    };
+    constexpr int NTAP = KH * KW;
+
+    // Indices come straight from the grid: x = channel-vector (contiguous, so a
+    // wave covers one linear run), y = output column, z = n*Ho. A flat 1D launch
+    // would need tid % CV and tid / CV per thread -- two integer divisions by a
+    // runtime value, which measured ~1.8x slower than this on these shapes. Only
+    // the z decomposition divides, and blockIdx.z is wave-uniform so it lands in
+    // scalar registers once per block.
+    const int CV = p.C / VEC;
+    const int cv =
+        static_cast<int>(blockIdx.x) * static_cast<int>(blockDim.x) + static_cast<int>(threadIdx.x);
+    const int wo =
+        static_cast<int>(blockIdx.y) * static_cast<int>(blockDim.y) + static_cast<int>(threadIdx.y);
+    if(cv >= CV || wo >= p.Wo)
+        return;
+    const int ho = static_cast<int>(blockIdx.z) % p.Ho;
+    const int n  = static_cast<int>(blockIdx.z) / p.Ho;
+    if(n >= p.N)
+        return;
+
+    // Weights: the VEC channels of this thread are VEC consecutive [KH*KW] rows.
+    const T* wbase = Wt + cv * VEC * NTAP;
+    VecT wraw[NTAP];
+#pragma unroll
+    for(int j = 0; j < NTAP; ++j)
+        wraw[j] = *reinterpret_cast<const VecT*>(wbase + j * VEC);
+
+    const int nrec = p.N * p.Hi * p.Wi * p.C * static_cast<int>(sizeof(T));
+    auto rsrc      = __builtin_amdgcn_make_buffer_rsrc(
+        const_cast<T*>(A), static_cast<short>(0), nrec, MIOPEN_DW_BUF_RSRC_W3);
+
+    const int inbase = (n * p.Hi) * p.Wi * p.C + cv * VEC;
+    float acc[VEC];
+#pragma unroll
+    for(int i = 0; i < VEC; ++i)
+        acc[i] = 0.0f;
+
+#pragma unroll
+    for(int ky = 0; ky < KH; ++ky)
+    {
+        const int ih   = ho - p.ph + ky;
+        const bool rok = (ih >= 0 && ih < p.Hi);
+#pragma unroll
+        for(int kx = 0; kx < KW; ++kx)
+        {
+            const int iw    = wo - p.pw + kx;
+            const bool ok   = rok && (iw >= 0) && (iw < p.Wi);
+            const int off   = ok ? (inbase + (ih * p.Wi + iw) * p.C) * static_cast<int>(sizeof(T))
+                                 : nrec; // >= num_records -> reads zero
+            const v4i_t raw = __builtin_amdgcn_raw_buffer_load_b128(rsrc, off, 0, 0);
+            const VecT xv   = __builtin_bit_cast(VecT, raw);
+#pragma unroll
+            for(int i = 0; i < VEC; ++i)
+            {
+                // weight of channel i for this tap: wbase[i*NTAP + ky*KW + kx]
+                acc[i] = __builtin_fmaf(
+                    valu_to_f32(xv.v[i]),
+                    valu_to_f32(
+                        wraw[(i * NTAP + ky * KW + kx) / VEC].v[(i * NTAP + ky * KW + kx) % VEC]),
+                    acc[i]);
+            }
+        }
+    }
+
+    VecT res;
+#pragma unroll
+    for(int i = 0; i < VEC; ++i)
+        res.v[i] = static_cast<T>(acc[i]);
+    *reinterpret_cast<VecT*>(D + ((n * p.Ho + ho) * p.Wo + wo) * p.C + cv * VEC) = res;
+}
+
 template <typename T, int KH, int KW, int TH, int TW>
 __device__ inline void v3a_microtile_core_nhwc(const T* __restrict__ A,
                                                const T* __restrict__ Wt,
