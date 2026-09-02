@@ -162,7 +162,8 @@ function(hkp_wire_pack_target)
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Kept in the binary dir rather than beside the output: both the output and the
     # intermediate roots are wiped before each pack, which would take a stamp inside
-    # either of them with it.
+    # either of them with it. Living outside the tree it vouches for, it is removed
+    # before the wipe rather than only rewritten after the pack -- see the recipe.
     set(_stamp "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-descriptors.stamp")
 
     # The rocKE producer needs the wheel-provisioned interpreter so its UKDs
@@ -231,8 +232,16 @@ function(hkp_wire_pack_target)
     set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env} "${_interp}"
         "${HKP_TOOL}")
 
+    # The stamp goes first, ahead of the wipe. It is the only thing standing between a
+    # half-packed tree and a build that believes the tree is current: the wipe empties
+    # OUT_ROOT, so a pack that dies after it -- a compiler failure, a killed job, an
+    # interrupted build -- leaves no descriptors behind. A stamp that outlived that pack
+    # would mark the edge up to date, the empty tree would never be repacked, and the
+    # embedding check would walk nothing and pass at zero descriptors. Removing it first
+    # means no stamp exists until a pack completes.
     add_custom_command(
         OUTPUT "${_stamp}"
+        COMMAND "${CMAKE_COMMAND}" -E rm -f "${_stamp}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_inter_root}"
         COMMAND ${_tool_cmd}
