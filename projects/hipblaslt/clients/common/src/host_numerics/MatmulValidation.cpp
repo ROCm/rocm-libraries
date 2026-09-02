@@ -47,12 +47,12 @@ namespace hipblaslt::host_numerics
         }
     } // namespace
 
-    MatmulValidationResult validateMatmulOutputs(const MatmulValidationRequest& request)
+    bool validateMatmulOutputs(const MatmulValidationOptions&        options,
+                               std::span<const MatmulValidationCase> cases,
+                               MatmulValidationMetrics               metrics)
     {
-        MatmulValidationResult result;
-        const auto             record = [&](bool passed) {
-            result.failedChecks += static_cast<size_t>(!passed);
-        };
+        size_t     failedChecks = 0;
+        const auto record = [&](bool passed) { failedChecks += static_cast<size_t>(!passed); };
         double ulpSum           = 0.0;
         size_t ulpCount         = 0;
         // Each output is searched independently. The componentwise maxima form
@@ -63,50 +63,50 @@ namespace hipblaslt::host_numerics
         double requiredAbsolute = 0.0;
         double requiredRelative = 0.0;
 
-        for(const auto& validationCase : request.cases)
+        for(const auto& validationCase : cases)
         {
             std::vector<HostComparisonReport> outputReports;
             outputReports.reserve(validationCase.outputs.size());
             for(const auto& output : validationCase.outputs)
             {
-                outputReports.push_back(compareMatmulOutput(output,
-                                                            validationCase,
-                                                            request.options,
-                                                            request.options.comparePointwise
-                                                                || request.options.compareNorm,
-                                                            request.options.searchAllClose,
-                                                            request.options.computeUlp));
+                outputReports.push_back(
+                    compareMatmulOutput(output,
+                                        validationCase,
+                                        options,
+                                        options.comparePointwise || options.compareNorm,
+                                        options.searchAllClose,
+                                        options.computeUlp));
             }
 
-            if(request.options.comparePointwise || request.options.compareNorm)
+            if(options.comparePointwise || options.compareNorm)
             {
                 for(const auto& report : outputReports)
                     record(report.comparison.nonFiniteMismatches == 0);
             }
-            if(request.options.comparePointwise)
+            if(options.comparePointwise)
             {
                 for(const auto& report : outputReports)
                     record(report.comparison.passed());
             }
 
-            if(request.options.compareNorm)
+            if(options.compareNorm)
             {
                 for(const auto& report : outputReports)
                 {
                     const double normError = std::abs(report.relativeFrobeniusError);
-                    request.metrics.relativeFrobeniusError += normError;
-                    if(request.options.assertNorm)
+                    metrics.relativeFrobeniusError += normError;
+                    if(options.assertNorm)
                     {
                         record(norm_check(normError,
                                           validationCase.outputs.front().type,
-                                          request.options.computeType,
-                                          request.options.inputTypeA,
-                                          request.options.inputTypeB));
+                                          options.computeType,
+                                          options.inputTypeA,
+                                          options.inputTypeB));
                     }
                 }
             }
 
-            if(request.options.searchAllClose)
+            if(options.searchAllClose)
             {
                 for(size_t outputIndex = 0; outputIndex < outputReports.size(); ++outputIndex)
                 {
@@ -128,12 +128,12 @@ namespace hipblaslt::host_numerics
                 }
             }
 
-            if(request.options.computeUlp)
+            if(options.computeUlp)
             {
                 for(const auto& report : outputReports)
                 {
-                    request.metrics.maximumUlp = std::max(
-                        request.metrics.maximumUlp, report.unitsInLastPlaceComparison.maximumUlp);
+                    metrics.maximumUlp = std::max(metrics.maximumUlp,
+                                                  report.unitsInLastPlaceComparison.maximumUlp);
                     ulpSum += report.unitsInLastPlaceComparison.sumUlp;
                     ulpCount += report.unitsInLastPlaceComparison.ulpCompared;
                 }
@@ -143,9 +143,9 @@ namespace hipblaslt::host_numerics
                 = [&](const std::optional<MatmulValidationCase::SideOutput>& output) {
                       if(!output)
                           return;
-                      if(request.options.comparePointwise)
+                      if(options.comparePointwise)
                       {
-                          auto pointwiseOptions        = request.options;
+                          auto pointwiseOptions        = options;
                           pointwiseOptions.compareNorm = false;
                           const auto report            = compareMatmulOutput(output->pointwise,
                                                                   validationCase,
@@ -155,22 +155,22 @@ namespace hipblaslt::host_numerics
                                                                   false);
                           record(report.comparison.passed());
                       }
-                      if(request.options.compareNorm)
+                      if(options.compareNorm)
                       {
-                          auto normOptions             = request.options;
+                          auto normOptions             = options;
                           normOptions.comparePointwise = false;
                           const auto report            = compareMatmulOutput(
                               output->norm, validationCase, normOptions, false, false, false);
                           const double normError = std::abs(report.relativeFrobeniusError);
-                          request.metrics.relativeFrobeniusError += normError;
-                          if(request.options.assertNorm)
+                          metrics.relativeFrobeniusError += normError;
+                          if(options.assertNorm)
                           {
                               record(output->useComputeNormPolicy
                                          ? norm_check(normError,
                                                       output->norm.type,
-                                                      request.options.computeType,
-                                                      request.options.inputTypeA,
-                                                      request.options.inputTypeB)
+                                                      options.computeType,
+                                                      options.inputTypeA,
+                                                      options.inputTypeB)
                                          : norm_check(normError, output->norm.type));
                           }
                       }
@@ -181,13 +181,13 @@ namespace hipblaslt::host_numerics
             validateSideOutput(validationCase.bias);
         }
 
-        if(request.options.searchAllClose && allCloseCompared)
+        if(options.searchAllClose && allCloseCompared)
         {
-            request.metrics.absoluteTolerance = allCloseFailed ? 1.0 : requiredAbsolute;
-            request.metrics.relativeTolerance = allCloseFailed ? 1.0 : requiredRelative;
+            metrics.absoluteTolerance = allCloseFailed ? 1.0 : requiredAbsolute;
+            metrics.relativeTolerance = allCloseFailed ? 1.0 : requiredRelative;
         }
-        if(request.options.computeUlp && ulpCount != 0)
-            request.metrics.averageUlp = ulpSum / ulpCount;
-        return result;
+        if(options.computeUlp && ulpCount != 0)
+            metrics.averageUlp = ulpSum / ulpCount;
+        return failedChecks == 0;
     }
 } // namespace hipblaslt::host_numerics
