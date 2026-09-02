@@ -489,3 +489,159 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 288]   # 32-element K tail
           - Exact: [256, 256, 1, 272]   # 16-element K tail
           - Exact: [255, 256, 1, 352]   # odd M against a K tail
+
+  -
+    - # NT, wide macro-tile sweep.  Sampled at an even stride across every
+      # tile/wave-group combination the TLU=1 path admits, so the spread covers
+      # all six wave groups and the full 32..256 range rather than clustering.
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  1, 1]   # MT32x32 wg1x1
+          - [16, 16, 32, 1,  1, 2, 10,  1, 1]   # MT32x160 wg1x1
+          - [16, 16, 32, 1,  1, 2, 15,  1, 1]   # MT32x240 wg1x1
+          - [16, 16, 32, 1,  1, 4, 8,  1, 1]   # MT64x128 wg1x1
+          - [16, 16, 32, 1,  1, 4, 13,  1, 1]   # MT64x208 wg1x1
+          - [16, 16, 32, 1,  1, 6, 4,  1, 1]   # MT96x64 wg1x1
+          - [16, 16, 32, 1,  1, 8, 2,  1, 1]   # MT128x32 wg1x1
+          - [16, 16, 32, 1,  1, 9, 4,  1, 1]   # MT144x64 wg1x1
+          - [16, 16, 32, 1,  1, 11, 2,  1, 1]   # MT176x32 wg1x1
+          - [16, 16, 32, 1,  1, 13, 4,  1, 1]   # MT208x64 wg1x1
+          - [16, 16, 32, 1,  1, 16, 2,  1, 1]   # MT256x32 wg1x1
+          - [16, 16, 32, 1,  1, 1, 6,  2, 2]   # MT32x192 wg2x2
+          - [16, 16, 32, 1,  1, 2, 6,  2, 2]   # MT64x192 wg2x2
+          - [16, 16, 32, 1,  1, 4, 6,  2, 2]   # MT128x192 wg2x2
+          - [16, 16, 32, 1,  1, 6, 6,  2, 2]   # MT192x192 wg2x2
+          - [16, 16, 32, 1,  1, 8, 6,  2, 2]   # MT256x192 wg2x2
+          - [16, 16, 32, 1,  1, 4, 1,  1, 4]   # MT64x64 wg1x4
+          - [16, 16, 32, 1,  1, 6, 4,  1, 4]   # MT96x256 wg1x4
+          - [16, 16, 32, 1,  1, 9, 2,  1, 4]   # MT144x128 wg1x4
+          - [16, 16, 32, 1,  1, 11, 1,  1, 4]   # MT176x64 wg1x4
+          - [16, 16, 32, 1,  1, 12, 4,  1, 4]   # MT192x256 wg1x4
+          - [16, 16, 32, 1,  1, 14, 2,  1, 4]   # MT224x128 wg1x4
+          - [16, 16, 32, 1,  1, 16, 1,  1, 4]   # MT256x64 wg1x4
+          - [16, 16, 32, 1,  1, 1, 6,  4, 1]   # MT64x96 wg4x1
+          - [16, 16, 32, 1,  1, 1, 12,  4, 1]   # MT64x192 wg4x1
+          - [16, 16, 32, 1,  1, 2, 2,  4, 1]   # MT128x32 wg4x1
+          - [16, 16, 32, 1,  1, 2, 10,  4, 1]   # MT128x160 wg4x1
+          - [16, 16, 32, 1,  1, 2, 15,  4, 1]   # MT128x240 wg4x1
+          - [16, 16, 32, 1,  1, 4, 8,  4, 1]   # MT256x128 wg4x1
+          - [16, 16, 32, 1,  1, 4, 13,  4, 1]   # MT256x208 wg4x1
+          - [16, 16, 32, 1,  1, 2, 2,  1, 2]   # MT32x64 wg1x2
+          - [16, 16, 32, 1,  1, 4, 2,  1, 2]   # MT64x64 wg1x2
+          - [16, 16, 32, 1,  1, 6, 2,  1, 2]   # MT96x64 wg1x2
+          - [16, 16, 32, 1,  1, 8, 2,  1, 2]   # MT128x64 wg1x2
+          - [16, 16, 32, 1,  1, 9, 2,  1, 2]   # MT144x64 wg1x2
+          - [16, 16, 32, 1,  1, 10, 4,  1, 2]   # MT160x128 wg1x2
+          - [16, 16, 32, 1,  1, 12, 1,  1, 2]   # MT192x32 wg1x2
+          - [16, 16, 32, 1,  1, 13, 4,  1, 2]   # MT208x128 wg1x2
+          - [16, 16, 32, 1,  1, 15, 2,  1, 2]   # MT240x64 wg1x2
+          - [16, 16, 32, 1,  1, 1, 2,  2, 1]   # MT32x32 wg2x1
+          - [16, 16, 32, 1,  1, 1, 10,  2, 1]   # MT32x160 wg2x1
+          - [16, 16, 32, 1,  1, 1, 15,  2, 1]   # MT32x240 wg2x1
+          - [16, 16, 32, 1,  1, 2, 8,  2, 1]   # MT64x128 wg2x1
+          - [16, 16, 32, 1,  1, 2, 13,  2, 1]   # MT64x208 wg2x1
+          - [16, 16, 32, 1,  1, 4, 4,  2, 1]   # MT128x64 wg2x1
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseCustomMainLoopSchedule: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 256]
+          - Exact: [1000, 1000, 1, 256]
+
+  -
+    - # NT, small odd sizes swept by Range.  bf16 carries no free-dim alignment
+      # assert, so these land deliberately off every 32/64 boundary; a Range
+      # covers far more edge shapes per line than an Exact list.
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  1, 1]   # MT32x32   wg1x1
+          - [16, 16, 32, 1,  1, 4, 4,  1, 1]   # MT64x64   wg1x1
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseCustomMainLoopSchedule: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Range format: [start, step, stop]
+          - Range: [[17, 32, 113], [17, 32, 113], [1], [128]]  # 17,49,81,113 -- 1 past a 32 boundary
+          - Range: [[33, 64, 161], [33, 64, 161], [1], [128]]  # 33,97,161 -- just above 32/64 multiples
+          - Range: [[17, 32, 113], [17, 32, 113], [1], [384]]
+          - Range: [[33, 64, 161], [33, 64, 161], [1], [384]]
+
+  -
+    - # NT, long K.  Nothing else in this suite runs the K loop far enough to
+      # shake out accumulation or loop-counter issues; the TN suite carries the
+      # same 30720 case.
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  1, 1]   # MT64x64   wg1x1
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseCustomMainLoopSchedule: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [544, 128, 1, 30720]
+          - Exact: [128, 544, 1, 30720]
