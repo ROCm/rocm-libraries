@@ -100,8 +100,6 @@ Options parseOptions(int argc, char** argv) {
     options.warmups = parseSize(argv[6], "warmup count");
     options.iterations = parseSize(argv[7], "iteration count");
     if (argc == 9) options.profile = argv[8];
-    if (options.rows == 0 || options.columns == 0 || options.reductions == 0)
-        throw std::invalid_argument("M, N, and K must be nonzero.");
     if (options.iterations == 0) throw std::invalid_argument("Iterations must be nonzero.");
     return options;
 }
@@ -178,10 +176,10 @@ int main(int argc, char** argv) {
             if (options.reductions % blockSize != 0)
                 throw std::invalid_argument("MX profiles require K divisible by 32.");
             const size_t reductionBlocks = options.reductions / blockSize;
-            request.a.blockScale =
-                BlockScaleBinding(makeBlockScales(options.rows, reductionBlocks, 3), blockSize);
-            request.b.blockScale =
-                BlockScaleBinding(makeBlockScales(options.columns, reductionBlocks, 4), blockSize);
+            request.a.blockScale = makeBlockScales(options.rows, reductionBlocks, 3);
+            request.a.blockSize = blockSize;
+            request.b.blockScale = makeBlockScales(options.columns, reductionBlocks, 4);
+            request.b.blockSize = blockSize;
         }
 
         const GemmBackend backend = options.backend;
@@ -207,7 +205,9 @@ int main(int argc, char** argv) {
                                      profile.accumulatorType);
         expectedRequest.outputSelection = validationSelection;
         expectedRequest.a.blockScale = request.a.blockScale;
+        expectedRequest.a.blockSize = request.a.blockSize;
         expectedRequest.b.blockScale = request.b.blockScale;
+        expectedRequest.b.blockSize = request.b.blockSize;
         referenceGemm(expectedRequest, GemmBackend::Pointwise);
 
         const std::vector<size_t> validationIndices = validationSelection.indices(outputElements);

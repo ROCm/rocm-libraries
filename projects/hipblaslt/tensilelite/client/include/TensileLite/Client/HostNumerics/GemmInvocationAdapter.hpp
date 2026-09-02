@@ -65,13 +65,13 @@ namespace TensileLite::Client::HostNumerics
         void runPostGemmOperationsAndCopyOutputs() const;
 
     private:
-        explicit TranslatedGemmBatch(roc::host_numerics::GemmOperand aOperand,
-                                     roc::host_numerics::GemmOperand bOperand,
-                                     roc::host_numerics::Tensor      cTensor,
-                                     roc::host_numerics::Tensor      dTensor,
-                                     roc::host_numerics::ScalarType  accumulatorType)
-            : a(std::move(aOperand))
-            , b(std::move(bOperand))
+        explicit TranslatedGemmBatch(roc::host_numerics::Tensor     aTensor,
+                                     roc::host_numerics::Tensor     bTensor,
+                                     roc::host_numerics::Tensor     cTensor,
+                                     roc::host_numerics::Tensor     dTensor,
+                                     roc::host_numerics::ScalarType accumulatorType)
+            : a(std::move(aTensor))
+            , b(std::move(bTensor))
             , c(std::move(cTensor))
             , d(std::move(dTensor))
             , options(accumulatorType)
@@ -120,8 +120,8 @@ namespace TensileLite::Client::HostNumerics
             roc::host_numerics::EpilogueOptions options;
         };
 
-        roc::host_numerics::GemmOperand a;
-        roc::host_numerics::GemmOperand b;
+        roc::host_numerics::Tensor      a;
+        roc::host_numerics::Tensor      b;
         roc::host_numerics::Tensor      c;
         roc::host_numerics::Tensor      d;
         roc::host_numerics::GemmOptions options;

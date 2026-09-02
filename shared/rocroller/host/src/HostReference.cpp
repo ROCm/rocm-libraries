@@ -15,11 +15,11 @@ namespace rocRoller::HostNumerics
     {
         using namespace roc::host_numerics;
 
-        BlockScaleBinding normalizeBlockScale(Tensor      values,
-                                              size_t      freeExtent,
-                                              size_t      reductionExtent,
-                                              size_t      blockSize,
-                                              char const* name)
+        Tensor normalizeBlockScale(Tensor      values,
+                                   size_t      freeExtent,
+                                   size_t      reductionExtent,
+                                   size_t      blockSize,
+                                   char const* name)
         {
             if(blockSize == 0)
                 throw std::invalid_argument("rocRoller scale block size must be nonzero.");
@@ -30,7 +30,7 @@ namespace rocRoller::HostNumerics
                 throw std::invalid_argument(std::string("rocRoller ") + name
                                             + " scales must have shape [free extent, K block].");
 
-            return {std::move(values), blockSize};
+            return values;
         }
     }
 
@@ -120,26 +120,23 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument(
                 "rocRoller host GEMM C shape does not match the output shape.");
 
-        GemmOperand operandA(std::move(a));
-        GemmOperand operandB(std::move(b));
+        GemmOptions options(ScalarType::Float32);
         if(scaleA)
-            operandA.blockScale = normalizeBlockScale(std::move(*scaleA),
-                                                      operandA.values.shape()[0],
-                                                      operandA.values.shape()[1],
-                                                      scaleBlockSize,
-                                                      "A");
+            options.blockScaleA = normalizeBlockScale(
+                std::move(*scaleA), a.shape()[0], a.shape()[1], scaleBlockSize, "A");
         if(scaleB)
-            operandB.blockScale = normalizeBlockScale(std::move(*scaleB),
-                                                      operandB.values.shape()[1],
-                                                      operandB.values.shape()[0],
-                                                      scaleBlockSize,
-                                                      "B");
+            options.blockScaleB = normalizeBlockScale(
+                std::move(*scaleB), b.shape()[1], b.shape()[0], scaleBlockSize, "B");
+        if(options.blockScaleA)
+            options.blockSizeA = scaleBlockSize;
+        if(options.blockScaleB)
+            options.blockSizeB = scaleBlockSize;
 
         HostReferenceGemm result{
-            .a       = std::move(operandA),
-            .b       = std::move(operandB),
+            .a       = std::move(a),
+            .b       = std::move(b),
             .c       = std::move(c),
-            .options = GemmOptions(ScalarType::Float32),
+            .options = std::move(options),
         };
         result.options.epilogue.alpha = alpha;
         result.options.epilogue.beta  = beta;
@@ -175,10 +172,10 @@ namespace rocRoller::HostNumerics
     {
         using namespace roc::host_numerics;
 
-        const size_t rows = problem.a.values.shape()[0];
+        const size_t rows = problem.a.shape()[0];
         if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
             throw std::overflow_error("rocRoller host GEMM output stride exceeds ptrdiff_t.");
-        const Layout outputLayout(Shape{rows, problem.b.values.shape()[1]},
+        const Layout outputLayout(Shape{rows, problem.b.shape()[1]},
                                   {1, static_cast<ptrdiff_t>(rows)});
         return referenceGemmWithBlasBackend(
             problem.a, problem.b, problem.c, ScalarType::Float32, problem.options, outputLayout);

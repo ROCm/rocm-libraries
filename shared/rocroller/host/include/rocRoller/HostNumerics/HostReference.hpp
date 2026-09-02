@@ -56,8 +56,8 @@ namespace rocRoller::HostNumerics
 
     struct HostReferenceGemm
     {
-        roc::host_numerics::GemmOperand a;
-        roc::host_numerics::GemmOperand b;
+        roc::host_numerics::Tensor      a;
+        roc::host_numerics::Tensor      b;
         roc::host_numerics::Tensor      c;
         roc::host_numerics::GemmOptions options;
     };
@@ -128,10 +128,8 @@ namespace rocRoller::HostNumerics
     template <typename Output>
     std::vector<Output> convertHostReference(roc::host_numerics::Tensor floatOutput)
     {
-        static_assert(
-            std::is_same_v<
-                Output,
-                float> || std::is_same_v<Output, Half> || std::is_same_v<Output, BFloat16>);
+        static_assert(std::is_same_v<Output, float> || std::is_same_v<Output, Half>
+                      || std::is_same_v<Output, BFloat16>);
 
         using namespace roc::host_numerics;
         if(floatOutput.type() != ScalarType::Float32 || floatOutput.shape().rank() != 2)

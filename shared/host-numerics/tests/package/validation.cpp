@@ -22,10 +22,10 @@ int main() {
     const std::array<float, 1> c{0};
     Tensor d(ScalarType::Float32, Shape{1, 1});
 
-    const GemmOperand operandA(Tensor::copyNativeStorage<float>(
-        Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(a)));
-    const GemmOperand operandB(Tensor::copyNativeStorage<float>(
-        Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b)));
+    const Tensor operandA = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(a));
+    const Tensor operandB = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b));
     const Tensor inputC = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(c));
     if (!queryGemmSupport(operandA, operandB, inputC, d)) return 1;
@@ -37,10 +37,10 @@ int main() {
         return 1;
 
     const Tensor ownedGemm = referenceGemm(
-        GemmOperand(Tensor::copyNativeStorage<float>(
-            Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(a))),
-        GemmOperand(Tensor::copyNativeStorage<float>(
-            Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b))),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                         std::span<const float>(a)),
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                         std::span<const float>(b)),
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                          std::span<const float>(c)),
         ScalarType::Float32);

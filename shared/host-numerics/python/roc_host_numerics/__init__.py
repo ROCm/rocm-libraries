@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from . import _roc_host_numerics as _native
 from ._roc_host_numerics import *  # noqa: F403
 
 
@@ -153,52 +154,39 @@ def reference_gemm(
 ):
     """Compute a reference GEMM from tensor arguments and return its output tensor."""
 
-    operand_a = GemmOperand(a)  # noqa: F405
-    operand_b = GemmOperand(b)  # noqa: F405
-    if compute_type_a is not None:
-        operand_a.compute_type = compute_type_a
-    if compute_type_b is not None:
-        operand_b.compute_type = compute_type_b
-    operand_a.conjugate = conjugate_a
-    operand_b.conjugate = conjugate_b
-
     def as_default_vector_broadcast(scale, axis):
         return scale.expand_dims(axis) if len(scale.shape) == 1 else scale
 
-    def add_pre_quantization_scales(operand, scales, default_axis):
+    def pre_quantization_scales(scales, default_axis):
         scales = [] if scales is None else list(scales)
-        operand.pre_quantization_scales = [
-            as_default_vector_broadcast(scale, default_axis) for scale in scales
-        ]
+        return [as_default_vector_broadcast(scale, default_axis) for scale in scales]
 
-    add_pre_quantization_scales(operand_a, pre_quantization_scales_a, 1)
-    add_pre_quantization_scales(operand_b, pre_quantization_scales_b, 0)
-
-    if block_scale_a is not None:
-        if block_size_a == 0:
-            raise ValueError(
-                "Python reference_gemm A block scale requires a nonzero size."
-            )
-        operand_a.block_scale = BlockScaleBinding(  # noqa: F405
-            block_scale_a, block_size_a
-        )
-    elif block_size_a != 0:
+    if block_scale_a is not None and block_size_a == 0:
+        raise ValueError("Python reference_gemm A block scale requires a nonzero size.")
+    if block_scale_a is None and block_size_a != 0:
         raise ValueError("Python reference_gemm A block size requires a scale tensor.")
-
-    if block_scale_b is not None:
-        if block_size_b == 0:
-            raise ValueError(
-                "Python reference_gemm B block scale requires a nonzero size."
-            )
-        operand_b.block_scale = BlockScaleBinding(  # noqa: F405
-            block_scale_b, block_size_b
-        )
-    elif block_size_b != 0:
+    if block_scale_b is not None and block_size_b == 0:
+        raise ValueError("Python reference_gemm B block scale requires a nonzero size.")
+    if block_scale_b is None and block_size_b != 0:
         raise ValueError("Python reference_gemm B block size requires a scale tensor.")
 
     options = GemmOptions(accumulator_type)  # noqa: F405
     options.accumulation_rounding = accumulation_rounding
     options.math_mode = math_mode
+    options.compute_type_a = compute_type_a
+    options.compute_type_b = compute_type_b
+    options.pre_quantization_scales_a = pre_quantization_scales(
+        pre_quantization_scales_a, 1
+    )
+    options.pre_quantization_scales_b = pre_quantization_scales(
+        pre_quantization_scales_b, 0
+    )
+    options.block_scale_a = block_scale_a
+    options.block_scale_b = block_scale_b
+    options.block_size_a = block_size_a
+    options.block_size_b = block_size_b
+    options.conjugate_a = conjugate_a
+    options.conjugate_b = conjugate_b
     options.epilogue.alpha = alpha
     options.epilogue.beta = beta
     options.epilogue.scale_c = scale_c
@@ -220,9 +208,9 @@ def reference_gemm(
         if output_selection is None
         else output_selection
     )
-    return reference_gemm_operands(  # noqa: F405
-        operand_a,
-        operand_b,
+    return _native._reference_gemm(
+        a,
+        b,
         c,
         output_type,
         options,

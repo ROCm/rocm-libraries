@@ -9,8 +9,8 @@ namespace roc::host_numerics {
 // Reports whether the optional BLAS component can execute a request using the
 // requested policy. Unlike queryGemmSupport(), this function accepts
 // GemmBackend::Blas and includes BLAS in Automatic policy.
-GemmSupportInfo queryGemmSupportWithBlasBackend(const GemmOperand& a, const GemmOperand& b,
-                                                const Tensor& c, const Tensor& d,
+GemmSupportInfo queryGemmSupportWithBlasBackend(const Tensor& a, const Tensor& b, const Tensor& c,
+                                                const Tensor& d,
                                                 const GemmOptions& options = GemmOptions{},
                                                 GemmBackend backend = GemmBackend::Automatic);
 
@@ -21,11 +21,11 @@ GemmSupportInfo queryGemmSupportWithBlasBackend(const GemmOperand& a, const Gemm
 // is applied while writing the caller-owned output tensor. Automatic tries
 // BLAS first when its cost policy prefers BLAS, then delegates to the built-in
 // Blocked/Pointwise policy.
-GemmBackend referenceGemmIntoWithBlasBackend(GemmOperand a, GemmOperand b, Tensor c, Tensor d,
+GemmBackend referenceGemmIntoWithBlasBackend(Tensor a, Tensor b, Tensor c, Tensor d,
                                              const GemmOptions& options = GemmOptions{},
                                              GemmBackend backend = GemmBackend::Automatic);
 
-Tensor referenceGemmWithBlasBackend(GemmOperand a, GemmOperand b, Tensor c, ScalarType outputType,
+Tensor referenceGemmWithBlasBackend(Tensor a, Tensor b, Tensor c, ScalarType outputType,
                                     const GemmOptions& options = GemmOptions{},
                                     std::optional<Layout> outputLayout = std::nullopt,
                                     GemmBackend backend = GemmBackend::Automatic);

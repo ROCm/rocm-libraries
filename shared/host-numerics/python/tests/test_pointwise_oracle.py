@@ -118,8 +118,8 @@ class PointwiseOracleTests(unittest.TestCase):
         options.output_selection = hv.OutputSelection.explicit_indices(selected)
 
         backend = hv.reference_gemm_into(
-            hv.GemmOperand(hv.from_numpy(left)),
-            hv.GemmOperand(hv.from_numpy(right)),
+            hv.from_numpy(left),
+            hv.from_numpy(right),
             hv.from_numpy(initial),
             output,
             options,
@@ -186,12 +186,14 @@ class PointwiseOracleTests(unittest.TestCase):
         )
         selected = [0, 4, 5]
 
-        operand_a = hv.GemmOperand(hv.from_numpy(left, hv.ScalarType.Float4E2M1))
-        operand_a.block_scale = hv.BlockScaleBinding(scale_a, block_a)
-        operand_b = hv.GemmOperand(hv.from_numpy(right, hv.ScalarType.Float4E2M1))
-        operand_b.block_scale = hv.BlockScaleBinding(scale_b, block_b)
+        operand_a = hv.from_numpy(left, hv.ScalarType.Float4E2M1)
+        operand_b = hv.from_numpy(right, hv.ScalarType.Float4E2M1)
         output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3]))
         options = hv.GemmOptions(hv.ScalarType.Float32)
+        options.block_scale_a = scale_a
+        options.block_scale_b = scale_b
+        options.block_size_a = block_a
+        options.block_size_b = block_b
         options.output_selection = hv.OutputSelection.explicit_indices(selected)
 
         backend = hv.reference_gemm_into(
@@ -281,17 +283,14 @@ class PointwiseOracleTests(unittest.TestCase):
         selected = [0, 3]
         output_layout = hv.Layout(hv.Shape([2, 2]), [8, 3], 2)
 
-        operand_a = hv.GemmOperand(
-            affine_tensor(left, hv.ScalarType.ComplexFloat32, strides=[6, 1], offset=1)
+        operand_a = affine_tensor(
+            left, hv.ScalarType.ComplexFloat32, strides=[6, 1], offset=1
         )
-        operand_a.conjugate = True
-        operand_b = hv.GemmOperand(
-            affine_tensor(
-                right,
-                hv.ScalarType.ComplexFloat32,
-                strides=[1, 5],
-                offset=2,
-            )
+        operand_b = affine_tensor(
+            right,
+            hv.ScalarType.ComplexFloat32,
+            strides=[1, 5],
+            offset=2,
         )
         initial_tensor = affine_tensor(
             initial,
@@ -303,6 +302,7 @@ class PointwiseOracleTests(unittest.TestCase):
         options = hv.GemmOptions(hv.ScalarType.ComplexFloat32)
         options.epilogue.alpha = complex(alpha)
         options.epilogue.beta = complex(beta)
+        options.conjugate_a = True
         options.output_selection = hv.OutputSelection.explicit_indices(selected)
 
         backend = hv.reference_gemm_into(

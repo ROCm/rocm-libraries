@@ -269,22 +269,20 @@ void testBlockScaledSelectionBlockPlan() {
         makeProblem(a, b, c, pointwiseOutput, rows, reductionElements, columns);
     GemmTestCase blockedProblem =
         makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
-    const BlockScaleBinding blockScaleA{
-        Tensor::copyNativeStorage<float>(
-            Layout::contiguousLastDimensionFastest(Shape{rows, scaleBlocks}),
-            std::span<const float>(scaleA)),
-        8,
-    };
-    const BlockScaleBinding blockScaleB{
-        Tensor::copyNativeStorage<float>(
-            Layout::contiguousLastDimensionFastest(Shape{columns, scaleBlocks}),
-            std::span<const float>(scaleB)),
-        8,
-    };
+    const Tensor blockScaleA = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{rows, scaleBlocks}),
+        std::span<const float>(scaleA));
+    const Tensor blockScaleB = Tensor::copyNativeStorage<float>(
+        Layout::contiguousLastDimensionFastest(Shape{columns, scaleBlocks}),
+        std::span<const float>(scaleB));
     pointwiseProblem.a.blockScale = blockScaleA;
+    pointwiseProblem.a.blockSize = 8;
     pointwiseProblem.b.blockScale = blockScaleB;
+    pointwiseProblem.b.blockSize = 8;
     blockedProblem.a.blockScale = blockScaleA;
+    blockedProblem.a.blockSize = 8;
     blockedProblem.b.blockScale = blockScaleB;
+    blockedProblem.b.blockSize = 8;
     pointwiseProblem.outputSelection = selection;
     blockedProblem.outputSelection = selection;
 
@@ -312,10 +310,11 @@ void testBlockScaleAppliedAfterCompleteScaleSegment() {
 
     GemmTestCase pointwiseProblem = makeProblem(a, b, c, pointwiseOutput, 1, reductionElements, 1);
     GemmTestCase blockedProblem = makeProblem(a, b, c, blockedOutput, 1, reductionElements, 1);
-    const BlockScaleBinding blockScaleA{Tensor::copyNativeValues<float>(Shape{1, 1}, scaleA),
-                                        reductionElements};
+    const Tensor blockScaleA = Tensor::copyNativeValues<float>(Shape{1, 1}, scaleA);
     pointwiseProblem.a.blockScale = blockScaleA;
+    pointwiseProblem.a.blockSize = reductionElements;
     blockedProblem.a.blockScale = blockScaleA;
+    blockedProblem.a.blockSize = reductionElements;
 
     runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
               "Blocked GEMM applied a one-sided block scale before its complete reduction "
@@ -334,10 +333,7 @@ void testOneSidedBlockScaling() {
     const std::vector<float> b(reductionElements * columns, 1.0f);
     const std::vector<float> c(rows * columns, 0.0f);
     const std::array<float, 4> scales{2.0f, 3.0f, 4.0f, 5.0f};
-    const BlockScaleBinding blockScale{
-        Tensor::copyNativeValues<float>(Shape{2, 2}, scales),
-        8,
-    };
+    const Tensor blockScale = Tensor::copyNativeValues<float>(Shape{2, 2}, scales);
 
     const auto checkOneSide = [&](bool scaleOperandA, const std::array<float, 4>& expected) {
         Tensor pointwiseOutput = makeOutput(rows, columns, untouchedValue);
@@ -348,10 +344,14 @@ void testOneSidedBlockScaling() {
             makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
         if (scaleOperandA) {
             pointwiseProblem.a.blockScale = blockScale;
+            pointwiseProblem.a.blockSize = 8;
             blockedProblem.a.blockScale = blockScale;
+            blockedProblem.a.blockSize = 8;
         } else {
             pointwiseProblem.b.blockScale = blockScale;
+            pointwiseProblem.b.blockSize = 8;
             blockedProblem.b.blockScale = blockScale;
+            blockedProblem.b.blockSize = 8;
         }
 
         runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
@@ -377,9 +377,11 @@ void testOneSidedBlockScalingWithZeroReductionExtent() {
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     GemmTestCase pointwiseProblem = makeProblem(empty, empty, c, pointwiseOutput, rows, 0, columns);
     GemmTestCase blockedProblem = makeProblem(empty, empty, c, blockedOutput, rows, 0, columns);
-    const BlockScaleBinding emptyScale{Tensor(ScalarType::Float32, Shape{rows, 0}), 8};
+    const Tensor emptyScale(ScalarType::Float32, Shape{rows, 0});
     pointwiseProblem.a.blockScale = emptyScale;
+    pointwiseProblem.a.blockSize = 8;
     blockedProblem.a.blockScale = emptyScale;
+    blockedProblem.a.blockSize = 8;
     pointwiseProblem.epilogue.beta = 2.0f;
     blockedProblem.epilogue.beta = 2.0f;
 
