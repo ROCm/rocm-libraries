@@ -6,9 +6,10 @@
 Dispatcher GEMM search space runner (all bridged GEMM variants).
 
 Enumerates the GemmKernelConfig search space by calling expand_sweep with the
-tile_engine default_ci_config.json across all (dtype, layout) strata, samples a
-budget-limited subset with a daily rotating seed, compiles each config via the
-bridge, runs on GPU, and reports correctness + TFLOPS.
+variant's tile_engine default_ci_config.json (multi_d and multi_abd have their
+own, carrying the fused-epilogue block) across all (dtype, layout) strata,
+samples a budget-limited subset with a daily rotating seed, compiles each config
+via the bridge, runs on GPU, and reports correctness + TFLOPS.
 
 One runner covers every variant expand_sweep understands -- standard, grouped,
 multi_d, multi_abd and stream_k -- because they share the same enumerate/sample/
@@ -27,8 +28,8 @@ Usage:
     python3 test_gemm_search_space.py --arch gfx942 --budget 500
     python3 test_gemm_search_space.py --variant grouped --groups 4
     python3 test_gemm_search_space.py --variant multi_abd   # fp16/rcrr only
-    python3 test_gemm_search_space.py --variant multi_d     # PassThrough epilogue
-    python3 test_gemm_search_space.py --variant multi_d --elementwise-op MultiDAdd
+    python3 test_gemm_search_space.py --variant multi_d     # sweeps MultiDAdd/Multiply
+    python3 test_gemm_search_space.py --variant multi_d --elementwise-op PassThrough
     python3 test_gemm_search_space.py --budget 0   # full space, no cap
     python3 test_gemm_search_space.py --budget 500 --seed 42 --json results.json
 """
@@ -63,13 +64,35 @@ from gemm_utils import (
     setup_multiple_gemm_dispatchers,
 )
 
-_CI_CONFIG = (
-    _DISPATCHER.parent / "tile_engine/ops/gemm/configs/default_ci_config.json"
-)
+_TE_GEMM = _DISPATCHER.parent / "tile_engine/ops/gemm"
+_CI_CONFIG = _TE_GEMM / "configs/default_ci_config.json"
+
+# multi_d and multi_abd have their own CI configs carrying the
+# ``multi_d_config`` / ``multi_abd_config`` blocks that describe the fused
+# epilogue (which element-wise op, how many D tensors). The generic config has
+# neither, so pointing every variant at it left expand_sweep with nothing to
+# enumerate and the fusion untested. gemm_multi_d_full_benchmark.py already
+# reads these same files.
+_VARIANT_CI_CONFIG = {
+    "multi_d": _TE_GEMM / "gemm_multi_d/configs/default_ci_config.json",
+    "multi_abd": _TE_GEMM / "gemm_multi_abd/configs/default_ci_config.json",
+}
+
+
+def _ci_config_for(variant: str) -> Path:
+    return _VARIANT_CI_CONFIG.get(variant, _CI_CONFIG)
 _DTYPES = ["fp16", "bf16", "fp8", "bf8"]
 _LAYOUTS = ["rcr", "rrr", "crr", "ccr"]
 _RTOL = 2e-2
 _SKIP = 77
+
+# The arches whose kernels this sweep can actually build and run, matching
+# SUPPORTED_ARCHS in the aquant/abquant GPU tests. The no-GPU gate below is not
+# sufficient on its own: a box with an *unsupported* GPU (gfx90a, say) passes it,
+# then fails every sampled config at the hipcc step and reports FAIL. That is the
+# same false signal the exit-77 convention exists to remove, pointing the other
+# way -- so gate on the resolved arch, forced or detected, exactly as bquant does.
+_SUPPORTED_ARCHS = ("gfx942", "gfx950")
 
 # Per-variant defaults for --dtypes / --layouts. multi_abd and multi_d are
 # fp16-only end-to-end (codegen, ctypes lib and runner all assume fp16) and take
@@ -236,9 +259,12 @@ def _verify(variant: str, cfg, runner, result, ops: _Operands) -> float:
         # multi_d's fused epilogue op lives in `elementwise_op`; the similarly
         # named `cde_elementwise_op` is the multi_abd field and stays at its
         # PassThrough default here, so reading it would reference the wrong op.
-        # Read it rather than hard-coding --elementwise-op: under the default
-        # PassThrough the epilogue is E = C and _cde_reference drops the D
-        # tensors, which is only correct because both sides agree on the op.
+        # Read it per-config rather than from --elementwise-op: the sweep now
+        # enumerates MultiDAdd and MultiDMultiply together, so a single pinned
+        # op would mis-reference half the configs.
+        #
+        # nd comes from the kernel, not the config, and the D pool is sized to
+        # the largest num_d in the sample -- num_d is itself swept over {1, 2}.
         nd = runner.num_d_tensors
         acc = _quantize(ops.A, dtype) @ _quantize(ops.B, dtype)
         ref = _cde_reference(cfg.elementwise_op, acc, ops.Ds[:nd])
@@ -263,6 +289,11 @@ def run(args) -> int:
         print("SKIP: no GPU detected and --arch not given")
         return _SKIP
 
+    if arch not in _SUPPORTED_ARCHS:
+        print(f"SKIP: search-space sweep is {'/'.join(_SUPPORTED_ARCHS)}-only; "
+              f"got {arch}")
+        return _SKIP
+
     variant = args.variant
     def_dtypes, def_layouts = _VARIANT_DEFAULTS[variant]
     dtypes = [d.strip() for d in args.dtypes.split(",")] if args.dtypes else def_dtypes
@@ -278,16 +309,20 @@ def run(args) -> int:
     print("\nEnumerating search space...")
     t0 = time.time()
     strata = {}
+    ci_config = _ci_config_for(variant)
     for dtype in dtypes:
         for layout in layouts:
-            configs = expand_sweep(str(_CI_CONFIG), arch=arch, dtype=dtype,
+            configs = expand_sweep(str(ci_config), arch=arch, dtype=dtype,
                                    layout=layout, variant=variant)
-            if variant == "multi_d":
-                # default_ci_config.json carries no multi_d_config, so expand_sweep
-                # falls back to its own MultiDAdd default. Pin the epilogue op here
-                # instead: the config dataclass derives .name (and the codegen's
-                # elementwise_ops list) from this field, so replacing it is enough
-                # to select a different kernel -- no separate JSON is needed.
+            if variant == "multi_d" and args.elementwise_op is not None:
+                # Only when explicitly asked for. The config dataclass derives
+                # .name (and the codegen's elementwise_ops list) from this field,
+                # so replacing it is enough to select a different kernel -- which
+                # makes `--elementwise-op PassThrough` a usable A/B experiment.
+                # It is not a usable default: PassThrough takes Ds as an unnamed
+                # parameter pack device-side and _cde_reference returns acc
+                # host-side, so both sides compute A@B and a kernel that never
+                # loads D still passes.
                 configs = [replace(c, elementwise_op=args.elementwise_op)
                            for c in configs]
             strata[f"{dtype}/{layout}"] = configs
@@ -414,10 +449,13 @@ def main() -> int:
                         "rcrr for multi_d/multi_abd)")
     p.add_argument("--groups", type=int, default=4,
                    help="Sub-problem count for --variant grouped (default: 4)")
-    p.add_argument("--elementwise-op", default="PassThrough",
+    p.add_argument("--elementwise-op", default=None,
                    choices=("PassThrough", "MultiDAdd", "MultiDMultiply"),
-                   help="Epilogue op for --variant multi_d (default: PassThrough). "
-                        "Ignored by every other variant.")
+                   help="Pin the epilogue op for --variant multi_d, overriding "
+                        "the sweep (default: sweep MultiDAdd/MultiDMultiply from "
+                        "the config). PassThrough discards the D tensors on both "
+                        "the device and reference sides, so it verifies plain "
+                        "A@B only. Ignored by every other variant.")
     p.add_argument("--budget", type=int, default=500,
                    help="Max configs to run; 0 = no cap (default: 500)")
     p.add_argument("--seed", type=int, default=None,

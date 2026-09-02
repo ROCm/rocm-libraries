@@ -57,6 +57,8 @@ from grouped_gemm_abquant_utils import (
     default_fp8_compv3_config,
     default_bf8_compv3_config,
     default_fp8_eightwaves_config,
+    _eightwaves_warp_tile_k,
+    _preshuffleb_warp_tile_k,
 )
 
 log = logging.getLogger(__name__)
@@ -208,10 +210,34 @@ def _make_inputs(problem: ABQuantGemmProblem, dtype: str, gfx_arch: str,
             B_raw, _decode_fp8(B_raw, dtype, gfx_arch), AQ, BQ)
 
 
+def _expected_warp_tile_k(pipeline: str, gfx_arch: str) -> int:
+    """The warp_tile_k get_k_warp_tile() will pick for `pipeline` on `gfx_arch`.
+
+    compv3 is a standard compute pipeline (not FlatMM), so 32 -- the standard fp8
+    MFMA -- is correct on both arches and is deliberately arch-independent.
+    eightwaves and preshuffleb are FlatMM and do vary.
+    """
+    if pipeline == "compv3":
+        return 32
+    if pipeline == "preshuffleb":
+        return _preshuffleb_warp_tile_k(gfx_arch)
+    return _eightwaves_warp_tile_k(gfx_arch)
+
+
 def _run_one(label: str, config, M: int, N: int, K: int, dtype: str,
              out_dir: Path, gfx_arch: str,
              seed: int = 42) -> "tuple[str, str]":
     """Build, run, and verify one kernel. Returns (PASS|FAIL, detail_message)."""
+    # Arch trap, checked before the build: a warp_tile_k that disagrees with the
+    # branch get_k_warp_tile() takes for this arch compiles cleanly and returns
+    # zeros. The degenerate-C guards below do catch that, but only after a full
+    # hipcc build, and they report it as "kernel did not compute" rather than
+    # naming the config field that drifted.
+    expected_wtk = _expected_warp_tile_k(config.pipeline, gfx_arch)
+    if config.warp_tile_k != expected_wtk:
+        return FAIL, (f"{label}: warp_tile_k arch trap: got {config.warp_tile_k}, "
+                      f"expected {expected_wtk} for {config.pipeline} on {gfx_arch}")
+
     # The problem must repeat the config's quant grouping: the kernel bakes the
     # group sizes into the generated header, and the host strides are derived
     # from them, so a mismatch silently reads the wrong scale.

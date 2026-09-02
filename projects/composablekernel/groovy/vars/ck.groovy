@@ -1728,8 +1728,11 @@ def dispatcherSweepDtypesFor(String arch) {
 //
 // layouts are deliberately omitted: the runner picks per-variant defaults
 // (multi_d/multi_abd are fp16/rcrr-only, so naming the standard 4x4 matrix here
-// would enumerate configs that variant cannot build). multi_d likewise takes the
-// runner's default --elementwise-op PassThrough.
+// would enumerate configs that variant cannot build). --elementwise-op is
+// likewise omitted, so multi_d sweeps the MultiDAdd/MultiDMultiply x num_d
+// {1,2} matrix from gemm_multi_d/configs/default_ci_config.json. Passing
+// PassThrough here would make the lane vacuous: it discards the D tensors on
+// both the device and reference sides, so the fusion under test is never run.
 //
 // dtypes are omitted for the same reason -- except for "grouped", whose
 // _VARIANT_DEFAULTS entry in test_gemm_search_space.py is the full
@@ -1847,15 +1850,17 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
         run_ok python3 ../dispatcher/tests/test_batched_gemm_gpu_correctness.py --gfx ${arch} && \
         run_ok python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx ${arch} && \
         python3 ../dispatcher/tests/test_grouped_gemm_gpu_correctness.py && \
-        python3 ../dispatcher/tests/test_multi_d_gpu_correctness.py && \
+        run_ok python3 ../dispatcher/tests/test_multi_d_gpu_correctness.py --gfx ${arch} && \
         python3 ../dispatcher/tests/test_multi_abd_gpu_correctness.py && \
         run_ok python3 ../dispatcher/tests/test_rowcolquant_gpu_correctness.py --gfx ${arch} && \
         run_ok python3 ../dispatcher/tests/test_tensorquant_gpu_correctness.py --gfx ${arch}"""
     // The grouped/multi_d/multi_abd tests are the bridge-level companions to the
     // --variant sweeps below: the sweep exercises the search space, they exercise
     // the ctypes bridge. They were registered in ctest but never invoked from
-    // here. All three are unittest-based, take no --gfx, and exit 0 on an
-    // internal skip, so they need no run_ok.
+    // here. grouped_gemm and multi_abd are unittest-based, take no --gfx, and
+    // exit 0 on an internal skip, so they need no run_ok. multi_d is
+    // script-style: it takes --gfx and exits 77 on a clean skip, so it must be
+    // wrapped -- a bare 77 would break the && chain and fail the lane.
     //
     // rowcolquant and tensorquant sit here rather than in the gfx950 block
     // because, unlike the other quant ops, both support gfx942 as well --
@@ -1883,10 +1888,14 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
         run_ok python3 ../dispatcher/tests/test_streamk_registry.py --arch ${arch} --datatypes fp16 --layouts rcr && \
         run_ok python3 ../dispatcher/tests/test_streamk_gpu_correctness.py --gfx ${arch}"""
     }
-    // bquant is still gfx950-only: its config builders hardcode warp_tile_k
-    // tuned for gfx950 (128), and on gfx942 get_k_warp_tile() takes the other
-    // branch of CK_GFX950_SUPPORT, so such a kernel builds and runs and returns
-    // zeros. Widening it means porting abquant's arch-aware _preshuffleb_warp_tile_k.
+    // bquant stays gfx950-only, but no longer for the original reason: its config
+    // builders used to hardcode the gfx950 warp_tile_k (128), which on gfx942 took
+    // the other branch of CK_GFX950_SUPPORT and produced a kernel that built, ran,
+    // and returned zeros. grouped_gemm_bquant_utils is arch-aware now
+    // (_fp8_warp_tile_k / _preshuffleb_warp_tile_k), so the gate is held only
+    // pending one validating run on gfx942 -- not by a known defect. Flipping it
+    // means widening SUPPORTED_ARCHS in test_bquant_gpu_correctness.py in the same
+    // change; the two must not drift apart.
     // This is why the lane fans out to a gfx950 node as well as gfx942 -- see the
     // stage comment in the Jenkinsfile.
     //

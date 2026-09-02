@@ -255,6 +255,79 @@ class TestFp8Bf8OcpEncoding(unittest.TestCase):
                          np.dtype(ml_dtypes.float8_e5m2fnuz))
 
 
+class TestFp8EncodeMatchesMlDtypes(unittest.TestCase):
+    """_fp8_encode vs ml_dtypes: identical in range, divergent on overflow.
+
+    _fp8_encode exists because ml_dtypes cannot express CK's saturating convert,
+    not because the rounding differs -- so everything except overflow has to
+    agree exactly, and the one place it does not has to be pinned as deliberate.
+    """
+
+    _CASES = (
+        (4, 3, True,  "float8_e4m3fn"),
+        (5, 2, True,  "float8_e5m2"),
+        (4, 3, False, "float8_e4m3fnuz"),
+        (5, 2, False, "float8_e5m2fnuz"),
+    )
+
+    @staticmethod
+    def _finite_magnitudes(table):
+        return np.unique(table[np.isfinite(table)].astype(np.float64))
+
+    def test_midpoints_round_half_to_even(self):
+        # The regression this guards: ties were broken toward the smaller
+        # magnitude, which disagreed with the hardware convert (and ml_dtypes)
+        # on roughly half of all representable midpoints -- 126 of 252 for
+        # e4m3. Every one of those is a silently low reference value.
+        ml_dtypes = _require_ml_dtypes()
+        for exp_bits, mant_bits, use_ocp, ml_name in self._CASES:
+            with self.subTest(bits=(exp_bits, mant_bits), ocp=use_ocp):
+                table = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
+                mags = self._finite_magnitudes(table)
+                mids = ((mags[:-1] + mags[1:]) / 2.0).astype(np.float32)
+                ours = table[_fp8_encode(mids, exp_bits, mant_bits,
+                                         use_ocp=use_ocp).astype(np.intp)]
+                theirs = mids.astype(getattr(ml_dtypes, ml_name))
+                np.testing.assert_array_equal(ours.astype(np.float64),
+                                              theirs.astype(np.float64))
+
+    def test_agrees_across_the_whole_finite_range(self):
+        ml_dtypes = _require_ml_dtypes()
+        for exp_bits, mant_bits, use_ocp, ml_name in self._CASES:
+            with self.subTest(bits=(exp_bits, mant_bits), ocp=use_ocp):
+                table = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
+                mags = self._finite_magnitudes(table)
+                max_finite = float(mags[-1])
+                vals = np.unique(np.concatenate([
+                    mags,
+                    -mags,
+                    np.linspace(-max_finite, max_finite, 4001),
+                ]))
+                vals = vals[np.abs(vals) <= max_finite].astype(np.float32)
+                ours = table[_fp8_encode(vals, exp_bits, mant_bits,
+                                         use_ocp=use_ocp).astype(np.intp)]
+                theirs = vals.astype(getattr(ml_dtypes, ml_name))
+                np.testing.assert_array_equal(ours.astype(np.float64),
+                                              theirs.astype(np.float64))
+
+    def test_overflow_saturates_where_ml_dtypes_does_not(self):
+        # Intended divergence, not a gap: CK's convert clamps, so the host
+        # reference must clamp too. Deferring to ml_dtypes here would poison the
+        # reference with NaN/Inf on any input the kernel merely saturates.
+        ml_dtypes = _require_ml_dtypes()
+        big = np.array([1e30, -1e30], dtype=np.float32)
+        for exp_bits, mant_bits, use_ocp, ml_name in self._CASES:
+            with self.subTest(bits=(exp_bits, mant_bits), ocp=use_ocp):
+                table = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
+                max_finite = float(self._finite_magnitudes(table)[-1])
+                ours = table[_fp8_encode(big, exp_bits, mant_bits,
+                                         use_ocp=use_ocp).astype(np.intp)]
+                self.assertEqual(float(ours[0]), max_finite)
+                self.assertEqual(float(ours[1]), -max_finite)
+                theirs = big.astype(getattr(ml_dtypes, ml_name)).astype(np.float64)
+                self.assertFalse(np.all(np.isfinite(theirs)))
+
+
 class TestOutputDtype(unittest.TestCase):
     """Output (C) element dtype must mirror the codegen's get_output_dtype."""
 
@@ -435,9 +508,15 @@ class TestGfx1250Fp8Ocp(unittest.TestCase):
     def test_ocp_differs_from_fnuz(self):
         # OCP and FNUZ are distinct encodings; the byte patterns must not match
         # for a generic value (guards against silently reusing the FNUZ codec).
+        #
+        # use_ocp=False is required, not incidental: _fp32_to_fp8_u8 defaults to
+        # autodetecting the local GPU, so on an OCP arch (gfx950/gfx12) both
+        # sides would encode OCP and the assertion below would fail for a reason
+        # unrelated to the codecs being distinct.
         x = np.array([[0.1, 0.3, 1.5]], dtype=np.float32)
         self.assertFalse(
-            np.array_equal(_fp32_to_fp8_ocp_u8(x), _fp32_to_fp8_u8(x))
+            np.array_equal(_fp32_to_fp8_ocp_u8(x),
+                           _fp32_to_fp8_u8(x, use_ocp=False))
         )
 
     def test_ocp_bf8_shape(self):

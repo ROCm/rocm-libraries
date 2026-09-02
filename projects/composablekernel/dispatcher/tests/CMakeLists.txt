@@ -13,12 +13,20 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 # Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
 add_test(
     NAME dispatcher_test_preshuffle_gpu_correctness
-    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_preshuffle_gpu_correctness.py -v
+    # Run the script directly: this module is script-style (a bare function plus
+    # a main() guard), not unittest.TestCase, so `unittest discover` collects 0
+    # tests -- and unittest exits NONZERO on "NO TESTS RAN", turning an
+    # unrunnable box into a hard ctest failure. main() skips (exit 77) without a
+    # GPU/built lib and returns nonzero only on a real correctness failure.
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_preshuffle_gpu_correctness.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_preshuffle_gpu_correctness PROPERTIES
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
+    # Without this a CPU-only runner reports a green PASS for a test that never
+    # reached the GPU; 77 makes ctest record it as skipped instead.
+    SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
@@ -63,12 +71,16 @@ set_tests_properties(dispatcher_test_batched_contraction_gpu_correctness PROPERT
 # Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
 add_test(
     NAME dispatcher_test_tensor_quant_gpu_correctness
-    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_tensor_quant_gpu_correctness.py
+    # Run the script directly rather than under pytest: pytest exits 0 when every
+    # test skips, so a CPU-only or non-fp8 runner reported a green PASS for work
+    # that never reached the GPU. main() exits 77 on those boxes instead.
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_tensor_quant_gpu_correctness.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_tensor_quant_gpu_correctness PROPERTIES
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
+    SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
@@ -77,7 +89,7 @@ add_test(
     NAME dispatcher_test_contraction_multi_abd_gpu_correctness
     # Run the script directly: this module is script-style (a parameterized
     # function + main() guard), not unittest.TestCase, so `unittest discover`
-    # would collect 0 tests and pass vacuously. main() skips (exit 0) without a
+    # would collect 0 tests and pass vacuously. main() skips (exit 77) without a
     # GPU/hipcc and returns nonzero only on a real correctness failure.
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_contraction_multi_abd_gpu_correctness.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -87,6 +99,9 @@ set_tests_properties(dispatcher_test_contraction_multi_abd_gpu_correctness PROPE
     # Builds a kernel from source via hipcc before running; needs more than the
     # 600s the sibling bridges use.
     TIMEOUT 1800
+    # Without this a CPU-only runner reports a green PASS for a test that never
+    # reached the GPU; 77 makes ctest record it as skipped instead.
+    SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
@@ -120,6 +135,24 @@ set_tests_properties(dispatcher_test_arch_filter_constraints PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# dispatcher_common unit tests: path helpers, validators, and -- since this is
+# the only place they are covered -- the fp8-encoding arch predicates
+# (fp8_uses_ocp / ocp_arch_defines / arch_feature_defines). Those decide whether
+# -DCK_USE_OCP_FP8 reaches hipcc; getting them wrong makes host and device
+# disagree on the fp8 encoding with no build error, so they need a test that
+# actually runs. This file was previously not registered at all.
+add_test(
+    NAME dispatcher_test_dispatcher_common
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_dispatcher_common.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_dispatcher_common PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # gemm_utils host-helper + runner-shape regression test. Also acts as an import
 # canary: a merge that truncates python/gemm_utils.py (see #9308) makes this fail.
 add_test(
@@ -140,11 +173,14 @@ set_tests_properties(dispatcher_test_gemm_utils PROPERTIES
 # numpy fp32 reference (scale-relative tolerance). They SKIP cleanly (no fail)
 # when no GPU / hipcc / static lib is present, so they cost nothing on a
 # CPU-only runner and only run on a GPU runner. mx arch-gates to gfx950.
+#
+# These three are still unittest.TestCase-based and skip internally, so
+# `unittest discover` is the right driver. multi_d has been converted to the
+# script-style-77 convention and is registered separately below.
 # =============================================================================
 foreach(_gpu_test
         test_grouped_gemm_gpu_correctness
         test_multi_abd_gpu_correctness
-        test_multi_d_gpu_correctness
         test_mx_gemm_gpu_correctness)
     add_test(
         NAME dispatcher_${_gpu_test}
@@ -158,6 +194,49 @@ foreach(_gpu_test
     )
 endforeach()
 
+# Multi-D GEMM: E = MultiDAdd(A @ B, D0, D1) over all four A/B layouts.
+# Invoked as a script, not via `unittest discover`: it returns 77 on a missing
+# GPU / static lib / hipcc, which SKIP_RETURN_CODE turns into ctest "Skipped".
+# The discover path above exits 0 on an all-skipped run and would report Passed.
+#
+# TIMEOUT is 1800, not the 600 its neighbours use: the layout sweep is four
+# separate hipcc builds (setup_multiple_gemm_dispatchers runs once per layout),
+# so the wall-clock budget is roughly 4x theirs.
+add_test(
+    NAME dispatcher_test_multi_d_gpu_correctness
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_multi_d_gpu_correctness.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_multi_d_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 1800
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Config search-space sweep: enumerate configs for a variant, build and run a
+# sampled subset, verify each against a numpy reference. Previously registered
+# nowhere -- it was reachable only from the Jenkins dispatcher lane, so a local
+# `ctest` never exercised it and neither did any pre-merge gate.
+#
+# --budget 4 rather than the Jenkins lane's 16: each sampled config is its own
+# hipcc build, and this is a correctness canary here, not the sweep. It already
+# returns 77 when no GPU is present and --arch is not given (:281), so
+# SKIP_RETURN_CODE keeps a CPU-only runner honest instead of green.
+add_test(
+    NAME dispatcher_test_gemm_search_space
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_search_space.py --budget 4
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_search_space PROPERTIES
+    LABELS "dispatcher;python;gemm;gpu"
+    TIMEOUT 1800
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # =============================================================================
 # RowColQuant / TensorQuant bridge tests.
 #
@@ -167,8 +246,13 @@ endforeach()
 # silently collect zero tests and report success.
 #
 # The *_utils suites are pure Python (naming, config, codegen text) and run
-# anywhere. The *_gpu_correctness suites arch-gate to gfx942/gfx950 and skip
-# cleanly without a GPU or hipcc, so they cost nothing on a CPU-only runner.
+# anywhere, and stay on `-m pytest`.
+#
+# The *_gpu_correctness suites are dual-mode: importable by pytest, but also
+# runnable as scripts with a `main()` that returns 77 to skip. ctest invokes
+# them as scripts, because `-m pytest` reports exit 0 -- i.e. PASSED -- when
+# every test in the file skips, which would hide a missing GPU behind a green
+# result. Run as scripts with SKIP_RETURN_CODE 77 they report Skipped instead.
 # =============================================================================
 foreach(_quant_test
         test_grouped_gemm_rowcolquant_utils
@@ -190,12 +274,13 @@ foreach(_quant_gpu_test
         test_tensorquant_gpu_correctness)
     add_test(
         NAME dispatcher_${_quant_gpu_test}
-        COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/${_quant_gpu_test}.py -v
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/${_quant_gpu_test}.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     set_tests_properties(dispatcher_${_quant_gpu_test} PROPERTIES
         LABELS "dispatcher;python;bridge;quant;gpu"
         TIMEOUT 600
+        SKIP_RETURN_CODE 77
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
     )
 endforeach()
@@ -324,7 +409,11 @@ add_test(
 
 set_tests_properties(dispatcher_test_streamk_registry PROPERTIES
     LABELS "dispatcher;python;streamk;gpu"
-    TIMEOUT 900
+    # 96 cases (4 dtypes x 4 layouts x 3 strategies x 2 shapes), each a separate
+    # hipcc build of the driver -- compile time dominates, so the budget scales
+    # with the matrix, not with GPU speed. Measured end-to-end at ~55 min on a
+    # local box; 900 was not survivable by any arch.
+    TIMEOUT 4200
     SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
@@ -670,43 +759,24 @@ message(STATUS "  Run verbose:    ctest -R dispatcher_test_autocorrect_verbose")
 # dispatcher_test_rowcolquant_gpu_correctness -- distinct test, distinct file.
 add_test(
     NAME dispatcher_test_gemm_rowcolquant_gpu_correctness
-    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_rowcolquant_gpu_correctness.py
+    # Run the script directly rather than under pytest: pytest exits 0 when every
+    # test skips, so a CPU-only or non-fp8 runner reported a green PASS for work
+    # that never reached the GPU. main() exits 77 on those boxes instead.
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_rowcolquant_gpu_correctness.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(dispatcher_test_gemm_rowcolquant_gpu_correctness PROPERTIES
     LABELS "dispatcher;python;bridge;gpu"
     TIMEOUT 600
-    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
-)
-
-
-# Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
-add_test(
-    NAME dispatcher_test_aquant_gpu_correctness
-    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_aquant_gpu_correctness.py
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
-set_tests_properties(dispatcher_test_aquant_gpu_correctness PROPERTIES
-    LABELS "dispatcher;python;bridge;gpu"
-    TIMEOUT 600
-    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
-)
-
-
-# Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
-add_test(
-    NAME dispatcher_test_abquant_gpu_correctness
-    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_abquant_gpu_correctness.py
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
-set_tests_properties(dispatcher_test_abquant_gpu_correctness PROPERTIES
-    LABELS "dispatcher;python;bridge;gpu"
-    TIMEOUT 600
+    SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
 # =============================================================================
-# Block-scale quant bridge tests (per-op unit tests + self-tests + bquant GPU)
+# Block-scale quant bridge tests (per-op unit tests + self-tests)
+#
+# The *_gpu_correctness counterparts are registered above, next to the other
+# script-style tests that need SKIP_RETURN_CODE 77.
 # =============================================================================
 
 # Per-op bridge name-contract / codegen / scope unit tests (CPU-only, unittest).
@@ -744,18 +814,5 @@ add_test(
 set_tests_properties(dispatcher_test_grouped_gemm_bquant_utils PROPERTIES
     LABELS "dispatcher;python;bridge"
     TIMEOUT 120
-    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
-)
-
-# bquant on-device GPU correctness test (SKIPs cleanly without a GPU/built lib),
-# registered consistently with the sibling *_gpu_correctness bridge tests.
-add_test(
-    NAME dispatcher_test_bquant_gpu_correctness
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_bquant_gpu_correctness.py
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
-set_tests_properties(dispatcher_test_bquant_gpu_correctness PROPERTIES
-    LABELS "dispatcher;python;bridge;gpu"
-    TIMEOUT 600
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )

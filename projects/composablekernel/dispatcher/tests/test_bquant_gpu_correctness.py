@@ -6,22 +6,29 @@
 """
 GPU correctness tests for BQuant GEMM dispatcher — C4 and H3 coverage.
 
-Requires a gfx942 (MI300X) or gfx950 (MI350X / MI355X) GPU and hipcc in PATH.
-Skips cleanly (exit 77) when no GPU is visible or the detected arch is neither.
+Requires a gfx950 (MI350X / MI355X) GPU and hipcc in PATH.  Skips cleanly
+(exit 77) when no GPU is visible, the detected arch is not gfx950, or
+ml_dtypes is missing.
 
-C4 (fp8/bf8 compv3) uses standard fp8 MFMA, present on gfx942.  The host
-fp8 codec follows the target arch via dispatcher_common.fp8_uses_ocp.
-H3 (mx_bf16*) is gfx950-only: the scale-MFMA builtins it needs
-(__builtin_amdgcn_mfma_scale_f32_*_f8f6f4) are absent from the gfx942 ISA
-and fail at compile time rather than silently.
+C4 (fp8/bf8 compv3) uses standard fp8 MFMA, which the gfx942 ISA also has, and
+the host fp8 codec now follows the target arch via dispatcher_common.fp8_uses_ocp
+rather than hardcoding OCP.  gfx942 is nevertheless not in SUPPORTED_ARCHS: CI
+gates the whole bquant lane to gfx950 (ck.groovy), so a gfx942 run here would
+exercise a path no lane covers.  Enabling it is a follow-up, not an oversight.
+H3 (mx_bf16*) cannot be enabled on gfx942 at all: the scale-MFMA builtins it
+needs (__builtin_amdgcn_mfma_scale_f32_*_f8f6f4) are absent from that ISA and
+fail at compile time rather than silently.
 
 Tests:
   C4 — fp8, bf8: GPU output is non-zero, non-constant, and within 5%
        max-relative-error vs. a fp32 CPU reference.
+  C  — fp8i4, bf8i4: pk_int4 B with an fp8/bf8-encoded BQ scale.
   H3 — mx_bf16bf16, mx_bf16bf8, mx_bf16fp4: same non-zero / rel-error checks,
        plus verify QuantType::BQuantGrouped + e8m0 pipeline compiles and runs.
        gfx950 only (see MX_SUPPORTED_ARCHS).
   M2 — timing: time_ms is non-zero when timing is requested.
+
+Every case sweeps N over _N_SWEEP to cover the per-N-tile de-permute.
 
 Run:
   python3 test_bquant_gpu_correctness.py
@@ -48,6 +55,8 @@ from grouped_gemm_bquant_utils import (
     setup_multiple_bquant_dispatchers,
     default_fp8_config,
     default_bf8_config,
+    default_fp8i4_config,
+    default_bf8i4_config,
     default_mx_bf16bf16_config,
     default_mx_bf16bf8_config,
     default_mx_bf16fp4_config,
@@ -188,10 +197,12 @@ SKIP = "SKIP"
 # that has nothing to do with the code under test.
 SKIP_EXIT = 77
 
-# C4 (fp8/bf8 compv3) uses standard fp8 MFMA, present on gfx942. The former
-# gfx950-only restriction was the OCP-hardcoded host codec, now fixed, plus the
-# warp_tile_k mismatches in the utils, now corrected.
-SUPPORTED_ARCHS = ("gfx942", "gfx950")
+# Kept in lockstep with the CI gate (`arch == "gfx950"` in ck.groovy): the two
+# must not disagree, or the test claims coverage no lane produces. The blockers
+# that made this gfx950-only -- the OCP-hardcoded host codec and the warp_tile_k
+# mismatches in the utils -- are fixed, so widening this to include "gfx942" is
+# a matter of flipping the lane and this tuple together, in that follow-up.
+SUPPORTED_ARCHS = ("gfx950",)
 
 # H3 (mx_*) is gfx950-only at the ISA level: __builtin_amdgcn_mfma_scale_f32_*
 # builtins do not exist on gfx942 and cause a compile error there, not a silent
@@ -337,26 +348,45 @@ def _make_bf16_inputs(M, N, K, gK, gN, seed=42):
     return A_raw, A_dec, B_raw, B_dec, BQ_e8m0, BQ_f32_dec
 
 
+# N-tile sweep: N=128 is a single N-tile; N=256/512 span 2 and 4 TileN blocks and
+# exercise the round-6 per-N-tile PermuteN de-permute (the round-5 global riffle
+# scrambled columns at N>=256).  gN must divide N; TileN is 64 (decode) / 128 (MX).
+#
+# A single pinned N under TileN would leave the de-permute entirely unexercised,
+# so this is coverage, not a knob: shrink it only with a replacement for that path.
+_N_SWEEP = (128, 256, 512)
+
+
 def test_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     # K=768 = 3*TileK(256): use num_loop=3 (TailNumber::Odd) for better coverage.
     # num_loop=2 works but exercises only the no-hot-loop/Even tail path; 3 gives
     # the no-hot-loop/Odd tail path and exercises the BQ scale prefetch more robustly.
-    M, N, K, gK, gN = 16, 64, 768, 128, 1
+    M, K, gK, gN = 16, 768, 128, 1
     cfg = default_fp8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
-    A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "fp8", gfx_arch)
-    return _run_one("C4/fp8", cfg, M, N, K,
-                    A_raw, A_dec, B_raw, B_dec, BQ,
-                    out_dir, c_dtype=np.float16, gfx_arch=gfx_arch)
+    for N in _N_SWEEP:
+        A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "fp8",
+                                                          gfx_arch=gfx_arch)
+        status, detail = _run_one(f"C4/fp8/N{N}", cfg, M, N, K,
+                                  A_raw, A_dec, B_raw, B_dec, BQ,
+                                  out_dir, c_dtype=np.float16, gfx_arch=gfx_arch)
+        if status != PASS:
+            return status, detail
+    return PASS, f"C4/fp8: PASS for N in {_N_SWEEP}"
 
 
 def test_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     # K=768 = 3*TileK(256): use num_loop=3 for the same reason as test_c4_fp8.
-    M, N, K, gK, gN = 16, 64, 768, 128, 1
+    M, K, gK, gN = 16, 768, 128, 1
     cfg = default_bf8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
-    A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "bf8", gfx_arch)
-    return _run_one("C4/bf8", cfg, M, N, K,
-                    A_raw, A_dec, B_raw, B_dec, BQ,
-                    out_dir, c_dtype=np.float16, gfx_arch=gfx_arch)
+    for N in _N_SWEEP:
+        A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "bf8",
+                                                          gfx_arch=gfx_arch)
+        status, detail = _run_one(f"C4/bf8/N{N}", cfg, M, N, K,
+                                  A_raw, A_dec, B_raw, B_dec, BQ,
+                                  out_dir, c_dtype=np.float16, gfx_arch=gfx_arch)
+        if status != PASS:
+            return status, detail
+    return PASS, f"C4/bf8: PASS for N in {_N_SWEEP}"
 
 
 def test_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
@@ -364,14 +394,18 @@ def test_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
         return SKIP, (f"H3/mx_bf16bf16: not supported on {gfx_arch} "
                       f"(requires {'/'.join(MX_SUPPORTED_ARCHS)})")
     # K=256 = 2*TileK(128): MicroscaleCompV3 needs num_loop>=2 to avoid OOB second prefetch
-    M, N, K, gK, gN = 128, 128, 256, 32, 1
+    M, K, gK, gN = 128, 256, 32, 1
     cfg = default_mx_bf16bf16_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
-    # C is bf16_t (2 bytes); use uint16 buffer + decode fn so size matches exactly.
-    A_raw, A_dec, B_raw, B_dec, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
-    return _run_one("H3/mx_bf16bf16", cfg, M, N, K,
-                    A_raw, A_dec, B_raw, B_dec, BQ_e8m0,
-                    out_dir, c_dtype=np.uint16, c_decode_fn=_bf16_raw_to_f32,
-                    BQ_ref=BQ_f32, gfx_arch=gfx_arch)
+    for N in _N_SWEEP:
+        # C is bf16_t (2 bytes); use uint16 buffer + decode fn so size matches exactly.
+        A_raw, A_dec, B_raw, B_dec, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
+        status, detail = _run_one(f"H3/mx_bf16bf16/N{N}", cfg, M, N, K,
+                                  A_raw, A_dec, B_raw, B_dec, BQ_e8m0,
+                                  out_dir, c_dtype=np.uint16, c_decode_fn=_bf16_raw_to_f32,
+                                  BQ_ref=BQ_f32, gfx_arch=gfx_arch)
+        if status != PASS:
+            return status, detail
+    return PASS, f"H3/mx_bf16bf16: PASS for N in {_N_SWEEP}"
 
 
 def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
@@ -379,17 +413,21 @@ def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
         return SKIP, (f"H3/mx_bf16bf8: not supported on {gfx_arch} "
                       f"(requires {'/'.join(MX_SUPPORTED_ARCHS)})")
     # K=384 = 3*TileK(128): use num_loop=3 (TailNumber::Odd) for broader pipeline coverage.
-    M, N, K, gK, gN = 128, 128, 384, 128, 1
+    M, K, gK, gN = 128, 384, 128, 1
     cfg = default_mx_bf16bf8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
-    A_raw, A_dec, _, _, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
-    # B is bf8: encode K*N float32 values as bf8 bytes
-    B_f32 = np.random.default_rng(43).uniform(-1.0, 1.0, (K, N)).astype(np.float32)
-    B_raw_bf8 = _encode_fp8(B_f32, "bf8", gfx_arch)
-    B_dec_bf8 = _decode_fp8(B_raw_bf8, "bf8", gfx_arch)
-    return _run_one("H3/mx_bf16bf8", cfg, M, N, K,
-                    A_raw, A_dec, B_raw_bf8, B_dec_bf8, BQ_e8m0,
-                    out_dir, c_dtype=np.uint16, c_decode_fn=_bf16_raw_to_f32,
-                    BQ_ref=BQ_f32, gfx_arch=gfx_arch)
+    for N in _N_SWEEP:
+        A_raw, A_dec, _, _, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
+        # B is bf8: encode K*N float32 values as bf8 bytes
+        B_f32 = np.random.default_rng(43).uniform(-1.0, 1.0, (K, N)).astype(np.float32)
+        B_raw_bf8 = _encode_fp8(B_f32, "bf8", gfx_arch)
+        B_dec_bf8 = _decode_fp8(B_raw_bf8, "bf8", gfx_arch)
+        status, detail = _run_one(f"H3/mx_bf16bf8/N{N}", cfg, M, N, K,
+                                  A_raw, A_dec, B_raw_bf8, B_dec_bf8, BQ_e8m0,
+                                  out_dir, c_dtype=np.uint16, c_decode_fn=_bf16_raw_to_f32,
+                                  BQ_ref=BQ_f32, gfx_arch=gfx_arch)
+        if status != PASS:
+            return status, detail
+    return PASS, f"H3/mx_bf16bf8: PASS for N in {_N_SWEEP}"
 
 
 def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
@@ -398,23 +436,78 @@ def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
                       f"(requires {'/'.join(MX_SUPPORTED_ARCHS)})")
     # pk_fp4: 2 fp4 values per byte → B buffer is K*N/2 bytes.
     # K=256 = 2*TileK(128): MicroscaleCompV3 needs num_loop>=2 to avoid OOB second prefetch.
-    M, N, K, gK, gN = 128, 128, 256, 32, 1
+    M, K, gK, gN = 128, 256, 32, 1
     cfg = default_mx_bf16fp4_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
-    A_raw, A_dec, _, _, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
-    rng = np.random.default_rng(44)
-    # rcr kernel reads pk_fp4 B COLUMN-MAJOR: consecutive K-elements share a byte
-    # (low nibble = k even, high nibble = k odd), per reference_mx_gemm_bquant's (k&1)
-    # branch. Generate logical (K,N) fp4 codes, pack column-major, LUT-decode reference.
-    codes = rng.integers(0, 16, size=(K, N), dtype=np.uint8)
-    B_f32_approx = _FP4_E2M1_LUT[codes]                      # reference values (K,N)
-    _flat = codes.flatten(order='F').astype(np.uint8)        # col-major: idx = n*K + k
-    _lo = _flat[0::2] & 0x0F                                 # k even -> low nibble
-    _hi = _flat[1::2] & 0x0F                                 # k odd  -> high nibble
-    B_raw = (_lo | (_hi << 4)).astype(np.uint8)
-    return _run_one("H3/mx_bf16fp4", cfg, M, N, K,
-                    A_raw, A_dec, B_raw, B_f32_approx, BQ_e8m0,
-                    out_dir, c_dtype=np.uint16, c_decode_fn=_bf16_raw_to_f32,
-                    BQ_ref=BQ_f32, gfx_arch=gfx_arch)
+    for N in _N_SWEEP:
+        A_raw, A_dec, _, _, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
+        rng = np.random.default_rng(44)
+        # rcr kernel reads pk_fp4 B COLUMN-MAJOR: consecutive K-elements share a byte
+        # (low nibble = k even, high nibble = k odd), per reference_mx_gemm_bquant's (k&1)
+        # branch. Generate logical (K,N) fp4 codes, pack column-major, LUT-decode reference.
+        codes = rng.integers(0, 16, size=(K, N), dtype=np.uint8)
+        B_f32_approx = _FP4_E2M1_LUT[codes]                  # reference values (K,N)
+        _flat = codes.flatten(order='F').astype(np.uint8)    # col-major: idx = n*K + k
+        _lo = _flat[0::2] & 0x0F                             # k even -> low nibble
+        _hi = _flat[1::2] & 0x0F                             # k odd  -> high nibble
+        B_raw = (_lo | (_hi << 4)).astype(np.uint8)
+        status, detail = _run_one(f"H3/mx_bf16fp4/N{N}", cfg, M, N, K,
+                                  A_raw, A_dec, B_raw, B_f32_approx, BQ_e8m0,
+                                  out_dir, c_dtype=np.uint16, c_decode_fn=_bf16_raw_to_f32,
+                                  BQ_ref=BQ_f32, gfx_arch=gfx_arch)
+        if status != PASS:
+            return status, detail
+    return PASS, f"H3/mx_bf16fp4: PASS for N in {_N_SWEEP}"
+
+
+def test_c_i4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
+    """Round-6: fp8i4 / bf8i4 must be exact once BQ is encoded to the kernel's
+    QDataType (fp8/bf8, 1 byte).  The round-5 float32 BQ produced NaN.  Swept over
+    N to also exercise the per-N-tile de-permute.  B is pk_int4 (2 per byte)."""
+    M, K, gK, gN = 16, 256, 128, 1
+    results = []
+    for variant, ctor, dtype in (("fp8i4", default_fp8i4_config, "fp8"),
+                                 ("bf8i4", default_bf8i4_config, "bf8")):
+        cfg = ctor(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
+        for N in _N_SWEEP:
+            rng = np.random.default_rng(45)
+            A_f32 = rng.uniform(-2.0, 2.0, (M, K)).astype(np.float32)
+            A_raw = _encode_fp8(A_f32, dtype, gfx_arch)
+            A_dec = _decode_fp8(A_raw, dtype, gfx_arch)
+            # B is pk_int4: 2 K-elements per byte, packed COLUMN-MAJOR (rcr).
+            #
+            # Ground-truth nibble convention (Old-TE reference_gemm_quant +
+            # pk_int4.hpp with CK_TILE_USE_PK4_LAYOUT_SHUFFLE=1):
+            #   * value(code) = code - 8   (code in 0..15 -> value in [-8, +7]),
+            #     NOT the two's-complement (codes<8?codes:codes-16) round-5 used.
+            #   * pk_int4_t_to_fp32x2_t returns {x_h, x_l} (SHUFFLE swap), and
+            #     load_b picks (k&1) ? .hi : .lo, so for the byte covering
+            #     (k even, k odd) of a fixed n:
+            #         k even -> HIGH nibble;  k odd -> LOW nibble.
+            #   The device conversion consumes the same bytes after the
+            #   UNCONDITIONAL permute_vectors_i4x4_b in the ctypes lib, so the
+            #   host byte layout must match this reference exactly.
+            codes = rng.integers(0, 16, size=(K, N), dtype=np.uint8)  # 0..15
+            B_dec = codes.astype(np.float32) - 8.0                    # value = code-8
+            _flat = codes.flatten(order='F').astype(np.uint8)  # col-major idx=n*K+k
+            _even = _flat[0::2] & 0x0F   # k even -> HIGH nibble
+            _odd = _flat[1::2] & 0x0F    # k odd  -> LOW nibble
+            B_raw = (_odd | (_even << 4)).astype(np.uint8)
+            QK_B = math.ceil(K / gK)
+            QN_B = math.ceil(N / gN)
+            # BQ supplied as float32 -> the runner encodes it to fp8/bf8 (QDataType,
+            # arch-aware).  The kernel therefore sees the fp8/bf8-rounded scale, so
+            # the CPU reference must use the same round-tripped value to stay fair.
+            BQ = rng.uniform(0.5, 2.0, (QK_B, QN_B)).astype(np.float32)
+            BQ_ref = _decode_fp8(_encode_fp8(BQ, dtype, gfx_arch), dtype, gfx_arch)
+            BQ_ref = BQ_ref.reshape(QK_B, QN_B).astype(np.float32)
+            status, detail = _run_one(f"C/{variant}/N{N}", cfg, M, N, K,
+                                      A_raw, A_dec, B_raw, B_dec, BQ,
+                                      out_dir, c_dtype=np.float16,
+                                      BQ_ref=BQ_ref, gfx_arch=gfx_arch)
+            if status != PASS:
+                return status, detail
+        results.append(variant)
+    return PASS, f"C/i4: PASS ({', '.join(results)}) for N in {_N_SWEEP}"
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +517,7 @@ def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
 TESTS = [
     ("C4/fp8",          test_c4_fp8),
     ("C4/bf8",          test_c4_bf8),
+    ("C/i4",            test_c_i4),
     ("H3/mx_bf16bf16",  test_h3_mx_bf16bf16),
     ("H3/mx_bf16bf8",   test_h3_mx_bf16bf8),
     ("H3/mx_bf16fp4",   test_h3_mx_bf16fp4),
@@ -451,6 +545,14 @@ def main():
         return SKIP_EXIT
     if gfx not in SUPPORTED_ARCHS:
         print(f"SKIP: BQuant is {'/'.join(SUPPORTED_ARCHS)}-only; detected {gfx}")
+        return SKIP_EXIT
+    try:
+        import ml_dtypes  # noqa: F401
+    except ImportError:
+        # Gate here rather than letting _encode_fp8 raise: an ImportError inside a
+        # test function is swallowed by the loop's `except Exception` below and
+        # reported as FAIL, blaming the kernel for a missing host dependency.
+        print("SKIP: ml_dtypes not installed; BQuant fp8/bf8 encoding unavailable")
         return SKIP_EXIT
 
     out_dir = args.output_dir or Path(tempfile.mkdtemp(prefix="bquant_gpu_test_"))

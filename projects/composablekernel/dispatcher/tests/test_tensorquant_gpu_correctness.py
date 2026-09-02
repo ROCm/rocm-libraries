@@ -275,6 +275,12 @@ def test_tensorquant_timing_positive(tmp_path):
 # Standalone runner
 # ---------------------------------------------------------------------------
 
+# Mirrors the pytest cases above one-for-one. ctest runs this file as a script
+# (not via `-m pytest`) so that a missing GPU exits 77 = Skipped, so anything
+# absent from this list is not covered by ctest at all.
+#
+# test_*_timing_positive has no entry of its own because _run_one already fails
+# the case when time_ms <= 0.
 TESTS = [
     ("C4/fp8", lambda od, gfx: _run_one(
         "C4/fp8", default_fp8_config(gfx_arch=gfx), 128, 128, 192,
@@ -282,6 +288,10 @@ TESTS = [
     ("C4/bf8", lambda od, gfx: _run_one(
         "C4/bf8", default_bf8_config(gfx_arch=gfx), 128, 128, 192,
         *_make_inputs(128, 128, 192, "bf8"), Path(od), gfx_arch=gfx)),
+    # Non-square M/N/K to stress stride math.
+    ("rect/fp8", lambda od, gfx: _run_one(
+        "rect/fp8", default_fp8_config(gfx_arch=gfx), 64, 256, 128,
+        *_make_inputs(64, 256, 128, "fp8"), Path(od), gfx_arch=gfx)),
 ]
 
 

@@ -807,6 +807,13 @@ def expand_bquant_sweep(
 # =============================================================================
 
 
+# NOTE: the gfx942 branch of both helpers below is correct but not yet exercised
+# by CI -- the bquant lane is gated to gfx950 (ck.groovy) and
+# test_bquant_gpu_correctness.SUPPORTED_ARCHS matches it. They are written
+# arch-aware now so that enabling gfx942 is a one-line change in those two
+# places; until that follow-up lands, treat the gfx942 values as unvalidated.
+
+
 def _fp8_warp_tile_k(gfx_arch: str) -> int:
     """warp_tile_k for fp8/bf8 compv3 (non-FlatMM): 128 on gfx950, 32 on gfx942.
 
