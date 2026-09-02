@@ -247,13 +247,12 @@ inline constexpr SkipEntry kSkipList[] = {
      "wraps it and the source pointer lands outside the allocation. SIGSEGV, not a diff"},
     {"Image_Geometric/FlipTest.Correctness/HOST_I8toI8_*_FullRoi_1x45x13_h1_*", ""},
     {"Image_Geometric/FlipTest.Correctness/HOST_I8toI8_*_FullRoi_2x36x55_h1_*",
-     "the I8 horizontal path is also fatal on a 55-wide row, where the offset does not underflow; "
-     "that one is a second overrun and has not been pinned to a line yet"},
+     "flip-host-i8-horizontal-scalar-tail-offset, which is fatal rather than merely wrong once the "
+     "missing tail fixup starts the read far enough left of the buffer"},
     {"Image_Geometric/FlipTest.Correctness/HIP_*_FullRoi_1x45x13_h1_v1",
-     "flip-hip-horizontal-partial-group-unguarded: the horizontal-only branch clamps its last "
-     "8-wide group back to the row start, but only for id_z == 0 && id_y == 0, and the "
-     "horizontal-and-vertical branch has no such clamp at all. Either way a width that is not a "
-     "multiple of 8 indexes before the plane and faults the device"},
+     "flip-hip-grid-sized-from-the-frame, the x-axis half of the vertical fault already listed "
+     "below: id_x runs past roiWidth, so rb.x - id_x - 7 wraps. The h1-only branch repairs its "
+     "last partial group on image 0 row 0 only, and the h1+v1 branch not at all"},
     {"Image_Geometric/FlipTest.Correctness/HIP_*_FullRoi_2x36x55_h1_v1", ""},
     {"Image_Geometric/FlipTest.Correctness/HIP_*_PartialRoi_1x45x13_h1_v0", ""},
     {"Image_Geometric/FlipTest.Correctness/HOST_F32toF32_PKD3_*_1x45x13_h0_v1",
