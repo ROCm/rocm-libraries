@@ -3359,20 +3359,22 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 // ROCm library (hipsparselt embeds its own TensileLite and exports the same
 // symbols), so adding a field to it makes the destructor resolve to a copy
 // compiled against the old layout and corrupts the heap.
+//
+// Both branches assign. `inputs` can outlive the solution that filled it, and a
+// Stream-K binding left in place would send the next solution's GSU reduction
+// into the small Stream-K region, far past its end.
 static void bindFlagRegion(const RocblasltContractionProblem&      prob,
                            const TensileLite::ContractionSolution& solution,
                            TensileLite::ContractionInputs&         inputs)
 {
-    if(prob.streamKFlags == nullptr)
-        return;
-    if(solution.sizeMapping.streamK <= 0 || solution.sizeMapping.streamKAtomic != 0)
-        return;
-    // outputAmaxD hands the same pointer to the amax counter, which would then
-    // land on top of flag zero. Leave those on the GSU region: no better than
-    // before for that combination, but no worse.
-    if(solution.problemType.outputAmaxD)
-        return;
-    inputs.Synchronizer = prob.streamKFlags;
+    const bool readsFlags = prob.streamKFlags != nullptr && solution.sizeMapping.streamK > 0
+                            && solution.sizeMapping.streamKAtomic == 0
+                            // outputAmaxD hands the same pointer to the amax counter,
+                            // which would then land on top of flag zero. Leave those on
+                            // the GSU region: no better than before for that
+                            // combination, but no worse.
+                            && !solution.problemType.outputAmaxD;
+    inputs.Synchronizer = readsFlags ? prob.streamKFlags : prob.Synchronizer;
 }
 
 /******************************************************************************
@@ -3882,11 +3884,14 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // flag pointer is baked into the kernel arguments by solve() just
             // below. If this solution reads the flags as Stream-K, point them at
             // a region private to this stream so two Gemm objects initialized on
-            // different streams cannot share one.
+            // different streams cannot share one. Every other solution is put
+            // back on the shared GSU region: `data->inputs` survives across
+            // initialize() calls, so a Stream-K binding left in place would send
+            // an MBSK reduction into the small Stream-K region.
+            void* region = nullptr;
             if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
                && !solution->problemType.outputAmaxD)
             {
-                void* region = nullptr;
                 if(rocblaslt_status s = handle->streamKFlagsForStream(stream, 0, &region);
                    s != rocblaslt_status_success)
                 {
@@ -3895,9 +3900,10 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                               "one to c_syncSkStreamSlots distinct streams");
                     return s;
                 }
-                if(region != nullptr)
-                    data->inputs.Synchronizer = region;
             }
+            // A handle with no Stream-K buffer hands back no region and has no
+            // isolation to offer; the shared region is all there is.
+            data->inputs.Synchronizer = region != nullptr ? region : handle->gsuFlagsForProblem(0);
 
             data->kernels = solution->solve(data->problem, data->inputs, *hardware);
         }
@@ -3980,25 +3986,30 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // Grouped GEMM does select Stream-K solutions, so isolation has to
             // cover the stream as well as the problem index: offsetting by index
             // alone keeps one grouped call internally safe but still shares the
-            // region with every other stream.
-            if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
-               && !solution->problemType.outputAmaxD)
+            // region with every other stream. Every other solution is put back
+            // on the GSU region its own problem index owns, for the reason the
+            // single-GEMM branch above assigns unconditionally.
+            const bool readsFlags = solution->sizeMapping.streamK > 0
+                                    && solution->sizeMapping.streamKAtomic == 0
+                                    && !solution->problemType.outputAmaxD;
+            // A group is one kernel launch, so two of its problems sharing a
+            // region would let one clear a flag the other is spinning on. Past
+            // c_syncSkSlotsPerStream there is no region left to give them, so
+            // the call is refused rather than wrapped onto slot 0.
+            if(readsFlags
+               && data->inputs.grouped.size() > _rocblaslt_handle::c_syncSkSlotsPerStream)
             {
-                // A group is one kernel launch, so two of its problems sharing
-                // a region would let one clear a flag the other is spinning on.
-                // Past c_syncSkSlotsPerStream there is no region left to give
-                // them, so the call is refused rather than wrapped onto slot 0.
-                if(data->inputs.grouped.size() > _rocblaslt_handle::c_syncSkSlotsPerStream)
+                log_error(__func__,
+                          "a Stream-K solution cannot run a grouped GEMM wider than "
+                          "c_syncSkSlotsPerStream problems: the problems past it have no "
+                          "flag region of their own");
+                return rocblaslt_status_invalid_value;
+            }
+            for(size_t i = 0; i < data->inputs.grouped.size(); i++)
+            {
+                void* region = nullptr;
+                if(readsFlags)
                 {
-                    log_error(__func__,
-                              "a Stream-K solution cannot run a grouped GEMM wider than "
-                              "c_syncSkSlotsPerStream problems: the problems past it have no "
-                              "flag region of their own");
-                    return rocblaslt_status_invalid_value;
-                }
-                for(size_t i = 0; i < data->inputs.grouped.size(); i++)
-                {
-                    void* region = nullptr;
                     if(rocblaslt_status s = handle->streamKFlagsForStream(stream, i, &region);
                        s != rocblaslt_status_success)
                     {
@@ -4007,9 +4018,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                                   "handed one to c_syncSkStreamSlots distinct streams");
                         return s;
                     }
-                    if(region != nullptr)
-                        data->inputs.grouped[i].Synchronizer = region;
                 }
+                data->inputs.grouped[i].Synchronizer
+                    = region != nullptr ? region : handle->gsuFlagsForProblem(i);
             }
 
             data->useUserArgs = useUserArgs;
