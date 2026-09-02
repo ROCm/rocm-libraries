@@ -353,6 +353,20 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * K_wg = N*Ho*Wo, which is stride-K in dY (NHWK) and stride-C in X (NHWC).
      * Emitting it produces numerically wrong dW.  Mirrors Python
      * is_valid_wgrad_spec / WgradConvSpec.validate(). */
+    /* split_k == 0 puts the split degree in a kernel argument, so the K-slice
+     * length is unknown at build time; the async and unrolled k-loops both need
+     * a compile-time trip count. Mirrors the Python validator. */
+    if(s->split_k == 0 && (s->async_dma || s->unroll_k))
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "wgrad split_k=0 (runtime degree) is incompatible with "
+                     "async_dma/unroll_k: those pipelines need a compile-time "
+                     "iteration count. Use a fixed split_k >= 1.");
+        return false;
+    }
+
     if(s->async_dma && !s->lds_k_outer)
     {
         if(reason && reason_cap)

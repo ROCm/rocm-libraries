@@ -493,6 +493,19 @@ class WgradConvSpec:
                 "global->LDS load needs a stride-1 reduction axis, which wgrad "
                 "only has once the tile is stored K-outer"
             )
+        if self.split_k == 0 and (self.async_dma or self.unroll_k):
+            # split_k == 0 means the split degree is a launch-time kernel
+            # argument, so the K-slice length is not known at build time. The
+            # async and unrolled k-loops both need a compile-time trip count to
+            # lay out their pipeline, and wg_K_padded() cannot supply one for a
+            # runtime degree. Reject here with the reason rather than let the
+            # builder raise a confusing ValueError deep in the k-loop, which the
+            # sweep drivers swallow into a silent skip.
+            raise ValueError(
+                "wgrad split_k=0 (runtime degree) is incompatible with "
+                "async_dma/unroll_k: those pipelines need a compile-time "
+                "iteration count. Use a fixed split_k >= 1."
+            )
         if self.lds_k_outer:
             # ds_read_b64_tr_b16 is a gfx950 MFMA-class instruction operating on
             # 16-bit lanes; the validated fragment formula assumes an 8-element
@@ -643,6 +656,12 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"scattered MFMA layout; cshuffle produces contiguous pairs)"
         )
 
+    if spec.split_k == 0 and (spec.async_dma or spec.unroll_k):
+        return False, (
+            "wgrad split_k=0 (runtime degree) is incompatible with "
+            "async_dma/unroll_k: those pipelines need a compile-time iteration "
+            "count. Use a fixed split_k >= 1."
+        )
     if spec.async_dma and not spec.lds_k_outer:
         # Mirror of the WgradConvSpec.validate() gate: the async intrinsic maps
         # contiguous-global to contiguous-LDS, and wgrad only has a stride-1

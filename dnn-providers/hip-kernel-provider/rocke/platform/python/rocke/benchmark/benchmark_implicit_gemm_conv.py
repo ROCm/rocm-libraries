@@ -2014,7 +2014,18 @@ def _run_wgrad_sweep(
     #          actual degrees from _SPLIT_K_AUTO are swept at launch time via the ks arg.
     #  -1   → one combo per tile config, degree resolved by CK formula at build time.
     #  else → single fixed degree baked into the kernel.
-    split_k_values = (0,) if args.split_k == 0 else (args.split_k,)
+    # --split-k 0 means "sweep every degree". Normally one runtime-degree kernel
+    # (split_k=0) covers them all: the degree rides a kernel argument and the
+    # degrees in _SPLIT_K_AUTO are swept at launch time, which saves recompiling
+    # per degree. The async and unrolled pipelines cannot use that kernel -- they
+    # need a compile-time trip count to lay out the pipeline -- so for those we
+    # compile one kernel per concrete degree instead. Same coverage, more
+    # compiles.
+    if args.split_k == 0:
+        _rt_capable = not bool(getattr(args, "async_dma", False))
+        split_k_values = (0,) if _rt_capable else _SPLIT_K_AUTO
+    else:
+        split_k_values = (args.split_k,)
 
     combos = list(
         itertools.product(
