@@ -168,7 +168,7 @@ install_packages( )
   local library_dependencies_fedora=( "make" "gcc-c++" "libcxx-devel" "rpm-build" )
   local library_dependencies_sles=( "make" "gcc-c++" "rpm-build" )
 
-  if [[ $HIP_PLATFORM == "nvidia" ]]; then
+  if [[ "${build_cuda}" == true ]]; then
     # Ideally, this could be cuda-cublas-dev, but the package name has a version number in it
     library_dependencies_ubuntu+=( "" ) # removed, use --installcuda option to install cuda
   else
@@ -360,11 +360,10 @@ cat <<EOF
 
     --cmake_install               Install minimum cmake version if required.
 
-    --cuda, --use-cuda            Build library for CUDA backend (deprecated).
-                                  Sets HIP_PLATFORM=nvidia and invokes nvcc
-                                  directly (no hipcc dependency). nvcc must be
-                                  on PATH or reachable via --cudapath.
-                                  Without this flag, HIP_PLATFORM defaults to amd.
+    --cuda, --use-cuda            Build library for CUDA backend using nvcc
+                                  directly (no hipcc dependency). Passes
+                                  -DUSE_CUDA=ON to CMake. nvcc must be on
+                                  PATH or reachable via --cudapath.
 
     -d, --dependencies            Build and install external dependencies. Dependencies are to be installed in /usr/local.
                                   This should be done only once (this does not install rocBLAS, rocSolver, or cuda).
@@ -460,8 +459,6 @@ while true; do
         shift ;;
     --cuda|--use-cuda)
         # still need this flag in install.sh to support install.sh --cuda -d for now
-        echo "--cuda option is deprecated (use environment variable HIP_PLATFORM=nvidia)"
-        export HIP_PLATFORM="nvidia"
         build_cuda=true
         shift ;;
     --installcuda)
@@ -574,10 +571,6 @@ else
   full_build_dir=${build_dir}/debug
 fi
 
-# this can be removed and be done in rmake.py once --cuda flag support is gone
-if [[ "${build_cuda}" != true ]]; then
-  export HIP_PLATFORM="amd"
-fi
 
 if [[ "${rmake_invoked}" == false ]]; then
   pushd .
