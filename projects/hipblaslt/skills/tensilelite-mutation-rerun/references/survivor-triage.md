@@ -13,13 +13,13 @@ only to divide the review work.
 Save the results that were not killed:
 
 ```bash
-mutmut results > work/mutation/<slice>/results.txt
+mutmut results > work/mutation/slices/<slice>-<slug>/results.txt
 ```
 
 Save the complete result list separately:
 
 ```bash
-mutmut results --all true > work/mutation/<slice>/results-all.txt
+mutmut results --all true > work/mutation/slices/<slice>-<slug>/results-all.txt
 ```
 
 Read the output conservatively. Each non-empty result line contains a mutant ID
