@@ -94,6 +94,10 @@ TEST_P(CopyTest, Correctness) {
 // Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_DataExchange, CopyTest,
-    ::testing::ValuesIn(make_shape_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
-                                           {Roi::Full})),
+    ::testing::ValuesIn(concat_configs({
+        make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv, {Roi::Full},
+                     {presets::kTailWidthSize}),
+        make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full},
+                     {presets::kDefaultSize, presets::kSubVectorSize}),
+    })),
     config_param_name);

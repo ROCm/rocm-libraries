@@ -119,9 +119,14 @@ TEST_P(ColorCastTest, Correctness) {
 // Restricted to the 3-channel layouts: color_cast applies distinct R/G/B constants, and the
 // kernel rejects 1-channel input with an error despite the header documenting c = 1/3 (a
 // doc/kernel discrepancy).
-INSTANTIATE_TEST_SUITE_P(Image_Color, ColorCastTest,
-                         ::testing::ValuesIn(with_params<ColorCastParams>(
-                             make_shape_configs(presets::kDefaultDTypes,
-                                                presets::kLayoutsFullConv),
-                             {ColorCastParams{0.6f, 30, 90, 150}})),
-                         op_config_name<ColorCastParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Image_Color, ColorCastTest,
+    ::testing::ValuesIn(with_params<ColorCastParams>(
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {ColorCastParams{0.6f, 30, 90, 150}})),
+    op_config_name<ColorCastParams>);

@@ -131,7 +131,12 @@ TEST_P(EmbossTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Filter, EmbossTest,
     ::testing::ValuesIn(with_params<EmbossParams>(
-        make_shape_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv),
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
         {EmbossParams{1.0f, 3}, EmbossParams{1.0f, 5}, EmbossParams{2.0f, 3},
          EmbossParams{2.0f, 5}})),
     op_config_name<EmbossParams>);

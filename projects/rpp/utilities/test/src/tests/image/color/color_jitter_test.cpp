@@ -150,7 +150,12 @@ TEST_P(ColorJitterTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, ColorJitterTest,
     ::testing::ValuesIn(with_params<ColorJitterParams>(
-        host_configs(make_shape_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv)),
+        host_configs(concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        })),
         {ColorJitterParams{0.0f, 0.0f, 0.0f, 1.0f},     // neutral
          ColorJitterParams{0.0f, 0.0f, 0.0f, 0.0f},     // desaturate to grey
          ColorJitterParams{0.0f, 0.0f, 90.0f, 1.0f},    // hue rotation

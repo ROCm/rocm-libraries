@@ -128,6 +128,11 @@ TEST_P(GaussianFilterTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Filter, GaussianFilterTest,
     ::testing::ValuesIn(with_params<GaussianFilterParams>(
-        make_shape_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv),
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
         {GaussianFilterParams{3, 1.0f}, GaussianFilterParams{5, 1.0f}})),
     op_config_name<GaussianFilterParams>);

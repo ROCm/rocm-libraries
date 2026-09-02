@@ -107,9 +107,14 @@ TEST_P(ContrastTest, Correctness) {
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(Image_Color, ContrastTest,
-                         ::testing::ValuesIn(with_params<ContrastParams>(
-                             make_shape_configs(presets::kDefaultDTypes,
-                                                presets::kLayoutsFullConv),
-                             {ContrastParams{1.75f, 128.0f}})),
-                         op_config_name<ContrastParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Image_Color, ContrastTest,
+    ::testing::ValuesIn(with_params<ContrastParams>(
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {ContrastParams{1.75f, 128.0f}})),
+    op_config_name<ContrastParams>);

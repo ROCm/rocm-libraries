@@ -125,6 +125,11 @@ TEST_P(ColorTwistTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, ColorTwistTest,
     ::testing::ValuesIn(with_params<ColorTwistParams>(
-        make_shape_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv),
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
         {ColorTwistParams{1.5f, 20.0f, 90.0f, 1.2f}})),
     op_config_name<ColorTwistParams>);

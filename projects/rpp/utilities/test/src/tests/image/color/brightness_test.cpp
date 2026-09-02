@@ -108,9 +108,14 @@ TEST_P(BrightnessTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_brightness<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-INSTANTIATE_TEST_SUITE_P(Image_Color, BrightnessTest,
-                         ::testing::ValuesIn(with_params<BrightnessParams>(
-                             make_shape_configs(presets::kDefaultDTypes,
-                                                presets::kLayoutsFullConv),
-                             {BrightnessParams{1.75f, 50.0f}})),
-                         op_config_name<BrightnessParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Image_Color, BrightnessTest,
+    ::testing::ValuesIn(with_params<BrightnessParams>(
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {BrightnessParams{1.75f, 50.0f}})),
+    op_config_name<BrightnessParams>);

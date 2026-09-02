@@ -95,5 +95,10 @@ TEST_P(HistogramEqualizeTest, Correctness) {
 // Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, HistogramEqualizeTest,
-    ::testing::ValuesIn(make_shape_configs({DType::U8}, presets::kLayoutsFullConv)),
+    ::testing::ValuesIn(concat_configs({
+        make_configs({DType::U8}, presets::kLayoutsFullConv, {Roi::Full, Roi::Partial},
+                     {presets::kTailWidthSize}),
+        make_configs({DType::U8}, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kSubVectorSize}),
+    })),
     config_param_name);

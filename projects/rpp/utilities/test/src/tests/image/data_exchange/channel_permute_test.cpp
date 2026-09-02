@@ -122,6 +122,11 @@ TEST_P(ChannelPermuteTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_DataExchange, ChannelPermuteTest,
     ::testing::ValuesIn(with_params<ChannelPermuteParams>(
-        make_shape_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv, {Roi::Full}),
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
+                         {Roi::Full}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch, {Roi::Full},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
         {ChannelPermuteParams{{2, 0, 1}}})),
     op_config_name<ChannelPermuteParams>);

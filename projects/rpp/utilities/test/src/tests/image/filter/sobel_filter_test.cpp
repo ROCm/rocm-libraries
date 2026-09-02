@@ -130,6 +130,7 @@ TEST_P(SobelFilterTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Filter, SobelFilterTest,
     ::testing::ValuesIn(with_params<SobelFilterParams>(
-        make_shape_configs(presets::kDefaultDTypes, {Layout::PLN1}),
+        make_configs(presets::kDefaultDTypes, {Layout::PLN1}, {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kTailWidthSize, presets::kSubVectorSize}),
         {SobelFilterParams{0, 3}, SobelFilterParams{1, 3}, SobelFilterParams{2, 3}})),
     op_config_name<SobelFilterParams>);

@@ -110,6 +110,11 @@ TEST_P(ColorTemperatureTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, ColorTemperatureTest,
     ::testing::ValuesIn(with_params<ColorTemperatureParams>(
-        make_shape_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv),
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
         {ColorTemperatureParams{40}})),
     op_config_name<ColorTemperatureParams>);

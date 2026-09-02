@@ -116,6 +116,7 @@ TEST_P(MedianFilterTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Filter, MedianFilterTest,
     ::testing::ValuesIn(with_params<MedianFilterParams>(
-        make_shape_configs(presets::kDefaultDTypes, presets::kLayoutsFull),
+        make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kTailWidthSize, presets::kSubVectorSize}),
         {MedianFilterParams{3}, MedianFilterParams{5}})),
     op_config_name<MedianFilterParams>);

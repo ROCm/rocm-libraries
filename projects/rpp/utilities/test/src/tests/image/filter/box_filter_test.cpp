@@ -121,6 +121,11 @@ TEST_P(BoxFilterTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Filter, BoxFilterTest,
     ::testing::ValuesIn(with_params<BoxFilterParams>(
-        make_shape_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv),
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
         {BoxFilterParams{3}, BoxFilterParams{5}})),
     op_config_name<BoxFilterParams>);

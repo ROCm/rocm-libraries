@@ -128,6 +128,11 @@ inline std::string config_name(const TestConfig& c) {
 }
 
 namespace presets {
+// The shape sweep. Each size lands the width somewhere different against the SIMD and HIP block
+// widths, and a test grids its other axes over them. A test that also has layout conversions in
+// its grid usually runs those at kTailWidthSize only: a conversion is a store-side concern, so
+// one shape exercises it, and pairing it with the odd width keeps its cost at one grid.
+
 // The default shape for images.
 inline constexpr Size kDefaultSize{2, 36, 48};
 
@@ -153,6 +158,9 @@ inline const std::vector<LayoutConv> kLayouts3ChConv{{Layout::PKD3, Layout::PKD3
                                                     {Layout::PLN3, Layout::PLN3},
                                                     {Layout::PKD3, Layout::PLN3},
                                                     {Layout::PLN3, Layout::PKD3}};
+
+// The non-converting subset of kLayouts3ChConv.
+inline const std::vector<Layout> kLayouts3Ch{Layout::PKD3, Layout::PLN3};
 
 // Full standard datatypes for most operators.
 inline const std::vector<DType> kDefaultDTypes{DType::U8, DType::I8, DType::F16, DType::F32};
@@ -197,42 +205,6 @@ inline std::vector<TestConfig> concat_configs(std::initializer_list<std::vector<
     configs.reserve(total);
     for (const auto& s : sets) configs.insert(configs.end(), s.begin(), s.end());
     return configs;
-}
-
-// The standard shape sweep: an op's own dtype/layout/ROI axes gridded over the four shapes in
-// presets, each of which lands the width somewhere different against the SIMD and HIP block
-// widths. The shapes are not all crossed with every layout, because the point of each differs:
-//
-//   * kTailWidthSize carries the layout conversions. A conversion is a store-side concern, so one
-//     shape exercises it; pairing it with the odd width keeps that shape's cost at one grid.
-//   * kDefaultSize and kSubVectorSize (vector-plus-tail, and tail-only) run the plain layouts,
-//     where the load and store strides are the ones the vector loops were written for.
-//
-// The plain layouts are the non-converting entries of `layouts`, so an op declares its layout
-// interface once. An op that only ever converts (colour-to-greyscale has no same-layout form) has
-// no such subset, and runs its whole set at every shape instead.
-inline std::vector<TestConfig> make_shape_configs(
-    const std::vector<DType>& dtypes, const std::vector<LayoutConv>& layouts,
-    const std::vector<Roi>& rois = {Roi::Full, Roi::Partial}) {
-    std::vector<LayoutConv> plain;
-    for (LayoutConv l : layouts)
-        if (l.in == l.out) plain.push_back(l);
-    if (plain.empty()) plain = layouts;
-    return concat_configs({
-        make_configs(dtypes, layouts, rois, {presets::kTailWidthSize}),
-        make_configs(dtypes, plain, rois, {presets::kDefaultSize, presets::kSubVectorSize}),
-    });
-}
-
-// The same sweep for an op that writes the layout it reads, mirroring the plain-layout overload
-// of make_configs(). Every shape runs every layout: there are no conversions to hold back.
-inline std::vector<TestConfig> make_shape_configs(
-    const std::vector<DType>& dtypes, const std::vector<Layout>& layouts,
-    const std::vector<Roi>& rois = {Roi::Full, Roi::Partial}) {
-    std::vector<LayoutConv> convs;
-    convs.reserve(layouts.size());
-    for (Layout l : layouts) convs.push_back({l, l});
-    return make_shape_configs(dtypes, convs, rois);
 }
 
 // GTest name generator: turns each TestConfig into its filterable label.

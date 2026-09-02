@@ -106,9 +106,15 @@ TEST_P(SaturationTest, Correctness) {
 
 // Restricted to the 3-channel layouts: saturation is an RGB (c = 3) op. Same-layout cases plus
 // both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(Image_Color, SaturationTest,
-                         ::testing::ValuesIn(with_params<SaturationParams>(
-                             make_shape_configs({DType::U8, DType::F16, DType::F32},
-                                                presets::kLayouts3ChConv),
-                             {SaturationParams{1.5f}})),
-                         op_config_name<SaturationParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Image_Color, SaturationTest,
+    ::testing::ValuesIn(with_params<SaturationParams>(
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayouts3ChConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayouts3Ch,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {SaturationParams{1.5f}})),
+    op_config_name<SaturationParams>);
