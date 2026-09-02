@@ -13,6 +13,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelHeuristicFactory.hpp>
@@ -431,14 +433,28 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 {
     // The fallback must contribute no ordering of its own: any score spread would
     // outrank priority, which is the one signal an engine without a model still has.
+    // It reports NaN rather than a shared constant, because RFC 0019.13 §15.2 hands the
+    // score to engine selection as a figure of merit and a constant reads as one.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
     const UnrankedKernelHeuristic heuristic;
 
-    EXPECT_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64)),
-              heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096)));
+    EXPECT_TRUE(std::isnan(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64))));
+    EXPECT_TRUE(
+        std::isnan(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096))));
+
+    // Equal-in-ordering is what the fallback owes. These two definitions carry the same
+    // priority, so the documented tiebreak -- ascending descriptor id -- has to decide, and
+    // a NaN score must not have leaked into the comparator to decide it instead.
+    Catalog catalog;
+    catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
+    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+    const auto ranked = heuristic.rankScored(catalog, context);
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x01)) << "the id tiebreak did not decide";
+    EXPECT_TRUE(std::isnan(ranked.front().score)) << "the fallback reported a figure of merit";
 }
 
 } // namespace

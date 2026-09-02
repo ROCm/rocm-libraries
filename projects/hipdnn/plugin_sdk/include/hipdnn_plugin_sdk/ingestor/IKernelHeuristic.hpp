@@ -56,6 +56,23 @@ public:
     /// candidate and should be computed once, and a model that fails partway through must
     /// abandon the whole ranking rather than leave a mix of real scores and sentinels,
     /// which would be neither the model's order nor the fallback's.
+    /// RFC 0019.13 §15.2: what selection returns -- "an ordered sequence of `(UKD id, score)`,
+    /// winner first".
+    ///
+    /// By id rather than object or reference, and that is the whole point: "The result crosses
+    /// a plugin boundary. An object commits the ABI to a kernel-definition layout; a reference
+    /// couples the caller's lifetime to the catalog."
+    ///
+    /// The score travels with the id because the callers §15.2 names need it -- a knob query
+    /// reports the top-ranked value as its default, autotune walks the ranked list, and engine
+    /// selection reads the top score as the engine's figure of merit (§11.1). Returning order
+    /// alone makes the third impossible, which is what blocked §15 phase 7.
+    struct ScoredKernel
+    {
+        DescriptorId kernelId;
+        double score;
+    };
+
     /// What decided the order, for the §12 trace: a compiled scorer, or nothing at all.
     /// Overridden by the unranked fallback, which declines to rank.
     virtual std::string traceDecidedBy() const
@@ -63,28 +80,41 @@ public:
         return "native";
     }
 
-    virtual std::vector<KernelDefinition> rank(const Catalog& catalog,
-                                               const MatchContext& context) const
+    /// The ranking, in §15.2's form. Overriding this rather than rank() keeps one
+    /// implementation of the order: rank() is derived from it below.
+    virtual std::vector<ScoredKernel> rankScored(const Catalog& catalog,
+                                                 const MatchContext& context) const
     {
-        std::vector<std::pair<double, const KernelDefinition*>> scored;
+        struct Ranked
+        {
+            double ordering;   ///< NaN-free, so the comparator stays a strict weak ordering
+            double reported;   ///< exactly what score() returned, NaN included
+            const KernelDefinition* entry;
+        };
+
+        std::vector<Ranked> scored;
         scored.reserve(catalog.entries.size());
         for(const auto& entry : catalog.entries)
         {
+            // NaN sorts last rather than poisoning the comparator, but it is reported to the
+            // caller unchanged: §15.2's score is a figure of merit, and a heuristic that
+            // computed none has to say so rather than hand back a number that reads as one.
             const double raw = score(context, catalog.bound, entry);
-            scored.emplace_back(std::isnan(raw) ? -std::numeric_limits<double>::infinity() : raw,
-                                &entry);
+            scored.push_back({std::isnan(raw) ? -std::numeric_limits<double>::infinity() : raw,
+                              raw,
+                              &entry});
         }
 
         std::stable_sort(scored.begin(), scored.end(), [](const auto& lhs, const auto& rhs) {
-            if(lhs.first != rhs.first)
+            if(lhs.ordering != rhs.ordering)
             {
-                return lhs.first > rhs.first;
+                return lhs.ordering > rhs.ordering;
             }
-            if(lhs.second->priority != rhs.second->priority)
+            if(lhs.entry->priority != rhs.entry->priority)
             {
-                return lhs.second->priority > rhs.second->priority;
+                return lhs.entry->priority > rhs.entry->priority;
             }
-            return lhs.second->kernelId < rhs.second->kernelId;
+            return lhs.entry->kernelId < rhs.entry->kernelId;
         });
 
         // RFC 0019 §12's selection trace, for every heuristic that ranks through this
@@ -97,23 +127,51 @@ public:
             std::ostringstream candidates;
             for(size_t i = 0; i < scored.size(); ++i)
             {
-                candidates << (i == 0 ? "" : " ") << toString(scored[i].second->kernelId) << "="
-                           << scored[i].first;
+                candidates << (i == 0 ? "" : " ") << toString(scored[i].entry->kernelId) << "="
+                           << scored[i].reported;
             }
             HIPDNN_PLUGIN_LOG_INFO("uhd trace: decided_by=" << traceDecidedBy()
-                                   << " winner=" << toString(scored.front().second->kernelId)
+                                   << " winner=" << toString(scored.front().entry->kernelId)
                                    << " candidates=" << scored.size()
                                    << " arch=" << context.deviceProperties.gcnArchName
                                    << " ranked=[" << candidates.str() << "]");
         }
 
-        std::vector<KernelDefinition> ranked;
+        std::vector<ScoredKernel> ranked;
         ranked.reserve(scored.size());
-        for(const auto& [_, entry] : scored)
+        for(const auto& candidate : scored)
         {
-            ranked.push_back(*entry);
+            ranked.push_back({candidate.entry->kernelId, candidate.reported});
         }
         return ranked;
+    }
+
+    /// The same order as rankScored(), as whole kernels.
+    ///
+    /// Kept because the catalog is what the state manager holds and re-sorts; §15.2's point is
+    /// that the *result crossing a plugin boundary* is ids and scores, not that a caller
+    /// already holding the catalog may not look at it. Non-virtual, so there is exactly one
+    /// place the order is decided.
+    std::vector<KernelDefinition> rank(const Catalog& catalog, const MatchContext& context) const
+    {
+        const auto scored = rankScored(catalog, context);
+
+        std::map<DescriptorId, const KernelDefinition*> byId;
+        for(const auto& entry : catalog.entries)
+        {
+            byId.emplace(entry.kernelId, &entry);
+        }
+
+        std::vector<KernelDefinition> ordered;
+        ordered.reserve(scored.size());
+        for(const auto& [kernelId, _] : scored)
+        {
+            if(const auto found = byId.find(kernelId); found != byId.end())
+            {
+                ordered.push_back(*found->second);
+            }
+        }
+        return ordered;
     }
 };
 
@@ -158,11 +216,14 @@ public:
         return "declared_order";
     }
 
+    /// NaN, not zero: this heuristic ranks by declared order and computes no figure of merit.
+    /// Zero is a value an engine could legitimately score, so reporting it here would let
+    /// §15.2's engine-selection caller compare a fallback against a model on the same scale.
     double score(const MatchContext& /*context*/,
                  const BoundTokens& /*bound*/,
                  const KernelDefinition& /*kernel*/) const override
     {
-        return 0.0;
+        return std::numeric_limits<double>::quiet_NaN();
     }
 };
 

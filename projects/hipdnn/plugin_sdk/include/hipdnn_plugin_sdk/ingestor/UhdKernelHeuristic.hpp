@@ -269,8 +269,8 @@ public:
         return orientedScore(_extractor->extract(ctx));
     }
 
-    std::vector<KernelDefinition> rank(const Catalog& catalog,
-                                       const MatchContext& context) const override
+    std::vector<ScoredKernel> rankScored(const Catalog& catalog,
+                                         const MatchContext& context) const override
     {
         // RFC 0019 §8.3: exact gcnArchName, then `default`. Resolved here rather than at
         // load because descriptor discovery is a process-wide static that runs before any
@@ -332,8 +332,8 @@ public:
     }
 
 private:
-    std::vector<KernelDefinition> rankWith(const Catalog& catalog,
-                                           const MatchContext& context) const
+    std::vector<ScoredKernel> rankWith(const Catalog& catalog,
+                                       const MatchContext& context) const
     {
         try
         {
@@ -380,11 +380,11 @@ private:
                                  return a.second->kernelId < b.second->kernelId;
                              });
 
-            std::vector<KernelDefinition> ordered;
+            std::vector<ScoredKernel> ordered;
             ordered.reserve(scored.size());
-            for(const auto& [_, entry] : scored)
+            for(const auto& [score, entry] : scored)
             {
-                ordered.push_back(*entry);
+                ordered.push_back({entry->kernelId, score});
             }
 
             traceSelection(scored, context);
@@ -407,7 +407,17 @@ private:
                                                  << " uhd=" << _config.uhdId
                                                  << " adapter=" << _config.adapterType
                                                  << " features_hash=" << _config.featuresHash);
-            return detail::declaredOrder(catalog.entries);
+            // Declared order carries no model score, and inventing one would let a caller
+            // read a fallback as a figure of merit. NaN says "not scored" in the same
+            // channel §15.2 defines, and rank()'s ordering is unaffected.
+            std::vector<ScoredKernel> fallback;
+            fallback.reserve(catalog.entries.size());
+            for(const auto& entry : detail::declaredOrder(catalog.entries))
+            {
+                fallback.push_back({entry.kernelId,
+                                    std::numeric_limits<double>::quiet_NaN()});
+            }
+            return fallback;
         }
     }
 
