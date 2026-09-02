@@ -26,8 +26,8 @@ void validateOwnedGemmStorage(const GemmSpecification& problem, const Tensor& ou
     };
     for (const Tensor& scale : problem.a.preQuantizationScales) inputs.push_back(&scale);
     for (const Tensor& scale : problem.b.preQuantizationScales) inputs.push_back(&scale);
-    if (problem.a.blockScale) inputs.push_back(&problem.a.blockScale->values);
-    if (problem.b.blockScale) inputs.push_back(&problem.b.blockScale->values);
+    if (problem.a.blockScale) inputs.push_back(&*problem.a.blockScale);
+    if (problem.b.blockScale) inputs.push_back(&*problem.b.blockScale);
     if (problem.epilogue.bias) inputs.push_back(&*problem.epilogue.bias);
     if (problem.epilogue.scaleAlpha) inputs.push_back(&*problem.epilogue.scaleAlpha);
     if (problem.epilogue.scaleA) inputs.push_back(&*problem.epilogue.scaleA);
@@ -102,20 +102,20 @@ detail::GemmExecutionInfo detail::executeGemm(const GemmInvocation& request, Gem
     return runInfo;
 }
 
-GemmSupportInfo queryGemmSupport(const GemmOperand& a, const GemmOperand& b, const Tensor& c,
-                                 const Tensor& d, const GemmOptions& options, GemmBackend backend) {
+GemmSupportInfo queryGemmSupport(const Tensor& a, const Tensor& b, const Tensor& c, const Tensor& d,
+                                 const GemmOptions& options, GemmBackend backend) {
     return detail::queryGemmSupport(detail::GemmInvocation(a, b, c, d, options), backend);
 }
 
-GemmBackend referenceGemmInto(GemmOperand a, GemmOperand b, Tensor c, Tensor d,
-                              const GemmOptions& options, GemmBackend backend) {
+GemmBackend referenceGemmInto(Tensor a, Tensor b, Tensor c, Tensor d, const GemmOptions& options,
+                              GemmBackend backend) {
     return detail::executeGemm(detail::GemmInvocation(std::move(a), std::move(b), std::move(c),
                                                       std::move(d), options),
                                backend)
         .backendUsed;
 }
 
-Tensor referenceGemm(GemmOperand a, GemmOperand b, Tensor c, ScalarType outputType,
+Tensor referenceGemm(Tensor a, Tensor b, Tensor c, ScalarType outputType,
                      const GemmOptions& options, std::optional<Layout> outputLayout,
                      GemmBackend backend) {
     const GemmSpecification problem(std::move(a), std::move(b), std::move(c), outputType, options);

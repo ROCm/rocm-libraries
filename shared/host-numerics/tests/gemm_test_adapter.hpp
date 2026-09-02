@@ -9,6 +9,7 @@ namespace roc::host_numerics {
 // Test-only access to the private bound invocation keeps backend conformance
 // tests focused on execution details without restoring that type to the public
 // API.
+using GemmOperand = detail::GemmOperand;
 using GemmTestSpecification = GemmSpecification;
 using GemmTestCase = GemmInvocation;
 using GemmTestRunInfo = GemmExecutionInfo;

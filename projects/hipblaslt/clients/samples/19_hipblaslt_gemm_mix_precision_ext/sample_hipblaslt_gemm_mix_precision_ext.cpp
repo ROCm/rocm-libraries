@@ -73,16 +73,15 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
                                            batchStrideD,
                                            Layout(Shape{size_t(runner.m), size_t(runner.n)},
                                                   {1, static_cast<ptrdiff_t>(runner.m)}));
-        GemmOperand operandA(
-            copyTensorFromEncodedStorage(aPtr + batchStrideA * b,
-                                         batchStrideA,
-                                         Layout(Shape{size_t(runner.m), size_t(runner.k)},
-                                                {1, static_cast<ptrdiff_t>(runner.m)})));
-        GemmOperand operandB(
-            copyTensorFromEncodedStorage(bPtr + batchStrideB * b,
-                                         batchStrideB,
-                                         Layout(Shape{size_t(runner.k), size_t(runner.n)},
-                                                {1, static_cast<ptrdiff_t>(runner.k)})));
+        Tensor a = copyTensorFromEncodedStorage(aPtr + batchStrideA * b,
+                                                batchStrideA,
+                                                Layout(Shape{size_t(runner.m), size_t(runner.k)},
+                                                       {1, static_cast<ptrdiff_t>(runner.m)}));
+        Tensor bTensor
+            = copyTensorFromEncodedStorage(bPtr + batchStrideB * b,
+                                           batchStrideB,
+                                           Layout(Shape{size_t(runner.k), size_t(runner.n)},
+                                                  {1, static_cast<ptrdiff_t>(runner.k)}));
         Tensor c = copyTensorFromEncodedStorage(cPtr + batchStrideC * b,
                                                 batchStrideC,
                                                 Layout(Shape{size_t(runner.m), size_t(runner.n)},
@@ -90,8 +89,7 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
         GemmOptions options;
         options.epilogue.alpha = static_cast<double>(runner.alpha) * scaleA;
         options.epilogue.beta  = static_cast<double>(runner.beta);
-        referenceGemmInto(
-            std::move(operandA), std::move(operandB), std::move(c), referenceTensor, options);
+        referenceGemmInto(std::move(a), std::move(bTensor), std::move(c), referenceTensor, options);
         copyTensorEncodedBackingStorageToBuffer(
             reference.data() + batchStrideD * b, batchStrideD, referenceTensor);
     }
