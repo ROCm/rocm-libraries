@@ -23,6 +23,20 @@
 /* ----- shared small helper: copy a working acc array into ctx->final_accs ----
  * Python sets `final_accs = current_accs` (or `for_op.results`); in C the
  * drivers write the ctx slot the epilogue reads. */
+/* k offset handed to the load phase: `const_i32(n)` for the forward conv, or
+ * `add(kloop_k_lo, const_i32(n))` when the instance supplies a slice base
+ * (wgrad). Sequenced so the SSA order matches the Python emitter. */
+static rocke_value_t*
+    kloop_k_off(rocke_ir_builder_t* b, const rocke_conv_build_ctx_t* ctx, int64_t n)
+{
+    rocke_value_t* c = rocke_b_const_i32(b, n);
+    if(ctx->kloop_k_lo == NULL)
+    {
+        return c;
+    }
+    return rocke_b_add(b, ctx->kloop_k_lo, c);
+}
+
 static void
     rocke_conv_set_final_accs(rocke_conv_build_ctx_t* ctx, rocke_value_t* const* accs, int num_accs)
 {
@@ -330,7 +344,7 @@ void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
         {
             int slot = pp % nb;
             rocke_conv_emit_load_phase(
-                ctx, rocke_b_const_i32(b, (int64_t)pp * block_k), buf_a[slot], buf_b[slot]);
+                ctx, kloop_k_off(b, ctx, (int64_t)pp * block_k), buf_a[slot], buf_b[slot]);
         }
     }
 
@@ -352,7 +366,7 @@ void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
             }
             /* issue_load(issue_idx, nxt) */
             rocke_conv_emit_load_phase(
-                ctx, rocke_b_const_i32(b, (int64_t)issue_idx * block_k), buf_a[nxt], buf_b[nxt]);
+                ctx, kloop_k_off(b, ctx, (int64_t)issue_idx * block_k), buf_a[nxt], buf_b[nxt]);
         }
 
         if(wait_vmcnt)

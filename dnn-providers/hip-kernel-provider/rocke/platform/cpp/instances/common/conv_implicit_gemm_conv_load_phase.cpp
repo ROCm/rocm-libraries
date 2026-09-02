@@ -262,13 +262,15 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
          * prefetch; streaming keeps the loads from evicting useful cache lines.
          * (Python imports CACHE_STREAM from ...core.ir; the C enum value is
          * ROCKE_CACHE_STREAM.) */
+        rocke_loads_descriptor_fn a_fn
+            = (ctx->a_descriptor_fn != NULL) ? ctx->a_descriptor_fn : rocke_conv_a_descriptor;
         rocke_async_tile_loader_slot_t a_slot;
         rocke_async_tile_loader_bind(b, &ctx->a_loader, A_dst, ctx->warp_id, &a_slot);
         rocke_async_tile_loader_slot_issue(b,
                                            &a_slot,
                                            ctx->tid,
                                            ctx->a_rsrc,
-                                           rocke_conv_a_descriptor,
+                                           a_fn,
                                            ctx,
                                            0x7FFFFFFF, /* oob_sentinel default = (1 << 31) - 1 */
                                            ROCKE_CACHE_STREAM);

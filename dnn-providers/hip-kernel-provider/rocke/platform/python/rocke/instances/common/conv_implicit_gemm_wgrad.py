@@ -472,29 +472,26 @@ class WgradConvSpec:
                 f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
                 f"scattered MFMA layout; cshuffle produces contiguous pairs)"
             )
-        if self.async_dma:
-            # Direct global->LDS load is NOT correct for wgrad and must not be
-            # emitted. `raw_ptr_buffer_load_lds` moves N *contiguous global*
-            # elements into N *contiguous LDS* elements, so the LDS axis that is
-            # contiguous has to be the global stride-1 axis. The loader is driven
-            # with (row=m, col=k_wg), but for wgrad the reduction axis K_wg is
+        if self.async_dma and not self.lds_k_outer:
+            # Direct global->LDS load is only correct on the K-outer tile.
+            # `raw_ptr_buffer_load_lds` moves N *contiguous global* elements into
+            # N *contiguous LDS* elements, so the LDS axis that is contiguous has
+            # to be the global stride-1 axis. On the M-outer tile the loader is
+            # driven with (row=m, col=k_wg), but wgrad's reduction axis K_wg is
             # stride-K in dY (NHWK) and stride-C in X (NHWC) -- never stride-1.
-            # Each lane therefore deposits `elems_per_chunk` consecutive
-            # *channels* where consecutive *spatial positions* were required.
-            # The result is numerically wrong (the synchronous loader on the
-            # identical spec is correct), and the boundary pad predicate is lost
-            # as well because one buffer_load...lds carries a single predicate
-            # for elements that have different (hi,wi) validity.
+            # Each lane would deposit `elems_per_chunk` consecutive *channels*
+            # where consecutive *spatial positions* were required, and the
+            # boundary pad predicate would be lost as well, because one
+            # buffer_load...lds carries a single predicate for elements that
+            # have different (hi, wi) validity.
             #
-            # Making this correct needs the K-outer LDS tile (LDS[k_wg][m]) plus
-            # gfx950 `ds_read_b64_tr_b16` fragment reads; until that lands, fail
-            # loudly rather than return a silently wrong dW.
-            raise NotImplementedError(
-                "wgrad does not support async_dma: direct global->LDS load "
-                "requires the GEMM reduction axis to be stride-1 in global "
-                "memory, but wgrad reduces over K_wg=N*Ho*Wo which is stride-K "
-                "in dY and stride-C in X. Emitting it produces numerically "
-                "wrong dW. Use the default synchronous loader (async_dma=False)."
+            # The K-outer tile fixes both: a chunk then runs along the FREE axis
+            # at a fixed (n, ho, wo, y, x), which is contiguous in global and
+            # shares one predicate.
+            raise ValueError(
+                "wgrad async_dma requires lds_k_outer=True: the direct "
+                "global->LDS load needs a stride-1 reduction axis, which wgrad "
+                "only has once the tile is stored K-outer"
             )
         if self.lds_k_outer:
             # ds_read_b64_tr_b16 is a gfx950 MFMA-class instruction operating on
@@ -646,14 +643,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"scattered MFMA layout; cshuffle produces contiguous pairs)"
         )
 
-    if spec.async_dma:
-        # Mirror of the WgradConvSpec.validate() rejection: the async intrinsic
-        # maps contiguous-global to contiguous-LDS, and wgrad's reduction axis
-        # K_wg is stride-K (dY) / stride-C (X). Emitting it yields wrong dW.
+    if spec.async_dma and not spec.lds_k_outer:
+        # Mirror of the WgradConvSpec.validate() gate: the async intrinsic maps
+        # contiguous-global to contiguous-LDS, and wgrad only has a stride-1
+        # reduction axis once the tile is stored K-outer.
         return False, (
-            "wgrad does not support async_dma: the direct global->LDS load "
-            "requires a stride-1 reduction axis, but wgrad reduces over "
-            "K_wg=N*Ho*Wo (stride K in dY, stride C in X)"
+            "wgrad async_dma requires lds_k_outer=True: the direct global->LDS "
+            "load needs a stride-1 reduction axis, which wgrad only has once "
+            "the tile is stored K-outer"
         )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
@@ -983,7 +980,10 @@ def build_implicit_gemm_conv_wgrad(
         # the stride 36 dwords for a 64-wide tile (36 % 32 == 4), which spreads
         # the four row-groups across banks. 8 elements also keeps the row 16-byte
         # aligned, which the b128 store side needs.
-        _KOUTER_PAD = 8
+        # Direct load deposits lane-contiguous *packed* bytes and cannot skip a
+        # row pad, so the async path must use a pad of 0. The transpose read is
+        # insensitive to the row stride, so dropping the pad costs nothing here.
+        _KOUTER_PAD = 0 if spec.async_dma else 8
         a_kouter_stride = block_m + _KOUTER_PAD
         b_kouter_stride = block_n + _KOUTER_PAD
         _a_shape = (block_k, a_kouter_stride)
@@ -1125,19 +1125,28 @@ def build_implicit_gemm_conv_wgrad(
         return X_desc.offset(b_, m=m_val, k=k_val)
 
     if spec.async_dma:
+        # K-outer: rows are K_wg, columns are the free axis. A chunk is then a
+        # run along the free axis at one k_wg, which is contiguous in global for
+        # both operands -- exactly what the intrinsic requires.
+        # contig_cols: a chunk must stay inside one contiguous global run. For dY
+        # (NHWK) the free axis is k_out, dense over kpg; for X (NHWC) it is the
+        # inner c of N_wg=(y,x,c), dense only over cpg -- a wider chunk would
+        # cross a filter position and silently fetch the wrong elements.
         a_loader = AsyncTileLoader.from_tile(
-            tile_rows=block_m,
-            tile_cols=block_k,
+            tile_rows=block_k,
+            tile_cols=block_m,
             block_size=threads,
             wave_size=spec.wave_size,
             elem_dtype=ir_dtype_a,
+            contig_cols=p_load.kpg,
         )
         b_loader = AsyncTileLoader.from_tile(
-            tile_rows=block_n,
-            tile_cols=block_k,
+            tile_rows=block_k,
+            tile_cols=block_n,
             block_size=threads,
             wave_size=spec.wave_size,
             elem_dtype=ir_dtype_b,
+            contig_cols=p_load.cpg,
         )
         a_sync_loader = None
         b_sync_loader = None
@@ -1198,27 +1207,11 @@ def build_implicit_gemm_conv_wgrad(
     def emit_load_phase(k_off: Value, A_dst: Value, B_dst: Value) -> None:
         k_off_capture[0] = k_off
 
-        if spec.async_dma:
-            from ...core.ir import CACHE_STREAM
-
-            a_slot = a_loader.bind(b, smem_dst=A_dst, wave_id=warp_id)
-            a_slot.issue(
-                b,
-                tid=tid,
-                rsrc=dy_rsrc,
-                descriptor=dy_descriptor,
-                coherency=CACHE_STREAM,
-            )
-            b_slot = b_loader.bind(b, smem_dst=B_dst, wave_id=warp_id)
-            b_slot.issue(
-                b, tid=tid, rsrc=x_rsrc, descriptor=x_descriptor, coherency=CACHE_STREAM
-            )
-            return
-
         if spec.lds_k_outer:
             # The K-outer tile is indexed (k, free); the descriptors take
             # (free, k). Swap the two coordinates -- the descriptors themselves
             # are unchanged, so the global addressing stays byte-identical.
+            # Shared by the synchronous and the direct-load paths.
             def _dy_kouter(b_, row, col):
                 return dy_descriptor(b_, col, row)
 
@@ -1228,6 +1221,23 @@ def build_implicit_gemm_conv_wgrad(
             a_desc_fn, b_desc_fn = _dy_kouter, _x_kouter
         else:
             a_desc_fn, b_desc_fn = dy_descriptor, x_descriptor
+
+        if spec.async_dma:
+            from ...core.ir import CACHE_STREAM
+
+            a_slot = a_loader.bind(b, smem_dst=A_dst, wave_id=warp_id)
+            a_slot.issue(
+                b,
+                tid=tid,
+                rsrc=dy_rsrc,
+                descriptor=a_desc_fn,
+                coherency=CACHE_STREAM,
+            )
+            b_slot = b_loader.bind(b, smem_dst=B_dst, wave_id=warp_id)
+            b_slot.issue(
+                b, tid=tid, rsrc=x_rsrc, descriptor=b_desc_fn, coherency=CACHE_STREAM
+            )
+            return
 
         a_sync_loader.load(
             b, tid=tid, smem_dst=A_dst, descriptor=a_desc_fn, rsrc=dy_rsrc

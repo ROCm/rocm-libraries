@@ -548,6 +548,14 @@ class AsyncTileLoader:
     elem_dtype: Type = F16
     dwords: int = 1  # 1, 3, or 4
     chunks_total: int = 0  # tile_rows * tile_cols / elems_per_chunk
+    # Length of the longest run of tile columns that is contiguous in global
+    # memory. ``None`` means "the col axis is dense across the whole tile" (the
+    # historical assumption). When the col axis is a composite index whose outer
+    # part strides -- e.g. wgrad's N_wg = (y, x, c), where only ``c`` is
+    # stride-1 -- a chunk that crosses one of those boundaries would fetch the
+    # wrong elements, silently. Setting this makes ``choose_dwords`` pick a
+    # width that always stays inside one run.
+    contig_cols: Optional[int] = None
     chunks_per_pass: int = 0  # = block_size
     passes: int = 0  # ceil(chunks_total / block_size)
 
@@ -560,6 +568,7 @@ class AsyncTileLoader:
         block_size: int,
         elem_bytes: int = 2,
         max_dwords: int = 4,
+        contig_cols: Optional[int] = None,
     ) -> int:
         """Pick the widest `dwords` value that divides the tile evenly.
 
@@ -575,6 +584,11 @@ class AsyncTileLoader:
                 continue
             elems = (d * 4) // elem_bytes
             if tile_cols % elems != 0:
+                continue
+            # A chunk must lie entirely inside one contiguous run of columns.
+            if contig_cols is not None and (
+                elems > contig_cols or contig_cols % elems != 0
+            ):
                 continue
             chunks = (tile_rows * tile_cols) // elems
             if chunks < block_size:
@@ -595,6 +609,7 @@ class AsyncTileLoader:
         wave_size: int = 64,
         elem_dtype: Type = F16,
         max_dwords: int = 4,
+        contig_cols: Optional[int] = None,
     ) -> "AsyncTileLoader":
         eb = _ELEM_BYTES.get(elem_dtype.name)
         if eb is None:
@@ -607,6 +622,7 @@ class AsyncTileLoader:
             block_size=block_size,
             elem_bytes=eb,
             max_dwords=max_dwords,
+            contig_cols=contig_cols,
         )
         elems = (d * 4) // eb
         chunks = (tile_rows * tile_cols) // elems
@@ -617,6 +633,7 @@ class AsyncTileLoader:
             block_size=block_size,
             wave_size=wave_size,
             elem_dtype=elem_dtype,
+            contig_cols=contig_cols,
             dwords=d,
             chunks_total=chunks,
             chunks_per_pass=block_size,

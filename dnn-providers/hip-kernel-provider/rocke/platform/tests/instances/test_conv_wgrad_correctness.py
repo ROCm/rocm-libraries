@@ -180,6 +180,7 @@ def _make_spec(
     epilogue: str,
     split_k: int,
     lds_k_outer: bool = False,
+    async_dma: bool = False,
 ):
     """Build a (spec, problem, warp_tile_k) triple, or (None, None, reason)."""
     from rocke.core.arch import ArchTarget
@@ -246,6 +247,7 @@ def _make_spec(
         name=(
             f"test_wgrad_{shape.id}_{dtype}_{pipeline}_{epilogue}_spk{split_k}"
             + ("_kouter" if lds_k_outer else "")
+            + ("_async" if async_dma else "")
         ),
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
         tile_m=tile_m,
@@ -258,6 +260,8 @@ def _make_spec(
         warp_tile_k=atom.k,
         wave_size=target.wave_size,
         lds_k_outer=lds_k_outer,
+        async_dma=async_dma,
+        lds_k_pad=0 if async_dma else None,
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=split_k,
@@ -273,6 +277,7 @@ def _run_one(
     epilogue: str,
     split_k: int = 1,
     lds_k_outer: bool = False,
+    async_dma: bool = False,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -290,7 +295,7 @@ def _run_one(
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     spec, problem, _wtk = _make_spec(
-        arch, shape, dtype, pipeline, epilogue, split_k, lds_k_outer
+        arch, shape, dtype, pipeline, epilogue, split_k, lds_k_outer, async_dma
     )
     if spec is None:
         return True, f"skip (no atom): {_wtk}"
@@ -396,10 +401,11 @@ class TestConvWgradCorrectness(unittest.TestCase):
     """Wgrad correctness: each pipeline x epilogue x shape x dtype (+ split-K)."""
 
     def _check(
-        self, shape, dtype, pipeline, epilogue, split_k=1, lds_k_outer=False
+        self, shape, dtype, pipeline, epilogue, split_k=1, lds_k_outer=False,
+        async_dma=False,
     ) -> None:
         passed, reason = _run_one(
-            GPU_ARCH, shape, dtype, pipeline, epilogue, split_k, lds_k_outer
+            GPU_ARCH, shape, dtype, pipeline, epilogue, split_k, lds_k_outer, async_dma
         )
         if reason.startswith("skip"):
             self.skipTest(reason)
@@ -442,6 +448,39 @@ class TestConvWgradCorrectness(unittest.TestCase):
             with self.subTest(shape=shape.id):
                 self._check(shape, "bf16", "mem", "cshuffle", split_k=8,
                             lds_k_outer=True)
+
+    def test_lds_k_outer_async_dma(self):
+        """Direct global->LDS load, which is only legal on the K-outer tile.
+
+        The intrinsic moves contiguous-global to contiguous-LDS, so it needs the
+        reduction axis to be stride-1 -- which wgrad only has once the tile is
+        stored K-outer. It also cannot straddle a filter position, which is what
+        the loader's contig_cols guard enforces; the C=24 and C=8 shapes in the
+        sweep exercise that.
+        """
+        if not _IS_MFMA:
+            self.skipTest(f"async_dma wgrad is MFMA/gfx950-only; got {GPU_ARCH}")
+        for dtype in _DTYPES:
+            for shape in _SHAPES:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    self._check(shape, dtype, "mem", "cshuffle",
+                                lds_k_outer=True, async_dma=True)
+
+    def test_async_dma_requires_k_outer(self):
+        """async_dma on the M-outer tile must be rejected, not silently wrong."""
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+        )
+
+        spec, _p, _w = _make_spec(
+            GPU_ARCH, _SHAPES[0], "bf16", "mem", "cshuffle", 1,
+            lds_k_outer=False, async_dma=True,
+        )
+        if spec is None:
+            self.skipTest("no atom for this arch")
+        ok, why = is_valid_wgrad_spec(spec, GPU_ARCH)
+        self.assertFalse(ok, "async_dma without lds_k_outer must be rejected")
+        self.assertIn("lds_k_outer", why)
 
     # One method per pipeline so failures are clearly attributed.
     def test_pipeline_mem(self):

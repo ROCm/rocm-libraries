@@ -1083,12 +1083,18 @@ def build_implicit_gemm_conv(
         # writes lane-contiguous LDS at the wave-uniform base computed
         # by AsyncTileLoader. Consumers (the MFMA phase) must place an
         # `s_waitcnt(vmcnt=0)` before the first ds_read.
+        # contig_cols: the tile's col axis is the reduction index (y, x, c) and
+        # only the inner ``c`` is stride-1, so a chunk wider than cpg -- or one
+        # that does not divide it -- would straddle a filter position and fetch
+        # the wrong elements with no diagnostic. Without this the async path is
+        # silently wrong for any cpg that is not a multiple of the chunk width.
         a_loader = AsyncTileLoader.from_tile(
             tile_rows=block_m,
             tile_cols=block_k,
             block_size=threads,
             wave_size=spec.wave_size,
             elem_dtype=ir_dtype_a,
+            contig_cols=p.cpg,
         )
         b_loader = AsyncTileLoader.from_tile(
             tile_rows=block_n,
@@ -1096,6 +1102,7 @@ def build_implicit_gemm_conv(
             block_size=threads,
             wave_size=spec.wave_size,
             elem_dtype=ir_dtype_b,
+            contig_cols=p.cpg,
         )
         a_sync_loader = None
         b_sync_loader = None

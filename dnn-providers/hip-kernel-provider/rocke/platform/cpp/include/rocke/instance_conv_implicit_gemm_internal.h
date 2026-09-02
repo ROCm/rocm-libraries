@@ -287,6 +287,17 @@ typedef struct rocke_conv_build_ctx
     /* spec.lds_k_outer (wgrad only). Zeroed by the ctx memset, so the forward
      * and dgrad drivers keep their exact previous behaviour. */
     bool lds_k_outer;
+    /* Optional override for the A-operand descriptor on the ASYNC load path.
+     * The sync path already has a_load_override; the async slot had no hook and
+     * always called rocke_conv_a_descriptor, which is the forward descriptor.
+     * NULL keeps that behaviour, so fwd/dgrad are unaffected. */
+    rocke_loads_descriptor_fn a_descriptor_fn;
+    /* Base added to every k offset the k-loop drivers hand to the load phase.
+     * The forward conv passes a bare const_i32(it*block_k); wgrad's Python
+     * emits b.add(k_lo, const_i32(...)) because its slice starts at the
+     * split-K lower bound. NULL keeps the bare-const form, so fwd/dgrad emit
+     * exactly what they emitted before. */
+    rocke_value_t* kloop_k_lo;
     /* Atom edge + fragment length used by the K-outer transpose-read feed. */
     rocke_value_t* tr_lane_mod4;
     rocke_value_t* tr_grp16;

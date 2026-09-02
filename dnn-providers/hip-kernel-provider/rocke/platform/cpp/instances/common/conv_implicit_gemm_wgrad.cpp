@@ -346,20 +346,21 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         }
     }
 
-    /* wgrad cannot use the direct global->LDS load.  raw_ptr_buffer_load_lds
+    /* wgrad can only use the direct global->LDS load on the K-outer tile.
+     * raw_ptr_buffer_load_lds
      * maps contiguous-global bytes to contiguous-LDS bytes, so the contiguous
      * LDS axis must be the global stride-1 axis; wgrad reduces over
      * K_wg = N*Ho*Wo, which is stride-K in dY (NHWK) and stride-C in X (NHWC).
      * Emitting it produces numerically wrong dW.  Mirrors Python
      * is_valid_wgrad_spec / WgradConvSpec.validate(). */
-    if(s->async_dma)
+    if(s->async_dma && !s->lds_k_outer)
     {
         if(reason && reason_cap)
             snprintf(reason,
                      reason_cap,
-                     "wgrad does not support async_dma: the direct global->LDS load "
-                     "requires a stride-1 reduction axis, but wgrad reduces over "
-                     "K_wg=N*Ho*Wo (stride K in dY, stride C in X)");
+                     "wgrad async_dma requires lds_k_outer=True: the direct "
+                     "global->LDS load needs a stride-1 reduction axis, which wgrad "
+                     "only has once the tile is stored K-outer");
         return false;
     }
 
@@ -1352,7 +1353,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      * (m_val-first SSA order) instead of the shared rocke_conv_a_descriptor
      * (k_val-first).  The async path goes through rocke_conv_emit_load_phase
      * which calls rocke_conv_a_descriptor directly for the async slot; wgrad
-     * does not yet support async_dma, so that path is unreachable. */
+     * supplies the wgrad dY descriptor through ctx->a_descriptor_fn. */
     {
         rocke_conv_build_overrides_t* ov_ptr = (rocke_conv_build_overrides_t*)rocke_arena_alloc(
             &b->arena, sizeof(rocke_conv_build_overrides_t));
@@ -1452,6 +1453,11 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         fwd.dtype_a = spec->dtype_a;
         fwd.dtype_b = spec->dtype_b;
         fwd.dtype_d = spec->dtype_d;
+        /* The shared load phase and k-loop drivers branch on the forward spec,
+         * so these must be carried across or the async / unrolled paths are
+         * silently unreachable from wgrad. */
+        fwd.async_dma = spec->async_dma;
+        fwd.unroll_k = spec->unroll_k;
         /* A temporary spec we keep alive for the duration; store pointer */
         rocke_implicit_gemm_conv_spec_t* tmp_fwd_spec
             = (rocke_implicit_gemm_conv_spec_t*)rocke_arena_alloc(
@@ -1575,6 +1581,10 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     }
     ctx->c0 = k_lo;
     ctx->c_K_gemm = (k_hi_v != NULL) ? k_hi_v : c_wg_K;
+    /* wgrad's async k-loop offsets are b.add(k_lo, const_i32(...)) -- the slice
+     * base is part of the expression, unlike the forward conv which uses a bare
+     * const. Handing the driver k_lo keeps the emitted SSA identical. */
+    ctx->kloop_k_lo = k_lo;
 
     /* Chiplet swizzle */
     if(spec->chiplet_swizzle)
@@ -1629,9 +1639,12 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         if(spec->lds_k_outer)
         {
             a_sh[0] = ctx->block_k;
-            a_sh[1] = ctx->block_m + ROCKE_WGRAD_KOUTER_PAD;
+            /* Direct load writes packed lane-contiguous bytes and cannot skip a
+             * row pad, so the async path uses a pad of 0. */
+            const int kpad = spec->async_dma ? 0 : ROCKE_WGRAD_KOUTER_PAD;
+            a_sh[1] = ctx->block_m + kpad;
             b_sh[0] = ctx->block_k;
-            b_sh[1] = ctx->block_n + ROCKE_WGRAD_KOUTER_PAD;
+            b_sh[1] = ctx->block_n + kpad;
         }
         ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_sh, 2, "A_smem");
         ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_sh, 2, "B_smem");
@@ -1689,12 +1702,29 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* Loaders */
     ctx->async_dma = spec->async_dma;
     ctx->lds_k_outer = spec->lds_k_outer;
+    /* The async A slot has no a_load_override; give it the wgrad dY descriptor
+     * (swapped coordinates on the K-outer tile) so it does not fall back to the
+     * forward descriptor. */
+    ctx->a_descriptor_fn
+        = spec->lds_k_outer ? wgrad_dy_descriptor_kouter : wgrad_dy_descriptor;
     if(ctx->async_dma)
     {
+        /* K-outer: rows are K_wg, columns are the free axis, so a chunk is a run
+         * along the free axis at one k_wg -- contiguous in global for both
+         * operands, which is exactly what the intrinsic requires. contig_cols
+         * keeps a chunk inside one such run: kpg for dY (NHWK, dense over the
+         * output-channel slab) and cpg for X (NHWC, dense only within one
+         * filter position). Mirrors the Python call. */
+        const int a_rows = ctx->lds_k_outer ? ctx->block_k : ctx->block_m;
+        const int a_cols = ctx->lds_k_outer ? ctx->block_m : ctx->block_k;
+        const int b_rows = ctx->lds_k_outer ? ctx->block_k : ctx->block_n;
+        const int b_cols = ctx->lds_k_outer ? ctx->block_n : ctx->block_k;
+        const int a_contig = ctx->lds_k_outer ? rocke_conv_problem_kpg(&spec->problem) : 0;
+        const int b_contig = ctx->lds_k_outer ? rocke_conv_problem_cpg(&spec->problem) : 0;
         rocke_status_t sa = rocke_async_tile_loader_from_tile(
-            ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->a_loader);
+            a_rows, a_cols, ctx->threads, spec->wave_size, 4, a_contig, &ctx->a_loader);
         rocke_status_t sb = rocke_async_tile_loader_from_tile(
-            ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->b_loader);
+            b_rows, b_cols, ctx->threads, spec->wave_size, 4, b_contig, &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: async tile loader init failed");

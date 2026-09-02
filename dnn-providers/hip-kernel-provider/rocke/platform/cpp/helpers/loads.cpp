@@ -509,7 +509,7 @@ void rocke_coalesced_tile_loader_store_lds(rocke_ir_builder_t* b,
  * ========================================================================== */
 
 rocke_status_t rocke_async_tile_loader_choose_dwords(
-    int tile_rows, int tile_cols, int block_size, int max_dwords, int* out)
+    int tile_rows, int tile_cols, int block_size, int max_dwords, int contig_cols, int* out)
 {
     /* Python:
      *   if max_dwords > 4: max_dwords = 4
@@ -539,6 +539,13 @@ rocke_status_t rocke_async_tile_loader_choose_dwords(
             continue;
         }
         halves = d * 2;
+        /* A chunk must lie entirely inside one contiguous run of columns
+         * (Python: contig_cols is not None and (elems > contig_cols or
+         * contig_cols % elems != 0) -> skip). contig_cols == 0 means None. */
+        if(contig_cols > 0 && (halves > contig_cols || contig_cols % halves != 0))
+        {
+            continue;
+        }
         if(tile_cols % halves != 0)
         {
             continue;
@@ -562,6 +569,7 @@ rocke_status_t rocke_async_tile_loader_from_tile(int tile_rows,
                                                  int block_size,
                                                  int wave_size,
                                                  int max_dwords,
+                                                 int contig_cols,
                                                  rocke_async_tile_loader_t* out)
 {
     int d;
@@ -578,7 +586,8 @@ rocke_status_t rocke_async_tile_loader_from_tile(int tile_rows,
      *   return cls(... dwords=d, chunks_total=chunks,
      *              chunks_per_pass=block_size, passes=passes)
      */
-    st = rocke_async_tile_loader_choose_dwords(tile_rows, tile_cols, block_size, max_dwords, &d);
+    st = rocke_async_tile_loader_choose_dwords(
+        tile_rows, tile_cols, block_size, max_dwords, contig_cols, &d);
     if(st != ROCKE_OK)
     {
         return st;
@@ -596,6 +605,7 @@ rocke_status_t rocke_async_tile_loader_from_tile(int tile_rows,
         out->chunks_total = chunks;
         out->chunks_per_pass = block_size;
         out->passes = passes;
+        out->contig_cols = contig_cols;
     }
     return ROCKE_OK;
 }

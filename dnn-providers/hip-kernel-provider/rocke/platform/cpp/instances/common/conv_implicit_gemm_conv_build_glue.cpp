@@ -571,10 +571,15 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     if(ctx->async_dma)
     {
+        /* contig_cols = cpg: the tile's col axis is the reduction index (y, x, c)
+         * and only the inner c is stride-1, so a chunk wider than cpg -- or one
+         * that does not divide it -- would straddle a filter position and fetch
+         * the wrong elements with no diagnostic. Mirrors the Python call. */
+        const int cpg = rocke_conv_problem_cpg(&spec->problem);
         rocke_status_t sa = rocke_async_tile_loader_from_tile(
-            ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->a_loader);
+            ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->a_loader);
         rocke_status_t sb = rocke_async_tile_loader_from_tile(
-            ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->b_loader);
+            ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: async tile loader from_tile failed");
