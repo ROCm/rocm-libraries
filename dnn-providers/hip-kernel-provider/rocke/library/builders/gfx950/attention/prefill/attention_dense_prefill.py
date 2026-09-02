@@ -275,7 +275,13 @@ def main():
     ap.add_argument(
         "--persist-decode",
         default="auto",
-        choices=["auto", "qb_major", "hkv_major", "gqa_pair"],
+        choices=[
+            "auto",
+            "qb_major",
+            "hkv_major",
+            "gqa_pair",
+            "gqa_pair_2phase",
+        ],
     )
     ap.add_argument(
         "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
