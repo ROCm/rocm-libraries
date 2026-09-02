@@ -69,11 +69,11 @@ namespace hipblaslt::host_numerics
             operandB.computeType = computeTypeB;
 
         if(inputs.scaleA && !isBlockScaling(scaleAMode))
-            operandA.preQuantizationScales.emplace_back(*inputs.scaleA, MatrixAxis::Row);
+            operandA.preQuantizationScales.push_back(inputs.scaleA->expandDims(1));
         if(inputs.alphaVector)
-            operandA.preQuantizationScales.emplace_back(*inputs.alphaVector, MatrixAxis::Row);
+            operandA.preQuantizationScales.push_back(inputs.alphaVector->expandDims(1));
         if(inputs.scaleB && !isBlockScaling(scaleBMode))
-            operandB.preQuantizationScales.emplace_back(*inputs.scaleB, MatrixAxis::Column);
+            operandB.preQuantizationScales.push_back(inputs.scaleB->expandDims(0));
 
         const ScalarType accumulatorType = referenceAccumulatorType(dataTypes.coefficient);
         GemmOptions      options(accumulatorType);

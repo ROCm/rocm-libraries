@@ -372,10 +372,6 @@ NB_MODULE(_roc_host_numerics, module) {
         .value("Default", OutputConversion::Default)
         .value("SaturatingInt8", OutputConversion::SaturatingInt8);
 
-    nb::enum_<MatrixAxis>(module, "MatrixAxis")
-        .value("Row", MatrixAxis::Row)
-        .value("Column", MatrixAxis::Column);
-
     nb::enum_<Activation>(module, "Activation")
         .value("None_", Activation::None)
         .value("Absolute", Activation::Absolute)
@@ -507,6 +503,7 @@ NB_MODULE(_roc_host_numerics, module) {
                 return tensor.broadcastTo(Shape(std::move(shape)));
             },
             "shape"_a)
+        .def("expand_dims", &Tensor::expandDims, "axis"_a)
         .def("clone", [](const Tensor& tensor) { return tensor.deepCopy(); })
         .def("to", static_cast<Tensor (Tensor::*)(ScalarType) const>(&Tensor::copyConvertedTo),
              "type"_a);
