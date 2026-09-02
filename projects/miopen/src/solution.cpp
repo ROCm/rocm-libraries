@@ -586,12 +586,25 @@ void Solution::RunImpl(const Handle& handle,
         return;
     }
 
-    auto ctx       = ExecutionContext{&handle};
-    auto db_getter = MakeConvDbGetter(ctx);
-    const auto softmax_solution =
-        GetSolver() == regularSoftmax.SolverDbId()
-            ? solver::FindSolution(regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
-            : attnSoftmax.GetSolution(ctx, problem_description);
+    auto ctx                    = ExecutionContext{&handle};
+    auto db_getter              = MakeConvDbGetter(ctx);
+    const auto softmax_solution = [&]() {
+        const auto solverId = GetSolver();
+        if(solverId == regularSoftmax.SolverDbId())
+        {
+            return solver::FindSolution(
+                regularSoftmax, ctx, problem_description, db_getter, invoke_ctx);
+        }
+        else if(solverId == attnSoftmax.SolverDbId())
+        {
+            return attnSoftmax.GetSolution(ctx, problem_description);
+        }
+        else if(solverId == noncontiguousSoftmax.SolverDbId())
+        {
+            return noncontiguousSoftmax.GetSolution(ctx, problem_description);
+        }
+        MIOPEN_THROW(miopenStatusInvalidValue, "Invalid softmax solver ID: " + solverId.ToString());
+    }();
 
     if(softmax_solution.invoker_factory.has_value())
     {

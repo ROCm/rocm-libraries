@@ -55,7 +55,7 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
     std::ostringstream ss(isForward ? "sfmfwd-" : "sfmbwd-");
 
     // all the tensors must be the same size and types
-    // so we can use only one set of values
+    // so we need only one set of values
     const auto& desc = isForward ? xdxDesc : yDesc;
     ss << "forward" << isForward;
     ss << "outer_size" << outer_size << "inner_size" << inner_size << "stride" << stride;
@@ -68,6 +68,17 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
     ss << "y_offset" << y_offset;
     ss << "dx_offset" << dx_offset;
     ss << "dy_offset" << dy_offset;
+    if(desc.IsPacked())
+    {
+        ss << "packed";
+    }
+    else
+    {
+        ss << "n_stride" << desc.GetStrides()[0];
+        ss << "c_stride" << desc.GetStrides()[1];
+        ss << "h_stride" << desc.GetStrides()[2];
+        ss << "w_stride" << desc.GetStrides()[3];
+    }
 
     return NetworkConfig{ss.str()};
 }
