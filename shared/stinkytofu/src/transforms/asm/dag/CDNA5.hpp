@@ -457,9 +457,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // reset per region. pickFreeBest prefers a free candidate matching it. -1 = unknown.
     int currentMsb_ = -1;
 
-    // ds_reads still unissued in this region; with wmmaIssueConfig.issuedCount (WMMAs
-    // remaining) it gives the per-window fair share the relief paces against.
+    // Region ds_read totals: the relief paces against cumulative progress, so it needs the
+    // region's totals as well as what has issued so far.
     int dsRemainingThisRegion_ = 0;
+    int dsTotalThisRegion_ = 0;
+    int dsIssuedThisRegion_ = 0;
+    int wmmaTotalThisRegion_ = 0;
 
     // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
@@ -766,6 +769,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
         if (dsRemainingThisRegion_ > 0) --dsRemainingThisRegion_;
+        ++dsIssuedThisRegion_;
         dsReadInflight_.pushWithThrottle(dsReadThrottleLatency());
         dsInsertedSinceLastWmma_++;
     } else if (pickKind == kOther) {
@@ -1144,9 +1148,13 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // unless this window still owes its share of the region's remaining loads. The share is
     // self-correcting: deferring keeps dsRemaining high while wmmaRemaining falls, so it rises
     // until the loads are released, which paces the ds stream instead of letting it batch.
-    const int wmmaRemaining = std::max(1, wmmaIssueConfig.issuedCount);
-    const int fairShare = dsRemainingThisRegion_ / wmmaRemaining;
-    const bool warGateRelief = dsInsertedSinceLastWmma_ < fairShare;
+    // Cumulative, so a ratio of 1.19 paces differently from 2.0 -- a per-window integer
+    // share truncates both to 1 and releases at the head of every window.
+    const int expectedDs =
+        wmmaTotalThisRegion_ > 0
+            ? dsTotalThisRegion_ * wmmaIssuedCountThisRegion_ / wmmaTotalThisRegion_
+            : 0;
+    const bool warGateRelief = dsIssuedThisRegion_ < expectedDs;
     const bool warTooClose = !wmmaQueue.empty() && !warGateRelief && pipeOpGateBlocks(pickedDS);
     const bool dsBaseOk =
         pickedDS && !dsCapReached && !warTooClose && !destOverlapsActiveWmmaSrc(pickedDS);
@@ -2104,6 +2112,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     wmmaIssueConfig.issuedCount = 0;
     dsRemainingThisRegion_ = 0;
+    dsTotalThisRegion_ = 0;
+    dsIssuedThisRegion_ = 0;
+    wmmaTotalThisRegion_ = 0;
     hasWMMAInRegion_ = false;
     std::unordered_set<StinkyInstruction*> regionInsts;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
@@ -2114,9 +2125,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
         if (isMatrixInstruction(inst)) {
             wmmaIssueConfig.issuedCount++;
+            ++wmmaTotalThisRegion_;
             hasWMMAInRegion_ = true;
         } else if (isDSRead(inst)) {
             ++dsRemainingThisRegion_;
+            ++dsTotalThisRegion_;
         }
     }
 
