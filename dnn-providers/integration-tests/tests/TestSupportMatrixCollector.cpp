@@ -115,6 +115,22 @@ TEST_F(TestSupportMatrixCollector, UnknownEngineId)
     EXPECT_EQ(engineName, "0x00000000000F423F");
 }
 
+TEST_F(TestSupportMatrixCollector, EngineIdSuppliedByNameMapRendersAsItsName)
+{
+    auto& collector = SupportMatrixCollector::get();
+    collector.setEnabled(true);
+    collector.setEngineNames({{999999, "hipkernel:Whatever"}});
+    collector.recordGraphSupport("Conv", "ConvFprop fp32", "Test1", {999999});
+
+    auto records = collector.getRecords();
+    ASSERT_EQ(records.size(), 1u);
+    ASSERT_EQ(records[0].supportingEngines.size(), 1u);
+    // The same id the fallback case renders as hexadecimal, so this pins the map lookup
+    // rather than a difference between the two ids.
+    auto engineName = *records[0].supportingEngines.begin();
+    EXPECT_EQ(engineName, "hipkernel:Whatever");
+}
+
 TEST_F(TestSupportMatrixCollector, ResetClearsState)
 {
     auto& collector = SupportMatrixCollector::get();

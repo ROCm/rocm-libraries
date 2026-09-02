@@ -62,6 +62,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         # Two MatrixInstruction shapes: 16x16 BM/BN=4x4 (MIWaveGroup [2,2]) and
         # 16x16 BM=2,BN=8 (MIWaveGroup [4,1]) -> different num1DWaves on each tile side.

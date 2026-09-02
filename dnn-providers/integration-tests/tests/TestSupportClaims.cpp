@@ -19,6 +19,7 @@ using hipdnn_integration_tests::bundle::loadSupportClaims;
 using hipdnn_integration_tests::bundle::loadSweepSupportClaims;
 using hipdnn_integration_tests::bundle::parseSupportClaimsJson;
 using hipdnn_integration_tests::bundle::parseSweepSupportClaimsJson;
+using hipdnn_integration_tests::bundle::SupportClaimLocator;
 using hipdnn_integration_tests::bundle::supportJsonPath;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
@@ -395,6 +396,31 @@ TEST(TestLoadSweepSupportClaims, ThrowsOnUnparseableFile)
     std::ofstream(dir.path() / "support.json") << "{not valid json";
 
     EXPECT_THROW(loadSweepSupportClaims(dir.path()), std::runtime_error);
+}
+
+// ---------------------------------------------------------------------------
+// SupportClaimLocator — struct tests
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimLocator, SingleGraphIsNotSweep)
+{
+    const SupportClaimLocator target{"/some/Bundle.support.json", {}, "Bundle.json"};
+    EXPECT_FALSE(target.isSweep());
+    EXPECT_TRUE(target.caseId.empty());
+}
+
+TEST(TestSupportClaimLocator, SweepCaseIsSweep)
+{
+    const SupportClaimLocator target{"/some/support.json", "case_42", "sweep.json#case_42"};
+    EXPECT_TRUE(target.isSweep());
+    EXPECT_EQ(target.caseId, "case_42");
+}
+
+TEST(TestSupportClaimLocator, DefaultConstructedIsNotSweep)
+{
+    const SupportClaimLocator target{};
+    EXPECT_FALSE(target.isSweep());
+    EXPECT_TRUE(target.sidecarPath.empty());
 }
 
 // NOLINTEND(readability-identifier-naming)

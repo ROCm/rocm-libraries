@@ -9,7 +9,8 @@ against a float32 torch reference (``torch.nn.grad.conv2d_input``).  Covers:
   - stride=2 (tilde-decomposition, atomic epilogue)
   - split_k > 1 (atomic epilogue)
   - bf16 and fp32 data types
-  - RDNA (gfx1151 / gfx1201) via WMMA candidates
+  - gfx1151 / gfx1201 via WMMA candidates
+  - gfx1250 via WMMA wavelet pipeline (stride=1 mem + stride>1 / split_k wavelet)
 
 Requires a ROCm GPU and torch (skip otherwise).
 
@@ -34,9 +35,10 @@ _PYDIR = os.path.join(os.path.dirname(__file__), "..", "..", "python")
 ARCH = get_device_arch(0)
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 
-_CDNA_ARCHES = ("gfx90a", "gfx942", "gfx950")
-_RDNA_ARCHES = ("gfx1151", "gfx1201")
-_SUPPORTED_ARCHES = _CDNA_ARCHES + _RDNA_ARCHES
+_MFMA_ARCHES = ("gfx90a", "gfx942", "gfx950")
+_WMMA_ARCHES = ("gfx1151", "gfx1201")
+_WMMA_WAVELET_ARCHES = ("gfx1250",)
+_SUPPORTED_ARCHES = _MFMA_ARCHES + _WMMA_ARCHES + _WMMA_WAVELET_ARCHES
 
 _SKIP_REASON = (
     f"needs a supported ROCm GPU ({', '.join(_SUPPORTED_ARCHES)}) + torch; "
@@ -165,8 +167,8 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     def test_fp32_stride1(self):
         """fp32 dgrad, stride=1."""
-        if ARCH not in _CDNA_ARCHES:
-            self.skipTest(f"fp32 dgrad candidates are CDNA-only; running on {ARCH}")
+        if ARCH not in _MFMA_ARCHES:
+            self.skipTest(f"fp32 dgrad candidates require MFMA; running on {ARCH}")
         self._verify(
             "--dtype",
             "fp32",
@@ -197,8 +199,10 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     def test_fp16_stride2(self):
         """fp16 dgrad, stride=2 — tilde decomposition with atomic epilogue."""
-        if ARCH not in _CDNA_ARCHES:
-            self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
+        if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
+            self.skipTest(
+                f"stride>1 dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
+            )
         self._verify(
             "--dtype",
             "fp16",
@@ -231,8 +235,10 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     def test_bf16_stride2(self):
         """bf16 dgrad, stride=2."""
-        if ARCH not in _CDNA_ARCHES:
-            self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
+        if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
+            self.skipTest(
+                f"stride>1 dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
+            )
         self._verify(
             "--dtype",
             "bf16",
@@ -267,8 +273,10 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     def test_fp16_split_k(self):
         """fp16 dgrad, split_k auto-selected — exercises atomic reduction path."""
-        if ARCH not in _CDNA_ARCHES:
-            self.skipTest(f"split_k dgrad requires CDNA atomic-add; running on {ARCH}")
+        if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
+            self.skipTest(
+                f"split_k dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
+            )
         self._verify(
             "--dtype",
             "fp16",
@@ -389,7 +397,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     def test_fp16_grouped_stride2(self):
         """fp16 grouped dgrad, groups=4, stride=2 — tilde decomposition path."""
-        if ARCH not in _CDNA_ARCHES:
+        if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
             "--dtype",
@@ -457,7 +465,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
     def test_fp16_grouped_split_k(self):
         """fp16 grouped dgrad with split_k>1 — group on y, split_k on z compose;
         even cpg (=16) keeps the packed <2 x f16> atomic pairs in-group."""
-        if ARCH not in _CDNA_ARCHES:
+        if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"split_k dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
             "--dtype",

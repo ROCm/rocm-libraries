@@ -40,7 +40,6 @@ from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUI
                         ArgumentLoader, scalarMultiplyBpe, scalarMultiply64Bpe, vectorMultiplyBpe, vectorMultiply64Bpe
 from rocisa.enum import InstType, SelectBit, CacheScope, HighBitSel, TemporalHint, NonVolatile
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
-from . import CUSTOM_KERNEL_PATH
 from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
   BufferLoadB16, BufferLoadU16, BufferLoadB64, BufferLoadB96, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
   BufferLoadD16U8, BufferStoreB128, BufferStoreB16, BufferStoreB32, BufferStoreB64, \
@@ -76,13 +75,13 @@ from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
-from .Components.GlobalWriteBatch import GlobalWriteBatchWriter
+from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
-from .CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload
+from .CustomKernels import isCustomKernelConfig, getCustomKernelSource
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKMulticast
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
@@ -91,7 +90,8 @@ from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTe
 from Tensile.Common.DataType import DataType
 from Tensile.Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
-from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk
+from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
+  FusedA2AWgRemap
 
 from Tensile.KernelWriter import KernelWriter, ABMatrixInfo
 from Tensile.SolutionStructs.Naming import getKernelFileBase
@@ -156,18 +156,9 @@ class KernelWriterAssembly(KernelWriter):
     super(KernelWriterAssembly, self).__init__(assembler, debugConfig)
     self.globalread_gpr_record = GlobalReadGprRecord()
 
-  def _getCustomKernelSource(self, kernel, CustomKernelDirectory):
+  def _getCustomKernelSource(self, kernel, customKernelDirectory=None):
     kernelName = getKernelFileBase(self.debugConfig.splitGSU, kernel)
-    with open(os.path.join(CustomKernelDirectory, (kernelName + ".s"))) as f:
-      rocmVersion = self.assembler.rocm_version
-      if not supportsUserSgprKernargPreload(rocmVersion):
-        code = []
-        for line in f.readlines():
-          if "amdhsa_user_sgpr_kernarg_preload" not in line:
-            code.append(line)
-        code = "".join(code)
-      else:
-        code = f.read()
+    code = getCustomKernelSource(kernelName, self.assembler.rocm_version, customKernelDirectory)
 
     self.tPA = {}
     self.tPB = {}
@@ -188,7 +179,7 @@ class KernelWriterAssembly(KernelWriter):
     isCustom = isCustomKernelConfig(kernel)
     try:
       if isCustom:
-        code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH)
+        code = self._getCustomKernelSource(kernel)
         # The occupancy formula in compute_occupancy_from_resources is
         # gfx9/wave64-specific; only override CUOccupancy for gfx9 custom
         # kernels.  Non-gfx9 (gfx10/11/12, wave32) custom kernels leave
@@ -3387,6 +3378,22 @@ class KernelWriterAssembly(KernelWriter):
     else:
       module.add(DefaultWGM(self, kernel, sgprWGM))
 
+    # Resolving &counter3 here makes the per-work-group tally in the epilogue a bare
+    # atomic on a register pair rather than a kernarg load it has to wait on.
+    #
+    # The product counts SURVIVING work-groups: ClusterDim != [1,1] rounds the grid
+    # up host-side, but those padded work-groups s_endpgm in the prologue
+    # (clusterPadEarlyExit).
+    if kernel["ProblemType"]["FusedGemmA2A"]:
+      from .Components.GlobalWriteBatch import emitFusedA2ACounterPtrLatch, \
+        emitFusedA2ANShardLatch
+      module.add(FusedA2AWgRemap(self, kernel))
+      module.add(SMulI32(dst=sgpr("FusedTotalWGs"), src0=sgpr("NumWorkGroups0"),
+                         src1=sgpr("NumWorkGroups1"),
+                         comment="FusedTotalWGs = NumWorkGroups0 * NumWorkGroups1 (counter3 election target)"))
+      emitFusedA2ACounterPtrLatch(module, self, "FusedCounterPtr", "FusedTokenTiles")
+      emitFusedA2ANShardLatch(module, self, "FusedNShard")
+
     return module
 
 
@@ -3590,7 +3597,7 @@ class KernelWriterAssembly(KernelWriter):
           swzBlockSize = swzMorN * swzStride
           vw = kernel[f"VectorWidth{tc}"]
           kPack = tP["swizzlePackK"]
-          laneSize = int(kernel["MatrixInstK"] / 4) * kPack  # the size of one swizzle's lane
+          laneSize = tP["swizzleLaneSize"]  # the size of one swizzle's lane
 
           with self.allocTmpSgpr(2, tag="graTileOffsets_tmpSgprInfo") as tmpSgprInfo:
             swzBlkVWSizeSgpr = tmpSgprInfo.idx
@@ -3724,16 +3731,20 @@ class KernelWriterAssembly(KernelWriter):
         swzMorN = kernel["MatrixInstN"]
       swzStride = tP["swizzleK"]
       vw = kernel[f"VectorWidth{tc}"]
-      kPack = tP["swizzlePackK"]
-      laneSize = int(kernel["MatrixInstK"] / 4) * kPack  # the size of one swizzle's lane
+      laneSize = tP["swizzleLaneSize"]  # the size of one swizzle's lane
       numElmInSwzBlk = swzMorN * swzStride
+      # Below wave size where operands replicate (gfx10/gfx11 WMMA): upper lanes fold
+      # back onto the same addresses.
+      swzLanes = tP["swizzleLanesUsed"]
+      tidMaskComment = "tid" if swzLanes == kernel["WavefrontSize"] \
+          else "tid mod swzLanesUsed(%u), operands replicate across the wave"%swzLanes
 
       # Calculate local index in a swizzled block
       row = self.vgprPool.checkOut(1, tag="graUnrollOffsets_row")
       col = self.vgprPool.checkOut(1, tag="graUnrollOffsets_col")
       tmpVgpr = self.vgprPool.checkOut(1, tag="graUnrollOffsets_tmpVgpr")
       module.addComment0("SWZ-%s: r = swzRow = (tid / swzMorN(%u)) * laneSize(%u)"%(tc, swzMorN, laneSize))
-      module.add(VAndB32(dst=vgpr(v), src0=vgpr("Serial"), src1=(kernel["WavefrontSize"]-1), comment="tid"))
+      module.add(VAndB32(dst=vgpr(v), src0=vgpr("Serial"), src1=(swzLanes-1), comment=tidMaskComment))
       module.add(VLShiftRightB32(dst=vgpr(row), shiftHex=hex(int(log(swzMorN, 2))), src=vgpr(v)))
       module.add(VLShiftLeftB32(dst=vgpr(row), shiftHex=hex(int(log(laneSize, 2))), src=vgpr(row)))
       module.addComment0("SWZ-%s: c = swzCol = [tid mod (swzMorN(%u) / VW(%u))] * VW(%u)"%(tc, swzMorN, vw, vw))
@@ -4050,13 +4061,18 @@ class KernelWriterAssembly(KernelWriter):
         module.addComment0("=============================================================")
     else:
       # swap para and perp
-      for para in range(0, tP["nrc"]):
+      # An operand spanning several loads (gfx11 fp16/bf16) must land in consecutive G2L
+      # registers, since mfmaIter reads it as one contiguous range. Hence the sub-blocks
+      # are innermost. loadsPerLane == 1 reduces this to the plain swap.
+      lpl = tP["swizzleLoadsPerLane"] if tP["isSwizzled"] else 1
+      for paraBase in range(0, tP["nrc"], lpl):
         for sPara in range(0, int(tP["nrcv"]/tP["nrcvpi"])):
           for perp in range(0, tP["nrp"]):
             for sPerp in range(0, tP["nrpv"]):
-              # single loop
-              singleModule, graIdx = self.graFinalOffsetsSingleLoop(kernel, tP, tc, tmp, graIdx, perp, sPerp, para, sPara)
-              module.add(singleModule)
+              for sub in range(0, lpl):
+                # single loop
+                singleModule, graIdx = self.graFinalOffsetsSingleLoop(kernel, tP, tc, tmp, graIdx, perp, sPerp, paraBase + sub, sPara)
+                module.add(singleModule)
 
     self.vgprPool.checkIn(tP["gpr"]["lwoT"])
     tP["gpr"]["lwoT"] = None
@@ -4794,11 +4810,7 @@ class KernelWriterAssembly(KernelWriter):
     moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
     moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
     # Load and apply batch offset for General Batched GEMM
-    # gfx1250: skip the batch-offset apply. The load references KernArgAddress
-    # after the UserArgs/grouped prologue has relocated it, so the fixed soffset
-    # reads the wrong kernarg word and corrupts the SRD. Fall back to the
-    # pre-offset wait-only path here until the base-relative fix lands.
-    if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
+    if not kernel["ProblemType"]["GroupedGemm"]:
       batchOffsetKernArgOffset = self.states.batchOffsetAKernArgOffset if tc == "A" else self.states.batchOffsetBKernArgOffset
       moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr(stmp, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%tc))
       moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
@@ -13591,9 +13603,7 @@ class KernelWriterAssembly(KernelWriter):
               # (not the GSU workspace), so the offset is correctly applied here. When GSU>1 the
               # routing branches to the strided/workspace path and skips this block; the PostGSU
               # conversion kernel applies the offset when it writes the final result to C/D.
-              # gfx1250: skip the batch-offset apply (see computeLoadSrd A/B note);
-              # the KernArgAddress-relative load is unsafe after prologue relocation.
-              if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
+              if not kernel["ProblemType"]["GroupedGemm"]:
                 batchOffsetKernArgOffset = self.states.batchOffsetCKernArgOffset if mat == "C" else self.states.batchOffsetDKernArgOffset
                 module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%mat))
                 module.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
@@ -13696,9 +13706,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SAddCU32(dst=sgpr(tmpsgpr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
     module.add(SLoadB64(dst=sgpr("SrdTD", 2), base=sgpr(tmpsgpr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
     # Load and apply batch offset for General Batched GEMM (dstD) as necessary.
-    # gfx1250: skip the batch-offset apply (see computeLoadSrd A/B note);
-    # the KernArgAddress-relative load is unsafe after prologue relocation.
-    if not kernel["ProblemType"]["GroupedGemm"] and kernel["ISA"][:2] != (12, 5):
+    if not kernel["ProblemType"]["GroupedGemm"]:
       module.add(SLoadB64(dst=sgpr(tmpsgpr3, 2), base=sgpr("KernArgAddress", 2), soffset=hex(self.states.batchOffsetDKernArgOffset), comment="Load batchOffsetD from kernel args"))
       module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address and batchOffsetD Load"))
       module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpsgpr3+0), comment="Apply batchOffsetD to SrdTD (low)"))
@@ -16466,29 +16474,78 @@ class KernelWriterAssembly(KernelWriter):
                   next_firing_per_batch[_bIdx] = _d
                   break
 
-        for batchIdx in range(0, numBatchesCLS):
-          elementStartIdx = batchIdx * numElementsPerBatch
-          elementStopIdx = min( elementStartIdx + numElementsPerBatch, len(element) )
-          elementsThisBatch = element[elementStartIdx:elementStopIdx]
-          #print("BATCH[%u/%u]: element[%u:%u] VGPRs=%u" % (batchIdx, numBatches, elementStartIdx, elementStopIdx,ss.numVgprsPerElement ))
-          # elementVgprs can be large and should be perfectly tuned to the number of available
-          # VGPRS.  We do not want to accidentally overflow and grow the pool here:
+        # The store batch loop mutates `ss` (StoreState) and `biasLocalBarrierInit`.
+        # For FusedGemmA2A we regenerate the loop body TWICE (PUSH + LOCAL) under a
+        # single hoisted runtime gate, so factor the body into a closure that returns
+        # a Module (rather than adding directly to actLoopModule) and can be replayed
+        # from the same codegen-state after an explicit ss/biasLocalBarrierInit reset.
+        def _emit_batch_loop():
+          nonlocal biasLocalBarrierInit
+          m = Module("storeBatchLoop")
+          # codeAccVgprRead / codeMulAlpha are consumed in-place (popFirstItem) by
+          # globalWriteBatch. For the FusedGemmA2A two-pass replay each pass must start
+          # from an unconsumed queue, so take a per-pass deepcopy.
+          passAccVgprRead = deepcopy(codeAccVgprRead) if codeAccVgprRead is not None else None
+          passMulAlpha    = deepcopy(codeMulAlpha) if codeMulAlpha is not None else None
+          for batchIdx in range(0, numBatchesCLS):
+            elementStartIdx = batchIdx * numElementsPerBatch
+            elementStopIdx = min( elementStartIdx + numElementsPerBatch, len(element) )
+            elementsThisBatch = element[elementStartIdx:elementStopIdx]
+            #print("BATCH[%u/%u]: element[%u:%u] VGPRs=%u" % (batchIdx, numBatches, elementStartIdx, elementStopIdx,ss.numVgprsPerElement ))
+            # elementVgprs can be large and should be perfectly tuned to the number of available
+            # VGPRS.  We do not want to accidentally overflow and grow the pool here:
 
-          if kernel["StoreRemapVectorWidth"]:
-            #Indication if this batch is last batch for this column block shape
-            self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
+            if kernel["StoreRemapVectorWidth"]:
+              #Indication if this batch is last batch for this column block shape
+              self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
 
-          # Primer uses the next real row jump; boundary delta may be 0 (mid-row).
-          _next_firing_rowInc = next_firing_per_batch[batchIdx]
-          _direct_next_rowInc = next_rowInc_per_batch[batchIdx] if batchIdx < numBatches else 0
-          actLoopModule.add(self.globalWriteBatch(kernel, tPA, tPB, activation, ss, batchIdx, \
-              applyAlpha, beta, edge, atomic, gwvw, atomicW, \
-              elementsThisBatch, self.vgprs.addrE, self.vgprs.addrD, self.vgprs.addrC, self.vgprs.addrBias, \
-              self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
-              biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
-              activationTypeStr, elementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, numBatches, \
-              _next_firing_rowInc, _direct_next_rowInc))
-          biasLocalBarrierInit = True
+            # Primer uses the next real row jump; boundary delta may be 0 (mid-row).
+            _next_firing_rowInc = next_firing_per_batch[batchIdx]
+            _direct_next_rowInc = next_rowInc_per_batch[batchIdx] if batchIdx < numBatches else 0
+            m.add(self.globalWriteBatch(kernel, tPA, tPB, activation, ss, batchIdx, \
+                applyAlpha, beta, edge, atomic, gwvw, atomicW, \
+                elementsThisBatch, self.vgprs.addrE, self.vgprs.addrD, self.vgprs.addrC, self.vgprs.addrBias, \
+                self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
+                biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
+                activationTypeStr, elementSgprs, tmpSgpr, passAccVgprRead, passMulAlpha, factorDim, numBatches, \
+                _next_firing_rowInc, _direct_next_rowInc))
+            biasLocalBarrierInit = True
+          return m
+
+        if kernel["ProblemType"]["FusedGemmA2A"]:
+          # Hoist the PUSH/local dispatch gate out of the per-store body: emit ONE
+          # runtime gate, then the whole store body twice -- once with only the PUSH
+          # version (mode "PUSH"), once with only the local version (mode "LOCAL").
+          # Between the two passes, roll back the codegen-time StoreState (ss) and
+          # biasLocalBarrierInit to the batch-loop start so the LOCAL pass regenerates
+          # identical addresses/waitcnts from the same starting state.
+          localLabel = Label(self.labels.getNameInc("fusedA2A_hoist_local"),
+                             "fused-A2A hoisted: WG>=AM_tiles -> local")
+          afterLabel = Label(self.labels.getNameInc("fusedA2A_hoist_after"),
+                             "fused-A2A hoisted: after PUSH/local")
+          emitFusedA2AGate(actLoopModule, self, localLabel.getLabelName())
+          # self.states outlives this call, so a mid-pass raise would otherwise leak
+          # "PUSH"/"LOCAL" into a subsequent kernel.
+          try:
+            # PUSH pass
+            self.states.fusedA2ADispatchMode = "PUSH"
+            actLoopModule.add(_emit_batch_loop())
+            actLoopModule.add(SBranch(labelName=afterLabel.getLabelName(), comment="skip local store"))
+            # Roll back codegen-time state so the LOCAL pass regenerates from the
+            # batch-loop start. firstBatch and biasLocalBarrierInit are outside
+            # resetState()'s remit, so restore them here.
+            ss.resetState()
+            ss.firstBatch = True
+            biasLocalBarrierInit = False
+            actLoopModule.add(localLabel)
+            # LOCAL pass
+            self.states.fusedA2ADispatchMode = "LOCAL"
+            actLoopModule.add(_emit_batch_loop())
+            actLoopModule.add(afterLabel)
+          finally:
+            self.states.fusedA2ADispatchMode = "BOTH"
+        else:
+          actLoopModule.add(_emit_batch_loop())
 
         # SRVW+CLS: check in the offset vgpr after the last store batch.
         if kernel["StoreRemapVectorWidth"] and kernel["CompactLoopStore"] and getattr(self, "compactLoopStoreVgpr", -1) != -1:
@@ -16938,13 +16995,14 @@ class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
   def addStore(self, kernel, ss, tc: str, addrCalc, sumIdx, tmpS01, edge, elementIdx=None, batchIdx=None,
-               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore"):
+               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False):
     """
     Add stores for the element with addrCalc and sumIdx.
     tmpS01 is a single :temp sGPR
 
     CompactLoopStore: elementIdx lets elt0 (rowInc==0) seed incrementToNextRow.
     overrideAfterPrimerRows is the next emitting elt's rowInc (0 = no override).
+    forceSlc forces slc on the D store regardless of NonTemporalD; tc == 'D' only.
     """
     module = Module("addStore sumIdx %s"%(str(sumIdx)))
     if self.do["GlobalWrite"]:
@@ -16962,6 +17020,7 @@ class KernelWriterAssembly(KernelWriter):
       if tc == 'D':
         isGlc, isSlc, isNT, scope, th, nv = decodeNonTemporal(
             self.states.asmCaps, kernel["NonTemporalD"], _temporalHint(kernel, "D"), _nonVolatile(kernel, "D"))
+        isSlc = bool(isSlc or forceSlc)
         bps = self.states.bpeCexternal * ss.cfg.gwvw
         rpv = self.states.bpeCexternal * ss.cfg.gwvw / self.states.bpr
 
@@ -18249,6 +18308,23 @@ class KernelWriterAssembly(KernelWriter):
       names.append("StreamKLocalEnd")
     if len(kernel["SpaceFillingAlgo"]):
       names.append("StreamKTileID")
+    # SK4 (StreamKDynamic) derives the next-tile identity from a work-queue pop
+    # and, unlike static StreamK, overwrites StreamKTileIdx/StreamKPartialIdx
+    # while doing so. The current tile's fixup/store phase reads those (see
+    # StreamK.py skFixupStep / globalWriteBatch), so they must be checkpointed
+    # and restored around the borrowed next-tile identity.
+    #
+    # SK5 (StreamKHybrid) aliases StreamKIter/StreamKIterEnd onto the same
+    # physical SGPRs as StreamKTileIdx/StreamKPartialIdx (see the SK5 RegSet
+    # block). Checkpoint the idx names only; listing both the iter and idx
+    # names would save/restore the same registers twice. On the dynamic
+    # sub-path these regs hold the tile/partial index that the next-tile
+    # identity overwrites (restore required); on the static sub-path they hold
+    # StreamKIter/StreamKIterEnd, which next-tile setup only reads, so the
+    # save/restore is a no-op. One list covers both sub-paths.
+    if kernel["StreamK"] in (4, 5):
+      names.append("StreamKTileIdx")
+      names.append("StreamKPartialIdx")
     return names
 
   @contextmanager
@@ -18285,22 +18361,23 @@ class KernelWriterAssembly(KernelWriter):
     if not self.isPrefetchAcrossPersistentEnabled(kernel):
       return module
 
+    skComponent = Component.StreamK.find(self)
     skipLabel = Label(self.labels.getNameInc("SK_SkipNllPAP"), "")
     # Parallel reduction (no synchronizer): WGs do not advance across tiles.
     # Under StreamKForceDPOnly the reduction is always forced to the tree path
     # (Synchronizer always non-null, AddressFlags != 0 invariant), so this
-    # parallel-reduction skip never fires; fold it out and keep only the
-    # StreamKIter >= StreamKIterEnd (last-tile) check.
+    # parallel-reduction skip never fires; fold it out.
     if not kernel["StreamKForceDPOnly"]:
       module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip PAP"))
       module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
-    module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
-    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
+    # Variant-specific "is there a next persistent iteration?" predicate. SK3
+    # (and the SK3/static path of SK5) compares StreamKIter/StreamKIterEnd; SK4
+    # (StreamKDynamic) and SK5-dynamic override against the work-queue pop.
+    module.add(skComponent.papHasNextPersistentIteration(self, kernel, skipLabel))
 
     if not skipBarrier:
       module.add(SBarrier(comment="PAP: sync before next-tile prefetch"))
 
-    skComponent = Component.StreamK.find(self)
     with self.allocPapTileIdentitySgprs(kernel) as prevTile:
       module.add(self.papCheckpointCurrentTileIdentity(kernel, prevTile))
       module.add(skComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))

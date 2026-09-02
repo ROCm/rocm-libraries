@@ -131,6 +131,7 @@ struct TestConfigOptions
     std::optional<std::filesystem::path> goldenDataDir;
     std::optional<VerificationMode> verificationMode;
     std::optional<std::filesystem::path> captureDir;
+    bool enforceSupportClaims = false;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -212,6 +213,7 @@ public:
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
         instance._captureDir = std::move(opts.captureDir);
+        instance._enforceSupportClaims = opts.enforceSupportClaims;
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -384,6 +386,12 @@ public:
         return _verificationMode.value_or(VerificationMode::AUTO);
     }
 
+    bool enforceSupportClaims() const
+    {
+        throwIfNotInitialized();
+        return _enforceSupportClaims;
+    }
+
     bool hasCaptureDir() const
     {
         throwIfNotInitialized();
@@ -425,6 +433,7 @@ private:
     bool _failOnUnsupported = false;
     bool _skipGraphValidation = false;
     bool _allowBundles = false;
+    bool _enforceSupportClaims = false;
     bool _initialized = false;
 };
 

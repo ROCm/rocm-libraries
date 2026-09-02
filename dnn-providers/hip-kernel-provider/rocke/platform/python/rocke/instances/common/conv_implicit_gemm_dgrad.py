@@ -84,6 +84,9 @@ from ._conv_implicit_gemm_common import (
     _emit_mfma,
     _emit_smem_load,
     _ir_dtype,
+    build_wavelet_loaders,
+    compute_wavelet_epi_barriers,
+    emit_wavelet_kloop,
 )
 
 
@@ -503,10 +506,27 @@ class DgradConvSpec:
         default_factory=ConvAccumulatorEpilogue
     )
     split_k: int = 1
+    # Number of extra load waves for pipeline="wavelet" (gfx1250/WMMA only).
+    # Ignored for all other pipelines.
+    num_load_waves: int = 4
+    # cshuffle LDS aliasing — same semantics as ImplicitGemmConvSpec.cshuffle_no_alias.
+    # Wavelet forces additive (no_alias=True) because A/B stay live across both branches.
+    cshuffle_no_alias: bool = False
 
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
+
+    @property
+    def launch_block_size(self) -> int:
+        """Total threads launched per workgroup.
+
+        For ``pipeline="wavelet"`` this is ``block_size + num_load_waves * wave_size``;
+        for all other pipelines it equals ``block_size``.
+        """
+        if self.pipeline == "wavelet":
+            return self.block_size + self.num_load_waves * self.wave_size
+        return self.block_size
 
     @property
     def k_atoms_per_tile_k(self) -> int:
@@ -782,7 +802,10 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _c_lds = (
         spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
     )
-    _total_lds = _ab_lds + _c_lds
+    # wavelet: A/B stay live across both scf_if_else branches, so the LDS pool
+    # cannot alias C onto the A/B region even when cshuffle_no_alias=False.
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
+    _total_lds = (_ab_lds + _c_lds) if _no_alias else max(_ab_lds, _c_lds)
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "
@@ -790,17 +813,50 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
+    if spec.pipeline == "wavelet":
+        if spec.num_load_waves < 1:
+            return False, "pipeline='wavelet' requires num_load_waves >= 1"
+        if family != "wmma":
+            return False, (
+                "pipeline='wavelet' is WMMA/gfx1250 only: on MFMA targets "
+                "the single-buffer LDS is overwritten each K iteration and load/math "
+                "waves execute sequentially rather than truly concurrently."
+            )
+        if spec.async_dma:
+            return False, (
+                "pipeline='wavelet' is incompatible with async_dma=True: "
+                "the wavelet loaders are only constructed in the non-async branch "
+                "and a_wavelet_loader/b_wavelet_loader would be None at fetch time."
+            )
+        _mfmas_m = spec.tile_m // (spec.warp_m * spec.warp_tile_m)
+        _mfmas_n = spec.tile_n // (spec.warp_n * spec.warp_tile_n)
+        _k_iters = (spec.dg_K + spec.tile_k - 1) // spec.tile_k
+        _wmma_cost = _k_iters * _mfmas_m * _mfmas_n
+        _WMMA_COST_LIMIT = 4096
+        if _wmma_cost > _WMMA_COST_LIMIT:
+            return False, (
+                f"pipeline='wavelet' unrolled WMMA count {_wmma_cost} "
+                f"(K_iters={_k_iters} × mfmas={_mfmas_m}×{_mfmas_n}) "
+                f"exceeds compile-time limit {_WMMA_COST_LIMIT}; "
+                f"reduce tile_k, tile_m, or tile_n"
+            )
+        _launch_block = spec.launch_block_size
+        if _launch_block > target.max_threads_per_block:
+            return False, (
+                f"launch_block_size {_launch_block} > {target.max_threads_per_block} "
+                f"(hardware cap) on {arch}"
+            )
+
     if family == "wmma":
-        # 16x16x16 is the RDNA WMMA hero (gfx1151/gfx1201); 16x16x32 is the
-        # gfx1250 hero (its only fp16/bf16 WMMA atom -- there is no 16x16x16 on
-        # gfx1250). Both feed the same WMMA fragment machinery in emit_mfma_phase.
+        # gfx1250 (wavelet-capable) supports 16x16x32; other RDNA (mem-only) supports 16x16x16.
+        # Both atoms are accepted for the mem pipeline on gfx1250; wavelet supports both too.
         if atom not in ((16, 16, 16), (16, 16, 32)):
             return False, (
                 f"WMMA dgrad supports 16x16x16 or 16x16x32 (got {atom}) on {arch}"
             )
-        if spec.pipeline != "mem":
+        if spec.pipeline not in ("mem", "wavelet"):
             return False, (
-                f"WMMA dgrad supports only the 'mem' pipeline "
+                f"WMMA dgrad supports only 'mem' or 'wavelet' pipeline "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
         if spec.epilogue not in ("default", "cshuffle"):
@@ -812,7 +868,10 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             (spec.async_dma, "async_dma"),
             (spec.unroll_k, "unroll_k"),
             (spec.chiplet_swizzle, "chiplet_swizzle"),
-            (spec.split_k > 1, "split_k > 1"),
+            (
+                spec.split_k > 1 and spec.pipeline != "wavelet",
+                "split_k > 1 (non-wavelet WMMA)",
+            ),
         ):
             if flag:
                 return False, f"WMMA dgrad does not support {label} on {arch}"
@@ -1294,6 +1353,22 @@ def _build_tilde_dgrad(
         elem_dtype=ir_dtype_b,
         vector_axis=axis_b,
     )
+    if spec.pipeline == "wavelet":
+        a_wavelet_loader, b_wavelet_loader = build_wavelet_loaders(
+            num_load_waves=spec.num_load_waves,
+            wave_size=spec.wave_size,
+            block_m=block_m,
+            block_n=block_n,
+            block_k=block_k,
+            load_vec_a=load_vec_a,
+            load_vec_b=load_vec_b,
+            ir_dtype_a=ir_dtype_a,
+            ir_dtype_b=ir_dtype_b,
+            vector_axis_b=axis_b,
+        )
+    else:
+        a_wavelet_loader = None
+        b_wavelet_loader = None
 
     schedule = SchedulePolicy.for_pipeline(spec.pipeline)
     schedule.emit_prologue(b)
@@ -1406,85 +1481,93 @@ def _build_tilde_dgrad(
             )
         return new_accs
 
-    # ---- K loop ----
-    for_op = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k0")
-    with for_op as (k0, iter_vars):
-        emit_load_phase(k0, A_smem, B_smem)
-        b.sync()
-        new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
-        b.sync()
-        b.scf_yield(*new_accs)
-    final_accs = for_op.results
-
-    # ---- epilogue ----
-    final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
-
-    # ---- epilogue dispatch ----
-    # Epilogue dispatch.  Two independent axes:
-    #   split_k:    >1 → atomic,  =1 → direct (tilde guarantees disjoint writes)
-    #   is_strided: False → stride-1 descriptor,  True → runtime tilde addr_fn
-    # Within each leaf: wmma vs mfma selects the accumulator-layout helper,
-    # and epilogue="cshuffle" vs "default" selects LDS-staged vs scalar stores.
-
-    _tilde_kwargs = dict(
-        bounds_m=rec_gemm_m,
-        bounds_n=c_dg_N,
-        hw_tilde=hw_tilde,  # SSA node from line ~1089, NOT recomputed here
-        w_tilde_slice=rec_w_tilde_slice,
-        d_h_stride=rec_d_h_stride,
-        d_h_offset=rec_d_h_offset,
-        d_w_stride=rec_d_w_stride,
-        d_w_offset=rec_d_w_offset,
-        c_Hi=c_Hi,
-        c_Wi=c_Wi,
-        c_C=c_C,
-        c_group_base=c_group_base,
-    )
-    use_cshuffle = spec.epilogue == "cshuffle"
-    is_wmma = op.family == "wmma"
-
-    if spec.split_k > 1:
-        # Atomic: split-K CTAs each compute a partial and accumulate via atomic_add.
-        _emit_dgrad_tilde_atomic_epilogue(
-            b,
-            spec,
-            atom,
-            final_accs,
-            warp_m_idx,
-            warp_n_idx,
-            lane,
-            block_m_off_v,
-            block_n_off_v,
-            dX,
-            c_per_lane,
-            rec_gemm_m,
-            c_dg_N,
-            rec_h_tilde_slice,
-            rec_w_tilde_slice,
-            rec_d_h_stride,
-            rec_d_h_offset,
-            rec_d_w_stride,
-            rec_d_w_offset,
-            c_Hi,
-            c_Wi,
-            c_C,
+    # ---- epilogue dispatch helper (shared by wavelet and standard paths) ----
+    def _dispatch_dgrad_epilogue(final_accs):
+        _tilde_kwargs = dict(
+            bounds_m=rec_gemm_m,
+            bounds_n=c_dg_N,
+            hw_tilde=hw_tilde,
+            w_tilde_slice=rec_w_tilde_slice,
+            d_h_stride=rec_d_h_stride,
+            d_h_offset=rec_d_h_offset,
+            d_w_stride=rec_d_w_stride,
+            d_w_offset=rec_d_w_offset,
+            c_Hi=c_Hi,
+            c_Wi=c_Wi,
+            c_C=c_C,
             c_group_base=c_group_base,
         )
-    elif not spec.is_strided:
-        # stride=1, single sub-GEMM: compile-time stride-1 descriptor.
-        if is_wmma:
-            if use_cshuffle:
-                _emit_dgrad_cshuffle_epilogue_wmma(
-                    b,
-                    spec,
-                    op,
-                    final_accs,
-                    grid,
-                    dx_rsrc,
-                    c_group_base=c_group_base,
+        use_cshuffle = spec.epilogue == "cshuffle"
+        is_wmma = op.family == "wmma"
+
+        if spec.split_k > 1:
+            _emit_dgrad_tilde_atomic_epilogue(
+                b,
+                spec,
+                atom,
+                final_accs,
+                warp_m_idx,
+                warp_n_idx,
+                lane,
+                block_m_off_v,
+                block_n_off_v,
+                dX,
+                c_per_lane,
+                rec_gemm_m,
+                c_dg_N,
+                rec_h_tilde_slice,
+                rec_w_tilde_slice,
+                rec_d_h_stride,
+                rec_d_h_offset,
+                rec_d_w_stride,
+                rec_d_w_offset,
+                c_Hi,
+                c_Wi,
+                c_C,
+                c_group_base=c_group_base,
+            )
+        elif not spec.is_strided:
+            if is_wmma:
+                if use_cshuffle:
+                    _emit_dgrad_cshuffle_epilogue_wmma(
+                        b,
+                        spec,
+                        op,
+                        final_accs,
+                        grid,
+                        dx_rsrc,
+                        c_group_base=c_group_base,
+                    )
+                else:
+                    _emit_dgrad_direct_epilogue_wmma(
+                        b,
+                        spec,
+                        op,
+                        final_accs,
+                        warp_m_idx,
+                        warp_n_idx,
+                        lane,
+                        block_m_off_v,
+                        block_n_off_v,
+                        dx_rsrc,
+                        c0,
+                        c_group_base=c_group_base,
+                    )
+            elif use_cshuffle:
+                _emit_dgrad_cshuffle_epilogue(
+                    b, spec, final_accs, grid, dx_rsrc, c_group_base=c_group_base
                 )
             else:
-                _emit_dgrad_direct_epilogue_wmma(
+                _emit_dgrad_direct_epilogue(
+                    b, spec, final_accs, grid, dx_rsrc, c_group_base=c_group_base
+                )
+        elif is_wmma:
+            if use_cshuffle:
+                _emit_dgrad_tilde_cshuffle_epilogue(
+                    b, spec, atom, grid, final_accs, dx_rsrc, op=op, **_tilde_kwargs
+                )
+            else:
+                _emit_dgrad_tilde_direct_epilogue_wmma(
                     b,
                     spec,
                     op,
@@ -1496,55 +1579,84 @@ def _build_tilde_dgrad(
                     block_n_off_v,
                     dx_rsrc,
                     c0,
-                    c_group_base=c_group_base,
+                    **_tilde_kwargs,
                 )
-        elif use_cshuffle:
-            _emit_dgrad_cshuffle_epilogue(
-                b, spec, final_accs, grid, dx_rsrc, c_group_base=c_group_base
-            )
         else:
-            _emit_dgrad_direct_epilogue(
-                b, spec, final_accs, grid, dx_rsrc, c_group_base=c_group_base
-            )
-    elif is_wmma:
-        # stride>1, WMMA: runtime tilde addr_fn.
-        if use_cshuffle:
-            _emit_dgrad_tilde_cshuffle_epilogue(
-                b,
-                spec,
-                atom,
-                grid,
-                final_accs,
-                dx_rsrc,
-                op=op,
-                **_tilde_kwargs,
-            )
-        else:
-            _emit_dgrad_tilde_direct_epilogue_wmma(
-                b,
-                spec,
-                op,
-                final_accs,
-                warp_m_idx,
-                warp_n_idx,
-                lane,
-                block_m_off_v,
-                block_n_off_v,
-                dx_rsrc,
-                c0,
-                **_tilde_kwargs,
-            )
-    else:
-        # stride>1, MFMA: runtime tilde addr_fn (like CK k_batch=1).
-        assert atom is not None
-        if use_cshuffle:
-            _emit_dgrad_tilde_cshuffle_epilogue(
-                b, spec, atom, grid, final_accs, dx_rsrc, **_tilde_kwargs
-            )
-        else:
-            _emit_dgrad_tilde_direct_epilogue(
-                b, spec, atom, grid, final_accs, dx_rsrc, **_tilde_kwargs
-            )
+            assert atom is not None
+            if use_cshuffle:
+                _emit_dgrad_tilde_cshuffle_epilogue(
+                    b, spec, atom, grid, final_accs, dx_rsrc, **_tilde_kwargs
+                )
+            else:
+                _emit_dgrad_tilde_direct_epilogue(
+                    b, spec, atom, grid, final_accs, dx_rsrc, **_tilde_kwargs
+                )
+
+    # ---- K loop ----
+    if spec.pipeline == "wavelet":
+        # Wavelet load/math wave specialization (gfx1250/WMMA only).
+        # K_iters is a compile-time constant. dgrad uses dg_K_padded() to
+        # keep it uniform across sub-GEMMs (tilde decomposition may vary k_hi
+        # per sub-GEMM at runtime; wavelet unrolls at Python time so it uses the
+        # worst-case padded K — OOB loads are clamped to 0 by the buffer resource).
+        slice_k = (
+            spec.dg_K_padded()
+            if spec.split_k <= 1
+            else (spec.dg_K_padded() // spec.split_k)
+        )
+        K_iters = (slice_k + block_k - 1) // block_k
+
+        n_math_warps = spec.warp_m * spec.warp_n
+        b.kernel.attrs["max_workgroup_size"] = spec.launch_block_size
+        _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
+        _epi_barriers = compute_wavelet_epi_barriers(spec.epilogue, _no_alias)
+
+        def _dgrad_wavelet_epilogue(final_accs_in):
+            fa = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs_in)
+            _dispatch_dgrad_epilogue(fa)
+
+        emit_wavelet_kloop(
+            b=b,
+            warp_id=warp_id,
+            tid=tid,
+            n_math_warps=n_math_warps,
+            math_block_size=spec.block_size,
+            K_iters=K_iters,
+            block_k=block_k,
+            k_lo=k_lo,
+            A_smem=A_smem,
+            B_smem=B_smem,
+            a_wavelet_loader=a_wavelet_loader,
+            b_wavelet_loader=b_wavelet_loader,
+            a_descriptor=dy_descriptor,
+            b_descriptor=w_descriptor,
+            a_rsrc=dy_rsrc,
+            b_rsrc=w_rsrc,
+            k_off_capture=k_off_capture,
+            accs=accs,
+            emit_mfma_phase=emit_mfma_phase,
+            emit_epilogue_fn=_dgrad_wavelet_epilogue,
+            epi_barriers=_epi_barriers,
+        )
+        return b.kernel
+
+    for_op = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k0")
+    with for_op as (k0, iter_vars):
+        emit_load_phase(k0, A_smem, B_smem)
+        b.sync()
+        new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
+        b.sync()
+        b.scf_yield(*new_accs)
+    final_accs = for_op.results
+
+    # ---- epilogue ----
+    # Epilogue dispatch.  Two independent axes:
+    #   split_k:    >1 → atomic,  =1 → direct (tilde guarantees disjoint writes)
+    #   is_strided: False → stride-1 descriptor,  True → runtime tilde addr_fn
+    # Within each leaf: wmma vs mfma selects the accumulator-layout helper,
+    # and epilogue="cshuffle" vs "default" selects LDS-staged vs scalar stores.
+    final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
+    _dispatch_dgrad_epilogue(final_accs)
 
     return b.kernel
 
@@ -1914,13 +2026,18 @@ def _emit_dgrad_cshuffle_epilogue_wmma(
     c_group_base: Optional[Value] = None,
 ) -> None:
     """WMMA cshuffle epilogue for stride=1 dX (uses from_grid_op)."""
+    _war_barriers = 2 if spec.pipeline == "wavelet" else 1
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
     dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, c_group_base)
-    CShuffleEpilogue.from_grid_op(
+    _epi = CShuffleEpilogue.from_grid_op(
         op=op,
         grid=grid,
         max_store_vec=_dgrad_store_vec(spec),
         out_dtype=spec.data.dtype_d,
-    ).store(b, accs=accs, addr_fn=dx_addr, d_rsrc=dx_rsrc, bounds=bounds)
+        no_alias=_no_alias,
+    )
+    _epi = dc_replace(_epi, war_barriers=_war_barriers)
+    _epi.store(b, accs=accs, addr_fn=dx_addr, d_rsrc=dx_rsrc, bounds=bounds)
 
 
 def _emit_dgrad_cshuffle_epilogue(
@@ -1932,13 +2049,18 @@ def _emit_dgrad_cshuffle_epilogue(
     c_group_base: Optional[Value] = None,
 ) -> None:
     """MFMA cshuffle epilogue for stride=1 dX."""
+    _war_barriers = 2 if spec.pipeline == "wavelet" else 1
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
     dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, c_group_base)
-    CShuffleEpilogue.from_grid(
+    _epi = CShuffleEpilogue.from_grid(
         atom=spec.atom,
         grid=grid,
         max_store_vec=_dgrad_store_vec(spec),
         out_dtype=spec.data.dtype_d,
-    ).store(
+        no_alias=_no_alias,
+    )
+    _epi = dc_replace(_epi, war_barriers=_war_barriers)
+    _epi.store(
         b,
         accs=accs,
         addr_fn=dx_addr,
@@ -2106,15 +2228,19 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
         )
         return offset, hw_ok
 
+    _war_barriers = 2 if spec.pipeline == "wavelet" else 1
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
     _cshuffle_kwargs = {
         "max_store_vec": _dgrad_store_vec(spec),
         "out_dtype": spec.data.dtype_d,
+        "no_alias": _no_alias,
     }
     is_wmma = op is not None and getattr(op, "family", None) == "wmma"
     if is_wmma:
         epi = CShuffleEpilogue.from_grid_op(op=op, grid=grid, **_cshuffle_kwargs)
     else:
         epi = CShuffleEpilogue.from_grid(atom=atom, grid=grid, **_cshuffle_kwargs)
+    epi = dc_replace(epi, war_barriers=_war_barriers)
     epi.store(
         b,
         accs=accs,

@@ -247,12 +247,12 @@ std::shared_future<std::unique_ptr<RTCKernel>>
                       {
                           hipLink_wrapper_t linker;
                           if(loadOps && loadOps->has_spirv())
-                              linker.link(const_cast<void*>(loadOps->spirv_cb.bitcode_data),
-                                          loadOps->spirv_cb.bitcode_len_bytes,
+                              linker.link(loadOps->spirv_cb.bitcode_data.data(),
+                                          loadOps->spirv_cb.bitcode_data.size(),
                                           "loadcb.spv");
                           if(storeOps && storeOps->has_spirv())
-                              linker.link(const_cast<void*>(storeOps->spirv_cb.bitcode_data),
-                                          storeOps->spirv_cb.bitcode_len_bytes,
+                              linker.link(storeOps->spirv_cb.bitcode_data.data(),
+                                          storeOps->spirv_cb.bitcode_data.size(),
                                           "storecb.spv");
                           linker.link(code.data(), code.size(), (kernel_name + ".spv").c_str());
                           code = linker.complete();

@@ -42,7 +42,11 @@ rocsparse_indextype rocsparse::get_indextype<int64_t>()
 
 size_t rocsparse::indextype_sizeof(rocsparse_indextype that)
 {
-    switch(that)
+    // Switch over the integer value: the deprecated u16 index type is
+    // conditionally kept in the enum internally (ROCSPARSE_KEEP_INTERNAL_U16)
+    // but removed from the public enum, so switching over the enum would trip
+    // -Wswitch in one configuration or the other.
+    switch(static_cast<int>(that))
     {
 
     case rocsparse_indextype_i32:
