@@ -99,7 +99,7 @@ namespace rocsparse
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::dnvec_copy_data_kernel<1024, I, T>),
             dim3(((source->size - 1) / 1024 + 1),
-                 std::min(target->batch_count, static_cast<int64_t>(65536))),
+                 std::min(target->batch_count, static_cast<int64_t>(65535))),
             dim3(1024),
             0,
             handle->stream,
@@ -264,11 +264,11 @@ rocsparse_status rocsparse::dnvec_copy_data(rocsparse_handle            handle,
     return rocsparse_status_success;
 }
 
-extern "C" rocsparse_status rocsparse_dnvec_copy_data(rocsparse_handle            handle,
-                                                      rocsparse_const_dnvec_descr alpha,
-                                                      rocsparse_const_dnvec_descr source,
-                                                      rocsparse_dnvec_descr       target,
-                                                      rocsparse_error*            p_error)
+rocsparse_status rocsparse_dnvec_copy_data(rocsparse_handle            handle,
+                                           rocsparse_const_dnvec_descr alpha,
+                                           rocsparse_const_dnvec_descr source,
+                                           rocsparse_dnvec_descr       target,
+                                           rocsparse_error*            p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
