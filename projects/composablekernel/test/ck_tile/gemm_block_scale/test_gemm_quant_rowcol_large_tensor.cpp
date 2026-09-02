@@ -53,4 +53,33 @@ TYPED_TEST(TestCkTileGemmRowColQuant, LargeTensorPathLaunchOnly)
     this->run_test_launch_only(32768, 32896, 512);
 }
 
+// Non-tile-multiple coverage for the large-tensor path. GemmConfigLargeTensorPadded enables
+// kPad* so IsSupportedArgument accepts remainder dimensions; with LargeTensors=true the
+// kernel takes the 64-bit global path, so the pad-transform guards (not hardware buffer
+// bounds-checking) must mask the out-of-range tiles for every A/B layout.
+// clang-format off
+using RowColQuantLargeTensorPaddedTypes = ::testing::Types<
+    std::tuple<RowMajor,    RowMajor,    RowMajor, RowMajor, FP8, FP8, float, Half, RowColQuant, GemmConfigLargeTensorPadded, GroupSize1D_128>,
+    std::tuple<RowMajor,    ColumnMajor, RowMajor, RowMajor, FP8, FP8, float, Half, RowColQuant, GemmConfigLargeTensorPadded, GroupSize1D_128>,
+    std::tuple<ColumnMajor, RowMajor,    RowMajor, RowMajor, FP8, FP8, float, Half, RowColQuant, GemmConfigLargeTensorPadded, GroupSize1D_128>,
+    std::tuple<ColumnMajor, ColumnMajor, RowMajor, RowMajor, FP8, FP8, float, Half, RowColQuant, GemmConfigLargeTensorPadded, GroupSize1D_128>
+>;
+// clang-format on
+
+template <typename Tuple>
+class TestCkTileGemmRowColQuantPadded : public TestCkTileGemmRowColQuant<Tuple>
+{
+};
+
+TYPED_TEST_SUITE(TestCkTileGemmRowColQuantPadded, RowColQuantLargeTensorPaddedTypes);
+
+// N=144 (=16*9, not a multiple of N_Tile 128) and K=272 (=16*17, not a multiple of K_Tile
+// 256) carry remainder tiles across multiple M-tiles. M has no remainder: MPerBlock (16)
+// equals the A vector size, so IsSupportedArgument requires M to be a multiple of 16
+// regardless of kPadM.
+TYPED_TEST(TestCkTileGemmRowColQuantPadded, NonMultiplePaddingValidated)
+{
+    this->run_test_with_validation(128, 144, 272);
+}
+
 #endif // CK_USE_GFX1250
