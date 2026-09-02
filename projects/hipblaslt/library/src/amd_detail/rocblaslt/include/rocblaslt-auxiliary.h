@@ -113,6 +113,7 @@ rocblaslt_status rocblaslt_set_sm_count_target(rocblaslt_handle handle,
 rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
                                                int32_t*         sm_count_target);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /*! \ingroup aux_module
  *  \brief Bytes in one device communicator channel's flag region.
  *
@@ -125,6 +126,7 @@ rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
  *  addresses corrupts memory rather than returning a wrong answer.
  */
 size_t rocblaslt_device_comm_flag_block_bytes(void);
+#endif
 
 /*! \ingroup aux_module
  *  \brief Set the handle-level uniform-summation-order request.
