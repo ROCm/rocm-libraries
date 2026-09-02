@@ -336,29 +336,25 @@ static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
   // A/B data in L1/L2); skip all corrections for batch > 1.
   if (batch > 1) return sk_grid;
 
-  // ipt == 1: pure tile-streaming (no partial)
-  // bounded tile-count window: [2*cu_count, 32*cu_count).
+  // ipt == 1: pure tile-streaming.  DP's N-locality wins over a bounded
+  // tile-count window; outside it, keep SK.
   if (iters_per_tile <= 1) {
     if (cu_count > 0 && tiles >= cu_count * 2 && tiles < cu_count * 32) return tiles;
     return sk_grid;
   }
 
-  // Keep SK when DP would waste too much of its last wave (DP_eff < 80%).
-  // This is independent of the SK grid size: even when the fraction search
-  // picked sk_grid < cu_count, a low-DP_eff shape (e.g. tiles=256 on 224 CUs,
-  // 57%) is better served by SK than by a DP grid whose 2nd wave is ~half idle.
-  // Measured: tf32 4096x4096x* (tiles=256, DP_eff=57%) recover when kept in SK.
+  // Keep SK when DP would waste too much of its last wave (DP_eff < 80%),
+  // independent of the SK grid size — a low-DP_eff shape beats a DP grid whose
+  // last wave is largely idle.
   if (cu_count > 0) {
     const size_t dp_waves    = (tiles + cu_count - 1) / cu_count;
     const size_t dp_cu_steps = dp_waves * cu_count;
     if (tiles < 0.8 * dp_cu_steps) return sk_grid;
   }
 
-  // DP_eff >= 80%: DP fills its waves well, so force DP if any CTA would
-  // straddle a tile boundary (floor iters not a multiple of iters_per_tile) —
-  // those CTAs write partial workspace + need a fixup pass, and measurement
-  // shows DP wins across all aspect ratios here (bf16 9984x2048x32768 ipt=512
-  // regressed 1.5x when kept in SK).
+  // DP_eff >= 80%: DP fills its waves well, so force DP if any CTA would straddle
+  // a tile boundary (floor iters not a multiple of iters_per_tile) — those CTAs
+  // write partial workspace + need a fixup pass, and DP wins across aspect ratios.
   const size_t iters_total = tiles * iters_per_tile;
   const size_t floor_iters = iters_total / sk_grid;
   return (floor_iters % iters_per_tile != 0) ? tiles : sk_grid;
