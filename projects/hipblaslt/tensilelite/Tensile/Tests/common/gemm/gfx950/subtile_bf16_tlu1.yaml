@@ -1,9 +1,14 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# bf16 subtile GEMM correctness on NT, where both operands are free-dim
-# contiguous (TLU=1) and take the stacked transpose-read layout.
-# subtile_bf16.yaml covers TN, where neither operand is.
+# bf16 subtile GEMM correctness on the layouts with a free-dim contiguous
+# operand: NT (both operands), NN (A) and TT (B).  subtile_bf16.yaml covers TN,
+# where neither operand is.
+#
+# Geometry is picked per operand from TLU{A,B}: free-dim contiguous (TLU=1) gets
+# the stacked transpose-read layout, K-contiguous (TLU=0) the row-major one, so
+# the NN and TT groups put the two operands on different geometries in one
+# kernel.  Mirrors subtile_mxfp4_tlu1.yaml.
 #
 # The MFMA is shared with the MX F4 TLU=1 suite (both are 16x16 with a 4-VGPR
 # operand); what differs is the byte geometry.  bf16 reads LDS with
@@ -357,3 +362,117 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [256, 256, 1, 256]
         - BiasTypeArgs: ['s']
+
+  -
+    - # NN: A free-contig (TLU=1, stacked), B K-contig (TLU=0, row-major), so the
+      # two operands take different geometries in the same kernel.  Unlike fp4
+      # neither dim carries an even-extent assert, so both M and N may be odd.
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  1, 1]   # MT32x32   wg1x1
+          - [16, 16, 32, 1,  1, 4, 4,  1, 1]   # MT64x64   wg1x1
+          - [16, 16, 32, 1,  1, 2, 2,  2, 2]   # MT64x64   wg2x2
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+          - [16, 16, 32, 1,  1, 4, 4,  1, 4]   # MT64x256  wg1x4
+          - [16, 16, 32, 1,  1, 4, 4,  4, 1]   # MT256x64  wg4x1
+          - [16, 16, 32, 1,  1, 6, 6,  2, 2]   # MT192x192 wg2x2
+          # Non-power-of-two on M, the contiguous dim here, so A takes a strip
+          # narrower than its tile.  The M wave group has to be 1 for that.
+          - [16, 16, 32, 1,  1, 12, 4,  1, 4]  # MT192x256 wg1x4
+          - [16, 16, 32, 1,  1, 14, 4,  1, 4]  # MT224x256 wg1x4
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0, 1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseCustomMainLoopSchedule: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [512, 512, 1, 512]
+          - Exact: [192, 256, 1, 256]
+          - Exact: [224, 256, 1, 256]
+          - Exact: [256, 255, 1, 256]   # odd N
+          - Exact: [255, 256, 1, 256]   # odd M, legal for bf16 unlike fp4
+          - Exact: [256, 33,  1, 256]   # small odd N
+          - Exact: [256, 200, 2, 256]   # batch with an N edge
+          - Exact: [256, 511, 3, 256]   # odd N with batch 3
+          # K tails.  B is the K-contiguous operand here, and the bf16 boundary
+          # fixup is skipped whenever either operand is TLU=1, so a partial K
+          # window is exactly where a mixed layout would lose its last element.
+          - Exact: [256, 256, 1, 288]   # 32-element K tail
+          - Exact: [256, 256, 1, 272]   # 16-element K tail
+          - Exact: [256, 255, 1, 352]   # odd N against a K tail
+
+  -
+    - # TT: the mirror of the NN group -- A K-contig (TLU=0, row-major), B
+      # free-contig (TLU=1, stacked).  Non-power-of-two now belongs to N.
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  1, 1]   # MT32x32   wg1x1
+          - [16, 16, 32, 1,  1, 4, 4,  1, 1]   # MT64x64   wg1x1
+          - [16, 16, 32, 1,  1, 2, 2,  2, 2]   # MT64x64   wg2x2
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+          - [16, 16, 32, 1,  1, 4, 4,  1, 4]   # MT64x256  wg1x4
+          - [16, 16, 32, 1,  1, 4, 4,  4, 1]   # MT256x64  wg4x1
+          - [16, 16, 32, 1,  1, 6, 6,  2, 2]   # MT192x192 wg2x2
+          # Non-power-of-two on N, the contiguous dim here; the N wave group
+          # has to be 1 for it.
+          - [16, 16, 32, 1,  1, 4, 12,  4, 1]  # MT256x192 wg4x1
+          - [16, 16, 32, 1,  1, 4, 14,  4, 1]  # MT256x224 wg4x1
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [0, 1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseCustomMainLoopSchedule: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [512, 512, 1, 512]
+          - Exact: [256, 192, 1, 256]
+          - Exact: [256, 224, 1, 256]
+          - Exact: [255, 256, 1, 256]   # odd M
+          - Exact: [256, 255, 1, 256]   # odd N
+          - Exact: [33,  256, 1, 256]   # small odd M
+          - Exact: [200, 256, 2, 256]   # batch with an M edge
+          - Exact: [511, 256, 3, 256]   # odd M with batch 3
+          - Exact: [256, 256, 1, 288]   # 32-element K tail
+          - Exact: [256, 256, 1, 272]   # 16-element K tail
+          - Exact: [255, 256, 1, 352]   # odd M against a K tail
