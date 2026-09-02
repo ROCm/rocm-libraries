@@ -791,6 +791,7 @@ class InternalArgsSupport:
                  'gsu',
                  'wgm',
                  'staggerU',
+                 'perTileExtraIters',
                  'useUniversalArgs',
                  'useSFC'
                  ]
@@ -800,11 +801,13 @@ class InternalArgsSupport:
         # Set useSFC to True if SpaceFillingAlgo is non-empty, regardless of
         # the explicit InternalSupportParams setting
         useSFC = d['InternalSupportParams']['UseSFC'] or len(d.get('SpaceFillingAlgo', [])) > 0
-        return cls(version = d['InternalSupportParams']['KernArgsVersion'],
-                   gsu = d['InternalSupportParams']['SupportUserGSU'],
-                   wgm = d['InternalSupportParams']['SupportCustomWGM'],
-                   staggerU = d['InternalSupportParams']['SupportCustomStaggerU'],
-                   useUniversalArgs = d['InternalSupportParams']['UseUniversalArgs'],
+        isp = d['InternalSupportParams']
+        return cls(version = isp['KernArgsVersion'],
+                   gsu = isp['SupportUserGSU'],
+                   wgm = isp['SupportCustomWGM'],
+                   staggerU = isp['SupportCustomStaggerU'],
+                   perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
+                   useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
 
     def __init__(self, **kwargs):
