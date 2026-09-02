@@ -81,9 +81,15 @@ def test_get_version_no_match_raises(monkeypatch):
 
 def test_get_rocm_version_uses_rocm_version_env(monkeypatch, tmp_path):
     """ROCM_VERSION env var takes priority over all other sources."""
+    rocm_info = tmp_path / "rocm" / ".info"
+    hip_info = tmp_path / "hip" / ".info"
+    rocm_info.mkdir(parents=True)
+    hip_info.mkdir(parents=True)
+    (rocm_info / "version").write_text("7.1.0")
+    (hip_info / "version").write_text("7.2.0")
     monkeypatch.setenv("ROCM_VERSION", "6.4.0")
-    monkeypatch.delenv("ROCM_PATH", raising=False)
-    monkeypatch.delenv("HIP_PATH", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(rocm_info.parent))
+    monkeypatch.setenv("HIP_PATH", str(hip_info.parent))
     assert C.get_rocm_version() == SemanticVersion(6, 4, 0)
 
 
@@ -100,6 +106,16 @@ def test_get_rocm_version_uses_rocm_version_env(monkeypatch, tmp_path):
             SemanticVersion(7, 1, 25424),
             id="build_suffix",
         ),
+        pytest.param(
+            "10.1.0a20260813",
+            SemanticVersion(10, 1, 0),
+            id="alpha_suffix",
+        ),
+        pytest.param(
+            "7.2.1rc2",
+            SemanticVersion(7, 2, 1),
+            id="release_candidate_suffix",
+        ),
     ],
 )
 def test_get_rocm_version_reads_info_version_file(
@@ -112,6 +128,43 @@ def test_get_rocm_version_reads_info_version_file(
     monkeypatch.delenv("ROCM_VERSION", raising=False)
     monkeypatch.setenv("ROCM_PATH", str(tmp_path))
     assert C.get_rocm_version() == expected_version
+
+
+def test_get_rocm_version_prefers_rocm_path_over_hip_path(monkeypatch, tmp_path):
+    """ROCM_PATH takes priority over HIP_PATH."""
+    rocm_info = tmp_path / "rocm" / ".info"
+    hip_info = tmp_path / "hip" / ".info"
+    rocm_info.mkdir(parents=True)
+    hip_info.mkdir(parents=True)
+    (rocm_info / "version").write_text("7.1.0")
+    (hip_info / "version").write_text("7.2.0")
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(rocm_info.parent))
+    monkeypatch.setenv("HIP_PATH", str(hip_info.parent))
+    assert C.get_rocm_version() == SemanticVersion(7, 1, 0)
+
+
+def test_get_rocm_version_falls_back_from_rocm_path_to_hip_path(monkeypatch, tmp_path):
+    """An unreadable ROCM_PATH falls through to HIP_PATH."""
+    hip_root = tmp_path / "hip"
+    info_dir = hip_root / ".info"
+    info_dir.mkdir(parents=True)
+    (info_dir / "version").write_text("7.2.3")
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path / "missing"))
+    monkeypatch.setenv("HIP_PATH", str(hip_root))
+    assert C.get_rocm_version() == SemanticVersion(7, 2, 3)
+
+
+def test_get_rocm_version_raises_when_no_source_exists(monkeypatch, tmp_path):
+    """Missing environment and installation files report the documented error."""
+    real_path = C.Path
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
+    monkeypatch.setattr(C, "Path", lambda _root: real_path(tmp_path / "missing"))
+    with pytest.raises(RuntimeError, match="Failed to get ROCm version"):
+        C.get_rocm_version()
 
 
 # ---------------------------------------------------------------------------
