@@ -1,14 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Wiring for the gfx942 chunkwise KDA candidates.
+"""Wiring for the gfx950 chunkwise KDA candidates.
 
 The kernels had specs, validators, builders, grid helpers and signatures long
 before anything referenced them from dispatch. These tests pin what registering
 them did -- and, just as much, what it deliberately did not do: the split path
-is reachable only when the caller names it, because no measured fused/split
-crossover exists yet.
+is reachable only when the caller names it, because the fused/split crossover
+has not been measured at enough shapes to encode a threshold.
 
-CPU-only. Numeric coverage lives in ``test_kda_chunkwise_gfx942_numeric.py``.
+CPU-only. Numeric coverage lives in ``test_kda_chunkwise_gfx950_numeric.py``.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from __future__ import annotations
 import unittest
 
 from dispatch.kda import (
-    KDA_PARTITION_HEAD_V,
     KDA_REGISTRY,
     KdaRequest,
     dispatch_kda,
@@ -24,21 +23,23 @@ from dispatch.kda import (
     kda_sweep_space,
 )
 
-_FUSED = "kda_gfx942_chunk_fused"
-_PREP = "kda_gfx942_chunk_prep"
-_SCAN = "kda_gfx942_chunk_scan"
+_FUSED = "kda_gfx950_chunk_fused"
+_PREP = "kda_gfx950_chunk_prep"
+_SCAN = "kda_gfx950_chunk_scan"
 _ALL = (_FUSED, _PREP, _SCAN)
+
+_BATCH, _HEADS, _SEQLEN, _CHUNK = 2, 8, 1024, 32
 
 
 def _req(**kw) -> KdaRequest:
     base = dict(
-        batch=2,
-        num_heads=8,
-        seqlen=1024,
-        arch="gfx942",
+        batch=_BATCH,
+        num_heads=_HEADS,
+        seqlen=_SEQLEN,
+        arch="gfx950",
         head_k=128,
         head_v=128,
-        chunk_size=16,
+        chunk_size=_CHUNK,
     )
     base.update(kw)
     return KdaRequest(**base)
@@ -54,15 +55,15 @@ class TestRegistration(unittest.TestCase):
 
     def test_identity(self):
         for name, algorithm, spec_id in (
-            (_FUSED, "chunk_fused", "gfx942_chunk_fused"),
-            (_PREP, "chunk_prep", "gfx942_chunk_prep"),
-            (_SCAN, "chunk_scan", "gfx942_chunk_scan"),
+            (_FUSED, "chunk_fused", "gfx950_chunk_fused"),
+            (_PREP, "chunk_prep", "gfx950_chunk_prep"),
+            (_SCAN, "chunk_scan", "gfx950_chunk_scan"),
         ):
             with self.subTest(candidate=name):
                 c = _candidate(name)
                 self.assertEqual(c.algorithm, algorithm)
                 self.assertEqual(c.spec_id, spec_id)
-                self.assertEqual(c.capability.arches, ("gfx942",))
+                self.assertEqual(c.capability.arches, ("gfx950",))
 
     def test_every_candidate_declares_a_build(self):
         # The whole point of the registration: the three builders were
@@ -84,8 +85,8 @@ class TestRouting(unittest.TestCase):
     def test_default_routing_is_the_fused_kernel(self):
         self.assertEqual(dispatch_kda(_req()).candidate.name, _FUSED)
 
-    def test_unspecified_chunk_uses_the_gfx942_default(self):
-        self.assertEqual(dispatch_kda(_req(chunk_size=None)).spec.tile.chunk, 16)
+    def test_unspecified_chunk_uses_the_gfx950_default(self):
+        self.assertEqual(dispatch_kda(_req(chunk_size=None)).spec.tile.chunk, 32)
 
     def test_named_algorithm_selects_a_split_half(self):
         for name, algorithm in ((_PREP, "chunk_prep"), (_SCAN, "chunk_scan")):
@@ -94,7 +95,7 @@ class TestRouting(unittest.TestCase):
                 self.assertEqual(result.candidate.name, name)
 
     def test_named_spec_id_selects_a_split_half(self):
-        result = dispatch_kda(_req(spec_id="gfx942_chunk_scan"))
+        result = dispatch_kda(_req(spec_id="gfx950_chunk_scan"))
         self.assertEqual(result.candidate.name, _SCAN)
 
     def test_the_refusal_explains_the_opt_in(self):
@@ -116,15 +117,15 @@ class TestArchGate(unittest.TestCase):
 
         for name in _ALL:
             for arch in known_arches():
-                if arch == "gfx942":
+                if arch == "gfx950":
                     continue
                 with self.subTest(candidate=name, arch=arch):
                     req = _req(arch=arch, algorithm=_candidate(name).algorithm)
                     self.assertFalse(_candidate(name).admits(req)[0])
 
-    def test_registry_serves_them_only_to_gfx942(self):
-        self.assertEqual({c.name for c in KDA_REGISTRY.for_arch("gfx942")}, set(_ALL))
-        self.assertFalse(set(_ALL) & {c.name for c in KDA_REGISTRY.for_arch("gfx950")})
+    def test_registry_serves_them_only_to_gfx950(self):
+        self.assertEqual({c.name for c in KDA_REGISTRY.for_arch("gfx950")}, set(_ALL))
+        self.assertFalse(set(_ALL) & {c.name for c in KDA_REGISTRY.for_arch("gfx942")})
 
 
 class TestCapabilityGates(unittest.TestCase):
@@ -144,11 +145,6 @@ class TestCapabilityGates(unittest.TestCase):
 
     def test_an_unsupported_chunk_length_is_rejected(self):
         self.assertFalse(_candidate(_FUSED).admits(_req(chunk_size=64))[0])
-
-    def test_head_v_must_partition_exactly(self):
-        # 96 channels cannot be cut into 64-channel workgroups, and admitting
-        # it would move the failure to launch.
-        self.assertFalse(_candidate(_FUSED).admits(_req(head_v=96))[0])
 
     def test_the_split_path_can_serve_a_problem_that_wants_a_final_state(self):
         # Regression: withholding the state features from the tile builder made
@@ -179,45 +175,73 @@ class TestCapabilityGates(unittest.TestCase):
 class TestResidualGates(unittest.TestCase):
     """Gates the validators compute from the spec, not from the request."""
 
-    def test_c32_is_admitted_by_capability_then_refused_on_lds(self):
-        # chunk=32 is a declared chunk length, so the prefilter passes it; the
-        # gfx942 LDS budget is what rejects it. Pinning both halves of that
-        # split is the point -- a capability that also encoded LDS would have
-        # to recompute the spec to do it.
-        candidate = _candidate(_FUSED)
-        req = _req(chunk_size=32)
-        self.assertTrue(candidate.capability.check(req)[0])
-        ok, why = candidate.admits(req)
+    def test_c16_is_admitted_by_capability_then_split_on_the_schedule(self):
+        # chunk=16 is a declared chunk length, so the prefilter passes it for
+        # every candidate. What separates them is the tile schedule each one
+        # starts from: the fused kernel's narrower 16x16 atom tiles a 16-token
+        # chunk, the split path's chunk-wide 32x32 atom does not. Pinning both
+        # halves of that split is the point -- a capability that also encoded
+        # the atom would have to recompute the spec to do it.
+        for name in _ALL:
+            with self.subTest(candidate=name):
+                req = _req(chunk_size=16, algorithm=_candidate(name).algorithm)
+                self.assertTrue(_candidate(name).capability.check(req)[0])
+
+        self.assertTrue(_candidate(_FUSED).admits(_req(chunk_size=16))[0])
+        for name in (_PREP, _SCAN):
+            with self.subTest(candidate=name):
+                req = _req(chunk_size=16, algorithm=_candidate(name).algorithm)
+                ok, why = _candidate(name).admits(req)
+                self.assertFalse(ok)
+                self.assertIn("16", why)
+
+    def test_a_scan_whose_tile_builder_is_unbuildable_is_refused(self):
+        # head_k=32 passes every rule the scan itself has, and fails the tile
+        # builder's cumsum row-group fold. Admitting the scan alone would leave
+        # a kernel nothing can feed.
+        req = _req(head_k=32, algorithm="chunk_scan")
+        self.assertTrue(_candidate(_SCAN).capability.check(req)[0])
+        ok, why = _candidate(_SCAN).admits(req)
         self.assertFalse(ok)
-        self.assertIn("LDS", why)
+        self.assertIn("tile builder", why)
 
 
 class TestGeometry(unittest.TestCase):
-    def test_fused_grid_is_one_workgroup_per_partitioned_head(self):
+    def test_fused_grid_is_one_workgroup_per_head(self):
+        # gfx950 holds a whole DV=128 state mirror, so a logical head is not
+        # partitioned the way it is on gfx942.
         result = dispatch_kda(_req())
-        parts = 128 // KDA_PARTITION_HEAD_V
-        self.assertEqual(result.grid, (2 * 8 * parts, 1, 1))
-        self.assertEqual(result.block, (256, 1, 1))
+        self.assertEqual(result.grid, (_BATCH * _HEADS, 1, 1))
+        self.assertEqual(result.block, (512, 1, 1))
 
     def test_prep_grid_is_one_workgroup_per_chunk(self):
         result = dispatch_kda(_req(algorithm="chunk_prep"))
-        parts = 128 // KDA_PARTITION_HEAD_V
-        self.assertEqual(result.grid, (2 * 8 * parts * (1024 // 16), 1, 1))
+        self.assertEqual(result.grid, (_BATCH * _HEADS * (_SEQLEN // _CHUNK), 1, 1))
+        self.assertEqual(result.block, (256, 1, 1))
 
     def test_scan_grid_matches_the_fused_grid(self):
         fused = dispatch_kda(_req()).grid
         scan = dispatch_kda(_req(algorithm="chunk_scan")).grid
         self.assertEqual(fused, scan)
 
-    def test_the_spec_carries_the_partition_not_the_logical_width(self):
-        # The request describes a DV=128 head; the kernel runs 64 channels.
-        self.assertEqual(dispatch_kda(_req()).spec.head_v, KDA_PARTITION_HEAD_V)
-        self.assertEqual(dispatch_kda(_req()).spec.head_k, 128)
+    def test_the_spec_carries_the_requested_head_widths(self):
+        spec = dispatch_kda(_req()).spec
+        self.assertEqual(spec.head_k, 128)
+        self.assertEqual(spec.head_v, 128)
+
+    def test_each_path_keeps_its_own_tile_schedule(self):
+        # The fused kernel's tuned schedule must not leak into the split scan,
+        # whose LDS budget is capped for two workgroups per CU.
+        fused = dispatch_kda(_req()).spec.tile
+        scan = dispatch_kda(_req(algorithm="chunk_scan")).spec.tile
+        self.assertEqual((fused.block_size, fused.scan_atom_m), (512, 16))
+        self.assertEqual((scan.block_size, scan.scan_atom_m), (256, 0))
+        self.assertEqual((fused.chunk, scan.chunk), (_CHUNK, _CHUNK))
 
 
 class TestSignatures(unittest.TestCase):
     def test_each_signature_matches_its_kernel_abi(self):
-        from kernels.gfx942.kda_chunkwise import (
+        from kernels.gfx950.kda_chunkwise import (
             kda_chunk_fused_signature,
             kda_chunk_prep_signature,
             kda_chunk_scan_signature,
@@ -245,7 +269,7 @@ class TestBuild(unittest.TestCase):
                 kernel = dispatch_kda(_req(algorithm=algorithm)).build()
                 self.assertIn(needle, kernel.name)
                 self.assertIn("dk128", kernel.name)
-                self.assertIn("dv64", kernel.name)
+                self.assertIn("dv128", kernel.name)
 
     def test_the_built_kernel_takes_the_declared_signature(self):
         result = dispatch_kda(_req())

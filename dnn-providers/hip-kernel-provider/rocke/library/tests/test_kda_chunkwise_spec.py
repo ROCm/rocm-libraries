@@ -226,6 +226,35 @@ class TestScanSpec:
         spec = KdaChunkScanSpec(token_major_io=True)
         assert "tm" in spec.kernel_name()
 
+    def test_raw_prep_preserves_scan_tile_knobs(self):
+        pytest.importorskip("torch")
+        from builders.gfx950.kda.kda_chunk_split import prep_spec_of
+
+        tile = KdaTileSpec(
+            block_size=64,
+            pad_dk=16,
+            pad_c=8,
+            pad_cb=16,
+            solve_block=16,
+            tile_atom_m=16,
+            scan_atom_m=16,
+            waves_per_eu=2,
+        )
+        spec = KdaChunkScanSpec(tile=tile)
+        prep = prep_spec_of(spec, raw=True)
+
+        assert prep.tile.block_size == 256
+        for field in (
+            "pad_dk",
+            "pad_c",
+            "pad_cb",
+            "solve_block",
+            "tile_atom_m",
+            "scan_atom_m",
+            "waves_per_eu",
+        ):
+            assert getattr(prep.tile, field) == getattr(tile, field)
+
     def test_lds_leaves_room_for_two_workgroups(self):
         """The split path only earns back its tile traffic at 2 WG/CU.
 
@@ -243,6 +272,18 @@ class TestScanSpec:
         ok, why = is_valid_scan_spec(KdaChunkScanSpec(head_v=64), arch=ARCH)
         assert not ok
         assert "head_v" in why or "v slice" in why
+
+    def test_staging_tiles_must_fit_whole_workgroup_passes(self):
+        spec = KdaChunkScanSpec(head_k=96)
+        ok, why = is_valid_scan_spec(spec, arch=ARCH)
+        assert not ok
+        assert "slots" in why
+
+    def test_dec_tile_must_fit_one_guarded_pass(self):
+        spec = KdaChunkScanSpec(head_k=2048)
+        ok, why = is_valid_scan_spec(spec, arch=ARCH)
+        assert not ok
+        assert "dec tile" in why
 
     def test_staging_alignment_rejections(self):
         """Staging is ds_write_b128 throughout, so both pitches stay 8-aligned."""
@@ -275,3 +316,38 @@ class TestSpecNaming:
         c = KdaChunkPrepSpec(tile=_tile(pad_cb=16)).kernel_name()
         assert a != c
         assert "pcb16" in c
+
+        scan = KdaChunkScanSpec()
+        scan_h0 = KdaChunkScanSpec(has_initial_state=True, store_final_state=False)
+        assert scan.kernel_name() != scan_h0.kernel_name()
+        assert "h0" in scan_h0.kernel_name()
+        assert "noht" in scan_h0.kernel_name()
+
+        fused = KdaChunkFusedSpec()
+        fused_h0 = KdaChunkFusedSpec(
+            has_initial_state=True,
+            store_final_state=False,
+            prefetch_inputs=False,
+            overlay_lds=True,
+            tile=_tile(
+                block_size=512,
+                pad_dk=16,
+                pad_cb=16,
+                tile_atom_m=16,
+                scan_atom_m=16,
+                solve_block=32,
+                waves_per_eu=2,
+            ),
+        )
+        assert fused.kernel_name() != fused_h0.kernel_name()
+        for needle in (
+            "h0",
+            "noht",
+            "nopf",
+            "ovl",
+            "sb32",
+            "p16x4",
+            "ta16",
+            "wpe2",
+        ):
+            assert needle in fused_h0.kernel_name()

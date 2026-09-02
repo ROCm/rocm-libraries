@@ -88,6 +88,7 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 | `unified_attention_2d` | ✅ | ✅ | ✅ | scalar (no matrix core) |
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
+| `kda_chunkwise` | ❌ | ✅ | ❌ | gfx950-only; dispatcher-wired via `dispatch.kda` |
 
 ---
 

@@ -96,6 +96,12 @@ LOG2E = 1.4426950408889634
 EXP2_CLAMP = 126.0
 
 _DTYPE_IR = {"bf16": BF16}
+# Declared coverage, exported so a dispatch candidate can state what it serves
+# by importing these rather than transcribing them. The validators below read
+# the same names, so the two cannot drift apart.
+KDA_DTYPES: Tuple[str, ...] = tuple(sorted(_DTYPE_IR))
+# The only chunk lengths the emitted tile-atom schedules cover.
+KDA_CHUNK_SIZES: Tuple[int, ...] = (16, 32)
 # gfx950 LDS budget per workgroup.
 LDS_LIMIT = 160 * 1024
 # The K-packed bf16 atoms, by M/N extent. Both are gfx950 shapes; the K extent
@@ -427,8 +433,11 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
             f"unsupported tile_atom_m {t.tile_atom_m}; " f"have {sorted(_SCAN_ATOMS)}"
         )
     atom = spec.atom
-    if t.chunk not in (16, 32):
-        return False, "chunk must be 16 or 32 for the emitted tile-atom schedules"
+    if t.chunk not in KDA_CHUNK_SIZES:
+        return False, (
+            f"chunk must be one of {list(KDA_CHUNK_SIZES)} for the emitted "
+            "tile-atom schedules"
+        )
     if t.chunk % atom.m or t.chunk % atom.n:
         return False, (f"tile atom ({atom.m}x{atom.n}) must divide chunk ({t.chunk})")
     panels = (t.chunk // atom.m) * (t.chunk // atom.n)
@@ -1904,7 +1913,7 @@ class _ScanCtx:
         self.C, self.DK = chunk, head_k
         self.EV = head_v
         self.EV_stride = head_v if ev_stride is None else ev_stride
-        self.v_row_base = v_row_base if isinstance(v_row_base, int) else v_row_base
+        self.v_row_base = v_row_base
         self.io = io
         self.BLOCK = block_size
         self.ELEM = elem
@@ -2481,13 +2490,23 @@ class KdaChunkScanSpec:
     name: str = "rocke_kda_chunk_scan"
 
     @property
-    def atom(self) -> MfmaAtom:
+    def prep(self) -> KdaChunkPrepSpec:
+        """The tile builder whose output this scan stages.
+
+        Derived rather than passed alongside, because the scan's staging
+        copies assume exactly the layouts that builder's global sink writes:
+        two specs that could drift apart would drift into a silent misread.
+        """
         return KdaChunkPrepSpec(
             head_k=self.head_k,
             head_v=self.head_v,
             dtype=self.dtype,
             tile=self.tile,
-        ).atom
+        )
+
+    @property
+    def atom(self) -> MfmaAtom:
+        return self.prep.atom
 
     @property
     def scan_atom(self) -> MfmaAtom:
@@ -2524,22 +2543,17 @@ class KdaChunkScanSpec:
         )
 
     def kernel_name(self) -> str:
-        t = self.tile
-        parts = [
-            self.name,
-            f"dk{self.head_k}",
-            f"dv{self.head_v}",
-            self.dtype,
-            f"c{t.chunk}",
-            f"b{t.block_size}",
-        ]
-        if t.scan_atom_m:
-            parts.append(f"sa{t.scan_atom_m}")
+        parts = (f"dk{self.head_k}", f"dv{self.head_v}", self.dtype)
+        parts += self.tile.name_parts()
+        if self.has_initial_state:
+            parts += ("h0",)
+        if not self.store_final_state:
+            parts += ("noht",)
         if self.value_splits != 1:
-            parts.append(f"vs{self.value_splits}")
+            parts += (f"vs{self.value_splits}",)
         if self.token_major_io:
-            parts.append("tm")
-        return kernel_name_join(*parts)
+            parts += ("tm",)
+        return kernel_name_join(self.name, *parts)
 
 
 def is_valid_scan_spec(
@@ -2590,6 +2604,17 @@ def is_valid_scan_spec(
             f"padded chunk pitch ({t.chunk + t.pad_cb}) must be a multiple of 8 "
             "elements; the staging copies are ds_write_b128"
         )
+    for rows, cols in (
+        (t.chunk, spec.head_k),
+        (t.chunk, t.chunk),
+        (spec.head_k, t.chunk),
+    ):
+        n_slot = rows * cols // 8
+        if n_slot > t.block_size and n_slot % t.block_size:
+            return False, (
+                f"tile {rows}x{cols} needs {n_slot} slots, not a multiple of "
+                f"{t.block_size}"
+            )
     for what, n in (
         ("C x DK", t.chunk * spec.head_k),
         ("C x C", t.chunk * t.chunk),
@@ -2604,6 +2629,11 @@ def is_valid_scan_spec(
         return False, (
             f"dec tile ({spec.head_k}) must be a multiple of 4; it is staged as "
             "one fp32 4-vector per thread"
+        )
+    if spec.head_k > 4 * t.block_size:
+        return False, (
+            f"dec tile ({spec.head_k}) exceeds one guarded pass of "
+            f"{4 * t.block_size} elements for block_size ({t.block_size})"
         )
 
     lds = spec.lds_bytes()
@@ -2847,6 +2877,8 @@ def kda_chunk_prep_signature(spec: KdaChunkPrepSpec):
 
 __all__ = [
     "EXP2_CLAMP",
+    "KDA_CHUNK_SIZES",
+    "KDA_DTYPES",
     "KdaChunkFusedSpec",
     "KdaChunkPrepSpec",
     "KdaChunkScanSpec",

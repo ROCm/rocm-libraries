@@ -248,9 +248,16 @@ Batch-compile the Cartesian product of legal `value_splits`, prep/scan tile
 `block_size`, `scan_atom_m`, padding knobs, and `solve_block`, then correctness-
 prune against the aligned float64 oracle (`kda_chunk_split.ref_aligned_raw`) and
 the token-serial walk. Survivors are timed with identical event windows and at
-least five median blocks via `/workspace/kda-ref/bench_apples.py` and
-`/workspace/kda-ref/sweep_aligned_split.py` (results recorded off-repo per
-compliance).
+least five median blocks via the in-repo benchmark scenario:
+
+```bash
+cd rocke/library
+python -m benchmarks.gfx950.kda.benchmark_chunkwise --path split \
+    --shapes 8x8x1024 8x16x2048 32x16x2048
+```
+
+The builder-local `bench()` helpers expose the same timing hooks for focused
+experiments. Keep measured results outside the repository per compliance.
 
 Before profiling, inspect HSACO resources and ISA for each survivor: VGPR/SGPR/
 LDS occupancy, vector load/store widths, barrier/wait counts, shuffle reductions,

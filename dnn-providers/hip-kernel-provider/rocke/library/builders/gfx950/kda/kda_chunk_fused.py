@@ -19,13 +19,16 @@ Run directly for a parity sweep plus a benchmark::
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import sys
 
-_HERE = os.path.dirname(__file__)
-_RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
-sys.path.insert(0, _RK + "/platform/python")
-sys.path.insert(0, _RK + "/library")
+try:
+    import rocke  # noqa: F401
+except ImportError:  # running as a bare script outside the editable install
+    _HERE = os.path.dirname(__file__)
+    _RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
+    sys.path[:0] = [_RK + "/library", _RK + "/platform/python"]
 
 import torch  # noqa: E402
 
@@ -41,6 +44,7 @@ from rocke.helpers.compile import compile_kernel  # noqa: E402
 from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
 
 _LAUNCHER_CACHE: dict = {}
+TOL = 3e-2
 
 
 def make_launcher(spec: KdaChunkFusedSpec) -> KernelLauncher:
@@ -70,6 +74,8 @@ def run_fused(spec, q, k, g, beta, v, o, ht, scale, bh, nc, h0=None, stream=None
     ``[BH*NC, C*DV]``, and ``h0``/``ht`` are ``[BH, DV, DK]`` fp32 (the state
     kept transposed, which is the orientation both of its consumers want).
     """
+    if h0 is None:
+        assert not spec.has_initial_state, "h0=None but the kernel reads h0_ptr"
     launcher = make_launcher(spec)
     if stream is None:
         stream = torch.cuda.current_stream().cuda_stream
@@ -179,7 +185,7 @@ def launch_packed(spec, q, k, v, g, beta, h0=None):
     return o.view(B, H, T, DV), ht.view(B, H, DV, DK).transpose(-1, -2)
 
 
-def check(spec, B, H, T, gate_low=-0.5, tol=3e-2, with_h0=False, verbose=True):
+def check(spec, B, H, T, gate_low=-0.5, tol=TOL, with_h0=False, verbose=True):
     DK, DV = spec.head_k, spec.head_v
     q, k, v, g, beta = make_inputs(B, H, T, DK, DV, gate_low)
     h0 = None
@@ -275,16 +281,32 @@ def main():
         B, H, T = (int(x) for x in args.check_shape.split("x"))
         for gate_low in (-0.1, -0.5, -2.0, -5.0):
             for with_h0 in (False, True):
-                if with_h0 and not spec.has_initial_state:
-                    continue
-                print(f"parity B={B} H={H} T={T} gate in [{gate_low}, 0]:")
-                worst = max(worst, check(spec, B, H, T, gate_low=gate_low))
+                check_spec = (
+                    spec
+                    if not with_h0
+                    else dataclasses.replace(spec, has_initial_state=True)
+                )
+                state_label = " with h0" if with_h0 else ""
+                print(
+                    f"parity B={B} H={H} T={T} gate in [{gate_low}, 0]{state_label}:"
+                )
+                worst = max(
+                    worst,
+                    check(
+                        check_spec,
+                        B,
+                        H,
+                        T,
+                        gate_low=gate_low,
+                        with_h0=with_h0,
+                    ),
+                )
 
     for s in args.shapes.split(","):
         B, H, T = (int(x) for x in s.split("x"))
         bench(spec, B, H, T, iters=args.iters)
 
-    return 0
+    return 0 if args.no_check or worst <= TOL else 1
 
 
 if __name__ == "__main__":

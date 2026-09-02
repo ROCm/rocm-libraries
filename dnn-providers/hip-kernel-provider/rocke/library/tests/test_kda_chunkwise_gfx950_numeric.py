@@ -24,20 +24,7 @@ Every test is marked ``gpu`` and skipped off a gfx950. Select with
 
 from __future__ import annotations
 
-import os
-import sys
-
 import pytest
-
-# The host builders live under library/builders and import each other by module
-# name, the way they do when run as scripts.
-sys.path.insert(
-    0,
-    os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "builders/gfx950/kda",
-    ),
-)
 
 
 def _gpu_ready():
@@ -73,7 +60,7 @@ TOL = 3e-2
 @pytest.mark.parametrize("gate_low", GATES)
 def test_prep_tiles_match_float64_oracle(gate_low):
     """All six per-chunk tiles, over enough chunks to cover every code path."""
-    import kda_chunk_prep as prep
+    from builders.gfx950.kda import kda_chunk_prep as prep
 
     from kernels.gfx950.kda_chunkwise import KdaChunkPrepSpec
 
@@ -84,7 +71,7 @@ def test_prep_tiles_match_float64_oracle(gate_low):
 @pytest.mark.parametrize("gate_low", GATES)
 def test_split_path_matches_token_serial(gate_low):
     """rocke prep + rocke scan, against the token-serial recurrence."""
-    import kda_chunk_split as split
+    from builders.gfx950.kda import kda_chunk_split as split
 
     from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec
 
@@ -100,7 +87,7 @@ def test_fused_path_matches_token_serial(gate_low):
     this is the check that routing the tiles through HBM instead of LDS did not
     change the arithmetic.
     """
-    import kda_chunk_fused as fused
+    from builders.gfx950.kda import kda_chunk_fused as fused
 
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec
 
@@ -108,6 +95,27 @@ def test_fused_path_matches_token_serial(gate_low):
         KdaChunkFusedSpec(), 2, 4, 256, gate_low=gate_low, verbose=False
     )
     assert worst <= TOL, f"gate {gate_low}: worst rel {worst:.3e}"
+
+
+@pytest.mark.parametrize("path", ["split", "fused"])
+@pytest.mark.parametrize("gate_low", GATES)
+def test_nonzero_initial_state_matches_token_serial(path, gate_low):
+    """Both compositions must preserve a non-zero state carried into prefill."""
+    if path == "split":
+        from builders.gfx950.kda import kda_chunk_split as module
+        from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec
+
+        spec = KdaChunkScanSpec(has_initial_state=True)
+    else:
+        from builders.gfx950.kda import kda_chunk_fused as module
+        from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec
+
+        spec = KdaChunkFusedSpec(has_initial_state=True)
+
+    worst = module.check(
+        spec, 2, 4, 256, gate_low=gate_low, with_h0=True, verbose=False
+    )
+    assert worst <= TOL, f"{path}, gate {gate_low}: initial-state worst rel {worst:.3e}"
 
 
 @pytest.mark.parametrize("gate_low", GATES)
@@ -120,7 +128,7 @@ def test_subtiled_fused_path_matches_token_serial(gate_low):
     single-atom output onto a tiled one, so this covers index arithmetic the
     chunk-wide atom never exercises.
     """
-    import kda_chunk_fused as fused
+    from builders.gfx950.kda import kda_chunk_fused as fused
 
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
@@ -141,7 +149,7 @@ def test_subtiled_and_chunk_wide_fused_agree_to_one_ulp():
     """
     import torch
 
-    import kda_chunk_fused as fused
+    from builders.gfx950.kda import kda_chunk_fused as fused
 
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
@@ -186,7 +194,7 @@ def test_input_prefetch_is_bitwise_identical(tile_kw):
     """
     import torch
 
-    import kda_chunk_fused as fused
+    from builders.gfx950.kda import kda_chunk_fused as fused
 
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
@@ -219,7 +227,7 @@ def test_fused_lds_overlay_is_bitwise_identical():
     """
     import torch
 
-    import kda_chunk_fused as fused
+    from builders.gfx950.kda import kda_chunk_fused as fused
 
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
@@ -246,7 +254,7 @@ def test_c32_tile_phase_16x16_panels_agree_to_one_ulp():
     """
     import torch
 
-    import kda_chunk_fused as fused
+    from builders.gfx950.kda import kda_chunk_fused as fused
 
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
@@ -274,7 +282,7 @@ def test_c32_tile_phase_16x16_panels_agree_to_one_ulp():
 
 def test_c16_fused_matches_token_serial_oracle():
     """Literal C=16 is a valid A/B even though it is not the throughput winner."""
-    import kda_chunk_fused as fused
+    from builders.gfx950.kda import kda_chunk_fused as fused
 
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
@@ -300,8 +308,8 @@ def test_split_and_fused_agree_bitwise():
     """
     import torch
 
-    import kda_chunk_fused as fused
-    import kda_chunk_split as split
+    from builders.gfx950.kda import kda_chunk_fused as fused
+    from builders.gfx950.kda import kda_chunk_split as split
 
     from kernels.gfx950.kda_chunkwise import (
         KdaChunkFusedSpec,
@@ -329,7 +337,7 @@ def test_scan_rejects_a_spec_it_cannot_emit():
     """
     from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec
 
-    import kda_chunk_split as split
+    from builders.gfx950.kda import kda_chunk_split as split
 
     with pytest.raises(ValueError, match="unsupported spec"):
         split.make_launcher(KdaChunkScanSpec(head_v=64))
@@ -357,7 +365,7 @@ def test_raw_split_matches_aligned_oracle(gate_low):
     """Fused raw prep + token-major split scan vs the aligned float64 oracle."""
     import torch
 
-    import kda_chunk_split as split
+    from builders.gfx950.kda import kda_chunk_split as split
 
     B, H, T = 1, 4, 256
     scan, _ = split.aligned_split_specs(1)
@@ -383,7 +391,7 @@ def test_value_splits_agree_with_vs1(value_splits, block, scan_atom_m):
     """Every legal value_splits geometry must match the unsplit scan."""
     import torch
 
-    import kda_chunk_split as split
+    from builders.gfx950.kda import kda_chunk_split as split
 
     from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec, KdaTileSpec
 
@@ -397,3 +405,35 @@ def test_value_splits_agree_with_vs1(value_splits, block, scan_atom_m):
     torch.cuda.synchronize()
     assert torch.allclose(o0.float(), o1.float(), rtol=0, atol=3e-2)
     assert torch.allclose(ht0.float(), ht1.float(), rtol=0, atol=3e-2)
+
+
+def test_dispatched_specs_match_the_token_serial_oracle():
+    """What the dispatcher selects must be what the oracle validates.
+
+    The registry derives its specs from a request instead of reusing the
+    builders' defaults, so this is what stops the two from drifting: a
+    selection that compiles but computes something else passes every CPU
+    wiring test there is.
+    """
+    from builders.gfx950.kda import kda_chunk_fused as fused
+    from builders.gfx950.kda import kda_chunk_split as split
+
+    from dispatch.kda import KdaRequest, dispatch_kda
+
+    B, H, T = 2, 4, 256
+
+    def request(**kw):
+        return KdaRequest(batch=B, num_heads=H, seqlen=T, arch="gfx950", **kw)
+
+    fused_spec = dispatch_kda(request()).spec
+    assert fused.check(fused_spec, B, H, T, verbose=False) <= TOL
+
+    h0_spec = dispatch_kda(request(has_initial_state=True)).spec
+    assert fused.check(h0_spec, B, H, T, with_h0=True, verbose=False) <= TOL
+
+    scan_spec = dispatch_kda(request(algorithm="chunk_scan")).spec
+    prep_spec = dispatch_kda(request(algorithm="chunk_prep")).spec
+    # The halves are dispatched independently, so their tile layouts have to
+    # agree or the scan stages something the tile builder never wrote.
+    assert split.prep_spec_of(scan_spec) == prep_spec
+    assert split.check(scan_spec, B, H, T, verbose=False) <= TOL

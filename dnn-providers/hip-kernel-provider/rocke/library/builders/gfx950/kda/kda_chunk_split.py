@@ -24,13 +24,16 @@ Run directly for a parity sweep plus a benchmark::
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import sys
 
-_HERE = os.path.dirname(__file__)
-_RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
-sys.path.insert(0, _RK + "/platform/python")
-sys.path.insert(0, _RK + "/library")
+try:
+    import rocke  # noqa: F401
+except ImportError:  # running as a bare script outside the editable install
+    _HERE = os.path.dirname(__file__)
+    _RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
+    sys.path[:0] = [_RK + "/library", _RK + "/platform/python"]
 
 import torch  # noqa: E402
 
@@ -47,10 +50,15 @@ from kernels.gfx950.kda_chunkwise import (  # noqa: E402
 from rocke.helpers.compile import compile_kernel  # noqa: E402
 from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
 
-import kda_chunk_prep as prep_mod  # noqa: E402
-from kda_chunk_fused import make_inputs, ref_token_serial  # noqa: E402
+if __package__:
+    from . import kda_chunk_prep as prep_mod  # noqa: E402
+    from .kda_chunk_fused import make_inputs, ref_token_serial  # noqa: E402
+else:
+    import kda_chunk_prep as prep_mod  # noqa: E402
+    from kda_chunk_fused import make_inputs, ref_token_serial  # noqa: E402
 
 _LAUNCHER_CACHE: dict = {}
+TOL = 3e-2
 
 
 def make_launcher(spec: KdaChunkScanSpec) -> KernelLauncher:
@@ -94,15 +102,7 @@ def prep_spec_of(spec: KdaChunkScanSpec, *, raw: bool = False) -> KdaChunkPrepSp
             has_dt_bias=True,
             lower_bound=-5.0,
         )
-        tile = KdaTileSpec(
-            chunk=spec.tile.chunk,
-            block_size=256,
-            pad_dk=spec.tile.pad_dk,
-            pad_c=spec.tile.pad_c,
-            pad_cb=spec.tile.pad_cb,
-            solve_block=spec.tile.solve_block,
-            tile_atom_m=spec.tile.tile_atom_m,
-        )
+        tile = dataclasses.replace(spec.tile, block_size=256)
     return KdaChunkPrepSpec(
         head_k=spec.head_k,
         head_v=spec.head_v,
@@ -146,6 +146,8 @@ def run_scan(
     tseq=None,
 ):
     """Launch the scan over tiles already materialized by the prep kernel."""
+    if h0 is None:
+        assert not spec.has_initial_state, "h0=None but the kernel reads h0_ptr"
     launcher = make_launcher(spec)
     if stream is None:
         stream = torch.cuda.current_stream().cuda_stream
@@ -383,7 +385,7 @@ def launch_packed(spec, q, k, v, g, beta, h0=None):
     return o.view(B, H, T, DV), ht.view(B, H, DV, DK).transpose(-1, -2)
 
 
-def check(spec, B, H, T, gate_low=-0.5, tol=3e-2, with_h0=False, verbose=True):
+def check(spec, B, H, T, gate_low=-0.5, tol=TOL, with_h0=False, verbose=True):
     DK, DV = spec.head_k, spec.head_v
     q, k, v, g, beta = make_inputs(B, H, T, DK, DV, gate_low)
     h0 = None
@@ -488,14 +490,33 @@ def main():
     if not args.no_check:
         B, H, T = (int(x) for x in args.check_shape.split("x"))
         for gate_low in (-0.1, -0.5, -2.0, -5.0):
-            print(f"parity B={B} H={H} T={T} gate in [{gate_low}, 0]:")
-            worst = max(worst, check(spec, B, H, T, gate_low=gate_low))
+            for with_h0 in (False, True):
+                check_spec = (
+                    spec
+                    if not with_h0
+                    else dataclasses.replace(spec, has_initial_state=True)
+                )
+                state_label = " with h0" if with_h0 else ""
+                print(
+                    f"parity B={B} H={H} T={T} gate in [{gate_low}, 0]{state_label}:"
+                )
+                worst = max(
+                    worst,
+                    check(
+                        check_spec,
+                        B,
+                        H,
+                        T,
+                        gate_low=gate_low,
+                        with_h0=with_h0,
+                    ),
+                )
 
     for s in args.shapes.split(","):
         B, H, T = (int(x) for x in s.split("x"))
         bench(spec, B, H, T, iters=args.iters)
 
-    return 0 if worst <= 3e-2 else 1
+    return 0 if worst <= TOL else 1
 
 
 if __name__ == "__main__":

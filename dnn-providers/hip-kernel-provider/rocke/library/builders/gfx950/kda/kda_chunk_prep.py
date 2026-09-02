@@ -20,10 +20,12 @@ import argparse
 import os
 import sys
 
-_HERE = os.path.dirname(__file__)
-_RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
-sys.path.insert(0, _RK + "/platform/python")
-sys.path.insert(0, _RK + "/library")
+try:
+    import rocke  # noqa: F401
+except ImportError:  # running as a bare script outside the editable install
+    _HERE = os.path.dirname(__file__)
+    _RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
+    sys.path[:0] = [_RK + "/library", _RK + "/platform/python"]
 
 import torch  # noqa: E402
 
