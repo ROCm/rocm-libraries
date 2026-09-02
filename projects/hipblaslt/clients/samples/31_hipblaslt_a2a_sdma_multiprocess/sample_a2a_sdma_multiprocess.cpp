@@ -19,6 +19,10 @@
 // its own ranks against the closed form both sides generate from; no D crosses
 // the socket.
 //
+// Once checked, every rank re-fills A and B from the alphabet the tensilelite
+// client draws from and repeats the launch behind a per-iteration barrier,
+// reporting latency as the max across ranks over kTimingIterations.
+//
 // Needs a device library holding a FusedGemmA2A solution. Run with:
 //
 //   HIP_VISIBLE_DEVICES=<four peer-capable cards> \
@@ -39,6 +43,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -67,6 +72,9 @@ namespace
     constexpr size_t kWorkspaceSize   = 32ull * 1024 * 1024;
     constexpr int    kSocketTimeoutSec = 30;
 
+    constexpr int kTimingIterations = 50;
+    constexpr int kTimingWarmup     = 10;
+
     // Ordered worst-last: combining two verdicts is a max.
     constexpr char kGo   = 0;
     constexpr char kSkip = 1;
@@ -94,6 +102,13 @@ namespace
     float expectedD(uint32_t rank, int64_t feature, int64_t token)
     {
         return float((rank + 1) * ((feature % 7) + 1) * ((token % 5) + 1));
+    }
+
+    // Matches the (x%7)-3 alphabet the tensilelite client draws from.
+    float nextSample(uint32_t& state, float scale)
+    {
+        state = state * 1664525u + 1013904223u;
+        return float(int((state >> 16) % 7) - 3) * scale;
     }
 
     bool writeAll(int fd, const void* data, size_t bytes)
@@ -125,21 +140,24 @@ namespace
     }
 
     // The last of kRanksPerProcess local threads to arrive runs swap, which is
-    // where the socket traffic happens; the others wait for it. Single use.
+    // where the socket traffic happens; the others wait for it.
     class Rendezvous
     {
     public:
         bool arrive(const std::function<bool()>& swap)
         {
             std::unique_lock<std::mutex> lock(mutex_);
+            const uint64_t               epoch = epoch_;
             if(++arrived_ == kRanksPerProcess)
             {
-                failed_ = !swap();
-                open_   = true;
+                failed_  = !swap();
+                arrived_ = 0;
+                ++epoch_;
                 cv_.notify_all();
             }
-            else if(!cv_.wait_for(
-                        lock, std::chrono::seconds(kSocketTimeoutSec), [this] { return open_; }))
+            else if(!cv_.wait_for(lock, std::chrono::seconds(kSocketTimeoutSec), [this, epoch] {
+                        return epoch_ != epoch;
+                    }))
             {
                 return false;
             }
@@ -150,7 +168,7 @@ namespace
         std::mutex              mutex_;
         std::condition_variable cv_;
         uint32_t                arrived_ = 0;
-        bool                    open_    = false;
+        uint64_t                epoch_   = 0;
         bool                    failed_  = false;
     };
 
@@ -172,6 +190,22 @@ namespace
 
         std::vector<uint16_t> hD;
         std::vector<uint16_t> hRecv;
+
+        std::vector<double> latencies;
+    };
+
+    struct Events
+    {
+        hipEvent_t start = nullptr;
+        hipEvent_t stop  = nullptr;
+
+        ~Events()
+        {
+            if(start != nullptr)
+                static_cast<void>(hipEventDestroy(start));
+            if(stop != nullptr)
+                static_cast<void>(hipEventDestroy(stop));
+        }
     };
 
     // Releases the descriptors a rank builds, on every path out of runRank.
@@ -215,6 +249,9 @@ namespace
         std::mutex verdictMutex;
         char       localVerdict = kGo;
         char       verdict      = kGo;
+
+        Rendezvous          timingBarrier;
+        std::vector<double> perfUs;
     };
 
     uint32_t peerRankBase(uint32_t rankBase)
@@ -312,6 +349,28 @@ namespace
 
 namespace
 {
+    char fillDense(ProcessContext& ctx, uint32_t rank)
+    {
+        Rank& self = ctx.ranks[rank - ctx.rankBase];
+
+        const size_t elemsA = size_t(kK) * kFeatures;
+        const size_t elemsB = size_t(kK) * kTokens;
+
+        std::vector<uint16_t> host(elemsA);
+        uint32_t              state = rank + 1;
+        for(auto& v : host)
+            v = toBf16(nextSample(state, 0.5f));
+        CHECK_HIP(
+            hipMemcpy(self.dA, host.data(), elemsA * sizeof(uint16_t), hipMemcpyHostToDevice));
+
+        host.resize(elemsB);
+        for(auto& v : host)
+            v = toBf16(nextSample(state, 0.25f));
+        CHECK_HIP(
+            hipMemcpy(self.dB, host.data(), elemsB * sizeof(uint16_t), hipMemcpyHostToDevice));
+        return kGo;
+    }
+
     char runRank(ProcessContext& ctx, uint32_t rank, AllgatherSlot& slot)
     {
         Rank&         self = ctx.ranks[rank - ctx.rankBase];
@@ -392,22 +451,25 @@ namespace
             return verdict;
 
         const float alpha = 1.0f, beta = 0.0f;
-        CHECK_LT(hipblasLtMatmul(self.handle,
-                                 mm,
-                                 &alpha,
-                                 self.dA,
-                                 layA,
-                                 self.dB,
-                                 layB,
-                                 &beta,
-                                 self.dC,
-                                 layC,
-                                 self.dD,
-                                 layD,
-                                 &heur[0].algo,
-                                 self.dWorkspace,
-                                 kWorkspaceSize,
-                                 nullptr));
+        auto        launch = [&] {
+            return hipblasLtMatmul(self.handle,
+                                   mm,
+                                   &alpha,
+                                   self.dA,
+                                   layA,
+                                   self.dB,
+                                   layB,
+                                   &beta,
+                                   self.dC,
+                                   layC,
+                                   self.dD,
+                                   layD,
+                                   &heur[0].algo,
+                                   self.dWorkspace,
+                                   kWorkspaceSize,
+                                   nullptr);
+        };
+        CHECK_LT(launch());
         CHECK_HIP(hipDeviceSynchronize());
 
         const size_t bytesCD   = size_t(kFeatures) * kTokens * sizeof(uint16_t);
@@ -416,6 +478,38 @@ namespace
         self.hRecv.resize(size_t(kWorld) * kTokens * kShard);
         CHECK_HIP(hipMemcpy(self.hD.data(), self.dD, bytesCD, hipMemcpyDeviceToHost));
         CHECK_HIP(hipMemcpy(self.hRecv.data(), self.dRecv, bytesRecv, hipMemcpyDeviceToHost));
+
+        if(fillDense(ctx, rank) != kGo)
+            return kFail;
+
+        Events events;
+        CHECK_HIP(hipEventCreate(&events.start));
+        CHECK_HIP(hipEventCreate(&events.stop));
+        self.latencies.reserve(kTimingIterations);
+
+        for(int it = 0; it < kTimingWarmup + kTimingIterations; ++it)
+        {
+            if(!ctx.timingBarrier.arrive([&ctx] {
+                   char token = 0;
+                   return writeAll(ctx.sock, &token, 1) && readAll(ctx.sock, &token, 1);
+               }))
+            {
+                std::printf("rank %u failed: timing barrier\n", rank);
+                return kFail;
+            }
+
+            CHECK_HIP(hipEventRecord(events.start, nullptr));
+            CHECK_LT(launch());
+            CHECK_HIP(hipEventRecord(events.stop, nullptr));
+            CHECK_HIP(hipDeviceSynchronize());
+
+            if(it >= kTimingWarmup)
+            {
+                float ms = 0.0f;
+                CHECK_HIP(hipEventElapsedTime(&ms, events.start, events.stop));
+                self.latencies.push_back(double(ms) * 1000.0);
+            }
+        }
         return kGo;
     }
 
@@ -602,6 +696,27 @@ namespace
         return true;
     }
 
+    void reportPerf(std::vector<double> us)
+    {
+        std::sort(us.begin(), us.end());
+        const double lo     = us.front();
+        const double median = us[us.size() / 2];
+        const double p99    = us[(us.size() * 99) / 100];
+
+        const double gflop  = 2.0 * double(kFeatures) * kTokens * kK / 1e9;
+        const double egress = double(kExtent) * kTokens * sizeof(uint16_t) * double(kWorld - 1)
+                              / double(kWorld) / 1e6;
+
+        std::printf("perf (whole call, max across ranks, %d iterations after %d warmup; rates at "
+                    "min latency):\n",
+                    kTimingIterations,
+                    kTimingWarmup);
+        std::printf(
+            "  latency      min %.1f us    median %.1f us    p99 %.1f us\n", lo, median, p99);
+        std::printf("  GEMM         %.0f TFLOP/s per rank (%.1f GFLOP)\n", gflop / lo * 1e3, gflop);
+        std::printf("  A2A egress   %.1f GB/s per rank (%.1f MB)\n", egress / lo * 1e3, egress);
+    }
+
     int runProcess(ProcessContext& ctx)
     {
         const bool report = ctx.rankBase == 0;
@@ -654,6 +769,25 @@ namespace
             for(uint32_t slot = 0; slot < kRanksPerProcess; ++slot)
                 if(!checkRank(ctx, ctx.rankBase + slot))
                     status = kStatusFailed;
+
+        std::vector<double> local(kTimingIterations, 0.0), peer(kTimingIterations, 0.0);
+        if(status == kStatusOk)
+            for(uint32_t slot = 0; slot < kRanksPerProcess; ++slot)
+                for(int i = 0; i < kTimingIterations; ++i)
+                    local[i] = std::max(local[i], ctx.ranks[slot].latencies[i]);
+
+        const size_t bytes = local.size() * sizeof(double);
+        if(!writeAll(ctx.sock, local.data(), bytes) || !readAll(ctx.sock, peer.data(), bytes))
+        {
+            std::printf("failed: latency exchange\n");
+            status = kStatusFailed;
+        }
+        else if(status == kStatusOk)
+        {
+            for(int i = 0; i < kTimingIterations; ++i)
+                local[i] = std::max(local[i], peer[i]);
+            ctx.perfUs = std::move(local);
+        }
 
         for(uint32_t slot = 0; slot < kRanksPerProcess; ++slot)
         {
@@ -741,5 +875,7 @@ int main()
                 (long long)kTokens,
                 (long long)kExtent,
                 (long long)kShard);
+    if(!ctx.perfUs.empty())
+        reportPerf(ctx.perfUs);
     return kStatusOk;
 }
