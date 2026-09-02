@@ -41,7 +41,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Resolved Issues
 * [RNN] Fix RNN workspace tensor descriptor int overflow
 * [Conv] Enabled grouped Composable Kernel (CK) xdlops fwd, bwd, and wrw convolution (2D and 3D) for tensors whose strides exceed the int32 range.
-* [Conv] Gated the unmaintained ASM-GTC NHWC solvers (`ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC`, `ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC` and `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC`) off tensors whose element count exceeds the int32 range, preventing them from being selected and silently returning incorrect results on large convolutions.
+* [Conv] Gated the unmaintained ASM-GTC NHWC solvers (`ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC`, `ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC` and `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC`) off tensors whose size in bytes exceeds the int32 addressable range, preventing them from being selected and silently returning incorrect results on large convolutions.
 * [Conv] Fixed `miopenStatusInternalError` thrown by Find on depthwise NHWC grouped convolutions under `MIOPEN_FIND_MODE=NORMAL`.
 * Fixed a thread-safety issue where concurrent access to the AI-heuristic model caches was not guarded by a mutex.
 * [Conv] Fixed Composable Kernel (CK) grouped-convolution solvers not always being registered in host code.

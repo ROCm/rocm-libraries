@@ -1000,20 +1000,8 @@ bool ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC::IsApplicable(
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
-    // This solver originates in the (now unmaintained) MISA project and addresses
-    // global tensor memory with 32-bit element indexing. AllTensorsDimsFitIntoInt()
-    // above only validates that each individual length/stride fits in int32; it does
-    // NOT bound the flattened element count. A tensor whose total element count
-    // exceeds INT_MAX therefore overflows the kernel's 32-bit indexing and silently
-    // returns wrong results. MISA does not implement large-tensor support, so gate the
-    // solver off such shapes; a large-tensor-capable solver is selected instead.
-    {
-        constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
-        if(problem.GetIn().GetNumBytes() > max_int32 ||
-           problem.GetOut().GetNumBytes() > max_int32 ||
-           problem.GetWeights().GetNumBytes() > max_int32)
-            return false;
-    }
+    if(igemm_tensor_size_exceeds_asm_gtc_addressing(problem))
+        return false;
 
     if(!problem.IsFp32() && !problem.IsFp16() &&
        !(problem.IsBfp16() &&
