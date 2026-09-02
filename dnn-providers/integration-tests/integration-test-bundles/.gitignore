@@ -1,4 +1,3 @@
-# All binary tensor data must go through DVC, never committed to git directly.
-# Each bundle's .bin files are tracked by its <Name>.tensors.dvc pointer; this
-# rule is a catch-all safety net so raw .bin can never be staged by accident.
-*.bin
+# Binary tensor data (*.bin) is ignored one level up in
+# dnn-providers/integration-tests/.gitignore, so the rule applies to every
+# bundle directory name past or future, not just this one.
