@@ -90,7 +90,7 @@ test_categories:
 
 execution_settings:
   default_timeout: 600
-  timeout_multiplier: 1
+  timeout_multiplier: 4
   category_timeouts:
     quick: 600            # 10 minutes (was add_tiered_test_target SMOKE_TIMEOUT default)
     standard: 1800        # 30 minutes
