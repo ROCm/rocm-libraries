@@ -529,7 +529,7 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
 
 namespace this_thread {
 _LIBHIPTHREADS_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::chrono::nanoseconds __ns) {
-#if CCCL_VERSION >= 3000000
+#if CCCL_VERSION >= 3000000 || HIPCCL_VERSION >= 3000000
     cuda::std::__cccl_thread_sleep_for(__ns);
 #else
     cuda::std::__libcpp_thread_sleep_for(__ns);
