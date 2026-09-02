@@ -160,6 +160,22 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
           echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
 
+      # hipdnn_golden_data_tests validates our checked-in golden .bin blobs against
+      # our own CPU/GPU references. The blobs are DVC-managed, so without this step
+      # the binary registers zero tests and the lane passes having verified nothing.
+      # Anonymous S3 reads are enabled on both remotes (.dvc/config), so no
+      # credentials are needed, and each golden-data pointer carries its own
+      # `remote:` key, so a bare pull resolves them all.
+      #
+      # This MUST run before configure: integration-tests/CMakeLists.txt stages the
+      # bundle tree into the build directory with a configure-time file(COPY), so
+      # blobs that arrive later never reach <exe>/../lib/integration-test-bundles.
+      - name: Fetch golden data
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check "dvc[s3]"
+          python -m dvc pull --recursive dnn-providers/integration-tests/integration-test-bundles
+
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
@@ -378,6 +394,22 @@ jobs:
           test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
           echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
 
+      # hipdnn_golden_data_tests validates our checked-in golden .bin blobs against
+      # our own CPU/GPU references. The blobs are DVC-managed, so without this step
+      # the binary registers zero tests and the lane passes having verified nothing.
+      # Anonymous S3 reads are enabled on both remotes (.dvc/config), so no
+      # credentials are needed, and each golden-data pointer carries its own
+      # `remote:` key, so a bare pull resolves them all.
+      #
+      # This MUST run before configure: integration-tests/CMakeLists.txt stages the
+      # bundle tree into the build directory with a configure-time file(COPY), so
+      # blobs that arrive later never reach <exe>/../lib/integration-test-bundles.
+      - name: Fetch golden data
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check "dvc[s3]"
+          python -m dvc pull --recursive dnn-providers/integration-tests/integration-test-bundles
+
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
@@ -425,10 +457,7 @@ jobs:
       # That spelling is retired: it is now the hipdnn_golden_data_tests binary,
       # registered as an ordinary ctest target, so the "Run tests" step above already
       # covers it -- once per run rather than once per provider, and with no env var.
-      #
-      # Note it validates nothing until the golden .bin blobs are pulled: this
-      # workflow sparse-checks-out .dvc but never runs `dvc pull`, so every bundle
-      # currently registers as "without golden data".
+      # The "Fetch golden data" step above is what gives it anything to validate.
 
       - name: Patch ROCm SDK with superbuild outputs
         run: cmake --install build --prefix "$ROCM_SDK_PATH"

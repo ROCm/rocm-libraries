@@ -370,6 +370,10 @@ def build_meta_json(config, pytorch_version):
         rocm_ver = pytorch_version.split("+rocm")[1]
 
     return {
+        # Required by RFC 0011 §4.1. The harness rejects metadata without it, and a
+        # rejected .meta.json next to golden .bin blobs is a hard load failure -- so
+        # omitting this does not degrade the bundle, it deletes it.
+        "format_version": 1,
         "generator": "generate_sdpa_fwd_golden.py",
         "generator_sha256": _get_generator_sha256(),
         "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime(

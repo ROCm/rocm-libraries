@@ -1,4 +1,5 @@
 {
+    "format_version": 1,
     "generator": "generate_sdpa_fwd_golden.py",
     "generator_sha256": "eaffaeaf20fd4204529d8b1d130271eb91888775e5d52ccc66d865d568f7f5b9",
     "generated_at": "2026-06-26T20:56:17Z",
