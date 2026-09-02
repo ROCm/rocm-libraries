@@ -253,6 +253,17 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     )
     target_compile_options(test_tile_gemm_quant_rowcol PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
+    # RowColQuant large-tensor tests (64-bit global load/store path).
+    # The source guards its body with #if defined(CK_USE_GFX1250), which is only defined
+    # when gfx1250 is a target (see top-level CMakeLists.txt). Gate registration on the
+    # same condition so non-gfx1250 targets don't build a zero-test executable.
+    if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+        add_gtest_executable(test_tile_gemm_quant_rowcol_large_tensor
+            test_gemm_quant_rowcol_large_tensor.cpp
+        )
+        target_compile_options(test_tile_gemm_quant_rowcol_large_tensor PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+    endif()
+
     # TensorQuant tests
     add_gtest_executable(test_tile_gemm_quant_tensor 
         test_gemm_quant_tensor.cpp
@@ -309,6 +320,13 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
         test_tile_gemm_quant_rowcol
         test_tile_gemm_quant_tensor
     )
+
+    # gfx1250-only large-tensor target: add to the umbrella list only when it was
+    # registered above, so the labeling foreach and umbrella dependencies below do
+    # not reference a nonexistent target on other architectures.
+    if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+        list(APPEND CK_TILE_GEMM_BLOCK_SCALE_TEST_TARGETS test_tile_gemm_quant_rowcol_large_tensor)
+    endif()
 
     # Label all ck_tile gemm_block_scale tests with CK_TILE_GEMM_BLOCK_SCALE_TESTS for selective execution
     foreach(test_target ${CK_TILE_GEMM_BLOCK_SCALE_TEST_TARGETS})
