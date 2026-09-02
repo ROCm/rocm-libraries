@@ -1086,6 +1086,22 @@ class Solution(collections.abc.Mapping):
     if isgfx1250 and not state["ProblemType"].get("StridedBatched", True):
         reject(state, printRejectionReason, "General (pointer-array) batched not supported on gfx1250: loadBatchedAddress emits duplicate CFG labels and the general-batched conversion kernel is not implemented")
 
+    # OutputAmaxD on gfx1250 is only correct for the fp8 dynamic-scaling reduction path.
+    # The amax is accumulated in GlobalWriteBatch solely on the odd-gwvw ScaleCD store path
+    # (UseScaleCD + f32 ComputeDataType + gwvw%2==1). FP16/BF16 outputs force an even, packed
+    # gwvw whose VMulPKF32 route never touches AmaxOut, so those configs would silently emit
+    # amaxD=0 instead of failing. Reject them cleanly instead of producing wrong results.
+    # NOTE: the dtype checks below are a necessary but not sufficient proxy; the exact
+    # store-vector-width==1 requirement (an fp8 dest can still derive an even store gwvw)
+    # is enforced later in assignDerivedParameters, once StoreVectorWidth is derived.
+    if isgfx1250 and state["ProblemType"].get("OutputAmaxD", False):
+        if not state["ProblemType"].get("UseScaleCD", False):
+            reject(state, printRejectionReason, "OutputAmaxD on gfx1250 requires UseScaleCD (amax is only accumulated on the ScaleCD store path)")
+        elif not state["ProblemType"]["ComputeDataType"].isSingle():
+            reject(state, printRejectionReason, "OutputAmaxD on gfx1250 requires f32 ComputeDataType (the amax accumulator lives on the single-precision store path)")
+        elif not state["ProblemType"]["DestDataType"].is8bitFloat():
+            reject(state, printRejectionReason, "OutputAmaxD on gfx1250 is only supported for fp8 output (FP16/BF16 dest packs an even gwvw that never accumulates amax, silently yielding amaxD=0)")
+
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
@@ -4473,6 +4489,18 @@ class Solution(collections.abc.Mapping):
     state["NumGlobalWriteVectorsPerThread"] = state["NumElementsPerThread"] \
         // state["GlobalWriteVectorWidth"]
 
+    # OutputAmaxD accumulates amax only on the single-element ScaleD store route
+    # (GlobalWriteBatch gates it on gwvw==1); an even store width takes the packed
+    # VMulPKF32 path that never touches AmaxOut, silently yielding amaxD=0. This is a
+    # non-atomic buffer store, so the store gwvw is just StoreVectorWidth (or 1 when
+    # _VectorStore is off) -- not GlobalWriteVectorWidth. Require it to be 1.
+    if tuple(state["ISA"])[:2] == (12, 5) and state["ProblemType"].get("OutputAmaxD", False):
+      amaxStoreGwvw = state["StoreVectorWidth"] if state.get("_VectorStore", 1) else 1
+      if amaxStoreGwvw != 1:
+        reject(state, printRejectionReason,
+               "OutputAmaxD on gfx1250 requires StoreVectorWidth==1 (=%u: an even store width uses the packed store route that never accumulates AmaxOut)"
+               % amaxStoreGwvw)
+        return
 
     # NumWaveSplitK requires BufferStore for thread masking in emitLdChange
     if state["NumWaveSplitK"] > 1:

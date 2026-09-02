@@ -2,77 +2,191 @@
 # SPDX-License-Identifier: MIT
 
 # OutputAmaxD coverage for gfx1250 (flat_atomic_dec_u32 synchronizer fallback).
-# Amax problem groups extracted from PR #11117 (misc_params / scale_cd), which
-# previously xfailed because the amax synchronizer emitted a scalar SAtomicDec
-# with no gfx1250 ISA mapping. With the HasSAtomic-gated fallback these build.
-
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
-
 GlobalParameters:
   SyncsPerBenchmark: 0
-  MinimumRequiredVersion: 5.0.0
   NumElementsToValidate: -1
-  KernelTime: True
-  DataInitTypeAlpha: 1
-  DataInitTypeBeta: 1
+  MinimumRequiredVersion: 5.0.0
+  DataInitTypeBias: 3
+  DataInitTypeA: 12
+  DataInitTypeB: 12
+  DataInitTypeC: 12
+  DataInitTypeD: 0
+  DataInitTypeBeta: 2
+  DataInitTypeAlpha: 2
+  DataInitTypeScaleA: 2
+  DataInitTypeScaleB: 2
+  DataInitTypeScaleC: 1
+  DataInitTypeScaleD: 2
+  DataInitTypeScaleAlphaVec: 3
   Architecture: gfx1250
-
 BenchmarkProblems:
-  # FP16 with OutputAmaxD
   -
-    - # ProblemType
+    - # ProblemType  TN - OCP F8 in/out
       OperationType: GEMM
-      DataType: h
-      DestDataType: h
-      ComputeDataType: s
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: False
-      TransposeB: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      OutputAmaxD: True
+      DataTypeAmaxD: s
+      UseScaleAB: "Scalar"
+      UseScaleCD: True
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: all
+      BiasDataTypeList: ['h']
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
+        - DepthU: [128]
+        - WavefrontSize: [32]
+        - LDSTrInst: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - SourceSwap: [True]
+        - ExpandPointerSwap: [False]
+        - StaggerU: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128, 128, 128, 128, 128]
+          - Exact: [127, 127, 1, 128, 127, 127, 127, 127]
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+  -
+    - # ProblemType  TN - OCP F8 in/out - minimal UseScaleCD + OutputAmaxD (fp8 reasonable
+      #                version of the misc_params / scale_cd amax groups; those used
+      #                FP16/BF16 output which cannot accumulate amax in the current kernel)
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       OutputAmaxD: True
       DataTypeAmaxD: s
-
+      UseScaleCD: True
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
-        - DepthU: [64]
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
+        - DepthU: [128]
         - WavefrontSize: [32]
+        - LDSTrInst: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - SourceSwap: [True]
+        - ExpandPointerSwap: [False]
+        - StaggerU: [0]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 256]
-          - Exact: [512, 512, 1, 512]
-
-  # BF16 with UseScaleCD and OutputAmaxD combined
+          - Exact: [128, 128, 1, 128, 128, 128, 128, 128]
+          - Exact: [256, 256, 1, 256, 256, 256, 256, 256]
   -
-    - # ProblemType
+    - # ProblemType  TN - OCP F8 in/out - UseScaleCD only, no amax
+      #                (fp8 reasonable version of scale_cd group 1: FP16 UseScaleCD, which
+      #                cannot scale correctly on gfx1250 due to even/packed gwvw)
       OperationType: GEMM
-      DataType: b
-      DestDataType: b
-      ComputeDataType: s
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: False
-      TransposeB: True
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseScaleCD: True
-      OutputAmaxD: True
-
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
-        - DepthU: [64]
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
+        - DepthU: [128]
         - WavefrontSize: [32]
+        - LDSTrInst: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - SourceSwap: [True]
+        - ExpandPointerSwap: [False]
+        - StaggerU: [0]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 128]
-          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 128, 1, 128, 128, 128, 128, 128]
+          - Exact: [256, 256, 1, 256, 256, 256, 256, 256]
+  -
+    - # ProblemType  TN - OCP F8 in/out - UseScaleAB + UseScaleCD, no amax
+      #                (fp8 reasonable version of scale_cd group 4: F8->h UseScaleAB+UseScaleCD)
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseScaleAB: "Scalar"
+      UseScaleCD: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
+        - DepthU: [128]
+        - WavefrontSize: [32]
+        - LDSTrInst: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - SourceSwap: [True]
+        - ExpandPointerSwap: [False]
+        - StaggerU: [0]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128, 128, 128, 128, 128]
+          - Exact: [256, 256, 1, 256, 256, 256, 256, 256]
