@@ -238,14 +238,12 @@ int main() {
     GemmOperand transformedOperandA(Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(transformedA)));
     transformedOperandA.computeType = ScalarType::Float8E4M3;
-    transformedOperandA.preQuantizationScales.push_back(VectorBinding{
+    transformedOperandA.preQuantizationScales.push_back(
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
-                                         std::span<const float>(transformedScaleA)),
-        MatrixAxis::Row});
-    transformedOperandA.preQuantizationScales.push_back(VectorBinding{
+                                         std::span<const float>(transformedScaleA)));
+    transformedOperandA.preQuantizationScales.push_back(
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
-                                         std::span<const float>(transformedAlphaVector)),
-        MatrixAxis::Row});
+                                         std::span<const float>(transformedAlphaVector)));
     GemmTestCase transformedProblem(
         std::move(transformedOperandA),
         GemmOperand(
