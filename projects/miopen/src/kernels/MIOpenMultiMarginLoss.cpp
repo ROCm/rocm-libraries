@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #endif
@@ -37,7 +37,7 @@ __device__ void multimarginlossforward2d(const DTYPE* __restrict__ I,
                                          const uint64_t* __restrict__ T,
                                          const DTYPE* __restrict__ W,
                                          void* __restrict__ O,
-                                         const long p,
+                                         const int64_t p,
                                          const float margin,
                                          tensor_view_t<2> I_tv,
                                          tensor_view_t<1> T_tv,
@@ -88,7 +88,7 @@ extern "C" __global__ void MultiMarginLossForward2d(const FLOAT* __restrict__ I,
                                                     const uint64_t* __restrict__ T,
                                                     const FLOAT* __restrict__ W,
                                                     void* __restrict__ O,
-                                                    const long p,
+                                                    const int64_t p,
                                                     const float margin,
                                                     tensor_view_t<2> I_tv,
                                                     tensor_view_t<1> T_tv,

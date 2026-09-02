@@ -221,7 +221,13 @@ void WinoShaderArgsV2::SetActivParams(miopenActivationMode_t mode)
     case miopenActivationRELU:
         activation_mode = WinoShaderActivationModeV2_t::RELU;
         break;
-    default:
+
+    case miopenActivationSOFTRELU:
+    case miopenActivationABS:
+    case miopenActivationPOWER:
+    case miopenActivationCLIPPEDRELU:
+    case miopenActivationELU:
+    case miopenActivationCLAMP:
         MIOPEN_THROW(miopenStatusInternalError);
     }
     // clang-format on

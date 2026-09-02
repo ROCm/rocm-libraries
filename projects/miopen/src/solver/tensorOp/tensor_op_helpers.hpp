@@ -67,6 +67,24 @@ inline std::tuple<size_t, std::string> GetRDBLCKandREADTYPE(size_t len, miopenDa
 {
     const std::string data_type = GetDataType(type);
     size_t RD_BLCK              = (len % 4 == 0) ? 4 : (len % 2 == 0) ? 2 : 1;
+
+    if(data_type == "half" && RD_BLCK == 4)
+    {
+        RD_BLCK = 2;
+    }
+
+    return std::make_tuple(RD_BLCK,
+                           (RD_BLCK == 1) ? data_type : data_type + std::to_string(RD_BLCK));
+}
+
+inline std::tuple<size_t, std::string> GetRDBLCKandREADTYPEHIP(size_t len, miopenDataType_t type)
+{
+    if(type == miopenHalf)
+    {
+        return (len % 2 == 0) ? std::make_tuple(2U, "half2") : std::make_tuple(1U, "half");
+    }
+    const std::string data_type = GetDataType(type);
+    size_t RD_BLCK              = (len % 4 == 0) ? 4 : (len % 2 == 0) ? 2 : 1;
     return std::make_tuple(RD_BLCK,
                            (RD_BLCK == 1) ? data_type : data_type + std::to_string(RD_BLCK));
 }
@@ -83,7 +101,8 @@ inline std::tuple<int, int, unsigned int> GetBitmapAndWgInfo(const std::vector<s
                      ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
                      : 1;
 
-    int work_per_wg = std::accumulate(clens.begin() + d, clens.end(), 1, std::multiplies<int>());
+    int work_per_wg = static_cast<int>(
+        std::accumulate(clens.begin() + d, clens.end(), size_t{1}, std::multiplies<size_t>()));
 
     unsigned int bitmap = 0;
     // update bitmap for first_not_one
@@ -136,7 +155,8 @@ Get4dParams(const miopen::tensorOp::ProblemDescription& problem, bool is4dLite)
                      ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
                      : 1;
 
-    int work_per_wg = std::accumulate(clens.begin() + d, clens.end(), 1, std::multiplies<int>());
+    int work_per_wg = static_cast<int>(
+        std::accumulate(clens.begin() + d, clens.end(), size_t{1}, std::multiplies<size_t>()));
 
     unsigned int bitmap = 0;
     // update bitmap for first_not_one

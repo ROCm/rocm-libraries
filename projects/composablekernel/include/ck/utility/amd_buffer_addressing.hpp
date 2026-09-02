@@ -1,8 +1,9 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 #include "data_type.hpp"
+#include "ck/utility/amd_buffer_coherence.hpp"
 
 namespace ck {
 
@@ -286,30 +287,6 @@ llvm_amdgcn_raw_buffer_atomic_max_fp64(double vdata,
                                        int soffset,    // dst_wave_addr_offset
                                        int glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fmax.f64");
 
-// memory coherency bit for buffer store/load instruction
-// check ISA manual for each GFX target
-// e.g. for
-// https://www.amd.com/system/files/TechDocs/instinct-mi200-cdna2-instruction-set-architecture.pdf,
-// page 67~68
-enum struct AmdBufferCoherenceEnum
-{
-    DefaultCoherence = 0, // default value
-    GLC              = 1,
-    SLC              = 2,
-    GLC_SLC          = 3,
-    // gfx94: bit 0 = sc0, bit 1 = nt, bit 3 = swz, bit 4 = sc1
-    // SC[1:0] System Cache level: 0=wave, 1=group, 2=device, 3=system
-    // NT Non-Temporal: 0=expect temporal reuse; 1=do not expect temporal reuse
-    WAVE_NT0   = 0,
-    WAVE_NT1   = 2,
-    GROUP_NT0  = 1,
-    GROUP_NT1  = 3,
-    DEVICE_NT0 = 8,
-    DEVICE_NT1 = 10,
-    SYSTEM_NT0 = 9,
-    SYSTEM_NT1 = 11,
-};
-
 template <index_t N, AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
 __device__ typename vector_type<int8_t, N>::type
 amd_buffer_load_impl_raw(int32x4_t src_wave_buffer_resource,
@@ -430,7 +407,9 @@ __device__ typename vector_type<T, N>::type amd_buffer_load_impl(int32x4_t src_w
             (is_same<T, bf8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
             (is_same<T, int8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
             (is_same<T, uint8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
-            (is_same<T, pk_i4_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)),
+            (is_same<T, pk_i4_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+            (is_same<T, f4x2_pk_t::type>::value &&
+             (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)),
         "wrong! not implemented");
 
     using r_t     = typename vector_type<T, N>::type;
@@ -1018,18 +997,18 @@ __device__ void amd_direct_load_global_to_lds(const T* global_base_ptr,
                                               const index_t src_element_space_size)
 {
     // Direct loads require that each thread reads and writes exactly a single DWORD.
-    constexpr auto dword_bytes      = 4;
     constexpr auto bytes_per_thread = sizeof(T) * NumElemsPerThread;
+#if defined(__gfx950__)
+    constexpr auto dword_bytes = 4;
+    static_assert(bytes_per_thread == dword_bytes || bytes_per_thread == dword_bytes * 3 ||
+                  bytes_per_thread == dword_bytes * 4);
+#elif defined(__gfx942__)
+    constexpr auto dword_bytes = 4;
     static_assert(bytes_per_thread == dword_bytes);
-
-#ifndef CK_CODE_GEN_RTC
-    const uint32_t* global_ptr =
-        reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(global_base_ptr));
-#else
-    const uint32_t* global_ptr =
-        reinterpret_cast<uint32_t*>(reinterpret_cast<size_t>(global_base_ptr));
 #endif
-    const int32x4_t src_resource = make_wave_buffer_resource(global_ptr, src_element_space_size);
+
+    const int32x4_t src_resource =
+        make_wave_buffer_resource(global_base_ptr, src_element_space_size);
     const index_t global_offset_bytes = is_valid ? global_offset * sizeof(T) : 0x80000000;
 
 #if CK_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
@@ -1057,7 +1036,7 @@ __device__ void amd_direct_load_global_to_lds(const T* global_base_ptr,
 #endif
 
     llvm_amdgcn_raw_buffer_load_lds(
-        src_resource, lds_ptr, sizeof(uint32_t), global_offset_bytes, 0, 0, 0);
+        src_resource, lds_ptr, bytes_per_thread, global_offset_bytes, 0, 0, 0);
 #endif
 }
 #endif

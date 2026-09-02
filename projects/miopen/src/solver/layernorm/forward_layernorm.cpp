@@ -24,15 +24,15 @@
  *
  *******************************************************************************/
 
+#include "miopen/layernorm/problem_description.hpp"
 #include <miopen/datatype.hpp>
 #include <miopen/kernel_build_params.hpp>
+#include "miopen/mlo_internal.hpp"
 #include <miopen/layernorm.hpp>
 #include <miopen/layernorm/solvers.hpp>
 #include <miopen/layernorm/invoke_params.hpp>
 #include <miopen/layernorm/utils.hpp>
 #include <miopen/target_properties.hpp>
-
-#define LOCAL_SIZE 256
 
 namespace miopen {
 
@@ -40,67 +40,62 @@ namespace solver {
 
 namespace layernorm {
 
-bool LayernormForward::IsApplicable(const ExecutionContext&,
-                                    const miopen::layernorm::ProblemDescription& problem) const
-{
-    if(!problem.IsSameType())
-        return false;
-    if(!problem.IsSameLength())
-        return false;
-    if(!problem.IsAllPacked())
-        return false;
-    if(!problem.IsRightNormDim())
-        return false;
-    if(!(sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize()))
-        return false;
-    return true;
-}
-
-ConvSolution
-LayernormForward::GetSolution(const ExecutionContext& context,
-                              const miopen::layernorm::ProblemDescription& problem) const
+ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
+                                           const miopen::layernorm::ProblemDescription& problem,
+                                           const PerformanceConfigLayernorm& config) const
 {
     std::ignore = context;
 
     auto result = ConvSolution{miopenStatusSuccess};
 
     {
-        auto dtype        = problem.GetXDesc().GetType();
-        auto input_dtype  = miopen::GetDataType(problem.GetXDesc().GetType());
-        auto output_dtype = miopen::GetDataType(problem.GetYDesc().GetType());
-        auto dims         = problem.GetXDesc().GetLengths();
+        auto dtype     = problem.GetXDesc().GetType();
+        auto mode      = problem.GetMode();
+        auto data_type = miopen::GetDataType(problem.GetXDesc().GetType());
 
-        size_t outer_size = 1;
-        for(size_t i = 0; i < problem.GetNormalizedDim(); i++)
+        size_t xlocalsize, xgridsize, ylocalsize, ygridsize;
+        if(config.separate_stride)
         {
-            outer_size *= dims[i];
+            xlocalsize = problem.stride <= config.local_size && config.stride_in_local_size
+                             ? config.local_size >> mloLg2(problem.stride)
+                             : config.local_size;
+            xgridsize  = problem.outer_size * xlocalsize;
+            ylocalsize = problem.stride <= config.local_size && config.stride_in_local_size
+                             ? problem.stride
+                             : 1;
+            ygridsize  = problem.stride;
         }
-
-        size_t xlocalsize = LOCAL_SIZE;
-        size_t xgridsize  = outer_size * xlocalsize;
-        size_t ylocalsize = 1;
-        size_t ygridsize  = 1;
+        else
+        {
+            xlocalsize = config.local_size;
+            xgridsize  = problem.outer_size * problem.stride * xlocalsize;
+            ylocalsize = 1;
+            ygridsize  = 1;
+        }
         size_t zlocalsize = 1;
         size_t zgridsize  = 1;
 
         auto kernel = KernelInfo{};
 
         kernel.kernel_file = "MIOpenLayerNorm.cpp";
-        kernel.kernel_name = "LayernormFwdContiguous";
+        kernel.kernel_name = "LayernormFwd";
 
         const auto build_params = KernelBuildParameters{
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-            {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-            {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-            {"LOCAL_SIZE", LOCAL_SIZE},
+            {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
+            {"OUTER_SIZE", problem.outer_size},
+            {"INNER_SIZE", problem.inner_size},
+            {"STRIDE", problem.stride},
+            {"PARALLEL_SIZE", 1},
+            {"LOCAL_SIZE_X", xlocalsize},
+            {"LOCAL_SIZE_Y", ylocalsize},
+            {"MODE", mode},
+            {"VECTORIZED", config.vectorized},
+            {"SEPARATE_STRIDE", config.separate_stride},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
-            {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-            {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
-            {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
-            {"MIOPEN_WEIGHT_BIAS_T5", 5},
         };
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
@@ -121,23 +116,13 @@ LayernormForward::GetSolution(const ExecutionContext& context,
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::layernorm::InvokeParams>();
 
-            auto dims         = params.xDesc->GetLengths();
-            size_t inner_size = 1;
-
-            for(size_t i = params.normalized_dim; i < dims.size(); i++)
-            {
-                inner_size *= dims[i];
-            }
-
             kernel(params.x,
                    params.weight,
                    params.bias,
                    params.y,
                    params.mean,
                    params.rstd,
-                   params.epsilon,
-                   inner_size,
-                   static_cast<int32_t>(params.mode));
+                   params.epsilon);
         };
     };
 

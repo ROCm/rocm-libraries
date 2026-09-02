@@ -34,6 +34,8 @@
 
 #include "../test/verify.hpp"
 
+#include <miopen/float_equal.hpp>
+#include <miopen/ford.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 
@@ -65,37 +67,45 @@ void mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
                     bool adamw,
                     bool is_amp,
                     int32_t grad_scale,
-                    bool found_inf)
+                    bool found_inf,
+                    bool multi_threaded)
 {
     if(is_amp && found_inf)
         return;
 
-    size_t numel = miopen::deref(paramDesc).GetElementSize();
-    for(int i = 0; i < numel; i++)
-    {
+    const size_t numel = miopen::deref(paramDesc).GetElementSize();
+
+    const float bias_correction1             = 1.0 - pow(beta1, step);
+    const float bias_correction2             = 1.0 - pow(beta2, step);
+    const float k                            = lr / bias_correction1;
+    const float one_minus_lr_by_weight_decay = adamw ? 1.0f - lr * weight_decay : 0.0f;
+    const float inv_sqrt_bias_correction2    = 1.0f / sqrt(bias_correction2);
+    const float inv_grad_scale               = 1.0f / static_cast<float>(grad_scale);
+    const float one_minus_beta1              = 1.0f - beta1;
+    const float one_minus_beta2              = 1.0f - beta2;
+    const size_t min_grain                   = multi_threaded ? 8 : numel;
+
+    miopen::par_for(numel, min_grain, [&](int i) {
         Tref exp_avg    = exp_avgs[i];
         Tref exp_avg_sq = exp_avg_sqs[i];
 
         Tref param = params[i];
         Tref grad  = grads[i];
         if(maximize)
-            grad *= -1;
+            grad = -grad;
         if(is_amp)
-            grad /= grad_scale;
+            grad *= inv_grad_scale;
 
-        float bias_correction1 = 1 - pow(beta1, step);
-        float bias_correction2 = 1 - pow(beta2, step);
-
-        if(weight_decay != 0)
+        if(!miopen::float_equal_sentinel(weight_decay, 0))
         {
             if(adamw)
-                param -= lr * weight_decay * param;
+                param *= one_minus_lr_by_weight_decay;
             else
                 grad += param * weight_decay;
         }
 
-        exp_avg    = exp_avg * beta1 + grad * (1 - beta1);
-        exp_avg_sq = exp_avg_sq * beta2 + grad * grad * (1 - beta2);
+        exp_avg    = exp_avg * beta1 + grad * one_minus_beta1;
+        exp_avg_sq = exp_avg_sq * beta2 + grad * grad * one_minus_beta2;
 
         float denom;
         if(amsgrad)
@@ -107,15 +117,15 @@ void mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
                 max_exp_avg_sqs[i] = max_exp_avg_sq;
             }
 
-            denom = sqrt(max_exp_avg_sq) / sqrt(bias_correction2) + eps;
+            denom = sqrt(max_exp_avg_sq) * inv_sqrt_bias_correction2 + eps;
         }
         else
         {
-            denom = sqrt(exp_avg_sq) / sqrt(bias_correction2) + eps;
+            denom = sqrt(exp_avg_sq) * inv_sqrt_bias_correction2 + eps;
         }
 
-        params[i] = param - (lr / bias_correction1) * exp_avg / denom;
-    }
+        params[i] = param - k * exp_avg / denom;
+    });
 }
 
 #endif
@@ -160,6 +170,7 @@ public:
     Tref GetTolerance();
     int VerifyBackward() override;
     int VerifyForward() override;
+
     ~AdamDriver() override
     {
         miopenDestroyTensorDescriptor(paramDesc);
@@ -222,13 +233,14 @@ private:
     float beta2;
     float weight_decay;
     float eps;
-    bool amsgrad   = false;
-    bool maximize  = false;
-    bool found_inf = false;
-    bool adamw     = false;
-    bool is_amp    = false;
-    int grad_scale = 1;
-    int iter       = 0;
+    bool amsgrad         = false;
+    bool maximize        = false;
+    bool found_inf       = false;
+    bool adamw           = false;
+    bool is_amp          = false;
+    int grad_scale       = 1;
+    int iter             = 0;
+    bool use_multithread = false;
 
     miopenDataType_t grad_type;
 };
@@ -248,15 +260,16 @@ int AdamDriver<Tgpu, Tref, Tgrad>::ParseCmdLineArgs(int argc, char* argv[])
 template <typename Tgpu, typename Tref, typename Tgrad>
 int AdamDriver<Tgpu, Tref, Tgrad>::GetandSetData()
 {
-    auto param_len = GetInputTensorLengthsFromCmdLine();
-    lr             = inflags.GetValueDouble("lr");
-    beta1          = inflags.GetValueDouble("beta1");
-    beta2          = inflags.GetValueDouble("beta2");
-    eps            = inflags.GetValueDouble("eps");
-    weight_decay   = inflags.GetValueDouble("weight_decay");
-    amsgrad        = inflags.GetValueInt("amsgrad");
-    maximize       = inflags.GetValueInt("maximize");
-    iter           = inflags.GetValueInt("iter");
+    auto param_len  = GetInputTensorLengthsFromCmdLine();
+    lr              = inflags.GetValueDouble("lr");
+    beta1           = inflags.GetValueDouble("beta1");
+    beta2           = inflags.GetValueDouble("beta2");
+    eps             = inflags.GetValueDouble("eps");
+    weight_decay    = inflags.GetValueDouble("weight_decay");
+    amsgrad         = inflags.GetValueInt("amsgrad");
+    maximize        = inflags.GetValueInt("maximize");
+    iter            = inflags.GetValueInt("iter");
+    use_multithread = (inflags.GetValueInt("mt") != 0);
 
     if(is_amp)
     {
@@ -313,6 +326,7 @@ int AdamDriver<Tgpu, Tref, Tgrad>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
+    inflags.AddInputFlag("mt", 'M', "0", "Use multithreaded version (Default=0)", "int");
 
     return miopenStatusSuccess;
 }
@@ -320,19 +334,18 @@ int AdamDriver<Tgpu, Tref, Tgrad>::AddCmdLineArgs()
 template <typename Tgpu, typename Tref, typename Tgrad>
 std::vector<int> AdamDriver<Tgpu, Tref, Tgrad>::GetInputTensorLengthsFromCmdLine()
 {
-    std::vector<int> ret;
     auto tensor = inflags.GetValueTensor("dims");
     if(!tensor.lengths.empty())
         return tensor.lengths;
-    return ret;
+    return {};
 }
 
 template <typename Tgpu, typename Tref, typename Tgrad>
 int AdamDriver<Tgpu, Tref, Tgrad>::AllocateBuffersAndCopy()
 {
-    size_t param_sz = GetTensorSize(paramDesc);
+    const size_t param_sz = GetTensorSize(paramDesc);
+    const uint32_t ctx    = 0;
 
-    uint32_t ctx   = 0;
     param_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, param_sz, sizeof(Tgpu)));
     grad_dev       = std::unique_ptr<GPUMem>(new GPUMem(ctx, param_sz, sizeof(Tgrad)));
     exp_avg_dev    = std::unique_ptr<GPUMem>(new GPUMem(ctx, param_sz, sizeof(Tgpu)));
@@ -366,7 +379,7 @@ int AdamDriver<Tgpu, Tref, Tgrad>::AllocateBuffersAndCopy()
         max_exp_avg_sq_host = std::vector<Tref>(param_sz, static_cast<Tref>(0));
     }
 
-    for(int i = 0; i < param_sz; i++)
+    for(size_t i = 0; i < param_sz; ++i)
     {
         param[i]        = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
         grad[i]         = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0.0), static_cast<Tgrad>(0.1));
@@ -533,7 +546,8 @@ int AdamDriver<Tgpu, Tref, Tgrad>::RunForwardCPU()
                          adamw,
                          is_amp,
                          grad_scale,
-                         found_inf);
+                         found_inf,
+                         use_multithread);
 
     return miopenStatusSuccess;
 }
@@ -571,15 +585,17 @@ int AdamDriver<Tgpu, Tref, Tgrad>::VerifyForward()
 {
     RunForwardCPU();
     const Tref tolerance = GetTolerance();
-    auto error           = miopen::rms_range(param_host, param);
+    const auto error     = miopen::rms_range(param_host, param);
+    const char* ref_type = use_multithread ? "multi-threaded" : "single-threaded";
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward Adam FAILED: " << error << std::endl;
+        std::cout << "Forward Adam FAILED on " << ref_type << " CPU reference: " << error
+                  << std::endl;
         return EC_VerifyFwd;
     }
 
-    std::cout << "Forward Adam Verifies OK on CPU reference" << std::endl;
+    std::cout << "Forward Adam Verifies OK on " << ref_type << " CPU reference" << std::endl;
 
     return miopenStatusSuccess;
 }

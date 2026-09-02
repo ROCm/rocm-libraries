@@ -256,10 +256,10 @@ public:
                                    const RNNDescriptor& rnnD,
                                    const SeqTensorDescriptor& xDesc)
     {
-        auto y_desc = [](const RNNDescriptor& rnnD, const SeqTensorDescriptor& xDesc) {
-            std::vector<size_t> y_lenghts{xDesc.GetLengths()};
-            y_lenghts[2] = rnnD.hsize * (rnnD.dirMode == miopenRNNbidirection ? 2 : 1);
-            return SeqTensorDescriptor{xDesc.GetType(), y_lenghts};
+        auto y_desc = [](const RNNDescriptor& rnnD_, const SeqTensorDescriptor& xDesc_) {
+            std::vector<size_t> y_lenghts{xDesc_.GetLengths()};
+            y_lenghts[2] = rnnD_.hsize * (rnnD_.dirMode == miopenRNNbidirection ? 2 : 1);
+            return SeqTensorDescriptor{xDesc_.GetType(), y_lenghts};
         }(rnnD, xDesc);
 
         auto temp_x_desc = buildDynamicVirtual(xDesc);
@@ -377,10 +377,10 @@ public:
                                    const RNNDescriptor& rnnD,
                                    const SeqTensorDescriptor& xDesc)
     {
-        auto y_desc = [](const RNNDescriptor& rnnD, const SeqTensorDescriptor& xDesc) {
-            std::vector<size_t> y_lenghts{xDesc.GetLengths()};
-            y_lenghts[2] = rnnD.hsize * (rnnD.dirMode == miopenRNNbidirection ? 2 : 1);
-            return SeqTensorDescriptor{xDesc.GetType(), y_lenghts};
+        auto y_desc = [](const RNNDescriptor& rnnD_, const SeqTensorDescriptor& xDesc_) {
+            std::vector<size_t> y_lenghts{xDesc_.GetLengths()};
+            y_lenghts[2] = rnnD_.hsize * (rnnD_.dirMode == miopenRNNbidirection ? 2 : 1);
+            return SeqTensorDescriptor{xDesc_.GetType(), y_lenghts};
         }(rnnD, xDesc);
 
         auto temp_x_desc = buildDynamicVirtual(xDesc);
@@ -501,10 +501,10 @@ public:
                                    const RNNDescriptor& rnnD,
                                    const SeqTensorDescriptor& xDesc)
     {
-        auto y_desc = [](const RNNDescriptor& rnnD, const SeqTensorDescriptor& xDesc) {
-            std::vector<size_t> y_lenghts{xDesc.GetLengths()};
-            y_lenghts[2] = rnnD.hsize * (rnnD.dirMode == miopenRNNbidirection ? 2 : 1);
-            return SeqTensorDescriptor{xDesc.GetType(), y_lenghts};
+        auto y_desc = [](const RNNDescriptor& rnnD_, const SeqTensorDescriptor& xDesc_) {
+            std::vector<size_t> y_lenghts{xDesc_.GetLengths()};
+            y_lenghts[2] = rnnD_.hsize * (rnnD_.dirMode == miopenRNNbidirection ? 2 : 1);
+            return SeqTensorDescriptor{xDesc_.GetType(), y_lenghts};
         }(rnnD, xDesc);
 
         auto temp_x_desc = buildDynamicVirtual(xDesc);

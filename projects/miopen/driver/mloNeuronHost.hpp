@@ -142,8 +142,7 @@ int mloNeuronForwardRunHostAndVerify(int neuron_type,
            !std::isfinite(c_val) || !std::isfinite(g_val))
         {
             std::cout << "Difference in neuron layer: " << err << " too large at " << i
-                      << " x = " << data[i] << " "
-                      << " c_v = " << c_val << " vs g_val = " << g_val
+                      << " x = " << data[i] << " " << " c_v = " << c_val << " vs g_val = " << g_val
                       << " tolerance = " << allowedEps << std::endl;
             match = 0;
         }
@@ -250,8 +249,7 @@ int mloNeuronBackwardRunHostAndVerify(int neuron_type,
         {
             std::cout << "Difference in neuron back-propagation: " << err << " too large at " << i
                       << " dy = " << top_df_cpu[i] << " x = " << bot_cpu[i] << " y = " << top_cpu[i]
-                      << " "
-                      << " c_v = " << c_val << " vs g_val = " << g_val
+                      << " " << " c_v = " << c_val << " vs g_val = " << g_val
                       << " tolerance = " << allowedEps << std::endl;
             match = 0;
         }

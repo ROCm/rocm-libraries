@@ -26,37 +26,167 @@
 #ifndef GUARD_TARGET_PROPERTIES_HPP
 #define GUARD_TARGET_PROPERTIES_HPP
 
-#include <boost/optional.hpp>
+#include <miopen/config.hpp>
 #include <string>
+#include <tuple>
+#include <stdexcept>
+#include <miopen/stringutils.hpp>
 
+#define WORKAROUND_ISSUE_1204 1 // ROCm may incorrectly report "sramecc-" for gfx900.
 #define WORKAROUND_ISSUE_3001 1
 
 namespace miopen {
 
+static inline bool IsTF32Supported(const std::string& device_name)
+{
+    return device_name == "gfx942" || StartsWith(device_name, "gfx95");
+}
+
 struct Handle;
 
-struct TargetProperties
+class TargetProperties
 {
+    struct xnack_t
+    {
+        std::string tag;
+
+        xnack_t(const std::string& tag_) : tag(tag_) {}
+
+        auto init(const std::string& raw_name, const std::string&) const
+        {
+            bool initialized = false;
+            bool reported    = false;
+            bool enabled     = false;
+
+            auto tag_pos = raw_name.find(tag);
+            if(tag_pos != std::string::npos)
+            {
+                tag_pos += tag.length();
+                if(raw_name.length() > tag_pos)
+                {
+                    reported = true;
+                    enabled  = (raw_name[tag_pos] == '+');
+                }
+            }
+
+            initialized = true;
+            return std::make_tuple(initialized, reported, enabled);
+        }
+    };
+
+    struct sramecc_t
+    {
+        std::string tag;
+
+        sramecc_t(const std::string& tag_) : tag(tag_) {}
+
+        auto init(const std::string& raw_name, const std::string& dev_name) const
+        {
+            bool initialized = false;
+            bool reported    = false;
+            bool enabled     = (dev_name == "gfx906" || dev_name == "gfx908");
+
+#if WORKAROUND_ISSUE_1204
+            if(dev_name == "gfx900")
+            {
+                reported = false;
+            }
+            else
+#endif
+            {
+                auto tag_pos = raw_name.find(tag);
+                if(tag_pos != std::string::npos)
+                {
+                    tag_pos += tag.length();
+                    if(raw_name.length() > tag_pos)
+                    {
+                        reported = (raw_name[tag_pos] == '+');
+                    }
+                }
+                else
+                {
+                    reported = enabled;
+                }
+            }
+
+            initialized = true;
+            return std::make_tuple(initialized, reported, enabled);
+        }
+    };
+
+    template <typename T>
+    struct TargetProperty : public T
+    {
+        bool initialized = false;
+        bool reported    = false;
+        bool enabled     = false;
+
+        TargetProperty() = default;
+        TargetProperty(const std::string& tag_) : T(tag_) {}
+
+        void CheckInit() const
+        {
+            if(!initialized)
+                throw std::runtime_error("Error: not initialized targetProperty " + this->tag);
+        }
+        bool isReported() const
+        {
+            CheckInit();
+            return reported;
+        }
+        bool isEnabled() const
+        {
+            CheckInit();
+            return reported && enabled;
+        }
+        bool isDisabled() const
+        {
+            CheckInit();
+            return !(reported && enabled);
+        }
+
+        void init(const std::string& raw_name, const std::string& dev_name)
+        {
+            std::tie(initialized, reported, enabled) = T::init(raw_name, dev_name);
+        }
+    };
+
+    struct TargetPropertyXnack : public TargetProperty<xnack_t>
+    {
+        TargetPropertyXnack() : TargetProperty<xnack_t>(":xnack") {}
+    };
+
+    struct TargetPropertySramecc : public TargetProperty<sramecc_t>
+    {
+        TargetPropertySramecc() : TargetProperty<sramecc_t>(":sramecc") {}
+    };
+
+    void InitDbId();
+
+    std::string name;
+    std::string dbId;
+    static const std::size_t MaxWaveScratchSize;
+    static const std::size_t MaxLocalMemorySize;
+
+public:
+    TargetProperties()                                   = default;
+    TargetProperties(const TargetProperties&)            = default;
+    TargetProperties& operator=(const TargetProperties&) = default;
+
     virtual ~TargetProperties() = default;
+
+    TargetPropertyXnack xnack;
+    TargetPropertySramecc sramecc;
 
     virtual const std::string& Name() const { return name; }
     const std::string& DbId() const { return dbId; }
-    virtual boost::optional<bool> Xnack() const { return xnack; }
-    boost::optional<bool> Sramecc() const { return sramecc; }
-    boost::optional<bool> SrameccReported() const { return sramecc_reported; }
+
+    virtual bool isXnackEnabled() const { return xnack.isEnabled(); }
+
     static std::size_t GetMaxWaveScratchSize() { return MaxWaveScratchSize; }
     static std::size_t GetMaxLocalMemorySize() { return MaxLocalMemorySize; }
-    void Init(const Handle*);
 
-private:
-    void InitDbId();
-    std::string name;
-    std::string dbId;
-    boost::optional<bool> xnack            = boost::none;
-    boost::optional<bool> sramecc          = boost::none;
-    boost::optional<bool> sramecc_reported = boost::none;
-    static const std::size_t MaxWaveScratchSize;
-    static const std::size_t MaxLocalMemorySize;
+    MIOPEN_INTERNALS_EXPORT void Init(const Handle*);
 };
 
 } // namespace miopen

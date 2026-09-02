@@ -1,34 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/env.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/hipoc_kernel.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/handle_lock.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/logger.hpp>
 
 #include <hip/hip_ext.h>
@@ -47,7 +25,7 @@ HipEventProfiler::HipEventProfiler(const Handle& handle_)
     {
         start = make_hip_event();
         stop  = make_hip_event();
-        hipEventRecord(start.get(), handle.GetStream());
+        (void)hipEventRecord(start.get(), handle.GetStream());
     }
 }
 
@@ -55,10 +33,10 @@ HipEventProfiler::~HipEventProfiler()
 {
     if(start)
     {
-        hipEventRecord(stop.get(), handle.GetStream());
-        hipEventSynchronize(stop.get());
+        (void)hipEventRecord(stop.get(), handle.GetStream());
+        (void)hipEventSynchronize(stop.get());
         float event_time = 0.0f;
-        hipEventElapsedTime(&event_time, start.get(), stop.get());
+        (void)hipEventElapsedTime(&event_time, start.get(), stop.get());
         handle.ResetKernelTime();
         handle.AccumKernelTime(event_time);
     }
@@ -80,11 +58,30 @@ static std::string DimToFormattedString(const size_t* dims, size_t count)
     return ss.str();
 }
 
+// Rationale and the exact failure modes are documented on the declaration in
+// miopen/hipoc_kernel.hpp.
+void ValidateGlobalWorkSize(const std::array<size_t, 3>& gdims, const std::string& name)
+{
+    constexpr size_t max_global_work_size = 1ULL << 32;
+
+    for(size_t i = 0; i < gdims.size(); ++i)
+    {
+        if(gdims[i] >= max_global_work_size)
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Kernel " + name + ": global work size " +
+                             DimToFormattedString(gdims.data(), gdims.size()) + " exceeds the " +
+                             "32-bit limit in dimension " + std::to_string(i) +
+                             "; the launch would silently truncate to a wrong grid");
+    }
+}
+
 void HIPOCKernelInvoke::run(void* args, std::size_t size) const
 {
     MIOPEN_LOG_I2("kernel_name = "
                   << GetName() << ", global_work_dim = " << DimToFormattedString(gdims.data(), 3)
                   << ", local_work_dim = " << DimToFormattedString(ldims.data(), 3));
+
+    ValidateGlobalWorkSize(gdims, GetName());
 
     HipEventPtr start = nullptr;
     HipEventPtr stop  = nullptr;
@@ -97,7 +94,7 @@ void HIPOCKernelInvoke::run(void* args, std::size_t size) const
                       &size,
                       // NOLINTNEXTLINE cppcoreguidelines-pro-type-cstyle-cast
                       HIP_LAUNCH_PARAM_END};
-    if(callback)
+       if(callback)
     {
         start = make_hip_event();
         stop  = make_hip_event();
@@ -141,8 +138,16 @@ void HIPOCKernelInvoke::run(void* args, std::size_t size) const
             }
         }
 #else
-        hipEventSynchronize(stop.get());
+        (void)hipEventSynchronize(stop.get());
 #endif
+        if(IsLoggingKernel())
+        {
+            float elapsed_time = 0.0f;
+            (void)hipEventElapsedTime(&elapsed_time, start.get(), stop.get());
+
+            const bool is_transpose = IsTransposeOrTransformKernel(GetName());
+            AddKernelToJsonAccumulator(GetName(), elapsed_time, is_transpose);
+        }
         callback(start.get(), stop.get());
     }
 }
@@ -171,9 +176,10 @@ void HIPOCKernelInvoke::run_cooperative(void** kern_args) const
     }
 
 #if WORKAROUND_SWDEV_448157
-    if(gdims[0] >= (1ULL << 32) || gdims[1] >= (1ULL << 32) || gdims[2] >= (1ULL << 32))
-        MIOPEN_THROW("gridDim x blockDim >= 2^32");
+    ValidateGlobalWorkSize(gdims, GetName());
 
+    // Unlike run(), this path passes the workgroup count rather than the work-item
+    // count, so the division below must be exact or the remainder is silently dropped.
     if(gdims[0] % ldims[0] != 0 || gdims[1] % ldims[1] != 0 || gdims[2] % ldims[2] != 0)
         MIOPEN_THROW(miopenStatusInternalError);
 
@@ -215,7 +221,17 @@ void HIPOCKernelInvoke::run_cooperative(void** kern_args) const
 
     if(callback)
     {
-        hipEventSynchronize(stop.get());
+        status = hipEventSynchronize(stop.get());
+        if(status != hipSuccess)
+            MIOPEN_THROW_HIP_STATUS(status, "hipEventSynchronize() failed");
+        if(IsLoggingKernel())
+        {
+            float elapsed_time = 0.0f;
+            (void)hipEventElapsedTime(&elapsed_time, start.get(), stop.get());
+
+            const bool is_transpose = IsTransposeOrTransformKernel(GetName());
+            AddKernelToJsonAccumulator(GetName(), elapsed_time, is_transpose);
+        }
         callback(start.get(), stop.get());
     }
 }

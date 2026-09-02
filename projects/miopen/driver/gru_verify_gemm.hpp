@@ -26,10 +26,7 @@
 #ifndef GUARD_MIOPEN_GRU_VERIFY_GEMM_HPP
 #define GUARD_MIOPEN_GRU_VERIFY_GEMM_HPP
 
-#define ADNN_MM_TRANSPOSE 1
-
 #include "dropout_gpu_emulator.hpp"
-#include "mloConvHost.hpp" // ADNN_mm_cpu
 
 #include <../test/rnn_util.hpp>
 
@@ -204,23 +201,22 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
             }
             else
             {
-                ADNN_mm_cpu<Tref>(const_cast<Tref*>(in_state),
-                                  in_h,
-                                  batch_n,
-                                  in_stride,
-                                  0,
-                                  const_cast<Tref*>(wei_state),
-                                  in_h,
-                                  hy_h * bi * 3,
-                                  in_stride,
-                                  ADNN_MM_TRANSPOSE,
-                                  &hid_state[hid_shift],
-                                  hy_h * bi * 3,
-                                  batch_n,
-                                  hy_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(const_cast<Tref*>(in_state),
+                               in_h,
+                               batch_n,
+                               in_stride,
+                               false,
+                               const_cast<Tref*>(wei_state),
+                               in_h,
+                               hy_h * bi * 3,
+                               in_stride,
+                               true,
+                               &hid_state[hid_shift],
+                               hy_h * bi * 3,
+                               batch_n,
+                               hy_stride,
+                               1,
+                               1);
 
                 // from bias
                 if(biased)
@@ -260,24 +256,23 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
                 prelayer_shift = drop_out_offset;
             }
 
-            ADNN_mm_cpu<Tref>(use_dropout ? &dropout_hid_state[prelayer_shift]
-                                          : &hid_state[prelayer_shift],
-                              hy_h * bi,
-                              batch_n,
-                              use_dropout ? hy_h * bi : hy_stride,
-                              0,
-                              const_cast<Tref*>(&wei_state[wei_shift]),
-                              hy_h * bi,
-                              hy_h * bi * 3,
-                              bi_stride,
-                              ADNN_MM_TRANSPOSE,
-                              &hid_state[hid_shift],
-                              hy_h * bi * 3,
-                              batch_n,
-                              hy_stride,
-                              0,
-                              1,
-                              1);
+            gemm_cpu<Tref>(use_dropout ? &dropout_hid_state[prelayer_shift]
+                                       : &hid_state[prelayer_shift],
+                           hy_h * bi,
+                           batch_n,
+                           use_dropout ? hy_h * bi : hy_stride,
+                           false,
+                           const_cast<Tref*>(&wei_state[wei_shift]),
+                           hy_h * bi,
+                           hy_h * bi * 3,
+                           bi_stride,
+                           true,
+                           &hid_state[hid_shift],
+                           hy_h * bi * 3,
+                           batch_n,
+                           hy_stride,
+                           1,
+                           1);
 
             // from bias
             if(biased)
@@ -305,23 +300,22 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
             {
                 if(!hx_is_null)
                 {
-                    ADNN_mm_cpu<Tref>(const_cast<Tref*>(&hx_state[hx_shift]),
-                                      hy_h,
-                                      in_n[ti],
-                                      uni_stride,
-                                      0,
-                                      const_cast<Tref*>(&wei_state[wei_shift]),
-                                      hy_h,
-                                      hy_h * 2,
-                                      uni_stride,
-                                      ADNN_MM_TRANSPOSE,
-                                      &hid_state[hid_shift + bacc * hy_stride],
-                                      hy_h * 2,
-                                      in_n[ti],
-                                      hy_stride,
-                                      0,
-                                      1,
-                                      1);
+                    gemm_cpu<Tref>(const_cast<Tref*>(&hx_state[hx_shift]),
+                                   hy_h,
+                                   in_n[ti],
+                                   uni_stride,
+                                   false,
+                                   const_cast<Tref*>(&wei_state[wei_shift]),
+                                   hy_h,
+                                   hy_h * 2,
+                                   uni_stride,
+                                   true,
+                                   &hid_state[hid_shift + bacc * hy_stride],
+                                   hy_h * 2,
+                                   in_n[ti],
+                                   hy_stride,
+                                   1,
+                                   1);
 
                     if(biased)
                     {
@@ -339,24 +333,22 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
                         }
                     }
 
-                    ADNN_mm_cpu<Tref>(
-                        const_cast<Tref*>(&hx_state[hx_shift]),
-                        hy_h,
-                        in_n[ti],
-                        uni_stride,
-                        0,
-                        const_cast<Tref*>(&wei_state[wei_shift + 2 * hy_h * uni_stride]),
-                        hy_h,
-                        hy_h,
-                        uni_stride,
-                        ADNN_MM_TRANSPOSE,
-                        &hid_state[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
-                        hy_h,
-                        in_n[ti],
-                        hy_stride,
-                        0,
-                        1,
-                        1);
+                    gemm_cpu<Tref>(const_cast<Tref*>(&hx_state[hx_shift]),
+                                   hy_h,
+                                   in_n[ti],
+                                   uni_stride,
+                                   false,
+                                   const_cast<Tref*>(&wei_state[wei_shift + 2 * hy_h * uni_stride]),
+                                   hy_h,
+                                   hy_h,
+                                   uni_stride,
+                                   true,
+                                   &hid_state[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
+                                   hy_h,
+                                   in_n[ti],
+                                   hy_stride,
+                                   1,
+                                   1);
 
                     if(biased)
                     {
@@ -373,22 +365,21 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
 
                     if(bidirection)
                     {
-                        ADNN_mm_cpu<Tref>(
+                        gemm_cpu<Tref>(
                             const_cast<Tref*>(&hx_state[hx_shift + hy_n * hy_h]),
                             hy_h,
                             in_n[seqLength - 1 - ti],
                             uni_stride,
-                            0,
+                            false,
                             const_cast<Tref*>(&wei_state[wei_shift + 3 * hy_h * uni_stride]),
                             hy_h,
                             hy_h * 2,
                             uni_stride,
-                            ADNN_MM_TRANSPOSE,
+                            true,
                             &hid_state[hid_shift + baccbi * hy_stride + 3 * hy_h],
                             hy_h * 2,
                             in_n[seqLength - 1 - ti],
                             hy_stride,
-                            0,
                             1,
                             1);
 
@@ -409,22 +400,21 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
                             }
                         }
 
-                        ADNN_mm_cpu<Tref>(
+                        gemm_cpu<Tref>(
                             const_cast<Tref*>(&hx_state[hx_shift + hy_n * hy_h]),
                             hy_h,
                             in_n[seqLength - 1 - ti],
                             uni_stride,
-                            0,
+                            false,
                             const_cast<Tref*>(&wei_state[wei_shift + 5 * hy_h * uni_stride]),
                             hy_h,
                             hy_h,
                             uni_stride,
-                            ADNN_MM_TRANSPOSE,
+                            true,
                             &hid_state[hid_shift + baccbi * hy_stride + bi * 3 * hy_h + hy_h],
                             hy_h,
                             in_n[seqLength - 1 - ti],
                             hy_stride,
-                            0,
                             1,
                             1);
 
@@ -445,23 +435,22 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
             }
             else
             {
-                ADNN_mm_cpu<Tref>(const_cast<Tref*>(&hy_state[hx_shift]),
-                                  hy_h,
-                                  in_n[ti],
-                                  uni_stride,
-                                  0,
-                                  const_cast<Tref*>(&wei_state[wei_shift]),
-                                  hy_h,
-                                  hy_h * 2,
-                                  uni_stride,
-                                  ADNN_MM_TRANSPOSE,
-                                  &hid_state[hid_shift + bacc * hy_stride],
-                                  hy_h * 2,
-                                  in_n[ti],
-                                  hy_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(const_cast<Tref*>(&hy_state[hx_shift]),
+                               hy_h,
+                               in_n[ti],
+                               uni_stride,
+                               false,
+                               const_cast<Tref*>(&wei_state[wei_shift]),
+                               hy_h,
+                               hy_h * 2,
+                               uni_stride,
+                               true,
+                               &hid_state[hid_shift + bacc * hy_stride],
+                               hy_h * 2,
+                               in_n[ti],
+                               hy_stride,
+                               1,
+                               1);
 
                 if(biased)
                 {
@@ -478,23 +467,22 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
                     }
                 }
 
-                ADNN_mm_cpu<Tref>(const_cast<Tref*>(&hy_state[hx_shift]),
-                                  hy_h,
-                                  in_n[ti],
-                                  uni_stride,
-                                  0,
-                                  const_cast<Tref*>(&wei_state[wei_shift + 2 * hy_h * uni_stride]),
-                                  hy_h,
-                                  hy_h,
-                                  uni_stride,
-                                  ADNN_MM_TRANSPOSE,
-                                  &hid_state[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
-                                  hy_h,
-                                  in_n[ti],
-                                  hy_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(const_cast<Tref*>(&hy_state[hx_shift]),
+                               hy_h,
+                               in_n[ti],
+                               uni_stride,
+                               false,
+                               const_cast<Tref*>(&wei_state[wei_shift + 2 * hy_h * uni_stride]),
+                               hy_h,
+                               hy_h,
+                               uni_stride,
+                               true,
+                               &hid_state[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
+                               hy_h,
+                               in_n[ti],
+                               hy_stride,
+                               1,
+                               1);
 
                 if(biased)
                 {
@@ -513,24 +501,23 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
 
                     if(!hx_is_null && in_n.at(seqLength - 1 - ti) > in_n.at(seqLength - ti))
                     {
-                        ADNN_mm_cpu<Tref>(
+                        gemm_cpu<Tref>(
                             const_cast<Tref*>(
                                 &hx_state[hx_shift + hy_n * hy_h + in_n.at(seqLength - ti) * hy_h]),
                             hy_h,
                             (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
                             uni_stride,
-                            0,
+                            false,
                             const_cast<Tref*>(&wei_state[wei_shift + 3 * hy_h * uni_stride]),
                             hy_h,
                             hy_h * 2,
                             uni_stride,
-                            ADNN_MM_TRANSPOSE,
+                            true,
                             &hid_state[hid_shift + (baccbi + in_n.at(seqLength - ti)) * hy_stride +
                                        3 * hy_h],
                             hy_h * 2,
                             (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
                             hy_stride,
-                            0,
                             1,
                             1);
 
@@ -552,24 +539,23 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
                             }
                         }
 
-                        ADNN_mm_cpu<Tref>(
+                        gemm_cpu<Tref>(
                             const_cast<Tref*>(
                                 &hx_state[hx_shift + hy_n * hy_h + in_n.at(seqLength - ti) * hy_h]),
                             hy_h,
                             (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
                             uni_stride,
-                            0,
+                            false,
                             const_cast<Tref*>(&wei_state[wei_shift + 5 * hy_h * uni_stride]),
                             hy_h,
                             hy_h,
                             uni_stride,
-                            ADNN_MM_TRANSPOSE,
+                            true,
                             &hid_state[hid_shift + (baccbi + in_n.at(seqLength - ti)) * hy_stride +
                                        bi * 3 * hy_h + hy_h],
                             hy_h,
                             (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
                             hy_stride,
-                            0,
                             1,
                             1);
 
@@ -588,24 +574,22 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
                         }
                     }
 
-                    ADNN_mm_cpu<Tref>(
-                        const_cast<Tref*>(&hy_state[hx_shift + hy_n * hy_h]),
-                        hy_h,
-                        in_n[seqLength - ti],
-                        uni_stride,
-                        0,
-                        const_cast<Tref*>(&wei_state[wei_shift + 3 * hy_h * uni_stride]),
-                        hy_h,
-                        hy_h * 2,
-                        uni_stride,
-                        ADNN_MM_TRANSPOSE,
-                        &hid_state[hid_shift + baccbi * hy_stride + 3 * hy_h],
-                        hy_h * 2,
-                        in_n[seqLength - ti],
-                        hy_stride,
-                        0,
-                        1,
-                        1);
+                    gemm_cpu<Tref>(const_cast<Tref*>(&hy_state[hx_shift + hy_n * hy_h]),
+                                   hy_h,
+                                   in_n[seqLength - ti],
+                                   uni_stride,
+                                   false,
+                                   const_cast<Tref*>(&wei_state[wei_shift + 3 * hy_h * uni_stride]),
+                                   hy_h,
+                                   hy_h * 2,
+                                   uni_stride,
+                                   true,
+                                   &hid_state[hid_shift + baccbi * hy_stride + 3 * hy_h],
+                                   hy_h * 2,
+                                   in_n[seqLength - ti],
+                                   hy_stride,
+                                   1,
+                                   1);
 
                     if(biased)
                     {
@@ -623,22 +607,21 @@ void RunGRUForwardGEMMCPUVerify(miopenHandle_t handle,
                         }
                     }
 
-                    ADNN_mm_cpu<Tref>(
+                    gemm_cpu<Tref>(
                         const_cast<Tref*>(&hy_state[hx_shift + hy_n * hy_h]),
                         hy_h,
                         in_n[seqLength - ti],
                         uni_stride,
-                        0,
+                        false,
                         const_cast<Tref*>(&wei_state[wei_shift + 5 * hy_h * uni_stride]),
                         hy_h,
                         hy_h,
                         uni_stride,
-                        ADNN_MM_TRANSPOSE,
+                        true,
                         &hid_state[hid_shift + baccbi * hy_stride + bi * 3 * hy_h + hy_h],
                         hy_h,
                         in_n[seqLength - ti],
                         hy_stride,
-                        0,
                         1,
                         1);
 
@@ -1028,23 +1011,22 @@ void RunGRUBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
         {
             int prelayer_shift = (li + 1) * batch_n * hy_stride;
 
-            ADNN_mm_cpu<Tref>(&dh_state[prelayer_shift],
-                              hy_h * bi * 3,
-                              batch_n,
-                              hy_stride,
-                              0,
-                              const_cast<Tref*>(&wei_state[wei_shift]),
-                              hy_h * bi,
-                              hy_h * bi * 3,
-                              bi_stride,
-                              0,
-                              &dh_state[hid_shift + bi * 3 * hy_h],
-                              hy_h * bi,
-                              batch_n,
-                              hy_stride,
-                              0,
-                              1,
-                              1);
+            gemm_cpu<Tref>(&dh_state[prelayer_shift],
+                           hy_h * bi * 3,
+                           batch_n,
+                           hy_stride,
+                           false,
+                           const_cast<Tref*>(&wei_state[wei_shift]),
+                           hy_h * bi,
+                           hy_h * bi * 3,
+                           bi_stride,
+                           false,
+                           &dh_state[hid_shift + bi * 3 * hy_h],
+                           hy_h * bi,
+                           batch_n,
+                           hy_stride,
+                           1,
+                           1);
 
             if(use_dropout)
             {
@@ -1110,23 +1092,22 @@ void RunGRUBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
 
                 int pretime_shift = li * batch_n * hy_stride + (bacc + in_n[ti]) * hy_stride;
 
-                ADNN_mm_cpu<Tref>(&dh_state[pretime_shift],
-                                  hy_h * 2,
-                                  in_n[ti + 1],
-                                  hy_stride,
-                                  0,
-                                  const_cast<Tref*>(&wei_state[weitime_shift]),
-                                  hy_h,
-                                  hy_h * 2,
-                                  uni_stride,
-                                  0,
-                                  &dh_state[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
-                                  hy_h,
-                                  in_n[ti + 1],
-                                  hy_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(&dh_state[pretime_shift],
+                               hy_h * 2,
+                               in_n[ti + 1],
+                               hy_stride,
+                               false,
+                               const_cast<Tref*>(&wei_state[weitime_shift]),
+                               hy_h,
+                               hy_h * 2,
+                               uni_stride,
+                               false,
+                               &dh_state[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
+                               hy_h,
+                               in_n[ti + 1],
+                               hy_stride,
+                               1,
+                               1);
 
                 for(int bs = 0; bs < in_n[ti + 1]; bs++)
                 {
@@ -1142,24 +1123,22 @@ void RunGRUBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
                     }
                 }
 
-                ADNN_mm_cpu<Tref>(
-                    &dh_state[hid_shift + bacc * hy_stride + 2 * hy_h],
-                    hy_h,
-                    in_n[ti + 1],
-                    hy_stride,
-                    0,
-                    const_cast<Tref*>(&wei_state[weitime_shift + 2 * hy_h * uni_stride]),
-                    hy_h,
-                    hy_h,
-                    uni_stride,
-                    0,
-                    &dh_state[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
-                    hy_h,
-                    in_n[ti + 1],
-                    hy_stride,
-                    0,
-                    1,
-                    1);
+                gemm_cpu<Tref>(&dh_state[hid_shift + bacc * hy_stride + 2 * hy_h],
+                               hy_h,
+                               in_n[ti + 1],
+                               hy_stride,
+                               false,
+                               const_cast<Tref*>(&wei_state[weitime_shift + 2 * hy_h * uni_stride]),
+                               hy_h,
+                               hy_h,
+                               uni_stride,
+                               false,
+                               &dh_state[hid_shift + bacc * hy_stride + bi * 3 * hy_h],
+                               hy_h,
+                               in_n[ti + 1],
+                               hy_stride,
+                               1,
+                               1);
 
                 for(int bs = 0; bs < in_n[ti + 1]; bs++)
                 {
@@ -1174,22 +1153,21 @@ void RunGRUBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
                     pretime_shift = li * batch_n * hy_stride +
                                     (baccbi - in_n[seqLength - 2 - ti]) * hy_stride + hy_h * 3;
 
-                    ADNN_mm_cpu<Tref>(
+                    gemm_cpu<Tref>(
                         &dh_state[pretime_shift],
                         hy_h * 2,
                         in_n[seqLength - 1 - ti],
                         hy_stride,
-                        0,
+                        false,
                         const_cast<Tref*>(&wei_state[weitime_shift + hy_h * 3 * uni_stride]),
                         hy_h,
                         hy_h * 2,
                         uni_stride,
-                        0,
+                        false,
                         &dh_state[hid_shift + baccbi * hy_stride + bi * 3 * hy_h + hy_h],
                         hy_h,
                         in_n[seqLength - 1 - ti],
                         hy_stride,
-                        0,
                         1,
                         1);
 
@@ -1209,22 +1187,21 @@ void RunGRUBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
                         }
                     }
 
-                    ADNN_mm_cpu<Tref>(
+                    gemm_cpu<Tref>(
                         &dh_state[hid_shift + baccbi * hy_stride + 5 * hy_h],
                         hy_h,
                         in_n[seqLength - 1 - ti],
                         hy_stride,
-                        0,
+                        false,
                         const_cast<Tref*>(&wei_state[weitime_shift + 5 * hy_h * uni_stride]),
                         hy_h,
                         hy_h,
                         uni_stride,
-                        0,
+                        false,
                         &dh_state[hid_shift + baccbi * hy_stride + bi * 3 * hy_h + hy_h],
                         hy_h,
                         in_n[seqLength - 1 - ti],
                         hy_stride,
-                        0,
                         1,
                         1);
 
@@ -1381,23 +1358,22 @@ void RunGRUBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
         // dhx
         int pretime_shift = li * batch_n * hy_stride;
 
-        ADNN_mm_cpu<Tref>(&dh_state[pretime_shift],
-                          hy_h * 2,
-                          in_n[0],
-                          hy_stride,
-                          0,
-                          const_cast<Tref*>(&wei_state[weitime_shift]),
-                          hy_h,
-                          hy_h * 2,
-                          uni_stride,
-                          0,
-                          &dhx_state[hx_shift],
-                          hy_h,
-                          in_n[0],
-                          uni_stride,
-                          0,
-                          1,
-                          1);
+        gemm_cpu<Tref>(&dh_state[pretime_shift],
+                       hy_h * 2,
+                       in_n[0],
+                       hy_stride,
+                       false,
+                       const_cast<Tref*>(&wei_state[weitime_shift]),
+                       hy_h,
+                       hy_h * 2,
+                       uni_stride,
+                       false,
+                       &dhx_state[hx_shift],
+                       hy_h,
+                       in_n[0],
+                       uni_stride,
+                       1,
+                       1);
 
         for(int bs = 0; bs < in_n[0]; bs++)
         {
@@ -1413,23 +1389,22 @@ void RunGRUBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
             }
         }
 
-        ADNN_mm_cpu<Tref>(const_cast<Tref*>(&dcx_state[hx_shift]),
-                          hy_h,
-                          in_n[0],
-                          uni_stride,
-                          0,
-                          const_cast<Tref*>(&wei_state[weitime_shift + 2 * hy_h * uni_stride]),
-                          hy_h,
-                          hy_h,
-                          uni_stride,
-                          0,
-                          &dhx_state[hx_shift],
-                          hy_h,
-                          in_n[0],
-                          uni_stride,
-                          0,
-                          1,
-                          1);
+        gemm_cpu<Tref>(const_cast<Tref*>(&dcx_state[hx_shift]),
+                       hy_h,
+                       in_n[0],
+                       uni_stride,
+                       false,
+                       const_cast<Tref*>(&wei_state[weitime_shift + 2 * hy_h * uni_stride]),
+                       hy_h,
+                       hy_h,
+                       uni_stride,
+                       false,
+                       &dhx_state[hx_shift],
+                       hy_h,
+                       in_n[0],
+                       uni_stride,
+                       1,
+                       1);
 
         if(bidirection)
         {
@@ -1442,22 +1417,21 @@ void RunGRUBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
                 {
                     pretime_shift = li * batch_n * hy_stride + (pre_bat + cur_bat) * hy_stride;
 
-                    ADNN_mm_cpu<Tref>(
+                    gemm_cpu<Tref>(
                         &dh_state[pretime_shift + 3 * hy_h],
                         hy_h * 2,
                         (in_n.at(ti) - cur_bat),
                         hy_stride,
-                        0,
+                        false,
                         const_cast<Tref*>(&wei_state[weitime_shift + 3 * hy_h * uni_stride]),
                         hy_h,
                         hy_h * 2,
                         uni_stride,
-                        0,
+                        false,
                         &dhx_state[hx_shift + hy_n * hy_h + cur_bat * hy_h],
                         hy_h,
                         (in_n.at(ti) - cur_bat),
                         uni_stride,
-                        0,
                         1,
                         1);
 
@@ -1481,22 +1455,21 @@ void RunGRUBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
                         }
                     }
 
-                    ADNN_mm_cpu<Tref>(
+                    gemm_cpu<Tref>(
                         const_cast<Tref*>(&dcx_state[hx_shift + hy_n * hy_h + cur_bat * hy_h]),
                         hy_h,
                         (in_n.at(ti) - cur_bat),
                         uni_stride,
-                        0,
+                        false,
                         const_cast<Tref*>(&wei_state[weitime_shift + 5 * hy_h * uni_stride]),
                         hy_h,
                         hy_h,
                         uni_stride,
-                        0,
+                        false,
                         &dhx_state[hx_shift + hy_n * hy_h + cur_bat * hy_h],
                         hy_h,
                         (in_n.at(ti) - cur_bat),
                         uni_stride,
-                        0,
                         1,
                         1);
                 }
@@ -1526,23 +1499,22 @@ void RunGRUBackwardDataGEMMCPUVerify(std::vector<Tref>& din_host,
     }
     else
     {
-        ADNN_mm_cpu<Tref>(&dh_state[0],
-                          hy_h * bi * 3,
-                          batch_n,
-                          hy_stride,
-                          0,
-                          const_cast<Tref*>(wei_state),
-                          in_h,
-                          hy_h * bi * 3,
-                          in_stride,
-                          0,
-                          &din_state[0],
-                          in_h,
-                          batch_n,
-                          in_stride,
-                          0,
-                          1,
-                          1);
+        gemm_cpu<Tref>(&dh_state[0],
+                       hy_h * bi * 3,
+                       batch_n,
+                       hy_stride,
+                       false,
+                       const_cast<Tref*>(wei_state),
+                       in_h,
+                       hy_h * bi * 3,
+                       in_stride,
+                       false,
+                       &din_state[0],
+                       in_h,
+                       batch_n,
+                       in_stride,
+                       1,
+                       1);
     }
 
     for(int i = 0; i < numlayer * batch_n * hy_stride; i++)
@@ -1682,23 +1654,22 @@ void RunGRUBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
         {
             if(inputMode == 0)
             {
-                ADNN_mm_cpu<Tref>(const_cast<Tref*>(wkspace_state),
-                                  hy_h * bi * 3,
-                                  batch_n,
-                                  hy_stride,
-                                  ADNN_MM_TRANSPOSE,
-                                  const_cast<Tref*>(in_state),
-                                  in_h,
-                                  batch_n,
-                                  in_stride,
-                                  0,
-                                  &dwei_state[0],
-                                  in_h,
-                                  hy_h * bi * 3,
-                                  in_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(const_cast<Tref*>(wkspace_state),
+                               hy_h * bi * 3,
+                               batch_n,
+                               hy_stride,
+                               true,
+                               const_cast<Tref*>(in_state),
+                               in_h,
+                               batch_n,
+                               in_stride,
+                               false,
+                               &dwei_state[0],
+                               in_h,
+                               hy_h * bi * 3,
+                               in_stride,
+                               1,
+                               1);
             }
 
             if(biased)
@@ -1720,23 +1691,22 @@ void RunGRUBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
             int hid_shift = li * batch_n * hy_stride;
             int wei_shift = (in_h + hy_h) * wei_stride + (li - 1) * (bi * hy_h + hy_h) * wei_stride;
 
-            ADNN_mm_cpu<Tref>(const_cast<Tref*>(&wkspace_state[hid_shift]),
-                              hy_h * bi * 3,
-                              batch_n,
-                              hy_stride,
-                              ADNN_MM_TRANSPOSE,
-                              const_cast<Tref*>(&rsvspace_state[prelayer_shift]),
-                              hy_h * bi,
-                              batch_n,
-                              use_dropout ? hy_h * bi : hy_stride,
-                              0,
-                              &dwei_state[wei_shift],
-                              hy_h * bi,
-                              hy_h * bi * 3,
-                              bi_stride,
-                              0,
-                              1,
-                              1);
+            gemm_cpu<Tref>(const_cast<Tref*>(&wkspace_state[hid_shift]),
+                           hy_h * bi * 3,
+                           batch_n,
+                           hy_stride,
+                           true,
+                           const_cast<Tref*>(&rsvspace_state[prelayer_shift]),
+                           hy_h * bi,
+                           batch_n,
+                           use_dropout ? hy_h * bi : hy_stride,
+                           false,
+                           &dwei_state[wei_shift],
+                           hy_h * bi,
+                           hy_h * bi * 3,
+                           bi_stride,
+                           1,
+                           1);
 
             if(biased)
             {
@@ -1775,23 +1745,22 @@ void RunGRUBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
             {
                 if(!hx_is_null)
                 {
-                    ADNN_mm_cpu<Tref>(const_cast<Tref*>(&wkspace_state[hid_shift]),
-                                      hy_h * 3,
-                                      in_n[ti],
-                                      hy_stride,
-                                      ADNN_MM_TRANSPOSE,
-                                      const_cast<Tref*>(&hx_state[hx_shift]),
-                                      hy_h,
-                                      in_n[ti],
-                                      uni_stride,
-                                      0,
-                                      &dwei_state[wei_shift],
-                                      hy_h,
-                                      hy_h * 3,
-                                      uni_stride,
-                                      0,
-                                      1,
-                                      1);
+                    gemm_cpu<Tref>(const_cast<Tref*>(&wkspace_state[hid_shift]),
+                                   hy_h * 3,
+                                   in_n[ti],
+                                   hy_stride,
+                                   true,
+                                   const_cast<Tref*>(&hx_state[hx_shift]),
+                                   hy_h,
+                                   in_n[ti],
+                                   uni_stride,
+                                   false,
+                                   &dwei_state[wei_shift],
+                                   hy_h,
+                                   hy_h * 3,
+                                   uni_stride,
+                                   1,
+                                   1);
 
                     if(biased)
                     {
@@ -1813,23 +1782,22 @@ void RunGRUBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
                 pretime_shift =
                     li * batch_n * hy_stride + (bacc - in_n[ti - 1]) * hy_stride + bi * 3 * hy_h;
 
-                ADNN_mm_cpu<Tref>(const_cast<Tref*>(&wkspace_state[hid_shift]),
-                                  hy_h * 3,
-                                  in_n[ti],
-                                  hy_stride,
-                                  ADNN_MM_TRANSPOSE,
-                                  const_cast<Tref*>(&rsvspace_state[pretime_shift]),
-                                  hy_h,
-                                  in_n[ti],
-                                  hy_stride,
-                                  0,
-                                  &dwei_state[wei_shift],
-                                  hy_h,
-                                  hy_h * 3,
-                                  uni_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(const_cast<Tref*>(&wkspace_state[hid_shift]),
+                               hy_h * 3,
+                               in_n[ti],
+                               hy_stride,
+                               true,
+                               const_cast<Tref*>(&rsvspace_state[pretime_shift]),
+                               hy_h,
+                               in_n[ti],
+                               hy_stride,
+                               false,
+                               &dwei_state[wei_shift],
+                               hy_h,
+                               hy_h * 3,
+                               uni_stride,
+                               1,
+                               1);
 
                 if(biased)
                 {
@@ -1861,23 +1829,22 @@ void RunGRUBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
                 {
                     if(!hx_is_null)
                     {
-                        ADNN_mm_cpu<Tref>(const_cast<Tref*>(&wkspace_state[hid_shift + 3 * hy_h]),
-                                          hy_h * 3,
-                                          in_n[ti],
-                                          hy_stride,
-                                          ADNN_MM_TRANSPOSE,
-                                          const_cast<Tref*>(&hx_state[hx_shift + hy_n * hy_h]),
-                                          hy_h,
-                                          in_n[ti],
-                                          uni_stride,
-                                          0,
-                                          &dwei_state[wei_shift + 3 * hy_h * uni_stride],
-                                          hy_h,
-                                          hy_h * 3,
-                                          uni_stride,
-                                          0,
-                                          1,
-                                          1);
+                        gemm_cpu<Tref>(const_cast<Tref*>(&wkspace_state[hid_shift + 3 * hy_h]),
+                                       hy_h * 3,
+                                       in_n[ti],
+                                       hy_stride,
+                                       true,
+                                       const_cast<Tref*>(&hx_state[hx_shift + hy_n * hy_h]),
+                                       hy_h,
+                                       in_n[ti],
+                                       uni_stride,
+                                       false,
+                                       &dwei_state[wei_shift + 3 * hy_h * uni_stride],
+                                       hy_h,
+                                       hy_h * 3,
+                                       uni_stride,
+                                       1,
+                                       1);
 
                         if(biased)
                         {
@@ -1898,24 +1865,23 @@ void RunGRUBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
                 {
                     if(!hx_is_null && in_n.at(ti) > in_n.at(ti + 1))
                     {
-                        ADNN_mm_cpu<Tref>(
+                        gemm_cpu<Tref>(
                             const_cast<Tref*>(
                                 &wkspace_state[hid_shift + 3 * hy_h + in_n.at(ti + 1) * hy_stride]),
                             hy_h * 3,
                             (in_n.at(ti) - in_n.at(ti + 1)),
                             hy_stride,
-                            ADNN_MM_TRANSPOSE,
+                            true,
                             const_cast<Tref*>(
                                 &hx_state[hx_shift + hy_n * hy_h + in_n.at(ti + 1) * hy_h]),
                             hy_h,
                             (in_n.at(ti) - in_n.at(ti + 1)),
                             uni_stride,
-                            0,
+                            false,
                             &dwei_state[wei_shift + 3 * hy_h * uni_stride],
                             hy_h,
                             hy_h * 3,
                             uni_stride,
-                            0,
                             1,
                             1);
 
@@ -1937,23 +1903,22 @@ void RunGRUBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
                     pretime_shift =
                         li * batch_n * hy_stride + (bacc + in_n[ti]) * hy_stride + bi * 3 * hy_h;
 
-                    ADNN_mm_cpu<Tref>(const_cast<Tref*>(&wkspace_state[hid_shift + 3 * hy_h]),
-                                      hy_h * 3,
-                                      in_n[ti + 1],
-                                      hy_stride,
-                                      ADNN_MM_TRANSPOSE,
-                                      const_cast<Tref*>(&rsvspace_state[pretime_shift + hy_h]),
-                                      hy_h,
-                                      in_n[ti + 1],
-                                      hy_stride,
-                                      0,
-                                      &dwei_state[wei_shift + 3 * hy_h * uni_stride],
-                                      hy_h,
-                                      hy_h * 3,
-                                      uni_stride,
-                                      0,
-                                      1,
-                                      1);
+                    gemm_cpu<Tref>(const_cast<Tref*>(&wkspace_state[hid_shift + 3 * hy_h]),
+                                   hy_h * 3,
+                                   in_n[ti + 1],
+                                   hy_stride,
+                                   true,
+                                   const_cast<Tref*>(&rsvspace_state[pretime_shift + hy_h]),
+                                   hy_h,
+                                   in_n[ti + 1],
+                                   hy_stride,
+                                   false,
+                                   &dwei_state[wei_shift + 3 * hy_h * uni_stride],
+                                   hy_h,
+                                   hy_h * 3,
+                                   uni_stride,
+                                   1,
+                                   1);
 
                     if(biased)
                     {

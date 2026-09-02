@@ -1,3 +1,6 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #include <iostream>
 #include <miopen/miopen.h>
 #include <miopen/errors.hpp>
@@ -18,6 +21,7 @@ void testGetConvolutionSpatialDim(void)
         miopenGetConvolutionSpatialDim(conv_desc, &spatial_dim);
         ASSERT_EQ(spatial_dim, i) << "Spatial Dimension does not match at index: " << i
                                   << std::endl;
+        miopenDestroyConvolutionDescriptor(conv_desc);
     }
 }
 

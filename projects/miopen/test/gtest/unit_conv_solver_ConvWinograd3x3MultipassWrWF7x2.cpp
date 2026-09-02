@@ -40,24 +40,30 @@ auto GetConvTestCases(miopenDataType_t datatype)
 }
 
 template <miopenDataType_t datatype>
-const auto& GetTestParams()
+miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
-    static const auto params = [] {
-        Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A;
-        auto p             = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.CheckXnackDisabled();
-        if constexpr(datatype == miopenHalf)
-        {
-            p.SetConvAttrFp16Alt(0);
-        }
-        return p;
-    }();
-    return params;
+    Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A;
+    auto p             = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
+    p.CheckXnackDisabled();
+    if constexpr(datatype == miopenHalf)
+    {
+        p.SetConvAttrFp16Alt(0);
+    }
+    return p;
 }
 
-const auto& GetTestParamsFP16() { return GetTestParams<miopenHalf>(); }
-const auto& GetTestParamsBFP16() { return GetTestParams<miopenBFloat16>(); }
-const auto& GetTestParamsFP32() { return GetTestParams<miopenFloat>(); }
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsFP16()
+{
+    return GetTestParams<miopenHalf>();
+}
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsBFP16()
+{
+    return GetTestParams<miopenBFloat16>();
+}
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsFP32()
+{
+    return GetTestParams<miopenFloat>();
+}
 
 } // namespace
 
@@ -113,3 +119,70 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestConvSolverWinograd3x3MultipassF7x2DevApplicabilityWrw_NONE,
                          testing::Combine(testing::Values(GetTestParamsFP32()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));
+
+// =====================================================================
+// TransposedConvWinograd3x3MultipassWrW<7, 2> (NHWC layout)
+// =====================================================================
+
+namespace {
+
+auto GetConvTestCasesNHWC(miopenDataType_t datatype)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    return std::vector{
+        // clang-format off
+        TestCase{{datatype, miopenTensorNHWC, {1, 16, 24, 24}},
+                 {datatype, miopenTensorNHWC, {16, 16, 7, 7}},
+                 datatype, {{3, 3}, {1, 1}, {1, 1}}},
+        // clang-format on
+    };
+}
+
+} // namespace
+
+using GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF7x2Wrw_FP16 =
+    GPU_UnitTestConvSolverWrw_FP16;
+using GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF7x2Wrw_FP32 =
+    GPU_UnitTestConvSolverWrw_FP32;
+
+using CPU_UnitTestConvSolverTransposedWinograd3x3MultipassF7x2DevApplicabilityWrw_NONE =
+    CPU_UnitTestConvSolverDevApplicabilityWrw_NONE;
+
+TEST_P(GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF7x2Wrw_FP16,
+       TransposedConvWinograd3x3MultipassWrWF7x2)
+{
+    this->RunTest(miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<7, 2>{});
+};
+
+TEST_P(GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF7x2Wrw_FP32,
+       TransposedConvWinograd3x3MultipassWrWF7x2)
+{
+    this->RunTest(miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<7, 2>{});
+};
+
+TEST_P(CPU_UnitTestConvSolverTransposedWinograd3x3MultipassF7x2DevApplicabilityWrw_NONE,
+       TransposedConvWinograd3x3MultipassWrWF7x2)
+{
+    this->RunTest(miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<7, 2>{});
+};
+
+// Smoke tests
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF7x2Wrw_FP16,
+                         testing::Combine(testing::Values(GetTestParamsFP16()),
+                                          testing::Values(miopenConvolutionAlgoWinograd),
+                                          testing::ValuesIn(GetConvTestCasesNHWC(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF7x2Wrw_FP32,
+                         testing::Combine(testing::Values(GetTestParamsFP32()),
+                                          testing::Values(miopenConvolutionAlgoWinograd),
+                                          testing::ValuesIn(GetConvTestCasesNHWC(miopenFloat))));
+
+// Device applicability test
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    CPU_UnitTestConvSolverTransposedWinograd3x3MultipassF7x2DevApplicabilityWrw_NONE,
+    testing::Combine(testing::Values(GetTestParamsFP32()),
+                     testing::Values(GetConvTestCasesNHWC(miopenFloat)[0])));

@@ -148,9 +148,9 @@ private:
 
     miopen::FusionPlanDescriptor fusePlanDesc;
 
-    const float activ_alpha = static_cast<double>(0.5f);
-    const float activ_beta  = static_cast<double>(0.5f);
-    const float activ_gamma = static_cast<double>(0.5f);
+    static constexpr double activ_alpha = 0.5;
+    static constexpr double activ_beta  = 0.5;
+    static constexpr double activ_gamma = 0.5;
     bool skip_test;
 };
 
@@ -159,6 +159,7 @@ using namespace bad_fusion_plan;
 
 TEST(GPU_FusionPlan_FP16, GoodFusionPlan)
 {
+#if MIOPEN_USE_COMPOSABLEKERNEL
     GPU_FusionPlan_FP16<miopen::solver::fusion::ConvCKIgemmFwdBiasActivFused, half_float::half> obj(
         miopenTensorNHWC, miopenActivationRELU);
     if(obj.Skip())
@@ -167,6 +168,9 @@ TEST(GPU_FusionPlan_FP16, GoodFusionPlan)
     obj.AddBias();
     obj.AddActiv();
     ASSERT_TRUE(obj.Applicability());
+#else
+    GTEST_SKIP() << "Test requires CK";
+#endif
 }
 
 TEST(GPU_FusionPlan_FP16, BadOrderFusionPlan)
@@ -228,11 +232,15 @@ TEST(GPU_FusionPlan_FP16, BadMissingActivBiasFusionPlan)
 
 TEST(GPU_FusionPlan_FP16, BadEmptyFusionPlan)
 {
+#if MIOPEN_USE_COMPOSABLEKERNEL
     GPU_FusionPlan_FP16<miopen::solver::fusion::ConvCKIgemmFwdBiasActivFused, half_float::half> obj(
         miopenTensorNHWC, miopenActivationRELU);
     if(obj.Skip())
         GTEST_SKIP();
     EXPECT_ANY_THROW(obj.Applicability());
+#else
+    GTEST_SKIP() << "Test requires CK";
+#endif
 }
 
 TEST(GPU_FusionPlan_FP16, UnSupportedFusionPlanDuringSearchMode)

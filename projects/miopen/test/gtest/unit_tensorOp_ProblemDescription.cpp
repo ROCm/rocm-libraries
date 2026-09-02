@@ -51,8 +51,6 @@ struct TensorOpProblemDescriptionTestCase
         case miopenTensorOpMul: op.append("miopenTensorOpMul"); break;
         case miopenTensorOpMin: op.append("miopenTensorOpMin"); break;
         case miopenTensorOpMax: op.append("miopenTensorOpMax"); break;
-
-        default: break;
         }
 
         os << "(" << tc.aTensorDesc << "), ";

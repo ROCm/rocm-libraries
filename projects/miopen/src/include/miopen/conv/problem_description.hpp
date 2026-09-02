@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include <boost/any.hpp>
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/names.hpp>
 #include <miopen/scalar.hpp>
@@ -105,10 +104,10 @@ namespace conv {
 MIOPEN_INTERNALS_EXPORT miopenAlphaBetaCase_t ClassifyAlphaBeta(const Scalar& alpha,
                                                                 const Scalar& beta);
 
-struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
+struct ProblemDescription : ProblemDescriptionBase
 #if MIOPEN_ENABLE_SQLITE
     ,
-                                                    SQLiteSerializable<ProblemDescription>
+                            SQLiteSerializable<ProblemDescription>
 #endif
 {
     ProblemDescription() = default;
@@ -223,7 +222,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     bool IsDirectionForward() const { return direction == conv::Direction::Forward; }
     bool IsDirectionBackwardData() const { return direction == conv::Direction::BackwardData; }
     bool IsDirectionBackwardWrW() const { return direction == conv::Direction::BackwardWeights; }
-    std::string GetDirectionStr() const;
+    MIOPEN_INTERNALS_EXPORT std::string GetDirectionStr() const;
 
     const Scalar& GetAlpha() const { return alpha; }
     const Scalar& GetBeta() const { return beta; }
@@ -296,6 +295,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
         return GetInCastType() || GetWeightsCastType() || GetOutCastType();
     }
 
+    bool UseTF32() const { return use_tf32; }
+
     // To be used in Solvers that do not implement ALT FP16 kernels.
     // Those Solvers must be non-applicable for gfx90a when this function returns true.
     bool IsGfx90aFp16altRequired() const
@@ -311,9 +312,9 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
         MIOPEN_THROW("Direction must be known!");
     }
 
-    bool IsLayoutDefault() const;
-    bool IsLayoutNHWC() const;
-    bool IsLayoutNCHWc() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutDefault() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutNHWC() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutNCHWc() const;
     bool IsNCHWc_NCHWc() const;
     bool IsNCHWc_CHWNc() const;
 
@@ -339,9 +340,9 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
                out.AllLengthsFitIntoInt();
     }
 
-    void HeuristicUpdateLayouts();
+    MIOPEN_INTERNALS_EXPORT void HeuristicUpdateLayouts();
 
-    void MakeNetworkConfig(std::string& conf_key) const;
+    MIOPEN_INTERNALS_EXPORT void MakeNetworkConfig(std::string& conf_key) const;
 
     NetworkConfig MakeNetworkConfig() const override
     {
@@ -353,7 +354,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     // Todo: remove after fixing fin
     [[deprecated]] NetworkConfig BuildConfKey() const { return MakeNetworkConfig(); }
 
-    void Serialize(std::ostream& stream) const;
+    MIOPEN_INTERNALS_EXPORT void Serialize(std::ostream& stream) const;
 
     friend std::ostream& operator<<(std::ostream& os, const ProblemDescription& obj)
     {
@@ -396,6 +397,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
             self.GetInDataType(), self.GetWeightsDataType(), self.GetOutDataType());
         f(data_type, "data_type");
         f(self.GetDirectionStr(), "direction");
+        if(data_type == "FP32" && self.UseTF32())
+            f("TF32", "compute_datatype");
     }
 
     template <class Self, class Visitor>
@@ -406,13 +409,14 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
               [&](std::string value, std::string name) { f(value, name); });
     }
 
-    void SetupFloats(ExecutionContext& ctx) const;
+    MIOPEN_INTERNALS_EXPORT void SetupFloats(ExecutionContext& ctx) const;
+    MIOPEN_INTERNALS_EXPORT void SetupComputeType(const ExecutionContext& ctx) const;
 
 private:
     std::string ComputeLayout(const TensorDescriptor& td) const;
-    std::string ComputeInLayout() const;
-    std::string ComputeOutLayout() const;
-    std::string ComputeWeightsLayout() const;
+    MIOPEN_INTERNALS_EXPORT std::string ComputeInLayout() const;
+    MIOPEN_INTERNALS_EXPORT std::string ComputeOutLayout() const;
+    MIOPEN_INTERNALS_EXPORT std::string ComputeWeightsLayout() const;
 
     TensorDescriptor in;
     TensorDescriptor weights;
@@ -426,7 +430,62 @@ private:
     Scalar alpha                          = Scalar(1.0);
     Scalar beta                           = Scalar(0.0);
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
+    mutable bool use_tf32                 = false;
 };
+
+inline bool IsPointOutput3dStrideEqFilter(const ProblemDescription& problem,
+                                          Direction direction,
+                                          bool require_input_spatial_eq_filter)
+{
+    if(problem.GetDirection() != direction)
+        return false;
+
+    const auto& conv = problem.GetConv();
+    if(conv.GetSpatialDimension() != 3 || conv.group_count != 1)
+        return false;
+
+    const auto& in_desc    = problem.GetIn();
+    const auto& out_desc   = problem.GetOut();
+    const auto& point_desc = direction == Direction::Forward ? out_desc : in_desc;
+    const auto& w_desc     = problem.GetWeights();
+
+    const auto& point_lens = point_desc.GetLengths();
+    if(point_lens.size() != 5 || point_lens[2] != 1 || point_lens[3] != 1 || point_lens[4] != 1)
+        return false;
+
+    const auto& in_lens = in_desc.GetLengths();
+
+    const auto& pads      = conv.GetConvPads();
+    const auto& strides   = conv.GetConvStrides();
+    const auto& dilations = conv.GetConvDilations();
+    const auto& w_lens    = w_desc.GetLengths();
+    if(w_lens.size() != 5 || pads.size() != 3 || strides.size() != 3 || dilations.size() != 3)
+        return false;
+
+    for(int i = 0; i < 3; ++i)
+    {
+        if(pads[i] != 0 || dilations[i] != 1)
+            return false;
+        if(static_cast<int>(w_lens[2 + i]) != strides[i])
+            return false;
+        if(require_input_spatial_eq_filter &&
+           static_cast<int>(in_lens[2 + i]) != static_cast<int>(w_lens[2 + i]))
+            return false;
+    }
+
+    return true;
+}
+
+inline bool IsBwdDataPointOutput3dStrideEqFilter(const ProblemDescription& problem)
+{
+    return IsPointOutput3dStrideEqFilter(problem, Direction::BackwardData, false);
+}
+
+inline bool IsFwdDataPointOutput3dStrideEqFilter(const ProblemDescription& problem)
+{
+    // For direct GEMM without Im2Col, input spatial must equal filter spatial.
+    return IsPointOutput3dStrideEqFilter(problem, Direction::Forward, true);
+}
 
 } // namespace conv
 } // namespace miopen

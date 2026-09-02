@@ -70,8 +70,8 @@ public:
             if(i != rootStreamId)
             {
                 const miopen::HipEventPtr sync_event = make_hip_fast_event();
-                RecordEvent(sync_event.get(), i);
-                SetWaitEvent(sync_event.get(), rootStreamId);
+                (void)RecordEvent(sync_event.get(), i);
+                (void)SetWaitEvent(sync_event.get(), rootStreamId);
             }
         }
     }
@@ -80,12 +80,12 @@ public:
     {
         const miopen::HipEventPtr main_event = make_hip_fast_event();
 
-        RecordEvent(main_event.get(), rootStreamId);
+        (void)RecordEvent(main_event.get(), rootStreamId);
 
         for(size_t i = 0, stream_cnt = size(); i < stream_cnt; i++)
         {
             if(i != rootStreamId)
-                SetWaitEvent(main_event.get(), i);
+                (void)SetWaitEvent(main_event.get(), i);
         }
     };
 

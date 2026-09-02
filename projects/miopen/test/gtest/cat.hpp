@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #define MIOPEN_BETA_API 1
 #include "../driver/tensor_driver.hpp"
 #include "cpu_cat.hpp"
@@ -138,10 +116,10 @@ protected:
     void RunTest()
     {
         auto&& handle = get_handle();
-
-        cpu_cat_forward<T>(inputs, ref_output, dim);
         std::vector<miopen::TensorDescriptor*> inputDescs;
         std::vector<ConstData_t> inputData;
+
+        cpu_cat_forward<T>(inputs, ref_output, dim, false);
 
         std::transform(inputs.begin(),
                        inputs.end(),
@@ -167,10 +145,11 @@ protected:
 
     void Verify()
     {
-        auto error = miopen::rms_range(ref_output, output);
-        EXPECT_TRUE(miopen::range_distance(ref_output) == miopen::range_distance(output));
-        EXPECT_TRUE(error == 0) << "Outputs do not match each other. Error:" << error;
+        const auto error = miopen::rms_range(ref_output, output);
+        EXPECT_EQ(miopen::range_distance(ref_output), miopen::range_distance(output));
+        EXPECT_FLOAT_EQ(error, 0) << "Outputs do not match each other. Error:" << error;
     }
+
     CatTestCase cat_config;
 
     std::vector<tensor<T>> inputs;

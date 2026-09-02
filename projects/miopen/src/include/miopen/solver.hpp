@@ -122,6 +122,12 @@ private:
     }
 };
 
+#ifdef _WIN32
+// Suppress -Wundefined-func-template warning for Windows
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wundefined-func-template"
+#endif
+
 /// Common interface for tunable and non-tunable solvers
 template <class Context, class Problem>
 struct SolverInterface : SolverBase
@@ -145,6 +151,9 @@ struct SolverInterface : SolverBase
 
     /// Returns the workspace size required by the solver for the given Problem
     virtual size_t GetWorkspaceSize(const Context&, const Problem&) const { return 0; };
+
+    /// Returns true if the solver is expected to be slow for the given problem.
+    virtual bool IsSlow(const Context&, const Problem&) const { return false; };
 };
 
 /// Common interface for non-tunable solvers
@@ -176,7 +185,8 @@ struct SolverBaseNonTunable : SolverInterfaceNonTunable<Context, Problem>
     InvokerFactory GetInvokerFactory(const Context& ctx, const Problem& problem) const
     {
         const auto solution = this->GetSolution(ctx, problem);
-        return *solution.invoker_factory;
+        // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+        return solution.invoker_factory.value();
     }
 };
 
@@ -188,6 +198,8 @@ struct TunableSolverTrait
 template <class Context, class Problem, class PerformanceConfig>
 struct SolverBaseTunable : SolverInterfaceTunable<Context, Problem>, TunableSolverTrait
 {
+    using PerformanceConfigType = PerformanceConfig;
+
     bool IsTunable() const final { return true; };
 
     /// Initializes performance config to the default values.
@@ -225,9 +237,15 @@ struct SolverBaseTunable : SolverInterfaceTunable<Context, Problem>, TunableSolv
                                      const Problem& problem,
                                      const PerformanceConfig& config) const
     {
-        return *GetSolution(ctx, problem, config).invoker_factory;
+        // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+        return GetSolution(ctx, problem, config).invoker_factory.value();
     }
 };
+
+#ifdef _WIN32
+// Suppress -Wundefined-func-template warning for Windows
+#pragma GCC diagnostic pop
+#endif
 
 // \todo Should be removed
 template <class Context, class Problem>
@@ -242,12 +260,6 @@ struct IsTunable : std::is_base_of<TunableSolverTrait, Solver>
 {
     static_assert(!std::is_same_v<Solver, TunableSolverTrait>,
                   "Raw trait shouldn't be passed, explicit type is needed");
-};
-
-// Use struct as a syntactic sugar to make the intent as clear as possible.
-struct ThisSolverIsDeprecatedStatic
-{
-    MIOPEN_INTERNALS_EXPORT static bool IsDisabled(const ExecutionContext& ctx);
 };
 
 } // namespace solver

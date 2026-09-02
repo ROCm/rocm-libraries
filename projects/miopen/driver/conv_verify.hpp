@@ -27,6 +27,7 @@
 #define GUARD_MIOPEN_CONV_VERIFY_HPP
 
 #include <cassert>
+#include "../test/gemm.hpp"
 
 template <typename Tgpu_ /* the data type used in GPU computations (usually half) */,
           typename Tcheck_ /* the data type used in CPU checkings (usually double) */>
@@ -184,7 +185,7 @@ void RunBackwardWeightsCPUVerify(std::vector<Tcheck_>& dwei_host,
 
 #endif
 
-//#ifdef BACKWARD_WRW_VERIFY_GEMM
+// #ifdef BACKWARD_WRW_VERIFY_GEMM
 #if 0
     {
         assert(stride_h == stride_w);
@@ -259,7 +260,6 @@ void RunBackwardWeightsCPUVerify(std::vector<Tcheck_>& dwei_host,
         int im2col_batch_stride = weights_width * top_width * top_height;
         Tcheck_ * im2col_ptr = new Tcheck_[im2col_batch_stride * batch_sz];
 
-#define ADNN_MM_TRANSPOSE 1
         memset(im2col_ptr, 0, im2col_batch_stride * batch_sz * sizeof(Tcheck_));
         memset(weights_df_v_ptr, 0, weights_width * weights_height * sizeof(Tcheck_));
         for (int b = 0; b < batch_sz; ++b)
@@ -268,9 +268,9 @@ void RunBackwardWeightsCPUVerify(std::vector<Tcheck_>& dwei_host,
                 bot_height, bot_width, wei_h, wei_w, pad,
                 stride, &im2col_ptr[im2col_batch_stride * b]);
             // sum up over mini-batch
-            ADNN_mm_cpu<Tcheck_>((const Tcheck_*)&top_df_ptr[top_df_batch_stride * b], top_width * top_height, outputs, top_df_channel_stride, 0,
-                (const Tcheck_ *)&im2col_ptr[im2col_batch_stride * b], top_width * top_height, weights_width, top_width * top_height, ADNN_MM_TRANSPOSE,
-                weights_df_v_ptr, weights_width, weights_height, weights_df_v_stride, 0,
+            gemm_cpu<Tcheck_>((const Tcheck_*)&top_df_ptr[top_df_batch_stride * b], top_width * top_height, outputs, top_df_channel_stride, false,
+                (const Tcheck_ *)&im2col_ptr[im2col_batch_stride * b], top_width * top_height, weights_width, top_width * top_height, true,
+                weights_df_v_ptr, weights_width, weights_height, weights_df_v_stride,
                 1, 1);
 
         }

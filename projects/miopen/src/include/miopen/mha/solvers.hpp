@@ -39,42 +39,36 @@ namespace mha {
 
 using MhaSolver = NonTunableSolverBase<ExecutionContext, miopen::mha::ProblemDescription>;
 
-struct MhaForward final : MhaSolver
+struct MIOPEN_INTERNALS_EXPORT MhaForward final : MhaSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<MhaForward>(); }
 
-    MIOPEN_INTERNALS_EXPORT bool
-    IsApplicable(const ExecutionContext& context,
-                 const miopen::mha::ProblemDescription& problem) const override;
+    bool IsApplicable(const ExecutionContext& context,
+                      const miopen::mha::ProblemDescription& problem) const override;
 
-    MIOPEN_INTERNALS_EXPORT ConvSolution
-    GetSolution(const ExecutionContext& context,
-                const miopen::mha::ProblemDescription& problem) const override;
+    ConvSolution GetSolution(const ExecutionContext& context,
+                             const miopen::mha::ProblemDescription& problem) const override;
 
-    MIOPEN_INTERNALS_EXPORT std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::mha::ProblemDescription& problem) const override;
+    std::size_t GetWorkspaceSize(const ExecutionContext& context,
+                                 const miopen::mha::ProblemDescription& problem) const override;
 
-    MIOPEN_INTERNALS_EXPORT bool MayNeedWorkspace() const override;
+    bool MayNeedWorkspace() const override;
 };
 
-struct MhaBackward final : MhaSolver
+struct MIOPEN_INTERNALS_EXPORT MhaBackward final : MhaSolver
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<MhaBackward>(); }
 
-    MIOPEN_INTERNALS_EXPORT bool
-    IsApplicable(const ExecutionContext& context,
-                 const miopen::mha::ProblemDescription& problem) const override;
+    bool IsApplicable(const ExecutionContext& context,
+                      const miopen::mha::ProblemDescription& problem) const override;
 
-    MIOPEN_INTERNALS_EXPORT ConvSolution
-    GetSolution(const ExecutionContext& context,
-                const miopen::mha::ProblemDescription& problem) const override;
+    ConvSolution GetSolution(const ExecutionContext& context,
+                             const miopen::mha::ProblemDescription& problem) const override;
 
-    MIOPEN_INTERNALS_EXPORT std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::mha::ProblemDescription& problem) const override;
+    std::size_t GetWorkspaceSize(const ExecutionContext& context,
+                                 const miopen::mha::ProblemDescription& problem) const override;
 
-    MIOPEN_INTERNALS_EXPORT bool MayNeedWorkspace() const override;
+    bool MayNeedWorkspace() const override;
 };
 
 } // namespace mha

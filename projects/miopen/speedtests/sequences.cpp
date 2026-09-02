@@ -1,40 +1,16 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
-#include <miopen/config.h> // WORKAROUND_BOOST_ISSUE_392
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <miopen/kernel.hpp>
 #include <miopen/rank.hpp>
 #include <miopen/sequences.hpp>
 
 #include <driver.hpp>
 
-#include <boost/range/algorithm/find.hpp>
-#include <boost/range/irange.hpp>
-
 #include <array>
 #include <chrono>
 #include <iostream>
+#include <ranges>
 
 namespace miopen {
 namespace seq {
@@ -48,7 +24,7 @@ enum class Modes
     Standard,
     Template,
     Native,
-    Boost,
+    Range,
     Unknown,
 };
 
@@ -128,7 +104,7 @@ struct NativeImpl<Sequences::IRange>
 {
     bool Next(TestData&) const
     {
-        std::cerr << "irange is only for boost" << std::endl;
+        std::cerr << "irange is only for range" << std::endl;
         std::exit(-1); // NOLINT (concurrency-mt-unsafe)
     }
 };
@@ -195,7 +171,7 @@ bool Next(const TRange& range, TValue& value)
 }
 
 template <class TValue, TValue... values>
-struct BoostSequence
+struct RangeSequence
 {
     using value_type     = TValue;
     using const_iterator = const TValue*;
@@ -209,7 +185,7 @@ struct BoostSequence
 
 private:
     static constexpr std::size_t count                         = sizeof...(values);
-    static constexpr std::array<int, BoostSequence::count> arr = {{values...}};
+    static constexpr std::array<int, RangeSequence::count> arr = {{values...}};
 };
 
 template <class Start, class IntegerSequence>
@@ -240,20 +216,20 @@ struct span_impl<Start, std::integer_sequence<T, Ns...>>
 };
 
 template <class T, T start, T end>
-struct BoostSpan
+struct RangeSpan
     : span_impl<std::integral_constant<T, start>, std::make_integer_sequence<T, end - start>>
 {
 };
 
 template <Sequences seq>
-struct BoostImpl
+struct RangeImpl
 {
 };
 
 template <>
-struct BoostImpl<Sequences::IRange>
+struct RangeImpl<Sequences::IRange>
 {
-    bool Next(TestData& v) const { return miopen::seq::Next(boost::irange(0, 9), v.x); }
+    bool Next(TestData& v) const { return miopen::seq::Next(std::views::iota(0, 9), v.x); }
 };
 
 struct SpeedTestDriver : public test_driver
@@ -287,8 +263,8 @@ struct SpeedTestDriver : public test_driver
     void show_help()
     {
         test_driver::show_help();
-        std::cout << "Permitted modes: nat, std, tmpl, boost" << std::endl;
-        std::cout << "Permitted sequences: seq, span, irange (boost), join(nat, std, tmpl)"
+        std::cout << "Permitted modes: nat, std, tmpl, range" << std::endl;
+        std::cout << "Permitted sequences: seq, span, irange (range), join(nat, std, tmpl)"
                   << std::endl;
         std::cout << "Permitted instances: single, percall, static" << std::endl;
     }
@@ -309,8 +285,8 @@ private:
             return Modes::Template;
         if(str == "nat")
             return Modes::Native;
-        if(str == "boost")
-            return Modes::Boost;
+        if(str == "range")
+            return Modes::Range;
         return Modes::Unknown;
     }
 
@@ -346,7 +322,7 @@ private:
         case Modes::Standard: Standard<seq>(); break;
         case Modes::Template: Template<seq>(); break;
         case Modes::Native: Native<seq>(); break;
-        case Modes::Boost: Boost<seq>(); break;
+        case Modes::Range: Range<seq>(); break;
         case Modes::Unknown:
             std::cerr << "Unknown mode." << std::endl;
             std::exit(-1); // NOLINT (concurrency-mt-unsafe)
@@ -446,9 +422,9 @@ private:
     }
 
     static auto MakeSeq() { return Sequence<int, 1, 2, 7>{}; }
-    static auto MakeBSeq() { return BoostSequence<int, 1, 2, 7>{}; }
+    static auto MakeBSeq() { return RangeSequence<int, 1, 2, 7>{}; }
     static auto MakeSpan() { return Span<int, 0, 8>{}; }
-    static auto MakeBSpan() { return BoostSpan<int, 0, 9>{}; }
+    static auto MakeBSpan() { return RangeSpan<int, 0, 9>{}; }
     static auto MakeJoin() { return Join<Span<int, 0, 8>, Sequence<int, 10, 11, 14, 15>>{}; }
     static auto TmplMember() { return std::integral_constant<int TestData::*, &TestData::x>{}; }
 
@@ -467,7 +443,7 @@ private:
         case Sequences::Span: Test([]() { return RS(MakeSpan(), &TestData::x); }); break;
         case Sequences::Join: Test([]() { return RS(MakeJoin(), &TestData::x); }); break;
         case Sequences::IRange:
-            std::cerr << "irange is only for boost" << std::endl;
+            std::cerr << "irange is only for range" << std::endl;
             std::exit(-1); // NOLINT (concurrency-mt-unsafe)
         }
     }
@@ -481,13 +457,13 @@ private:
         case Sequences::Span: Test([]() { return RS(MakeSpan(), TmplMember()); }); break;
         case Sequences::Join: Test([]() { return RS(MakeJoin(), TmplMember()); }); break;
         case Sequences::IRange:
-            std::cerr << "irange is only for boost" << std::endl;
+            std::cerr << "irange is only for range" << std::endl;
             std::exit(-1); // NOLINT (concurrency-mt-unsafe)
         }
     }
 
     template <Sequences seq>
-    void Boost() const
+    void Range() const
     {
         switch(seq)
         {
@@ -496,7 +472,7 @@ private:
         case Sequences::Join:
             std::cerr << "join is only for nat/std/tmpl" << std::endl;
             std::exit(-1); // NOLINT (concurrency-mt-unsafe)
-        case Sequences::IRange: Test([]() { return BoostImpl<Sequences::IRange>{}; }); break;
+        case Sequences::IRange: Test([]() { return RangeImpl<Sequences::IRange>{}; }); break;
         }
     }
 };

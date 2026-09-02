@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -64,21 +64,45 @@ struct DeviceOperationInstanceFactory<
                          is_same_v<CLayout, Row>)
             {
                 add_device_gemm_wmma_universal_f16_f16_f16_mk_kn_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_mk_kn_mn_comp_kpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_mk_kn_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_mk_kn_mn_comp_mnkpadding_instances(
+                    op_ptrs);
             }
             else if constexpr(is_same_v<ALayout, Row> && is_same_v<BLayout, Col> &&
                               is_same_v<CLayout, Row>)
             {
                 add_device_gemm_wmma_universal_f16_f16_f16_mk_nk_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_mk_nk_mn_comp_kpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_mk_nk_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_mk_nk_mn_comp_mnkpadding_instances(
+                    op_ptrs);
             }
             else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Row> &&
                               is_same_v<CLayout, Row>)
             {
                 add_device_gemm_wmma_universal_f16_f16_f16_km_kn_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_km_kn_mn_comp_kpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_km_kn_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_km_kn_mn_comp_mnkpadding_instances(
+                    op_ptrs);
             }
             else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Col> &&
                               is_same_v<CLayout, Row>)
             {
                 add_device_gemm_wmma_universal_f16_f16_f16_km_nk_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_km_nk_mn_comp_kpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_km_nk_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f16_f16_km_nk_mn_comp_mnkpadding_instances(
+                    op_ptrs);
             }
         }
 #endif
@@ -91,11 +115,23 @@ struct DeviceOperationInstanceFactory<
             {
                 add_device_gemm_wmma_universal_bf16_bf16_bf16_mk_kn_mn_comp_default_instances(
                     op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_mk_kn_mn_comp_kpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_mk_kn_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_mk_kn_mn_comp_mnkpadding_instances(
+                    op_ptrs);
             }
             else if constexpr(is_same_v<ALayout, Row> && is_same_v<BLayout, Col> &&
                               is_same_v<CLayout, Row>)
             {
                 add_device_gemm_wmma_universal_bf16_bf16_bf16_mk_nk_mn_comp_default_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_mk_nk_mn_comp_kpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_mk_nk_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_mk_nk_mn_comp_mnkpadding_instances(
                     op_ptrs);
             }
             else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Row> &&
@@ -103,16 +139,28 @@ struct DeviceOperationInstanceFactory<
             {
                 add_device_gemm_wmma_universal_bf16_bf16_bf16_km_kn_mn_comp_default_instances(
                     op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_km_kn_mn_comp_kpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_km_kn_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_km_kn_mn_comp_mnkpadding_instances(
+                    op_ptrs);
             }
             else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Col> &&
                               is_same_v<CLayout, Row>)
             {
                 add_device_gemm_wmma_universal_bf16_bf16_bf16_km_nk_mn_comp_default_instances(
                     op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_km_nk_mn_comp_kpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_km_nk_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_bf16_bf16_bf16_km_nk_mn_comp_mnkpadding_instances(
+                    op_ptrs);
             }
         }
 #endif
-#if(defined(CK_ENABLE_BF16) && defined(CK_ENABLE_FP8))
+#if(defined(CK_ENABLE_BF16) && defined(CK_ENABLE_FP8) && defined(CK_USE_WMMA_FP8))
         if constexpr(is_same_v<ADataType, f8_t> && is_same_v<BDataType, f8_t> &&
                      is_same_v<CDataType, bhalf_t>)
         {
@@ -120,11 +168,144 @@ struct DeviceOperationInstanceFactory<
                          is_same_v<CLayout, Row>)
             {
                 add_device_gemm_wmma_universal_f8_f8_bf16_mk_kn_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f8_bf16_mk_kn_mn_comp_kpadding_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f8_bf16_mk_kn_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f8_f8_bf16_mk_kn_mn_comp_mnkpadding_instances(
+                    op_ptrs);
             }
             else if constexpr(is_same_v<ALayout, Row> && is_same_v<BLayout, Col> &&
                               is_same_v<CLayout, Row>)
             {
                 add_device_gemm_wmma_universal_f8_f8_bf16_mk_nk_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f8_bf16_mk_nk_mn_comp_kpadding_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f8_bf16_mk_nk_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f8_f8_bf16_mk_nk_mn_comp_mnkpadding_instances(
+                    op_ptrs);
+            }
+        }
+
+        if constexpr(is_same_v<ADataType, bhalf_t> && is_same_v<BDataType, pk_i4_t> &&
+                     is_same_v<CDataType, bhalf_t>)
+        {
+            if constexpr(is_same_v<ALayout, Row> && is_same_v<BLayout, Col> &&
+                         is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_bf16_i4_bf16_mk_nk_mn_comp_default_instances(
+                    op_ptrs);
+            }
+            else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Col> &&
+                              is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_bf16_i4_bf16_km_nk_mn_comp_default_instances(
+                    op_ptrs);
+            }
+        }
+#endif
+#if(defined(CK_ENABLE_FP16) && defined(CK_ENABLE_FP8) && defined(CK_USE_WMMA_FP8))
+        if constexpr(is_same_v<ADataType, f8_t> && is_same_v<BDataType, half_t> &&
+                     is_same_v<CDataType, half_t>)
+        {
+            if constexpr(is_same_v<ALayout, Row> && is_same_v<BLayout, Row> &&
+                         is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_f8_f16_f16_mk_kn_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_mk_kn_mn_comp_kpadding_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_mk_kn_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_mk_kn_mn_comp_mnkpadding_instances(
+                    op_ptrs);
+            }
+            else if constexpr(is_same_v<ALayout, Row> && is_same_v<BLayout, Col> &&
+                              is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_f8_f16_f16_mk_nk_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_mk_nk_mn_comp_kpadding_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_mk_nk_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_mk_nk_mn_comp_mnkpadding_instances(
+                    op_ptrs);
+            }
+            else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Row> &&
+                              is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_f8_f16_f16_km_kn_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_km_kn_mn_comp_kpadding_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_km_kn_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_km_kn_mn_comp_mnkpadding_instances(
+                    op_ptrs);
+            }
+            else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Col> &&
+                              is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_f8_f16_f16_km_nk_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_km_nk_mn_comp_kpadding_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_km_nk_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f8_f16_f16_km_nk_mn_comp_mnkpadding_instances(
+                    op_ptrs);
+            }
+        }
+
+        if constexpr(is_same_v<ADataType, half_t> && is_same_v<BDataType, f8_t> &&
+                     is_same_v<CDataType, half_t>)
+        {
+            if constexpr(is_same_v<ALayout, Row> && is_same_v<BLayout, Row> &&
+                         is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_f16_f8_f16_mk_kn_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_mk_kn_mn_comp_kpadding_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_mk_kn_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_mk_kn_mn_comp_mnkpadding_instances(
+                    op_ptrs);
+            }
+            else if constexpr(is_same_v<ALayout, Row> && is_same_v<BLayout, Col> &&
+                              is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_f16_f8_f16_mk_nk_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_mk_nk_mn_comp_kpadding_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_mk_nk_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_mk_nk_mn_comp_mnkpadding_instances(
+                    op_ptrs);
+            }
+            else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Row> &&
+                              is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_f16_f8_f16_km_kn_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_km_kn_mn_comp_kpadding_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_km_kn_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_km_kn_mn_comp_mnkpadding_instances(
+                    op_ptrs);
+            }
+            else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Col> &&
+                              is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_f16_f8_f16_km_nk_mn_comp_default_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_km_nk_mn_comp_kpadding_instances(op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_km_nk_mn_comp_mnpadding_instances(
+                    op_ptrs);
+                add_device_gemm_wmma_universal_f16_f8_f16_km_nk_mn_comp_mnkpadding_instances(
+                    op_ptrs);
+            }
+        }
+
+        if constexpr(is_same_v<ADataType, half_t> && is_same_v<BDataType, pk_i4_t> &&
+                     is_same_v<CDataType, half_t>)
+        {
+            if constexpr(is_same_v<ALayout, Row> && is_same_v<BLayout, Col> &&
+                         is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_f16_i4_f16_mk_nk_mn_comp_default_instances(op_ptrs);
+            }
+            else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Col> &&
+                              is_same_v<CLayout, Row>)
+            {
+                add_device_gemm_wmma_universal_f16_i4_f16_km_nk_mn_comp_default_instances(op_ptrs);
             }
         }
 #endif
@@ -304,6 +485,13 @@ struct DeviceOperationInstanceFactory<
                     op_ptrs);
                 add_device_gemm_xdl_universal_bf16_bf16_bf16_mk_nk_mn_mem_v2_kpadding_instances(
                     op_ptrs);
+
+#ifdef CK_USE_GFX1250
+                add_device_gemm_xdl_universal_bf16_bf16_bf16_mk_nk_mn_v3_prefetch_instances(
+                    op_ptrs);
+                add_device_gemm_xdl_universal_bf16_bf16_bf16_mk_nk_mn_v3_no_prefetch_instances(
+                    op_ptrs);
+#endif
             }
             else if constexpr(is_same_v<ALayout, Col> && is_same_v<BLayout, Row> &&
                               is_same_v<CLayout, Row>)

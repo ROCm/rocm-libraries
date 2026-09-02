@@ -1,34 +1,30 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck/ck.hpp"
 #include "ck/utility/enable_if.hpp"
+#include "ck/utility/get_id.hpp"
 #include "ck/utility/random_gen.hpp"
 #include "ck/utility/functional.hpp"
 #include "ck/utility/type.hpp"
 
-#ifdef CK_USE_FNUZ_FP8
-#define CK_USE_FNUZ_FP8 1
-#else
+#ifndef CK_USE_FNUZ_FP8
 #define CK_USE_FNUZ_FP8 0
 #endif
 
-#ifdef CK_USE_OCP_FP8
-#define CK_USE_OCP_FP8 1
-#else
+#ifndef CK_USE_OCP_FP8
 #define CK_USE_OCP_FP8 0
 #endif
 
-#if(defined(__gfx942__) || defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && \
-    __HIP_DEVICE_COMPILE__
+#if(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx12__)) && __HIP_DEVICE_COMPILE__
 #define CK_FP8_CVT_FAST_PATH 1
 #else
 #define CK_FP8_CVT_FAST_PATH 0
 #endif
 
-#if(defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
+#if(defined(__gfx950__) || defined(__gfx12__)) && __HIP_DEVICE_COMPILE__
 #define CK_OCP_FP8_CVT_FAST_PATH 1
 #else
 #define CK_OCP_FP8_CVT_FAST_PATH 0
@@ -36,8 +32,34 @@
 
 namespace ck {
 
-using f8_fnuz_t  = _BitInt(8);
-using bf8_fnuz_t = unsigned _BitInt(8);
+struct f8_fnuz_t
+{
+    using data_type  = unsigned char;
+    data_type m_data = data_type{};
+    __host__ __device__ explicit constexpr f8_fnuz_t(data_type in_data) : m_data(in_data) {}
+    __host__ __device__ explicit constexpr f8_fnuz_t() = default;
+    __host__ __device__ bool constexpr operator==(f8_fnuz_t other) const
+    {
+        return m_data == other.m_data;
+    }
+    __host__ __device__ explicit constexpr operator data_type() const { return m_data; }
+};
+
+struct bf8_fnuz_t
+{
+    using data_type  = unsigned char;
+    data_type m_data = data_type{};
+    __host__ __device__ explicit constexpr bf8_fnuz_t(data_type in_data) : m_data(in_data) {}
+    __host__ __device__ explicit constexpr bf8_fnuz_t() = default;
+    __host__ __device__ bool constexpr operator==(bf8_fnuz_t other) const
+    {
+        return m_data == other.m_data;
+    }
+    __host__ __device__ explicit constexpr operator data_type() const { return m_data; }
+};
+
+static_assert(1 == sizeof(f8_fnuz_t));
+static_assert(1 == sizeof(bf8_fnuz_t));
 
 typedef unsigned char fp8_storage_t;
 
@@ -64,10 +86,18 @@ enum class ck_saturation_t
 namespace fp8_impl {
 
 typedef fp8_storage_t fp8x2_storage_t __attribute__((ext_vector_type(2)));
+typedef fp8_storage_t fp8x8_storage_t __attribute__((ext_vector_type(8)));
 typedef _Float16 half2_t __attribute__((ext_vector_type(2)));
 typedef ushort ushortx2_t __attribute__((ext_vector_type(2)));
 typedef short shortx2_t __attribute__((ext_vector_type(2)));
 typedef float float2_t __attribute__((ext_vector_type(2)));
+typedef uint32_t uint32x2_t __attribute__((ext_vector_type(2)));
+#if CK_USE_LLVM_BUILTIN_BF16
+using bhalf_t = __bf16;
+#else
+using bhalf_t = ushort;
+#endif
+typedef bhalf_t bhalf2_t __attribute__((ext_vector_type(2)));
 
 __host__ __device__ static inline constexpr bool fnuz_f8_is_nan(f8_fnuz_t a)
 {
@@ -367,7 +397,7 @@ struct bf8_ocp_t
     __host__ explicit operator float() const
 #endif
     {
-#if defined(__gfx950__) || defined(__gfx1200__) || defined(__gfx1201__)
+#if defined(__gfx950__) || defined(__gfx12__)
         return fp8_impl::cast_to_f32_from_f8<default_interpret>(this->data);
 #else
         return fp8_impl::cast_from_f8<float, wm, we, false>(
@@ -381,7 +411,7 @@ struct bf8_ocp_t
     __host__ explicit operator _Float16() const
 #endif
     {
-#if defined(__gfx950__) || defined(__gfx1200__) || defined(__gfx1201__)
+#if defined(__gfx950__) || defined(__gfx12__)
         return static_cast<_Float16>(fp8_impl::cast_to_f32_from_f8<default_interpret>(this->data));
 #else
         return fp8_impl::cast_from_f8<_Float16, wm, we, false>(
@@ -431,7 +461,7 @@ __host__ __device__ inline constexpr bool fp8_is_inf(bf8_ocp_t a)
 namespace fp8_impl {
 
 // Assertions to check for supported conversion types
-#define __assert_ocp_support(interp)                                               \
+#define __fp8_impl_assert_ocp_support(interp)                                      \
     {                                                                              \
         if(interp != ck_fp8_interpretation_t::CK_E4M3_OCP &&                       \
            interp != ck_fp8_interpretation_t::CK_E5M2_OCP)                         \
@@ -439,7 +469,7 @@ namespace fp8_impl {
             __hip_assert(false && "type is unsupported by current target device"); \
         }                                                                          \
     }
-#define __assert_fnuz_support(interp)                                              \
+#define __fp8_impl_assert_fnuz_support(interp)                                     \
     {                                                                              \
         if(interp != ck_fp8_interpretation_t::CK_E4M3_FNUZ &&                      \
            interp != ck_fp8_interpretation_t::CK_E5M2_FNUZ)                        \
@@ -453,10 +483,10 @@ __is_interpret_supported([[maybe_unused]] ck_fp8_interpretation_t interp)
 {
 #if defined(__HIP_DEVICE_COMPILE__) && __HIP_DEVICE_COMPILE__
 #if CK_USE_OCP_FP8
-    __assert_ocp_support(interp);
+    __fp8_impl_assert_ocp_support(interp);
 #endif
 #if CK_USE_FNUZ_FP8
-    __assert_fnuz_support(interp);
+    __fp8_impl_assert_fnuz_support(interp);
 #endif
 #endif
 }
@@ -963,7 +993,100 @@ static __device__ fp8x2_storage_t cast_to_f8_from_bf16(ushortx2_t v, unsigned in
 
     return fp8x2_storage_t{val.i8val[0], val.i8val[1]};
 }
-#endif // defined(__gfx950__)
+#elif defined(__gfx125__)
+template <ck_fp8_interpretation_t interpret, bool saturate, bool stochastic_rounding = false>
+static __device__ fp8_storage_t cast_to_f8_from_f16(_Float16 v,
+                                                    [[maybe_unused]] unsigned int rng = 0)
+{
+    union
+    {
+        int i32val;
+        half2_t vhalf;
+        _Float16 half_vec[2];
+    } val{};
+    val.half_vec[0] = v;
+
+    if constexpr(saturate)
+    {
+        if((val.i32val & 0x7FFF) != 0x7FFF)
+        {
+            val.half_vec[0] = (interpret == ck_fp8_interpretation_t::CK_E4M3_OCP)
+                                  ? __builtin_amdgcn_fmed3h(val.half_vec[0], 448.0, -448.0)
+                                  : __builtin_amdgcn_fmed3h(val.half_vec[0], 57344.0, -57344.0);
+        }
+    }
+
+    if constexpr(stochastic_rounding)
+    {
+        union
+        {
+            int vi32;
+            fp8_storage_t vf8[4];
+        } out{0};
+        out.vi32 = (interpret == ck_fp8_interpretation_t::CK_E4M3_OCP)
+                       ? __builtin_amdgcn_cvt_sr_fp8_f16(val.half_vec[0], rng, out.vi32, 0)
+                       : __builtin_amdgcn_cvt_sr_bf8_f16(val.half_vec[0], rng, out.vi32, 0);
+        return out.vf8[0];
+    }
+    else
+    {
+        union
+        {
+            short vi16;
+            fp8_storage_t vf8[2];
+        } out{};
+
+        out.vi16 = (interpret == ck_fp8_interpretation_t::CK_E4M3_OCP)
+                       ? __builtin_amdgcn_cvt_pk_fp8_f16(val.vhalf)
+                       : __builtin_amdgcn_cvt_pk_bf8_f16(val.vhalf);
+        return out.vf8[0];
+    }
+}
+template <ck_fp8_interpretation_t interpret, bool saturate, bool stochastic_rounding = false>
+static __device__ fp8x2_storage_t cast_to_f8_from_f16(half2_t v,
+                                                      [[maybe_unused]] unsigned int rng = 0)
+{
+    if constexpr(stochastic_rounding)
+    {
+        return fp8x2_storage_t{
+            cast_to_f8_from_f16<interpret, saturate, stochastic_rounding>(v[0], rng),
+            cast_to_f8_from_f16<interpret, saturate, stochastic_rounding>(v[1], rng)};
+    }
+
+    if constexpr(saturate)
+    {
+        union
+        {
+            shortx2_t i16_vec;
+            half2_t vhalf;
+        } val{.vhalf = v};
+
+        if((val.i16_vec[0] & 0x7FFF) != 0x7FFF)
+        {
+            val.vhalf[0] = (interpret == ck_fp8_interpretation_t::CK_E4M3_OCP)
+                               ? __builtin_amdgcn_fmed3h(val.vhalf[0], 448.0, -448.0)
+                               : __builtin_amdgcn_fmed3h(val.vhalf[0], 57344.0, -57344.0);
+        }
+        if((val.i16_vec[1] & 0x7FFF) != 0x7FFF)
+        {
+            val.vhalf[1] = (interpret == ck_fp8_interpretation_t::CK_E4M3_OCP)
+                               ? __builtin_amdgcn_fmed3h(val.vhalf[1], 448.0, -448.0)
+                               : __builtin_amdgcn_fmed3h(val.vhalf[1], 57344.0, -57344.0);
+        }
+    }
+
+    union
+    {
+        short vi16;
+        fp8x2_storage_t v2f8;
+    } out{};
+
+    out.vi16 = (interpret == ck_fp8_interpretation_t::CK_E4M3_OCP)
+                   ? __builtin_amdgcn_cvt_pk_fp8_f16(v)
+                   : __builtin_amdgcn_cvt_pk_bf8_f16(v);
+    return out.v2f8;
+}
+#endif // defined(__gfx950__) || defined(__gfx125__)
 
 #if CK_FP8_CVT_FAST_PATH
 // The conversion function is from rocblas
@@ -1396,16 +1519,22 @@ __host__ __device__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
     uint32_t rng = 0;
     if constexpr(stochastic_rounding)
     {
+#if defined(__gfx950__) || defined(__gfx125__)
+        // use HW clock for stochastic input multiply by incremented thread id
+        rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
+                                        (get_thread_global_1d_id() + 1));
+#else
         constexpr int seed = 1254739;
 #ifndef CK_CODE_GEN_RTC
         rng = prand_generator<float, seed>(reinterpret_cast<uintptr_t>(&f), f);
 #else
         rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&f), f);
-#endif
+#endif // #ifndef CK_CODE_GEN_RTC
+#endif // #if defined(__gfx950__)
     }
     return cast_to_f8_from_f32<interp, sat == ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
         f, rng);
-#else
+#else // #if CK_FP8_CVT_FAST_PATH
 #if CK_USE_OCP_FP8
 __host__ __device__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
 {
@@ -1416,12 +1545,18 @@ __host__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
     uint32_t rng = 0;
     if constexpr(stochastic_rounding)
     {
+#if defined(__gfx950__) || defined(__gfx125__)
+        // use HW clock for stochastic input multiply by incremented thread id
+        rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
+                                        (get_thread_global_1d_id() + 1));
+#else
         constexpr int seed = 1254739;
 #ifndef CK_CODE_GEN_RTC
         rng = prand_generator<float, seed>(reinterpret_cast<uintptr_t>(&f), f);
 #else
         rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&f), f);
-#endif
+#endif // #ifndef CK_CODE_GEN_RTC
+#endif // #if defined(__gfx950__)
     }
 
     if constexpr(interp == ck_fp8_interpretation_t::CK_E4M3_FNUZ)
@@ -1465,7 +1600,7 @@ __host__ static inline fp8_storage_t cvt_float_to_fp8(const float f)
         __hip_assert(false && "FP8 type is not supported by current target device");
         return 0;
     }
-#endif // CK_FP8_CVT_FAST_PATH
+#endif // #if CK_FP8_CVT_FAST_PATH
 }
 
 /**
@@ -1487,16 +1622,22 @@ __device__ static inline fp8x2_storage_t cvt_float_to_fp8(const float2_t f)
     uint32_t rng = 0;
     if constexpr(stochastic_rounding)
     {
+#if defined(__gfx950__) || defined(__gfx125__)
+        // use HW clock for stochastic input multiply by incremented thread id
+        rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
+                                        (get_thread_global_1d_id() + 1));
+#else
         constexpr int seed = 1254739;
 #ifndef CK_CODE_GEN_RTC
         rng = prand_generator<float, seed>(reinterpret_cast<uintptr_t>(&f), f[0]);
 #else
         rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&f), f[0]);
-#endif
+#endif // #ifndef CK_CODE_GEN_RTC
+#endif // #if defined(__gfx950__)
     }
     return cast_to_f8_from_f32<interp, sat == ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
         f, rng);
-#else
+#else // #if CK_FP8_CVT_FAST_PATH
 #if CK_USE_OCP_FP8
 __host__ __device__ static inline fp8x2_storage_t cvt_float_to_fp8(const float2_t f)
 {
@@ -1532,14 +1673,20 @@ __host__ static inline fp8_storage_t cvt_half_t_to_fp8(const _Float16 x)
         uint32_t rng = 0;
         if constexpr(stochastic_rounding)
         {
+#if defined(__gfx950__) || defined(__gfx125__)
+            // use HW clock for stochastic input multiply by incremented thread id
+            rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
+                                            (get_thread_global_1d_id() + 1));
+#else
             constexpr int seed = 1254739;
 #ifndef CK_CODE_GEN_RTC
             rng = prand_generator<float, seed>(reinterpret_cast<uintptr_t>(&x), x);
 #else
             rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&x), x);
-#endif
+#endif // #ifndef CK_CODE_GEN_RTC
+#endif // #if defined(__gfx950__)
         }
-#if defined(__gfx950__)
+#if defined(__gfx950__) || defined(__gfx125__)
         return cast_to_f8_from_f16<interp,
                                    sat == ck_saturation_t::CK_SATFINITE,
                                    stochastic_rounding>(x, rng);
@@ -1574,14 +1721,20 @@ __host__ static inline fp8x2_storage_t cvt_half_t_to_fp8(const half2_t x)
         uint32_t rng = 0;
         if constexpr(stochastic_rounding)
         {
+#if defined(__gfx950__) || defined(__gfx125__)
+            // use HW clock for stochastic input multiply by incremented thread id
+            rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
+                                            (get_thread_global_1d_id() + 1));
+#else
             constexpr int seed = 1254739;
 #ifndef CK_CODE_GEN_RTC
             rng = prand_generator<float, seed>(reinterpret_cast<uintptr_t>(&x), x[0]);
 #else
             rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&x), x[0]);
-#endif
+#endif // #ifndef CK_CODE_GEN_RTC
+#endif // #if defined(__gfx950__)
         }
-#if defined(__gfx950__)
+#if defined(__gfx950__) || defined(__gfx125__)
         return cast_to_f8_from_f16<interp,
                                    sat == ck_saturation_t::CK_SATFINITE,
                                    stochastic_rounding>(x, rng);
@@ -1606,9 +1759,9 @@ template <ck_fp8_interpretation_t interp,
           ck_saturation_t sat      = ck_saturation_t::CK_SATFINITE,
           bool stochastic_rounding = false>
 #if CK_FP8_CVT_FAST_PATH || CK_USE_OCP_FP8
-__host__ __device__ static inline fp8_storage_t cvt_bhalf_t_to_fp8(const ushort x)
+__host__ __device__ static inline fp8_storage_t cvt_bhalf_t_to_fp8(const bhalf_t x)
 #else
-__host__ static inline fp8_storage_t cvt_bhalf_t_to_fp8(const ushort x)
+__host__ static inline fp8_storage_t cvt_bhalf_t_to_fp8(const bhalf_t x)
 #endif
 {
     {
@@ -1616,22 +1769,29 @@ __host__ static inline fp8_storage_t cvt_bhalf_t_to_fp8(const ushort x)
         uint32_t rng = 0;
         if constexpr(stochastic_rounding)
         {
+#if defined(__gfx950__) || defined(__gfx125__)
+            // use HW clock for stochastic input multiply by incremented thread id
+            rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
+                                            (get_thread_global_1d_id() + 1));
+#else
             constexpr int seed = 1254739;
 #ifndef CK_CODE_GEN_RTC
             rng = prand_generator<float, seed>(reinterpret_cast<uintptr_t>(&x),
                                                static_cast<float>(x));
 #else
             rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&x), static_cast<float>(x));
-#endif
+#endif // #ifndef CK_CODE_GEN_RTC
+#endif // #if defined(__gfx950__)
         }
 #if defined(__gfx950__)
         return cast_to_f8_from_bf16<interp,
                                     sat == ck_saturation_t::CK_SATFINITE,
                                     stochastic_rounding>(x, rng);
 #else
-        ignore = rng;
+        ignore                = rng;
+        const uint32_t x_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x));
         return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
-            bit_cast<float>(uint32_t{x} << 16)); // convert value to float
+            bit_cast<float>(x_bits << 16)); // convert value to float
 #endif // defined(__gfx950__)
     }
 }
@@ -1649,21 +1809,27 @@ template <ck_fp8_interpretation_t interp,
           ck_saturation_t sat      = ck_saturation_t::CK_SATFINITE,
           bool stochastic_rounding = false>
 #if CK_FP8_CVT_FAST_PATH || CK_USE_OCP_FP8
-__host__ __device__ static inline fp8x2_storage_t cvt_bhalf_t_to_fp8(const ushortx2_t x)
+__host__ __device__ static inline fp8x2_storage_t cvt_bhalf_t_to_fp8(const bhalf2_t x)
 #else
-__host__ static inline fp8x2_storage_t cvt_bhalf_t_to_fp8(const ushortx2_t x)
+__host__ static inline fp8x2_storage_t cvt_bhalf_t_to_fp8(const bhalf2_t x)
 #endif
 {
 #if CK_WORKAROUND_BF16_TO_FP8_CONVERSION
-    return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
-        float2_t{bit_cast<float>(uint32_t{x[0]} << 16),
-                 bit_cast<float>(uint32_t{x[1]} << 16)}); // convert values to float
-#else                                                     // CK_WORKAROUND_BF16_TO_FP8_CONVERSION
+    const uint32_t x0_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x[0]));
+    const uint32_t x1_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x[1]));
+    return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(float2_t{
+        bit_cast<float>(x0_bits << 16), bit_cast<float>(x1_bits << 16)}); // convert values to float
+#else // CK_WORKAROUND_BF16_TO_FP8_CONVERSION
     {
         __is_interpret_supported(interp);
         uint32_t rng = 0;
         if constexpr(stochastic_rounding)
         {
+#if defined(__gfx950__) || defined(__gfx125__)
+            // use HW clock for stochastic input multiply by incremented thread id
+            rng = __builtin_amdgcn_prng_b32(__builtin_readcyclecounter() *
+                                            (get_thread_global_1d_id() + 1));
+#else
             constexpr int seed = 1254739;
 #ifndef CK_CODE_GEN_RTC
             rng = prand_generator<float, seed>(reinterpret_cast<uintptr_t>(&x),
@@ -1671,17 +1837,20 @@ __host__ static inline fp8x2_storage_t cvt_bhalf_t_to_fp8(const ushortx2_t x)
 #else
             rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&x),
                                                static_cast<float>(x[0]));
-#endif
+#endif // #ifndef CK_CODE_GEN_RTC
+#endif // #if defined(__gfx950__)
         }
 #if defined(__gfx950__)
         return cast_to_f8_from_bf16<interp,
                                     sat == ck_saturation_t::CK_SATFINITE,
                                     stochastic_rounding>(x, rng);
 #else
-        ignore = rng;
+        ignore                 = rng;
+        const uint32_t x0_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x[0]));
+        const uint32_t x1_bits = static_cast<uint32_t>(bit_cast<uint16_t>(x[1]));
         return cvt_float_to_fp8<interp, ck_saturation_t::CK_SATFINITE, stochastic_rounding>(
-            float2_t{bit_cast<float>(uint32_t{x[0]} << 16),
-                     bit_cast<float>(uint32_t{x[1]} << 16)}); // convert values to float
+            float2_t{bit_cast<float>(x0_bits << 16),
+                     bit_cast<float>(x1_bits << 16)}); // convert values to float
 #endif // defined(__gfx950__)
     }
 #endif // CK_WORKAROUND_BF16_TO_FP8_CONVERSION
@@ -1695,7 +1864,7 @@ using bf8_t = bf8_ocp_t;
 #define CK_FP8_TYPE_FNUZ 0
 #define CK_FP8_TYPE_OCP 1
 #else
-using f8_t = f8_fnuz_t;
+using f8_t  = f8_fnuz_t;
 using bf8_t = bf8_fnuz_t;
 #define CK_FP8_TYPE_FNUZ 1
 #define CK_FP8_TYPE_OCP 0

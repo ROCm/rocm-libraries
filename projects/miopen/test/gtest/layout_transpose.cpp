@@ -25,15 +25,9 @@
  *******************************************************************************/
 #include <gtest/gtest.h>
 
-#include <cstdlib>
-#include <ctime>
-#include <vector>
-
-#include <boost/optional.hpp>
 #include "../../driver/conv_common.hpp"
 #include <miopen/batched_transpose_sol.hpp>
 #include <miopen/handle.hpp>
-#include <miopen/invoke_params.hpp>
 #include <miopen/invoker.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
@@ -41,7 +35,8 @@
 #include <miopen/tensor_layout.hpp>
 
 #include "driver.hpp"
-#include "random.hpp"
+
+#include <vector>
 
 namespace {
 
@@ -217,7 +212,7 @@ struct transpose_dims
 
 template <typename T>
 auto gen_value =
-    [](auto... is) { return static_cast<T>(prng::gen_A_to_B(RAND_INTEGER_MIN, RAND_INTEGER_MAX)); };
+    [](auto...) { return static_cast<T>(prng::gen_A_to_B(RAND_INTEGER_MIN, RAND_INTEGER_MAX)); };
 
 } // namespace
 

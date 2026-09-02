@@ -158,24 +158,24 @@ ProdForward::GetSolution(const ExecutionContext& context,
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
                 decltype(auto) parallel_kernel = handle_.Run(kernels[0]);
-                decltype(auto) kernel          = handle_.Run(kernels[1]);
+                decltype(auto) kernel_         = handle_.Run(kernels[1]);
                 decltype(auto) params =
                     raw_params.CastTo<miopen::reduce::CalculationInvokeParams>();
 
-                auto xdims = params.xDesc->GetLengths();
-                auto ydims = params.yDesc->GetLengths();
-                auto dim   = params.dim;
+                auto xdims_ = params.xDesc->GetLengths();
+                auto ydims_ = params.yDesc->GetLengths();
+                auto dim_   = params.dim;
 
-                auto reduce_size = xdims[dim];
-                auto output_numel =
-                    std::accumulate(ydims.begin(), ydims.end(), 1ULL, std::multiplies<size_t>());
+                auto reduce_size_ = xdims_[dim_];
+                auto output_numel_ =
+                    std::accumulate(ydims_.begin(), ydims_.end(), 1ULL, std::multiplies<size_t>());
 
                 auto inner_size = std::accumulate(
-                    xdims.begin() + dim + 1, xdims.end(), 1ULL, std::multiplies<size_t>());
+                    xdims_.begin() + dim_ + 1, xdims_.end(), 1ULL, std::multiplies<size_t>());
 
-                auto reqd_work_item_cnt = get_reqd_work_item_cnt(handle_);
+                auto reqd_work_item_cnt_ = get_reqd_work_item_cnt(handle_);
                 auto parallelism_size =
-                    get_parallelism_size(reqd_work_item_cnt, output_numel, reduce_size);
+                    get_parallelism_size(reqd_work_item_cnt_, output_numel_, reduce_size_);
 
                 auto elapsed = 0.f;
                 HipEventPtr start;
@@ -188,32 +188,32 @@ ProdForward::GetSolution(const ExecutionContext& context,
                     reset_profiling_state = true;
                     start                 = miopen::make_hip_event();
                     stop                  = miopen::make_hip_event();
-                    hipEventRecord(start.get(), handle_.GetStream());
+                    (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
 
                 parallel_kernel(params.x,
                                 params.workspace,
-                                output_numel,
-                                reduce_size,
+                                output_numel_,
+                                reduce_size_,
                                 parallelism_size,
                                 inner_size,
                                 static_cast<bool>(params.nanPropagation));
 
-                kernel(params.workspace,
-                       params.y,
-                       output_numel,
-                       parallelism_size,
-                       inner_size,
-                       static_cast<bool>(params.nanPropagation));
+                kernel_(params.workspace,
+                        params.y,
+                        output_numel_,
+                        parallelism_size,
+                        inner_size,
+                        static_cast<bool>(params.nanPropagation));
 
                 if(reset_profiling_state)
                 {
-                    hipEventRecord(stop.get(), handle_.GetStream());
+                    (void)hipEventRecord(stop.get(), handle_.GetStream());
                     handle_.EnableProfiling(true);
-                    hipEventSynchronize(stop.get());
-                    hipEventElapsedTime(&elapsed, start.get(), stop.get());
-                    hipEventDestroy(start.get());
-                    hipEventDestroy(stop.get());
+                    (void)hipEventSynchronize(stop.get());
+                    (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
+                    (void)hipEventDestroy(start.get());
+                    (void)hipEventDestroy(stop.get());
                     handle_.ResetKernelTime();
                     handle_.AccumKernelTime(elapsed);
                 };
@@ -224,27 +224,27 @@ ProdForward::GetSolution(const ExecutionContext& context,
     {
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
+                decltype(auto) kernel_ = handle_.Run(kernels.front());
                 decltype(auto) params =
                     raw_params.CastTo<miopen::reduce::CalculationInvokeParams>();
 
-                auto xdims = params.xDesc->GetLengths();
-                auto ydims = params.yDesc->GetLengths();
-                auto dim   = params.dim;
+                auto xdims_ = params.xDesc->GetLengths();
+                auto ydims_ = params.yDesc->GetLengths();
+                auto dim_   = params.dim;
 
-                auto reduce_size = xdims[dim];
-                auto output_numel =
-                    std::accumulate(ydims.begin(), ydims.end(), 1ULL, std::multiplies<size_t>());
+                auto reduce_size_ = xdims_[dim_];
+                auto output_numel_ =
+                    std::accumulate(ydims_.begin(), ydims_.end(), 1ULL, std::multiplies<size_t>());
 
                 auto inner_size = std::accumulate(
-                    xdims.begin() + dim + 1, xdims.end(), 1ULL, std::multiplies<size_t>());
+                    xdims_.begin() + dim_ + 1, xdims_.end(), 1ULL, std::multiplies<size_t>());
 
-                kernel(params.x,
-                       params.y,
-                       output_numel,
-                       reduce_size,
-                       inner_size,
-                       static_cast<bool>(params.nanPropagation));
+                kernel_(params.x,
+                        params.y,
+                        output_numel_,
+                        reduce_size_,
+                        inner_size,
+                        static_cast<bool>(params.nanPropagation));
             };
         };
     }

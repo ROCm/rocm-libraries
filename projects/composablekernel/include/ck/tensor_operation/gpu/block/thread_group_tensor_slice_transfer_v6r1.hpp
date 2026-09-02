@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2023, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -29,7 +29,8 @@ template <typename ThreadGroup,
           index_t VectorDim,
           index_t ScalarPerVector,
           bool ThreadTransferSrcResetCoordinateAfterRun,
-          bool ThreadTransferDstResetCoordinateAfterRun>
+          bool ThreadTransferDstResetCoordinateAfterRun,
+          typename IndexType = index_t>
 struct ThreadGroupTensorSliceTransfer_v6r1
 {
     static constexpr index_t nDim = remove_reference_t<SrcDesc>::GetNumOfDimension();
@@ -126,7 +127,8 @@ struct ThreadGroupTensorSliceTransfer_v6r1
                                            ScalarPerVector,
                                            DstInMemOp,
                                            ThreadTransferSrcResetCoordinateAfterRun,
-                                           ThreadTransferDstResetCoordinateAfterRun>;
+                                           ThreadTransferDstResetCoordinateAfterRun,
+                                           IndexType>;
 
     ThreadwiseTransfer threadwise_transfer_;
 };

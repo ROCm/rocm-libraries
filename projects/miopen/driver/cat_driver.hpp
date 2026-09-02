@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #ifndef GUARD_MIOPEN_CAT_DRIVER_HPP
 #define GUARD_MIOPEN_CAT_DRIVER_HPP
 
@@ -36,56 +14,91 @@
 #include <cstdlib>
 #include <memory>
 #include <miopen/miopen.h>
+#include <miopen/float_equal.hpp>
 #include <miopen/tensor.hpp>
 #include <numeric>
 #include <vector>
 #include <../test/tensor_holder.hpp>
 #include <../test/verify.hpp>
+#include <miopen/ford.hpp>
 
 #ifndef MLO_CATHOST_H_
 #define MLO_CATHOST_H_
 
 template <typename Tgpu, typename Tcheck>
-int32_t mloCatForwardRunHost(std::vector<miopenTensorDescriptor_t> inputDescs,
-                             std::vector<Tgpu*> inputs,
+int32_t mloCatForwardRunHost(const std::vector<miopenTensorDescriptor_t>& inputDescs,
+                             const std::vector<Tgpu*>& inputs,
                              miopenTensorDescriptor_t outputDesc,
                              Tcheck* outputhost,
-                             uint32_t dim)
+                             uint32_t dim,
+                             bool multi_threaded)
 {
-    auto shape             = miopen::deref(outputDesc).GetLengths();
-    size_t outer_size      = 1;
-    size_t inner_size      = 1;
-    size_t output_dim_size = shape[dim];
-    for(size_t i = 0; i < dim; i++)
+    const auto& shape            = miopen::deref(outputDesc).GetLengths();
+    const size_t output_dim_size = shape[dim];
+    size_t outer_size            = 1;
+    size_t inner_size            = 1;
+
+    for(size_t i = 0; i < dim; ++i)
     {
         outer_size *= shape[i];
     }
 
-    for(size_t i = dim + 1; i < shape.size(); i++)
+    for(size_t i = dim + 1; i < shape.size(); ++i)
     {
         inner_size *= shape[i];
     }
 
-    int32_t ret                = 0;
-    size_t output_start_offset = 0;
+    const size_t inner_size_by_output_dim_size = inner_size * output_dim_size;
+    const size_t n                             = inputs.size();
+    const size_t min_grain                     = multi_threaded ? 1 : n;
 
-    for(size_t i = 0; i < inputs.size(); i++)
+    /////////////////////////////////////////////////////////////////////////////////////////////
+    // 1. Precompute output start offsets to avoid race conditions in the multi-threaded version.
+    // 2. Cache copy_size values, since they are needed by the start offsets computation anyway.
+    std::vector<size_t> copy_sizes;
+    std::vector<size_t> output_start_offsets;
+
+    copy_sizes.reserve(n);
+    output_start_offsets.reserve(n);
+
+    copy_sizes.emplace_back(inner_size * miopen::deref(inputDescs[0]).GetLengths()[dim]);
+    output_start_offsets.emplace_back(0);
+
+    for(size_t i{1}; i < n; ++i)
     {
-        auto input       = inputs[i];
-        size_t dim_size  = miopen::deref(inputDescs[i]).GetLengths()[dim];
-        size_t copy_size = inner_size * dim_size;
-        for(size_t o = 0; o < outer_size; o++)
+        const size_t dim_size = miopen::deref(inputDescs[i]).GetLengths()[dim];
+
+        output_start_offsets.emplace_back(output_start_offsets.back() + copy_sizes.back());
+        copy_sizes.emplace_back(inner_size * dim_size);
+    }
+    /////////////////////////////////////////////////////////////////////////////////////////////
+
+    miopen::par_for(n, min_grain, [&](size_t i) {
+        const auto input                = inputs[i];
+        const size_t copy_size          = copy_sizes[i];
+        const size_t copy_size_in_bytes = copy_size * sizeof(*outputhost);
+
+        for(size_t o = 0; o < outer_size; ++o)
         {
-            size_t output_offset = output_start_offset + (o * inner_size * output_dim_size);
-            for(size_t j = 0; j < copy_size; j++)
+            const size_t input_offset = copy_size * o;
+            const size_t output_offset =
+                output_start_offsets[i] + (o * inner_size_by_output_dim_size);
+
+            if constexpr(std::is_same_v<Tgpu, Tcheck> && std::is_trivially_copyable_v<Tgpu>)
             {
-                outputhost[output_offset + j] = input[copy_size * o + j];
+                memcpy(&outputhost[output_offset], &input[input_offset], copy_size_in_bytes);
+            }
+            else
+            {
+                for(size_t j = 0; j < copy_size; ++j)
+                {
+                    outputhost[output_offset + j] = input[input_offset + j];
+                }
             }
         }
-        output_start_offset += copy_size;
-    }
+    });
 
-    return ret;
+    return 0;
 }
 
 #endif
@@ -142,6 +155,8 @@ private:
 
     std::vector<void*> in_devs_ptr;
     std::vector<Tgpu*> ins_ptr;
+
+    bool use_multithread = false;
 };
 
 template <typename Tgpu, typename Tref>
@@ -163,6 +178,7 @@ int CatDriver<Tgpu, Tref>::GetandSetData()
     size_t output_dim_size = 0;
     auto in_lens           = GetInputTensorLengthsFromCmdLine();
     dim                    = inflags.GetValueInt("dim");
+    use_multithread        = (inflags.GetValueInt("mt") != 0);
 
     for(auto in_len : in_lens)
     {
@@ -171,6 +187,7 @@ int CatDriver<Tgpu, Tref>::GetandSetData()
         inputDescs.push_back(inputDesc);
         output_dim_size += in_len[dim];
     }
+
     auto out_len = in_lens[0];
     out_len[dim] = output_dim_size;
 
@@ -199,6 +216,8 @@ int CatDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
 
+    inflags.AddInputFlag("mt", 'M', "0", "Use multithreaded version (Default=0)", "int");
+
     return miopenStatusSuccess;
 }
 
@@ -208,7 +227,7 @@ std::vector<std::vector<int>> CatDriver<Tgpu, Tref>::GetInputTensorLengthsFromCm
     const int max_input_count = 8;
     std::vector<std::vector<int>> ret;
     std::string name = "input";
-    for(int i = 1; i < max_input_count; i++)
+    for(int i = 1; i <= max_input_count; i++)
     {
         auto tensor = inflags.GetValueTensor(name + std::to_string(i));
         if(!tensor.lengths.empty())
@@ -298,8 +317,8 @@ int CatDriver<Tgpu, Tref>::RunForwardGPU()
 template <typename Tgpu, typename Tref>
 int CatDriver<Tgpu, Tref>::RunForwardCPU()
 {
-    mloCatForwardRunHost<Tgpu, Tref>(inputDescs, ins_ptr, outputDesc, outhost.data(), dim);
-
+    mloCatForwardRunHost<Tgpu, Tref>(
+        inputDescs, ins_ptr, outputDesc, outhost.data(), dim, use_multithread);
     return miopenStatusSuccess;
 }
 
@@ -313,16 +332,18 @@ template <typename Tgpu, typename Tref>
 int CatDriver<Tgpu, Tref>::VerifyForward()
 {
     RunForwardCPU();
-    auto error = miopen::rms_range(outhost, out);
+    const auto error     = miopen::rms_range(outhost, out);
+    const char* pRefType = use_multithread ? "multi-threaded" : "single-threaded";
 
-    if(!std::isfinite(error) || error != 0)
+    if(!std::isfinite(error) || !miopen::float_equal_sentinel(error, 0))
     {
-        std::cout << "Forward Cat FAILED: " << error << " > 0" << std::endl;
+        std::cout << "Forward Cat FAILED against " << pRefType << " CPU reference: " << error
+                  << " > 0" << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Forward Cat Verifies OK on CPU reference" << std::endl;
+        std::cout << "Forward Cat Verifies OK on " << pRefType << " CPU reference" << std::endl;
     }
 
     return miopenStatusSuccess;

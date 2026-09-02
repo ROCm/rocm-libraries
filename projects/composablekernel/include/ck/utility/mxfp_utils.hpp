@@ -1,9 +1,20 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck/utility/data_type.hpp"
+
+#if defined(__gfx950__) && __HIP_DEVICE_COMPILE__
+#define CK_MX_ARCH_950 1
+#else
+#define CK_MX_ARCH_950 0
+#endif
+#if defined(__gfx125__) && __HIP_DEVICE_COMPILE__
+#define CK_MX_ARCH_125 1
+#else
+#define CK_MX_ARCH_125 0
+#endif
 
 #ifdef CK_CODE_GEN_RTC
 #define UINT_MAX 4294967295
@@ -213,7 +224,7 @@ __host__ __device__ inline T convert_to_type(float value)
     {
         // closer to 0
         if(std::abs(value) <= std::abs(min_subnorm - value))
-            return 0;
+            return sign << (NumericUtils<T>::exp + NumericUtils<T>::mant);
         else
             return 1 | (sign << (NumericUtils<T>::exp + NumericUtils<T>::mant));
     }
@@ -249,7 +260,7 @@ __host__ __device__ inline T convert_to_type(float value)
 
     if(out_exponent == 0 && mantissa == 0)
     {
-        return 0;
+        return sign << (NumericUtils<T>::exp + NumericUtils<T>::mant);
     }
 
     mantissa &= (1UL << NumericUtils<T>::mant) - 1;

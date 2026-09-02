@@ -29,11 +29,11 @@
 static Driver* makeDriver(const std::string& base_arg)
 {
     if(base_arg == "layernorm")
-        return new LayerNormDriver<float, float>();
+        return new LayerNormDriver<float>();
     if(base_arg == "layernormfp16")
-        return new LayerNormDriver<float16, float>();
+        return new LayerNormDriver<float16>();
     if(base_arg == "layernormbfp16")
-        return new LayerNormDriver<bfloat16, float>();
+        return new LayerNormDriver<bfloat16>();
     return nullptr;
 }
 

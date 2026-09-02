@@ -41,14 +41,14 @@
 
 namespace miopen {
 
-struct MIOPEN_INTERNALS_EXPORT ReduceTensorDescriptor : miopenReduceTensorDescriptor
+struct ReduceTensorDescriptor : miopenReduceTensorDescriptor
 {
     ReduceTensorDescriptor() = default;
-    ReduceTensorDescriptor(miopenReduceTensorOp_t reduceTensorOp,
-                           miopenDataType_t reduceTensorCompType,
-                           miopenNanPropagation_t reduceTensorNanOpt,
-                           miopenReduceTensorIndices_t reduceTensorIndices,
-                           miopenIndicesType_t reduceTensorIndicesType);
+    MIOPEN_INTERNALS_EXPORT ReduceTensorDescriptor(miopenReduceTensorOp_t reduceTensorOp,
+                                                   miopenDataType_t reduceTensorCompType,
+                                                   miopenNanPropagation_t reduceTensorNanOpt,
+                                                   miopenReduceTensorIndices_t reduceTensorIndices,
+                                                   miopenIndicesType_t reduceTensorIndicesType);
 
     miopenReduceTensorOp_t reduceTensorOp_;
     miopenDataType_t reduceTensorCompType_;
@@ -56,22 +56,22 @@ struct MIOPEN_INTERNALS_EXPORT ReduceTensorDescriptor : miopenReduceTensorDescri
     miopenReduceTensorIndices_t reduceTensorIndices_;
     miopenIndicesType_t reduceTensorIndicesType_;
 
-    std::size_t GetWorkspaceSize(const Handle& handle,
-                                 const TensorDescriptor& inDesc,
-                                 const TensorDescriptor& outDesc) const;
-    std::size_t GetIndicesSize(const TensorDescriptor& inDesc,
-                               const TensorDescriptor& outDesc) const;
-    void ReduceTensor(const Handle& handle,
-                      Data_t indices,
-                      size_t indicesSizeInBytes,
-                      Data_t workspace,
-                      size_t workspaceSizeInBytes,
-                      const void* alpha,
-                      const TensorDescriptor& aDesc,
-                      ConstData_t A,
-                      const void* beta,
-                      const TensorDescriptor& cDesc,
-                      Data_t C) const;
+    MIOPEN_INTERNALS_EXPORT std::size_t GetWorkspaceSize(const Handle& handle,
+                                                         const TensorDescriptor& inDesc,
+                                                         const TensorDescriptor& outDesc) const;
+    MIOPEN_INTERNALS_EXPORT std::size_t GetIndicesSize(const TensorDescriptor& inDesc,
+                                                       const TensorDescriptor& outDesc) const;
+    MIOPEN_INTERNALS_EXPORT void ReduceTensor(const Handle& handle,
+                                              Data_t indices,
+                                              size_t indicesSizeInBytes,
+                                              Data_t workspace,
+                                              size_t workspaceSizeInBytes,
+                                              const void* alpha,
+                                              const TensorDescriptor& aDesc,
+                                              ConstData_t A,
+                                              const void* beta,
+                                              const TensorDescriptor& cDesc,
+                                              Data_t C) const;
 };
 
 std::ostream& operator<<(std::ostream& stream, const ReduceTensorDescriptor& c);

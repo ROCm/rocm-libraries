@@ -52,8 +52,8 @@ std::enable_if_t<is_trivial_serializable<T>{}> serialize(std::ostream& os, const
 }
 
 template <class T>
-auto serialize(std::ostream& os, const T& x)
-    -> decltype(x.begin(), x.end(), T(x.begin(), x.end()), void())
+auto serialize(std::ostream& os,
+               const T& x) -> decltype(x.begin(), x.end(), T(x.begin(), x.end()), void())
 {
     std::size_t n = std::distance(x.begin(), x.end());
     serialize(os, n);
@@ -85,8 +85,8 @@ std::enable_if_t<is_trivial_serializable<T>{}> serialize(std::istream& is, std::
 }
 
 template <class T>
-auto serialize(std::istream& is, T& x)
-    -> decltype(x.begin(), x.end(), x.assign(x.begin(), x.end()), void())
+auto serialize(std::istream& is,
+               T& x) -> decltype(x.begin(), x.end(), x.assign(x.begin(), x.end()), void())
 {
     using value_type = std::decay_t<decltype(*x.begin())>;
     std::size_t n;

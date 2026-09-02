@@ -67,21 +67,21 @@ enum class Primitive
     MultiMarginLoss
 };
 
-struct MIOPEN_INTERNALS_EXPORT Id
+struct Id
 {
     static constexpr uint64_t invalid_value = 0;
 
     Id() = default;
-    Id(uint64_t value_);
+    MIOPEN_INTERNALS_EXPORT Id(uint64_t value_);
     Id(ForceInit, uint64_t value_);
-    Id(const std::string& str);
-    Id(const char* str);
+    MIOPEN_INTERNALS_EXPORT Id(const std::string& str);
+    MIOPEN_INTERNALS_EXPORT Id(const char* str);
 
-    std::string ToString() const;
-    AnySolver GetSolver() const;
+    MIOPEN_INTERNALS_EXPORT std::string ToString() const;
+    MIOPEN_INTERNALS_EXPORT AnySolver GetSolver() const;
     const SolverBase* GetSolverBase() const;
-    std::string GetAlgo(conv::Direction dir) const;
-    miopenConvAlgorithm_t GetAlgo() const;
+    MIOPEN_INTERNALS_EXPORT std::string GetAlgo(conv::Direction dir) const;
+    MIOPEN_INTERNALS_EXPORT miopenConvAlgorithm_t GetAlgo() const;
     Primitive GetPrimitive() const;
 
     bool IsValid() const { return is_valid; }

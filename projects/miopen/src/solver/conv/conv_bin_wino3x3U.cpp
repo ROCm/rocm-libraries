@@ -33,8 +33,6 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/tensors.hpp>
 
-#include <boost/any.hpp>
-
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_3X3)
 
 namespace miopen {
@@ -56,7 +54,7 @@ bool ConvBinWinograd3x3U::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
+    if(target.isXnackEnabled())
         return false;
 
     const auto name = ctx.GetStream().GetDeviceName();
@@ -73,7 +71,12 @@ bool ConvBinWinograd3x3U::IsApplicable(const ExecutionContext& ctx,
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
-    if(!problem.IsLayoutDefault())
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+    if(!(problem.GetIn().IsPossibleLayout4D5D("NCHW", strict) &&
+         problem.GetWeights().IsPossibleLayout4D5D("NCHW", strict) &&
+         problem.GetOut().IsPossibleLayout4D5D("NCHW", strict)))
         return false;
 
     if(problem.IsTensorsCasted())
@@ -102,7 +105,7 @@ bool ConvBinWinograd3x3U::IsApplicable(const ExecutionContext& ctx,
         && problem.GetInChannels() >= (device_is_gfx8 ? 16 : 18)
         && problem.IsFp32()
         && problem.GetGroupCount() == 1
-        && problem.GetInLayout() == "NCHW";
+        && problem.GetIn().IsPossibleLayout4D5D("NCHW", strict);
         /// && (isForwardDirection() ? _weights_layout == "KCHW" : _weights_layout == "CKHW" )
         /// Actually, K<->C flpping is controlled by separate flag, so we can support either
         /// layout in both directions.

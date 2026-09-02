@@ -33,11 +33,11 @@
 
 namespace miopen {
 // Class store value in double for higher precision.
-struct MIOPEN_INTERNALS_EXPORT Scalar
+struct Scalar
 {
     explicit Scalar(double val) : mVal(val), mType(miopenDouble) {}
 
-    Scalar(ConstData_t ptr, miopenDataType_t type);
+    MIOPEN_INTERNALS_EXPORT Scalar(ConstData_t ptr, miopenDataType_t type);
 
     float GetAsFloat() const { return static_cast<float>(mVal); }
     double GetAsDouble() const { return mVal; }

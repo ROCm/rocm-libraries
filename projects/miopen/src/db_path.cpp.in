@@ -28,6 +28,7 @@
 #include <miopen/env.hpp>
 #include <miopen/stringutils.hpp>
 #include <miopen/expanduser.hpp>
+#include <miopen/filesystem_checker.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/filesystem.hpp>
 
@@ -90,7 +91,10 @@ fs::path PrepareUserDbPath()
     /// the library to use exactly that path.
     const auto p = env::value(MIOPEN_USER_DB_PATH);
     if(!p.empty())
-        return ExpandUser(p);
+    {
+        auto result = ExpandUser(p);
+        return result;
+    }
     /// \anchor nfs-detection
     /// Otherwise, check if the user-db-path denotes a network filesystem. If this is the case, then
     /// let's assume that the library is running on a cluster system, where home directory is shared
@@ -99,12 +103,14 @@ fs::path PrepareUserDbPath()
     /// WARNING: This makes all the library's user databases non-persistent. However, for now, we
     /// assume that the performance hit associated with the usage of shared home dir is worse than
     /// the deletion of user databases.
-    const auto udb_path = ExpandUser("${MIOPEN_USER_DB_PATH}");
+    auto result = ExpandUser("${MIOPEN_USER_DB_PATH}");
 #if !MIOPEN_BUILD_DEV
-    if(IsNetworkedFilesystem(udb_path))
-        return fs::temp_directory_path();
+    if(GetFilesystemChecker().IsNetworkedFilesystem(result))
+    {
+        result = fs::temp_directory_path() / ".config" / "miopen";
+    }
 #endif
-    return udb_path;
+    return result;
 }
 } // namespace
 
@@ -112,10 +118,33 @@ std::string GetUserDbSuffix() { return "${MIOPEN_USER_DB_SUFFIX}"; }
 
 std::string GetSystemFindDbSuffix() { return "${MIOPEN_SYSTEM_FIND_DB_SUFFIX}"; }
 
-const fs::path& GetUserDbPath()
+namespace {
+// Use static local variable to avoid non-const globals while allowing reset for testing
+const fs::path*& UserDbPathPtrRef()
 {
-    static const auto instance = PrepareUserDbPath();
-    return instance;
+    static const fs::path* ptr = nullptr;
+    return ptr;
 }
+
+const fs::path& GetUserDbPathInternal()
+{
+    auto& ptr = UserDbPathPtrRef();
+    if(ptr == nullptr)
+        ptr = new fs::path(PrepareUserDbPath());
+    return *ptr;
+}
+} // namespace
+
+const fs::path& GetUserDbPath() { return GetUserDbPathInternal(); }
+
+#ifdef MIOPEN_BUILD_TESTING
+namespace testing {
+void ResetUserDbPath()
+{
+    delete UserDbPathPtrRef();
+    UserDbPathPtrRef() = nullptr;
+}
+} // namespace testing
+#endif
 
 } // namespace miopen

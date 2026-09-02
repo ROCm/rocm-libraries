@@ -35,40 +35,41 @@
 
 namespace miopen {
 
-struct MIOPEN_INTERNALS_EXPORT LRNDescriptor : miopenLRNDescriptor
+struct LRNDescriptor : miopenLRNDescriptor
 {
-    LRNDescriptor();
+    MIOPEN_INTERNALS_EXPORT LRNDescriptor();
     LRNDescriptor(miopenLRNMode_t m, unsigned int pn, const double* pparms);
+    MIOPEN_INTERNALS_EXPORT
     LRNDescriptor(miopenLRNMode_t m, unsigned int pn, std::vector<double> pparms);
 
-    miopenLRNMode_t GetMode() const;
-    unsigned int GetN() const;
-    double GetAlpha() const;
-    double GetBeta() const;
-    double GetK() const;
+    MIOPEN_INTERNALS_EXPORT miopenLRNMode_t GetMode() const;
+    MIOPEN_INTERNALS_EXPORT unsigned int GetN() const;
+    MIOPEN_INTERNALS_EXPORT double GetAlpha() const;
+    MIOPEN_INTERNALS_EXPORT double GetBeta() const;
+    MIOPEN_INTERNALS_EXPORT double GetK() const;
 
-    miopenStatus_t Forward(const Handle& handle,
-                           const void* alpha,
-                           const TensorDescriptor& xDesc,
-                           ConstData_t x,
-                           const void* beta,
-                           const TensorDescriptor& yDesc,
-                           Data_t y,
-                           bool do_backward,
-                           Data_t workSpace) const;
+    MIOPEN_INTERNALS_EXPORT miopenStatus_t Forward(const Handle& handle,
+                                                   const void* alpha,
+                                                   const TensorDescriptor& xDesc,
+                                                   ConstData_t x,
+                                                   const void* beta,
+                                                   const TensorDescriptor& yDesc,
+                                                   Data_t y,
+                                                   bool do_backward,
+                                                   Data_t workSpace) const;
 
-    miopenStatus_t Backward(const Handle& handle,
-                            const void* alpha,
-                            const TensorDescriptor& yDesc,
-                            ConstData_t y,
-                            const TensorDescriptor& dyDesc,
-                            ConstData_t dy,
-                            const TensorDescriptor& xDesc,
-                            ConstData_t x,
-                            const void* beta,
-                            const TensorDescriptor& dxDesc,
-                            Data_t dx,
-                            ConstData_t workSpace) const;
+    MIOPEN_INTERNALS_EXPORT miopenStatus_t Backward(const Handle& handle,
+                                                    const void* alpha,
+                                                    const TensorDescriptor& yDesc,
+                                                    ConstData_t y,
+                                                    const TensorDescriptor& dyDesc,
+                                                    ConstData_t dy,
+                                                    const TensorDescriptor& xDesc,
+                                                    ConstData_t x,
+                                                    const void* beta,
+                                                    const TensorDescriptor& dxDesc,
+                                                    Data_t dx,
+                                                    ConstData_t workSpace) const;
 
     friend std::ostream& operator<<(std::ostream& stream, const LRNDescriptor& x);
 

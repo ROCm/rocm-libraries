@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <vector>
+#include <limits>
 #include <cstdint>
 
 #include <miopen/conv/solvers.hpp>
@@ -32,15 +33,16 @@
 #include <miopen/generic_search.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-#include <miopen/solver/ck_utility_common.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #endif
-#include <miopen/solver/implicitgemm_ck_util.hpp>
-#include <miopen/solver/implicitgemm_util.hpp>
-#include <miopen/solver/ck_grouped_conv_narrow.hpp>
+#include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
 
 namespace miopen {
 namespace solver {
@@ -48,282 +50,29 @@ namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
 
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-
 namespace {
 
-struct CKArgs
-{
-    CKArgs(const ProblemDescription& problem)
-    {
-        G               = ProblemInterpreter::GetGroupCountG(problem);
-        N               = ProblemInterpreter::GetBatchN(problem);
-        K1              = ProblemInterpreter::GetOutputChannelK(problem);
-        C1              = ProblemInterpreter::GetInputChannelC(problem);
-        C               = C1 / G; // Number of input Channel per group
-        K               = K1 / G; // Number of output Channel per group
-        Hi              = ProblemInterpreter::GetInputHeightHi(problem);
-        Wi              = ProblemInterpreter::GetInputWidthWi(problem);
-        Ho              = ProblemInterpreter::GetOutputHeightHo(problem);
-        Wo              = ProblemInterpreter::GetOutputWidthWo(problem);
-        Y               = ProblemInterpreter::GetFilterHeightY(problem);
-        X               = ProblemInterpreter::GetFilterWidthX(problem);
-        data_type       = ProblemInterpreter::GetOutputDataType(problem);
-        alpha_beta_case = ProblemInterpreter::GetAlphaBetaCase(problem);
+// ============================================================================
+// Solver Configuration for BWD 2D Grouped Convolution
+// ============================================================================
 
-        input  = {G, N, C, Hi, Wi};
-        output = {G, N, K, Ho, Wo};
-        weight = {G, K, C, Y, X};
-
-        // CK strides are in GNCDHW order
-        if(problem.IsLayoutNHWC())
-        {
-            // first entry reserved for G's stride
-            auto copy_strides = [](const auto& src, auto& dst) {
-                assert(dst.size() == (src.size() + 1));
-                std::copy(src.begin(), src.end(), dst.begin() + 1);
-            };
-            copy_strides(problem.GetIn().GetStrides(), in_strides);
-            copy_strides(problem.GetOut().GetStrides(), out_strides);
-            copy_strides(problem.GetWeights().GetStrides(), wei_strides);
-
-            // On a backward pass, problem.GetIn() means y(or out),
-            // and problem.GetOut means x(or in)
-            /// \todo remove this when we stop swapping in and out tensors/descriptors
-            std::swap(in_strides, out_strides);
-
-            // Now compute G's stride
-            in_strides[0]  = C;
-            out_strides[0] = K;
-            wei_strides[0] = K * wei_strides[1];
-        }
-        else
-        {
-            assert(problem.IsLayoutDefault()); // already checked in IsApplicable
-            // for default layout, we produce packed strides for NHWC layout
-            // because we transpose to NHWC layout before calling CK kernel
-            in_strides  = {C, Hi * Wi * G * C, 1, Wi * G * C, G * C};
-            out_strides = {K, Ho * Wo * G * K, 1, Wo * G * K, G * K};
-            wei_strides = {K * Y * X * C, Y * X * C, 1, X * C, C};
-        }
-
-        strides  = {ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                   ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
-        dilation = {ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
-                    ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
-        lPadding = {ProblemInterpreter::GetInputLeftPadH(problem),
-                    ProblemInterpreter::GetInputLeftPadW(problem)};
-        rPadding = {ProblemInterpreter::GetAdjustedInputRightPadH(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
-    }
-
-    CKArgs(const CKArgs&) = default;
-    CKArgs(CKArgs&&)      = default;
-    CKArgs& operator=(const CKArgs&) = default;
-
-    template <typename ConvPtr>
-    auto MakeArgPtr(const ConvPtr& conv_ptr,
-                    Data_t in,
-                    ConstData_t w,
-                    ConstData_t out,
-                    float alpha,
-                    float beta,
-                    int split_k) const
-    {
-        (void)alpha;
-        (void)beta;
-        // Large-tensor (>INT_MAX element stride) instances expose CK's int64
-        // long_index_t MakeArgumentPointer overload; bind it with the int64
-        // member arrays directly (they outlive the returned arg_ptr).
-        if(IsLargeTensorCKInstance(conv_ptr))
-        {
-            return conv_ptr->MakeArgumentPointer(out,
-                                                 w,
-                                                 {},
-                                                 in,
-                                                 output,
-                                                 out_strides,
-                                                 weight,
-                                                 wei_strides,
-                                                 {},
-                                                 {},
-                                                 input,
-                                                 in_strides,
-                                                 strides,
-                                                 dilation,
-                                                 lPadding,
-                                                 rPadding,
-                                                 {},
-                                                 {},
-                                                 {},
-                                                 split_k);
-        }
-        // Sub-INT_MAX shapes: narrow to int32 at the boundary. The narrowed
-        // bundle is a mutable member of CKArgs (populated by
-        // GetNarrowedArrays) so its arrays outlive any arg_ptr referencing
-        // them -- CK's MakeArgumentPointer captures references into the
-        // bundle.
-        const auto& a = GetNarrowedArrays();
-        return conv_ptr->MakeArgumentPointer(out,
-                                             w,
-                                             {},
-                                             in,
-                                             a.out_l,
-                                             a.out_s,
-                                             a.wei_l,
-                                             a.wei_s,
-                                             {},
-                                             {},
-                                             a.in_l,
-                                             a.in_s,
-                                             a.filter_strides,
-                                             a.filter_dilations,
-                                             a.lPadding,
-                                             a.rPadding,
-                                             {},
-                                             {},
-                                             {},
-                                             split_k);
-    }
-
-    template <typename ConvPtr>
-    auto MakeArgPtr(const ConvPtr& conv_ptr,
-                    const ConvDataTensors& tensors,
-                    float alpha,
-                    float beta,
-                    int split_k) const
-    {
-        return MakeArgPtr(conv_ptr, tensors.out, tensors.w, tensors.in, alpha, beta, split_k);
-    }
-
-    template <typename ConvPtr>
-    bool IsSupportedBy(const ConvPtr& conv_ptr) const
-    {
-        auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
-        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
-        if(workspace_size != 0)
-            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
-        return conv_ptr->IsSupportedArgument(arg_ptr.get());
-    }
-
-    template <typename ConvPtr>
-    bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int split_k) const
-    {
-        auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
-        auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
-        if(workspace_size != 0)
-            conv_ptr->SetWorkSpacePointer(arg_ptr.get(), &workspace_size);
-        return conv_ptr->IsSupportedArgument(arg_ptr.get());
-    }
-
-    template <typename ConvPtr>
-    std::size_t GetCKSplitkWorkspaceSize(const ConvPtr& conv_ptr, int split_k) const
-    {
-        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
-        return conv_ptr->GetWorkSpaceSize(arg_ptr.get());
-    }
-
-    // Dim members are int64 (and length/stride arrays use ck::long_index_t)
-    // so the NCHW stride builder above (e.g. Hi*Wi*G*C) does not silently
-    // overflow on tensors whose contiguous stride exceeds INT_MAX. Argument
-    // construction then binds to CK's long_index_t MakeArgumentPointer
-    // overload, which is safe only when paired with a large-tensor instance
-    // (see implicitgemm_ck_util.hpp::RequiresLargeTensorCKInstance).
-    int64_t G;
-    int64_t N;
-    int64_t K;
-    int64_t C;
-    int64_t C1;
-    int64_t K1;
-    int64_t Hi;
-    int64_t Wi;
-    int64_t Ho;
-    int64_t Wo;
-    int64_t Y;
-    int64_t X;
-    miopenDataType_t data_type;
-    miopenAlphaBetaCase_t alpha_beta_case;
-    std::array<ck::long_index_t, 5> input;
-    std::array<ck::long_index_t, 5> in_strides;
-    std::array<ck::long_index_t, 5> output;
-    std::array<ck::long_index_t, 5> out_strides;
-    std::array<ck::long_index_t, 5> weight;
-    std::array<ck::long_index_t, 5> wei_strides;
-    std::array<ck::long_index_t, 2> strides;
-    std::array<ck::long_index_t, 2> dilation;
-    std::array<ck::long_index_t, 2> lPadding;
-    std::array<ck::long_index_t, 2> rPadding;
-
-    // Populate-and-return the narrowed bundle. Lazy so narrowing only runs
-    // for kernels that survived the RequiresLargeTensorCKInstance filter --
-    // CKArgs is constructed unconditionally in FillValidKernelsIDs before
-    // filtering, so narrowing in the constructor would assert on >INT_MAX
-    // shapes even though no kernel is ultimately selected.
-    const NarrowedCKArrays2D& GetNarrowedArrays() const
-    {
-        narrowed = MakeNarrowedCKArrays<NarrowedCKArrays2D>(input,
-                                                            in_strides,
-                                                            output,
-                                                            out_strides,
-                                                            weight,
-                                                            wei_strides,
-                                                            strides,
-                                                            dilation,
-                                                            lPadding,
-                                                            rPadding);
-        return narrowed;
-    }
-
-    // mutable: populated lazily by GetNarrowedArrays() (const) so MakeArgPtr
-    // (also const) can hand CK references that outlive the call.
-    mutable NarrowedCKArrays2D narrowed;
+// clang-format off
+constexpr SolverHeuristicConfig k2DBwdSolverConfig = {
+    /* solver_name                 */ "ConvHipImplicitGemmGroupBwdXdlops",
+    /* solver_name_ktn             */ "ConvHipIgemmGroupXdlops",
+    /* spatial_dims                */ 2,
+    /* uses_split_k                */ true,
+    /* split_k_min                 */ 1,
+    /* split_k_max                 */ 128,
+    /* supports_split_k_autodeduce */ false,
+    /* supports_ktn                */ true,
 };
+// clang-format on
+
 } // namespace
 
-template <typename DataType>
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::Init(const ProblemDescription& problem)
-{
-    valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
-    index         = 0;
-    split_k       = 1;
-    // valid_kernels can legitimately be empty here (e.g. no matching large-tensor CK
-    // instance for this problem); leave kernel_id empty so downstream applicability
-    // checks (IsCKArgsSupported) correctly report "unsupported" instead of indexing OOB.
-    if(!valid_kernels.empty())
-        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
-}
-
-template <typename DataType>
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::CheckIsSupportCKArgs(
-    const ProblemDescription& problem) const
-{
-    return IsCKArgsSupported<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem, kernel_id);
-}
-
-template <typename DataType>
-bool ConvHipImplicitGemmGroupBwdXdlops::CheckCKApplicability(
-    const ProblemDescription& problem) const
-{
-    return IsCKApplicable<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
-}
-
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-static std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
-{
-    std::vector<std::string> tokens;
-    std::string token;
-    std::istringstream tokenStream(
-        kernel.substr(kernel.find('<') + 1, kernel.find('>') - kernel.find('<') - 1));
-    while(std::getline(tokenStream, token, ','))
-    {
-        token.erase(remove_if(token.begin(), token.end(), isspace),
-                    token.end()); // strip whitespace
-        tokens.push_back(token);
-    }
-    return tokens;
-}
-
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDs()
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDsKTN()
 {
     for(int i = 0; i < valid_kernels.size(); i++)
     {
@@ -331,12 +80,12 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitHeuristicKernelIDs()
            std::string::npos)
         {
             heuristic_indexes.push_back(i);
-            heuristic_kernels[i] = GetKernelAsTokens(valid_kernels[i]);
+            heuristic_kernels[i] = GetKernelAsTokens2D(valid_kernels[i]);
         }
     }
 }
 
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyToken(
+bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyTokenKTN(
     int idx, std::string value, const std::string& arch, const ProblemDescription& /*problem*/)
 {
     if(arch == "gfx90a")
@@ -344,7 +93,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyToken(
         if(idx == 13)
             idx += 1; // skip
     }
-    if(arch == "gfx942")
+    if(arch == "gfx942" || arch == "gfx950")
     {
         if(idx < 3)
             idx += 0;
@@ -370,7 +119,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyToken(
 }
 
 static std::vector<float>
-GetFeatures(const ProblemDescription& problem, std::size_t /*num_cu*/, const std::string& arch)
+GetFeaturesKTN(const ProblemDescription& problem, std::size_t /*num_cu*/, const std::string& arch)
 {
     if(arch == "gfx90a")
     {
@@ -427,37 +176,45 @@ GetFeatures(const ProblemDescription& problem, std::size_t /*num_cu*/, const std
 }
 
 template <typename DataType>
-bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModel(
+bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModelKTN(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(
-        problem); // filter valid_kernel ID's
-    InitHeuristicKernelIDs();
-    static const std::string& arch = ctx.GetStream().GetDeviceName();
-    static std::string solver      = "ConvHipIgemmGroupBwdXdlops";
-    if(arch == "gfx90a")
-        solver = "ConvHipIgemmGroupXdlops";
-    std::vector<float> features = GetFeatures(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
+    if(!loader.IsLoaded())
+        return false;
+
+    auto data_type = problem.GetInDataType();
+    use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
+
+    valid_kernels = loader.FillValidKernelsWithTf32Fallback(
+        CKSolverType::GrpConvBwd, problem, data_type, use_tf32);
+    if(valid_kernels.empty())
+        return false;
+
+    InitHeuristicKernelIDsKTN();
+    const auto arch          = ctx.GetStream().GetDeviceName();
+    const std::string solver = k2DBwdSolverConfig.GetSolverNameForArch(arch);
+    std::vector<float> features =
+        GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
     if(ai::tuning::ModelSetParams(
            arch, solver, problem.GetDirection(), features, true, [&](int idx, std::string value) {
-               return this->ModelApplyToken(idx, value, arch, problem);
+               return this->ModelApplyTokenKTN(idx, value, arch, problem);
            }))
     {
         index     = heuristic_indexes[0];
         kernel_id = valid_kernels[index] + "+1";
-        MIOPEN_LOG_I("Params set by AI: " << ToString());
+        MIOPEN_LOG_I("Params set by KTN: " << ToString());
         return true;
     }
     return false;
 }
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
-#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
     if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942" &&
-       !StartsWith(ctx.GetStream().GetDeviceName(), "gfx95"))
+       ctx.GetStream().GetDeviceName() != "gfx950")
         return false;
     if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
        problem.GetInDataType() != miopenBFloat16)
@@ -467,73 +224,184 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsModelApplicable(
     return true;
 }
 
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
-    [[maybe_unused]] const ExecutionContext& ctx,
-    [[maybe_unused]] const ProblemDescription& problem)
-{
-    split_k   = 1;
-    index     = 0;
-    kernel_id = "";
+// clang-format off
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
+static const std::vector<std::tuple<std::string, int>> ranked_gemm_grp_bwd = {
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Filter1x1Stride1Pad0, 32, 32, 1, 1, 16, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 2, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 128, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 2, 1, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 4, 1, 1, 4, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 2, 2, 1, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Default, 32, 32, 1, 1, 16, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Default, 16, 16, 1, 1, 16, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<128, 128, 32, 32, 8, 8, Default, 32, 32, 2, 1, 8, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Default, 16, 16, 1, 1, 8, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Default, 32, 32, 1, 1, 8, 2, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Default, 16, 16, 1, 1, 8, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Default, 32, 32, 1, 1, 4, 2, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>", 1)
+};
 
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
+static const std::vector<std::tuple<std::string, int>> ranked_gemm_grp_bwd_navi = {
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 128, 128, 32, 8, 8, Default, 16, 16, 8, 2, 8, 4, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 4, 2, 4, 4, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 128, 64, 64, Default, 8, 8, 2>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128, 64, 64, 32, Filter1x1Stride1Pad0, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 4, 2, 1, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>", 1)
+};
+// clang-format on
+
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::InitValidKernels(
+    const ProblemDescription& problem)
+{
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    if(!loader.IsLoaded())
+        return;
+
+    auto data_type = problem.GetInDataType();
+    use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
+
+    valid_kernels = loader.FillValidKernelsWithTf32Fallback(
+        CKSolverType::GrpConvBwd, problem, data_type, use_tf32);
+
+    if(!valid_kernels.empty())
+    {
+        index     = 0;
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+    }
+}
+
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::DefaultKernelFromList(
+    const ExecutionContext& ctx)
+{
+    const auto dev_name = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
+    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+
+    auto* ranked_p = &ranked_gemm_grp_bwd;
+    if(is_gfx11 || is_gfx12)
+        ranked_p = &ranked_gemm_grp_bwd_navi;
+
+    const auto ranked_1st_applicable = *ranked_p;
+
+    for(const auto& kernel : ranked_1st_applicable)
+    {
+        const auto& kernel_str = std::get<0>(kernel);
+        const auto& it         = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
+        if(it != valid_kernels.end())
+        {
+            index     = it - valid_kernels.begin();
+            split_k   = 1;
+            kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+            return;
+        }
+    }
+}
+
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
+    const ExecutionContext& ctx, const ProblemDescription& problem)
+{
+    HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
+    state.Reset(k2DBwdSolverConfig.uses_split_k);
+
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
+    if(!loader.IsLoaded())
+        return;
+
+    [[maybe_unused]] const bool is_deterministic = problem.GetConv().attribute.deterministic;
+
+    // AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(IsModelApplicable(ctx, problem))
+    if(&ctx != &GetDummyCtx() &&
+       !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR))
     {
-        if(problem.GetInDataType() == miopenFloat)
+        bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
+
+        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
+            return loader.FillValidKernels(
+                CKSolverType::GrpConvBwd, p, p.GetInDataType(), try_tf32);
+        };
+
+        auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {
+            return RunKTNGeneric(*this, c, p);
+        };
+
+        auto ck_val_creator = MakeCKValidatorCreator(
+            loader, CKSolverType::GrpConvBwd, problem.GetInDataType(), mode_use_tf32);
+
+        if(RunAIHeuristics(k2DBwdSolverConfig,
+                           state,
+                           ctx,
+                           problem,
+                           is_deterministic,
+                           fill_valid_kernels,
+                           ktn_runner,
+                           ck_val_creator,
+                           mode_use_tf32))
         {
-            if(RunParameterPredictionModel<float>(ctx, problem))
-                return;
-        }
-        else if(problem.GetInDataType() == miopenBFloat16)
-        {
-            if(RunParameterPredictionModel<ck::bhalf_t>(ctx, problem))
-                return;
-        }
-        else
-        {
-            if(RunParameterPredictionModel<ck::half_t>(ctx, problem))
-                return;
+            return;
         }
     }
 #endif
-    switch(problem.GetInDataType())
+
+    // Fallback to default initialization
+    InitValidKernels(problem);
+    if(!valid_kernels.empty())
     {
-    case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat: Init<float>(problem); break;
-    case miopenInt8: Init<int8_t>(problem); break;
-    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
-    case miopenInt64:
-    case miopenInt32:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenDouble: break;
+        if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
+            DefaultKernelFromList(ctx);
+        state.SetResult(index, split_k, k2DBwdSolverConfig.uses_split_k);
     }
-#endif
+
+    // Invariant: split_k must always be 1 in deterministic mode
+    assert(!is_deterministic || split_k == 1);
 }
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemDescription& problem)
 {
-#if MIOPEN_USE_COMPOSABLEKERNEL
     if(valid_kernels.empty())
     {
-        switch(problem.GetInDataType())
-        {
-        case miopenHalf: Init<ck::half_t>(problem); break;
-        case miopenFloat: Init<float>(problem); break;
-        case miopenInt8: Init<int8_t>(problem); break;
-        case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
-        case miopenInt64:
-        case miopenInt32:
-        case miopenFloat8_fnuz:
-        case miopenBFloat8_fnuz:
-        case miopenDouble: break;
-        }
+        const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
+        if(!loader.IsLoaded())
+            return false;
+
+        auto data_type = problem.GetInDataType();
+        use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
+
+        valid_kernels = loader.FillValidKernelsWithTf32Fallback(
+            CKSolverType::GrpConvBwd, problem, data_type, use_tf32);
+
+        if(valid_kernels.empty())
+            return false;
+
         assert(!valid_kernels.empty());
         return true;
     }
+
+    const bool is_deterministic = problem.GetConv().attribute.deterministic;
+
+    // Deterministic mode: only iterate over kernels (index), split_k is always 1
+    if(is_deterministic)
+    {
+        if(!NextLinear(0, valid_kernels.size() - 1, index))
+        {
+            return false; // All kernels exhausted
+        }
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+1";
+        return true;
+    }
+
+    // General (non-deterministic) mode: iterate over both split_k and kernels
     do
     {
         bool flag = NextTwoPower<1, 128>(split_k);
+
         if(!flag)
         {
             kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
@@ -548,7 +416,6 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::SetNextValue(const ProblemD
         // All split_k and index values were iterated
         return false;
     } while(false);
-#endif
     return true;
 }
 
@@ -560,21 +427,16 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValidValue() const
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    switch(problem.GetInDataType())
-    {
-    case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
-    case miopenFloat: return CheckIsSupportCKArgs<float>(problem);
-    case miopenInt8: return CheckIsSupportCKArgs<int8_t>(problem);
-    case miopenBFloat16: return CheckIsSupportCKArgs<ck::bhalf_t>(problem);
-    case miopenInt64:
-    case miopenInt32:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenDouble: break;
-    }
-#endif
-    return false;
+    if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
+        return false;
+
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
+    if(!loader.IsLoaded())
+        return false;
+
+    auto data_type = problem.GetInDataType();
+    return loader.IsArgsSupported(
+        CKSolverType::GrpConvBwd, problem, kernel_id, data_type, use_tf32);
 }
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::operator==(
@@ -603,23 +465,13 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsValidPerformanceConfig(
 size_t
 ConvHipImplicitGemmGroupBwdXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
 {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    switch(problem.GetInDataType())
-    {
-    case miopenHalf:
-        return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<ck::half_t>, CKArgs>(problem);
-    case miopenFloat: return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<float>, CKArgs>(problem);
-    case miopenInt8: return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<int8_t>, CKArgs>(problem);
-    case miopenBFloat16:
-        return GetCKSplitkMaxWorkspaceSize<DeviceOpGBwdPtrs<ck::bhalf_t>, CKArgs>(problem);
-    case miopenInt64:
-    case miopenInt32:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenDouble: break;
-    }
-#endif
-    return 0; // other types not applicable for this solver
+    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
+    if(!loader.IsLoaded())
+        return 0;
+
+    auto data_type = problem.GetInDataType();
+    bool use_tf32  = (data_type == miopenFloat) && problem.UseTF32();
+    return loader.GetWorkspaceSize(CKSolverType::GrpConvBwd, problem, data_type, use_tf32);
 }
 
 size_t ConvHipImplicitGemmGroupBwdXdlops::GetWorkspaceSize(const ExecutionContext&,
@@ -641,7 +493,6 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem) const
 {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
         return false;
     if(problem.HasMixedDataTypes())
@@ -650,6 +501,21 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
         return false;
     if(!problem.IsDirectionBackwardData())
         return false;
+
+    // gfx950 measured: CK's grouped backward-data kernel addresses global memory
+    // with 32-bit BYTE offsets. A tensor larger than INT_MAX *bytes* overflows
+    // that arithmetic and silently returns wrong results (verified: every shape
+    // whose x-tensor exceeds 2^31 bytes fails; every shape below it passes).
+    // ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC handles these correctly and is
+    // selected instead. Counterpart to the MISA int32 gates, which bound the
+    // opposite solver on the forward path.
+    {
+        constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        if(problem.GetIn().GetNumBytes() > max_int32 ||
+           problem.GetOut().GetNumBytes() > max_int32 ||
+           problem.GetWeights().GetNumBytes() > max_int32)
+            return false;
+    }
     if(!problem.Is2d())
         return false;
     if(!(problem.IsLayoutNHWC() || problem.IsLayoutDefault()))
@@ -657,22 +523,13 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     // needed because layout transpose kernel does not support non-packed tensors
     if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
         return false;
-    if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
+
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
+    if(!loader.IsLoaded())
         return false;
-    switch(problem.GetInDataType())
-    {
-    case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
-    case miopenFloat: return CheckCKApplicability<float>(problem);
-    case miopenInt8: return CheckCKApplicability<int8_t>(problem);
-    case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
-    case miopenInt64:
-    case miopenInt32:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenDouble: break;
-    }
-#endif
-    return false;
+
+    return loader.IsApplicable(
+        CKSolverType::GrpConvBwd, problem, problem.GetInDataType(), problem.UseTF32());
 }
 
 ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
@@ -680,30 +537,12 @@ ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
     [[maybe_unused]] const ProblemDescription& problem,
     [[maybe_unused]] const PerformanceConfigHipImplicitGemmGroupBwdXdlops& config) const
 {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    return MakeSolutionGroupConvImplicitGemmXdlops(
-        problem,
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
-            return InitInvokerFactoryBwdNCHW<2,
-                                             false,
-                                             DeviceOpGBwdPtrs<T>,
-                                             CKArgs,
-                                             miopen::conv::DataInvokeParams>(
-                ctx, problem, config.kernel_id);
-        },
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
-            return InitInvokerFactoryNHWC<false,
-                                          DeviceOpGBwdPtrs<T>,
-                                          CKArgs,
-                                          miopen::conv::DataInvokeParams>(
-                ctx, problem, config.kernel_id);
-        });
+    const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
+    if(!loader.IsLoaded())
+        return ConvSolution{miopenStatusInternalError};
 
-#else
-    return {};
-#endif
+    return loader.GetSolution(
+        CKSolverType::GrpConvBwd, ctx, problem, config.kernel_id, config.UseTF32());
 }
 
 } // namespace conv
