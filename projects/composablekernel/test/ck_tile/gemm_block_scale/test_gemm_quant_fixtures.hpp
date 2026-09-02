@@ -57,6 +57,17 @@ struct GemmConfigLargeTensor : public GemmConfigBase
     static constexpr bool LargeTensors = true;
 };
 
+// Large-tensor path with padding enabled so non-tile-multiple M/N/K are accepted
+// (IsSupportedArgument gates the divisibility checks on kPad*) and the remainder tiles
+// are guarded on the unmasked 64-bit global path.
+struct GemmConfigLargeTensorPadded : public GemmConfigBase
+{
+    static constexpr bool kPadM        = true;
+    static constexpr bool kPadN        = true;
+    static constexpr bool kPadK        = true;
+    static constexpr bool LargeTensors = true;
+};
+
 struct GemmConfigDecode : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile      = 16;
