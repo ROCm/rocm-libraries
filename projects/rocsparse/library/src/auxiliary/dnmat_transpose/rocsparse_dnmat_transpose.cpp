@@ -59,7 +59,7 @@ namespace rocsparse
         const I a_s = hipBlockIdx_x * BN + wid;
         const I b_i = hipBlockIdx_x * BN + lid;
 
-        __shared__ T sdata[BN][BN];
+        __shared__ T sdata[BN][BN + 1];
 
         for(I j = 0; j < ncols; j += BN)
         {
@@ -107,7 +107,7 @@ namespace rocsparse
         const I a_i = blockIdx.x * BN + lid;
         const I b_s = blockIdx.x * BN + wid;
 
-        __shared__ T sdata[BN][BN];
+        __shared__ T sdata[BN][BN + 1];
 
         for(I j = 0; j < ncols; j += BN)
         {
@@ -119,8 +119,7 @@ namespace rocsparse
                 const auto a_j = a_s + k;
                 if(a_i < nrows && a_j < ncols)
                 {
-                    sdata[wid + k][lid] = source[a_j * source_ld + a_i];
-                    ; // A col order
+                    sdata[wid + k][lid] = source[a_j * source_ld + a_i]; // A col order
                 }
             }
 
@@ -227,7 +226,7 @@ namespace rocsparse
         static constexpr uint32_t BM = 8;
 
         dim3 gdim((source->rows - 1) / BN + 1,
-                  std::min(target->batch_count, static_cast<int64_t>(65536)));
+                  std::min(target->batch_count, static_cast<int64_t>(65535)));
         dim3 tdim(BN * BM);
 
         const T* alpha_const_values
