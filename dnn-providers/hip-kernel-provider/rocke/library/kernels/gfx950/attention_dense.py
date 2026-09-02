@@ -238,6 +238,11 @@ class AttentionDenseSpec:
     #   sched template, mirroring what the PV cluster already does. Off by
     #   default (the unpipelined chain is byte-identical to the shipped kernel).
     qk_pipeline: bool = False
+    # k_prefetch_early: issue tile j+1's K DMA at the top of body j instead of at
+    #   the end, so it overlaps a full tile of compute. Legal at NBUF=2 because
+    #   only V's prefetch buffer aliases a buffer the body still reads. Off by
+    #   default (the end-of-body issue is byte-identical to the shipped kernel).
+    k_prefetch_early: bool = False
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -394,6 +399,12 @@ class AttentionDenseSpec:
             raise ValueError("q_reload is not yet supported with paged KV")
         if self.qk_pipeline and not self.persistent:
             raise ValueError("qk_pipeline is only implemented on the persistent path")
+        if self.k_prefetch_early and not self.persistent:
+            raise ValueError(
+                "k_prefetch_early is only implemented on the persistent path"
+            )
+        if self.k_prefetch_early and self.paged:
+            raise ValueError("k_prefetch_early is not yet supported with paged KV")
         if self.use_sinks and self.paged:
             raise ValueError("use_sinks is not yet supported with paged KV")
         if self.use_sinks and self.varlen:
@@ -471,6 +482,8 @@ class AttentionDenseSpec:
                 parts.append("qreload")
             if self.qk_pipeline:
                 parts.append("qkpipe")
+            if self.k_prefetch_early:
+                parts.append("kpf")
         return kernel_name_join(*parts)
 
 
@@ -1267,6 +1280,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     use_sinks = spec.use_sinks
     Q_RELOAD = spec.q_reload
     QK_PIPELINE = spec.qk_pipeline
+    K_PREFETCH_EARLY = spec.k_prefetch_early
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -1501,6 +1515,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             async_load_k(K_lds_addr, buf_val, tk0)
             async_load_v(V_lds_addr, buf_val, tk0)
 
+        def load_tile_k(buf_val, tile_idx):
+            async_load_k(K_lds_addr, buf_val, b.mul(tile_idx, b.const_i32(BN)))
+
+        def load_tile_v(buf_val, tile_idx):
+            async_load_v(V_lds_addr, buf_val, b.mul(tile_idx, b.const_i32(BN)))
+
         def do_qk(kbuf):
             s_reg = []
             for nsub in range(N_SUB):
@@ -1723,6 +1743,15 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             # of a full vmcnt(0) serialize. Bit-identical, raises MfmaUtil.
             b.s_waitcnt(vmcnt=V_DMA_PASSES)
             b.s_barrier_bare()
+            if K_PREFETCH_EARLY:
+                # K's write buffer (j+1) never aliases the K this tile reads (j),
+                # so K(j+1)'s DMA can be issued here and land behind this tile's
+                # whole QK+softmax+PV cluster. Issuing it at the end of the body
+                # instead (see load_tile below) leaves it ~0 cycles to land, which
+                # is why the wait above is the kernel's costliest instruction.
+                # V cannot move: at NBUF=2 its write buffer IS the buffer the PV
+                # cluster is about to read, which is what pins V to the end.
+                load_tile_k(pbuf, b.add(j, b.const_i32(1)))
             s = do_qk(kbuf)
             if mask_lower or mask_upper:
                 do_mask(s, j, lower=mask_lower, upper=mask_upper)
@@ -1758,7 +1787,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 o_acc = rescale_o(o_acc, alpha)
             p_packs = relayout_p(p_vals)
             b.s_barrier_bare()
-            load_tile(pbuf, b.add(j, b.const_i32(1)))
+            if K_PREFETCH_EARLY:
+                load_tile_v(pbuf, b.add(j, b.const_i32(1)))
+            else:
+                load_tile(pbuf, b.add(j, b.const_i32(1)))
             b.scf_yield(m_new, l_new, *o_acc, *p_packs)
 
         if causal:
