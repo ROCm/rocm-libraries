@@ -72,7 +72,7 @@ function(add_fma_property)
                                 PROPERTIES COMPILE_FLAGS -mno-fma)
 endfunction()
 
-set(CPPFILES "handle_api.cpp" "handle_host.cpp")
+set(CPPFILES "handle_api.cpp" "handle_host.cpp" "status_api.cpp")
 # Addition of Tensor Outer API CPP files
 file(GLOB TENSOR_CPPFILES "tensor/*.cpp" )
 list(APPEND Rpp_Source ${CPPFILES})
