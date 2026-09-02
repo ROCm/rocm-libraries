@@ -52,22 +52,7 @@ namespace hipblaslt::host_numerics
         double& averageUlp;
     };
 
-    struct MatmulValidationRequest
-    {
-        MatmulValidationOptions options;
-        std::span<const MatmulValidationCase> cases;
-        MatmulValidationMetrics metrics;
-    };
-
-    struct MatmulValidationResult
-    {
-        size_t failedChecks = 0;
-
-        bool passed() const
-        {
-            return failedChecks == 0;
-        }
-    };
-
-    MatmulValidationResult validateMatmulOutputs(const MatmulValidationRequest& request);
+    bool validateMatmulOutputs(const MatmulValidationOptions&        options,
+                               std::span<const MatmulValidationCase> cases,
+                               MatmulValidationMetrics               metrics);
 } // namespace hipblaslt::host_numerics
