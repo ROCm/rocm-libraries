@@ -42,7 +42,7 @@ endif()
 # approach used in hipsparselt's clients. Leave the working gfortran path
 # untouched.
 set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES)
-if(NOT CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
+if(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
     get_filename_component(_hipblaslt_fortran_bin_dir "${CMAKE_Fortran_COMPILER}" DIRECTORY)
     get_filename_component(_hipblaslt_fortran_root_dir "${_hipblaslt_fortran_bin_dir}" DIRECTORY)
     find_library(HIPBLASLT_FORTRANRUNTIME_LIBRARY NAMES FortranRuntime
@@ -50,6 +50,13 @@ if(NOT CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
     if(HIPBLASLT_FORTRANRUNTIME_LIBRARY)
         find_library(HIPBLASLT_FORTRANDECIMAL_LIBRARY NAMES FortranDecimal
             PATHS "${_hipblaslt_fortran_root_dir}/lib")
+        if(NOT HIPBLASLT_FORTRANDECIMAL_LIBRARY)
+            message(FATAL_ERROR
+                "Found FortranRuntime (${HIPBLASLT_FORTRANRUNTIME_LIBRARY}) but not its "
+                "companion FortranDecimal library under ${_hipblaslt_fortran_root_dir}/lib. "
+                "LAPACK's CHARACTER-argument routines (zlange/clange/dlange) need both to link "
+                "against LLVM Flang compiler ${CMAKE_Fortran_COMPILER}.")
+        endif()
         set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES
             ${HIPBLASLT_FORTRANRUNTIME_LIBRARY} ${HIPBLASLT_FORTRANDECIMAL_LIBRARY})
     else()
@@ -57,6 +64,13 @@ if(NOT CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
         # a single flang_rt.runtime library.
         find_library(HIPBLASLT_FLANGRT_LIBRARY NAMES flang_rt.runtime
             PATHS "${_hipblaslt_fortran_root_dir}/lib")
+        if(NOT HIPBLASLT_FLANGRT_LIBRARY)
+            message(FATAL_ERROR
+                "Could not find the LLVM Flang runtime library (FortranRuntime+FortranDecimal, "
+                "or flang_rt.runtime) under ${_hipblaslt_fortran_root_dir}/lib for Fortran "
+                "compiler ${CMAKE_Fortran_COMPILER}. LAPACK's CHARACTER-argument routines "
+                "(zlange/clange/dlange) need it to link.")
+        endif()
         set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES ${HIPBLASLT_FLANGRT_LIBRARY})
     endif()
     unset(_hipblaslt_fortran_bin_dir)
