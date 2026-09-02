@@ -118,6 +118,93 @@ def to_numpy(tensor, dtype=None) -> np.ndarray:
     return np.asarray(tensor.values, dtype=dtype).reshape(tensor.shape)
 
 
+def _as_default_vector_broadcast(scale, axis):
+    return scale.expand_dims(axis) if len(scale.shape) == 1 else scale
+
+
+def _pre_quantization_scales(scales, default_axis):
+    scales = [] if scales is None else list(scales)
+    return [_as_default_vector_broadcast(scale, default_axis) for scale in scales]
+
+
+def _gemm_options(
+    accumulator_type,
+    alpha,
+    beta,
+    scale_c,
+    compute_type_a,
+    compute_type_b,
+    math_mode,
+    activation,
+    activation_parameter0,
+    activation_parameter1,
+    output_selection,
+    block_scale_a,
+    block_scale_b,
+    block_size_a,
+    block_size_b,
+    pre_quantization_scales_a,
+    pre_quantization_scales_b,
+    bias,
+    scale_alpha,
+    scale_a,
+    scale_b,
+    output_scale,
+    output_conversion,
+    accumulation_rounding,
+    conjugate_a,
+    conjugate_b,
+):
+    if block_scale_a is not None and block_size_a == 0:
+        raise ValueError("Python reference_gemm A block scale requires a nonzero size.")
+    if block_scale_a is None and block_size_a != 0:
+        raise ValueError("Python reference_gemm A block size requires a scale tensor.")
+    if block_scale_b is not None and block_size_b == 0:
+        raise ValueError("Python reference_gemm B block scale requires a nonzero size.")
+    if block_scale_b is None and block_size_b != 0:
+        raise ValueError("Python reference_gemm B block size requires a scale tensor.")
+
+    options = _native._GemmOptions(accumulator_type)
+    options.accumulation_rounding = accumulation_rounding
+    options.math_mode = math_mode
+    options.compute_type_a = compute_type_a
+    options.compute_type_b = compute_type_b
+    options.pre_quantization_scales_a = _pre_quantization_scales(
+        pre_quantization_scales_a, 1
+    )
+    options.pre_quantization_scales_b = _pre_quantization_scales(
+        pre_quantization_scales_b, 0
+    )
+    options.block_scale_a = block_scale_a
+    options.block_scale_b = block_scale_b
+    options.block_size_a = block_size_a
+    options.block_size_b = block_size_b
+    options.conjugate_a = conjugate_a
+    options.conjugate_b = conjugate_b
+    options.epilogue.alpha = alpha
+    options.epilogue.beta = beta
+    options.epilogue.scale_c = scale_c
+    options.epilogue.bias = bias
+    options.epilogue.scale_alpha = scale_alpha
+    options.epilogue.scale_a = (
+        None if scale_a is None else _as_default_vector_broadcast(scale_a, 1)
+    )
+    options.epilogue.scale_b = (
+        None if scale_b is None else _as_default_vector_broadcast(scale_b, 0)
+    )
+    options.epilogue.output_scale = output_scale
+    options.epilogue.output_conversion = output_conversion
+    options.epilogue.activation = activation
+    options.epilogue.activation_parameter0 = activation_parameter0
+    options.epilogue.activation_parameter1 = activation_parameter1
+    options.output_selection = (
+        OutputSelection.all()  # noqa: F405
+        if output_selection is None
+        else output_selection
+    )
+    return options
+
+
 def reference_gemm(
     a,
     b,
@@ -154,59 +241,33 @@ def reference_gemm(
 ):
     """Compute a reference GEMM from tensor arguments and return its output tensor."""
 
-    def as_default_vector_broadcast(scale, axis):
-        return scale.expand_dims(axis) if len(scale.shape) == 1 else scale
-
-    def pre_quantization_scales(scales, default_axis):
-        scales = [] if scales is None else list(scales)
-        return [as_default_vector_broadcast(scale, default_axis) for scale in scales]
-
-    if block_scale_a is not None and block_size_a == 0:
-        raise ValueError("Python reference_gemm A block scale requires a nonzero size.")
-    if block_scale_a is None and block_size_a != 0:
-        raise ValueError("Python reference_gemm A block size requires a scale tensor.")
-    if block_scale_b is not None and block_size_b == 0:
-        raise ValueError("Python reference_gemm B block scale requires a nonzero size.")
-    if block_scale_b is None and block_size_b != 0:
-        raise ValueError("Python reference_gemm B block size requires a scale tensor.")
-
-    options = GemmOptions(accumulator_type)  # noqa: F405
-    options.accumulation_rounding = accumulation_rounding
-    options.math_mode = math_mode
-    options.compute_type_a = compute_type_a
-    options.compute_type_b = compute_type_b
-    options.pre_quantization_scales_a = pre_quantization_scales(
-        pre_quantization_scales_a, 1
-    )
-    options.pre_quantization_scales_b = pre_quantization_scales(
-        pre_quantization_scales_b, 0
-    )
-    options.block_scale_a = block_scale_a
-    options.block_scale_b = block_scale_b
-    options.block_size_a = block_size_a
-    options.block_size_b = block_size_b
-    options.conjugate_a = conjugate_a
-    options.conjugate_b = conjugate_b
-    options.epilogue.alpha = alpha
-    options.epilogue.beta = beta
-    options.epilogue.scale_c = scale_c
-    options.epilogue.bias = bias
-    options.epilogue.scale_alpha = scale_alpha
-    options.epilogue.scale_a = (
-        None if scale_a is None else as_default_vector_broadcast(scale_a, 1)
-    )
-    options.epilogue.scale_b = (
-        None if scale_b is None else as_default_vector_broadcast(scale_b, 0)
-    )
-    options.epilogue.output_scale = output_scale
-    options.epilogue.output_conversion = output_conversion
-    options.epilogue.activation = activation
-    options.epilogue.activation_parameter0 = activation_parameter0
-    options.epilogue.activation_parameter1 = activation_parameter1
-    options.output_selection = (
-        OutputSelection.all()  # noqa: F405
-        if output_selection is None
-        else output_selection
+    options = _gemm_options(
+        accumulator_type,
+        alpha,
+        beta,
+        scale_c,
+        compute_type_a,
+        compute_type_b,
+        math_mode,
+        activation,
+        activation_parameter0,
+        activation_parameter1,
+        output_selection,
+        block_scale_a,
+        block_scale_b,
+        block_size_a,
+        block_size_b,
+        pre_quantization_scales_a,
+        pre_quantization_scales_b,
+        bias,
+        scale_alpha,
+        scale_a,
+        scale_b,
+        output_scale,
+        output_conversion,
+        accumulation_rounding,
+        conjugate_a,
+        conjugate_b,
     )
     return _native._reference_gemm(
         a,
@@ -217,3 +278,69 @@ def reference_gemm(
         output_layout,
         backend,
     )
+
+
+def reference_gemm_into(
+    a,
+    b,
+    c,
+    d,
+    accumulator_type=ScalarType.Float32,  # noqa: F405
+    alpha=1.0,
+    beta=0.0,
+    scale_c=1.0,
+    compute_type_a=None,
+    compute_type_b=None,
+    math_mode=MathMode.Default,  # noqa: F405
+    activation=Activation.None_,  # noqa: F405
+    activation_parameter0=0.0,
+    activation_parameter1=0.0,
+    output_selection=None,
+    backend=GemmBackend.Pointwise,  # noqa: F405
+    block_scale_a=None,
+    block_scale_b=None,
+    block_size_a=0,
+    block_size_b=0,
+    pre_quantization_scales_a=None,
+    pre_quantization_scales_b=None,
+    bias=None,
+    scale_alpha=None,
+    scale_a=None,
+    scale_b=None,
+    output_scale=1.0,
+    output_conversion=OutputConversion.Default,  # noqa: F405
+    accumulation_rounding=AccumulationRounding.TypeDefault,  # noqa: F405
+    conjugate_a=False,
+    conjugate_b=False,
+):
+    """Compute a reference GEMM into caller-owned output tensor d."""
+
+    options = _gemm_options(
+        accumulator_type,
+        alpha,
+        beta,
+        scale_c,
+        compute_type_a,
+        compute_type_b,
+        math_mode,
+        activation,
+        activation_parameter0,
+        activation_parameter1,
+        output_selection,
+        block_scale_a,
+        block_scale_b,
+        block_size_a,
+        block_size_b,
+        pre_quantization_scales_a,
+        pre_quantization_scales_b,
+        bias,
+        scale_alpha,
+        scale_a,
+        scale_b,
+        output_scale,
+        output_conversion,
+        accumulation_rounding,
+        conjugate_a,
+        conjugate_b,
+    )
+    return _native._reference_gemm_into(a, b, c, d, options, backend)

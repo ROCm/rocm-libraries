@@ -46,9 +46,7 @@ GemmBackend referenceGemmIntoBound(Tensor a, Tensor b, Tensor c, Tensor d, GemmO
 }  // namespace
 
 void registerGemmBindings(nb::module_& module) {
-    nb::class_<GemmEpilogue>(
-        module, "GemmEpilogue",
-        "Owning GEMM alpha/beta, vector scaling, activation, and output-conversion settings.")
+    nb::class_<GemmEpilogue>(module, "_GemmEpilogue")
         .def(nb::init<ScalarType>(), "coefficient_type"_a)
         .def_prop_rw(
             "alpha",
@@ -95,7 +93,7 @@ void registerGemmBindings(nb::module_& module) {
                 epilogue.activationParameter1 = scalarFromPython(value);
             });
 
-    nb::class_<GemmOptions>(module, "GemmOptions", "GEMM arithmetic and epilogue options.")
+    nb::class_<GemmOptions>(module, "_GemmOptions")
         .def(nb::init<ScalarType>(), "accumulator_type"_a = ScalarType::Float32)
         .def_rw("accumulator_type", &GemmOptions::accumulatorType)
         .def_rw("accumulation_rounding", &GemmOptions::accumulationRounding)
@@ -116,7 +114,7 @@ void registerGemmBindings(nb::module_& module) {
     module.def("_reference_gemm", &referenceGemmOwned, "a"_a, "b"_a, "c"_a,
                "output_type"_a = ScalarType::Float32, "options"_a = GemmOptions{},
                "output_layout"_a = std::optional<Layout>{}, "backend"_a = GemmBackend::Pointwise);
-    module.def("reference_gemm_into", &referenceGemmIntoBound, "a"_a, "b"_a, "c"_a, "d"_a,
+    module.def("_reference_gemm_into", &referenceGemmIntoBound, "a"_a, "b"_a, "c"_a, "d"_a,
                "options"_a = GemmOptions{}, "backend"_a = GemmBackend::Pointwise);
 }
 }  // namespace roc::host_numerics::python_bindings
