@@ -1112,11 +1112,19 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
 def _b128ChunkTiling(tileInfo, mStripBytes):
   """How one lane's b128 divides a strip: (chunks per K row, elements per chunk).
 
-  A b128 covers 16/bpe contiguous free-dim elements at one K row.  Only fp4
-  subdivides a row; every other TLU dtype keeps one chunk per K row, making the
-  per-lane offset a pure K ramp.
+  A b128 covers 16/bpe contiguous free-dim elements at one K row, and a strip
+  holds chunksPerK = mStripBytes/16 of them.  At chunksPerK == 1 a b128 is a
+  whole K row and the per-lane offset is a pure K ramp; above that, physical
+  chunk P = i*wavesize + laneId splits into K row (P // chunksPerK) plus an
+  intra-row M block (P % chunksPerK).  bpe-driven, not dtype-specific.
   """
-  chunksPerK = max(1, mStripBytes // 16) if float(tileInfo.bpe) == 0.5 else 1
+  chunksPerK = max(1, mStripBytes // 16)
+  # The split masks and shifts by chunksPerK, so a non-power-of-two would
+  # silently mis-address rather than fail.
+  if chunksPerK & (chunksPerK - 1):
+    raise ValueError("TLU=1 GR requires a power-of-two chunksPerK, got %d "
+                     "(mStripBytes=%d, subtileShape=%s, bpe=%s)"
+                     % (chunksPerK, mStripBytes, tileInfo.subtileShape, tileInfo.bpe))
   return chunksPerK, int(16 / tileInfo.bpe)
 
 

@@ -13,8 +13,9 @@ known bug. They answer in rejection-reason strings -- ``None`` means the
 geometry is fine -- because the same predicates drive the stack-height backoff
 ladder and produce the message the caller rejects with.
 
-Public entry points: :func:`subtileStackForTLU1`, :func:`subtileTLU1StackReason`
-and :func:`validateSubtileGRKPartition`.
+Public entry points: :func:`subtileStackForTLU1`, :func:`subtileTLU1StackReason`,
+:func:`validateSubtileGRKPartition`, and the per-dtype stack-geometry tables
+``SUBTILE_TLU1_B4_STACKS`` / ``SUBTILE_TLU1_B16_STACKS``.
 """
 
 from ..Utilities import reject
@@ -53,28 +54,60 @@ def _subtilePerWaveMTiles(mtTiles, stack, wgSize):
   return max(1, padded // int(wgSize))
 
 
-# A TLU=1 fp4 strip is stackM * MatrixInstM * 0.5 bytes wide, so a 16-tile stack
-# fills one 128B cache line and a 2-tile stack uses only 16B of each line it
-# touches.  Taller is therefore better, up to a full line.
-_SUBTILE_STACK_SIZES = (16, 8, 4, 2)
+# A TLU=1 strip is stackM * MatrixInstM * bpe bytes wide, so the stack that fills
+# one cache line depends on the dtype: 16 tiles for fp4, 4 for bf16.  Below that
+# the strip uses only part of each line it touches, so taller is better up to a
+# full line.
 _SUBTILE_STACK_MIN = 2
-_SUBTILE_STACK_FULL_LINE = 16
+_SUBTILE_LINE_BYTES = 128
 
 
-def _subtileStackForTile(mtTiles):
-  """Free-dim MFMA-M tiles per LDS strip for one TLU=1 fp4 operand.
+# TLU=1 subtile geometry per free-dim stack height, keyed by dtype family.  bf16
+# fills a cache line at 4 tiles, so it needs no taller stacks than that.
+SUBTILE_TLU1_B4_STACKS = {
+  2:  "AB_B4_TLU1",
+  4:  "AB_B4_TLU1_4x1",
+  8:  "AB_B4_TLU1_8x1",
+  16: "AB_B4_TLU1_16x1",
+}
+SUBTILE_TLU1_B16_STACKS = {
+  2: "AB_B16_TLU1",
+  4: "AB_B16_TLU1_4x1",
+}
+
+
+def _subtileStackFullLine(instM, bpe):
+  """Free-dim MFMA-M tiles whose TLU=1 strip covers one cache line."""
+  perTileBytes = int(instM) * float(bpe)
+  return max(_SUBTILE_STACK_MIN, int(_SUBTILE_LINE_BYTES // perTileBytes))
+
+
+def _subtileStackLadder(fullLine):
+  """Candidate stack heights for this dtype, tallest first."""
+  return tuple(1 << b for b in range(int(fullLine).bit_length() - 1, 0, -1))
+
+
+def _subtileStackForTile(mtTiles, fullLine):
+  """Free-dim MFMA-M tiles per LDS strip for one TLU=1 operand.
 
   Tallest power-of-two stack that still holds the tile in one strip, else the
-  tallest exact divisor.  Pad tiles cost LDS footprint but no traffic, since the
-  pad lanes go to BufferOOB.  Rounding past the tile would need a partial
-  trailing strip that the subtile grids do not count.
+  tallest exact divisor.  The pad tiles rounding adds are written to LDS but
+  never read, and not fetched at all since the pad lanes go to BufferOOB, so
+  they cost footprint rather than traffic.  Rounding past the tile would need a
+  partial trailing strip that the subtile grids do not count.
   """
   mtTiles = int(mtTiles)
-  exact = next((s for s in _SUBTILE_STACK_SIZES if mtTiles % s == 0),
+  fullLine = int(fullLine)
+  exact = next((s for s in _subtileStackLadder(fullLine) if mtTiles % s == 0),
                _SUBTILE_STACK_MIN)
   if mtTiles <= 1:
     return exact
-  roundedUp = min(_SUBTILE_STACK_FULL_LINE, 1 << (mtTiles - 1).bit_length())
+  # Rounding up is only safe while the rounded stack still holds the whole tile
+  # in one strip.  A stack that neither divides the tile nor covers it would need
+  # a partial trailing strip, which the subtile grids do not count and the GR
+  # emit cannot address.  bf16 reaches this: its cache line caps the stack at 4,
+  # so a 6-tile tile must take the exact stack of 2 rather than round to 4.
+  roundedUp = min(fullLine, 1 << (mtTiles - 1).bit_length())
   if roundedUp > exact and roundedUp >= mtTiles:
     return roundedUp
   return exact
@@ -113,15 +146,15 @@ def _subtileStripSharingReason(state, tc, mtTiles, stack):
   return None
 
 
-def subtileTLU1StackReason(state, tc, mtTiles, stack):
-  """Why `stack` cannot lay out the TLU=1 fp4 operand tc, or None when it can."""
+def subtileTLU1StackReason(state, tc, mtTiles, stack, bpe):
+  """Why `stack` cannot lay out the TLU=1 operand tc, or None when it can."""
   mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
   strips = -(-mtTiles // stack)
   # A partial tail strip has no register list of its own, so the GR emit indexes
   # past the end of localSubtilesRegister.  Padding is only emittable while the
   # operand is a single strip.
   if mtTiles % stack != 0 and strips > 1:
-    return ("UseSubtileImpl=1 TLU=1 fp4 pads tensor %s across more than one "
+    return ("UseSubtileImpl=1 TLU=1 pads tensor %s across more than one "
             "LDS strip: %d MMA tiles on a stack of %d is %d strips with a "
             "partial tail, which the GR emit cannot address (MacroTile=%d)"
             % (tc, mtTiles, stack, strips, mtFree))
@@ -142,27 +175,30 @@ def subtileTLU1StackReason(state, tc, mtTiles, stack):
   otherWaves = max(1, numWaves // wgSize)
   perWave    = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
   fetchGroup = max(1, stack // perWave) * otherWaves
-  stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * 0.5
+  stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * float(bpe)
   slots      = int(stripBytes // (state["WavefrontSize"] * 16)) \
                * (state["DepthU"] // state["MatrixInstK"])
   if slots < fetchGroup:
-    return ("UseSubtileImpl=1 TLU=1 fp4 leaves the LDS strip on tensor %s with "
+    return ("UseSubtileImpl=1 TLU=1 leaves the LDS strip on tensor %s with "
             "%d (block x K window) slots for a fetch group of %d, so the surplus "
             "waves refetch it (MacroTile=%d, DepthU=%d, stack=%d)"
             % (tc, slots, fetchGroup, mtFree, state["DepthU"], stack))
   return None
 
 
-def subtileStackForTLU1(state, tc, mtTiles):
-  """Stack height for a TLU=1 fp4 operand, backing off when the geometry refuses it.
+def subtileStackForTLU1(state, tc, mtTiles, bpe):
+  """Stack height for a TLU=1 operand, backing off when the geometry refuses it.
 
-  _subtileStackForTile picks purely on cache-line utilization, and a height it
-  likes can still be unlayoutable for this wave group.  Walk down the ladder
-  from the preferred height rather than rejecting the solution outright.
+  _subtileStackForTile picks purely on cache-line utilization.  A height it
+  likes can still be unlayoutable for this wave group, and a shorter one often
+  is not, so walk down the ladder rather than rejecting the solution outright.
+  The preferred height is tried first, so a solution that is valid today keeps
+  the stack it has today.
   """
-  preferred = _subtileStackForTile(mtTiles)
-  for stack in [preferred] + [s for s in _SUBTILE_STACK_SIZES if s < preferred]:
-    if subtileTLU1StackReason(state, tc, mtTiles, stack) is None:
+  fullLine = _subtileStackFullLine(state["MatrixInstM"], bpe)
+  preferred = _subtileStackForTile(mtTiles, fullLine)
+  for stack in [preferred] + [s for s in _subtileStackLadder(fullLine) if s < preferred]:
+    if subtileTLU1StackReason(state, tc, mtTiles, stack, bpe) is None:
       return stack
   return preferred
 

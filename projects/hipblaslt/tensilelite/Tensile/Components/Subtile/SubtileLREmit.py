@@ -21,6 +21,7 @@ from rocisa.enum import RegisterType
 from rocisa.instruction import (
     DSLoadB128,
     DSLoadB64TrB4,
+    DSLoadB64TrB16,
     SMovB32, SMovB64,
     VAddU32, VAndB32, VMovB32, VOrB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
@@ -652,17 +653,54 @@ def _lraColScatterBase(writer, module, tc, base, csc):
   writer.vgprPool.checkIn(kcol)
 
 
+# LDS transpose reads for the TLU=1 (NT) layout, keyed by bytes-per-element.
+# regsPerRead is the instruction's VGPR return count, so one read covers
+# regsPerRead * 4 / bpe elements per lane and two reads fill the 4-VGPR operand.
+# gfx950 has no 128-bit transpose-16 form -- ds_read_tr16_b128 is the gfx1250
+# spelling and the gfx950 assembler rejects both it and ds_read_b128_tr_b16 --
+# so bf16 uses the b64 form here.
+_TLU_TR_READ = {
+    0.5: (DSLoadB64TrB4, 2),
+    2.0: (DSLoadB64TrB16, 2),
+}
+
+
+def _tluTrRead(tileInfo):
+  """(opcode, regsPerRead, elemsPerRead) for this operand's TLU=1 transpose read."""
+  entry = _TLU_TR_READ.get(float(tileInfo.bpe))
+  if entry is None:
+    raise NotImplementedError("No TLU=1 transpose local read for bpe %s on tensor %s"
+                              % (tileInfo.bpe, tileInfo.tc))
+  opcode, regsPerRead = entry
+  return opcode, regsPerRead, int(regsPerRead * 4 / float(tileInfo.bpe))
+
+
 def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
   """LR per-lane LDS base offset for TLU=1 (NT) transpose reads.
 
   GR wrote this operand K-major, free-dim contiguous, so one K row is
-  ``mStripBytes`` wide and the first read's base is::
+  ``mStripBytes`` wide.
 
-      base(lane) = (kGroup * groupKStride + frow) * mStripBytes
+  A transpose read covers elemsPerRead = regsPerRead * 4 / bpe free-dim elements
+  per lane.  For the K-major LDS image GR writes (element(M,K) = K*subtileM + M),
+  the per-lane base of the first read (M-tile 0, instr 0) is
 
-  The second read within a tile and the M-tile selection are constant ds offsets
-  applied by emitSingleDsRead.  The non-subtile s+m+k formula assumes a padded
-  layout and does not match this image.
+      freeRuns = instM // elemsPerRead
+      kGroup = lane // instM               (0..numGroups-1)
+      kIntra = (lane % instM) // freeRuns  (K row within this group's slice)
+      mRun   = lane %  freeRuns            (which free-dim run this lane reads)
+      base(lane) = (kGroup * groupKStride + kIntra) * mStripBytes
+                   + mRun * elemsPerRead * bpe
+
+  where groupKStride = instK // numGroups is the K-row distance between adjacent
+  lane groups.  Successive reads within a tile step elemsPerRead K rows and the
+  M-tile selection is a constant ds offset, both applied by emitSingleDsRead.
+  The layout invariant is numReads * elemsPerRead == groupKStride.
+
+  fp4 has freeRuns 1, so mRun vanishes and kIntra collapses to lane % instM,
+  which is the map verified on gfx950 hardware; bf16 has freeRuns 4 and needs
+  both terms.  The non-subtile s+m+k formula assumes a padded layout and does
+  not match this image.
   """
   tc = tileInfo.tc
   wavesize = kernel["WavefrontSize"]
@@ -673,23 +711,40 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
   mStripBytes = int(subtileM * bpe)          # LDS bytes per K row (free-dim strip width)
   numGroups = wavesize // instM
   groupKStride = instK // numGroups          # K rows between adjacent lane groups
+  _, regsPerRead, elemsPerRead = _tluTrRead(tileInfo)
+  # One lane group's K slice must be covered exactly by the reads that fill the
+  # operand, otherwise the constant per-read offsets below address K rows no lane
+  # owns.
+  numReads = int(tileInfo.mmaTileRegCount) // regsPerRead
+  if numReads * elemsPerRead != groupKStride:
+    raise ValueError("TLU=1 LR transpose reads do not tile the lane group's K slice on "
+                     "tensor %s: %d reads x %d elements != groupKStride %d"
+                     % (tc, numReads, elemsPerRead, groupKStride))
 
   tmp = writer.vgprPool.checkOut(2, tag="_lraTileAssignment_tlu_tmp")
   kGroup = tmp
-  frow   = tmp + 1
+  kIntra = tmp + 1
   base   = tileInfo.sharedVgprLROffset[0]
 
+  # A lane group supplies instM addresses covering freeRuns runs of elemsPerRead
+  # free-dim elements each, so the low log2(freeRuns) lane bits pick the run and
+  # the bits above it pick the K row.  fp4 has freeRuns == 1: the run field is
+  # empty and kIntra collapses to lane % instM, the verified map.
+  freeRuns = max(1, instM // elemsPerRead)
   module.addComment0("%s: TLU=1 LR transpose-read base offset" % tc)
-  module.add(VAndB32(dst=vgpr(frow), src0=vgpr("Serial"), src1=hex(instM - 1),
-             comment="%s: frow = lane %% %u" % (tc, instM)))
+  module.add(VAndB32(dst=vgpr(kIntra), src0=vgpr("Serial"), src1=hex(instM - 1),
+             comment="%s: lane %% %u" % (tc, instM)))
+  if freeRuns > 1:
+    module.add(VLShiftRightB32(dst=vgpr(kIntra), shiftHex=hex(freeRuns.bit_length() - 1),
+               src=vgpr(kIntra), comment="%s: kIntra = (lane %% %u) // %u" % (tc, instM, freeRuns)))
   module.add(VAndB32(dst=vgpr(kGroup), src0=vgpr("Serial"), src1=hex(wavesize - 1),
              comment="%s: laneId" % tc))
   module.add(VLShiftRightB32(dst=vgpr(kGroup), shiftHex=hex(instM.bit_length() - 1),
              src=vgpr(kGroup), comment="%s: kGroup = lane // %u" % (tc, instM)))
   module.add(VLShiftLeftB32(dst=vgpr(kGroup), shiftHex=hex(groupKStride.bit_length() - 1),
              src=vgpr(kGroup), comment="%s: kGroup * %u (groupKStride)" % (tc, groupKStride)))
-  module.add(VAddU32(dst=vgpr(base), src0=vgpr(kGroup), src1=vgpr(frow),
-             comment="%s: kGroup*%u + frow" % (tc, groupKStride)))
+  module.add(VAddU32(dst=vgpr(base), src0=vgpr(kGroup), src1=vgpr(kIntra),
+             comment="%s: kGroup*%u + kIntra" % (tc, groupKStride)))
   # ``base`` holds the logical K-column.  Column-scatter (8x1 and up) builds the
   # scattered address from it instead of the contiguous *mStripBytes + XOR path.
   csc = selectTLUColScatter(tileInfo)
@@ -698,10 +753,22 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
   else:
     module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=hex(mStripBytes.bit_length() - 1),
                src=vgpr(base), comment="%s: * %u (mStripBytes)" % (tc, mStripBytes)))
+  # Free-dim offset within the K row: the run this lane reads, from the low
+  # log2(freeRuns) lane bits.  fp4 has freeRuns == 1, so nothing is emitted.
+  if freeRuns > 1:
+    mOffBytes = int(elemsPerRead * bpe)
+    module.add(VAndB32(dst=vgpr(kIntra), src0=vgpr("Serial"), src1=hex(freeRuns - 1),
+               comment="%s: free-dim run = lane %% %u" % (tc, freeRuns)))
+    module.add(VLShiftLeftB32(dst=vgpr(kIntra), shiftHex=hex(mOffBytes.bit_length() - 1),
+               src=vgpr(kIntra), comment="%s: * %u bytes per run" % (tc, mOffBytes)))
+    module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(kIntra),
+               comment="%s: + free-dim offset within the K row" % tc))
   # Apply the same chunk XOR + pad the GR write used; the XOR is an involution,
-  # so both sides flip identically and A round-trips.  The source bit is read
-  # from ``base`` rather than kGroup because it does not always live in the
-  # kGroup sub-field (4x1's chunk[4] comes from frow).  See SubtileTLUSwizzle.
+  # so both sides flip identically and A round-trips.  ``base`` holds the chunk's
+  # LDS byte address and a b128 chunk is 16 bytes, so chunk bit b lives at byte
+  # bit b + 4.  The source bit is read from ``base`` rather than kGroup because it
+  # does not always live in the kGroup sub-field (4x1's chunk[4] comes from
+  # kIntra).  See SubtileTLUSwizzle.
   swz = selectTLUSwizzle(tileInfo)
   if swz:
     CHUNK_BYTE_BITS = 4  # log2(16 bytes per b128 chunk)
@@ -944,18 +1011,19 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
   mfmaId = tileInfo.getSubtileShapeLinearId(subIterK, 0)
 
   # TLU=1 (NT): transpose read. LDS is K-major (free-dim contiguous), so recover
-  # the MFMA K-layout with ds_read_b64_tr_b4. Each transpose read returns 2 VGPRs
-  # (a lane holds 16 fp4 K); two reads fill the 4-VGPR fp4 operand. Offsets follow
-  # the verified thread map (format.md): the second read covers the next 16 K
-  # cols (stride 16 * mStripBytes), and sId0 selects the instM-row M-tile block
-  # (stride instM * bpe within the strip).
+  # the MFMA K-layout with a transpose ds_read chosen by bpe (_tluTrRead): fp4
+  # takes two b64_tr_b4 reads of 16 K cols each to fill its 4-VGPR operand, bf16
+  # takes a single tr16_b128. Offsets follow the thread map derived in
+  # _lraTileAssignment_tlu: successive reads step elemsPerRead K cols, and sId0
+  # selects the instM-row M-tile block (stride instM * bpe within the strip).
   if tileInfo.lr and isinstance(tileInfo.lr.config.tag, LRTag_TLU1):
     instM = int(tileInfo.mmaTileShape[0])
     bpe = tileInfo.bpe
     subtileM = int(tileInfo.subtileShape[0] * instM)
     mStripBytes = int(subtileM * bpe)     # LDS bytes per K row (free-dim strip width)
     mTileBytes = int(instM * bpe)         # sId0 M-tile block stride within the strip
-    kReadStrideBytes = int(16 * mStripBytes)  # second read steps 16 K cols
+    trOpcode, REGS_PER_TR, elemsPerRead = _tluTrRead(tileInfo)
+    kReadStrideBytes = int(elemsPerRead * mStripBytes)
     # Column-scatter (8x1+): the scattered LDS layout collapses the readIdx step
     # to a fixed byte stride (the two transpose reads land 16 K-columns apart,
     # which the bit-interleave maps to csc.readStrideBytes).  mTileBytes still
@@ -977,13 +1045,12 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     addrVgpr = tileInfo.sharedVgprLROffset[0]
     dstVgpr = dstTile.regList.indices[0]
     numRegs = len(dstTile.regList.indices)
-    REGS_PER_TR = 2                       # ds_read_b64_tr_b4 returns 2 dwords
     numReads = numRegs // REGS_PER_TR
     module = Module()
     for readIdx in range(numReads):
       offset = (subtileRow * stripStride + sId1 * kWindowStride
                 + mTileInStrip * mTileBytes + readIdx * kReadStrideBytes)
-      module.add(DSLoadB64TrB4(
+      module.add(trOpcode(
           dst=vgpr(dstVgpr + readIdx * REGS_PER_TR, REGS_PER_TR),
           src=vgpr(addrVgpr),
           ds=DSModifiers(offset=offset),

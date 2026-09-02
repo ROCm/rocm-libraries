@@ -207,13 +207,11 @@ def test_r5_tileinfo_tlu1_grids():
     Verifies that TileInfo.__init__ grid computation for ABTilePair works with
     the TLU1 geometry: all subtile/MMA grid fields are populated and positive.
 
-    AB_B16_TLU1 has subtileShape=(8, 1): each subtile covers 8 MMA-M tiles x 1
-    MMA-K tile.  With waveGroupSize=2 and mmaM=16, we need at least
-    8 * 16 * 2 = 256 elements in M to get a localMMATileGrid[0] >= 8.
-    Using macroTileA=256, depthUA=64:
+    AB_B16_TLU1 has subtileShape=(2, 1): each subtile covers 2 MMA-M tiles x 1
+    MMA-K tile.  Using macroTileA=256, depthUA=64, waveGroupSize=2, mmaM=16:
       globalMMATileGrid = (256//16, 64//32) = (16, 2)
       localMMATileGrid  = (16/2, 2) = (8, 2)
-      localSubtileGrid  = [8//8, 2//1] = [1, 2]
+      localSubtileGrid  = [8//2, 2//1] = [4, 2]
     """
     from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16_TLU1
 
@@ -233,20 +231,21 @@ def test_r5_tileinfo_tlu1_grids():
     assert ti.waveGroupSize == 2
 
 
-def test_r5_tileinfo_tlu1_16x1():
-    """TileInfo with AB_B16_TLU1_16x1 (256-bit GR along M) hits same TLU1 path."""
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16_TLU1_16x1
-    from Tensile.Components.Subtile.SubtileGeometry import GRTag_TLU1, LRTag_TLU1
+def test_r5_tileinfo_tlu1_4x1():
+    """TileInfo with AB_B16_TLU1_4x1 (4-tile bf16 stack) hits the same TLU1 path."""
+    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16_TLU1_4x1
 
     kernel = _kernel_ab(macroTileA=128, macroTileB=128, depthUA=64, depthUB=64,
                         miwavegroup=(2, 2))
     writer = _mock_writer()
-    ti = TileInfo(AB_B16_TLU1_16x1, "A", writer, kernel)
+    ti = TileInfo(AB_B16_TLU1_4x1, "A", writer, kernel)
 
-    # TLU1 branch again for the wider (16-element) variant.
+    # TLU1 branch again for the taller stack; the b128 load width is unchanged,
+    # so a lane still covers 8 bf16 along M.
     assert ti.gr.contiguousDim == "M"
     assert ti.lr.contiguousDim == "M"
-    assert ti.gr.contiguousElements == 16  # loadShape.m=16 for TLU1_16x1
+    assert ti.gr.contiguousElements == 8
+    assert ti.gr.subtileShape == (4, 1)
 
 
 # ---------------------------------------------------------------------------

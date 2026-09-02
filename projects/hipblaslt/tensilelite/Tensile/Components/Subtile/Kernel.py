@@ -312,14 +312,17 @@ AB_B16_2x2 = ABTilePair(
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B16, subtileShape=(2, 2), loadShape=LoadShape(m=1, k=8)),
 )
 
-# Column-major A/B (TLU=1): GR and LR contiguous along M
+# Column-major A/B (TLU=1): GR and LR contiguous along M.  The MFMA-K layout is
+# recovered on the LDS read via ds_load_tr16_b128, which fills the whole 4-VGPR
+# bf16 operand in a single read.  A bf16 strip already covers a 128 B cache line
+# at 4 MFMA-M tiles, so no taller stack is wired.
 AB_B16_TLU1 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(8, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=8, k=1)),   # 128-bit GR: 8 bf16 along M
-    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(8, 1), loadShape=LoadShape(m=8, k=1)),                              # 128-bit LR: 8 bf16 along M
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(2, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=8, k=1)),  # 2 MFMA-M tiles = 32 bf16 = 64 B contiguous along M
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(2, 1), loadShape=LoadShape(m=8, k=1)),                                   # 128-bit LR: 8 bf16 along M
 )
-AB_B16_TLU1_16x1 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(16, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=16, k=1), loadWidth=32), # 256-bit GR: 16 bf16 along M
-    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=16, k=1), loadWidth=32),                            # 256-bit LR: 16 bf16 along M
+AB_B16_TLU1_4x1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(4, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=8, k=1)),  # 4 MFMA-M tiles = 64 bf16 = 128 B contiguous along M
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(4, 1), loadShape=LoadShape(m=8, k=1)),
 )
 
 # Column-major FP4 (TLU=1, NT): the MFMA-K layout is recovered on the LDS read
@@ -380,7 +383,7 @@ AB_GEOMETRY_MAP = {
   "AB_B4_2x2":   AB_B4_2x2,
   "AB_B8":       AB_B8,
   "AB_B16_TLU1": AB_B16_TLU1,
-  "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
+  "AB_B16_TLU1_4x1": AB_B16_TLU1_4x1,
   "AB_B16_W32":  AB_B16_W32,
   **{abB4Tlu1Name(stack): _abB4Tlu1(stack) for stack in AB_B4_TLU1_STACKS},
 }

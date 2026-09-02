@@ -4,12 +4,28 @@
 import pytest
 
 from Tensile.SolutionStructs.Validators.Subtile import (
-    _SUBTILE_STACK_FULL_LINE,
-    _SUBTILE_STACK_SIZES,
+    _subtileStackFullLine,
+    _subtileStackLadder,
     _subtileStackForTile,
     subtileStackForTLU1,
     subtileTLU1StackReason,
 )
+
+
+MI_M = 16
+FP4_BPE = 0.5
+B16_BPE = 2.0
+# fp4 fills a 128B line at 16 MFMA-M tiles, bf16 at 4.
+FP4_FULL_LINE = _subtileStackFullLine(MI_M, FP4_BPE)
+B16_FULL_LINE = _subtileStackFullLine(MI_M, B16_BPE)
+
+
+def test_full_line_is_derived_from_the_dtype():
+    assert FP4_FULL_LINE == 16
+    assert B16_FULL_LINE == 4
+    # The fp4 ladder must reproduce the hardcoded table it replaced.
+    assert _subtileStackLadder(FP4_FULL_LINE) == (16, 8, 4, 2)
+    assert _subtileStackLadder(B16_FULL_LINE) == (4, 2)
 
 
 # (MFMA-M tiles in the macro tile, expected stack). At MatrixInstM=16 the tile
@@ -34,34 +50,53 @@ CASES = [
 ]
 
 
+# bf16's cache line caps the stack at 4, so it rounds up only while the rounded
+# stack still covers the tile: 3 -> 4, but 5..7 fall back to the exact divisor.
+B16_CASES = [
+    (1, 2), (2, 2), (3, 4), (4, 4),
+    (5, 2), (6, 2), (7, 2), (8, 4),
+    (9, 2), (10, 2), (11, 2), (12, 4),
+    (13, 2), (14, 2), (15, 2), (16, 4),
+]
+
+
 @pytest.mark.parametrize("mtTiles,expected", CASES)
 def test_stack_for_tile(mtTiles, expected):
-    assert _subtileStackForTile(mtTiles) == expected
+    assert _subtileStackForTile(mtTiles, FP4_FULL_LINE) == expected
+
+
+@pytest.mark.parametrize("mtTiles,expected", B16_CASES)
+def test_stack_for_tile_b16(mtTiles, expected):
+    assert _subtileStackForTile(mtTiles, B16_FULL_LINE) == expected
 
 
 @pytest.mark.parametrize("mtTiles", [18, 20, 24, 32, 40, 48, 64])
 def test_stack_above_the_full_line_never_strands_a_trailing_strip(mtTiles):
     # Even tiles only: an odd one has no power-of-two divisor and falls back to
     # _SUBTILE_STACK_MIN, but MX rejects odd MIWaveTile before a layout is built.
-    stack = _subtileStackForTile(mtTiles)
-    assert stack <= _SUBTILE_STACK_FULL_LINE
+    stack = _subtileStackForTile(mtTiles, FP4_FULL_LINE)
+    assert stack <= FP4_FULL_LINE
     assert stack >= mtTiles or mtTiles % stack == 0
 
 
-def test_rounding_only_happens_when_one_strip_covers_the_tile():
+@pytest.mark.parametrize("fullLine", [FP4_FULL_LINE, B16_FULL_LINE])
+def test_rounding_only_happens_when_one_strip_covers_the_tile(fullLine):
+    ladder = _subtileStackLadder(fullLine)
     for mtTiles in range(1, 17):
-        exact = next((s for s in _SUBTILE_STACK_SIZES if mtTiles % s == 0), 2)
-        stack = _subtileStackForTile(mtTiles)
+        exact = next((s for s in ladder if mtTiles % s == 0), 2)
+        stack = _subtileStackForTile(mtTiles, fullLine)
         if stack > exact:
             assert stack >= mtTiles
 
 
-def test_stack_never_shrinks_below_an_exact_divisor():
+@pytest.mark.parametrize("fullLine", [FP4_FULL_LINE, B16_FULL_LINE])
+def test_stack_never_shrinks_below_an_exact_divisor(fullLine):
     # Rounding may only move the stack up; a tile that divides a taller stack
     # exactly must never be given a shorter one.
+    ladder = _subtileStackLadder(fullLine)
     for mtTiles in range(1, 17):
-        exact = next((s for s in (16, 8, 4, 2) if mtTiles % s == 0), 2)
-        assert _subtileStackForTile(mtTiles) >= exact
+        exact = next((s for s in ladder if mtTiles % s == 0), 2)
+        assert _subtileStackForTile(mtTiles, fullLine) >= exact
 
 
 # --- geometry-aware fallback -------------------------------------------------
@@ -70,7 +105,6 @@ def test_stack_never_shrinks_below_an_exact_divisor():
 # additionally backs off to a shorter stack when the preferred one cannot be laid
 # out for the wave group, instead of leaving the solution to be rejected.
 
-MI_M = 16
 WAVE_GROUPS = [(1, 1), (1, 2), (2, 1), (1, 4), (2, 2), (4, 1)]
 
 
@@ -95,9 +129,9 @@ def test_mt192x192_wg2x2_falls_back_to_a_layout_that_works():
     # the dim exactly and each wave owns whole strips.
     state = _state(12, 12, (2, 2))
     for tc in ("A", "B"):
-        assert _subtileStackForTile(12) == 16
-        assert subtileStackForTLU1(state, tc, 12) == 2
-        assert subtileTLU1StackReason(state, tc, 12, 2) is None
+        assert _subtileStackForTile(12, FP4_FULL_LINE) == 16
+        assert subtileStackForTLU1(state, tc, 12, FP4_BPE) == 2
+        assert subtileTLU1StackReason(state, tc, 12, 2, FP4_BPE) is None
 
 
 @pytest.mark.parametrize("waveGroup", [(1, 4), (4, 1)])
@@ -107,9 +141,9 @@ def test_mt192x192_keeps_rejecting_the_three_tile_wave_groups(waveGroup):
     # the preferred stack is returned and the caller still rejects.
     state = _state(12, 12, waveGroup)
     tc = "A" if waveGroup[0] == 4 else "B"
-    stack = subtileStackForTLU1(state, tc, 12)
-    assert stack == _subtileStackForTile(12)
-    assert subtileTLU1StackReason(state, tc, 12, stack) is not None
+    stack = subtileStackForTLU1(state, tc, 12, FP4_BPE)
+    assert stack == _subtileStackForTile(12, FP4_FULL_LINE)
+    assert subtileTLU1StackReason(state, tc, 12, stack, FP4_BPE) is not None
 
 
 def test_fallback_never_moves_a_stack_that_already_works():
@@ -121,10 +155,10 @@ def test_fallback_never_moves_a_stack_that_already_works():
             if mtTiles % waveGroup[0] or mtTiles % waveGroup[1]:
                 continue
             state = _state(mtTiles, mtTiles, waveGroup)
-            preferred = _subtileStackForTile(mtTiles)
+            preferred = _subtileStackForTile(mtTiles, FP4_FULL_LINE)
             for tc in ("A", "B"):
-                if subtileTLU1StackReason(state, tc, mtTiles, preferred) is None:
-                    assert subtileStackForTLU1(state, tc, mtTiles) == preferred
+                if subtileTLU1StackReason(state, tc, mtTiles, preferred, FP4_BPE) is None:
+                    assert subtileStackForTLU1(state, tc, mtTiles, FP4_BPE) == preferred
 
 
 def test_strip_sharing_rules_stay_gfx950_only():
@@ -134,10 +168,10 @@ def test_strip_sharing_rules_stay_gfx950_only():
     tiles, waveGroup = 12, (2, 2)
     gfx950 = _state(tiles, tiles, waveGroup)
     other = _state(tiles, tiles, waveGroup, isa=(12, 5, 0))
-    preferred = _subtileStackForTile(tiles)
-    assert subtileTLU1StackReason(gfx950, "A", tiles, preferred) is not None
-    assert subtileTLU1StackReason(other, "A", tiles, preferred) is None
-    assert subtileStackForTLU1(other, "A", tiles) == preferred
+    preferred = _subtileStackForTile(tiles, FP4_FULL_LINE)
+    assert subtileTLU1StackReason(gfx950, "A", tiles, preferred, FP4_BPE) is not None
+    assert subtileTLU1StackReason(other, "A", tiles, preferred, FP4_BPE) is None
+    assert subtileStackForTLU1(other, "A", tiles, FP4_BPE) == preferred
 
 
 def test_fallback_only_ever_returns_a_known_stack_height():
@@ -149,4 +183,4 @@ def test_fallback_only_ever_returns_a_known_stack_height():
                 continue
             state = _state(mtTiles, mtTiles, waveGroup)
             for tc in ("A", "B"):
-                assert subtileStackForTLU1(state, tc, mtTiles) in _SUBTILE_STACK_SIZES
+                assert subtileStackForTLU1(state, tc, mtTiles, FP4_BPE) in _subtileStackLadder(FP4_FULL_LINE)

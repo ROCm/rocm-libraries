@@ -67,7 +67,8 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
-from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
+from .Validators.Subtile import (SUBTILE_TLU1_B4_STACKS, SUBTILE_TLU1_B16_STACKS,
+                                 subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 
 
@@ -1138,13 +1139,7 @@ class Solution(collections.abc.Mapping):
         tlu = state["ProblemType"][f"TLU{tc}"]
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
-            # AB_B16_TLU1 exists but nothing gives the free dim the element
-            # multiple its 16B chunk needs, the way the fp4 branch below does.
-            # Without a reject here these solutions clear validation and then
-            # assert in kernelBodySubtile instead of failing cleanly.
-            reject(state, printRejectionReason,
-                   f"UseSubtileImpl=1 TLU=1 is not implemented for dtype {dtype}")
-            return
+            bpeTLU, stackGeometries = 2.0, SUBTILE_TLU1_B16_STACKS
           elif dtype.isFloat4():
             # Two fp4 share a byte, so an odd free-dim extent leaves the K
             # stride on a half byte and the elements-to-bytes shift truncates
@@ -1159,20 +1154,24 @@ class Solution(collections.abc.Mapping):
             state[key] = max(state[key], 32)
             # fp4 only: 6-bit shares this geometry's 0.5 bpe but neither
             # bank-conflict layout covers it, so it falls to the reject below.
-            mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
-            mtTiles = mtFree // state["MatrixInstM"]
-            stack = subtileStackForTLU1(state, tc, mtTiles)
-            stackReason = subtileTLU1StackReason(state, tc, mtTiles, stack)
-            if stackReason:
-              reject(state, printRejectionReason, stackReason)
-              return
-            # Lazy import for the same reason as validateSubtileGRKPartition:
-            # Components/Subtile at module scope deadlocks the package load.
-            from Tensile.Components.Subtile.Kernel import abB4Tlu1Name
-            state[f"_ABTilePair{tc}"] = abB4Tlu1Name(stack)
+            bpeTLU, stackGeometries = 0.5, SUBTILE_TLU1_B4_STACKS
           else:
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
+
+          mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+          mtTiles = mtFree // state["MatrixInstM"]
+          stack = subtileStackForTLU1(state, tc, mtTiles, bpeTLU)
+          stackReason = subtileTLU1StackReason(state, tc, mtTiles, stack, bpeTLU)
+          if stackReason:
+            reject(state, printRejectionReason, stackReason)
+            return
+          if stack not in stackGeometries:
+            reject(state, printRejectionReason,
+                   "UseSubtileImpl=1 TLU=1 has no subtile geometry for a %d-tile stack "
+                   "on tensor %s at %s bytes per element" % (stack, tc, bpeTLU))
+            return
+          state[f"_ABTilePair{tc}"] = stackGeometries[stack]
         elif dtype.isBFloat16() or dtype.isHalf():
           if state["WavefrontSize"] == 32:
             state[f"_ABTilePair{tc}"] = "AB_B16_W32"

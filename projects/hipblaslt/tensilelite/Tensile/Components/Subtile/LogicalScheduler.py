@@ -2987,8 +2987,15 @@ class LogicalScheduler:
         # so we skip emission entirely for them.
         # TDM uses tensor_load_to_lds, not buffer instructions, so the
         # dword-granularity OOB corruption does not apply.
+        # Neither does it apply when the operand is free-dim contiguous (TLU=1):
+        # there a load runs along M/N at a fixed K row, so a short tail drops
+        # whole K rows instead of splitting an element across the boundary.
+        # tailLoopBoundaryDtlLoadAB patches A and B together and requires both to
+        # be eligible, so this is gated on neither operand being TLU=1.
         hasTDM = self._kernel.get("enableTDMA") and self._kernel.get("enableTDMB")
-        if self._kernel["ProblemType"]["DataTypeA"].isBFloat16() and not hasTDM:
+        anyTLU = (self._kernel["ProblemType"].get("TLUA", False)
+                  or self._kernel["ProblemType"].get("TLUB", False))
+        if self._kernel["ProblemType"]["DataTypeA"].isBFloat16() and not hasTDM and not anyTLU:
             # We need to wait for other SIMD before placing the DTL load
             # (as we'll write twice to this address : OOB Zero then fixup load)
             preamble.append(SyncOp())
