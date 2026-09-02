@@ -79,37 +79,38 @@ try
 
     // memory workspace sizes:
     // size for stedc
-    size_t size_work_stack, size_tempvect, size_tempgemm, size_tmpz, size_workArr, size_splits;
+    size_t size_tmpT, size_work_stack, size_tempvect, size_tempgemm, size_tmpz, size_workArr, size_splits;
     // size for range setup
     size_t size_work;
-    rocsolver_stedcx_getMemorySize<false, T, S>(evect, n, batch_count, &size_work,
+    rocsolver_stedcx_getMemorySize<false, T, S>(evect, n, batch_count, &size_tmpT, &size_work,
                                                 &size_work_stack, &size_tempvect, &size_tempgemm,
                                                 &size_tmpz, &size_splits, &size_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_work, size_work_stack,
+        return rocblas_set_optimal_device_memory_size(handle, size_tmpT, size_work, size_work_stack,
                                                       size_tempvect, size_tempgemm, size_tmpz,
                                                       size_splits, size_workArr);
 
     // memory workspace allocation
-    void *work_stack, *work, *tempvect, *tempgemm, *tmpz, *splits, *workArr;
-    rocblas_device_malloc mem(handle, size_work, size_work_stack, size_tempvect,
+    void *tmpT, *work_stack, *work, *tempvect, *tempgemm, *tmpz, *splits, *workArr;
+    rocblas_device_malloc mem(handle, size_tmpT, size_work, size_work_stack, size_tempvect,
                               size_tempgemm, size_tmpz, size_splits, size_workArr);
     if(!mem)
         return rocblas_status_memory_error;
 
-    work = mem[0];
-    work_stack = mem[1];
-    tempvect = mem[2];
-    tempgemm = mem[3];
-    tmpz = mem[4];
-    splits = mem[5];
-    workArr = mem[6];
+    tmpT = mem[0];
+    work = mem[1];
+    work_stack = mem[2];
+    tempvect = mem[3];
+    tempgemm = mem[4];
+    tmpz = mem[5];
+    splits = mem[6];
+    workArr = mem[7];
 
     // execution
     return rocsolver_stedcx_template<false, false, T>(
         handle, evect, erange, n, vl, vu, il, iu, D, strideD, E, strideE, nev, W, strideW, C,
-        shiftC, ldc, strideC, info, batch_count, (S*)work, (S*)work_stack, (S*)tempvect,
+        shiftC, ldc, strideC, info, batch_count, (T*)tmpT, (S*)work, (S*)work_stack, (S*)tempvect,
         (S*)tempgemm, (S*)tmpz, (rocblas_int*)splits, (S**)workArr);
 }
 catch(...)

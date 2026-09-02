@@ -98,6 +98,7 @@ void rocsolver_syevdx_heevdx_inplace_getMemorySize(const rocblas_evect evect,
                                                    const rocblas_int n,
                                                    const rocblas_int batch_count,
                                                    size_t* size_scalars,
+                                                   size_t* size_tmpT,
                                                    size_t* size_work1,
                                                    size_t* size_work2,
                                                    size_t* size_work3,
@@ -113,24 +114,23 @@ void rocsolver_syevdx_heevdx_inplace_getMemorySize(const rocblas_evect evect,
                                                    size_t* size_nsplit_workArr)
 {
     // if quick return, set workspace to zero
+    *size_scalars = 0;
+    *size_tmpT = 0;
+    *size_work1 = 0;
+    *size_work2 = 0;
+    *size_work3 = 0;
+    *size_work4 = 0;
+    *size_work5 = 0;
+    *size_work6_ifail = 0;
+    *size_D = 0;
+    *size_E = 0;
+    *size_iblock = 0;
+    *size_isplit_map = 0;
+    *size_tau = 0;
+    *size_nev = 0;
+    *size_nsplit_workArr = 0;
     if(n == 0 || batch_count == 0)
-    {
-        *size_scalars = 0;
-        *size_work1 = 0;
-        *size_work2 = 0;
-        *size_work3 = 0;
-        *size_work4 = 0;
-        *size_work5 = 0;
-        *size_work6_ifail = 0;
-        *size_D = 0;
-        *size_E = 0;
-        *size_iblock = 0;
-        *size_isplit_map = 0;
-        *size_tau = 0;
-        *size_nev = 0;
-        *size_nsplit_workArr = 0;
         return;
-    }
 
     size_t unused;
     size_t a1 = 0, a2 = 0, a3 = 0, a4 = 0;
@@ -178,13 +178,11 @@ void rocsolver_syevdx_heevdx_inplace_getMemorySize(const rocblas_evect evect,
     {
         // extra requirements for computing eigenvalues and vectors (stedcx)
         rocsolver_stedcx_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count,
-                                                      &a3, &b3, &c3, size_work4, size_work5,
+                                                      size_tmpT, &a3, &b3, &c3, size_work4, size_work5,
                                                       size_work6_ifail, &unused);
 
         // extra space to store A
         *size_iblock = sizeof(T) * n * n * batch_count;
-
-        *size_isplit_map = 0;
     }
 
     // get max values
@@ -217,6 +215,7 @@ rocblas_status rocsolver_syevdx_heevdx_inplace_template(rocblas_handle handle,
                                                         rocblas_int* info,
                                                         const rocblas_int batch_count,
                                                         T* scalars,
+                                                        T* tmpT,
                                                         void* work1,
                                                         void* work2,
                                                         void* work3,
@@ -320,7 +319,7 @@ rocblas_status rocsolver_syevdx_heevdx_inplace_template(rocblas_handle handle,
 
         rocsolver_stedcx_template<BATCHED, STRIDED, T>(
             handle, rocblas_evect_tridiagonal, erange, n, vl, vu, il, iu, D, stride, E, stride,
-            d_nev, W, strideW, A, shiftA, lda, strideA, info, batch_count, (S*)work1, (S*)work2,
+            d_nev, W, strideW, A, shiftA, lda, strideA, info, batch_count, tmpT, (S*)work1, (S*)work2,
             (S*)work3, (S*)work4, (S*)work5, work6_ifail, (S**)nsplit_workArr);
 
         rocblas_int h_nev = (erange == rocblas_erange_index ? iu - il + 1 : n);
