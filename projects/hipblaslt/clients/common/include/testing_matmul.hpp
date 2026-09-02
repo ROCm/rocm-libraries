@@ -3240,9 +3240,8 @@ void testing_matmul_with_bias(const Arguments&                                  
             = matmulValidationTolerances(arg, matmulProblems, TiA, TiB, To, Tc);
         readValidationSideOutputs();
         const auto validationCases = makeValidationCases(pointwiseTolerances);
-        const auto result = hipblaslt::host_numerics::validateMatmulOutputs(
-            {.options = validationOptions, .cases = validationCases, .metrics = metrics});
-        CHECK_SUCCESS(result.passed());
+        CHECK_SUCCESS(hipblaslt::host_numerics::validateMatmulOutputs(
+            validationOptions, validationCases, metrics));
     };
 
     if(!arg.timing)
