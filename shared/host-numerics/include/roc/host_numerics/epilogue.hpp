@@ -24,7 +24,7 @@ struct EpilogueOptions {
     ScalarType computeType;
     std::optional<Tensor> auxiliaryInput;
     std::optional<Tensor> gateResidual;
-    std::optional<VectorBinding> bias;
+    std::optional<Tensor> bias;  // Any shape broadcast-compatible with input.
     Scalar outputScale;
     Scalar auxiliaryScale;
     OutputConversion outputConversion = OutputConversion::Default;

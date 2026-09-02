@@ -55,18 +55,20 @@ LayerNormOutputs referenceLayerNormOwned(Tensor input, ScalarType outputType,
         {.output = outputType, .mean = statisticsType, .inverseVariance = statisticsType}, options);
 }
 
-EpilogueOutputs referenceEpilogueOwned(
-    Tensor input, ScalarType outputType, ScalarType computeType, std::optional<Tensor> bias,
-    MatrixAxis biasAxis, Activation activation, ActivationApplication activationApplication,
-    std::optional<Tensor> auxiliaryInput, std::optional<ScalarType> auxiliaryOutputType,
-    std::optional<Tensor> gateResidual, nb::object outputScale, nb::object auxiliaryScale,
-    nb::object activationParameter0, nb::object activationParameter1,
-    OutputConversion outputConversion, bool includeRawOutput, bool includeAmax,
-    OutputSelection outputSelection) {
+EpilogueOutputs referenceEpilogueOwned(Tensor input, ScalarType outputType, ScalarType computeType,
+                                       std::optional<Tensor> bias, Activation activation,
+                                       ActivationApplication activationApplication,
+                                       std::optional<Tensor> auxiliaryInput,
+                                       std::optional<ScalarType> auxiliaryOutputType,
+                                       std::optional<Tensor> gateResidual, nb::object outputScale,
+                                       nb::object auxiliaryScale, nb::object activationParameter0,
+                                       nb::object activationParameter1,
+                                       OutputConversion outputConversion, bool includeRawOutput,
+                                       bool includeAmax, OutputSelection outputSelection) {
     EpilogueOptions options(computeType);
     options.auxiliaryInput = std::move(auxiliaryInput);
     options.gateResidual = std::move(gateResidual);
-    if (bias) options.bias = VectorBinding{*bias, biasAxis};
+    options.bias = std::move(bias);
     options.outputScale = scalarFromPython(outputScale);
     options.auxiliaryScale = scalarFromPython(auxiliaryScale);
     options.outputConversion = outputConversion;
@@ -215,7 +217,7 @@ void registerOperationBindings(nb::module_& module) {
 
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
-               "bias_axis"_a = MatrixAxis::Row, "activation"_a = Activation::None,
+               "activation"_a = Activation::None,
                "activation_application"_a = ActivationApplication::Forward,
                "auxiliary_input"_a = std::optional<Tensor>{},
                "auxiliary_output_type"_a = std::optional<ScalarType>{},
