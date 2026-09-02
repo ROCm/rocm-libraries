@@ -225,11 +225,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_INTEGRATION_POINTWISE_BUILD_DIR
         "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}/pointwise")
 
-    # The archive fixture carries its own engine identity and its own output folder.
+    # The archive fixture carries its own engine identity and its own output folder. The
+    # output folder carries the authored name, so a reader of the staged tree can find the
+    # folder a shard came from without consulting the packing rules.
+    set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
     set(HIPKERNELPROVIDER_ARCHIVE_FIXTURE_SOURCE_DIR
-        "${_test_descriptor_source_root}/integration/archive_fixture")
+        "${_test_descriptor_source_root}/integration/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}")
     set(HIPKERNELPROVIDER_ARCHIVE_FIXTURE_BUILD_DIR
-        "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}/packed")
+        "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}")
 
     # The offset a test binary walks from its own directory to reach the test descriptor
     # trees. Both trees hang off HIPDNN_PLUGIN_ROOTDIR and both binaries off

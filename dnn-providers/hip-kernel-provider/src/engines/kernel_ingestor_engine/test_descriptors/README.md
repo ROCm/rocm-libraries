@@ -4,16 +4,20 @@ Authored descriptor sets for the hip-kernel-provider test suites. The build pack
 into one of two discovery roots. The unit binary reads the `unit` root. The integration
 binary reads the `integration` root. The two roots stay disjoint.
 
-| Source folder | Dialect | Consumer |
-|---|---|---|
-| `shared/conv_fwd/` | `hip` | both binaries |
-| `unit/pointwise/` | `embedded_source` | the unit binary |
-| `integration/pointwise/` | `hip` | the integration binary |
-| `integration/archive_fixture/` | `hip` | the integration binary |
+| Source folder | Dialect | Stages into | Consumer |
+|---|---|---|---|
+| `shared/conv_fwd/` | `hip` | `unit/conv/`, `integration/conv/` | both binaries |
+| `unit/pointwise/` | `embedded_source` | `unit/pointwise/` | the unit binary |
+| `integration/pointwise/` | `hip` | `integration/pointwise/` | the integration binary |
+| `integration/archive_fixture/` | `hip` | `integration/archive_fixture/` | the integration binary |
 
 The packer runs five times over these sets. `shared/conv_fwd/` feeds both binaries, and each
 other folder feeds one binary. Every descriptor in these sets applies to each packed
 architecture. Each set therefore stages one architecture folder for each packed architecture.
+
+A staged folder carries the name of the folder it was authored in, so a shard in the build
+tree names its own origin. `shared/conv_fwd/` is the one set that cannot: it stages twice,
+under a name that says which root each copy serves.
 
 ## `shared/conv_fwd/`
 

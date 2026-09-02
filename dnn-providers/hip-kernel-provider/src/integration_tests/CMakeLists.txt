@@ -107,7 +107,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # here would be baked into the installed test binary as well, naming a build tree it
     # cannot see.
     target_compile_definitions(hip_kernel_provider_integration_tests
-        PRIVATE HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/packed"
+        PRIVATE HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
     )
     # The integration root is packed by three roots, and each stages under its own
     # packaging target. Name each one individually.
