@@ -424,8 +424,8 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((A_load_conjugate && op_A != rocsparse_operation_none)
-                                           ? rocsparse_status_internal_error,
-                                           : rocsparse_status_success,
+                                               ? rocsparse_status_internal_error
+                                               : rocsparse_status_success,
                                            "That's not the supposed configuration");
 
     const int64_t M = A->rows;
