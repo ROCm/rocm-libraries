@@ -35,6 +35,10 @@ Documentation for rocFFT is available at
 ### Resolved issues
 
 * Addressed a cache-reuse issue with RCCL communicators by giving each communicator its own set of streams.
+* Fixed multi-dimensional real transforms returning wrong results when a complex
+  transform of the same lengths and radices had been planned earlier in the process
+  and its plan was still alive. The two need different twiddle tables, but the 2D
+  twiddle table cache key did not distinguish them.
 * Fixed `rocfft_plan_create` hanging when given a zero FFT length, zero batch, or zero dimensions; these
   now return `rocfft_status_invalid_dimensions` or `rocfft_status_invalid_arg_value`.
 * Fixed `rocfft_execution_info_set_stream` to derive the device from the stream itself instead of assuming the current device.

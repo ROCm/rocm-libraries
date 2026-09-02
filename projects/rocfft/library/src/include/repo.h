@@ -69,6 +69,10 @@ class Repo
         size_t              length0   = 0;
         size_t              length1   = 0;
         rocfft_precision    precision = rocfft_precision_single;
+        // whether a half-N section is appended for a dimension; these change
+        // the table that twiddles_create_2D generates, so they belong in the key
+        bool                attach_halfN1 = false;
+        bool                attach_halfN2 = false;
         std::vector<size_t> radices1;
         std::vector<size_t> radices2;
         // buffers are in device memory, so we need per-device
@@ -83,6 +87,10 @@ class Repo
                 return length1 < other.length1;
             if(precision != other.precision)
                 return precision < other.precision;
+            if(attach_halfN1 != other.attach_halfN1)
+                return attach_halfN1 < other.attach_halfN1;
+            if(attach_halfN2 != other.attach_halfN2)
+                return attach_halfN2 < other.attach_halfN2;
             if(radices1 != other.radices1)
                 return radices1 < other.radices1;
             if(radices2 != other.radices2)
