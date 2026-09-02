@@ -46,6 +46,8 @@ struct NumericProfile {
     ScalarType outputType;
     ScalarType accumulatorType;
     bool blockScaled = false;
+    bool affineLayouts = false;
+    bool commonEpilogue = false;
 };
 
 NumericProfile numericProfile(std::string_view name) {
@@ -55,6 +57,8 @@ NumericProfile numericProfile(std::string_view name) {
     if (name == "bf16") return {ScalarType::BFloat16, ScalarType::BFloat16, ScalarType::Float32};
     if (name == "f8") return {ScalarType::Float8E4M3, ScalarType::Float32, ScalarType::Float32};
     if (name == "bf8") return {ScalarType::Float8E5M2, ScalarType::Float32, ScalarType::Float32};
+    if (name == "f32-affine-epilogue")
+        return {ScalarType::Float32, ScalarType::Float32, ScalarType::Float32, false, true, true};
     if (name == "f4mx")
         return {ScalarType::Float4E2M1, ScalarType::Float32, ScalarType::Float32, true};
     if (name == "f6mx")
@@ -62,7 +66,7 @@ NumericProfile numericProfile(std::string_view name) {
     if (name == "bf6mx")
         return {ScalarType::Float6E3M2, ScalarType::Float32, ScalarType::Float32, true};
     throw std::invalid_argument(
-        "Profile must be f32, f64, f16, bf16, f8, bf8, f4mx, f6mx, "
+        "Profile must be f32, f64, f16, bf16, f8, bf8, f32-affine-epilogue, f4mx, f6mx, "
         "or bf6mx.");
 }
 
@@ -77,7 +81,7 @@ size_t parseSize(const char* text, const char* name) {
 Options parseOptions(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--help") {
         std::cout << "Usage: host-numerics-gemm-benchmark "
-                     "<pointwise|blocked> <M> <N> <K> <selected-or-0-for-all> "
+                     "<automatic|pointwise|blocked> <M> <N> <K> <selected-or-0-for-all> "
                      "<warmups> <iterations> [profile]\n";
         std::exit(0);
     }
@@ -85,12 +89,14 @@ Options parseOptions(int argc, char** argv) {
 
     Options options;
     const std::string_view backend(argv[1]);
-    if (backend == "pointwise")
+    if (backend == "automatic")
+        options.backend = GemmBackend::Automatic;
+    else if (backend == "pointwise")
         options.backend = GemmBackend::Pointwise;
     else if (backend == "blocked")
         options.backend = GemmBackend::Blocked;
     else
-        throw std::invalid_argument("Backend must be pointwise or blocked.");
+        throw std::invalid_argument("Backend must be automatic, pointwise, or blocked.");
 
     options.rows = parseSize(argv[2], "M");
     options.columns = parseSize(argv[3], "N");
@@ -135,6 +141,8 @@ double median(std::vector<double> values) {
 
 const char* backendName(GemmBackend backend) {
     switch (backend) {
+        case GemmBackend::Automatic:
+            return "automatic";
         case GemmBackend::Pointwise:
             return "pointwise";
         case GemmBackend::Blocked:
@@ -158,28 +166,52 @@ int main(int argc, char** argv) {
                 : OutputSelection::primeStride(outputElements, outputElements,
                                                options.selectedOutputs);
 
-        const Layout aLayout(Shape{options.rows, options.reductions},
-                             {1, static_cast<ptrdiff_t>(options.rows)});
-        const Layout bLayout(Shape{options.reductions, options.columns},
-                             {1, static_cast<ptrdiff_t>(options.reductions)});
-        const Layout outputLayout(Shape{options.rows, options.columns},
-                                  {1, static_cast<ptrdiff_t>(options.rows)});
+        const ptrdiff_t aLeadingDimension =
+            static_cast<ptrdiff_t>(options.rows + (profile.affineLayouts ? 3 : 0));
+        const ptrdiff_t bLeadingDimension =
+            static_cast<ptrdiff_t>(options.reductions + (profile.affineLayouts ? 5 : 0));
+        const ptrdiff_t outputLeadingDimension =
+            static_cast<ptrdiff_t>(options.rows + (profile.affineLayouts ? 7 : 0));
+        const ptrdiff_t inputOffset = profile.affineLayouts ? 2 : 0;
+        const ptrdiff_t outputOffset = profile.affineLayouts ? 3 : 0;
+        const Layout aLayout(Shape{options.rows, options.reductions}, {1, aLeadingDimension},
+                             inputOffset);
+        const Layout bLayout(Shape{options.reductions, options.columns}, {1, bLeadingDimension},
+                             inputOffset);
+        const Layout outputLayout(Shape{options.rows, options.columns}, {1, outputLeadingDimension},
+                                  outputOffset);
         const Tensor a = makeMatrix(profile.inputType, aLayout, 1);
         const Tensor b = makeMatrix(profile.inputType, bLayout, 2);
-        const Tensor c = makeMatrix(profile.outputType, outputLayout, 0, true);
+        const Tensor c = makeMatrix(profile.outputType, outputLayout, 5, !profile.commonEpilogue);
         const Tensor output(profile.outputType, outputLayout);
-        GemmTestCase request(a, b, c, output, profile.accumulatorType);
-        request.outputSelection = selection;
+        GemmOptions requestOptions(profile.accumulatorType);
+        requestOptions.outputSelection = selection;
         if (profile.blockScaled) {
             constexpr size_t blockSize = 32;
             if (options.reductions % blockSize != 0)
                 throw std::invalid_argument("MX profiles require K divisible by 32.");
             const size_t reductionBlocks = options.reductions / blockSize;
-            request.blockScaleA = makeBlockScales(options.rows, reductionBlocks, 3);
-            request.blockSizeA = blockSize;
-            request.blockScaleB = makeBlockScales(options.columns, reductionBlocks, 4);
-            request.blockSizeB = blockSize;
+            requestOptions.blockScaleA = makeBlockScales(options.rows, reductionBlocks, 3);
+            requestOptions.blockSizeA = blockSize;
+            requestOptions.blockScaleB = makeBlockScales(options.columns, reductionBlocks, 4);
+            requestOptions.blockSizeB = blockSize;
         }
+        if (profile.commonEpilogue) {
+            requestOptions.epilogue.alpha = 0.75f;
+            requestOptions.epilogue.beta = -0.25f;
+            requestOptions.epilogue.bias =
+                makeMatrix(ScalarType::Float32,
+                           Layout::contiguousLastDimensionFastest(Shape{1, options.columns}), 6);
+            requestOptions.epilogue.scaleA =
+                makeMatrix(ScalarType::Float32,
+                           Layout::contiguousLastDimensionFastest(Shape{options.rows, 1}), 7);
+            requestOptions.epilogue.scaleB =
+                makeMatrix(ScalarType::Float32,
+                           Layout::contiguousLastDimensionFastest(Shape{1, options.columns}), 8);
+            requestOptions.epilogue.activation = Activation::Relu;
+            requestOptions.epilogue.outputScale = 0.5f;
+        }
+        GemmTestCase request(a, b, c, output, requestOptions);
 
         const GemmBackend backend = options.backend;
         GemmTestRunInfo runInfo;
@@ -200,12 +232,9 @@ int main(int argc, char** argv) {
                 ? OutputSelection::primeStride(outputElements, outputElements, 128)
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
-        GemmTestCase expectedRequest(a, b, c, expected, profile.accumulatorType);
-        expectedRequest.outputSelection = validationSelection;
-        expectedRequest.blockScaleA = request.blockScaleA;
-        expectedRequest.blockSizeA = request.blockSizeA;
-        expectedRequest.blockScaleB = request.blockScaleB;
-        expectedRequest.blockSizeB = request.blockSizeB;
+        GemmOptions expectedOptions = requestOptions;
+        expectedOptions.outputSelection = validationSelection;
+        GemmTestCase expectedRequest(a, b, c, expected, expectedOptions);
         referenceGemm(expectedRequest, GemmBackend::Pointwise);
 
         const std::vector<size_t> validationIndices = validationSelection.indices(outputElements);
