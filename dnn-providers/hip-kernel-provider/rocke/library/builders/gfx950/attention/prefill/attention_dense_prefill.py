@@ -128,6 +128,7 @@ def make_spec_from_shape(shape: dict[str, Any]) -> AttentionDenseSpec:
         lazy_rescale=bool(shape.get("lazy_rescale", True)),
         persist_decode=str(shape.get("persist_decode", "auto")),
         q_reload=bool(shape.get("q_reload", False)),
+        qk_pipeline=bool(shape.get("qk_pipeline", False)),
     )
 
 
@@ -292,6 +293,11 @@ def main():
         help="reload Q packs per K-step (frees VGPR; experiment opt)",
     )
     ap.add_argument(
+        "--qk-pipeline",
+        action="store_true",
+        help="depth-1 software pipeline over the QK cluster's K LDS reads",
+    )
+    ap.add_argument(
         "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
     )
     ap.add_argument("--use-sinks", action="store_true", help="enable attention sinks")
@@ -327,6 +333,7 @@ def main():
             "use_sinks": args.use_sinks,
             "persist_decode": args.persist_decode,
             "q_reload": args.q_reload,
+            "qk_pipeline": args.qk_pipeline,
         }
         spec = make_spec_from_shape(shape)
         result = run_benchmark(
