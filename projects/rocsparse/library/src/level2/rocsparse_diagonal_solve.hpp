@@ -33,23 +33,10 @@ typedef _rocsparse_csrsv_info* rocsparse_csrsv_info;
 
 namespace rocsparse
 {
-    struct spdiag_view
-    {
-        rocsparse_indextype offset_type{}; // index type of diag_ind / transposed_perm
-        const void*         diag_ind{nullptr}; // per-row diagonal position
-        const void*         transposed_perm{nullptr}; // remap into val, or nullptr
-    };
-
-    rocsparse_status build_spdiag_view(rocsparse_const_spmat_descr A,
-                                       rocsparse_operation         trans,
-                                       rocsparse_csrsv_info        info,
-                                       rocsparse::spdiag_view*     view);
-
-    // Format-specific entry points that perform a complete diagonal solve: they
-    // build the diagonal view from the analysis info, seed the numeric zero-pivot
-    // buffer, and launch the solve. CSR and CSC differ only in how the analysis
-    // pivot is typed, so callers dispatch on the matrix format rather than sharing
-    // a single CSR-centric path.
+    // Complete diagonal solve: builds the diagonal view from the analysis info,
+    // seeds the numeric zero-pivot buffer, and launches the solve. Only CSR and CSC
+    // matrices are supported; callers switch on the matrix format so that a format
+    // added later fetches its own analysis info rather than a CSR-named handle.
     //
     // The dense operands are taken as descriptors: rocsparse_sptrsv solves a single
     // right-hand side held in dense vectors, whereas rocsparse_sptrsm solves the

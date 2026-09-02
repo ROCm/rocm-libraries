@@ -46,15 +46,25 @@
 
 namespace rocsparse
 {
-    // Layout of a dense operand of the diagonal solve: element (row, col) of batch
-    // entry b lives at values[b * batch_stride + row * row_stride + col * col_stride].
-    // A dense vector has a single column and folds its increment into row_stride,
-    // while a dense matrix folds its leading dimension, its storage order and, for
-    // the right-hand side, an optional transposition into the two remaining strides.
+    // What the analysis stage recorded about the diagonal of A.
+    struct spdiag_view
+    {
+        rocsparse_indextype offset_type{}; // index type of diag_ind / transposed_perm
+        const void*         diag_ind{nullptr}; // per-row diagonal position
+        const void*         transposed_perm{nullptr}; // remap into val, or nullptr
+    };
+
+    // Layout of a dense operand of the diagonal solve: row i of right-hand side r of
+    // batch entry b lives at values[b * batch_stride + i * row_inc + r * rhs_inc].
+    // Only the batch offset is a stride here; the other two are increments within a
+    // single batch entry, in the sense of the inc of a dense vector. A dense vector
+    // carries one right-hand side and folds its inc into row_inc, while a dense
+    // matrix carries one per column and folds its leading dimension, its storage
+    // order and, for X, an optional transposition into row_inc and rhs_inc.
     struct dense_layout
     {
-        int64_t row_stride{1};
-        int64_t col_stride{0};
+        int64_t row_inc{1};
+        int64_t rhs_inc{0};
         int64_t batch_stride{0};
     };
 
@@ -73,50 +83,43 @@ namespace rocsparse
                                const T* __restrict__ val,
                                int64_t val_batch_stride,
                                const T* __restrict__ x,
-                               int64_t x_row_stride,
-                               int64_t x_col_stride,
+                               int64_t x_row_inc,
+                               int64_t x_rhs_inc,
                                int64_t x_batch_stride,
                                T* __restrict__ y,
-                               int64_t y_row_stride,
-                               int64_t y_col_stride,
+                               int64_t y_row_inc,
+                               int64_t y_rhs_inc,
                                int64_t y_batch_stride,
                                J* __restrict__ zero_pivot,
-                               int64_t                     zero_pivot_stride,
+                               int64_t                     zero_pivot_batch_stride,
                                rocsparse_index_base        base,
                                rocsparse_diagonal_modifier modifier,
                                bool                        conj,
                                bool                        conj_x,
                                bool                        is_host_mode)
     {
-        const auto row = static_cast<J>(hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x);
-        if(row >= m)
-        {
-            return;
-        }
-
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
         for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
         {
-            rocsparse::diagonal_solve_device(row,
-                                             nrhs,
-                                             static_cast<J>(hipBlockIdx_y),
-                                             static_cast<J>(hipGridDim_y),
-                                             alpha,
-                                             diag_ind,
-                                             transposed_perm,
-                                             val + batch * val_batch_stride,
-                                             x + batch * x_batch_stride,
-                                             x_row_stride,
-                                             x_col_stride,
-                                             y + batch * y_batch_stride,
-                                             y_row_stride,
-                                             y_col_stride,
-                                             zero_pivot + batch * zero_pivot_stride,
-                                             base,
-                                             modifier,
-                                             conj,
-                                             conj_x);
+            rocsparse::diagonal_solve_device<BLOCKSIZE>(m,
+                                                        nrhs,
+                                                        alpha,
+                                                        diag_ind,
+                                                        transposed_perm,
+                                                        val + batch * val_batch_stride,
+                                                        x + batch * x_batch_stride,
+                                                        x_row_inc,
+                                                        x_rhs_inc,
+                                                        y + batch * y_batch_stride,
+                                                        y_row_inc,
+                                                        y_rhs_inc,
+                                                        zero_pivot
+                                                            + batch * zero_pivot_batch_stride,
+                                                        base,
+                                                        modifier,
+                                                        conj,
+                                                        conj_x);
         }
     }
 
@@ -135,14 +138,21 @@ namespace rocsparse
                                                   void*                          y,
                                                   const rocsparse::dense_layout& y_layout,
                                                   void*                          zero_pivot,
-                                                  int64_t                        zero_pivot_stride,
-                                                  rocsparse_index_base           base,
-                                                  rocsparse_diagonal_modifier    modifier,
-                                                  bool                           conj,
-                                                  bool                           conj_x,
-                                                  bool                           is_host_mode)
+                                                  int64_t              zero_pivot_batch_stride,
+                                                  rocsparse_index_base base,
+                                                  rocsparse_diagonal_modifier modifier,
+                                                  bool                        conj,
+                                                  bool                        conj_x,
+                                                  bool                        is_host_mode)
     {
         static constexpr uint32_t BLOCKSIZE = 1024;
+
+        // An empty operand would ask for a grid with a zero-sized dimension, which
+        // is an invalid launch configuration rather than an empty one.
+        if(m == 0 || nrhs == 0 || batch_count == 0)
+        {
+            return rocsparse_status_success;
+        }
 
         auto alpha = reinterpret_cast<const T*>(alpha_);
 
@@ -166,15 +176,15 @@ namespace rocsparse
                                            reinterpret_cast<const T*>(val),
                                            val_batch_stride,
                                            reinterpret_cast<const T*>(x),
-                                           x_layout.row_stride,
-                                           x_layout.col_stride,
+                                           x_layout.row_inc,
+                                           x_layout.rhs_inc,
                                            x_layout.batch_stride,
                                            reinterpret_cast<T*>(y),
-                                           y_layout.row_stride,
-                                           y_layout.col_stride,
+                                           y_layout.row_inc,
+                                           y_layout.rhs_inc,
                                            y_layout.batch_stride,
                                            reinterpret_cast<J*>(zero_pivot),
-                                           zero_pivot_stride,
+                                           zero_pivot_batch_stride,
                                            base,
                                            modifier,
                                            conj,
@@ -200,8 +210,8 @@ namespace rocsparse
                                                     void*                          y,
                                                     const rocsparse::dense_layout& y_layout,
                                                     void*                          zero_pivot,
-                                                    int64_t                     zero_pivot_stride,
-                                                    rocsparse_index_base        base,
+                                                    int64_t              zero_pivot_batch_stride,
+                                                    rocsparse_index_base base,
                                                     rocsparse_diagonal_modifier modifier,
                                                     bool                        conj,
                                                     bool                        conj_x,
@@ -224,7 +234,7 @@ namespace rocsparse
                              y,                                             \
                              y_layout,                                      \
                              zero_pivot,                                    \
-                             zero_pivot_stride,                             \
+                             zero_pivot_batch_stride,                       \
                              base,                                          \
                              modifier,                                      \
                              conj,                                          \
@@ -261,55 +271,50 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    static rocsparse_status diagonal_solve(rocsparse_handle               handle,
-                                           rocsparse_operation            trans,
-                                           rocsparse_diagonal_modifier    modifier,
-                                           const void*                    alpha,
-                                           rocsparse_const_spmat_descr    A,
-                                           const rocsparse::spdiag_view&  diag,
-                                           int64_t                        nrhs,
-                                           const void*                    x,
-                                           const rocsparse::dense_layout& x_layout,
-                                           void*                          y,
-                                           const rocsparse::dense_layout& y_layout,
-                                           int64_t                        batch_count,
-                                           bool                           conj_x,
-                                           void*                          zero_pivot,
-                                           int64_t                        zero_pivot_stride,
-                                           bool                           is_host_mode)
+    static rocsparse_status diagonal_solve_impl(rocsparse_handle               handle,
+                                                rocsparse_operation            trans,
+                                                rocsparse_diagonal_modifier    modifier,
+                                                const void*                    alpha,
+                                                rocsparse_const_spmat_descr    A,
+                                                const rocsparse::spdiag_view&  diag,
+                                                rocsparse_indextype            pivot_indextype,
+                                                int64_t                        nrhs,
+                                                const void*                    x,
+                                                const rocsparse::dense_layout& x_layout,
+                                                void*                          y,
+                                                const rocsparse::dense_layout& y_layout,
+                                                int64_t                        batch_count,
+                                                bool                           conj_x,
+                                                void*                          zero_pivot,
+                                                int64_t zero_pivot_batch_stride,
+                                                bool    is_host_mode)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
         const bool conj = (trans == rocsparse_operation_conjugate_transpose);
 
-        // The zero-pivot buffer is typed like the analysis pivot, i.e. the CSR col
-        // index type. build_csr_from_csc swaps row/col, so for CSC that is row_type;
-        // using col_type would mismatch the analysis pivot on mixed-index matrices.
-        const rocsparse_indextype zero_pivot_indextype
-            = (A->format == rocsparse_format_csc) ? A->row_type : A->col_type;
-
-#define DIAGONAL_SOLVE_DISPATCH(T_)                              \
-    rocsparse::diagonal_solve_dispatch<T_>(handle,               \
-                                           diag.offset_type,     \
-                                           zero_pivot_indextype, \
-                                           batch_count,          \
-                                           A->rows,              \
-                                           nrhs,                 \
-                                           alpha,                \
-                                           diag.diag_ind,        \
-                                           diag.transposed_perm, \
-                                           A->const_val_data,    \
-                                           A->batch_stride,      \
-                                           x,                    \
-                                           x_layout,             \
-                                           y,                    \
-                                           y_layout,             \
-                                           zero_pivot,           \
-                                           zero_pivot_stride,    \
-                                           A->descr->base,       \
-                                           modifier,             \
-                                           conj,                 \
-                                           conj_x,               \
+#define DIAGONAL_SOLVE_DISPATCH(T_)                                 \
+    rocsparse::diagonal_solve_dispatch<T_>(handle,                  \
+                                           diag.offset_type,        \
+                                           pivot_indextype,         \
+                                           batch_count,             \
+                                           A->rows,                 \
+                                           nrhs,                    \
+                                           alpha,                   \
+                                           diag.diag_ind,           \
+                                           diag.transposed_perm,    \
+                                           A->const_val_data,       \
+                                           A->batch_stride,         \
+                                           x,                       \
+                                           x_layout,                \
+                                           y,                       \
+                                           y_layout,                \
+                                           zero_pivot,              \
+                                           zero_pivot_batch_stride, \
+                                           A->descr->base,          \
+                                           modifier,                \
+                                           conj,                    \
+                                           conj_x,                  \
                                            is_host_mode)
 
         switch(A->data_type)
@@ -345,69 +350,68 @@ namespace rocsparse
     }
 }
 
-rocsparse_status rocsparse::build_spdiag_view(rocsparse_const_spmat_descr A,
+namespace rocsparse
+{
+    static rocsparse_status build_spdiag_view(rocsparse_const_spmat_descr A,
                                               rocsparse_operation         trans,
                                               rocsparse_csrsv_info        info,
                                               rocsparse::spdiag_view*     view)
-{
-    ROCSPARSE_ROUTINE_TRACE;
+    {
+        ROCSPARSE_ROUTINE_TRACE;
 
-    RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-        (info == nullptr) ? rocsparse_status_invalid_pointer : rocsparse_status_success,
-        "the analysis stage must be executed before a diagonal solve");
-
-    const rocsparse::trm_info_t* trm = nullptr;
-    switch(A->format)
-    {
-    case rocsparse_format_csr:
-    {
-        trm = info->get(trans, A->descr->fill_mode);
-        break;
-    }
-    case rocsparse_format_csc:
-    {
-#if defined(ROCSPARSE_WITH_CSC_TRSV) || defined(ROCSPARSE_WITH_CSC_TRSM)
-        _rocsparse_mat_descr   descr_csr;
-        _rocsparse_spmat_descr mat_csr;
-        rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
-        trm = info->get(rocsparse::cscsv_operation_to_csr(trans), descr_csr.fill_mode);
-        break;
-#else
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#endif
-    }
-    case rocsparse_format_coo:
-    case rocsparse_format_coo_aos:
-    case rocsparse_format_bsr:
-    case rocsparse_format_ell:
-    case rocsparse_format_bell:
-    case rocsparse_format_sell:
-    {
-        // LCOV_EXCL_START
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-            rocsparse_status_not_implemented,
-            "diagonal solve is only implemented for CSR and CSC matrices");
-        // LCOV_EXCL_STOP
+            (info == nullptr) ? rocsparse_status_invalid_pointer : rocsparse_status_success,
+            "the analysis stage must be executed before a diagonal solve");
+
+        const rocsparse::trm_info_t* trm = nullptr;
+        switch(A->format)
+        {
+        case rocsparse_format_csr:
+        {
+            trm = info->get(trans, A->descr->fill_mode);
+            break;
+        }
+        case rocsparse_format_csc:
+        {
+#if defined(ROCSPARSE_WITH_CSC_TRSV) || defined(ROCSPARSE_WITH_CSC_TRSM)
+            _rocsparse_mat_descr   descr_csr;
+            _rocsparse_spmat_descr mat_csr;
+            rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
+            trm = info->get(rocsparse::cscsv_operation_to_csr(trans), descr_csr.fill_mode);
+            break;
+#else
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#endif
+        }
+        case rocsparse_format_coo:
+        case rocsparse_format_coo_aos:
+        case rocsparse_format_bsr:
+        case rocsparse_format_ell:
+        case rocsparse_format_bell:
+        case rocsparse_format_sell:
+        {
+            // LCOV_EXCL_START
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_not_implemented,
+                "diagonal solve is only implemented for CSR and CSC matrices");
+            // LCOV_EXCL_STOP
+        }
+        }
+
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((trm == nullptr || trm->get_diag_ind() == nullptr)
+                                                   ? rocsparse_status_invalid_pointer
+                                                   : rocsparse_status_success,
+                                               "the analysis stage did not provide the diagonal "
+                                               "offsets required by the diagonal solve");
+
+        view->offset_type     = trm->get_offset_indextype();
+        view->diag_ind        = trm->get_diag_ind();
+        view->transposed_perm = trm->get_transposed_perm();
+        return rocsparse_status_success;
     }
-    }
 
-    RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-        (trm == nullptr || trm->get_diag_ind() == nullptr) ? rocsparse_status_invalid_pointer
-                                                           : rocsparse_status_success,
-        "the analysis stage did not provide the diagonal offsets required by the diagonal solve");
-
-    view->offset_type     = trm->get_offset_indextype();
-    view->diag_ind        = trm->get_diag_ind();
-    view->transposed_perm = trm->get_transposed_perm();
-    return rocsparse_status_success;
-}
-
-namespace rocsparse
-{
     // Consumes what the analysis stage produced - the diagonal offsets and the
     // structural pivot - seeds the numeric pivot buffer from it, then solves.
-    // Everything is identical between CSR and CSC except the index type used for
-    // the analysis pivot, which the callers pass in.
     static rocsparse_status diagonal_solve_using_analysis(rocsparse_handle            handle,
                                                           rocsparse_operation         trans,
                                                           rocsparse_diagonal_modifier modifier,
@@ -450,28 +454,29 @@ namespace rocsparse
         }
 
         RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::diagonal_solve(handle,
-                                      trans,
-                                      modifier,
-                                      alpha,
-                                      A,
-                                      diag,
-                                      nrhs,
-                                      x,
-                                      x_layout,
-                                      y,
-                                      y_layout,
-                                      batch_count,
-                                      conj_x,
-                                      numeric_exact->get_position(),
-                                      1,
-                                      handle->pointer_mode == rocsparse_pointer_mode_host));
+            rocsparse::diagonal_solve_impl(handle,
+                                           trans,
+                                           modifier,
+                                           alpha,
+                                           A,
+                                           diag,
+                                           pivot_indextype,
+                                           nrhs,
+                                           x,
+                                           x_layout,
+                                           y,
+                                           y_layout,
+                                           batch_count,
+                                           conj_x,
+                                           numeric_exact->get_position(),
+                                           1,
+                                           handle->pointer_mode == rocsparse_pointer_mode_host));
 
         return rocsparse_status_success;
     }
 
-    // A dense vector carries a single right-hand side, so only its increment and its
-    // batch stride are needed to address it.
+    // A dense vector carries a single right-hand side, so only its inc and its batch
+    // stride are needed to address it.
     static rocsparse_status diagonal_solve_dnvec(rocsparse_handle            handle,
                                                  rocsparse_operation         trans,
                                                  rocsparse_diagonal_modifier modifier,
@@ -503,10 +508,10 @@ namespace rocsparse
                                                         false);
     }
 
-    // A dense matrix addresses (row, col) with its leading dimension on one side and
-    // a unit stride on the other, depending on its storage order. Transposing the
-    // right-hand side swaps the two strides, and conjugating it is deferred to the
-    // kernel so that no temporary copy of X is needed.
+    // A dense matrix addresses (row, rhs) with its leading dimension on one side and
+    // a unit inc on the other, depending on its storage order. Transposing X swaps
+    // the two, and conjugating it is deferred to the kernel so that no temporary
+    // copy of X is needed.
     static rocsparse_status diagonal_solve_dnmat(rocsparse_handle            handle,
                                                  rocsparse_operation         trans,
                                                  rocsparse_diagonal_modifier modifier,
@@ -549,8 +554,10 @@ namespace rocsparse
     }
 }
 
-// The analysis pivot is typed like the CSR column index, whereas build_csr_from_csc
-// swaps row and col, so for CSC it is typed like the CSC row index instead.
+// The analysis pivot is typed like the CSR column index. build_csr_from_csc swaps
+// row and col, so a CSC matrix types it like its row index instead; using col_type
+// there would mismatch the analysis pivot on a mixed-index matrix. That typing is
+// the only thing separating the CSR and the CSC entry points.
 
 rocsparse_status rocsparse::diagonal_solve_csr(rocsparse_handle            handle,
                                                rocsparse_operation         trans,
