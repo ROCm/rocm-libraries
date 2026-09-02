@@ -771,11 +771,11 @@ the library ships, and sweeping it measures a configuration rocKE would never re
 to. A commit message saying the author swept a knob means it was *explored*, not that it
 *ships*.
 
-If your kernel has no profile yet, write one at `configs/<slug>.profile.yaml` — the
-integration branch stacked on this one carries a worked example. It declares the
-dispatcher entry point, the request class, the predicate, the matcher's vocabulary, and
-any knob the kernel resolves BY POLICY. The same file drives the variant-set gate at
-step 5, so the two cannot disagree about which kernel they are discussing.
+If your kernel has no profile yet, write one — `configs/gfx942_attention_dense.profile.yaml`
+is the worked example. It declares the dispatcher entry point, the request class, the
+predicate, the matcher's vocabulary, and any knob the kernel resolves BY POLICY. The same
+file drives the variant-set gate at step 5, so the two cannot disagree about which kernel
+they are discussing.
 
 ### 4a-2. Sweeping a knob — isolate, then pair the survivors
 
@@ -1332,8 +1332,8 @@ fail: the kernel runs and computes something else. Two defects shipped this way.
 
 So write it down as you go, in your profile's `launch_surface:` block — one entry per
 surface with its Python source, its C++ mirror, the KMD fields it branches on, its guard
-and its test. The worked six-surface block lives at the bottom of the integration
-branch's profile.
+and its test. `configs/gfx942_attention_dense.profile.yaml` has a worked six-surface
+block at the bottom.
 
 ```bash
 cd $REPO
