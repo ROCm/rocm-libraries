@@ -77,20 +77,20 @@ void registerGemmBindings(nb::module_& module) {
         .def_prop_rw(
             "alpha",
             [](const GemmEpilogue& epilogue) { return epilogue.alpha.as<std::complex<double>>(); },
-            [](GemmEpilogue& epilogue, std::complex<double> value) {
-                epilogue.alpha = Scalar(value);
+            [](GemmEpilogue& epilogue, nb::object value) {
+                epilogue.alpha = scalarFromPython(value);
             })
         .def_prop_rw(
             "beta",
             [](const GemmEpilogue& epilogue) { return epilogue.beta.as<std::complex<double>>(); },
-            [](GemmEpilogue& epilogue, std::complex<double> value) {
-                epilogue.beta = Scalar(value);
+            [](GemmEpilogue& epilogue, nb::object value) {
+                epilogue.beta = scalarFromPython(value);
             })
         .def_prop_rw(
             "scale_c",
             [](const GemmEpilogue& epilogue) { return epilogue.scaleC.as<std::complex<double>>(); },
-            [](GemmEpilogue& epilogue, std::complex<double> value) {
-                epilogue.scaleC = Scalar(value);
+            [](GemmEpilogue& epilogue, nb::object value) {
+                epilogue.scaleC = scalarFromPython(value);
             })
         .def_rw("bias", &GemmEpilogue::bias)
         .def_rw("scale_alpha", &GemmEpilogue::scaleAlpha)
@@ -101,22 +101,22 @@ void registerGemmBindings(nb::module_& module) {
             [](const GemmEpilogue& epilogue) {
                 return epilogue.outputScale.as<std::complex<double>>();
             },
-            [](GemmEpilogue& epilogue, std::complex<double> value) {
-                epilogue.outputScale = Scalar(value);
+            [](GemmEpilogue& epilogue, nb::object value) {
+                epilogue.outputScale = scalarFromPython(value);
             })
         .def_rw("output_conversion", &GemmEpilogue::outputConversion)
         .def_rw("activation", &GemmEpilogue::activation)
         .def_prop_rw(
             "activation_parameter0",
             [](const GemmEpilogue& epilogue) { return epilogue.activationParameter0.as<double>(); },
-            [](GemmEpilogue& epilogue, double value) {
-                epilogue.activationParameter0 = Scalar(value);
+            [](GemmEpilogue& epilogue, nb::object value) {
+                epilogue.activationParameter0 = scalarFromPython(value);
             })
         .def_prop_rw(
             "activation_parameter1",
             [](const GemmEpilogue& epilogue) { return epilogue.activationParameter1.as<double>(); },
-            [](GemmEpilogue& epilogue, double value) {
-                epilogue.activationParameter1 = Scalar(value);
+            [](GemmEpilogue& epilogue, nb::object value) {
+                epilogue.activationParameter1 = scalarFromPython(value);
             });
 
     nb::class_<GemmOptions>(module, "GemmOptions", "GEMM arithmetic and epilogue options.")

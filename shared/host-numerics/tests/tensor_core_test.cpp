@@ -117,6 +117,8 @@ int main() {
     scalarTensor.storeFrom({}, 9.0f);
     require(scalarSnapshot.type() == ScalarType::Float32 && scalarSnapshot.as<float>() == -3.5f,
             "Tensor item did not preserve independent scalar value semantics.");
+    require(scalarTensor.item<float>() == 9.0f,
+            "Typed Tensor item did not return a native scalar value.");
 
     Tensor packedScalarTensor(ScalarType::Float6E3M2, Layout(Shape{}, {}, 1));
     packedScalarTensor.storeFrom({}, 1.5f);
@@ -125,6 +127,30 @@ int main() {
             "Packed rank-zero Tensor did not convert to Scalar.");
     requireInvalidArgument([&] { (void)nativeTensor.item(); },
                            "Tensor item accepted a non-scalar shape.");
+
+    require(broadcastShapes(Shape{2, 1, 3}, Shape{1, 4, 1}) == Shape{2, 4, 3},
+            "Tensor broadcast shape mismatch.");
+    require(broadcastShapes(Shape{0, 3}, Shape{1, 3}) == Shape{0, 3},
+            "Tensor broadcasting mishandled a zero extent.");
+    requireInvalidArgument([&] { (void)broadcastShapes(Shape{2}, Shape{3}); },
+                           "Tensor broadcasting accepted incompatible shapes.");
+
+    const std::array<float, 2> columnValues{2.0f, 5.0f};
+    const Tensor column = Tensor::copyNativeValues<float>(Shape{2, 1}, columnValues);
+    const Tensor broadcastColumn = column.broadcastTo(Shape{2, 3});
+    require(broadcastColumn.shape() == Shape{2, 3} && broadcastColumn.layout().strides()[0] == 1 &&
+                broadcastColumn.layout().strides()[1] == 0 &&
+                broadcastColumn.loadAs<float>({0, 2}) == 2.0f &&
+                broadcastColumn.loadAs<float>({1, 2}) == 5.0f,
+            "Tensor broadcast view mismatch.");
+    requireInvalidArgument([&] { (void)column.broadcastTo(Shape{3, 2}); },
+                           "Tensor broadcast accepted an incompatible destination shape.");
+
+    const Tensor broadcastScalar = scalarTensor.broadcastTo(Shape{2, 3});
+    require(broadcastScalar.layout().strides()[0] == 0 &&
+                broadcastScalar.layout().strides()[1] == 0 &&
+                broadcastScalar.loadAs<float>({1, 2}) == 9.0f,
+            "Rank-zero Tensor did not broadcast as a scalar.");
 
     Tensor uninitialized = Tensor::allocateUninitialized(ScalarType::Float32, Shape{2});
     uninitialized.storeFrom({0}, 3.0f);

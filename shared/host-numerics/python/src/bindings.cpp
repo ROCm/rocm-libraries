@@ -89,6 +89,24 @@ nb::list tensorValues(Tensor tensor) {
     return result;
 }
 
+nb::object tensorItem(const Tensor& tensor) {
+    const Scalar value = tensor.item();
+    switch (scalarTypeInfo(value.type()).category) {
+        case ScalarCategory::Boolean:
+            return nb::cast(value.as<bool>());
+        case ScalarCategory::SignedInteger:
+            return nb::cast(value.as<int64_t>());
+        case ScalarCategory::UnsignedInteger:
+            return nb::cast(value.as<uint64_t>());
+        case ScalarCategory::Complex:
+            return nb::cast(value.as<std::complex<double>>());
+        case ScalarCategory::FloatingPoint:
+        case ScalarCategory::Scale:
+            return nb::cast(value.as<double>());
+    }
+    throw std::invalid_argument("Tensor item has an invalid scalar type.");
+}
+
 struct NumpyStorageType {
     ScalarType type;
     size_t itemSize;
@@ -290,6 +308,13 @@ Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::by
 
 }  // namespace
 
+namespace roc::host_numerics::python_bindings {
+Scalar scalarFromPython(nb::handle value) {
+    if (nb::isinstance<Tensor>(value)) return nb::cast<Tensor>(value).item();
+    return Scalar(nb::cast<std::complex<double>>(value));
+}
+}  // namespace roc::host_numerics::python_bindings
+
 NB_MODULE(_roc_host_numerics, module) {
     nb::enum_<ScalarCategory>(module, "ScalarCategory")
         .value("Boolean", ScalarCategory::Boolean)
@@ -475,6 +500,13 @@ NB_MODULE(_roc_host_numerics, module) {
                                           storage.size());
                      })
         .def_prop_ro("values", [](const Tensor& tensor) { return tensorValues(tensor); })
+        .def("item", &tensorItem)
+        .def(
+            "broadcast_to",
+            [](const Tensor& tensor, std::vector<size_t> shape) {
+                return tensor.broadcastTo(Shape(std::move(shape)));
+            },
+            "shape"_a)
         .def("clone", [](const Tensor& tensor) { return tensor.deepCopy(); })
         .def("to", static_cast<Tensor (Tensor::*)(ScalarType) const>(&Tensor::copyConvertedTo),
              "type"_a);
