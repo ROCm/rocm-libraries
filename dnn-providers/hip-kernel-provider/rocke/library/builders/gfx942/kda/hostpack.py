@@ -115,21 +115,31 @@ def pack_v_partitions(
     BH, NC = B * H, T // chunk
     parts = DV // head_v
 
+    # ``broadcast_to`` returns a read-only view, and ``ascontiguousarray`` does
+    # not copy one whose layout is already contiguous -- which is exactly the
+    # single-partition case (logical head_v == 64), where the broadcast adds a
+    # length-1 axis and changes nothing. The pack would then hand back a
+    # read-only array, and every consumer here uploads through
+    # ``ctypes.from_buffer``, which requires a writable buffer. Copy explicitly
+    # so the result does not depend on how many partitions there happen to be.
+    def materialize(view: np.ndarray, shape: Tuple[int, ...]) -> np.ndarray:
+        return np.array(view, copy=True).reshape(*shape)
+
     def duplicate(x: np.ndarray, tail: int) -> np.ndarray:
         x = np.ascontiguousarray(x).reshape(BH, NC, chunk, tail)
         x = np.broadcast_to(x[:, None, ...], (BH, parts, NC, chunk, tail))
-        return np.ascontiguousarray(x).reshape(BH * parts * NC, chunk * tail)
+        return materialize(x, (BH * parts * NC, chunk * tail))
 
     qf = duplicate(q, DK)
     kf = duplicate(k, DK)
     gf = duplicate(g, DK)
     bf = np.ascontiguousarray(beta).reshape(BH, NC, chunk)
     bf = np.broadcast_to(bf[:, None, ...], (BH, parts, NC, chunk))
-    bf = np.ascontiguousarray(bf).reshape(BH * parts * NC, chunk)
+    bf = materialize(bf, (BH * parts * NC, chunk))
     vf = np.ascontiguousarray(v).reshape(BH, NC, chunk, parts, head_v)
-    vf = np.ascontiguousarray(vf.transpose(0, 3, 1, 2, 4)).reshape(
-        BH * parts * NC, chunk * head_v
-    )
+    # Same ownership guarantee as the duplicated fields: at one partition the
+    # transpose is a no-op and would otherwise alias the caller's ``v``.
+    vf = materialize(vf.transpose(0, 3, 1, 2, 4), (BH * parts * NC, chunk * head_v))
     return PackedFused(
         q=qf,
         k=kf,

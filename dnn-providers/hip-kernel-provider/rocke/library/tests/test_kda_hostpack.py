@@ -33,6 +33,7 @@ from kernels.gfx942.kda_chunkwise import (
     kda_chunk_fused_signature,
 )
 from rocke.run_manifest import registered_manifest_kinds, resolve_manifest_runner
+from rocke.runtime.host_buffers import as_u8_buffer
 from rocke.runtime.packing import pack_args
 
 
@@ -126,6 +127,30 @@ def test_unpack_inverts_v_pack():
         parts=packed.parts,
     )
     np.testing.assert_array_equal(got, v)
+
+
+@pytest.mark.parametrize("parts", (1, 2, 4))
+def test_pack_returns_writable_owned_buffers(parts):
+    """Every packed field must be uploadable, at any partition count.
+
+    ``broadcast_to`` yields a read-only view and ``ascontiguousarray`` will not
+    copy one that is already contiguous, so at one partition the pack used to
+    hand back read-only arrays. ``ctypes.from_buffer`` -- how both the manifest
+    runner and the benchmark upload -- rejects those, which made logical
+    ``head_v == 64`` unrunnable through the torch-free lane.
+    """
+    head_v = 4
+    B, H, T, DK, C = 2, 2, 32, 8, 16
+    dense = dict(
+        zip(("q", "k", "v", "g", "beta"), make_inputs(B, H, T, DK, head_v * parts))
+    )
+    packed = pack_v_partitions(C, head_v, **dense)
+    assert packed.parts == parts
+    for name, source in dense.items():
+        field = getattr(packed, name)
+        assert field.flags.writeable, f"{name} is read-only"
+        assert not np.shares_memory(field, source), f"{name} aliases its input"
+        as_u8_buffer(field)  # raises TypeError on a read-only buffer
 
 
 def test_pack_rejects_ragged_sequence():

@@ -734,10 +734,25 @@ def _emit_kt_slot(ctx: _ChunkCtx, ch, sink, vidx) -> None:
 
 
 def _emit_kt_all_waves(ctx: _ChunkCtx, ch, sink) -> None:
-    """Kt with the original uniform ``tid + i*BLOCK`` mapping, every wave."""
+    """Kt with the original uniform ``tid + i*BLOCK`` mapping, every wave.
+
+    ``C * DK / 8`` slots need not be a whole number of block passes: at
+    head_k=64 and C=16 there are 128 of them against a 256-thread block, so a
+    trip count alone drops every one and leaves Kt unwritten. Since Kt is the
+    state update's only exclusive input, that reads uninitialized LDS into the
+    recurrence and corrupts the final state while leaving the first chunk's
+    ``o`` -- which does not consume Kt -- correct. The full passes stay
+    unguarded so the widths that divide evenly emit exactly as before.
+    """
     b, tid, BLOCK, N_CD = ctx.b, ctx.tid, ctx.BLOCK, ctx.N_CD
-    for i in range(N_CD // (8 * BLOCK)):
+    n_kt = N_CD // 8
+    full, tail = divmod(n_kt, BLOCK)
+    for i in range(full):
         _emit_kt_slot(ctx, ch, sink, b.add(tid, b.const_i32(i * BLOCK)))
+    if tail:
+        vidx = b.add(tid, b.const_i32(full * BLOCK))
+        with b.scf_if(b.cmp_gt(b.const_i32(n_kt), vidx)):
+            _emit_kt_slot(ctx, ch, sink, vidx)
 
 
 def _emit_stage_issue(ctx: _ChunkCtx, ch):
