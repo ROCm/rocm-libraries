@@ -105,8 +105,8 @@ void registerGemmBindings(nb::module_& module) {
 
     module.def("_reference_gemm", &referenceGemmOwned, "a"_a, "b"_a, "c"_a,
                "output_type"_a = ScalarType::Float32, "options"_a = GemmOptions{},
-               "output_layout"_a = std::optional<Layout>{}, "backend"_a = GemmBackend::Pointwise);
+               "output_layout"_a = std::optional<Layout>{}, "backend"_a = GemmBackend::Automatic);
     module.def("_reference_gemm_into", &referenceGemmIntoBound, "a"_a, "b"_a, "c"_a, "d"_a,
-               "options"_a = GemmOptions{}, "backend"_a = GemmBackend::Pointwise);
+               "options"_a = GemmOptions{}, "backend"_a = GemmBackend::Automatic);
 }
 }  // namespace roc::host_numerics::python_bindings

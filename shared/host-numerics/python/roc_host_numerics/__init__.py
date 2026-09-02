@@ -221,7 +221,7 @@ def reference_gemm(
     activation_parameter0=0.0,
     activation_parameter1=0.0,
     output_selection=None,
-    backend=GemmBackend.Pointwise,  # noqa: F405
+    backend=GemmBackend.Automatic,  # noqa: F405
     block_scale_a=None,
     block_scale_b=None,
     block_size_a=0,
@@ -296,7 +296,7 @@ def reference_gemm_into(
     activation_parameter0=0.0,
     activation_parameter1=0.0,
     output_selection=None,
-    backend=GemmBackend.Pointwise,  # noqa: F405
+    backend=GemmBackend.Automatic,  # noqa: F405
     block_scale_a=None,
     block_scale_b=None,
     block_size_a=0,
