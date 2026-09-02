@@ -333,6 +333,11 @@ compilation and evaluation both recurse per level, and rules are read from
 descriptor files on disk, so an over-deep rule must report a bad rule rather
 than exhaust the stack.
 
+A level is one operator: `{"!": [X]}` puts `X` one level down, since an
+operator's argument array is not a level of its own. A bare array *literal* is,
+as is the array a layout alias expands into — so a rule whose deepest node is an
+alias fits one operator less than the same rule spelled with the array.
+
 Not included: the `var` operator (variables are the sigil form only), and the
 collection and string operators (`map`, `reduce`, `filter`, `all`, `some`,
 `none`, `merge`, `cat`, `substr`, `missing`, `missing_some`).

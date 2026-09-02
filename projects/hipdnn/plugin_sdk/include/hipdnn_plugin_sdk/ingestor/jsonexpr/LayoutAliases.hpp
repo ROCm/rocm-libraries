@@ -212,14 +212,47 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
 /// only where a `stride_order` reference gives it that meaning -- opposite one
 /// in an `==` / `!=`, or as an element of the array an `in` searches -- so
 /// "nhwc" stays an ordinary string literal everywhere else.
+///
+/// Depth is charged exactly as Compiler.hpp charges it, because the two share
+/// one MAX_EXPRESSION_DEPTH: an operator's argument array is not a level of
+/// its own, so `{"!": [X]}` puts X one deeper, not two. Charging the array as
+/// well would halve the effective limit for every rule -- and, since compile()
+/// runs this pass first, would reject at that halved depth while reporting the
+/// full documented limit.
 inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
                                           char sigil,
                                           const std::map<std::string, std::int64_t>& rankPins,
-                                          std::size_t depth = 0)
+                                          std::size_t depth = 0);
+
+/// Expand an operator's value the way compileObject descends into one: the
+/// elements of an argument array sit one level below the operator, and a bare
+/// non-array value sits one level below it too.
+inline nlohmann::json expandOperatorValue(const nlohmann::json& val,
+                                          char sigil,
+                                          const std::map<std::string, std::int64_t>& rankPins,
+                                          std::size_t depth)
+{
+    if(!val.is_array())
+    {
+        return expandLayoutAliases(val, sigil, rankPins, depth + 1);
+    }
+    nlohmann::json out = nlohmann::json::array();
+    for(const auto& e : val)
+    {
+        out.push_back(expandLayoutAliases(e, sigil, rankPins, depth + 1));
+    }
+    return out;
+}
+
+inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
+                                          char sigil,
+                                          const std::map<std::string, std::int64_t>& rankPins,
+                                          std::size_t depth)
 {
     checkExpressionDepth(depth);
     if(j.is_array())
     {
+        // A bare array literal IS a level of its own, matching compileNode.
         nlohmann::json out = nlohmann::json::array();
         for(const auto& e : j)
         {
@@ -253,6 +286,7 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
                 }
                 else
                 {
+                    // An operand of the argument array: one level below the operator.
                     args.push_back(expandLayoutAliases(side, sigil, rankPins, depth + 1));
                 }
             }
@@ -269,15 +303,17 @@ inline nlohmann::json expandLayoutAliases(const nlohmann::json& j,
             nlohmann::json hay = nlohmann::json::array();
             for(const auto& e : val.at(1))
             {
+                // The haystack is an operand (depth + 1) and is itself an
+                // array, so its elements are a further level down.
                 hay.push_back(isLayoutAliasCandidate(e, sigil)
                                   ? resolveLayoutAlias(e, refPath, rankPins)
-                                  : expandLayoutAliases(e, sigil, rankPins, depth + 1));
+                                  : expandLayoutAliases(e, sigil, rankPins, depth + 2));
             }
             out[key] = nlohmann::json::array({val.at(0), std::move(hay)});
             continue;
         }
 
-        out[key] = expandLayoutAliases(val, sigil, rankPins, depth + 1);
+        out[key] = expandOperatorValue(val, sigil, rankPins, depth);
     }
     return out;
 }

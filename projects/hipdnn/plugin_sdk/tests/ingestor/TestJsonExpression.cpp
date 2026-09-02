@@ -564,6 +564,12 @@ TEST(TestJsonExpression, DeeplyNestedRulesAreRejectedNotFatal)
     // Rules are read from descriptor files on disk, and compilation and
     // evaluation both recurse per nesting level, so an over-deep rule must
     // report a bad rule rather than overflow the stack.
+    //
+    // Bracketed at the exact boundary, not loosely around it: compilation runs
+    // three recursive passes (rank pins, alias expansion, lowering) that share
+    // one MAX_EXPRESSION_DEPTH, and if they charge depth at different rates the
+    // strictest silently becomes the real limit while the diagnostic still
+    // names the documented one. A test sized at MAX/2 cannot see that.
     const auto nest = [](std::size_t depth) {
         json rule = json("$x");
         for(std::size_t i = 0; i < depth; ++i)
@@ -574,19 +580,44 @@ TEST(TestJsonExpression, DeeplyNestedRulesAreRejectedNotFatal)
     };
     // Comfortably inside the limit: compiles and evaluates.
     EXPECT_EQ(eval(nest(16)), V(41 + 16));
-    EXPECT_NO_THROW(jexpr::compile<jexpr::JsonDataSource>(nest(jexpr::MAX_EXPRESSION_DEPTH / 2)));
-    // Past it: a diagnostic, not a crash.
-    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(nest(jexpr::MAX_EXPRESSION_DEPTH * 4)),
+    // At the limit: still compiles, and -- the claim the bound actually makes --
+    // still EVALUATES, since evaluation recurses per level too and is bounded
+    // only through compilation.
+    EXPECT_EQ(eval(nest(jexpr::MAX_EXPRESSION_DEPTH - 1)),
+              V(41 + static_cast<std::int64_t>(jexpr::MAX_EXPRESSION_DEPTH) - 1));
+    // One past it: a diagnostic, not a crash.
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(nest(jexpr::MAX_EXPRESSION_DEPTH + 1)),
                  jexpr::JsonExpressionCompileError);
+
     // The alias pre-pass runs before lowering and recurses too, so it must
-    // enforce the same bound rather than being reached with an over-deep rule.
-    json aliasRule = json({{"==", json::array({"$q.stride_order", "nhwc"})}});
-    for(std::size_t i = 0; i < jexpr::MAX_EXPRESSION_DEPTH * 4; ++i)
-    {
-        aliasRule = json({{"and", json::array({aliasRule})}});
-    }
-    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(aliasRule),
+    // enforce the same bound -- neither a looser one (it would hand an
+    // over-deep document to lowering) nor a tighter one (it would reject a rule
+    // the documented limit admits, citing a limit that is not the real one).
+    const auto aliasNest = [](std::size_t depth) {
+        json rule = json({{"==", json::array({"$q.stride_order", "nhwc"})}});
+        for(std::size_t i = 0; i < depth; ++i)
+        {
+            rule = json({{"and", json::array({rule})}});
+        }
+        return rule;
+    };
+    // Expanding the alias to its 4-element array adds one tree level, so the
+    // deepest accepted alias rule sits one below the plain bound.
+    EXPECT_NO_THROW(
+        jexpr::compile<jexpr::JsonDataSource>(aliasNest(jexpr::MAX_EXPRESSION_DEPTH - 2)));
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(aliasNest(jexpr::MAX_EXPRESSION_DEPTH + 1)),
                  jexpr::JsonExpressionCompileError);
+
+    // The rank-pin walk is the third pass over the same document; an `and`
+    // chain is what it descends, so it must agree on the bound as well.
+    json pinned = json({{"and",
+                         json::array({json({{"==", json::array({"$q.rank", 4})}}),
+                                      json({{"==", json::array({"$q.stride_order", "nhwc"})}})})}});
+    for(std::size_t i = 0; i < jexpr::MAX_EXPRESSION_DEPTH + 1; ++i)
+    {
+        pinned = json({{"and", json::array({pinned})}});
+    }
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(pinned), jexpr::JsonExpressionCompileError);
 }
 
 TEST(TestJsonExpression, ConstraintShapes)

@@ -29,6 +29,14 @@ public:
 /// hand -- overflows the stack instead of reporting a bad rule. Compiling is
 /// what enforces it, which bounds evaluation too. Far above anything a real
 /// criterion or dispatch formula nests.
+///
+/// All three compile passes must charge depth at the SAME rate for the number
+/// below to mean what it says. They share this one bound, and compile() runs
+/// them in the order above, so a pass that counts faster than the others
+/// silently becomes the real limit while still reporting this one -- and a
+/// pass that counts slower hands an over-deep document to the next pass.
+/// Compiler.hpp sets the rate: one level per operator, an argument array not
+/// being a level of its own.
 inline constexpr std::size_t MAX_EXPRESSION_DEPTH = 256;
 
 inline void checkExpressionDepth(std::size_t depth)
