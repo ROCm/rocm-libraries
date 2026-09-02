@@ -47,3 +47,42 @@ The full tree (~2246 files) can take several minutes, so passing a subdirectory 
 ### run_tensile_logic_check.sh (Unix only)
 
 Thin wrapper that runs the script with `.venv/bin/python`, if it's present, and with `python3` otherwise. Use the `.py` script directly on Windows.
+
+## run_cmake_configure_matrix.sh
+
+Runs the supported local CMake topology matrix for hipBLASLt, rocISA, and hipSPARSELt. It is a
+configure-first integration runner: each cell uses an isolated build directory and checks the
+generated cache, config/export files, Ninja command, or CPack metadata. It does not replace GPU
+execution or Windows package/import testing.
+
+Run it **inside** a prepared ROCm environment. The source-provider cells need an offline nanobind
+checkout because rocISA uses FetchContent. The staged cell either accepts an existing provider
+prefix or builds a minimal one with `--prepare-stage`.
+
+```bash
+projects/hipblaslt/scripts/run_cmake_configure_matrix.sh \
+  --nanobind-source /deps/nanobind \
+  --prepare-stage \
+  --results-dir /results/cmake-matrix
+```
+
+For the published local image used by this PR, mount the checkout read-only, a writable results
+directory, and an offline nanobind source:
+
+```bash
+docker run --rm --network=none \
+  --user "$(id -u):$(id -g)" \
+  --mount type=bind,source="$PWD",target=/src,readonly \
+  --mount type=bind,source="$PWD/.cmake-configure-matrix",target=/results \
+  --mount type=bind,source="$NANOBIND_SOURCE",target=/deps/nanobind,readonly \
+  --workdir /src \
+  pr9248-gfx950:33012920661 \
+  bash projects/hipblaslt/scripts/run_cmake_configure_matrix.sh \
+    --nanobind-source /deps/nanobind --prepare-stage --results-dir /results
+```
+
+Use `--list` for the cell names and `--cell NAME` to run a focused subset. Add `--prepare-stage`
+or `--stage-prefix` to include the staged/TheRock cell. The YAML cell requires an LLVM package with
+its zstd dependency closure, so add `--with-yaml` (or use `--all`) only in such an environment.
+Windows, real TheRock superbuild, and packaged Windows import remain separate platform/integration
+validations.
