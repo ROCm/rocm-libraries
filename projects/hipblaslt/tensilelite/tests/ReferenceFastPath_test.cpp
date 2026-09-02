@@ -15,6 +15,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <string>
 #include <type_traits>
 #include <variant>
 #include <vector>
@@ -39,7 +40,8 @@ namespace
                                              rocisa::DataType typeC,
                                              size_t           M,
                                              size_t           N,
-                                             size_t           K)
+                                             size_t           K,
+                                             size_t           batches = 1)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(false,
                                                             false,
@@ -50,7 +52,7 @@ namespace
                                                             M,
                                                             N,
                                                             K,
-                                                            1,
+                                                            batches,
                                                             M,
                                                             M * K,
                                                             K,
@@ -67,6 +69,54 @@ namespace
         return problem;
     }
 } // namespace
+
+TEST(ReferenceInvocationAdapter, ZeroOutputOrBatchIsNoOpWithoutBindings)
+{
+    constexpr std::array<std::array<size_t, 4>, 3> cases{{
+        {0, 3, 4, 1},
+        {2, 0, 4, 1},
+        {2, 3, 4, 0},
+    }};
+    for(const auto& [m, n, k, batches] : cases)
+    {
+        SCOPED_TRACE("M=" + std::to_string(m) + ", N=" + std::to_string(n)
+                     + ", K=" + std::to_string(k) + ", batches=" + std::to_string(batches));
+        auto                    problem = makePackedProblem(rocisa::DataType::Float,
+                                         rocisa::DataType::Float,
+                                         rocisa::DataType::Float,
+                                         m,
+                                         n,
+                                         k,
+                                         batches);
+        const ContractionInputs inputs;
+
+        const auto translation = HostNumerics::translateGemmInvocation(
+            problem, inputs, roc::host_numerics::OutputSelection::all());
+        ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(translation));
+        EXPECT_EQ(std::get<HostNumerics::GemmInvocationAdapter>(translation).batchCount(), 0);
+        EXPECT_EQ(
+            executeReferenceGemm(
+                problem, inputs, roc::host_numerics::OutputSelection::all(), automaticExecution),
+            roc::host_numerics::GemmBackend::Pointwise);
+    }
+}
+
+TEST(ReferenceInvocationAdapter, ZeroReductionDoesNotRequireProductOrAddendBindings)
+{
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, 2, 3, 0);
+    std::array<float, 6> output;
+    output.fill(-99.0f);
+    ContractionInputs inputs;
+    inputs.d     = output.data();
+    inputs.alpha = std::numeric_limits<float>::quiet_NaN();
+    inputs.beta  = 0.0f;
+
+    EXPECT_EQ(executeReferenceGemm(
+                  problem, inputs, roc::host_numerics::OutputSelection::all(), automaticExecution),
+              roc::host_numerics::GemmBackend::Pointwise);
+    EXPECT_EQ(output, (std::array<float, 6>{}));
+}
 
 TEST(ReferenceBlockedBackend, PreservesDoublePrecisionForF64)
 {

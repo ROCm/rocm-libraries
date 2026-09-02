@@ -161,7 +161,7 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
         const bool hasBlockScale = blockScaleA.has_value() || blockScaleB.has_value();
         std::vector<Accumulator> partial(hasBlockScale ? rows * columns : 0);
 
-        for (size_t reductionBase = 0; !finalizer.alphaIsZero() && reductionBase < k;
+        for (size_t reductionBase = 0; !finalizer.skipsProduct() && reductionBase < k;
              reductionBase += reductionBlockElements) {
             const size_t reductions = std::min(reductionBlockElements, k - reductionBase);
             for (size_t row = 0; row < rows; ++row) {
@@ -250,7 +250,7 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
     const size_t outputElementsWritten =
         problem.outputSelection.selectedCount(problem.d.shape().elementCount());
     const bool parallelOutput = detail::canParallelizeGemmOutput(problem);
-    const size_t reductionWork = finalizer.alphaIsZero() ? 0 : k;
+    const size_t reductionWork = finalizer.skipsProduct() ? 0 : k;
     if (problem.outputSelection.selectsAll()) {
         const size_t rowBlockCount = (m + outputBlockRows - 1) / outputBlockRows;
         const size_t columnBlockCount = (n + outputBlockColumns - 1) / outputBlockColumns;
