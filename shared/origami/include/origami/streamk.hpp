@@ -97,29 +97,7 @@ ORIGAMI_EXPORT hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const config_t& config,
                                  size_t sm_count_target);
 
-/**
- * @brief Correct a Stream-K grid that would cause CTAs to cross tile boundaries.
- *
- * When @p sk_grid < @p tiles and some CTAs would handle a non-integer number of
- * complete output tiles (floor(tiles * iters_per_tile / sk_grid) % iters_per_tile != 0),
- * those CTAs write partial accumulator results to a workspace and require a
- * reduction pass.  This destroys L2 spatial locality and costs more than the
- * WG-count savings.  In that case the grid is corrected to @p tiles (data-parallel).
- *
- * Safe to call after any grid-selection path regardless of SK type.  When
- * @p iters_per_tile <= 1 (K fits in one MT_K window) or the grid already evenly
- * divides the tile work, the input @p sk_grid is returned unchanged.
- *
- * @param sk_grid       Candidate SK grid (number of CTAs to launch).
- * @param tiles         Total number of output tiles for this problem and config.
- * @param iters_per_tile Number of K-loop iterations per output tile (floor(K / MT_K)).
- * @return Corrected grid: @p tiles if the candidate causes partial tiles, else @p sk_grid.
- */
-ORIGAMI_EXPORT size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
-                                                         size_t tiles,
-                                                         size_t iters_per_tile,
-                                                         size_t cu_count,
-                                                         size_t batch = 1);
+
 
 }  // namespace streamk
 }  // namespace origami
