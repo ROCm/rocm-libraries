@@ -4,9 +4,15 @@ The shipped MFMA atoms live in `helpers.atoms`, grouped into `MFMA_F16_ATOMS`, `
 
 These MFMA atoms are the wave64 CDNA path (gfx942 / gfx950). The Python and C++ engines emit byte-identical IR for them.
 
+The logical contract is `D = A * B + C`: C is the accumulator input and D is
+the produced result. Their dtype, per-lane width, and layout metadata are
+modeled independently, although every currently shipped atom uses matching C
+and D representations. The emitted `tile.mma` operation therefore remains
+three source operands `(A, B, C)` with one D result.
+
 ## Atom Table
 
-| Atom             | (m, n, k) | A per lane  | B per lane  | C per lane   | Output tile | Target  | Notes                              |
+| Atom             | (m, n, k) | A per lane  | B per lane  | D per lane   | Output tile | Target  | Notes                              |
 |------------------|-----------|------------:|------------:|-------------:|------------:|---------|------------------------------------|
 | `f16_4x4x4`      | 4 x 4 x 4  | `<4xhalf>`  | `<4xhalf>`  | `<4xfloat>`  | 4x4 x 16 batches | gfx940+ | 16 independent 4x4 matmuls per wave (small-channel direct conv) |
 | `f16_16x16x16`   | 16x16x16 | `<4xhalf>`  | `<4xhalf>`  | `<4xfloat>`  | 16x16        | gfx940+ | Legacy CDNA atom                   |
@@ -33,7 +39,7 @@ The kernel epilogue must agree with `MfmaAtom.lane_to_output(b, lane, i)`. The l
 ### `16x16x16`, `16x16x32`
 
 ```text
-c_per_lane = 4
+d_per_lane = 4
 m_blk      = lane / 16        # 0..3
 n_in_atom  = lane % 16        # 0..15
 
@@ -45,7 +51,7 @@ For i in 0..3:
 ### `32x32x8`, `32x32x16`
 
 ```text
-c_per_lane = 16
+d_per_lane = 16
 m_blk      = lane / 32        # 0 or 1
 n_in_atom  = lane % 32        # 0..31
 
@@ -57,7 +63,7 @@ For i in 0..15:
 ### `4x4x4`
 
 ```text
-c_per_lane     = 4
+d_per_lane     = 4
 batch_idx      = lane / 4     # 0..15  (one of 16 independent 4x4 batches)
 lane_in_batch  = lane % 4     # 0..3
 
@@ -113,7 +119,7 @@ B holds the 4 K-elements of column `lane_in_batch` of B in batch `batch_idx`.
 
 ## VGPR Budget Implications
 
-The accumulator vector width `c_per_lane` is the primary VGPR-pressure knob:
+The accumulator vector width `d_per_lane` is the primary VGPR-pressure knob:
 
 | Atom         | acc per lane | mfmas_per_warp = M x N | acc VGPRs per warp tile  |
 |--------------|-------------:|------------------------|--------------------------|

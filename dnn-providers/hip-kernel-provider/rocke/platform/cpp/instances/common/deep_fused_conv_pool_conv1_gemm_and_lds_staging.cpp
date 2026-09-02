@@ -24,10 +24,10 @@
  * via a local forward declaration (resolved at link; see the NAMED GAP below).
  *
  * PEER NOTES.
- *   - _cshuffle_acc_distribution(c_frag_len) + LoadStoreTraits(vector_dim_y=1,
+ *   - _cshuffle_acc_distribution(d_frag_len) + LoadStoreTraits(vector_dim_y=1,
  *     scalar_per_vector=1) + store_tile_cshuffle(coord_fn=...): for THIS
- *     distribution iterate_accesses() yields exactly c_frag_len accesses with
- *     y_base==(i,0) (i in [0,c_frag_len)) and one scalar per access, so the whole
+ *     distribution iterate_accesses() yields exactly d_frag_len accesses with
+ *     y_base==(i,0) (i in [0,d_frag_len)) and one scalar per access, so the whole
  *     producer collapses to the per-slot loop reproduced inline below -- no
  *     distribution object is materialised and the emitted op stream is identical.
  *   - make_lds_view / CoalescedTileLoader / op layout coords / IRBuilder.mma are
@@ -132,7 +132,7 @@ static rocke_value_t* dfcp_load_smem_frag_contiguous_f16(rocke_ir_builder_t* b,
  * _stage_accumulators_to_cshuffle_lds (py 388-456)
  *
  * Publish MMA accumulators to a row-major [tile_m, tile_n] LDS tile, fully
- * op-driven via op->c_frag_len + op->c_layout()->coord + the per-warp tile
+ * op-driven via op->d_frag_len + op->d_layout()->coord + the per-warp tile
  * geometry. sync=false defers the trailing barrier so the caller can merge it
  * with the disjoint W1 producer barrier.
  * ================================================================== */
@@ -143,7 +143,7 @@ rocke_value_t* rocke_dfcp_stage_accumulators_to_cshuffle_lds(rocke_ir_builder_t*
                                                              const rocke_warp_grid_t* grid,
                                                              bool sync)
 {
-    int c_frag_len;
+    int d_frag_len;
     int mfmas_m;
     int mfmas_n;
     int shape[2];
@@ -160,7 +160,7 @@ rocke_value_t* rocke_dfcp_stage_accumulators_to_cshuffle_lds(rocke_ir_builder_t*
         return NULL;
     }
 
-    c_frag_len = op->c_frag_len;
+    d_frag_len = op->d_frag_len;
     mfmas_m = rocke_warp_grid_mfmas_per_warp_m(b, grid);
     mfmas_n = rocke_warp_grid_mfmas_per_warp_n(b, grid);
     if(!rocke_ir_builder_ok(b))
@@ -195,7 +195,7 @@ rocke_value_t* rocke_dfcp_stage_accumulators_to_cshuffle_lds(rocke_ir_builder_t*
 
     warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
     warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
-    c_map = rocke_mmaop_c_layout(op, b);
+    c_map = rocke_mmaop_d_layout(op, b);
     if(!rocke_ir_builder_ok(b))
     {
         return NULL;
@@ -212,26 +212,26 @@ rocke_value_t* rocke_dfcp_stage_accumulators_to_cshuffle_lds(rocke_ir_builder_t*
             int i;
 
             /* make_static_distributed_tensor + store_tile_cshuffle(coord_fn) over
-             * _cshuffle_acc_distribution(c_frag_len) with vector_dim_y=1,
+             * _cshuffle_acc_distribution(d_frag_len) with vector_dim_y=1,
              * scalar_per_vector=1: iterate_accesses() yields y_base==(i,0) for
-             * i in [0,c_frag_len), one scalar each. The store target is the LDS
+             * i in [0,d_frag_len), one scalar each. The store target is the LDS
              * view base; coords come from coord_fn.
              *
              * Python fills the distributed tensor FIRST (the dt.set loop at
-             * py 441-442 emits all c_frag_len `vec_extract`s up front), THEN
+             * py 441-442 emits all d_frag_len `vec_extract`s up front), THEN
              * store_tile_cshuffle consumes it (emitting the address math +
              * stores). The two phases must stay separate so the emitted IR is
              * byte-identical: all extractelements precede the stores, not
              * interleaved one-per-store. */
             rocke_value_t* scalars[16];
-            if(c_frag_len > (int)(sizeof(scalars) / sizeof(scalars[0])))
+            if(d_frag_len > (int)(sizeof(scalars) / sizeof(scalars[0])))
             {
                 rocke_i_set_err(
-                    b, ROCKE_ERR_VALUE, "cshuffle stage: c_frag_len=%d exceeds cap", c_frag_len);
+                    b, ROCKE_ERR_VALUE, "cshuffle stage: d_frag_len=%d exceeds cap", d_frag_len);
                 return NULL;
             }
             /* Phase 1: dt.set([i,0], vec_extract(acc_h, i)) for all i. */
-            for(i = 0; i < c_frag_len; ++i)
+            for(i = 0; i < d_frag_len; ++i)
             {
                 scalars[i] = rocke_b_vec_extract(b, acc_h, i);
             }
@@ -240,7 +240,7 @@ rocke_value_t* rocke_dfcp_stage_accumulators_to_cshuffle_lds(rocke_ir_builder_t*
             tile_m_base = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * op->m));
             tile_n_base = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * op->n));
             /* Phase 2: store_tile_cshuffle -- per access, address math + store. */
-            for(i = 0; i < c_frag_len; ++i)
+            for(i = 0; i < d_frag_len; ++i)
             {
                 rocke_value_t* row_in_atom = NULL;
                 rocke_value_t* col_in_atom = NULL;
@@ -476,7 +476,7 @@ rocke_status_t rocke_dfcp_emit_conv1_1x1(rocke_ir_builder_t* b,
         int idx;
         for(idx = 0; idx < num_accs; ++idx)
         {
-            accs[idx] = rocke_b_zero_vec_f32(b, op->c_frag_len);
+            accs[idx] = rocke_b_zero_vec_f32(b, op->d_frag_len);
         }
     }
 

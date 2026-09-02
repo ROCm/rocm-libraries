@@ -21,7 +21,7 @@
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* Largest per-lane fragment / accumulator length the attention atoms produce.
- * fp8/bf8 16x16x32 -> a_per_lane=8; wmma f16 -> a_frag_len=16, c_frag_len=8.
+ * fp8/bf8 16x16x32 -> a_per_lane=8; wmma f16 -> a_frag_len=16, d_frag_len=8.
  * head_size up to 256 -> n_pv_atoms up to 16, n_qk_atoms up to 16. */
 #define ROCKE_ATTN_MAX_LANE 16
 #define ROCKE_ATTN_MAX_ATOMS 16
@@ -94,7 +94,15 @@ rocke_status_t rocke_validate_attention_atom(rocke_ir_builder_t* b,
         return ROCKE_ERR_VALUE;
     }
     if(!rocke_mma_catalog_has_shape(
-           &target->mma, NULL, cat_dtype, cat_dtype, "fp32", atom->m, atom->n, atom->k))
+           &target->mma,
+           NULL,
+           cat_dtype,
+           cat_dtype,
+           atom->dtype_c,
+           atom->dtype_d,
+           atom->m,
+           atom->n,
+           atom->k))
     {
         rocke_i_set_err(b,
                         ROCKE_ERR_VALUE,
@@ -397,12 +405,12 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     /* ---- Online softmax + PV accumulator iter_args ---- */
     rocke_value_t* neg_inf = rocke_b_const_f32(b, -1e30);
     rocke_value_t* zero_f = rocke_b_const_f32(b, 0.0);
-    rocke_value_t* acc_zero = rocke_b_zero_vec_f32(b, atom->c_per_lane);
+    rocke_value_t* acc_zero = rocke_b_zero_vec_f32(b, atom->d_per_lane);
 
     rocke_iter_arg_t iter_args[ROCKE_ATTN_MAX_ITER_ARGS];
     char name_buf[ROCKE_ATTN_MAX_ITER_ARGS][16];
     int n_ia = 0;
-    for(int r = 0; r < atom->c_per_lane; ++r)
+    for(int r = 0; r < atom->d_per_lane; ++r)
     {
         snprintf(name_buf[n_ia], sizeof(name_buf[0]), "m%d", r);
         iter_args[n_ia].name = name_buf[n_ia];
@@ -435,14 +443,14 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_value_t* ms[ROCKE_ATTN_MAX_LANE];
         rocke_value_t* ls[ROCKE_ATTN_MAX_LANE];
         rocke_value_t* accs[ROCKE_ATTN_MAX_ATOMS];
-        for(int r = 0; r < atom->c_per_lane; ++r)
+        for(int r = 0; r < atom->d_per_lane; ++r)
         {
             ms[r] = kloop.iter_vars[2 * r];
             ls[r] = kloop.iter_vars[2 * r + 1];
         }
         for(int n = 0; n < n_pv_atoms; ++n)
         {
-            accs[n] = kloop.iter_vars[2 * atom->c_per_lane + n];
+            accs[n] = kloop.iter_vars[2 * atom->d_per_lane + n];
         }
 
         rocke_value_t* effective_kt
@@ -475,7 +483,7 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         }
 
         /* ---- QK MFMA chain ---- */
-        rocke_value_t* score = rocke_b_zero_vec_f32(b, atom->c_per_lane);
+        rocke_value_t* score = rocke_b_zero_vec_f32(b, atom->d_per_lane);
         for(int ka = 0; ka < n_qk_atoms; ++ka)
         {
             rocke_value_t* d_ka = rocke_b_const_i32(b, ka);
@@ -507,7 +515,7 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             new_accs[n] = accs[n];
         }
         rocke_value_t* q_pos_for_mask = (p->q_pos_base != NULL) ? p->q_pos_base : p->q_tile_base;
-        for(int r = 0; r < atom->c_per_lane; ++r)
+        for(int r = 0; r < atom->d_per_lane; ++r)
         {
             rocke_value_t* s_r_f32 = rocke_b_vec_extract(b, score, r);
             rocke_value_t* s_r_scaled = rocke_b_fmul(b, s_r_f32, p->scale_log2);
@@ -551,7 +559,7 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         }
 
         /* ---- P operand staging via LDS ---- */
-        for(int r = 0; r < atom->c_per_lane; ++r)
+        for(int r = 0; r < atom->d_per_lane; ++r)
         {
             rocke_value_t* p_row_t0 = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, 4));
             rocke_value_t* p_row = rocke_b_add(b, p_row_t0, rocke_b_const_i32(b, r));
@@ -616,7 +624,7 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         /* ---- Yield updated state ---- */
         rocke_value_t* yields[ROCKE_ATTN_MAX_ITER_ARGS];
         int ny = 0;
-        for(int r = 0; r < atom->c_per_lane; ++r)
+        for(int r = 0; r < atom->d_per_lane; ++r)
         {
             yields[ny++] = new_ms[r];
             yields[ny++] = new_ls[r];
@@ -632,20 +640,20 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     /* ---- Pull final state ---- */
     rocke_value_t* ls_final[ROCKE_ATTN_MAX_LANE];
     rocke_value_t* accs_final[ROCKE_ATTN_MAX_ATOMS];
-    for(int r = 0; r < atom->c_per_lane; ++r)
+    for(int r = 0; r < atom->d_per_lane; ++r)
     {
         ls_final[r] = (kloop.op != NULL) ? kloop.op->results[2 * r + 1] : NULL;
     }
     for(int n = 0; n < n_pv_atoms; ++n)
     {
-        accs_final[n] = (kloop.op != NULL) ? kloop.op->results[2 * atom->c_per_lane + n] : NULL;
+        accs_final[n] = (kloop.op != NULL) ? kloop.op->results[2 * atom->d_per_lane + n] : NULL;
     }
 
     /* ---- Epilogue ---- */
     rocke_value_t* m_blk = rocke_b_div(b, lane, c16);
     for(int nba = 0; nba < n_pv_atoms; ++nba)
     {
-        for(int r = 0; r < atom->c_per_lane; ++r)
+        for(int r = 0; r < atom->d_per_lane; ++r)
         {
             rocke_value_t* o_row_t0 = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, 4));
             rocke_value_t* o_row_t1 = rocke_b_add(b, p->q_tile_base, o_row_t0);
@@ -723,9 +731,9 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     }
 
     const rocke_layout_map_t* a_map = op->a_layout;
-    const rocke_layout_map_t* c_map = op->c_layout;
+    const rocke_layout_map_t* c_map = op->d_layout;
     int a_frag = op->a_frag_len;
-    int c_frag = op->c_frag_len;
+    int c_frag = op->d_frag_len;
     int n_dk = head_size / 16;
 
     /* Python evaluates b.mod(b.thread_id_x(), b.const_i32(wave)) left-to-right:

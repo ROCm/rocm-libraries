@@ -481,7 +481,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         family=family,
         a_dtype=spec.data.dtype_a,
         b_dtype=spec.data.dtype_b,
-        c_dtype="fp32",
+        c_dtype="fp32", d_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
@@ -617,7 +617,7 @@ def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
         family=_conv_mma_family(arch),
         a_dtype=spec.data.dtype_a,
         b_dtype=spec.data.dtype_b,
-        c_dtype="fp32",
+        c_dtype="fp32", d_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
@@ -844,7 +844,7 @@ def build_implicit_gemm_conv(
     _smem_dtype: Optional[Type] = (
         BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
     )
-    c_per_lane = op.c_frag_len
+    d_per_lane = op.d_frag_len
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
 
@@ -966,7 +966,7 @@ def build_implicit_gemm_conv(
     mfmas_n = spec.mfmas_per_warp_n
     k_atoms = spec.k_atoms_per_tile_k
 
-    acc_init = b.zero_vec_f32(c_per_lane)
+    acc_init = b.zero_vec_f32(d_per_lane)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]
@@ -1741,7 +1741,7 @@ def _emit_direct_epilogue(
     """Per-lane scalar store driven by the D descriptor DAG.
 
     Delegates to :class:`rocke.helpers.epilogues.DirectEpilogue`,
-    which owns the per-(mi, ni)-atom + per-``c_per_lane``-slot lane
+    which owns the per-(mi, ni)-atom + per-``d_per_lane``-slot lane
     loop and the OOB-sentinel address routing. The conv-specific
     bit is the ``addr_fn``: the D descriptor maps
     ``(m, k_out) -> NHWK linear element offset`` via the
@@ -1794,7 +1794,7 @@ def _emit_direct_epilogue_wmma(
 
     The WMMA wave32 accumulator scatters the M x N tile across lanes
     differently from MFMA, so the (row, col) of every per-lane slot comes from
-    the op's accumulator layout map (``op.c_layout()``) rather than the
+    the op's accumulator layout map (``op.d_layout()``) rather than the
     MFMA-specific ``MfmaAtom.lane_to_output``. Each slot is one element store
     routed through the same D descriptor + OOB-safe buffer-store idiom as the
     MFMA direct epilogue.
@@ -1817,7 +1817,7 @@ def _emit_direct_epilogue_wmma(
         if (not p.is_pointwise and p.groups > 1)
         else None
     )
-    c_map = op.c_layout()
+    c_map = op.d_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
     _elem_bytes = 4 if _fp32_out else 2
@@ -1835,7 +1835,7 @@ def _emit_direct_epilogue_wmma(
                 b.add(block_n_off, warp_n_off),
                 b.const_i32(ni * spec.warp_tile_n),
             )
-            for i in range(op.c_frag_len):
+            for i in range(op.d_frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 m_val = b.add(atom_m_off, row_off)
                 n_val = b.add(atom_n_off, col_off)
@@ -1880,8 +1880,8 @@ def _emit_cshuffle_epilogue(
     which implements the canonical three-stage pattern (mirrors CK
     Tile's ``cshuffle_epilogue.hpp``):
 
-      1. Each lane converts its `<c_per_lane x f32>` accumulator to
-         `<c_per_lane x dtype_d>` (f16/bf16/f32) and stores them into an
+      1. Each lane converts its `<d_per_lane x f32>` accumulator to
+         `<d_per_lane x dtype_d>` (f16/bf16/f32) and stores them into an
          `[tile_m x tile_n]` LDS region at the MMA *output* layout.
       2. ``block_sync_lds`` (s_barrier).
       3. A flat distribution of `block_size` threads reads
@@ -1898,7 +1898,7 @@ def _emit_cshuffle_epilogue(
 
     ``op`` is the resolved :class:`~rocke.core.arch.MmaOp`; when it is a
     WMMA op (``op.family == "wmma"``) the LDS scatter uses
-    ``op.c_layout().coord()`` instead of the MFMA ``atom.lane_to_output``.
+    ``op.d_layout().coord()`` instead of the MFMA ``atom.lane_to_output``.
     """
     p = spec.problem
     if p.is_pointwise:

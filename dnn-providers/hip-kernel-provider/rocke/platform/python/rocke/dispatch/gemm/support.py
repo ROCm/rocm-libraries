@@ -158,13 +158,13 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
     family = _mma_family(target)
     atom_m, atom_n, atom_k = q.warp_tile
     dtype = normalize_dtype(q.dtype_a)
-    if not target.supports_dtype_combo(dtype, dtype, "fp32", family=family):
+    if not target.supports_dtype_combo(dtype, dtype, "fp32", "fp32", family=family):
         return False, f"unsupported GEMM dtype {dtype!r} on {q.arch}"
     if not target.mma.has_shape(
         family=family,
         a_dtype=dtype,
         b_dtype=dtype,
-        c_dtype="fp32",
+        c_dtype="fp32", d_dtype="fp32",
         m=atom_m,
         n=atom_n,
         k=atom_k,

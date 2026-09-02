@@ -36,7 +36,7 @@ resolve uniformly regardless of which arch you are reading.
 
 | # | Subsection | Content |
 |---|---|---|
-| 21.1 | MFMA Atom Catalog | Atoms available on the arch: A/B/C dtype, M×N×K, K-pack and chained-MFMA lane-layout notes, fp8/bf8/scaled/MX/i8/i4 coverage |
+| 21.1 | MFMA Atom Catalog | Atoms available on the arch: A/B/C/D dtype, M×N×K, K-pack and chained-MFMA lane-layout notes, fp8/bf8/scaled/MX/i8/i4 coverage |
 | 21.2 | LDS specifics | LDS per CU, bank count, preferred swizzle (§6.4a), transpose-read availability, per-opcode bank-conflict periods, read/write asymmetry |
 | 21.3 | Cross-lane primitives | `permlane`/`ds_bpermute`/`ds_swizzle`/`ds_read_tr*`/`s_setprio`/`sched_barrier`/`s_barrier`/`iglp_opt` availability and DSL surface |
 | 21.4 | Register / occupancy | SIMDs/CU, waves/SIMD, waves/CU, VGPR/AGPR/SGPR caps, allocation granularity, threads/CTA, wave size |

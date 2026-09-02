@@ -145,7 +145,7 @@ def build_custom_grouped(
     Returns ``(kernel, block_size, TM, TN)``. ``M`` here is the per-expert
     row count (``M_total // E``).
     """
-    # MFMA32: the 32x32x8 bf16 atom (a/b_per_lane=4, c_per_lane=16). Does 4x the
+    # MFMA32: the 32x32x8 bf16 atom (a/b_per_lane=4, d_per_lane=16). Does 4x the
     # output per MFMA vs 16x16x32 at the same MAC/op, so it loads HALF the operand
     # bf16 per MAC -> halves LDS-read pressure (rocBLAS's NN trick, LdsUtil ~18% vs
     # our ~45%). And b_per_lane=4 == one ds_read_b64_tr_b16 -> the NN transpose-read
@@ -637,7 +637,7 @@ def build_custom_grouped(
     #          + (row_in[i]*N + col_in)                                 (per-(lane,i) only!)
     #          + (mi*AM*N + nj*AN)                                      (compile-time const)
     # Since (row_in[i]*N + col_in) is independent of (mi,nj), the expensive row*N
-    # multiply runs c_per_lane times (per i), not mm*nn*c_per_lane times -- and
+    # multiply runs d_per_lane times (per i), not mm*nn*d_per_lane times -- and
     # each store reduces to base + a compile-time constant. This collapses the
     # serial-tail address VALU (~128 muls + 64-bit addr math) that hides behind
     # no MFMA in this one-tile-per-block kernel.
@@ -646,7 +646,7 @@ def build_custom_grouped(
     warp_n_off = b.mul(warp_col, b.const_i32(WTN))
     # nostore (param, diagnostic): skip C stores.
     # storesink (param, diagnostic): keep all stores (so accs are consumed -> MFMAs
-    #   survive DCE) but collapse their addresses to c_per_lane per-lane slots ->
+    #   survive DCE) but collapse their addresses to d_per_lane per-lane slots ->
     #   write-combined, ~0 HBM store traffic. (full - storesink) isolates the real
     #   store-BW cost with compute intact, unlike nostore which DCEs the MFMA chain.
 
@@ -660,7 +660,7 @@ def build_custom_grouped(
 
     def make_storer(tb):
         """Precompute the per-i lane base addresses for tile `tb`; return a
-        store_one(acc, idx) that writes acc[idx]'s c_per_lane elements."""
+        store_one(acc, idx) that writes acc[idx]'s d_per_lane elements."""
         L = b.add(
             tb["c_eoff"],
             b.add(
@@ -669,14 +669,14 @@ def build_custom_grouped(
             ),
         )
         Li = []
-        for i in range(atom.c_per_lane):
+        for i in range(atom.d_per_lane):
             row_in, col_in = atom.lane_to_output(b, lane, i)
             Li.append(b.add(L, b.add(b.mul(row_in, cN), col_in)))
 
         def store_one(acc, idx):
             mi, nj = idx // nn, idx % nn
             mn_const = mi * AM * N + nj * AN  # compile-time
-            for i in range(atom.c_per_lane):
+            for i in range(atom.d_per_lane):
                 addr = b.add(Li[i], b.const_i32(mn_const))
                 store_c(addr, b.cast_f32_to(b.vec_extract(acc[idx], i), BF16))
 
@@ -702,7 +702,7 @@ def build_custom_grouped(
             idx = 0
             for mi in range(mm):
                 for nj in range(nn):
-                    for i in range(atom.c_per_lane):
+                    for i in range(atom.d_per_lane):
                         ro, ci = atom.lane_to_output(b, lane, i)
                         lr = b.add(b.add(warp_m_off, b.const_i32(mi * AM)), ro)
                         lc = b.add(b.add(warp_n_off, b.const_i32(nj * AN)), ci)
@@ -737,20 +737,20 @@ def build_custom_grouped(
         )
         # per-i base = L + row_in[i]*N + col_in  (lane-dependent, mi/nj-independent)
         Li = []
-        for i in range(atom.c_per_lane):
+        for i in range(atom.d_per_lane):
             row_in, col_in = atom.lane_to_output(b, lane, i)
             Li.append(b.add(L, b.add(b.mul(row_in, cN), col_in)))
         if storesink:
-            # Reduce ALL accumulators into c_per_lane sums (data-dependent on every
-            # MFMA -> none get DCE'd), then store only those c_per_lane values per
-            # lane. Compute stays fully live; store traffic ~ c_per_lane/(mm*nn*
-            # c_per_lane) of full. (full - storesink) = real store-BW cost.
-            sums = [None] * atom.c_per_lane
+            # Reduce ALL accumulators into d_per_lane sums (data-dependent on every
+            # MFMA -> none get DCE'd), then store only those d_per_lane values per
+            # lane. Compute stays fully live; store traffic ~ d_per_lane/(mm*nn*
+            # d_per_lane) of full. (full - storesink) = real store-BW cost.
+            sums = [None] * atom.d_per_lane
             for idx in range(mm * nn):
-                for i in range(atom.c_per_lane):
+                for i in range(atom.d_per_lane):
                     e = b.vec_extract(acc[idx], i)
                     sums[i] = e if sums[i] is None else b.fadd(sums[i], e)
-            for i in range(atom.c_per_lane):
+            for i in range(atom.d_per_lane):
                 store_c(Li[i], b.cast_f32_to(sums[i], BF16))
             return
 
@@ -798,16 +798,16 @@ def build_custom_grouped(
         tb = set_tile(b.block_id_x(), b.block_id_y(), b.block_id_z())
         zero(accs)
         kloop(accs, tb)  # tile T
-        # PACKED carry: each f32 accumulator vector -> one bf16x{c_per_lane} vector
-        # (c_per_lane=4 bf16 = 8 B = 2 VGPR). mm*nn=32 -> ~64 VGPR (vs 128 unpacked).
+        # PACKED carry: each f32 accumulator vector -> one bf16x{d_per_lane} vector
+        # (d_per_lane=4 bf16 = 8 B = 2 VGPR). mm*nn=32 -> ~64 VGPR (vs 128 unpacked).
         carry = [b.vec_cast_f32_to(accs[idx], BF16) for idx in range(mm * nn)]
         zero(accs)
         kloop(accs, tb)  # tile T+1 compute, `carry` still live
         epilogue(accs, tb)
-        cbase = b.add(tb["c_eoff"], b.mul(lane, b.const_i32(atom.c_per_lane)))
+        cbase = b.add(tb["c_eoff"], b.mul(lane, b.const_i32(atom.d_per_lane)))
         for idx, v in enumerate(carry):
-            addr = b.add(cbase, b.const_i32(idx * BS * atom.c_per_lane))
-            b.global_store_vN(C, addr, v, n=atom.c_per_lane, align=8)  # packed sink
+            addr = b.add(cbase, b.const_i32(idx * BS * atom.d_per_lane))
+            b.global_store_vN(C, addr, v, n=atom.d_per_lane, align=8)  # packed sink
         b.ret()
         return b.kernel, BS, TM, TN
 

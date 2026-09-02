@@ -131,7 +131,7 @@ typedef struct rocke_moe_mega_build_ctx
     rocke_gemm_tile_spec_t t; /* spec.gate_up_tile()                             */
     int block_m, block_n, block_k; /* t.tile_m / t.tile_n / t.tile_k            */
     int mfmas_m, mfmas_n; /* t.mfmas_per_warp_m / _n                    */
-    int c_per_lane; /* _mfma_atom_widths(u_gu)[2]                 */
+    int d_per_lane; /* _mfma_atom_widths(u_gu)[2]                 */
 
     rocke_value_t* c_wave; /* const_i32(spec.wave_size)                       */
     rocke_value_t* c_warps_n; /* const_i32(t.warp_n)                             */

@@ -166,12 +166,13 @@ def is_valid_spec(spec: FmhaFwdFp8Spec, arch: str = "gfx950") -> Tuple[bool, str
 
     # The dequant-on-load path emits the f16 16x16x16 atom; require it
     # on the target catalog (gfx942 / gfx950 both carry it).
-    if not target.supports_dtype_combo("f16", "f16", "fp32"):
+    if not target.supports_dtype_combo("f16", "f16", "fp32", "fp32"):
         return False, f"unsupported f16 MFMA dtype combo on {arch}"
     if not target.mma.has_shape(
         a_dtype="f16",
         b_dtype="f16",
         c_dtype="fp32",
+        d_dtype="fp32",
         m=MFMA_ATTN_BLOCK_M,
         n=MFMA_ATTN_BLOCK_M,
         k=MFMA_ATTN_BLOCK_M,

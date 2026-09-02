@@ -4,8 +4,8 @@
  * tests/core/mma_frag_ssot.cpp -- host unit test for the IR-layer MMA
  * frag-length / accumulator-dtype tables consulted by rocke_b_mma.
  *
- * rocke_b_mma sizes its tile.mma result vector as <c_frag_len x acc_elem>,
- * where c_frag_len comes from the op_id frag-length table and acc_elem is i32
+ * rocke_b_mma sizes its tile.mma result vector as <d_frag_len x acc_elem>,
+ * where d_frag_len comes from the op_id frag-length table and acc_elem is i32
  * for integer WMMA atoms (else f32). This test pins that mapping for a
  * representative set of atoms and checks the unknown-op_id error path, so a
  * table edit that changes a result width/dtype is caught here.
@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 
 static int g_failures = 0;
@@ -61,6 +62,27 @@ static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag
 
 int main(void)
 {
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx942");
+    CHECK(target != NULL, "gfx942 target exists");
+    if(target)
+    {
+        const rocke_mma_op_t* op
+            = rocke_mma_catalog_by_op_id(&target->mma, "mfma_f32_16x16x16_f16");
+        CHECK(op != NULL, "four-role catalog atom exists");
+        if(op)
+        {
+            CHECK(strcmp(op->c_dtype, "fp32") == 0, "C input dtype is explicit");
+            CHECK(strcmp(op->d_dtype, "fp32") == 0, "D result dtype is explicit");
+            CHECK(op->c_frag_len == 4, "C input fragment length is explicit");
+            CHECK(op->d_frag_len == 4, "D result fragment length is explicit");
+            CHECK(op->c_layout != op->d_layout, "C and D layouts are distinct objects");
+            CHECK(op->c_layout && op->c_layout->role == ROCKE_MMA_ROLE_C,
+                  "C layout carries the C role");
+            CHECK(op->d_layout && op->d_layout->role == ROCKE_MMA_ROLE_D,
+                  "D layout carries the D role");
+        }
+    }
+
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "rocke_mma_frag_ssot") != ROCKE_OK)
     {

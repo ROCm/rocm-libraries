@@ -48,7 +48,7 @@ def _pick_atom(target: ArchTarget, dtype: str, want):
     if want is not None:
         return want
     op = target.mma.select_largest_k(
-        family=family, a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=16, n=16
+        family=family, a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", d_dtype="fp32", m=16, n=16
     )
     if op is None:
         raise SystemExit(f"no f16/bf16 16x16 {family} atom for {dtype} on {target.gfx}")

@@ -447,7 +447,7 @@ def build_ragged_moe(spec: RaggedMoeSpec):
             for nj in range(nn):
                 idx = mi * nn + nj
                 # OPSW: swap operands -> acc[idx] holds C[m-tile mi, n-tile nj]
-                # with N as the per-lane (c_per_lane) fast dimension.
+                # with N as the per-lane (d_per_lane) fast dimension.
                 op_a, op_b = (b_fr[nj], a_fr[mi]) if opsw else (a_fr[mi], b_fr[nj])
                 if permmasched:
                     b.s_setprio(1)
@@ -695,10 +695,10 @@ def build_ragged_moe(spec: RaggedMoeSpec):
 
     def store_row(acc, mi):
         if opsw:
-            # OPSW layout: for this lane the c_per_lane accumulator values are
+            # OPSW layout: for this lane the d_per_lane accumulator values are
             # CONSECUTIVE N (row = (lane//16)*4 + i) for a SINGLE token (col =
             # lane%16). Pack them (scaled by the row's weight) into one aligned
-            # b64 store to C[token, n0..n0+c_per_lane-1].
+            # b64 store to C[token, n0..n0+d_per_lane-1].
             r0, c0 = atom.lane_to_output(b, lane, 0)  # r0 = n-in-atom base, c0 = m
             lr = b.add(b.add(warp_m_off, b.const_i32(mi * AM)), c0)  # token row (m)
             otok = stok_lds(lr)
@@ -715,7 +715,7 @@ def build_ragged_moe(spec: RaggedMoeSpec):
                     for nj in range(nn):
                         idx = mi * nn + nj
                         addr = b.add(row_base, b.zext(b.const_i32(nj * AN), I64))
-                        for p in range(atom.c_per_lane // 2):
+                        for p in range(atom.d_per_lane // 2):
                             pk = b.vec_pack(
                                 [
                                     b.cast_f32_to(
@@ -738,16 +738,16 @@ def build_ragged_moe(spec: RaggedMoeSpec):
                 addr = b.add(row_base, b.zext(b.const_i32(nj * AN), I64))
                 comps = [
                     b.cast_f32_to(b.fmul(b.vec_extract(acc[idx], i), w), BF16)
-                    for i in range(atom.c_per_lane)
+                    for i in range(atom.d_per_lane)
                 ]
                 b.global_store_vN(
-                    C, addr, b.vec_pack(comps, BF16), n=atom.c_per_lane, align=8
+                    C, addr, b.vec_pack(comps, BF16), n=atom.d_per_lane, align=8
                 )
             return
-        # Scatter one m-row (all nn n-tiles x c_per_lane elements) to
+        # Scatter one m-row (all nn n-tiles x d_per_lane elements) to
         # C[sorted_token_ids[row]] (expanded index), scaled by the routing weight.
         # The token/weight/row-base depend on (mi, i) only, not nj -> hoist over nj.
-        for i in range(atom.c_per_lane):
+        for i in range(atom.d_per_lane):
             row_in, col_in = atom.lane_to_output(b, lane, i)
             lr = b.add(b.add(warp_m_off, b.const_i32(mi * AM)), row_in)
             otok = stok_lds(lr)  # LDS-staged token index (no global reload)
@@ -784,7 +784,7 @@ def build_ragged_moe(spec: RaggedMoeSpec):
         cTK = b.const_i32(TK)
         b.sync()  # last compute's operand ds_reads on AB done before reuse
         for mi in range(mm):
-            for i in range(atom.c_per_lane):
+            for i in range(atom.d_per_lane):
                 row_in, col_in = atom.lane_to_output(b, lane, i)
                 lr = b.add(b.add(warp_m_off, b.const_i32(mi * AM)), row_in)
                 w = rw_lds(lr)  # per-row routing weight applied on the way into LDS
@@ -809,17 +809,17 @@ def build_ragged_moe(spec: RaggedMoeSpec):
             b.global_store_vN(C, addr, vec, n=8, align=16)
 
     def store_sink(acc):
-        # DIAGNOSTIC (STORESINK=1): reduce every accumulator into c_per_lane sums
+        # DIAGNOSTIC (STORESINK=1): reduce every accumulator into d_per_lane sums
         # (data-dependent on all MFMAs, so none are DCE'd) and store only those few
         # values. Compute+load stay fully live; store traffic ~ 0. (full-run TF minus
         # STORESINK TF) isolates the real C-store-tail cost.
-        sums = [None] * atom.c_per_lane
+        sums = [None] * atom.d_per_lane
         for idx in range(mm * nn):
-            for i in range(atom.c_per_lane):
+            for i in range(atom.d_per_lane):
                 e = b.vec_extract(acc[idx], i)
                 sums[i] = e if sums[i] is None else b.fadd(sums[i], e)
-        base = b.mul(lane, b.const_i32(atom.c_per_lane))
-        for i in range(atom.c_per_lane):
+        base = b.mul(lane, b.const_i32(atom.d_per_lane))
+        for i in range(atom.d_per_lane):
             b.global_store(
                 C, b.add(base, b.const_i32(i)), b.cast_f32_to(sums[i], BF16), align=2
             )

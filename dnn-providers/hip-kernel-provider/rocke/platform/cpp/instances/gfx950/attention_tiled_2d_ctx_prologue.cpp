@@ -71,7 +71,7 @@ static bool rocke_g950a2d_require_tiled_attention_arch(rocke_ir_builder_t* b, co
         return false;
     }
     const rocke_arch_mma_catalog_t* mma = rocke_archtarget_mma(target);
-    bool wide_k = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32)
+    bool wide_k = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", "fp32", 16, 16, 32)
                   || target->memory.has_ds_read_tr;
     if(wide_k && target->memory.has_ds_read_tr)
         return true;

@@ -23,8 +23,8 @@
  *   is_lead = b.cmp_eq(tid, b.const_i32(0))
  *
  *   if block_size <= wave_size:
- *       inc_per_lane = b.select(is_lead, b.const_i32(increment), b.const_i32(0))
- *       fetched = b.global_atomic_add(counter, counter_idx, inc_per_lane)
+ *       ind_per_lane = b.select(is_lead, b.const_i32(increment), b.const_i32(0))
+ *       fetched = b.global_atomic_add(counter, counter_idx, ind_per_lane)
  *       return b.ds_bpermute(b.const_i32(0), fetched)
  *
  *   if broadcast_slot is None:
@@ -67,9 +67,9 @@ rocke_value_t* rocke_build_persistent_counter_init(rocke_ir_builder_t* b,
          * to pin that order -- C arg-eval order is unspecified (GCC is r-to-l). */
         rocke_value_t* sel_t = rocke_b_const_i32(b, (int64_t)increment);
         rocke_value_t* sel_f = rocke_b_const_i32(b, 0);
-        rocke_value_t* inc_per_lane = rocke_b_select(b, is_lead, sel_t, sel_f);
+        rocke_value_t* ind_per_lane = rocke_b_select(b, is_lead, sel_t, sel_f);
         rocke_value_t* fetched
-            = rocke_b_global_atomic_add(b, counter, counter_idx, inc_per_lane, NULL);
+            = rocke_b_global_atomic_add(b, counter, counter_idx, ind_per_lane, NULL);
         return rocke_b_ds_bpermute(b, rocke_b_const_i32(b, 0), fetched);
     }
 

@@ -34,7 +34,7 @@
 #include "rocke/instance_gemm_internal.h"
 
 /* ====================================================================== *
- * _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, c_per_lane)
+ * _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, d_per_lane)
  *
  * Python:
  *   t = spec.tile; waves = spec.wave_size
@@ -128,7 +128,7 @@ rocke_value_t* rocke_gemm_emit_zero_acc(rocke_ir_builder_t* b,
 }
 
 /* ====================================================================== *
- * _atom_frag_lengths(op) -> (a_frag_len, b_frag_len, c_frag_len)
+ * _atom_frag_lengths(op) -> (a_frag_len, b_frag_len, d_frag_len)
  *
  * Pure read of the resolved MmaOp fragment lengths.
  * ====================================================================== */
@@ -139,7 +139,7 @@ void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_f
     if(b_frag)
         *b_frag = op->b_frag_len;
     if(c_frag)
-        *c_frag = op->c_frag_len;
+        *c_frag = op->d_frag_len;
 }
 
 /* ====================================================================== *
@@ -158,12 +158,12 @@ rocke_value_t* rocke_gemm_emit_mma(rocke_ir_builder_t* b,
 }
 
 /* ====================================================================== *
- * _emit_zero_acc_op(b, op): zero accumulator sized from op.c_frag_len.
- *   return b.zero_vec_f32(op.c_frag_len)
+ * _emit_zero_acc_op(b, op): zero accumulator sized from op.d_frag_len.
+ *   return b.zero_vec_f32(op.d_frag_len)
  * ====================================================================== */
 rocke_value_t* rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b, const rocke_mmaop_t* op)
 {
-    return rocke_b_zero_vec_f32(b, op->c_frag_len);
+    return rocke_b_zero_vec_f32(b, op->d_frag_len);
 }
 
 /* ====================================================================== *

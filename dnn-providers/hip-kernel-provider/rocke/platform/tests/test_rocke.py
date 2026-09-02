@@ -393,19 +393,19 @@ class TestHelpers(unittest.TestCase):
         lane = b.const_i32(33)
 
         a16 = mfma_atom("f16", 16, 16, 32)
-        self.assertEqual((a16.a_per_lane, a16.b_per_lane, a16.c_per_lane), (8, 8, 4))
+        self.assertEqual((a16.a_per_lane, a16.b_per_lane, a16.d_per_lane), (8, 8, 4))
         r16, c16 = a16.lane_to_output(b, lane, 2)
         self.assertEqual(r16.type.name, "i32")
         self.assertEqual(c16.type.name, "i32")
 
         a32 = mfma_atom("f16", 32, 32, 16)
-        self.assertEqual((a32.a_per_lane, a32.b_per_lane, a32.c_per_lane), (8, 8, 16))
+        self.assertEqual((a32.a_per_lane, a32.b_per_lane, a32.d_per_lane), (8, 8, 16))
         r32, c32 = a32.lane_to_output(b, lane, 9)
         self.assertEqual(r32.type.name, "i32")
         self.assertEqual(c32.type.name, "i32")
 
         a4 = mfma_atom("f16", 4, 4, 4)
-        self.assertEqual((a4.a_per_lane, a4.b_per_lane, a4.c_per_lane), (4, 4, 4))
+        self.assertEqual((a4.a_per_lane, a4.b_per_lane, a4.d_per_lane), (4, 4, 4))
 
     def test_wmma_atom_rdna_support(self):
         """RDNA WMMA atom: wave32 metadata, layout delegated to the MmaOp SSOT,
@@ -423,7 +423,7 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(atom.family, "wmma")
         self.assertEqual(atom.wave_size, 32)
         self.assertEqual(
-            (atom.a_per_lane, atom.b_per_lane, atom.c_per_lane), (16, 16, 8)
+            (atom.a_per_lane, atom.b_per_lane, atom.d_per_lane), (16, 16, 8)
         )
         self.assertEqual(wmma_atom("f16", 16, 16, 16), atom)
 
@@ -432,7 +432,7 @@ class TestHelpers(unittest.TestCase):
         op = ArchTarget.from_gfx("gfx1151").mma.by_op_id("wmma_f32_16x16x16_f16")
         self.assertIsNotNone(op)
         self.assertEqual(atom.a_layout().frag_len, op.a_layout().frag_len)
-        self.assertEqual(atom.c_layout().wave_size, op.c_layout().wave_size)
+        self.assertEqual(atom.d_layout().wave_size, op.d_layout().wave_size)
 
         # emit routes through b.mma -> a <8 x f32> accumulator result.
         b = IRBuilder("wmma_emit")
@@ -459,7 +459,7 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(loads[0].attrs["vec"], 16)
         self.assertEqual(loads[0].attrs["align"], 32)
 
-        # store_wmma_acc scatters c_per_lane scalars via the c_layout map.
+        # store_wmma_acc scatters d_per_lane scalars via the d_layout map.
         b3 = IRBuilder("wmma_store")
         o = b3.param("O", PtrType(F16, "global"))
         so = b3.param("so", I32)
@@ -535,7 +535,7 @@ class TestHelpers(unittest.TestCase):
         muls = [o for o in self._kernel_ops(b3.kernel) if o.name == "vector.mul"]
         self.assertEqual(len(muls), 1)
 
-        # store_wmma_tile -> c_per_lane scalar stores via the c_layout map.
+        # store_wmma_tile -> d_per_lane scalar stores via the d_layout map.
         b4 = IRBuilder("wmma_tile_store")
         o = b4.param("O", PtrType(F16, "global"))
         so = b4.param("so", I32)
@@ -6745,7 +6745,7 @@ class TestCShuffleEpilogueSmoke(unittest.TestCase):
         epi = CShuffleEpilogue.from_grid(atom=atom, grid=bound, out_dtype=dtype)
 
         n_accs = bound.mfmas_per_warp_m * bound.mfmas_per_warp_n
-        accs = [b.zero_vec_f32(atom.c_per_lane) for _ in range(n_accs)]
+        accs = [b.zero_vec_f32(atom.d_per_lane) for _ in range(n_accs)]
         d_rsrc = b.buffer_rsrc(D, b.mul(M, b.mul(N, b.const_i32(4))))
 
         def addr_fn(b_, m_val, n_val):

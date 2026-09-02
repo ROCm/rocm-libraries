@@ -238,7 +238,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     ctx->a_per_lane = ctx->op->a_frag_len;
     ctx->b_per_lane = ctx->op->b_frag_len;
-    ctx->c_per_lane = ctx->op->c_frag_len;
+    ctx->d_per_lane = ctx->op->d_frag_len;
 
     /* ---- block tile dims ---- (817) */
     ctx->block_m = spec->tile_m;
@@ -450,9 +450,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->k_atoms = rocke_implicit_gemm_conv_spec_k_atoms_per_tile_k(spec);
 
     /* ---- accumulators ---- (919-922).
-     * acc_init = zero_vec_f32(c_per_lane); accs = [(acc_m{mi}_n{ni}, acc_init)
+     * acc_init = zero_vec_f32(d_per_lane); accs = [(acc_m{mi}_n{ni}, acc_init)
      * for mi in range(mfmas_m) for ni in range(mfmas_n)]. */
-    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->c_per_lane);
+    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->d_per_lane);
     ctx->num_accs = ctx->mfmas_m * ctx->mfmas_n;
     if(ctx->num_accs < 0 || ctx->num_accs > ROCKE_CONV_MAX_ACCS)
     {

@@ -64,7 +64,7 @@ void rocke_conv_apply_accumulator_epilogue(rocke_ir_builder_t* b,
     {
         rocke_value_t* acc = accs[a];
         int count = acc->type->count;
-        /* count is the per-lane accumulator fragment width (c_frag_len: 4/8/16);
+        /* count is the per-lane accumulator fragment width (d_frag_len: 4/8/16);
          * 64 is generous headroom. */
         rocke_value_t* elems[64];
         for(i = 0; i < count; ++i)
@@ -235,7 +235,7 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
  *
  * Per-lane fp16 store for the WMMA (gfx1151) accumulator layout. The (row, col)
  * of every per-lane slot comes from the op's accumulator layout map
- * (op.c_layout()) rather than the MFMA-specific MfmaAtom.lane_to_output. Each
+ * (op.d_layout()) rather than the MFMA-specific MfmaAtom.lane_to_output. Each
  * slot is one f16 store routed through the same D descriptor + OOB-safe
  * buffer-store idiom as the MFMA direct epilogue.
  * ===================================================================== */
@@ -285,8 +285,8 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
     /* Grouped conv: k_out_group_base = b.mul(b.block_id_z(), b.const_i32(p.kpg))
      * if p.groups > 1 else None  (Python PR #10064 _emit_direct_epilogue_wmma). */
     rocke_value_t* k_out_group_base = _is_pointwise ? NULL : rocke_conv_make_k_out_group_base(b, p);
-    /* c_map = op.c_layout() */
-    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+    /* c_map = op.d_layout() */
+    const rocke_arch_layout_map_t* c_map = rocke_mmaop_d_layout(op, b);
 
     int flat = 0;
     int mi, ni, i;
@@ -321,7 +321,7 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
             n_const = rocke_b_const_i32(b, ni * spec->warp_tile_n);
             atom_n_off = rocke_b_add(b, n_inner, n_const);
 
-            for(i = 0; i < op->c_frag_len; ++i)
+            for(i = 0; i < op->d_frag_len; ++i)
             {
                 rocke_value_t* row_off = NULL;
                 rocke_value_t* col_off = NULL;

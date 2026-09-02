@@ -40,14 +40,20 @@ const rocke_arch_layout_map_t* rocke_mmaop_b_layout(const rocke_mmaop_t* op, roc
 
 const rocke_arch_layout_map_t* rocke_mmaop_c_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b)
 {
-    /* MmaOp.c_layout(): accumulator (row, col) lane/slot map. */
+    /* MmaOp.c_layout(): accumulator-input (row, col) lane/slot map. */
     return rocke_mma_op_c_layout(op, b);
+}
+
+const rocke_arch_layout_map_t* rocke_mmaop_d_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b)
+{
+    /* MmaOp.d_layout(): result (row, col) lane/slot map. */
+    return rocke_mma_op_d_layout(op, b);
 }
 
 const rocke_arch_layout_map_t* rocke_mmaop_acc_layout(const rocke_mmaop_t* op,
                                                       rocke_ir_builder_t* b)
 {
-    /* MmaOp.acc_layout(): alias for the accumulator (C) map. */
+    /* MmaOp.acc_layout(): compatibility spelling for the result D map. */
     return rocke_mma_op_acc_layout(op, b);
 }
 
@@ -85,16 +91,18 @@ const rocke_mmaop_t* rocke_archtarget_op_for_shape(const rocke_archtarget_t* t,
                                                    const char* a_dtype,
                                                    const char* b_dtype,
                                                    const char* c_dtype,
+                                                   const char* d_dtype,
                                                    int m,
                                                    int n,
                                                    int k)
 {
-    /* target.mma.op_for_shape(family=..., a/b/c=..., m, n, k). */
+    /* target.mma.op_for_shape(family=..., a/b/c/d=..., m, n, k). */
     if(t == NULL)
     {
         return NULL;
     }
-    return rocke_mma_catalog_op_for_shape(&t->mma, family, a_dtype, b_dtype, c_dtype, m, n, k);
+    return rocke_mma_catalog_op_for_shape(
+        &t->mma, family, a_dtype, b_dtype, c_dtype, d_dtype, m, n, k);
 }
 
 const rocke_mmaop_t* rocke_archtarget_by_op_id(const rocke_archtarget_t* t, const char* op_id)
@@ -120,10 +128,15 @@ bool rocke_archtarget_fits_lds(const rocke_archtarget_t* t, long bytes_in_use)
 }
 
 bool rocke_archtarget_supports_dtype_combo(
-    const rocke_archtarget_t* t, const char* a, const char* b, const char* c, const char* family)
+    const rocke_archtarget_t* t,
+    const char* a,
+    const char* b,
+    const char* c,
+    const char* d,
+    const char* family)
 {
-    /* ArchTarget.supports_dtype_combo(a, b, c, family). */
-    return rocke_arch_supports_dtype_combo(t, a, b, c, family);
+    /* ArchTarget.supports_dtype_combo(a, b, c, d, family). */
+    return rocke_arch_supports_dtype_combo(t, a, b, c, d, family);
 }
 
 int rocke_archtarget_max_vector_load_dwords(const rocke_archtarget_t* t, const char* dtype)

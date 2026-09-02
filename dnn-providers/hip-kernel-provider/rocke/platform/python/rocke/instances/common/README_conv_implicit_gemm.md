@@ -169,7 +169,7 @@ The AMDGPU LLVM backend may replace a `load <8 x half>, ptr addrspace(3)` that f
 
 - Added RDNA wave32 path using the `wmma` MMA family via `_resolve_conv_op`.
 - Supports 16×16×4, 16×16×16, and 16×16×32 WMMA atoms; `mem` pipeline and `default`/`cshuffle` epilogues.
-- Dedicated `_emit_direct_epilogue_wmma` and `_emit_wgrad_direct_epilogue_wmma` using `op.c_layout()`.
+- Dedicated `_emit_direct_epilogue_wmma` and `_emit_wgrad_direct_epilogue_wmma` using `op.d_layout()`.
 
 ### Chiplet-aware workgroup swizzle
 

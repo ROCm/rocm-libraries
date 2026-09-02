@@ -93,7 +93,7 @@ def main() -> int:
         arch = arch_from_isa(args.isa) or arch
     target = ArchTarget.from_gfx(arch)
     has_wide_k = target.mma.has_shape(
-        a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16, k=32
+        a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", d_dtype="fp32", m=16, n=16, k=32
     )
 
     problem = DirectConvProblem(

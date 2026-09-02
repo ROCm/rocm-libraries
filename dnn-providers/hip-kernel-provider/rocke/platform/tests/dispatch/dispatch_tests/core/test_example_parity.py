@@ -212,7 +212,13 @@ class TestExampleParity(unittest.TestCase):
 
         target = ArchTarget.from_gfx(self.ARCH)
         atom = target.mma.select_largest_k(
-            family="mma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16
+            family="mma",
+            a_dtype="fp16",
+            b_dtype="fp16",
+            c_dtype="fp32",
+            d_dtype="fp32",
+            m=16,
+            n=16,
         )
         by_hand = build_universal_gemm(
             UniversalGemmSpec(

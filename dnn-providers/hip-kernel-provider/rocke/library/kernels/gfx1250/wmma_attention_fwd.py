@@ -198,9 +198,9 @@ def build_wmma_attention_fwd(
     op = target.mma.by_op_id(_WMMA_OP_ID)
     wave = op.wave_size  # 32
     a_map = op.a_layout()  # (row, k): lane l, slot j -> (l%16, (l//16)*16 + j)
-    c_map = op.c_layout()  # (row, col): lane l, slot i -> ((l//16)*8 + i, l%16)
+    d_map = op.d_layout()  # (row, col): lane l, slot i -> ((l//16)*8 + i, l%16)
     a_frag = op.a_frag_len  # 16
-    c_frag = op.c_frag_len  # 8
+    d_frag = op.d_frag_len  # 8
 
     H = spec.head_size
     n_dk = H // _WMMA_K  # QK^T d-tiles (op.k = 32 each)
@@ -267,11 +267,11 @@ def build_wmma_attention_fwd(
     batch_off_v = b.mul(b.mul(batch, seqlen_k), stride_v_token)
 
     iter_args = []
-    for r in range(c_frag):
+    for r in range(d_frag):
         iter_args.append((f"m{r}", neg_inf))
         iter_args.append((f"l{r}", zero_f))
     for d in range(n_pv):
-        iter_args.append((f"acc{d}", b.zero_vec_f32(c_frag)))
+        iter_args.append((f"acc{d}", b.zero_vec_f32(d_frag)))
 
     c_block_k = b.const_i32(_BLOCK_K)
     loop_stop = b.div(seqlen_k, c_block_k)
@@ -279,16 +279,16 @@ def build_wmma_attention_fwd(
         b.const_i32(0), loop_stop, b.const_i32(1), iter_args=iter_args, iv_name="kt"
     )
     with kloop as (kt, state):
-        ms = [state[2 * r] for r in range(c_frag)]
-        ls = [state[2 * r + 1] for r in range(c_frag)]
-        accs = list(state[2 * c_frag :])
+        ms = [state[2 * r] for r in range(d_frag)]
+        ls = [state[2 * r + 1] for r in range(d_frag)]
+        accs = list(state[2 * d_frag :])
 
         k_tile_base = b.mul(kt, c_block_k)
 
         # ---- QK^T: two N-sub-tiles (k 0..15 and 16..31), each summed over d ----
         scores = []
         for nsub in range(2):
-            score = b.zero_vec_f32(c_frag)
+            score = b.zero_vec_f32(d_frag)
             # This lane's K row for sub-tile nsub: k_tile_base + nsub*16 + (l%16).
             k_row = b.add(b.add(k_tile_base, b.const_i32(nsub * _WMMA_N)), a_row)
             k_addr_row_base = b.add(
@@ -305,8 +305,8 @@ def build_wmma_attention_fwd(
         # ---- scale + mask + online softmax over the 32 k columns ----
         new_ms, new_ls, new_accs = [], [], list(accs)
         ps = [[], []]  # ps[nsub][r] scaled probability (acc layout)
-        for r in range(c_frag):
-            row_rel, col_k = c_map.coord(b, lane, r)
+        for r in range(d_frag):
+            row_rel, col_k = d_map.coord(b, lane, r)
             row_q_pos = b.add(q_row0, row_rel)
             srs = []
             for nsub in range(2):
@@ -344,8 +344,8 @@ def build_wmma_attention_fwd(
                 new_accs[d] = b.vec_insert(new_accs[d], b.fmul(old, alpha), r)
 
         # ---- P staging: acc layout -> 16x32 LDS tile ----
-        for r in range(c_frag):
-            row_rel, col_k = c_map.coord(b, lane, r)
+        for r in range(d_frag):
+            row_rel, col_k = d_map.coord(b, lane, r)
             b.smem_store_vN(
                 P_lds, [row_rel, col_k], b.cast_f32_to(ps[0][r], dtype_ir), 1
             )
@@ -383,20 +383,20 @@ def build_wmma_attention_fwd(
             causal_wmma_spacing()
 
         yields = []
-        for r in range(c_frag):
+        for r in range(d_frag):
             yields.append(new_ms[r])
             yields.append(new_ls[r])
         yields.extend(new_accs)
         b.scf_yield(*yields)
 
     final = kloop.results
-    ls_final = [final[2 * r + 1] for r in range(c_frag)]
-    accs_final = list(final[2 * c_frag :])
+    ls_final = [final[2 * r + 1] for r in range(d_frag)]
+    accs_final = list(final[2 * d_frag :])
 
     # ---- Epilogue: O[q,d] = acc / l (zero-denominator guarded) ----
     for d in range(n_pv):
-        for r in range(c_frag):
-            row_rel, col_n = c_map.coord(b, lane, r)
+        for r in range(d_frag):
+            row_rel, col_n = d_map.coord(b, lane, r)
             l_safe = ls_final[r]
             zero_mask = b.fcmp("oeq", l_safe, zero_f)
             inv_l = b.select(zero_mask, zero_f, b.rcp(l_safe))

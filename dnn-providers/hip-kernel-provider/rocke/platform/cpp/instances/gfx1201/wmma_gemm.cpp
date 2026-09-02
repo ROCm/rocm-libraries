@@ -134,6 +134,7 @@ bool rocke_wmma_gemm_gfx1201_is_valid_spec(const rocke_wmma_gemm_gfx1201_spec_t*
                                      spec->dtype,
                                      spec->dtype,
                                      "fp32",
+                                     "fp32",
                                      ROCKE_WMMA_M,
                                      ROCKE_WMMA_N,
                                      ROCKE_WMMA_K)

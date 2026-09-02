@@ -67,14 +67,13 @@ const char* rocke_normalize_dtype(const char* name, char* scratch, size_t scratc
 
 /* ============================== layout map ============================== */
 
-/* MMA fragment role. Mirrors LayoutMap.role ("acc"/"a"/"b"). The accumulator is
- * spelled "c" in the C op_id maps (MmaOp.c_layout) but role text is "acc"/"a"/
- * "b" exactly as Python LayoutMap.role. */
+/* MMA fragment role. Mirrors LayoutMap.role ("a"/"b"/"c"/"d"). */
 typedef enum rocke_mma_role
 {
-    ROCKE_MMA_ROLE_ACC = 0, /* accumulator C/D: coords (row, col)  */
-    ROCKE_MMA_ROLE_A, /* A operand:       coords (row, k)    */
-    ROCKE_MMA_ROLE_B /* B operand:       coords (k, col)    */
+    ROCKE_MMA_ROLE_A = 0, /* A operand: coords (row, k) */
+    ROCKE_MMA_ROLE_B, /* B operand: coords (k, col) */
+    ROCKE_MMA_ROLE_C, /* accumulator input: coords (row, col) */
+    ROCKE_MMA_ROLE_D /* result: coords (row, col) */
 } rocke_mma_role_t;
 
 /* The lane/slot -> tile-coordinate emitter. Given the builder, a runtime i32
@@ -124,6 +123,7 @@ typedef struct rocke_mma_op
     const char* a_dtype;
     const char* b_dtype;
     const char* c_dtype;
+    const char* d_dtype;
     int m;
     int n;
     int k;
@@ -131,10 +131,12 @@ typedef struct rocke_mma_op
     int a_frag_len;
     int b_frag_len;
     int c_frag_len;
+    int d_frag_len;
     int wave_size;
     const rocke_layout_map_t* a_layout; /* may be NULL */
     const rocke_layout_map_t* b_layout; /* may be NULL */
     const rocke_layout_map_t* c_layout; /* may be NULL */
+    const rocke_layout_map_t* d_layout; /* may be NULL */
 } rocke_mma_op_t;
 
 /* MmaOp.shape -> (m, n, k) via out params. */
@@ -145,10 +147,11 @@ void rocke_mma_op_shape(const rocke_mma_op_t* op, int* m, int* n, int* k);
  * C getters return NULL and -- when `b` is non-NULL -- set the builder's sticky
  * error (ROCKE_ERR_NOTIMPL) with the same message text, so callers can either
  * check NULL or rely on the sticky-fail builder. Pass b=NULL for a pure lookup.
- * Mirrors MmaOp.a_layout / b_layout / c_layout / acc_layout. */
+ * Mirrors MmaOp.a_layout / b_layout / c_layout / d_layout / acc_layout. */
 const rocke_layout_map_t* rocke_mma_op_a_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_b_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_c_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
+const rocke_layout_map_t* rocke_mma_op_d_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_acc_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 
 /* ====================== memory caps / resource limits ================== */
@@ -191,6 +194,7 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 const char* a_dtype,
                                 const char* b_dtype,
                                 const char* c_dtype,
+                                const char* d_dtype,
                                 int m,
                                 int n,
                                 const rocke_mma_op_t** out,
@@ -202,6 +206,7 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  const char* a_dtype,
                                  const char* b_dtype,
                                  const char* c_dtype,
+                                 const char* d_dtype,
                                  int m,
                                  int n,
                                  int k);
@@ -213,6 +218,7 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
                                                          const char* a_dtype,
                                                          const char* b_dtype,
                                                          const char* c_dtype,
+                                                         const char* d_dtype,
                                                          int m,
                                                          int n,
                                                          int k_max);
@@ -227,6 +233,7 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
                                                      const char* a_dtype,
                                                      const char* b_dtype,
                                                      const char* c_dtype,
+                                                     const char* d_dtype,
                                                      int m,
                                                      int n,
                                                      int k);
@@ -237,25 +244,25 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
  * any atom metadata. They mirror the target.py module-level helpers that
  * rocke.core.ir.IRBuilder.mma consults. */
 
-/* Accumulator fragment length for op_id -- the c_frag_len projection of
- * target.py::_MMA_FRAGMENT_INFO (rocke_arch_mma_c_frag_len(op_id) ==
- * target._frag_info(op_id).c_frag_len). Returns 0 for an unknown atom (the
+/* Result fragment length for op_id -- the d_frag_len projection of
+ * target.py::_MMA_FRAGMENT_INFO (rocke_arch_mma_d_frag_len(op_id) ==
+ * target._frag_info(op_id).d_frag_len). Returns 0 for an unknown atom (the
  * zero-length _FragInfo fallback). */
-int rocke_arch_mma_c_frag_len(const char* op_id);
+int rocke_arch_mma_d_frag_len(const char* op_id);
 
-/* Canonical (normalised) accumulator-dtype key, as produced by
+/* Canonical (normalised) result-dtype key, as produced by
  * rocke_normalize_dtype / the _DTYPE_ALIASES table. Compare an op_id's
- * accumulator dtype against this instead of a raw string literal so the spelling
+ * result dtype against this instead of a raw string literal so the spelling
  * has a single definition site shared by producer (the normalise table) and
  * consumers (e.g. the integer-accumulator predicate in ir_tile). */
 #define ROCKE_DTYPE_I32 "i32"
 
-/* Normalised accumulator dtype for op_id, aggregated across every arch's
- * catalog (mirrors target._op_id_c_dtype()[op_id]). The dtype is invariant
+/* Normalised result dtype for op_id, aggregated across every arch's
+ * catalog (mirrors target._op_id_d_dtype()[op_id]). The dtype is invariant
  * across the arches that list an op_id, so the first catalog hit wins. Returns
  * NULL for an op_id absent from every catalog. The returned string is an
  * interned canonical key (e.g. ROCKE_DTYPE_I32 / "fp32"); do not free. */
-const char* rocke_arch_mma_op_id_c_dtype(const char* op_id);
+const char* rocke_arch_mma_op_id_d_dtype(const char* op_id);
 
 /* ============================== arch target =========================== */
 
@@ -290,7 +297,12 @@ bool rocke_arch_fits_lds(const rocke_arch_target_t* t, long bytes_in_use);
 
 /* ArchTarget.supports_dtype_combo. family NULL => "mma". */
 bool rocke_arch_supports_dtype_combo(
-    const rocke_arch_target_t* t, const char* a, const char* b, const char* c, const char* family);
+    const rocke_arch_target_t* t,
+    const char* a,
+    const char* b,
+    const char* c,
+    const char* d,
+    const char* family);
 
 /* ArchTarget.max_vector_load_dwords (gated by the buffer-load path today, so the
  * dtype argument is accepted for parity but ignored). */

@@ -489,8 +489,8 @@ def _emit_fp8_gateup_group_gemm(
         group_up = ginner.results[1]
 
         # Fold (post-MFMA, per-group): outer += group * (a_scale * b_scale).
-        gate_scale_vec = b.vector_splat(gate_ab, atom.c_per_lane)
-        up_scale_vec = b.vector_splat(up_ab, atom.c_per_lane)
+        gate_scale_vec = b.vector_splat(gate_ab, atom.d_per_lane)
+        up_scale_vec = b.vector_splat(up_ab, atom.d_per_lane)
         gate_outer_new = b.vector_fma(group_gate, gate_scale_vec, gate_outer)
         up_outer_new = b.vector_fma(group_up, up_scale_vec, up_outer)
         b.scf_yield(gate_outer_new, up_outer_new)
@@ -752,8 +752,8 @@ def _emit_fp8_gateup_fused_kloop(
         new_gate = []
         new_up = []
         for ni in range(nni):
-            gvec = b.vector_splat(gate_ab[ni], atom.c_per_lane)
-            uvec = b.vector_splat(up_ab[ni], atom.c_per_lane)
+            gvec = b.vector_splat(gate_ab[ni], atom.d_per_lane)
+            uvec = b.vector_splat(up_ab[ni], atom.d_per_lane)
             new_gate.append(b.vector_fma(g_acc[ni], gvec, gate_outer[ni]))
             new_up.append(b.vector_fma(u_acc[ni], uvec, up_outer[ni]))
         b.scf_yield(*(new_gate + new_up))
@@ -1098,7 +1098,7 @@ def _emit_fp8_down_group_gemm(
         # D5 sgb: place the next-group W_down VMEM under this group's MFMA(s).
         _emit_sgb_down_group(b, n_mfma=atoms_per_group)
 
-        scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
+        scale_vec = b.vector_splat(ab_scale, atom.d_per_lane)
         down_outer_new = b.vector_fma(group_acc, scale_vec, down_outer)
         b.scf_yield(down_outer_new)
 
@@ -1146,14 +1146,14 @@ def _emit_down_atomic_reduce(
         # loads do NOT depend on each other. The pre-lever code loaded the weight
         # INSIDE each row's `scf_if(valid)` block, forcing a separate
         # `global_load_f32 -> vmcnt(0) -> v_mul -> atomic` serialization per row
-        # (c_per_lane full drains in the epilogue). Here we ISSUE every row's
+        # (d_per_lane full drains in the epilogue). Here we ISSUE every row's
         # token + weight load up front into DISTINCT registers, then drain ONCE
         # for the whole batch, then run the per-row validity-masked atomics with
         # the operands already resident. The weight bucket index is always a
         # valid slot (padded-row slots have weights too), so the unconditional
         # hoisted load is safe; the validity check still gates the atomic store.
         rows = []
-        for i in range(atom.c_per_lane):
+        for i in range(atom.d_per_lane):
             row_in, col_in = atom.lane_to_output(b, lane, i)
             row = b.add(
                 block_m_off,
@@ -1163,7 +1163,7 @@ def _emit_down_atomic_reduce(
             token = b.global_load_i32(SortedTokenIds, bucket)
             w = b.global_load_f32(SortedWeights, bucket)
             rows.append((i, col_in, token, w))
-        # One rolling drain covers all c_per_lane (token,weight) loads instead of
+        # One rolling drain covers all d_per_lane (token,weight) loads instead of
         # one vmcnt(0) per row.
         b.s_waitcnt(vmcnt=0)
         for i, col_in, token, w in rows:
@@ -1230,7 +1230,7 @@ def _store_hidden_f32_pass(
             flat = mi * mfmas_n + ni
             g_vec = gate_list[flat]
             u_vec = up_list[flat]
-            for i in range(atom.c_per_lane):
+            for i in range(atom.d_per_lane):
                 row_in, col_in = atom.lane_to_output(b, lane, i)
                 row = b.add(warp_m_off, b.add(b.const_i32(mi * atom.m), row_in))
                 col = b.add(warp_n_off, b.add(b.const_i32(ni * atom.n), col_in))

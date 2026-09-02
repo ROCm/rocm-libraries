@@ -12,7 +12,7 @@
  * The two 32x32 C helpers reproduce the Python builder-call sequence
  * byte-faithfully: same div/mod constants, same calculate_x ys/ps wiring, same
  * trailing add for the N-tile base. _C32_DIST (built once at Python module
- * import from make_static_tile_distribution(make_c_warp_dstr_encoding(
+ * import from make_static_tile_distribution(make_d_warp_dstr_encoding(
  * MfmaAtom.f16_32x32x16()))) is reproduced as a lazily-built, process-lifetime
  * cached distribution off rocke_mfma_atom("f16", 32, 32, 16).
  *
@@ -640,7 +640,7 @@ bool rocke_unified_attention_2d_tiled_config_from_spec(
 }
 
 /* ------------------------------------------------------ _C32_DIST (cached) */
-/* make_static_tile_distribution(make_c_warp_dstr_encoding(MfmaAtom.f16_32x32x16()))
+/* make_static_tile_distribution(make_d_warp_dstr_encoding(MfmaAtom.f16_32x32x16()))
  * -- a host-side distribution the Python caches at module scope. Built lazily on
  * the first 32x32-C-helper call of a build.
  *
@@ -679,7 +679,7 @@ static const rocke_tile_distribution_t* rocke_attn2d_c32_dist(rocke_ir_builder_t
         rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "_C32_DIST: no f16 32x32x16 MFMA atom");
         return NULL;
     }
-    enc = rocke_make_c_warp_dstr_encoding(b, atom);
+    enc = rocke_make_d_warp_dstr_encoding(b, atom);
     if(enc == NULL)
     {
         return NULL;

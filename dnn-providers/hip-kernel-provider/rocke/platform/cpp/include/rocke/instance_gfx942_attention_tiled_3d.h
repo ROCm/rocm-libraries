@@ -46,7 +46,7 @@
  *   rocke/helper_rocke.helpers.attention.h          -- warp_xor_reduce_sum,
  *       (warp_xor_reduce_max via the same module), masks, safe_inv_l
  *   rocke/helper_rocke.helpers.atoms.h              -- MfmaAtom.f16_16x16x16,
- *       make_c_warp_dstr_encoding
+ *       make_d_warp_dstr_encoding
  *   rocke/helper_rocke.helpers.distribution.h       -- make_static_tile_distribution,
  *       calculate_x (the _C16_DIST C-warp accumulator decode)
  *   rocke/helper_rocke.helpers.transforms.h         -- TensorDescriptor naive/

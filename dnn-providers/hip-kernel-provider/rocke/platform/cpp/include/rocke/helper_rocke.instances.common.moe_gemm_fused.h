@@ -70,7 +70,7 @@ extern "C" {
  * a NULL dtype defaults to f16). Shared by all three MoE GEMM fusions. */
 const rocke_type_t* rocke_moe_storage_dtype(const rocke_gemm_universal_spec_t* u);
 
-/* _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, c_per_lane). The warp-tile
+/* _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, d_per_lane). The warp-tile
  * atom's per-lane fragment widths: (wm*wk)/wave, (wn*wk)/wave, (wm*wn)/wave. */
 void rocke_moe_mfma_atom_widths(const rocke_gemm_universal_spec_t* u,
                                 int* a_per,
@@ -190,7 +190,7 @@ typedef struct rocke_moe_kloop_plan
     const rocke_gemm_universal_spec_t* u;
     rocke_value_t* tid;
     const rocke_type_t* storage_dtype;
-    int a_per_lane, b_per_lane, c_per_lane;
+    int a_per_lane, b_per_lane, d_per_lane;
     int block_m, block_n, block_k;
     int mfmas_m, mfmas_n, k_atoms;
     int threads, load_vec;
@@ -285,7 +285,7 @@ void rocke_moe_emit_cshuffle_stage(rocke_ir_builder_t* b,
                                    const rocke_moe_cwarp_decode_t* cdec,
                                    rocke_value_t* smem,
                                    const rocke_type_t* storage_dtype,
-                                   int c_per_lane,
+                                   int d_per_lane,
                                    rocke_moe_cell_value_fn cell_value,
                                    void* cell_user);
 
@@ -304,7 +304,7 @@ void rocke_moe_emit_down_reduce_epilogue_atomic(rocke_ir_builder_t* b,
                                                 rocke_value_t* SortedTokenIds,
                                                 rocke_value_t* SortedWeights,
                                                 rocke_value_t* Y,
-                                                int c_per_lane,
+                                                int d_per_lane,
                                                 rocke_value_t* batch_bucket_off,
                                                 rocke_value_t* tokens);
 

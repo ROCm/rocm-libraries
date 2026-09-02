@@ -31,7 +31,7 @@
  *     atom.zero_acc() that atoms.h does not expose are reproduced inline in the
  *     .c via rocke_mfma_atom(dtype, m, n, k) lookups / rocke_b_zero_vec_f32.
  *   - Arch dispatch (ArchTarget.from_gfx, target.wave_size, target.mma.has_shape,
- *     target.mma.by_op_id, MmaOp.a_layout/c_layout/a_frag_len/c_frag_len) binds
+ *     target.mma.by_op_id, MmaOp.a_layout/d_layout/a_frag_len/d_frag_len) binds
  *     to rocke/helper_rocke.core.arch.h / rocke/arch_target.h.
  *   - The online-softmax row reduce binds to the distribution helper
  *     (rocke/helper_rocke.helpers.distribution.h): the reduce encoding, the

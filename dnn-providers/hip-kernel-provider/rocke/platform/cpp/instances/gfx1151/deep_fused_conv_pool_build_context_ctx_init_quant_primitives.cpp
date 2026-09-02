@@ -574,6 +574,7 @@ rocke_status_t
                                             "f16",
                                             "f16",
                                             "fp32",
+                                            "fp32",
                                             ROCKE_GFX1151_DFCP_WMMA,
                                             ROCKE_GFX1151_DFCP_WMMA,
                                             ROCKE_GFX1151_DFCP_WMMA);

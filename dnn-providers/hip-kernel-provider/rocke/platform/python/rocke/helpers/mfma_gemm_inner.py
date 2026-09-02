@@ -112,7 +112,7 @@ def validate_mfma_atom_in_catalog(atom: MfmaAtom, arch: str, *, where: str) -> N
     if not target.mma.has_shape(
         a_dtype=atom.dtype_in,
         b_dtype=atom.dtype_in,
-        c_dtype=atom.dtype_out,
+        c_dtype=atom.dtype_d, d_dtype=atom.dtype_d,
         m=atom.m,
         n=atom.n,
         k=atom.k,
@@ -394,7 +394,7 @@ def mfma_k_loop(
     initial value to chain multiple K-loops (e.g. across paged blocks)
     without leaving the f32 register accumulator.
 
-    Returns a per-lane ``<c_per_lane x f32>`` vector.
+    Returns a per-lane ``<d_per_lane x f32>`` vector.
     """
     if K % atom.k != 0:
         raise ValueError(f"mfma_k_loop: K={K} must be divisible by atom.k={atom.k}")
@@ -502,14 +502,14 @@ def store_acc_to_global(
 
     The atom's :meth:`lane_to_output` returns the per-lane
     (row_in_atom, col_in_atom) for accumulator slot ``i``; combined
-    with the tile base offsets, each lane writes ``c_per_lane`` output
+    with the tile base offsets, each lane writes ``d_per_lane`` output
     cells.
     """
     if epilogue is not None:
         epilogue(b, atom, lane_decode, C, m_tile_base, n_tile_base, acc, N, out_dtype)
         return
     out_dtype_ir = F32 if out_dtype == "f32" else _ir_type_for_dtype(out_dtype)
-    for i in range(atom.c_per_lane):
+    for i in range(atom.d_per_lane):
         row_in, col_in = atom.lane_to_output(b, lane_decode.lane, i)
         row = b.add(m_tile_base, row_in)
         col = b.add(n_tile_base, col_in)

@@ -181,7 +181,7 @@ mfmas_per_warp_m, mfmas_per_warp_n
 k_atoms_per_tile_k
 ```
 
-Each workgroup owns one `tile_m x tile_n` output tile. Each warp owns a subregion. Each lane owns `c_per_lane * mfmas_per_warp_m * mfmas_per_warp_n` accumulator slots (4 for 16x16 atoms, 16 for 32x32 atoms).
+Each workgroup owns one `tile_m x tile_n` output tile. Each warp owns a subregion. Each lane owns `d_per_lane * mfmas_per_warp_m * mfmas_per_warp_n` accumulator slots (4 for 16x16 atoms, 16 for 32x32 atoms).
 
 ## LDS Allocation
 

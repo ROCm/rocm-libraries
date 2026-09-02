@@ -25,7 +25,7 @@
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_t, rocke_mmaop_t */
-#include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom, rocke_c_warp_params, decode */
+#include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom, rocke_d_warp_params, decode */
 #include "rocke/helper_rocke.helpers.distribution.h" /* tile distribution */
 #include "rocke/helper_rocke.helpers.epilogues.h" /* DirectEpilogue, CShuffleEpilogue, WarpGrid */
 #include "rocke/helper_rocke.helpers.grid.h" /* chiplet_aware_super_tile */
@@ -344,6 +344,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                                     family,
                                     s->dtype_a,
                                     s->dtype_b,
+                                    "fp32",
                                     "fp32",
                                     s->warp_tile_m,
                                     s->warp_tile_n,
@@ -757,6 +758,7 @@ static const rocke_mmaop_t*
                                                             spec->dtype_a,
                                                             spec->dtype_b,
                                                             "fp32",
+                                                            "fp32",
                                                             spec->warp_tile_m,
                                                             spec->warp_tile_n,
                                                             spec->warp_tile_k);
@@ -917,8 +919,8 @@ static void _emit_dgrad_direct_epilogue_wmma(rocke_ir_builder_t* b,
             rocke_value_t* atom_n_off
                 = rocke_b_add(b, _bwn, rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
-            const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
-            for(int i = 0; i < op->c_frag_len; i++)
+            const rocke_arch_layout_map_t* c_map = rocke_mmaop_d_layout(op, b);
+            for(int i = 0; i < op->d_frag_len; i++)
             {
                 rocke_value_t* row_off;
                 rocke_value_t* col_off;
@@ -1029,7 +1031,7 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
                                               rocke_value_t* block_m_off,
                                               rocke_value_t* block_n_off,
                                               rocke_value_t* dx_ptr,
-                                              int c_per_lane,
+                                              int d_per_lane,
                                               rocke_value_t* gemm_m,
                                               rocke_value_t* gemm_n,
                                               rocke_value_t* h_tilde_slice,
@@ -1056,9 +1058,9 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
     rocke_value_t* block_warp_n_off = rocke_b_add(b, block_n_off, warp_n_off);
 
     int kc_m0, kc_mlane, kc_m1, kc_nlane;
-    rocke_c_warp_params(atom, &kc_m0, &kc_mlane, &kc_m1, &kc_nlane);
+    rocke_d_warp_params(atom, &kc_m0, &kc_mlane, &kc_m1, &kc_nlane);
 
-    rocke_tile_distribution_encoding_t* enc = rocke_make_c_warp_dstr_encoding(b, atom);
+    rocke_tile_distribution_encoding_t* enc = rocke_make_d_warp_dstr_encoding(b, atom);
     const rocke_tile_distribution_t* dist = rocke_make_static_tile_distribution(b, enc);
 
     rocke_value_t* c_nlane = rocke_b_const_i32(b, kc_nlane);
@@ -1067,7 +1069,7 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
 
     rocke_value_t* rows[ROCKE_CONV_MAX_ACCS];
     rocke_value_t* cols[ROCKE_CONV_MAX_ACCS];
-    for(int i = 0; i < c_per_lane; i++)
+    for(int i = 0; i < d_per_lane; i++)
     {
         rocke_value_t* ys[2] = {rocke_b_const_i32(b, i / kc_m1), rocke_b_const_i32(b, i % kc_m1)};
         rocke_value_t* p_lane_arr[2] = {m_blk, n_in_atom};
@@ -1093,7 +1095,7 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
             rocke_value_t* atom_n_base
                 = rocke_b_add(b, block_warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
-            for(int i = 0; i < c_per_lane; i++)
+            for(int i = 0; i < d_per_lane; i++)
             {
                 rocke_value_t* c_m = rocke_b_add(b, atom_m_base, rows[i]);
                 rocke_value_t* c_n = rocke_b_add(b, atom_n_base, cols[i]);
@@ -1339,7 +1341,7 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
     rocke_value_t* warp_n_off
         = rocke_b_mul(b, warp_n_idx, rocke_b_const_i32(b, mfmas_n * spec->warp_tile_n));
 
-    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+    const rocke_arch_layout_map_t* c_map = rocke_mmaop_d_layout(op, b);
 
     int flat = 0;
     for(int mi = 0; mi < mfmas_m; mi++)
@@ -1354,7 +1356,7 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                                     rocke_b_add(b, block_n_off, warp_n_off),
                                                     rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
-            for(int i = 0; i < op->c_frag_len; i++)
+            for(int i = 0; i < op->d_frag_len; i++)
             {
                 rocke_value_t* row_off;
                 rocke_value_t* col_off;
@@ -1662,7 +1664,7 @@ static rocke_kernel_def_t*
                         spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     int a_per_lane = op->a_frag_len;
     int b_per_lane = op->b_frag_len;
-    int c_per_lane = op->c_frag_len;
+    int d_per_lane = op->d_frag_len;
 
     // ---- 1D grid: block_id_x covers all sub-GEMMs' tiles ----
     rocke_value_t* flat_block_id = rocke_b_block_id_x(b);
@@ -1802,7 +1804,7 @@ static rocke_kernel_def_t*
     int num_accs = mfmas_m * mfmas_n;
 
     // ---- accumulators ----
-    rocke_value_t* acc_init = rocke_b_zero_vec_f32(b, c_per_lane);
+    rocke_value_t* acc_init = rocke_b_zero_vec_f32(b, d_per_lane);
     rocke_iter_arg_t iter_args[ROCKE_CONV_MAX_ACCS];
     char acc_name_bufs[ROCKE_CONV_MAX_ACCS][32];
     for(int i = 0, idx = 0; i < mfmas_m; i++)
@@ -2140,7 +2142,7 @@ static rocke_kernel_def_t*
                                               block_m_off_v,
                                               block_n_off_v,
                                               dX,
-                                              c_per_lane,
+                                              d_per_lane,
                                               rec_gemm_m,
                                               c_dg_N,
                                               rec_h_tilde_slice,

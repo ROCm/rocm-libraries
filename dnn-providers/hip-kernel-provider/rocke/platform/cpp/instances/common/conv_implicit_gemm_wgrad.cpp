@@ -849,13 +849,13 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
     const rocke_mfma_atom_t* atom = ctx->atom;
     int mfmas_m = ctx->mfmas_m;
     int mfmas_n = ctx->mfmas_n;
-    int c_per_lane = ctx->c_per_lane;
+    int d_per_lane = ctx->d_per_lane;
     const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
     bool is_fp32 = (strcmp(dtype_d, "fp32") == 0);
     bool is_bf16 = (strcmp(dtype_d, "bf16") == 0);
     (void)is_bf16; /* used conditionally below */
 
-    /* Python emission order: warp offsets first, then c_warp_params / c_dist. */
+    /* Python emission order: warp offsets first, then d_warp_params / c_dist. */
     rocke_value_t* warp_m_off_v
         = rocke_b_mul(b, ctx->warp_m_idx, rocke_b_const_i32(b, mfmas_m * spec->warp_tile_m));
     rocke_value_t* warp_n_off_v
@@ -864,10 +864,10 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
     rocke_value_t* block_warp_n_off = rocke_b_add(b, ctx->block_n_off_v, warp_n_off_v);
 
     int m0, m_lane, m1, n_lane;
-    if(rocke_b_c_warp_params(b, atom, &m0, &m_lane, &m1, &n_lane) != ROCKE_OK)
+    if(rocke_b_d_warp_params(b, atom, &m0, &m_lane, &m1, &n_lane) != ROCKE_OK)
         return;
 
-    rocke_tile_distribution_encoding_t* enc = rocke_make_c_warp_dstr_encoding(b, atom);
+    rocke_tile_distribution_encoding_t* enc = rocke_make_d_warp_dstr_encoding(b, atom);
     if(enc == NULL)
         return;
     rocke_tile_distribution_t* c_dist = rocke_make_static_tile_distribution(b, enc);
@@ -883,11 +883,11 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
 
     /* Pre-compute per-slot (row, col) within the atom.
      * Python creates wg_M_v / wg_N_v AFTER this decode loop, so defer them.
-     * Python: kc_m1 = c_warp_params(atom)[2] = m1 (index 2, not m0=index 0).
+     * Python: kc_m1 = d_warp_params(atom)[2] = m1 (index 2, not m0=index 0).
      * ys = [i // kc_m1, i % kc_m1] -> [i // m1, i % m1]. */
     rocke_value_t* slot_rows[ROCKE_CONV_MAX_ACCS * 4]; /* generous */
     rocke_value_t* slot_cols[ROCKE_CONV_MAX_ACCS * 4];
-    for(int i = 0; i < c_per_lane; ++i)
+    for(int i = 0; i < d_per_lane; ++i)
     {
         rocke_value_t* y0 = rocke_b_const_i32(b, i / m1); /* i // kc_m1 */
         rocke_value_t* y1 = rocke_b_const_i32(b, i % m1); /* i % kc_m1 */
@@ -914,7 +914,7 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
             rocke_value_t* atom_n_base
                 = rocke_b_add(b, block_warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
-            for(int i = 0; i < c_per_lane; ++i)
+            for(int i = 0; i < d_per_lane; ++i)
             {
                 rocke_value_t* c_m = rocke_b_add(b, atom_m_base, slot_rows[i]);
                 rocke_value_t* c_n = rocke_b_add(b, atom_n_base, slot_cols[i]);
@@ -1149,7 +1149,7 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
     }
 
     /* WMMA path: mirrors Python _emit_wgrad_direct_epilogue_wmma.
-     * op.c_layout().coord(b, lane, i) gives per-slot (row_off, col_off);
+     * op.d_layout().coord(b, lane, i) gives per-slot (row_off, col_off);
      * dW_desc.offset(k_out=m_val, n_wg=n_val) gives the byte offset. */
     const rocke_mmaop_t* op = ctx->op;
     int mfmas_m = ctx->mfmas_m;
@@ -1170,7 +1170,7 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
     bool _is_pw = ctx->is_pointwise;
     rocke_value_t* c_wgN_wmma = _is_pw ? rocke_b_const_i32(b, wg_N) : NULL;
 
-    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+    const rocke_arch_layout_map_t* c_map = rocke_mmaop_d_layout(op, b);
     rocke_value_t* c0 = ctx->c0;
 
     int flat = 0;
@@ -1188,7 +1188,7 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
             rocke_value_t* n_const = rocke_b_const_i32(b, ni * spec->warp_tile_n);
             rocke_value_t* atom_n_off = rocke_b_add(b, n_inner, n_const);
 
-            for(int i = 0; i < op->c_frag_len; ++i)
+            for(int i = 0; i < op->d_frag_len; ++i)
             {
                 rocke_value_t* row_off = NULL;
                 rocke_value_t* col_off = NULL;
@@ -1377,7 +1377,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     }
     ctx->a_per_lane = ctx->op->a_frag_len;
     ctx->b_per_lane = ctx->op->b_frag_len;
-    ctx->c_per_lane = ctx->op->c_frag_len;
+    ctx->d_per_lane = ctx->op->d_frag_len;
 
     /* Block tile dims */
     ctx->block_m = spec->tile_m;
@@ -1548,7 +1548,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->k_atoms = spec->tile_k / spec->warp_tile_k;
 
     /* Accumulators */
-    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->c_per_lane);
+    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->d_per_lane);
     ctx->num_accs = ctx->mfmas_m * ctx->mfmas_n;
     if(ctx->num_accs <= 0 || ctx->num_accs > ROCKE_CONV_MAX_ACCS)
     {

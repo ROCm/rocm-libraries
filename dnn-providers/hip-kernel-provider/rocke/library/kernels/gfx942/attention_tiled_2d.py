@@ -57,7 +57,7 @@ from rocke.core.ir import (
     Value,
     VectorType,
 )
-from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
+from rocke.helpers.atoms import MfmaAtom, make_d_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
@@ -97,7 +97,7 @@ MFMA_N = 16
 # the scalar helpers from ``helpers/attention.py`` directly; this distribution-
 # driven form is local to the 2D kernel.
 _C32_DIST = make_static_tile_distribution(
-    make_c_warp_dstr_encoding(MfmaAtom.f16_32x32x16())
+    make_d_warp_dstr_encoding(MfmaAtom.f16_32x32x16())
 )
 
 
@@ -1345,7 +1345,14 @@ def build_unified_attention_2d_tiled(
 
     _a_dt = "f16" if spec.dtype == "fp16" else "bf16"
     _qk_atom = ArchTarget.from_gfx(arch).mma.select_largest_k(
-        family="mma", a_dtype=_a_dt, b_dtype=_a_dt, c_dtype="fp32", m=16, n=16, k_max=16
+        family="mma",
+        a_dtype=_a_dt,
+        b_dtype=_a_dt,
+        c_dtype="fp32",
+        d_dtype="fp32",
+        m=16,
+        n=16,
+        k_max=16,
     )
     if _qk_atom is None or _qk_atom.k != 16:
         raise NotImplementedError(
@@ -3742,7 +3749,7 @@ def build_unified_attention_2d_tiled(
     #   B (K^T) per lane: <8 x dtype>
     #     n   = n_tile*32 + (lane % 32)
     #     k   = k_iter*16 + (lane/32)*8 + [0..7]
-    #   C per lane: <16 x f32>
+    #   D per lane: <16 x f32>
     #     row = wave_row_base + ((elem//4)*8 + (lane/32)*4 + elem%4)
     #     col = tile_off + n_tile*32 + (lane % 32)
     #
@@ -5711,7 +5718,7 @@ _4WGQA_LEAN_HEAD_SIZE = 256
 
 
 def _online_softmax_rescale(
-    b, Sm, m_old, l_old, *, NKEYT, CPL, NKpv, BPL, sc, ninf, zf, bperm, dtype, exp
+    b, Sm, m_old, l_old, *, NKEYT, DPL, NKpv, BPL, sc, ninf, zf, bperm, dtype, exp
 ):
     """Shared online-softmax reduction/rescale for the natural-QK 4-warp bodies.
 
@@ -5725,14 +5732,14 @@ def _online_softmax_rescale(
     """
     local = ninf
     for kt in range(NKEYT):
-        for i in range(CPL):
+        for i in range(DPL):
             local = b.fmax(local, b.fmul(Sm[kt][i], sc))
     m_new = b.fmax(m_old, b.fmax(local, bperm(local)))
     alpha = exp(b.fsub(m_old, m_new))
-    P = [[None] * CPL for _ in range(NKEYT)]
+    P = [[None] * DPL for _ in range(NKEYT)]
     lsum = zf
     for kt in range(NKEYT):
-        for i in range(CPL):
+        for i in range(DPL):
             p = exp(b.fsub(b.fmul(Sm[kt][i], sc), m_new))
             lsum = b.fadd(lsum, p)
             P[kt][i] = b.cast_f32_to(p, dtype)
@@ -5773,7 +5780,7 @@ def _build_gfx942_4warp_gqa_lean(
     BN = 64  # 4-warp: 64-key tiles
     BPT = BN // BS
     at = MfmaAtom.bf16_32x32x8()
-    APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
+    APL, BPL, DPL, K = at.a_per_lane, at.b_per_lane, at.d_per_lane, at.k
     NKEYT = BN // 32
     NK = HD // K
     NDdim = HD // 32
@@ -5911,9 +5918,9 @@ def _build_gfx942_4warp_gqa_lean(
                 )
                 kf = b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2)
                 S_T[kt] = at.emit(b, kf, q, S_T[kt])
-        Sm = [[None] * CPL for _ in range(NKEYT)]
+        Sm = [[None] * DPL for _ in range(NKEYT)]
         for kt in range(NKEYT):
-            for i in range(CPL):
+            for i in range(DPL):
                 rr, cc = at.lane_to_output(b, lane, i)
                 key_g = b.add(
                     b.add(b.mul(kv, b.const_i32(BN)), b.const_i32(kt * 32)), rr
@@ -5930,7 +5937,7 @@ def _build_gfx942_4warp_gqa_lean(
             m_old,
             l_old,
             NKEYT=NKEYT,
-            CPL=CPL,
+            DPL=DPL,
             NKpv=NKpv,
             BPL=BPL,
             sc=sc,
@@ -5973,7 +5980,7 @@ def _build_gfx942_4warp_gqa_lean(
             na = b.vec_pack(
                 [
                     b.fma(b.vec_extract(accs[nt], i), alpha, b.vec_extract(pv, i))
-                    for i in range(CPL)
+                    for i in range(DPL)
                 ],
                 F32,
             )
@@ -5984,7 +5991,7 @@ def _build_gfx942_4warp_gqa_lean(
     accs_f = loop.results[2:]
     recip = b.rcp_fast(l_f)
     for nt in range(NDdim):
-        for i in range(CPL):
+        for i in range(DPL):
             r, c = at.lane_to_output(b, lane, i)
             dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
             q_inseq = b.add(qbase, b.add(wq, c))
@@ -6025,7 +6032,7 @@ def build_gfx942_4warp_gqa(
     BN = 32 if HD128_PIPE else 64
     BPT = BN // BS
     at = MfmaAtom.bf16_32x32x8() if spec.dtype == "bf16" else MfmaAtom.f16_32x32x8()
-    APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
+    APL, BPL, DPL, K = at.a_per_lane, at.b_per_lane, at.d_per_lane, at.k
     NKEYT = BN // 32
     NK = HD // K
     NDdim = HD // 32
@@ -6338,9 +6345,9 @@ def build_gfx942_4warp_gqa(
                     )
                     kf = b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2)
                 S_T[kt] = at.emit(b, kf, q, S_T[kt])
-        Sm = [[None] * CPL for _ in range(NKEYT)]
+        Sm = [[None] * DPL for _ in range(NKEYT)]
         for kt in range(NKEYT):
-            for i in range(CPL):
+            for i in range(DPL):
                 raw = b.vec_extract(S_T[kt], i)
                 if masked:
                     rr, cc = at.lane_to_output(b, lane, i)
@@ -6365,7 +6372,7 @@ def build_gfx942_4warp_gqa(
             m_old,
             l_old,
             NKEYT=NKEYT,
-            CPL=CPL,
+            DPL=DPL,
             NKpv=NKpv,
             BPL=BPL,
             sc=sc,
@@ -6382,7 +6389,7 @@ def build_gfx942_4warp_gqa(
         if HD128_PIPE:
             acc_tgt = [
                 b.vec_pack(
-                    [b.fmul(b.vec_extract(accs[nt], i), alpha) for i in range(CPL)], F32
+                    [b.fmul(b.vec_extract(accs[nt], i), alpha) for i in range(DPL)], F32
                 )
                 for nt in range(NDdim)
             ]
@@ -6429,7 +6436,7 @@ def build_gfx942_4warp_gqa(
                             alpha,
                             b.vec_extract(acc_tgt[nt], i),
                         )
-                        for i in range(CPL)
+                        for i in range(DPL)
                     ],
                     F32,
                 )
@@ -6464,7 +6471,7 @@ def build_gfx942_4warp_gqa(
     accs_f = l3.results[2:]
     recip = b.rcp_fast(l_f)
     for nt in range(NDdim):
-        for i in range(CPL):
+        for i in range(DPL):
             r, c = at.lane_to_output(b, lane, i)
             dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
             q_inseq = b.add(qbase, b.add(wq, c))

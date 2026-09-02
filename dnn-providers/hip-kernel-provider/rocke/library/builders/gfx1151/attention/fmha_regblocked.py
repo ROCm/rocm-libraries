@@ -147,8 +147,8 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
     atom = WmmaAtom.f16_16x16x16()
     wave = atom.wave_size  # 32
     a_map = atom.a_layout(arch)
-    c_map = atom.c_layout(arch)
-    c_frag = atom.c_per_lane  # 8
+    d_map = atom.d_layout(arch)
+    d_frag = atom.d_per_lane  # 8
     if cfg.double_buffer:
         # Prefetch path is gated behind the base single-buffer result; only
         # build it if single-buffer beats the single-wave wall (see plan).
@@ -286,30 +286,30 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
         hi = V_lds_t.load_vec(b, [d_col, b.const_i32(nr * 16 + 8)], n=8)
         return b.vec_concat(lo, hi)
 
-    # ---- iter-args: per mr -> m[c_frag], l[c_frag], acc[n_dk] ----
+    # ---- iter-args: per mr -> m[d_frag], l[d_frag], acc[n_dk] ----
     iter_args = []
     for mr in range(MR):
-        for r in range(c_frag):
+        for r in range(d_frag):
             iter_args.append((f"m{mr}_{r}", neg_inf))
-        for r in range(c_frag):
+        for r in range(d_frag):
             iter_args.append((f"l{mr}_{r}", zero_f))
         for d in range(n_dk):
             iter_args.append(
                 (f"acc{mr}_{d}", WmmaTensor.zero_acc(b, atom, arch=arch).value)
             )
 
-    per_mr = 2 * c_frag + n_dk
+    per_mr = 2 * d_frag + n_dk
 
     def unpack(state):
         ms, ls, accs = [], [], []
         for mr in range(MR):
             base = mr * per_mr
-            ms.append(list(state[base : base + c_frag]))
-            ls.append(list(state[base + c_frag : base + 2 * c_frag]))
+            ms.append(list(state[base : base + d_frag]))
+            ls.append(list(state[base + d_frag : base + 2 * d_frag]))
             accs.append(
                 [
                     WmmaTensor(atom, "c", v, arch)
-                    for v in state[base + 2 * c_frag : base + per_mr]
+                    for v in state[base + 2 * d_frag : base + per_mr]
                 ]
             )
         return ms, ls, accs
@@ -334,7 +334,7 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
         new_accs = [list(accs[mr]) for mr in range(MR)]
 
         # ---- QK: A = this wave's Q rows (global), B = shared K (LDS) ----
-        # score[mr][nr] is a c_frag (<8 f32>) C-distribution fragment. Q frags
+        # score[mr][nr] is a d_frag (<8 f32>) C-distribution fragment. Q frags
         # are loaded ONCE per (mr,d) and each K B-operand ONCE per (nr,d), then
         # reused across the other axis -- the register-blocking amortization
         # (1 LDS K-read feeds m_repeat matmuls) that makes the staging pay.
@@ -357,9 +357,9 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
 
         # ---- intra-warp online softmax over the full block_n row, per mr ----
         ps = [[None] * NR for _ in range(MR)]  # probabilities, C-dist
-        alpha_vecs = [b.zero_vec_f32(c_frag) for _ in range(MR)]
+        alpha_vecs = [b.zero_vec_f32(d_frag) for _ in range(MR)]
         for mr in range(MR):
-            for r in range(c_frag):
+            for r in range(d_frag):
                 row_rel = scores[mr][0].coord(b, lane, r)[0]
                 q_pos = b.add(m_pos_base(mr), row_rel)
                 # per-nr masked/scaled score and its 16-lane row-max
@@ -386,9 +386,9 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
                     p_r = b.exp2(b.fsub(s_nr[nr], m_new))
                     rsum = wave_reduce_sum(b, p_r, wave_size=wave, lanes_per_row=16)
                     total_sum = rsum if total_sum is None else b.fadd(total_sum, rsum)
-                    # stash p_r into the c_frag for this (mr,nr)
+                    # stash p_r into the d_frag for this (mr,nr)
                     if ps[mr][nr] is None:
-                        ps[mr][nr] = b.zero_vec_f32(c_frag)
+                        ps[mr][nr] = b.zero_vec_f32(d_frag)
                     ps[mr][nr] = b.vec_insert(ps[mr][nr], p_r, r)
                 new_ms[mr][r] = m_new
                 new_ls[mr][r] = b.fadd(b.fmul(ls[mr][r], alpha), total_sum)
@@ -403,8 +403,8 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
         p_a = [[None] * NR for _ in range(MR)]
         for mr in range(MR):
             for nr in range(NR):
-                for r in range(c_frag):
-                    row_rel, col_k = c_map.coord(b, lane, r)
+                for r in range(d_frag):
+                    row_rel, col_k = d_map.coord(b, lane, r)
                     P_lds.store_scalar(
                         b,
                         [wave_id, row_rel, col_k],
@@ -443,7 +443,7 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
     # ---- Epilogue (CK Tile store_wmma_tile + TileWindow), per M-atom ----
     for mr in range(MR):
         inv_l = []
-        for r in range(c_frag):
+        for r in range(d_frag):
             l_safe = ls_f[mr][r]
             zmask = b.fcmp("oeq", l_safe, zero_f)
             inv_l.append(b.select(zmask, zero_f, b.rcp(l_safe)))

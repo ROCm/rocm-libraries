@@ -94,7 +94,7 @@ Matrix Fused Multiply-Add. AMD matrix instruction (`v_mfma_f32_*`). Used by GEMM
 
 ## MfmaAtom
 
-DSL helper that packages one MFMA shape (`m, n, k`), per-lane operand widths (`a_per_lane`, `b_per_lane`, `c_per_lane`), accumulator dtype, intrinsic dispatch (`atom.emit(b, A, B, C)`), and lane-to-output mapping (`atom.lane_to_output(b, lane, i)`).
+DSL helper that packages one MFMA shape (`m, n, k`), per-lane operand widths (`a_per_lane`, `b_per_lane`, `c_per_lane`, `d_per_lane`), independent C-input and D-result dtypes, intrinsic dispatch (`D = atom.emit(b, A, B, C)`), and D lane-to-output mapping (`atom.lane_to_output(b, lane, i)`).
 
 ## MLIR-Style IR
 

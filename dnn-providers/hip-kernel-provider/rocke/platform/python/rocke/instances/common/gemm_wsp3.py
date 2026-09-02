@@ -85,7 +85,7 @@ def build_wsp3_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> KernelDef:
     op = _resolve_mma_op(spec, arch)
     if op is None:
         raise ValueError(f"no MMA atom for wsp3 spec on {arch}")
-    a_per_lane, b_per_lane, c_per_lane = _atom_frag_lengths(op)
+    a_per_lane, b_per_lane, d_per_lane = _atom_frag_lengths(op)
     storage_dtype = _storage_dtype(spec)
 
     block_m, block_n, block_k = t.tile_m, t.tile_n, t.tile_k
@@ -387,7 +387,7 @@ def build_wsp3_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> KernelDef:
                 M,
                 N,
                 C,
-                c_per_lane,
+                d_per_lane,
             )
         b.ret()
         return b.kernel
@@ -488,7 +488,7 @@ def build_wsp3_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> KernelDef:
             M,
             N,
             C,
-            c_per_lane,
+            d_per_lane,
         )
 
     b.ret()

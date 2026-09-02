@@ -386,7 +386,7 @@ def _resolve_mma_op(spec: "UniversalGemmSpec", arch: str):
         family=_mma_family(arch),
         a_dtype=a_name,
         b_dtype=a_name,
-        c_dtype="fp32",
+        c_dtype="fp32", d_dtype="fp32",
         m=t.warp_tile_m,
         n=t.warp_tile_n,
         k=t.warp_tile_k,
@@ -474,13 +474,15 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     family = _mma_family(arch)
     a_name = spec.data.dtype_a  # homogeneous A/B/C (checked above)
     atom = (t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
-    if not target.supports_dtype_combo(a_name, a_name, "fp32", family=family):
+    if not target.supports_dtype_combo(
+        a_name, a_name, "fp32", "fp32", family=family
+    ):
         return False, f"unsupported GEMM dtype {a_name!r} on {arch}"
     if not target.mma.has_shape(
         family=family,
         a_dtype=a_name,
         b_dtype=a_name,
-        c_dtype="fp32",
+        c_dtype="fp32", d_dtype="fp32",
         m=t.warp_tile_m,
         n=t.warp_tile_n,
         k=t.warp_tile_k,
@@ -615,7 +617,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
 
 
 def _mfma_atom_widths(spec: UniversalGemmSpec) -> Tuple[int, int, int]:
-    """Return (a_per_lane, b_per_lane, c_per_lane) for the spec's MFMA atom.
+    """Return (a_per_lane, b_per_lane, d_per_lane) for the spec's MFMA atom.
 
     Kept for the MFMA-only callers (``moe_gemm_fused``) that compute the
     per-lane widths straight from the wave64 geometry. The contract-driven
@@ -676,7 +678,7 @@ def _atom_frag_lengths(op) -> Tuple[int, int, int]:
     be wrong). Driving everything off ``op.*_frag_len`` is what lets one body
     emit both ISAs.
     """
-    return op.a_frag_len, op.b_frag_len, op.c_frag_len
+    return op.a_frag_len, op.b_frag_len, op.d_frag_len
 
 
 def _emit_mma(b: IRBuilder, op, a: Value, bb: Value, c: Value) -> Value:
@@ -692,7 +694,7 @@ def _emit_mma(b: IRBuilder, op, a: Value, bb: Value, c: Value) -> Value:
 
 def _emit_zero_acc_op(b: IRBuilder, op) -> Value:
     """Zero accumulator vector sized from the resolved op's ``c_frag_len``."""
-    return b.zero_vec_f32(op.c_frag_len)
+    return b.zero_vec_f32(op.d_frag_len)
 
 
 def _choose_load_vec(spec: UniversalGemmSpec) -> int:
@@ -919,7 +921,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         slot_size_p = b.param("slot_size", I32)
 
     t = spec.tile
-    a_per_lane, b_per_lane, c_per_lane = _atom_frag_lengths(op)
+    a_per_lane, b_per_lane, d_per_lane = _atom_frag_lengths(op)
 
     block_m = t.tile_m
     block_n = t.tile_n
@@ -1159,7 +1161,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     mfmas_n = t.mfmas_per_warp_n
     k_atoms = t.k_atoms_per_tile_k
 
-    # Accumulators: one `<c_per_lane x float>` per warp-local MFMA tile.
+    # Accumulators: one `<d_per_lane x float>` per warp-local MFMA tile.
     acc_init = _emit_zero_acc_op(b, op)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
@@ -1713,7 +1715,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         On RDNA (WMMA) this delegates to the fully contract-driven
         :func:`_emit_wmma_phase`. On CDNA (MFMA) it keeps the byte-identical
         arch-formula fragment load below; the matmul + accumulator length are
-        contract-driven (``_emit_mma`` / ``op.c_frag_len``).
+        contract-driven (``_emit_mma`` / ``op.d_frag_len``).
 
         ``lds_parity`` (DTLA + prefetch only): shifts every A row by
         ``parity * block_m`` and every B row by ``parity * block_n`` so
@@ -2090,7 +2092,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 M,
                 N,
                 C,
-                c_per_lane,
+                d_per_lane,
             )
             return
         if spec.trait.epilogue == "cshuffle":
@@ -2109,7 +2111,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 C,
                 a_per_lane,
                 b_per_lane,
-                c_per_lane,
+                d_per_lane,
                 batch_off_c=batch_off_c,
                 fused_epilogue=fused_ep,
             )
@@ -2127,7 +2129,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 M,
                 N,
                 C,
-                c_per_lane,
+                d_per_lane,
                 batch_off_c=batch_off_c,
                 fused_epilogue=fused_ep,
             )
@@ -2153,7 +2155,7 @@ def _emit_mfma_acc_scatter(
     accs: Sequence[Value],
     m_base_off: Value,
     n_base_off: Value,
-    c_per_lane: int,
+    d_per_lane: int,
     storage_dtype: Type,
     per_cell,
     *,
@@ -2168,7 +2170,7 @@ def _emit_mfma_acc_scatter(
     :mod:`rocke.core.arch`) with the same hoisting the two epilogues used to
     open-code in four near-identical blocks (default-16/32, cshuffle-16/32):
 
-    * 16x16 atom: ``row = m_blk*c_per_lane + i``, ``col = n_in_atom``.
+    * 16x16 atom: ``row = m_blk*d_per_lane + i``, ``col = n_in_atom``.
     * 32x32 atom: ``row = (i//4)*8 + m_blk*4 + (i%4)``, ``col = n_in_atom``,
       where the per-slot ``(i//4)*8 + (i%4)`` ramp is folded to one host
       constant exactly as before.
@@ -2198,7 +2200,7 @@ def _emit_mfma_acc_scatter(
     add/mul values are produced, but the SSA emission order differs from the
     hand-hoisted form.
     """
-    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding, mfma_atom
+    from ...helpers.atoms import d_warp_params, make_d_warp_dstr_encoding, mfma_atom
     from ...helpers.distribution import make_static_tile_distribution
 
     t = spec.tile
@@ -2213,8 +2215,8 @@ def _emit_mfma_acc_scatter(
         t.warp_tile_n,
         t.warp_tile_k,
     )
-    _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+    _, _kc_mlane, kc_m1, kc_nlane = d_warp_params(atom)
+    c_dist = make_static_tile_distribution(make_d_warp_dstr_encoding(atom))
 
     c_nlane = b.const_i32(kc_nlane)
     # Single P (the lane) -> [m_blk, n_in_atom] = [lane // kCNLane, lane %
@@ -2229,7 +2231,7 @@ def _emit_mfma_acc_scatter(
     # col_in_atom (= n_in_atom) from these.
     row_in_atom: List[Value] = []
     col_in_atom: Optional[Value] = None
-    for i in range(c_per_lane):
+    for i in range(d_per_lane):
         ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
         x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
         row_in_atom.append(x_row)
@@ -2252,7 +2254,7 @@ def _emit_mfma_acc_scatter(
                     n_base_off,
                     b.add(b.const_i32(ni * t.warp_tile_n), col_in_atom),
                 )
-            for i in range(c_per_lane):
+            for i in range(d_per_lane):
                 c_m = b.add(base_m, row_in_atom[i])
                 per_cell(c_m, c_n, acc_h, i)
 
@@ -2270,7 +2272,7 @@ def _emit_epilogue_default(
     M: Value,
     N: Value,
     C: Value,
-    c_per_lane: int,
+    d_per_lane: int,
     *,
     batch_off_c: Optional[Value] = None,
     fused_epilogue=None,  # Optional[FusedEpilogue] from helpers.fuse
@@ -2278,10 +2280,10 @@ def _emit_epilogue_default(
     """Direct vector-store epilogue.
 
     Per-lane accumulator layout for an `m x n x k` MFMA atom on wave64:
-      - 16x16 atoms: lane = (m_blk * 16 + n_in_atom), c_per_lane = 4
+      - 16x16 atoms: lane = (m_blk * 16 + n_in_atom), d_per_lane = 4
                      -> lane stores `(m_base + i, n_in_atom)` for i=0..3
         where m_base = m_blk * 4.
-      - 32x32 atoms: c_per_lane = 16, accumulator is divided into 4
+      - 32x32 atoms: d_per_lane = 16, accumulator is divided into 4
                      row-blocks of 4 floats each; runtime layout is
                      ((m_block_within_warp, row_in_block, n_in_atom))
                      with m_block_within_warp = lane / 32,
@@ -2341,7 +2343,7 @@ def _emit_epilogue_default(
     # One slot -> one f16 store. (The supported WMMA subset is the single
     # 16x16x16 atom -> mfmas_m == mfmas_n == 1.)
     if op.family == "wmma":
-        c_map = op.c_layout()
+        c_map = op.d_layout()
         block_warp_m_off = b.add(block_m_off, warp_m_off)
         block_warp_n_off = b.add(block_n_off, warp_n_off)
         flat = 0
@@ -2352,7 +2354,7 @@ def _emit_epilogue_default(
                 flat += 1
                 atom_n = b.add(block_warp_n_off, b.const_i32(ni * t.warp_tile_n))
                 acc_h = b.vec_cast_f32_to(acc, storage_dtype)
-                for i in range(c_per_lane):
+                for i in range(d_per_lane):
                     row_in_atom, col_in_atom = c_map.coord(b, lane, i)
                     c_m = b.add(atom_m, row_in_atom)
                     c_n = b.add(atom_n, col_in_atom)
@@ -2392,7 +2394,7 @@ def _emit_epilogue_default(
         accs,
         block_warp_m_off,
         block_warp_n_off,
-        c_per_lane,
+        d_per_lane,
         storage_dtype,
         _store_cell,
     )
@@ -2410,11 +2412,11 @@ def _emit_epilogue_split_k(
     M: Value,
     N: Value,
     Cf32: Value,
-    c_per_lane: int,
+    d_per_lane: int,
 ) -> None:
     """Split-K atomic-add epilogue.
 
-    Each warp owns a per-lane ``<c_per_lane x f32>`` accumulator that is the
+    Each warp owns a per-lane ``<d_per_lane x f32>`` accumulator that is the
     partial product over this CTA's K-slice. We scatter every slot to its
     output ``(c_m, c_n)`` (the canonical MFMA layout, identical to the direct
     epilogue) and atomic-add the raw f32 value into ``Cf32[c_m, c_n]``. The
@@ -2428,7 +2430,7 @@ def _emit_epilogue_split_k(
     the direct epilogue cell-for-cell -- only the per-cell write differs
     (f32 atomicrmw fadd vs bf16 global store).
     """
-    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding, mfma_atom
+    from ...helpers.atoms import d_warp_params, make_d_warp_dstr_encoding, mfma_atom
     from ...helpers.distribution import make_static_tile_distribution
 
     t = spec.tile
@@ -2441,8 +2443,8 @@ def _emit_epilogue_split_k(
     block_warp_n_off = b.add(block_n_off, warp_n_off)
 
     atom = mfma_atom(spec.data.dtype_a, t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
-    _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+    _, _kc_mlane, kc_m1, kc_nlane = d_warp_params(atom)
+    c_dist = make_static_tile_distribution(make_d_warp_dstr_encoding(atom))
 
     c_nlane = b.const_i32(kc_nlane)
     n_in_atom = b.mod(lane, c_nlane)
@@ -2451,7 +2453,7 @@ def _emit_epilogue_split_k(
 
     row_in_atom: List[Value] = []
     col_in_atom: Optional[Value] = None
-    for i in range(c_per_lane):
+    for i in range(d_per_lane):
         ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
         x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
         row_in_atom.append(x_row)
@@ -2470,7 +2472,7 @@ def _emit_epilogue_split_k(
                 block_warp_n_off,
                 b.add(b.const_i32(ni * t.warp_tile_n), col_in_atom),
             )
-            for i in range(c_per_lane):
+            for i in range(d_per_lane):
                 c_m = b.add(base_m, row_in_atom[i])
                 c_off = b.add(b.mul(c_m, N), c_n)
                 val = b.vec_extract(acc, i)
@@ -2504,7 +2506,7 @@ def _emit_epilogue_cshuffle(
     C: Value,
     a_per_lane: int,
     b_per_lane: int,
-    c_per_lane: int,
+    d_per_lane: int,
     *,
     batch_off_c: Optional[Value] = None,
     fused_epilogue=None,  # Optional[FusedEpilogue] from helpers.fuse
@@ -2512,8 +2514,8 @@ def _emit_epilogue_cshuffle(
     """LDS-staged cshuffle epilogue.
 
     Pattern (matches CK's `cshuffle_epilogue.hpp`):
-      1. Each warp converts its per-warp-tile accumulators (`<c_per_lane
-         x float>`) to `<c_per_lane x half>`.
+      1. Each warp converts its per-warp-tile accumulators (`<d_per_lane
+         x float>`) to `<d_per_lane x half>`.
       2. Each warp stores them to LDS in a layout where consecutive
          lanes hold consecutive N-direction elements (the *output*
          layout, not the MFMA layout).
@@ -2524,7 +2526,7 @@ def _emit_epilogue_cshuffle(
 
     For now we implement the 16x16 case and the 32x32 case using a
     distribution where every thread writes its own block-local row of
-    `c_per_lane` halves into LDS at the canonical MFMA position, then
+    `d_per_lane` halves into LDS at the canonical MFMA position, then
     a flat distribution of threads issues 4-wide global stores.
 
     The MFMA->LDS index math matches what we used in the default
@@ -2587,7 +2589,7 @@ def _emit_epilogue_cshuffle(
     # warp_tile_m, warp + ni * warp_tile_n + n_in_atom) bases outside
     # the per-element loop. The MFMA output layout pins consecutive
     # lanes to consecutive N columns and scatters the per-lane
-    # c_per_lane slots across M rows, so the smem store itself stays
+    # d_per_lane slots across M rows, so the smem store itself stays
     # scalar (n=1). What we can hoist is the address arithmetic:
     # every (mi, ni, i) re-derived the warp + mi offset in the
     # original form.
@@ -2607,7 +2609,7 @@ def _emit_epilogue_cshuffle(
         accs,
         warp_m_off,
         warp_n_off,
-        c_per_lane,
+        d_per_lane,
         storage_dtype,
         _smem_cell,
         n_base_first=True,

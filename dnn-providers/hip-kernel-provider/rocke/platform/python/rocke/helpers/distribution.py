@@ -1693,9 +1693,9 @@ def store_wmma_acc(
     align: Optional[int] = None,
     transform: Optional[Callable[[IRBuilder, Value, int, Value, Value], Value]] = None,
 ) -> None:
-    """Scatter one lane's ``<c_per_lane x f32>`` WMMA accumulator to a window.
+    """Scatter one lane's ``<d_per_lane x f32>`` WMMA accumulator to a window.
 
-    Walks the ``c_per_lane`` accumulator slots, resolves each slot's
+    Walks the ``d_per_lane`` accumulator slots, resolves each slot's
     ``(row, col)`` from the atom's verified ``c_layout`` map, optionally applies
     ``transform(b, value_f32, slot, row, col)`` (e.g. the online-softmax
     ``* inv_l[row]`` rescale), demotes f32 -> the window dtype, and issues one
@@ -1709,7 +1709,7 @@ def store_wmma_acc(
     cmap = atom.c_layout(arch)
     c_off = b.const_i32(col_offset)
     lead = list(lead)
-    for r in range(atom.c_per_lane):
+    for r in range(atom.d_per_lane):
         row, col = cmap.coord(b, lane, r)
         val = b.vec_extract(acc, r)
         if transform is not None:
@@ -1733,7 +1733,7 @@ def store_wmma_acc(
 # the wrong shape: a fragment must reach b.mma as one packed vector and the
 # accumulator rescale must stay a single b.vector_mul. WmmaTensor is the
 # distributed-tensor analogue that keeps the payload PACKED -- one SSA vector
-# (A/B: <a_per_lane x f16>, C: <c_per_lane x f32>) -- so the kernel body reads
+# (A/B: <a_per_lane x f16>, C: <d_per_lane x f32>) -- so the kernel body reads
 # in tile terms (load_wmma_tile / wmma_mma / acc.scale / store_wmma_tile)
 # while every operation lowers to the exact same single instruction the raw
 # path emits. The per-slot lane coordinate is resolved through the atom's
@@ -1745,7 +1745,7 @@ class WmmaTensor:
     """Packed distributed tensor for one lane's WMMA fragment or accumulator.
 
     ``role`` is ``"a"``/``"b"`` (a ``<a_per_lane x f16>`` input fragment) or
-    ``"c"`` (a ``<c_per_lane x f32>`` accumulator). ``value`` is the single
+    ``"c"`` (a ``<d_per_lane x f32>`` accumulator). ``value`` is the single
     packed SSA vector — the form :meth:`WmmaAtom.emit` consumes and produces.
     Carrying the packed vector (rather than a per-element list) is what keeps
     the issue-bound kernel at one instruction per tile op.
@@ -1763,7 +1763,7 @@ class WmmaTensor:
 
     @property
     def num_slots(self) -> int:
-        return self.atom.c_per_lane if self.role == "c" else self.atom.a_per_lane
+        return self.atom.d_per_lane if self.role == "c" else self.atom.a_per_lane
 
     def _layout(self):
         if self.role == "a":

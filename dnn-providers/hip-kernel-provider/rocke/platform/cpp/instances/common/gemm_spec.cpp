@@ -413,6 +413,7 @@ static const rocke_type_t*
                                          a_name,
                                          a_name,
                                          "fp32",
+                                         "fp32",
                                          t->warp_tile_m,
                                          t->warp_tile_n,
                                          t->warp_tile_k);
@@ -452,7 +453,7 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
     }
 }
 
-/* _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, c_per_lane). MFMA-only
+/* _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, d_per_lane). MFMA-only
  * per-lane widths derived straight from the wave64 geometry. Kept for parity
  * with the Python module surface (the contract-driven body uses the op-sourced
  * _atom_frag_lengths, a peer). */
@@ -561,12 +562,21 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     atom_n = t->warp_tile_n;
     atom_k = t->warp_tile_k;
 
-    if(!rocke_archtarget_supports_dtype_combo(target, a_name, a_name, "fp32", family))
+    if(!rocke_archtarget_supports_dtype_combo(
+           target, a_name, a_name, "fp32", "fp32", family))
     {
         CK_GEMM_REJECT("unsupported GEMM dtype '%s' on %s", a_name, arch);
     }
     if(!rocke_mma_catalog_has_shape(
-           &target->mma, family, a_name, a_name, "fp32", atom_m, atom_n, atom_k))
+           &target->mma,
+           family,
+           a_name,
+           a_name,
+           "fp32",
+           "fp32",
+           atom_m,
+           atom_n,
+           atom_k))
     {
         /* Python: f"unsupported {a_name} warp_tile {atom} on {arch}" -- {atom}
          * is a tuple repr "(m, n, k)". */

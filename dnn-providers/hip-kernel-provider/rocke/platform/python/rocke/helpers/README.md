@@ -366,39 +366,39 @@ What `MfmaAtom` exposes:
 atom.m, atom.n, atom.k # tile shape
 atom.a_per_lane # halves per A operand per lane on wave64
 atom.b_per_lane # halves per B operand per lane
-atom.c_per_lane # floats per accumulator per lane
-atom.dtype_in, atom.dtype_out # "f16", "f32"
+atom.d_per_lane # floats per accumulator per lane
+atom.dtype_in, atom.dtype_d # "f16", "f32"
 atom.name # "mfma_f32_16x16x32_f16"
 
 # Dispatch to the right IRBuilder method:
 acc_out = atom.emit(b, a_vec, b_vec, acc_in)
 
-# Allocate a fresh per-lane <c_per_lane x float> accumulator:
+# Allocate a fresh per-lane <d_per_lane x float> accumulator:
 acc_init = atom.zero_acc(b)
 
 # Lane -> output position within one atom (the epilogue addressing):
 row_off, col_off = atom.lane_to_output(b, lane, i)
 # row_off, col_off are i32 SSA values in [0, m) x [0, n).
-# i is the slot index in [0, c_per_lane).
+# i is the slot index in [0, d_per_lane).
 ```
 
 The `lane_to_output` mapping is the part nobody wants to derive twice:
 
- - **16x16 atom** (`c_per_lane=4`):
+ - **16x16 atom** (`d_per_lane=4`):
  ```
  m_blk = lane / 16
  n_in_atom = lane % 16
  row = m_blk * 4 + i
  col = n_in_atom
  ```
- - **32x32 atom** (`c_per_lane=16`):
+ - **32x32 atom** (`d_per_lane=16`):
  ```
  m_blk = lane / 32 (∈ {0, 1})
  n_in_atom = lane % 32
  row = (i // 4) * 8 + m_blk * 4 + (i % 4)
  col = n_in_atom
  ```
- - **4x4 atom** (`c_per_lane=4`):
+ - **4x4 atom** (`d_per_lane=4`):
  ```
  batch = lane / 4 (∈ {0..15}) # each batch is one independent 4x4
  lane_in_b = lane % 4
@@ -649,7 +649,7 @@ epi.store(
  addr_fn=lambda b, m, n: (b.add(b.mul(m, N), n), None),
  d_rsrc=d_rsrc,
  bounds=(M, N), # optional OOB mask
- vec_in_acc=False, # True if acc[0..c_per_lane-1] are
+ vec_in_acc=False, # True if acc[0..d_per_lane-1] are
  # contiguous in the output's fastest dim
 )
 ```

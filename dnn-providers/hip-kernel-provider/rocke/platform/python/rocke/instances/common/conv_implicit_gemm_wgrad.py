@@ -580,7 +580,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         family=family,
         a_dtype=spec.data.dtype_a,
         b_dtype=spec.data.dtype_b,
-        c_dtype="fp32",
+        c_dtype="fp32", d_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
@@ -663,7 +663,7 @@ def _resolve_wgrad_op(spec: WgradConvSpec, arch: str):
         family=_wgrad_mma_family(arch),
         a_dtype=spec.data.dtype_a,
         b_dtype=spec.data.dtype_b,
-        c_dtype="fp32",
+        c_dtype="fp32", d_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
@@ -785,7 +785,7 @@ def build_implicit_gemm_conv_wgrad(
     _smem_dtype: Optional[Type] = (
         BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
     )
-    c_per_lane = op.c_frag_len
+    d_per_lane = op.d_frag_len
 
     # Wgrad GEMM dims (per group): kpg × Y*X*cpg, reduction N*Ho*Wo.
     wg_M = _wg_M(p_load)  # kpg  (K when groups==1)
@@ -911,7 +911,7 @@ def build_implicit_gemm_conv_wgrad(
     mfmas_n = spec.mfmas_per_warp_n
     k_atoms = spec.k_atoms_per_tile_k
 
-    acc_init = b.zero_vec_f32(c_per_lane)
+    acc_init = b.zero_vec_f32(d_per_lane)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]
@@ -1313,7 +1313,7 @@ def build_implicit_gemm_conv_wgrad(
             block_m_off_v,
             block_n_off_v,
             dW,
-            c_per_lane,
+            d_per_lane,
             group=group_v,
         )
     elif spec.epilogue == "cshuffle":
@@ -1355,7 +1355,7 @@ def _emit_wgrad_split_k_epilogue(
     block_m_off: Value,
     block_n_off: Value,
     dw_ptr: Value,
-    c_per_lane: int,
+    d_per_lane: int,
     group: Optional[Value] = None,
 ) -> None:
     """Atomic-add partial accumulator directly into dW for all split-K slices.
@@ -1377,13 +1377,13 @@ def _emit_wgrad_split_k_epilogue(
     the even slot's element index is used as the base; the odd slot's value
     occupies the high element of the <2 x dtype> vector.  Both slots must
     share the same row (c_m) — for the standard MFMA C-fragment layout
-    this is guaranteed because consecutive ``c_per_lane`` indices within
+    this is guaranteed because consecutive ``d_per_lane`` indices within
     one ``(mi, ni)`` atom iterate along the N axis (same row, adjacent
     columns) in groups of ``kc_m1`` which is always ≥ 2 for the atoms
-    we support.  If ``c_per_lane`` is odd the last element falls back to
+    we support.  If ``d_per_lane`` is odd the last element falls back to
     a scalar f32 atomic-add to avoid reading out of bounds.
     """
-    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
+    from ...helpers.atoms import d_warp_params, make_d_warp_dstr_encoding
     from ...helpers.distribution import make_static_tile_distribution
 
     dtype_d = spec.data.dtype_d
@@ -1396,18 +1396,18 @@ def _emit_wgrad_split_k_epilogue(
     block_warp_m_off = b.add(block_m_off, warp_m_off)
     block_warp_n_off = b.add(block_n_off, warp_n_off)
 
-    _, __, kc_m1, kc_nlane = c_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+    _, __, kc_m1, kc_nlane = d_warp_params(atom)
+    c_dist = make_static_tile_distribution(make_d_warp_dstr_encoding(atom))
 
     c_nlane = b.const_i32(kc_nlane)
     n_in_atom = b.mod(lane, c_nlane)
     m_blk = b.div(lane, c_nlane)
     p_lane = [m_blk, n_in_atom]
 
-    # Decode all (row, col) pairs for the c_per_lane accumulator slots.
+    # Decode all (row, col) pairs for the d_per_lane accumulator slots.
     rows: List[Value] = []
     cols: List[Value] = []
-    for i in range(c_per_lane):
+    for i in range(d_per_lane):
         ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
         x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
         rows.append(x_row)
@@ -1485,7 +1485,7 @@ def _emit_wgrad_split_k_epilogue(
             if dtype_d == "fp32":
                 # rows[i] / cols[i] are the per-slot (row, col) within the atom,
                 # decoded directly from the MFMA C-fragment distribution.
-                for i in range(c_per_lane):
+                for i in range(d_per_lane):
                     c_m = b.add(atom_m_base, rows[i])
                     c_n = b.add(atom_n_base, cols[i])
                     _emit_scalar_atomic(c_m, c_n, b.vec_extract(acc, i))
@@ -1498,7 +1498,7 @@ def _emit_wgrad_split_k_epilogue(
                 # i+1 always have rows[i] != rows[i+1].  Attempting to pair them
                 # under the same c_m silently writes both values to the wrong row
                 # (the row of slot i only).  Use one atomic per slot instead.
-                for i in range(c_per_lane):
+                for i in range(d_per_lane):
                     c_m_i = b.add(atom_m_base, rows[i])
                     c_n_i = b.add(atom_n_base, cols[i])
                     _emit_single_packed_atomic(c_m_i, c_n_i, b.vec_extract(acc, i))
@@ -1520,7 +1520,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
     """Atomic-add partial WMMA accumulator directly into dW for split-K.
 
     Mirrors :func:`_emit_wgrad_split_k_epilogue` but uses the WMMA C-fragment
-    layout (``op.c_layout()``) instead of the MFMA distribution decoder.
+    layout (``op.d_layout()``) instead of the MFMA distribution decoder.
 
     Dispatch by dtype_d:
       fp32 — scalar ``global_atomic_add`` (atomicrmw fadd f32).
@@ -1560,7 +1560,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
             return c_m
         return b.add(c_m, b.mul(group, _c_kpg))
 
-    c_map = op.c_layout()
+    c_map = op.d_layout()
 
     def _to_dtype(v_f32: Value) -> Value:
         if dtype_d == "fp32":
@@ -1594,7 +1594,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
             acc = accs[flat]
             flat += 1
             atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
-            for i in range(op.c_frag_len):
+            for i in range(op.d_frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 c_m = b.add(atom_m_base, row_off)
                 c_n = b.add(atom_n_base, col_off)
@@ -1758,7 +1758,7 @@ def _emit_wgrad_direct_epilogue_wmma(
     _c_wgN_wmma = b.const_i32(_wg_N(p)) if p.is_pointwise else None
     _c_kpg = b.const_i32(p.kpg) if group is not None else None
     dW_desc = None if p.is_pointwise else make_dw_descriptor(p, dtype=spec.data.dtype_d)
-    c_map = op.c_layout()
+    c_map = op.d_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
     _elem_bytes = 4 if _fp32_out else 2
@@ -1776,7 +1776,7 @@ def _emit_wgrad_direct_epilogue_wmma(
                 b.add(block_n_off, warp_n_off),
                 b.const_i32(ni * spec.warp_tile_n),
             )
-            for i in range(op.c_frag_len):
+            for i in range(op.d_frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 m_val = b.add(atom_m_off, row_off)
                 n_val = b.add(atom_n_off, col_off)

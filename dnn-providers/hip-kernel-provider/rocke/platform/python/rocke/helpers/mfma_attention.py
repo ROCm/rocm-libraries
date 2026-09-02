@@ -159,7 +159,7 @@ def _validate_attention_atom(atom: "MfmaAtom", arch: str) -> None:
     if not target.mma.has_shape(
         a_dtype=cat_dtype,
         b_dtype=cat_dtype,
-        c_dtype="fp32",
+        c_dtype="fp32", d_dtype="fp32",
         m=atom.m,
         n=atom.n,
         k=atom.k,
@@ -567,10 +567,10 @@ def mfma_attention_fwd_inner_body(
     # slot through the K-loop.
     neg_inf = b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
-    acc_zero = b.zero_vec_f32(atom.c_per_lane)
+    acc_zero = b.zero_vec_f32(atom.d_per_lane)
 
     iter_args = []
-    for r in range(atom.c_per_lane):
+    for r in range(atom.d_per_lane):
         iter_args.append((f"m{r}", neg_inf))
         iter_args.append((f"l{r}", zero_f))
     for n in range(n_pv_atoms):
@@ -589,9 +589,9 @@ def mfma_attention_fwd_inner_body(
     )
     with kloop as (kt, state_vals):
         # Unpack state.
-        ms = [state_vals[2 * r] for r in range(atom.c_per_lane)]
-        ls = [state_vals[2 * r + 1] for r in range(atom.c_per_lane)]
-        accs = list(state_vals[2 * atom.c_per_lane :])
+        ms = [state_vals[2 * r] for r in range(atom.d_per_lane)]
+        ls = [state_vals[2 * r + 1] for r in range(atom.d_per_lane)]
+        accs = list(state_vals[2 * atom.d_per_lane :])
 
         # P29: k_block_iter_fn maps the linear iter index to a real
         # K-tile index via a caller-supplied LUT. ``effective_kt`` is
@@ -687,7 +687,7 @@ def mfma_attention_fwd_inner_body(
         # m_blk reduce across cols 0..15).
         new_ms, new_ls, new_accs = [], [], list(accs)
         ps = []  # per-row scaled probabilities (per-lane f32)
-        for r in range(atom.c_per_lane):
+        for r in range(atom.d_per_lane):
             s_r_f32 = b.vec_extract(score, r)
             s_r_scaled = b.fmul(s_r_f32, scale_log2)
             # Per-row position for the mask check + extra transforms.
@@ -749,7 +749,7 @@ def mfma_attention_fwd_inner_body(
         # ---- P operand staging via LDS ----
         # Lane t holds p[m_blk*4+r, n_in_atom] for r in 0..3.
         # Write to P_lds[m_blk*4+r, n_in_atom] then sync.
-        for r in range(atom.c_per_lane):
+        for r in range(atom.d_per_lane):
             p_row = b.add(b.mul(m_blk, b.const_i32(4)), b.const_i32(r))
             p_col = m_in_atom
             p_f16 = b.cast_f32_to(ps[r], dtype_ir)
@@ -822,7 +822,7 @@ def mfma_attention_fwd_inner_body(
 
         # Yield updated state.
         yields = []
-        for r in range(atom.c_per_lane):
+        for r in range(atom.d_per_lane):
             yields.append(new_ms[r])
             yields.append(new_ls[r])
         yields.extend(new_accs)
@@ -835,15 +835,15 @@ def mfma_attention_fwd_inner_body(
     # ``ms_final`` is the per-lane row-max; the scaled-acc / l_final pair
     # already encodes everything the epilogue needs, so we only consume
     # the normalisation factors below.
-    ls_final = [final[2 * r + 1] for r in range(atom.c_per_lane)]
-    accs_final = list(final[2 * atom.c_per_lane :])
+    ls_final = [final[2 * r + 1] for r in range(atom.d_per_lane)]
+    accs_final = list(final[2 * atom.d_per_lane :])
 
     # ---- Epilogue: O[m, d] = acc[m, d] / l[m] in target dtype ----
     # Lane t writes to O[q_tile_base + m_blk*4 + r, head, n_blk*16 +
     # n_in_atom] for r in 0..3, n_blk in 0..n_pv_atoms.
     m_blk = b.div(lane, c16)
     for n_blk_atom in range(n_pv_atoms):
-        for r in range(atom.c_per_lane):
+        for r in range(atom.d_per_lane):
             o_row = b.add(
                 b.add(q_tile_base, b.mul(m_blk, b.const_i32(4))),
                 b.const_i32(r),
@@ -889,7 +889,7 @@ def mfma_attention_fwd_inner_body(
 #
 # The fundamental difference from the wave64 MFMA body is the fragment
 # distribution: a WMMA accumulator row spans the 16 lanes of one wave32 half and
-# each lane owns ``c_frag_len`` (=8) q-rows of one k-column. RDNA3/3.5 (gfx11)
+# each lane owns ``d_frag_len`` (=8) q-rows of one k-column. RDNA3/3.5 (gfx11)
 # and RDNA4 (gfx12) differ in the *operand* distribution: on gfx11 the A/B
 # fragment carries the full ``a_frag_len`` (=16) K row in every lane (cross-half
 # duplication); on gfx12 the duplication is gone -- the fragment is ``<8 x half>``
@@ -978,10 +978,10 @@ def _wmma_attention_fwd_inner_body(
     # a_frag=8) ABIs are both expressed through the same accessors.
     a_map = op.a_layout()  # (row, k): lane l -> (row l%16, k=lane-base+slot)
     c_map = (
-        op.c_layout()
+        op.d_layout()
     )  # (row, col): gfx11 (2i+l//16, l%16); gfx12 ((l//16)*8+i, l%16)
     a_frag = op.a_frag_len  # 16 (gfx11) | 8 (gfx12) -- K elems per lane per step
-    c_frag = op.c_frag_len  # 8  -- accumulator slots per lane (same both)
+    c_frag = op.d_frag_len  # 8  -- accumulator slots per lane (same both)
 
     # Number of WMMA steps along the head-dim axis (QK K-dim == PV N-dim).
     n_dk = head_size // 16

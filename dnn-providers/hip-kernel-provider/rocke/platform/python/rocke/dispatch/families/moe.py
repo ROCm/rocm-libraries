@@ -190,7 +190,7 @@ def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandid
                 family="mma",
                 a_dtype=dt,
                 b_dtype=dt,
-                c_dtype="fp32",
+                c_dtype="fp32", d_dtype="fp32",
                 m=16,
                 n=16,
                 k=32,

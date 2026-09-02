@@ -420,7 +420,7 @@ walls? Investigated against `core/arch/target.py` (`_MMA_FRAGMENT_INFO`) and
 
 - **f16-accumulate WMMA** (vs the f32 accumulator) would halve the PV
   accumulator VGPRs in principle — but on RDNA3.5 the f16-output WMMA still
-  writes a `<8 x float>`-shaped C fragment (8 VGPR); **packed-f16 C output is a
+  writes a `<8 x float>`-shaped D fragment (8 VGPR); **packed-f16 D output is a
   gfx12/RDNA4 feature**, not available here. No register saving.
 - **Larger-K WMMA (`16x16x32`)** would cut the QK/PV instruction count per
   K-tile (better WMMA:overhead ratio) — **gfx12 only**.
@@ -560,7 +560,7 @@ flash-attention *math* is identical (online softmax, causal early-exit, the
 | wavefront | wave64 | **wave32** — softmax row-reduction butterfly spans 16 lanes, half the lane masks |
 | matrix unit | `v_mfma_*`, many tile shapes (`16x16x16`, `16x16x32`, `32x32x8`) → high arithmetic intensity per instr | **one** `16x16x16` WMMA → low WMMA:overhead ratio, the issue-bound wall |
 | operand semantics | MFMA `A·B` with native K-accumulation; large K tiles | WMMA `A·B^T` — forces the **V column-gather / transpose** dance the campaign fought |
-| C fragment | can output packed f16 | **always `<8×f32>`** — no accumulator VGPR relief |
+| D fragment | can output packed f16 | **always `<8×f32>`** — no result VGPR relief |
 | memory bound | **HBM-bandwidth-bound** → LDS staging + double-buffer + async-copy is the *correct* design | **cache-resident / issue-bound** → LDS staging is a net *loss* |
 | transpose | `ds_read_tr` transpose-loads, async global→LDS | neither exists → P→A must round-trip LDS or `ds_bpermute` (both costly) |
 | register file | large; deep pipelines fit | 192-VGPR cap; even one-stage pipelining spills at D128 |
@@ -629,7 +629,7 @@ f32 path changed; the full `test_rocke` suite stays green:
 
 | gap | what was added | where |
 |---|---|---|
-| only `MfmaAtom` (wave64, MFMA) existed | `WmmaAtom` (+ `wmma_atom`, `WMMA_F16/BF16_ATOMS`): wave32, m=n=k=16, a/b_per_lane=16, c_per_lane=8 (`<8×f32>`), `name="wmma_f32_16x16x16_f16"`. Lane-layout accessors **delegate to the existing `target.mma` LayoutMaps** so there is one source of truth; `emit` routes through `b.mma(name,…)` | `helpers/atoms.py` |
+| only `MfmaAtom` (wave64, MFMA) existed | `WmmaAtom` (+ `wmma_atom`, `WMMA_F16/BF16_ATOMS`): wave32, m=n=k=16, a/b_per_lane=16, c/d_per_lane=8 (`<8×f32>`), `name="wmma_f32_16x16x16_f16"`. Lane-layout accessors **delegate to the existing `target.mma` LayoutMaps** so there is one source of truth; `emit` routes through `b.mma(name,…)` | `helpers/atoms.py` |
 | `WarpGrid` was MFMA/wave64-only | a wave32 WMMA path accepting the WMMA atom | `helpers/geometry.py` |
 | `load_tile` is f32-only (casts every element via `load_vec_as_f32`) — not a packed `<16×f16>` fragment, so not directly `b.mma`-able | `load_wmma_fragment` / `store_wmma_acc`: a **packed** fragment load/store built on `TileWindow.load_vec(n=16)` (raw packed vector → directly `b.mma`-able), matching the op's layout maps | `helpers/distribution.py`, `helpers/tensor_view.py` |
 | `StaticDistributedTensor` stores a per-element f32 list (the right shape for elementwise/reduce ops, the wrong one for an issue-bound WMMA fragment) | `WmmaTensor`: a **packed** distributed tensor carrying one lane's fragment/accumulator as a *single SSA vector*, with tile-level `load_wmma_tile` / `wmma_mma` / `store_wmma_tile` wrappers and `tile.scale` (one `v_mul`) / `tile.coord` (off the verified layout map). Each is 1:1 over the underlying op, so the kernel body reads in tile terms with **zero** added instructions | `helpers/distribution.py` |

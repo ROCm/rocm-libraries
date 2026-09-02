@@ -46,7 +46,7 @@ static const rocke_type_t* rocke_mega_storage_dtype(const rocke_gemm_universal_s
     return rocke_scalar_by_name(d);
 }
 
-/* _mfma_atom_widths(u_gu) -> (a_per_lane, b_per_lane, c_per_lane). MFMA-only:
+/* _mfma_atom_widths(u_gu) -> (a_per_lane, b_per_lane, d_per_lane). MFMA-only:
  * the warp-tile atom's per-lane fragment widths. */
 static void rocke_mega_mfma_atom_widths(const rocke_gemm_universal_spec_t* u,
                                         int* a_per,
@@ -179,12 +179,12 @@ rocke_status_t rocke_moe_mega_build_ctx_init(rocke_moe_mega_build_ctx_t* ctx,
 
     /* ---- gate/up tile geometry + scalar consts (lines 498-509) --------- *
      * t = spec.gate_up_tile() = u_gu->tile (UniversalGemmSpec.tile mirrors
-     * gate_up_tile()). _, _, c_per_lane = _mfma_atom_widths(u_gu). */
+     * gate_up_tile()). _, _, d_per_lane = _mfma_atom_widths(u_gu). */
     ctx->t = u_gu->tile;
     {
         int a_per = 0, b_per = 0, c_per = 0;
         rocke_mega_mfma_atom_widths(u_gu, &a_per, &b_per, &c_per);
-        ctx->c_per_lane = c_per;
+        ctx->d_per_lane = c_per;
     }
 
     ctx->block_m = ctx->t.tile_m;

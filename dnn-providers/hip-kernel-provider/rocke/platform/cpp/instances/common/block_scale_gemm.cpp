@@ -585,7 +585,7 @@ rocke_kernel_def_t* rocke_build_block_scale_gemm(rocke_ir_builder_t* b,
     c_atom_k = rocke_b_const_i32(b, atom->k);
 
     /* outer = b.scf_for_iter(0, num_groups, 1, [("acc", atom.zero_acc(b))], "kg")
-     *   atom.zero_acc(b) -> b.zero_vec_f32(atom.c_per_lane)
+     *   atom.zero_acc(b) -> b.zero_vec_f32(atom.d_per_lane)
      * Python evaluates scf_for_iter's positional args left-to-right, so the
      * three bound constants (0, num_groups, 1) are emitted BEFORE the
      * zero_vec inside the iter-arg list. Emit them first here so the global
@@ -595,7 +595,7 @@ rocke_kernel_def_t* rocke_build_block_scale_gemm(rocke_ir_builder_t* b,
     loop_ub = rocke_b_const_i32(b, num_groups);
     loop_step = rocke_b_const_i32(b, 1);
     outer_args[0].name = "acc";
-    outer_args[0].init = rocke_b_zero_vec_f32(b, atom->c_per_lane);
+    outer_args[0].init = rocke_b_zero_vec_f32(b, atom->d_per_lane);
     outer = rocke_b_scf_for_iter(b,
                                  loop_lb,
                                  loop_ub,
@@ -679,10 +679,10 @@ rocke_kernel_def_t* rocke_build_block_scale_gemm(rocke_ir_builder_t* b,
                                       "gacc",
                                       &lctx);
 
-        /* ab_scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
+        /* ab_scale_vec = b.vector_splat(ab_scale, atom.d_per_lane)
          * scaled_group = b.vector_mul(group_acc, ab_scale_vec)
          * new_outer    = b.vector_add(outer_acc, scaled_group) */
-        ab_scale_vec = rocke_b_vector_splat(b, ab_scale, atom->c_per_lane);
+        ab_scale_vec = rocke_b_vector_splat(b, ab_scale, atom->d_per_lane);
         scaled_group = rocke_b_vector_mul(b, group_acc, ab_scale_vec);
         new_outer = rocke_b_vector_add(b, outer_acc, scaled_group);
 

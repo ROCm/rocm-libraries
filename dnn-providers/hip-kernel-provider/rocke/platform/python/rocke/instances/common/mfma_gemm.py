@@ -36,13 +36,13 @@ What the kernel does per CTA
      (4 K-elements at lane row on the legacy 16x16x16 atom,
      8 on the K-packed 16x16x32 / 32x32x16 atoms).
    * **B**: a ``<b_per_lane x f16>`` per K-iter.
-   * **C**: a ``<c_per_lane x f32>`` accumulator across the whole
+   * **C**: a ``<d_per_lane x f32>`` accumulator across the whole
      K-loop (4 floats on 16x16; 16 floats on 32x32).
 4. K-loop: ``scf.for k_blk in [0, K // atom.k)``: each iter loads the
    ``atom.m x atom.n x atom.k`` A/B slab into per-lane vector regs,
    fires one MFMA, accumulates into C. The K-packed atom halves
    ``K // atom.k`` for the same K, doubling K-loop density.
-5. Epilogue: each lane writes ``c_per_lane`` output cells of
+5. Epilogue: each lane writes ``d_per_lane`` output cells of
    ``C[m_tile*atom.m : m_tile*atom.m + atom.m,
    n_tile*atom.n : n_tile*atom.n + atom.n]`` using the atom's
    ``lane_to_output`` map (see :mod:`rocke.helpers.atoms`).
@@ -222,7 +222,7 @@ def is_valid_spec(spec: MfmaGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     if not target.mma.has_shape(
         a_dtype=cat_dtype,
         b_dtype=cat_dtype,
-        c_dtype="fp32",
+        c_dtype="fp32", d_dtype="fp32",
         m=atom.m,
         n=atom.n,
         k=atom.k,

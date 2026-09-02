@@ -127,9 +127,9 @@ def build_wmma_fmha_blockn(cfg: BlockNCfg, arch: str = "gfx1151") -> KernelDef:
     atom = WmmaAtom.f16_16x16x16()
     wave = atom.wave_size  # 32
     a_map = atom.a_layout(arch)
-    c_map = atom.c_layout(arch)
+    d_map = atom.d_layout(arch)
     a_frag = atom.a_per_lane  # 16
-    c_frag = atom.c_per_lane  # 8
+    d_frag = atom.d_per_lane  # 8
     n_dk = cfg.head_size // 16
     NK = cfg.bn_tiles
     dtype_ir = F16
@@ -203,21 +203,21 @@ def build_wmma_fmha_blockn(cfg: BlockNCfg, arch: str = "gfx1151") -> KernelDef:
     # P staging: one 16x16 slab per key subtile.
     P_lds = make_lds_view(b, dtype=dtype_ir, shape=(NK, 16, 16), name_hint="Pbn")
 
-    # iter-args: m (c_frag) | l (c_frag) | acc (n_dk)
+    # iter-args: m (d_frag) | l (d_frag) | acc (n_dk)
     iter_args = []
-    for r in range(c_frag):
+    for r in range(d_frag):
         iter_args.append((f"m{r}", neg_inf))
-    for r in range(c_frag):
+    for r in range(d_frag):
         iter_args.append((f"l{r}", zero_f))
     for d in range(n_dk):
         iter_args.append((f"acc{d}", WmmaTensor.zero_acc(b, atom, arch=arch).value))
 
     def unpack(state):
         idx = 0
-        ms = list(state[idx : idx + c_frag])
-        idx += c_frag
-        ls = list(state[idx : idx + c_frag])
-        idx += c_frag
+        ms = list(state[idx : idx + d_frag])
+        idx += d_frag
+        ls = list(state[idx : idx + d_frag])
+        idx += d_frag
         accs = [WmmaTensor(atom, "c", v, arch) for v in state[idx : idx + n_dk]]
         idx += n_dk
         return ms, ls, accs
@@ -265,10 +265,10 @@ def build_wmma_fmha_blockn(cfg: BlockNCfg, arch: str = "gfx1151") -> KernelDef:
 
         # ---- online softmax over all BLOCK_N keys ----
         # per (row r): scaled+masked s for each subtile, combined max, then exp/sum.
-        s_scaled = [[None] * c_frag for _ in range(NK)]
-        alpha_vec = b.zero_vec_f32(c_frag)
-        ps = [[None] * c_frag for _ in range(NK)]
-        for r in range(c_frag):
+        s_scaled = [[None] * d_frag for _ in range(NK)]
+        alpha_vec = b.zero_vec_f32(d_frag)
+        ps = [[None] * d_frag for _ in range(NK)]
+        for r in range(d_frag):
             row_rel, col_k = scores[0].coord(b, lane, r)
             local_max = neg_inf
             for s in range(NK):
@@ -302,8 +302,8 @@ def build_wmma_fmha_blockn(cfg: BlockNCfg, arch: str = "gfx1151") -> KernelDef:
         # ---- transpose P (acc layout -> PV A-operand) per subtile via LDS ----
         for s in range(NK):
             cs = b.const_i32(s)
-            for r in range(c_frag):
-                row_rel, col_k = c_map.coord(b, lane, r)
+            for r in range(d_frag):
+                row_rel, col_k = d_map.coord(b, lane, r)
                 P_lds.store_scalar(
                     b, [cs, row_rel, col_k], b.cast_f32_to(ps[s][r], dtype_ir)
                 )
@@ -331,9 +331,9 @@ def build_wmma_fmha_blockn(cfg: BlockNCfg, arch: str = "gfx1151") -> KernelDef:
         b.sync()  # P_lds reused next iter
 
         yields = []
-        for r in range(c_frag):
+        for r in range(d_frag):
             yields.append(new_ms[r])
-        for r in range(c_frag):
+        for r in range(d_frag):
             yields.append(new_ls[r])
         yields.extend(a.value for a in new_accs)
         b.scf_yield(*yields)
@@ -343,7 +343,7 @@ def build_wmma_fmha_blockn(cfg: BlockNCfg, arch: str = "gfx1151") -> KernelDef:
 
     # ---- Epilogue (CK Tile store_wmma_acc + TileWindow) ----
     inv_l = []
-    for r in range(c_frag):
+    for r in range(d_frag):
         l_safe = ls_f[r]
         zmask = b.fcmp("oeq", l_safe, zero_f)
         inv_l.append(b.select(zmask, zero_f, b.rcp(l_safe)))

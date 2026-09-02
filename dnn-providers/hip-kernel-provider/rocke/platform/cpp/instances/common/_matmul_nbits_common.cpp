@@ -294,8 +294,12 @@ bool rocke_matmul_nbits_validate_common_spec(const rocke_matmul_nbits_spec_t* sp
         /* family = "wmma" if wave_size == 32 else "mma". */
         const char* mma_family = (target->wave_size == 32) ? "wmma" : "mma";
 
-        if(!rocke_archtarget_supports_dtype_combo(
-               target, ROCKE__WMMA_AB_DTYPE, ROCKE__WMMA_AB_DTYPE, ROCKE__WMMA_C_DTYPE, mma_family))
+        if(!rocke_archtarget_supports_dtype_combo(target,
+                                                  ROCKE__WMMA_AB_DTYPE,
+                                                  ROCKE__WMMA_AB_DTYPE,
+                                                  ROCKE__WMMA_C_DTYPE,
+                                                  ROCKE__WMMA_C_DTYPE,
+                                                  mma_family))
         {
             ROCKE_NBITS_REJECT("unsupported matmul_nbits dtype fp16 on %s", arch);
         }
@@ -303,6 +307,7 @@ bool rocke_matmul_nbits_validate_common_spec(const rocke_matmul_nbits_spec_t* sp
                                          mma_family,
                                          ROCKE__WMMA_AB_DTYPE,
                                          ROCKE__WMMA_AB_DTYPE,
+                                         ROCKE__WMMA_C_DTYPE,
                                          ROCKE__WMMA_C_DTYPE,
                                          t->warp_tile_m,
                                          t->warp_tile_n,

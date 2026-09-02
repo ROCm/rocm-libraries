@@ -31,7 +31,7 @@ from rocke.runtime.hip_module import Runtime
 ARCH = "gfx950"
 _ATOM_K = (
     ArchTarget.from_gfx(ARCH)
-    .mma.select_largest_k(a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=32, n=32)
+    .mma.select_largest_k(a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", d_dtype="fp32", m=32, n=32)
     .k
 )
 

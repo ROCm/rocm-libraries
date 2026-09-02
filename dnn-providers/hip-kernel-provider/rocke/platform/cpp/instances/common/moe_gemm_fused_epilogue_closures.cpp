@@ -87,7 +87,7 @@ void rocke_moe_emit_gate_up_silu_epilogue_default(rocke_ir_builder_t* b,
                                                   rocke_value_t* M,
                                                   rocke_value_t* N,
                                                   rocke_value_t* Hidden,
-                                                  int c_per_lane,
+                                                  int d_per_lane,
                                                   rocke_value_t* batch_off_c)
 {
     (void)num_accs;
@@ -127,7 +127,7 @@ void rocke_moe_emit_gate_up_silu_epilogue_default(rocke_ir_builder_t* b,
     cell.c_neg_log2e = c_neg_log2e;
 
     rocke_moe_emit_cshuffle_stage(
-        b, spec, &cdec, Cs, storage_dtype, c_per_lane, rocke_moe_silu_cell, &cell);
+        b, spec, &cdec, Cs, storage_dtype, d_per_lane, rocke_moe_silu_cell, &cell);
 
     rocke_b_sync(b);
 
@@ -232,7 +232,7 @@ void rocke_moe_emit_interleaved_silu_epilogue(rocke_ir_builder_t* b,
                                               rocke_value_t* M,
                                               rocke_value_t* N,
                                               rocke_value_t* Hidden,
-                                              int c_per_lane,
+                                              int d_per_lane,
                                               rocke_value_t* batch_off_c)
 {
     (void)num_accs;
@@ -263,7 +263,7 @@ void rocke_moe_emit_interleaved_silu_epilogue(rocke_ir_builder_t* b,
     cell.storage_dtype = storage_dtype;
 
     rocke_moe_emit_cshuffle_stage(
-        b, spec, &cdec, C_smem, storage_dtype, c_per_lane, rocke_moe_acc_cell, &cell);
+        b, spec, &cdec, C_smem, storage_dtype, d_per_lane, rocke_moe_acc_cell, &cell);
 
     rocke_b_sync(b);
 

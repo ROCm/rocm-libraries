@@ -28,8 +28,8 @@
  *     zero_vec[_f32], vec_insert/vec_extract, scf_for_iter/scf_yield, mma,
  *     cast_f32_to, and the f16/bf16/fp8e4m3/bf8e5m2/f32 type singletons).
  *   - The MfmaAtom value type is rocke/helper_rocke.helpers.atoms.h's
- *     rocke_mfma_atom_t (fields m, n, k, a_per_lane, b_per_lane, c_per_lane,
- *     dtype_in, dtype_out, name). mfma_atom_for_dtype resolves atoms by
+ *     rocke_mfma_atom_t (fields m, n, k, a_per_lane, b_per_lane, d_per_lane,
+ *     dtype_in, dtype_d, name). mfma_atom_for_dtype resolves atoms by
  *     (dtype, m, n, k) over that catalog via rocke_mfma_atom().
  *   - validate_arch_and_block_size / validate_mfma_atom_in_catalog bind to
  *     rocke/helper_rocke.core.arch.h (ArchTarget.from_gfx, max_threads_per_block,
@@ -42,7 +42,7 @@
  * faithful port reproduces them inline inside rocke_mfma_k_loop /
  * rocke_store_acc_to_global, byte-for-byte:
  *     emit          -> rocke_b_mma(b, atom->name, a, b, c)
- *     zero_acc      -> rocke_b_zero_vec_f32(b, atom->c_per_lane)
+ *     zero_acc      -> rocke_b_zero_vec_f32(b, atom->d_per_lane)
  *     lane_to_output-> the 16x16 / 32x32 / 4x4 arith from atoms.py:536-591
  *
  * CALLBACKS. The Python `load_a`, `load_b`, `per_tile_post_mfma`, and `epilogue`
@@ -208,8 +208,8 @@ typedef rocke_value_t* (*rocke_mfma_post_fn)(rocke_ir_builder_t* b,
  *   acc = atom.emit(a, b_op, acc)   [-> rocke_b_mma(name, ...)];
  *   acc = per_tile_post_mfma(b, acc, kt)   (if non-NULL);
  *   yield acc.
- * initial_acc NULL => atom.zero_acc(b) [-> rocke_b_zero_vec_f32(c_per_lane)].
- * Returns the final per-lane <c_per_lane x f32> accumulator (the for-op's first
+ * initial_acc NULL => atom.zero_acc(b) [-> rocke_b_zero_vec_f32(d_per_lane)].
+ * Returns the final per-lane <d_per_lane x f32> accumulator (the for-op's first
  * result). iv_name/acc_name may be NULL (Python defaults "kt"/"acc").
  *
  * raise ValueError (K % atom.k != 0) -> builder sticky ROCKE_ERR_VALUE + NULL.
@@ -314,7 +314,7 @@ bool rocke_validate_arch_and_block_size(rocke_ir_builder_t* b,
  *     def validate_mfma_atom_in_catalog(atom, arch, *, where) -> None:
  *         target = ArchTarget.from_gfx(arch)
  *         if not target.mma.has_shape(a_dtype=atom.dtype_in, b_dtype=atom.dtype_in,
- *                 c_dtype=atom.dtype_out, m=atom.m, n=atom.n, k=atom.k):
+ *                 c_dtype=atom.dtype_d, m=atom.m, n=atom.n, k=atom.k):
  *             raise NotImplementedError("{where} MFMA atom ... not in the {arch}
  *                 MMA catalog; this configuration requires a different target.")
  *

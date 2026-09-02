@@ -214,7 +214,7 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
 
     /* C-accumulator warp distribution for the 16x16x16 atom (_C16_DIST, lines
      * 76-78). Built once (make_static_tile_distribution of
-     * make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16())); read by
+     * make_d_warp_dstr_encoding(MfmaAtom.f16_16x16x16())); read by
      * _mfma_16x16_c_row. The C layout is dtype-independent so the f16 atom drives
      * it for both fp16 and bf16. */
     const rocke_tile_distribution_t* C16_DIST;

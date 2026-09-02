@@ -79,6 +79,7 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                          a_name,
                                          a_name,
                                          "fp32",
+                                         "fp32",
                                          t->warp_tile_m,
                                          t->warp_tile_n,
                                          t->warp_tile_k);
@@ -441,7 +442,7 @@ rocke_kernel_def_t* rocke_build_wsp3_gemm(rocke_ir_builder_t* b,
     const rocke_mmaop_t* op;
     const rocke_archtarget_t* target;
     const rocke_type_t* storage_dtype;
-    int a_per_lane, b_per_lane, c_per_lane;
+    int a_per_lane, b_per_lane, d_per_lane;
     int block_m, block_n, block_k;
     int warp_m, warp_n, wtm, wtn, wtk;
     int mfmas_m, mfmas_n, k_atoms;
@@ -477,7 +478,7 @@ rocke_kernel_def_t* rocke_build_wsp3_gemm(rocke_ir_builder_t* b,
     {
         return NULL;
     }
-    rocke_gemm_atom_frag_lengths(op, &a_per_lane, &b_per_lane, &c_per_lane);
+    rocke_gemm_atom_frag_lengths(op, &a_per_lane, &b_per_lane, &d_per_lane);
     storage_dtype = rocke_gemm_storage_dtype(b, spec);
     if(storage_dtype == NULL)
     {
@@ -771,7 +772,7 @@ rocke_kernel_def_t* rocke_build_wsp3_gemm(rocke_ir_builder_t* b,
                                              M,
                                              N,
                                              C,
-                                             c_per_lane,
+                                             d_per_lane,
                                              NULL,
                                              NULL,
                                              false);
@@ -909,7 +910,7 @@ rocke_kernel_def_t* rocke_build_wsp3_gemm(rocke_ir_builder_t* b,
                                              M,
                                              N,
                                              C,
-                                             c_per_lane,
+                                             d_per_lane,
                                              NULL,
                                              NULL,
                                              false);
@@ -1077,7 +1078,7 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     t = &spec->tile;
 
     /* ---- per-lane MMA fragment widths -- */
-    rocke_gemm_atom_frag_lengths(ctx.op, &ctx.a_per_lane, &ctx.b_per_lane, &ctx.c_per_lane);
+    rocke_gemm_atom_frag_lengths(ctx.op, &ctx.a_per_lane, &ctx.b_per_lane, &ctx.d_per_lane);
 
     /* ---- block tile dims (aliases) -- */
     ctx.block_m = t->tile_m;

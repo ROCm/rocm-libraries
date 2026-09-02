@@ -58,7 +58,7 @@
  *       (rocke/helper_rocke.helpers.layouts.h)
  *   - the arch gate require_tiled_attention_arch / validate_tiled_attention_arch
  *       (instances/common/attention_arch.py -> rocke/helper_rocke.core.arch.h)
- *   - make_static_tile_distribution / make_c_warp_dstr_encoding
+ *   - make_static_tile_distribution / make_d_warp_dstr_encoding
  *       (rocke/helper_rocke.helpers.distribution.h, helper_rocke.helpers.atoms.h)
  *
  * THE KERNEL (per CTA = NUM_WARPS wave64s, each warp owns a 16/32-row M slice).

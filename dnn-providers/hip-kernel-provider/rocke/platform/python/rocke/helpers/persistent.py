@@ -146,8 +146,8 @@ def build_persistent_counter_init(
     #   (other waves are observers) so the optimiser cannot elide
     #   it.
     if block_size <= wave_size:
-        inc_per_lane = b.select(is_lead, b.const_i32(increment), b.const_i32(0))
-        fetched = b.global_atomic_add(counter, counter_idx, inc_per_lane)
+        ind_per_lane = b.select(is_lead, b.const_i32(increment), b.const_i32(0))
+        fetched = b.global_atomic_add(counter, counter_idx, ind_per_lane)
         return b.ds_bpermute(b.const_i32(0), fetched)
 
     if broadcast_slot is None:

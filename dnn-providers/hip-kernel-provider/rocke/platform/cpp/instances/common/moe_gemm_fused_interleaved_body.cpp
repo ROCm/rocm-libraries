@@ -52,7 +52,7 @@ static const rocke_type_t* rocke_moei_storage_dtype(const rocke_gemm_universal_s
     return rocke_scalar_by_name(d);
 }
 
-static int rocke_moei_c_per_lane(const rocke_gemm_universal_spec_t* u)
+static int rocke_moei_d_per_lane(const rocke_gemm_universal_spec_t* u)
 {
     const rocke_gemm_tile_spec_t* t = &u->tile;
     int wm = t->warp_tile_m;
@@ -233,7 +233,7 @@ bool rocke_moe_interleaved_build_ctx_init(
 
     /* ---- geometry ---- */
     const rocke_gemm_tile_spec_t* t = &u->tile;
-    ctx->c_per_lane = rocke_moei_c_per_lane(u);
+    ctx->d_per_lane = rocke_moei_d_per_lane(u);
     ctx->block_m = t->tile_m;
     ctx->block_n = t->tile_n;
     ctx->block_k = t->tile_k;
@@ -468,7 +468,7 @@ void rocke_moe_interleaved_emit_compute(rocke_moe_interleaved_build_ctx_t* ctx)
 
     /* _emit_interleaved_silu_epilogue(b, u, acc_res, C_smem, warp_m_idx,
      *     warp_n_idx, lane, block_m_off, block_n_off, M, N, Hidden,
-     *     c_per_lane, batch_off_c=batch_off_c) */
+     *     d_per_lane, batch_off_c=batch_off_c) */
     rocke_moe_emit_interleaved_silu_epilogue(b,
                                              &ctx->u,
                                              ctx->acc_res,
@@ -482,6 +482,6 @@ void rocke_moe_interleaved_emit_compute(rocke_moe_interleaved_build_ctx_t* ctx)
                                              ctx->M,
                                              ctx->N,
                                              ctx->Hidden,
-                                             ctx->c_per_lane,
+                                             ctx->d_per_lane,
                                              ctx->batch_off_c);
 }

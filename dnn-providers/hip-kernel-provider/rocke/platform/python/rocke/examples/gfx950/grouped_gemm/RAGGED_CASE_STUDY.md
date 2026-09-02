@@ -342,7 +342,7 @@ All four scatter sites (default, OPSW, COMBINE, CSHUF) use `c_rowbase()` + i64 p
 
 #### 8. LDS Token Staging (default ON, not gated)
 
-**Problem:** The default dense kernel loads per-row metadata (here: token index + routing weight) from global memory **per-element** in the epilogue. For ragged-MoE that's TM × c_per_lane = 1024 scattered `global_load` per tile, and the token index is also re-read in every K-tile's A-gather DTL load.
+**Problem:** The default dense kernel loads per-row metadata (here: token index + routing weight) from global memory **per-element** in the epilogue. For ragged-MoE that's TM × d_per_lane = 1024 scattered `global_load` per tile, and the token index is also re-read in every K-tile's A-gather DTL load.
 
 **Fix:** Stage `sorted_token_ids[m_base : m_base+TM]` into LDS **once per tile** (before the K-loop):
 

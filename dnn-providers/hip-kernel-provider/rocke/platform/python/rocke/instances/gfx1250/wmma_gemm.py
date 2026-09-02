@@ -69,7 +69,7 @@ def is_valid_spec(spec: WmmaGemmSpec, arch: str = "gfx1250"):
         family="wmma",
         a_dtype=spec.dtype,
         b_dtype=spec.dtype,
-        c_dtype="fp32",
+        c_dtype="fp32", d_dtype="fp32",
         m=_WMMA_M,
         n=_WMMA_N,
         k=_WMMA_K,
