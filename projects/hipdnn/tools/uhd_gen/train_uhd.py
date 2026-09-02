@@ -107,7 +107,47 @@ def train_model(
     model = lgb.train(params, train_data, num_boost_round=best_iter)
     logger.info("Trained model with %d trees", model.num_trees())
 
+    _report_out_of_range_predictions(model, X, target_col)
+
     return model
+
+
+def _report_out_of_range_predictions(
+    model: "lgb.Booster", features: np.ndarray, target_col: str
+) -> int:
+    """Report training rows where the model predicts a target it could never have seen.
+
+    The model is fitted on ``log1p(target)`` and the runtime inverts that with ``expm1`` to
+    recover the declared units. ``expm1`` is negative for any prediction below zero, so a
+    negative prediction here means a negative throughput -- a quantity the target cannot take.
+
+    Caught at training time because that is the cheapest place to catch it and the only place
+    it can be fixed: once the model ships, the runtime can do nothing but discard the score.
+    It is not fatal, because a partially-trained model is a legitimate intermediate state
+    during corpus development, and because the runtime bounds it regardless. It is loud
+    because a model doing this on its *own training data* will do it worse in the field.
+
+    Returns the number of offending rows, so a caller can decide to fail on it.
+    """
+    predictions = model.predict(features)
+    offending = predictions < 0.0
+    count = int(np.count_nonzero(offending))
+    if count == 0:
+        return 0
+
+    worst = float(np.expm1(predictions[offending].min()))
+    logger.error(
+        "Model predicts a negative %s for %d of %d training rows (worst: %.4g). "
+        "The target cannot be negative, so the runtime will discard these scores and rank "
+        "on declared order instead. This usually means the corpus contains rows whose "
+        "measured target is at or near zero, or that the feature set does not separate the "
+        "problems it is being asked to rank.",
+        target_col,
+        count,
+        len(predictions),
+        worst,
+    )
+    return count
 
 
 def _problem_groups(df: pd.DataFrame, problem_cols: list[str]) -> np.ndarray:

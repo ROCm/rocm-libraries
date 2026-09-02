@@ -13,6 +13,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -830,6 +832,75 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnmeasuredCandidateSortsLastUnderAMinObje
     // numerically below the 0 the unmeasured one reports.
     EXPECT_LT(scored.front().score, 0.0) << "the measured candidate did not come first";
     EXPECT_DOUBLE_EQ(scored.back().score, 0.0) << "the unmeasured candidate is not reporting 0";
+}
+
+TEST(TestIngestorUhdKernelHeuristic, ANegativeThroughputIsReportedAsAnErrorNotSwallowed)
+{
+    // A model predicting a value its target cannot take is broken, and the runtime's only
+    // recourse is to discard the score. Discarding it silently would leave an engine that
+    // looks like it ranks on a model while ranking on declared order -- which is precisely the
+    // failure mode RFC 0019 §12's observability exists to make visible.
+    //
+    // ERROR rather than WARN: the sibling WARN on this path is "not trained for this arch",
+    // where §9.3 says the model is still worth using. Here the number is wrong, not uncertain.
+    auto recorder = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(
+        HIPDNN_SEV_INFO);
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_negative_reported");
+    const auto fixture
+        = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/true, "log1p");
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    (void)heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "cannot take"))
+        << "a model predicting a negative throughput was discarded without a word";
+
+    // Every candidate was affected here, and the message has to say so: an engine whose model
+    // contributed nothing to a ranking is a different report from one that lost a candidate.
+    EXPECT_TRUE(recorder.hasLogContaining("Every candidate was affected"));
+
+    // Once per heuristic. The condition is a property of the model, so it recurs on every
+    // graph; repeating it per ranking would bury it.
+    const auto after = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
+    (void)heuristic->rankScored(catalogAgainstPriority(2048), context);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), after) << "the report repeated";
+}
+
+TEST(TestIngestorUhdKernelHeuristic, APartiallyAffectedRankingSaysTheModelStillDecidedTheRest)
+{
+    // The other half of the count, and why the count is worth carrying. One candidate
+    // extrapolating badly leaves a ranking that is still mostly the model's; reporting it the
+    // same way as a total failure would send someone hunting for the wrong problem.
+    auto recorder = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(
+        HIPDNN_SEV_INFO);
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_partial_out_of_range");
+    const auto fixture = writeFixture(
+        dir.path(), oneUsableOneOutOfRange(), "max", {}, /*calibrated=*/true, "identity");
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "1 of 2 candidates"));
+    EXPECT_TRUE(recorder.hasLogContaining("The remaining candidates ranked on the model."));
+
+    // And the usable candidate still won on its score rather than being dragged down with it.
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_GT(scored.front().score, 0.0);
+    EXPECT_DOUBLE_EQ(scored.back().score, 0.0);
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

@@ -396,6 +396,12 @@ private:
                 scored.push_back({scoreCandidate(row), &entry});
             }
 
+            const auto outOfRange = static_cast<size_t>(
+                std::count_if(scored.begin(), scored.end(), [](const Ranked& candidate) {
+                    return !std::isfinite(candidate.score.ordering);
+                }));
+            reportOutOfRangeOnce(outOfRange, scored.size());
+
             // scoreCandidate already replaced any non-finite value with -infinity, so the
             // comparator sees only real numbers. That matters beyond tidiness: NaN compares
             // false both ways, so it reads as "equivalent" to every element while real scores
@@ -544,7 +550,11 @@ private:
         // what the number means: TreeDataAdapter sums leaves and has no transform and no units.
         if(!std::isfinite(recovered) || recovered < 0.0)
         {
-            warnScoreOutOfRangeOnce(raw, recovered);
+            // Not reported here. One ranking can trip this for a single candidate or for all
+            // of them, and those mean different things -- a bad extrapolation versus a model
+            // that is useless on this problem. rankWith counts them and reports which.
+            _lastOutOfRangeRaw = raw;
+            _lastOutOfRangeRecovered = recovered;
             return {-std::numeric_limits<double>::infinity(), 0.0};
         }
 
@@ -557,26 +567,36 @@ private:
         return {oriented, oriented};
     }
 
-    /// Warns the first time this heuristic produces an unusable score, and never again.
+    /// Reports a model predicting outside the range its target can occupy, once per heuristic.
     ///
-    /// Once, because the condition is a property of the model rather than of the graph: if it
-    /// happens for one kernel it will happen for many, and a per-candidate warning would bury
-    /// the fact it is trying to report. It is worth reporting at all because a model predicting
-    /// outside its target's range is broken in training, and the 0 it degrades to is otherwise
-    /// indistinguishable from an engine that simply has no model.
-    void warnScoreOutOfRangeOnce(double raw, double recovered) const
+    /// ERROR, not WARN. The one WARN peer on this path is "not trained for this architecture",
+    /// which RFC 0019 §9.3 treats as still-useful -- the model is outside its distribution but
+    /// its ordering may hold. This is the other kind: a negative throughput is not a value the
+    /// target can take, so the number is wrong rather than uncertain and the score is
+    /// discarded. That puts it with the hash-mismatch and load-failure peers, which are ERROR.
+    ///
+    /// Once per heuristic, because the condition is a property of the model and so recurs for
+    /// every graph; a per-ranking message would bury what it is trying to report. The counts
+    /// are what make it diagnosable -- @p affected of @p total says whether this was a single
+    /// bad extrapolation or a model that cannot rank this problem at all.
+    void reportOutOfRangeOnce(size_t affected, size_t total) const
     {
-        if(_warnedScoreOutOfRange.exchange(true))
+        if(affected == 0 || _reportedScoreOutOfRange.exchange(true))
         {
             return;
         }
-        HIPDNN_PLUGIN_LOG_WARN("uhd: " << _describedBy << " predicted a score outside the range "
-                                       << "its target occupies (raw=" << raw << ", recovered="
-                                       << recovered << ", transform='" << _config.scoreTransform
-                                       << "', calibrated="
-                                       << (_config.scoreCalibrated ? "true" : "false")
-                                       << "). Treating it as no measurement (0). Further "
-                                          "occurrences for this heuristic are not logged.");
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "uhd: " << _describedBy << " predicted a score its target cannot take for " << affected
+                    << " of " << total << " candidates (raw=" << _lastOutOfRangeRaw
+                    << ", recovered=" << _lastOutOfRangeRecovered << ", transform='"
+                    << _config.scoreTransform
+                    << "'). A throughput cannot be negative, so those scores are discarded and "
+                       "those candidates rank last. "
+                    << (affected == total
+                            ? "Every candidate was affected, so this ranking is declared order "
+                              "and the model contributed nothing."
+                            : "The remaining candidates ranked on the model.")
+                    << " Further occurrences for this heuristic are not logged.");
     }
 
     /// RFC 0019 §3.1's arch -> UHD map, and §9.2's per-engine cache of what has been
@@ -592,9 +612,15 @@ private:
     std::shared_ptr<const uhd::FeatureExtractor> _extractor;
     double _objectiveSign;
 
-    /// Set the first time an unusable score is seen. Mutable and atomic because ranking runs
-    /// through a shared_ptr<const> from any thread.
-    mutable std::atomic<bool> _warnedScoreOutOfRange{false};
+    /// Set the first time an out-of-range score is reported. Mutable and atomic because
+    /// ranking runs through a shared_ptr<const> from any thread.
+    mutable std::atomic<bool> _reportedScoreOutOfRange{false};
+
+    /// The most recent offending pair, carried to the report so it names a concrete value.
+    /// Racy under concurrent ranking, which is acceptable: it is diagnostic detail on a message
+    /// that fires once, and any offending pair illustrates the condition as well as another.
+    mutable double _lastOutOfRangeRaw = 0.0;
+    mutable double _lastOutOfRangeRecovered = 0.0;
     std::string _describedBy;
 };
 

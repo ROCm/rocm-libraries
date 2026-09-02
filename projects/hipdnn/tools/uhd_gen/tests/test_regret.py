@@ -9,6 +9,8 @@ backwards.
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -158,3 +160,50 @@ def test_a_corpus_too_small_to_split_is_refused():
             problem_cols=["q.M", "q.N"],
             n_splits=5,
         )
+
+
+def test_negative_prediction_is_reported(caplog):
+    """A model predicting a target its units cannot take must say so at training time.
+
+    The runtime bounds this regardless, but by then the only recourse is to discard the score.
+    Training is where it can still be fixed, and a model doing it on its own training data will
+    do it worse in the field.
+    """
+    lgb = pytest.importorskip("lightgbm")
+    np = pytest.importorskip("numpy")
+
+    from uhd_gen.train_uhd import _report_out_of_range_predictions
+
+    class _AlwaysNegative:
+        """Stands in for a booster; the check only calls predict()."""
+
+        @staticmethod
+        def predict(features):
+            return np.full(len(features), -0.75)
+
+    features = np.zeros((4, 2))
+    with caplog.at_level(logging.ERROR):
+        count = _report_out_of_range_predictions(_AlwaysNegative(), features, "tflops")
+
+    assert count == 4
+    assert "negative tflops" in caplog.text
+    assert "4 of 4" in caplog.text
+
+
+def test_a_wholly_positive_model_reports_nothing(caplog):
+    """The quiet path, so the check cannot become noise that gets ignored."""
+    pytest.importorskip("lightgbm")
+    np = pytest.importorskip("numpy")
+
+    from uhd_gen.train_uhd import _report_out_of_range_predictions
+
+    class _AlwaysPositive:
+        @staticmethod
+        def predict(features):
+            return np.full(len(features), 1.5)
+
+    with caplog.at_level(logging.ERROR):
+        count = _report_out_of_range_predictions(_AlwaysPositive(), np.zeros((3, 2)), "tflops")
+
+    assert count == 0
+    assert caplog.text == ""
