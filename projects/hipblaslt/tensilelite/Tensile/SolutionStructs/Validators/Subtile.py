@@ -150,10 +150,18 @@ def subtileTLU1StackReason(state, tc, mtTiles, stack, bpe):
   """Why `stack` cannot lay out the TLU=1 operand tc, or None when it can."""
   mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
   strips = -(-mtTiles // stack)
+  axisWaves = state["MIWaveGroup"][0 if tc == 'A' else 1]
   # A partial tail strip has no register list of its own, so the GR emit indexes
   # past the end of localSubtilesRegister.  Padding is only emittable while the
   # operand is a single strip.
-  if mtTiles % stack != 0 and strips > 1:
+  #
+  # One wave on the axis is the exception: that wave owns every strip, so
+  # TileInfo rounds localSubtileGrid[0] up the way globalSubtileGrid already
+  # does and the tail is just the documented surplus, fetched but never read.
+  # Several axis waves cannot, because localSubtileGrid[0] also scales the
+  # per-wave M base: rounding it up would move where a wave reads A and B
+  # without moving where the epilogue stores its rows.
+  if axisWaves > 1 and mtTiles % stack != 0 and strips > 1:
     return ("UseSubtileImpl=1 TLU=1 pads tensor %s across more than one "
             "LDS strip: %d MMA tiles on a stack of %d is %d strips with a "
             "partial tail, which the GR emit cannot address (MacroTile=%d)"

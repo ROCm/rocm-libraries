@@ -512,7 +512,21 @@ class TileInfo:
       perWaveMTiles = int(self.localMMATileGrid[0])
       self.globalSubtileGrid = _wholeStripsAlongFreeDim(gr_cfg, self.macroTile, self.depthU)
       self.grWavesPerStrip   = _wavesSharingOneStrip(grStackM, perWaveMTiles)
-      self.localSubtileGrid  = [max(1, int(perWaveMTiles / grStackM)),
+      # Strips this wave owns.  The plain ratio floors, which disagrees with the
+      # rounded-up globalSubtileGrid[0] whenever the stack does not divide the
+      # free dim: a 9-tile dim over a 2-tile stack wants 5 strips but floors to
+      # 4, and the trailing strip is then never fetched.  With one wave on the
+      # axis the wave owns every strip, so take the same round-up and the two
+      # agree by construction.  Only safe here: localSubtileGrid[0] doubles as
+      # the per-wave M base multiplier, and with several axis-waves growing it
+      # would move where a wave reads A/B without moving where the epilogue
+      # stores its rows.  Those per-wave terms are suppressed at one wave.
+      axisWaves = int(self.waveGroupSize) if self.waveGroupSize else 1
+      if axisWaves == 1 and self.grWavesPerStrip == 1:
+        localStrips = int(self.globalSubtileGrid[0])
+      else:
+        localStrips = max(1, int(perWaveMTiles / grStackM))
+      self.localSubtileGrid  = [localStrips,
                                  int(self.localMMATileGrid[1] / self.subtileShape[1])]
       self.subtileSize       = gr_cfg.subtileSizeBytes()
 

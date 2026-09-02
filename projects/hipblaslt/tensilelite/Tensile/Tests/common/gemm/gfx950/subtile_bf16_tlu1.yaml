@@ -204,6 +204,15 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1, 3, 3,  2, 2]   # MT96x96   wg2x2
           - [16, 16, 32, 1,  1, 6, 6,  2, 2]   # MT192x192 wg2x2
           - [16, 16, 32, 1,  1, 6, 4,  1, 1]   # MT96x64   wg1x1
+          # 16*odd free dims.  The stack cannot divide an odd tile count, so the
+          # last strip is a partial one whose surplus M tiles are fetched and
+          # never read.  That only resolves when the axis has a single wave,
+          # hence wg1 on whichever dim is 144 or 176.
+          - [16, 16, 32, 1,  1, 9,  2,  1, 4]  # MT144x128 wg1x4
+          - [16, 16, 32, 1,  1, 2,  9,  4, 1]  # MT128x144 wg4x1
+          - [16, 16, 32, 1,  1, 11, 2,  1, 4]  # MT176x128 wg1x4
+          - [16, 16, 32, 1,  1, 2, 11,  4, 1]  # MT128x176 wg4x1
+          - [16, 16, 32, 1,  1, 9,  4,  1, 4]  # MT144x256 wg1x4
         - PrefetchGlobalRead: [0]
         - PrefetchLocalRead: [0]
         - DepthU: [64]
@@ -217,6 +226,10 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [192, 192, 1, 256]
           - Exact: [384, 384, 1, 128]
+          - Exact: [1152, 1152, 1, 256]  # 144*8 / 176*6.5 -- aligned for 144
+          - Exact: [1000, 1000, 1, 256]  # divides neither 144 nor 176
+          - Exact: [145, 177, 1, 256]    # one element past a single tile
+          - Exact: [1152, 1152, 1, 288]  # K tail on top of the free-dim edge
 
   -
     - # NT, M/N edge and K tail, including odd free-dim extents.  fp4 forbids
