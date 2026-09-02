@@ -213,12 +213,8 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
         }
     }
 
-    const Flash2Selection sel = selectFlash2Config(params.batch,
-                                                   params.num_heads_q,
-                                                   params.seq_len_q,
-                                                   params.head_dim,
-                                                   params.causal,
-                                                   cuCount);
+    const Flash2Selection sel = selectFlash2Config(
+        params.batch, params.numHeadsQ, params.seqLenQ, params.headDim, params.causal, cuCount);
 
     // Split-K execution is not yet plumbed through execute() (it needs a second
     // merge launch plus a workspace pointer). Record the decision, run single
@@ -246,11 +242,11 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
             params.qPerCta = K_FLASH2_LEGACY.qPerCta;
         }
     }
-    const char* funcName = flash2KernelName(params.head_dim);
+    const char* funcName = flash2KernelName(params.headDim);
     if(funcName == nullptr)
     {
         const std::string msg = "HipFlash2FwdPlanBuilder::buildPlan -- unsupported head_dim="
-                                + std::to_string(params.head_dim);
+                                + std::to_string(params.headDim);
         HIPDNN_PLUGIN_LOG_ERROR(msg);
         throw std::runtime_error(msg);
     }
@@ -326,9 +322,8 @@ std::vector<data_objects::KnobT>
 // ---------------------------------------------------------------------------
 // extractParams (private helper) -- Finding 1 fix: restored missing body
 // ---------------------------------------------------------------------------
-Flash2FwdParams
-    HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
-                                           const flatbuffer_utilities::IGraph& opGraph) const
+Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
+                                                       const flatbuffer_utilities::IGraph& opGraph)
 {
     Flash2FwdParams p{};
 
@@ -341,38 +336,39 @@ Flash2FwdParams
     p.vUid = attrs.v_tensor_uid();
     p.oUid = attrs.o_tensor_uid();
 
-    auto* Q = tensorMap.at(p.qUid);
-    auto* K = tensorMap.at(p.kUid);
-    auto* V = tensorMap.at(p.vUid);
-    auto* O = tensorMap.at(p.oUid);
+    auto* q = tensorMap.at(p.qUid);
+    auto* k = tensorMap.at(p.kUid);
+    auto* v = tensorMap.at(p.vUid);
+    auto* o = tensorMap.at(p.oUid);
 
-    p.batch = static_cast<int>(Q->dims()->Get(0));
-    p.num_heads_q = static_cast<int>(Q->dims()->Get(1));
-    p.seq_len_q = static_cast<int>(Q->dims()->Get(2));
-    p.head_dim = static_cast<int>(Q->dims()->Get(3));
+    p.batch = static_cast<int>(q->dims()->Get(0));
+    p.numHeadsQ = static_cast<int>(q->dims()->Get(1));
+    p.seqLenQ = static_cast<int>(q->dims()->Get(2));
+    p.headDim = static_cast<int>(q->dims()->Get(3));
 
-    p.num_heads_k = static_cast<int>(K->dims()->Get(1));
-    p.seq_len_kv = static_cast<int>(K->dims()->Get(2));
+    p.numHeadsK = static_cast<int>(k->dims()->Get(1));
+    p.seqLenKv = static_cast<int>(k->dims()->Get(2));
 
-    p.attn_scale = 0.0f;
+    p.attnScale = 0.0f;
     if(attrs.attn_scale_value().has_value())
-        p.attn_scale = attrs.attn_scale_value().value();
+    {
+        p.attnScale = attrs.attn_scale_value().value();
+    }
 
     p.causal = attrs.causal_mask();
 
-    auto toI64 = [](int64_t v) { return static_cast<int64_t>(v); };
-    p.q_stride_batch = toI64(Q->strides()->Get(0));
-    p.q_stride_head = toI64(Q->strides()->Get(1));
-    p.q_stride_seq = toI64(Q->strides()->Get(2));
-    p.k_stride_batch = toI64(K->strides()->Get(0));
-    p.k_stride_head = toI64(K->strides()->Get(1));
-    p.k_stride_seq = toI64(K->strides()->Get(2));
-    p.v_stride_batch = toI64(V->strides()->Get(0));
-    p.v_stride_head = toI64(V->strides()->Get(1));
-    p.v_stride_seq = toI64(V->strides()->Get(2));
-    p.o_stride_batch = toI64(O->strides()->Get(0));
-    p.o_stride_head = toI64(O->strides()->Get(1));
-    p.o_stride_seq = toI64(O->strides()->Get(2));
+    p.qStrideBatch = q->strides()->Get(0);
+    p.qStrideHead = q->strides()->Get(1);
+    p.qStrideSeq = q->strides()->Get(2);
+    p.kStrideBatch = k->strides()->Get(0);
+    p.kStrideHead = k->strides()->Get(1);
+    p.kStrideSeq = k->strides()->Get(2);
+    p.vStrideBatch = v->strides()->Get(0);
+    p.vStrideHead = v->strides()->Get(1);
+    p.vStrideSeq = v->strides()->Get(2);
+    p.oStrideBatch = o->strides()->Get(0);
+    p.oStrideHead = o->strides()->Get(1);
+    p.oStrideSeq = o->strides()->Get(2);
 
     return p;
 }

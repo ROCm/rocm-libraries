@@ -481,6 +481,7 @@ class TestGetSourceFileStringCustomKernelPath:
         assert ti.getRegCaps().get("MaxVgpr") is not None, (
             "rocisa singleton not properly initialized; getRegCaps() returned empty dict"
         )
+        yield
 
     def _make_kernel(self):
         """Construct a kernel object matching the production custom-kernel dict."""

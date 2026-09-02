@@ -303,6 +303,8 @@ static void printKernelConfigHelp(std::ostream& os) {
 
 int main(int argc, char** argv) {
     BackendRegistry::registerAllBackends();
+    AllocatorRegistry::registerAllAllocators();
+    AllocationRulesRegistry::registerAll();
 
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
