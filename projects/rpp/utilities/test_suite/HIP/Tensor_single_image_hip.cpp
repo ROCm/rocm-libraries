@@ -664,8 +664,8 @@ int main(int argc, char** argv) {
             }
             if (errorCodeCapture != RPP_SUCCESS) {
                 cout << "\nThe functionality " << func << " returned an error status "
-                     << rppGetStatusString(errorCodeCapture) << " on run number " << perfRunCount + 1
-                     << " of " << numRuns << " runs.\n";
+                     << rppGetStatusString(errorCodeCapture) << " on run number "
+                     << perfRunCount + 1 << " of " << numRuns << " runs.\n";
                 CHECK_RETURN_STATUS(hipFree(d_input));
                 if (dualInputCase) {
                     CHECK_RETURN_STATUS(hipFree(d_inputSecond));
