@@ -57,7 +57,7 @@ struct tensor_view
     using DataType_   = remove_cvref_t<DataType>;
     using TensorDesc  = remove_cvref_t<TensorDesc_>;
     using TensorIndex = array<index_t, TensorDesc::get_num_of_top_dimension()>;
-    using TensorCoord = decltype(make_tensor_coordinate(TensorDesc{}, TensorIndex{}));
+    using TensorCoord = decltype(make_tensor_coordinate<LargeTensor_>(TensorDesc{}, TensorIndex{}));
     static constexpr auto DstInMemOp  = DstInMemOp_;
     static constexpr bool LargeTensor = LargeTensor_;
     using OffsetType                  = std::conditional_t<LargeTensor, long_index_t, index_t>;
