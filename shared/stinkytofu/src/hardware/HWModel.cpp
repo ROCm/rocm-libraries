@@ -21,7 +21,9 @@ constexpr HWModel kGfx1250Model = {
     .lds =
         {
             .readQueueDepth = 16,
-            .readDrainLatency = 72,
+            // 0 => derive barrier-timing drain latency dynamically from
+            // matching ds_read count and the latest ds_read's own latency.
+            .readDrainLatency = 0,
             .readThrottleLatency = 72,
         },
     .barrier =
@@ -38,6 +40,17 @@ constexpr HWModel kGfx1250Model = {
         {
             .rules = kCdna5HazardRules,
             .numRules = kNumCdna5HazardRules,
+        },
+    .delayAlu =
+        {
+            .valuDepth = 5,
+            .transDepth = 4,
+            .saluCycleMax = 4,
+        },
+    .counters =
+        {
+            .hasSplitLoadStoreCnt = true,
+            .hasSplitStoreCntAsyncCnt = true,  // only async stores on this arch
         },
 };
 

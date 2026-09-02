@@ -28,7 +28,7 @@ import shutil
 import subprocess
 
 from pathlib import Path
-from typing import List, Union, NamedTuple
+from typing import Dict, List, Optional, Union, NamedTuple
 
 from Tensile.Common import ensurePath, print2
 from Tensile.Common.Architectures import isaToGfx
@@ -56,6 +56,7 @@ def buildAssemblyCodeObjectFiles(
       destRoot: Union[Path, str],
       asmDir: Union[Path, str],
       compress: bool=True,
+      outputArchNames: Optional[Dict[str, str]]=None,
     ):
     """Builds code object files from assembly files.
 
@@ -68,12 +69,15 @@ def buildAssemblyCodeObjectFiles(
             features), so the routing here is the bare gfx.
         asmDir: The directory containing the assembly files.
         compress: Whether to compress the code object files.
+        outputArchNames: base gfx -> output subtree; a stepping routes into
+            destRoot/<stepping>/ keeping the ISA filename. Identity for ordinary.
     """
 
     extObj = ".o"
     extCo = ".co"
     extCoRaw = ".co.raw"
 
+    outArchNames = outputArchNames or {}
     destRoot = Path(destRoot)
     archKernelMap = collections.defaultdict(list)
     for k in kernels:
@@ -85,7 +89,7 @@ def buildAssemblyCodeObjectFiles(
         continue
 
       gfx = isaToGfx(arch)
-      destDir = Path(ensurePath(destRoot / gfx))
+      destDir = Path(ensurePath(destRoot / outArchNames.get(gfx, gfx)))
 
       objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
       coFileMap = collections.defaultdict(set)

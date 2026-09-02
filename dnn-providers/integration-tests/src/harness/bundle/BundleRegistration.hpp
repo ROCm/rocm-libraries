@@ -4,6 +4,7 @@
 #pragma once
 
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <variant>
@@ -18,12 +19,23 @@
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportClaims.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
 
 namespace detail
 {
+
+inline std::filesystem::path sidecarPathFor(const DiscoveredBundle& disc)
+{
+    if(disc.isTemplateSweepCase())
+    {
+        return disc.jsonPath.parent_path() / "support.json";
+    }
+    return supportJsonPath(disc.diagnosticPath());
+}
 
 // A discovered bundle paired with its eagerly-loaded contents. The bundle is
 // loaded once at registration time (not per test run) and shared into the test
@@ -34,6 +46,7 @@ struct LoadedBundle
     std::string suiteName;
     std::string testName;
     std::shared_ptr<IntegrationTestBundle> bundle;
+    SupportClaimLocator claimLocator;
 };
 
 // A GTest test body that immediately fails with a stored diagnostic message.
@@ -135,11 +148,20 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc)
         return SkippedLoad{"Skipping bundle " + diagnosticPath.string() + ": " + toString(*error)};
     }
 
+    SupportClaimLocator locator;
+    locator.sidecarPath = sidecarPathFor(disc);
+    locator.diagnosticPath = diagnosticPath.string();
+    if(disc.isTemplateSweepCase())
+    {
+        locator.caseId = disc.sweep->caseId;
+    }
+
     return LoadedBundle{diagnosticPath,
                         disc.suiteName,
                         disc.testName,
                         std::make_shared<IntegrationTestBundle>(
-                            std::move(std::get<IntegrationTestBundle>(loadResult)))};
+                            std::move(std::get<IntegrationTestBundle>(loadResult))),
+                        locator};
 }
 
 // Registers one GTest test per preloaded bundle, run by the Engine executor.
@@ -157,19 +179,20 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles)
 {
     for(const auto& bundle : bundles)
     {
-        ::testing::RegisterTest(
-            bundle.suiteName.c_str(),
-            bundle.testName.c_str(),
-            nullptr,
-            nullptr,
-            __FILE__,
-            __LINE__,
-            [loaded = bundle.bundle, path = bundle.jsonPath]() -> ::testing::Test* {
-                auto* test = new IntegrationBundleVerificationHarness(
-                    /*requiresDevice=*/true);
-                test->setBundle(loaded, path);
-                return test;
-            });
+        ::testing::RegisterTest(bundle.suiteName.c_str(),
+                                bundle.testName.c_str(),
+                                nullptr,
+                                nullptr,
+                                __FILE__,
+                                __LINE__,
+                                [loaded = bundle.bundle,
+                                 path = bundle.jsonPath,
+                                 locator = bundle.claimLocator]() -> ::testing::Test* {
+                                    auto* test = new IntegrationBundleVerificationHarness(
+                                        /*requiresDevice=*/true);
+                                    test->setBundle(loaded, path, locator);
+                                    return test;
+                                });
     }
 }
 
@@ -201,8 +224,8 @@ inline void registerBundleTests()
     auto dataDir = resolveDataDir();
     if(!std::filesystem::exists(dataDir))
     {
-        HIPDNN_PLUGIN_LOG_WARN(
-            "--allow-bundles enabled but data directory does not exist: " << dataDir);
+        std::cerr << "WARNING: Bundle tests are enabled but the data directory does not exist: "
+                  << dataDir << "\n";
         return;
     }
 
@@ -219,7 +242,8 @@ inline void registerBundleTests()
 
     if(discovered.empty())
     {
-        HIPDNN_PLUGIN_LOG_WARN("--allow-bundles enabled but no bundles found in " << dataDir);
+        std::cerr << "WARNING: Bundle tests are enabled but no bundles were found in " << dataDir
+                  << "\n";
         return;
     }
 
@@ -238,7 +262,17 @@ inline void registerBundleTests()
     bundles.reserve(discovered.size());
     for(const auto& disc : discovered)
     {
+        if(TestConfig::get().enforceSupportClaims())
+        {
+            supportClaimCoverage().graphsFound++;
+            if(std::filesystem::exists(detail::sidecarPathFor(disc)))
+            {
+                supportClaimCoverage().graphsWithClaims++;
+            }
+        }
+
         auto outcome = detail::classifyBundle(disc);
+
         if(auto* failed = std::get_if<detail::FailedLoad>(&outcome))
         {
             HIPDNN_PLUGIN_LOG_ERROR(failed->message);
@@ -256,7 +290,7 @@ inline void registerBundleTests()
 
     if(bundles.empty())
     {
-        HIPDNN_PLUGIN_LOG_WARN("No bundles could be loaded from " << dataDir);
+        std::cerr << "WARNING: No bundles could be loaded from " << dataDir << "\n";
         return;
     }
 

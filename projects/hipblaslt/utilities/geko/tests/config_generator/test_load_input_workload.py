@@ -68,7 +68,7 @@ def test_apply_defaults_log_mode_roundtrip() -> None:
     cfg = {"ARCH": "gfx950", "GEMM_LOG_PATH": str(wf), "SIZE_OPTION": 2}
     validate_input_config(cfg)
     apply_input_config_defaults(cfg)
-    assert "GA" in cfg
+    assert "search_space" in cfg
     assert cfg.get("GemmProblems") is None
 
 
@@ -86,7 +86,7 @@ def test_validate_rejects_unknown_arch() -> None:
         )
 
 
-def test_apply_defaults_macro_tile_opt_requires_ga() -> None:
+def test_apply_defaults_macro_tile_opt_tensile_size_option_zero_allowed() -> None:
     cfg = {
         "ARCH": "gfx950",
         "TRANSA": "N",
@@ -95,10 +95,26 @@ def test_apply_defaults_macro_tile_opt_requires_ga() -> None:
         "DestDataType": "B",
         "ComputeDataType": "S",
         "MACROTILE_OPT": True,
-        "GA": False,
+        "backend": "tensile",
     }
     validate_input_config(cfg)
-    with pytest.raises(NotImplementedError, match="MACROTILE_OPT only valid"):
+    apply_input_config_defaults(cfg)
+
+
+def test_apply_defaults_macro_tile_opt_tensile_nonzero_size_option_rejected() -> None:
+    cfg = {
+        "ARCH": "gfx950",
+        "TRANSA": "N",
+        "TRANSB": "N",
+        "DataType": "B",
+        "DestDataType": "B",
+        "ComputeDataType": "S",
+        "MACROTILE_OPT": True,
+        "backend": "tensile",
+        "SIZE_OPTION": 1,
+    }
+    validate_input_config(cfg)
+    with pytest.raises(NotImplementedError, match="only supported for SIZE_OPTION=0"):
         apply_input_config_defaults(cfg)
 
 
@@ -110,7 +126,7 @@ def test_apply_defaults_sets_non_ga_kernel_cap_and_mt_du_none() -> None:
         "DataType": "B",
         "DestDataType": "B",
         "ComputeDataType": "S",
-        "GA": False,
+        "backend": "tensile",
         "MACROTILE_OPT": False,
     }
     validate_input_config(cfg)
@@ -127,13 +143,13 @@ def test_apply_defaults_env_overrides_and_invalid_tokens(monkeypatch: pytest.Mon
         "DataType": "B",
         "DestDataType": "B",
         "ComputeDataType": "S",
-        "GA": False,
+        "backend": "tensile",
     }
     validate_input_config(cfg)
 
     monkeypatch.setenv("StreamK", "false")
     monkeypatch.setenv("MI_FILTER", "7")
-    monkeypatch.setenv("GA_VALIDATION_PROFILE", "bad-int")
+    monkeypatch.setenv("DUCTILE_VALIDATION_PROFILE", "bad-int")
     apply_input_config_defaults(cfg)
 
     assert cfg["StreamK"] is False
@@ -193,3 +209,32 @@ def test_load_prepared_non_log_mode_populates_gemm_problem(tmp_path: Path) -> No
     cfg = load_prepared_config_from_yaml(cfg_path)
     assert "GemmProblems" in cfg
     assert len(cfg["GemmProblems"]) == 1
+
+
+@pytest.mark.parametrize("dt", ["C", "Z"])
+def test_heuristic_rejected_for_complex_dtype(dt: str) -> None:
+    cfg = {
+        "ARCH": "gfx942",
+        "TRANSA": "N",
+        "TRANSB": "N",
+        "DataType": dt,
+        "DestDataType": dt,
+        "ComputeDataType": "S" if dt == "C" else "Z",
+        "search_space": "heuristic",
+    }
+    validate_input_config(cfg)
+    with pytest.raises(NotImplementedError, match="Heuristic search space"):
+        apply_input_config_defaults(cfg)
+
+
+def test_heuristic_rejected_for_complex_gemm_problems() -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("N", "N", "C", "C", "C")
+    cfg = {
+        "ARCH": "gfx942",
+        "search_space": "heuristic",
+        "GemmProblems": [GemmConfig(gt, [[64, 64, 1, 64]])],
+    }
+    with pytest.raises(NotImplementedError, match="Heuristic search space"):
+        apply_input_config_defaults(cfg)

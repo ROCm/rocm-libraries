@@ -18,6 +18,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// The static function-pointer callback path is unusable under the
+// SPIR-V JIT-link flow, so skip it in the device pass. Gate on
+// __HIP_DEVICE_COMPILE__ because when amdgcnspirv is the sole target
+// __SPIRV__ is also set in the host pass, which must still compile.
+#if !(defined(__HIP_DEVICE_COMPILE__) && defined(__SPIRV__))
+
 #include "test_callbacks.h"
 #include "hip/hiprtc.h"
 #include "rocfft_complex.h"
@@ -938,17 +944,11 @@ std::shared_ptr<fft_params::jit_cb_state_t> get_rank_jit_state(const fft_params&
         break;
     }
 
-    state->data.resize(rocfft_scoped_device::device_count());
+    // Allocate a cbdata for the current device and append to state->data
+    auto add_cb_data = [&]() {
+        gpubuf cb_data_dev;
 
-    // If specified does not already have a cbdata allocated for it,
-    // alloc callback data pointer and set in the output vec,
-    // assuming it's big enough for all devices
-    auto add_cb_data_for_device = [&](int deviceID) {
-        if(state->data[deviceID])
-            return;
-
-        rocfft_scoped_device dev(deviceID);
-        callback_test_data   cb_data_host;
+        callback_test_data cb_data_host;
 
         switch(type)
         {
@@ -974,59 +974,53 @@ std::shared_ptr<fft_params::jit_cb_state_t> get_rank_jit_state(const fft_params&
             break;
         }
 
-        auto hip_status = state->data[deviceID].alloc(sizeof(callback_test_data));
+        auto hip_status = cb_data_dev.alloc(sizeof(callback_test_data));
         if(hip_status != hipSuccess)
         {
             throw hip_runtime_error("Error occurred when allocating device memory for callback",
                                     hip_status);
         }
-        hip_status = hipMemcpy(state->data[deviceID].data(),
-                               &cb_data_host,
-                               sizeof(callback_test_data),
-                               hipMemcpyHostToDevice);
+        hip_status = hipMemcpy(
+            cb_data_dev.data(), &cb_data_host, sizeof(callback_test_data), hipMemcpyHostToDevice);
         if(hip_status != hipSuccess)
         {
             throw hip_runtime_error("Error occurred when copying device memory for callback",
                                     hip_status);
         }
+        state->data.emplace_back(std::move(cb_data_dev));
     };
 
-    // user-specified decomposition - alloc data for each brick
-    // in the fields on this rank
-    auto add_cb_data_for_fields = [&](const std::vector<fft_params::fft_field>& fields) {
-        for(const auto& f : fields)
+    const auto& fields = type == jit_callback_op::LOAD ? params.ifields : params.ofields;
+    if(fields.empty())
+    {
+        // for library-decomposed multi-GPU, one cb for each device
+        if(params.multiGPU > 1)
         {
-            for(const auto& b : f.bricks)
+            for(int i = 0; i < static_cast<int>(params.multiGPU); ++i)
             {
-                if(b.rank != mpi_rank)
-                    continue;
-                add_cb_data_for_device(b.device);
+                rocfft_scoped_device dev(i);
+                add_cb_data();
             }
         }
-    };
-
-    if(params.multiGPU > 1)
-    {
-        // library-decomposed multi-GPU, allocate one cbdata for each device
-        for(int device = 0; device < rocfft_scoped_device::device_count(); ++device)
+        else
         {
-            add_cb_data_for_device(device);
+            // cb data for current HIP device
+            add_cb_data();
         }
     }
     else
     {
-        // check i/o fields
-        switch(type)
+        // user-specified decomposition - copy func+data for each brick
+        // on this rank
+        for(size_t i = 0; i < fields.front().bricks.size(); ++i)
         {
-        case jit_callback_op::LOAD:
-            add_cb_data_for_fields(params.ifields);
-            break;
-        case jit_callback_op::STORE:
-            add_cb_data_for_fields(params.ofields);
-            break;
+            if(fields.front().bricks[i].rank != mpi_rank)
+                continue;
+
+            // cb data for this brick's device
+            rocfft_scoped_device dev(fields.front().bricks[i].device);
+            add_cb_data();
         }
-        // add cbdata for current device
-        add_cb_data_for_device(rocfft_scoped_device::current_device());
     }
     return state;
 }
@@ -1114,3 +1108,5 @@ void get_rank_store_callbacks_funcptr(const fft_params&                         
         }
     }
 }
+
+#endif

@@ -153,4 +153,5 @@ const double lambdas[] = {1.0, 5.5, 20.0, 100.0, 1234.5, 5000.0};
 
 INSTANTIATE_TEST_SUITE_P(poisson_distribution_tests,
                          poisson_distribution_tests,
-                         ::testing::ValuesIn(lambdas));
+                         ::testing::ValuesIn(lambdas),
+                         lambda_param_name);

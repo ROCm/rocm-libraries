@@ -44,7 +44,10 @@
 #include "rocroller_host.hpp"
 #endif
 
+#include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Contractions.hpp>
+#include <Tensile/DataTypes.hpp>
+#include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
@@ -60,6 +63,7 @@
 #include <exception>
 #include <filesystem>
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -144,7 +148,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          hipblasLtBatchMode_t   batchMode,
                                                          int32_t                bias_stride,
                                                          int32_t                streamk_tile_scheduling_ext,
-                                                         int32_t                sm_count_target)
+                                                         int32_t                sm_count_target,
+                                                         int32_t                uniform_summation_order)
     : trans_a(trans_a)
     , trans_b(trans_b)
     , m(m)
@@ -216,6 +221,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , bias_stride(bias_stride)
     , streamk_tile_scheduling_ext(streamk_tile_scheduling_ext)
     , sm_count_target(sm_count_target)
+    , uniform_summation_order(uniform_summation_order)
 {
     if(this->bias_type == HIPBLASLT_DATATYPE_INVALID)
     {
@@ -2072,6 +2078,8 @@ namespace
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
 
+        tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
+
         // set AmaxD
         tensileProblem.setOutputAmaxD(prob.amaxD != nullptr);
         tensileProblem.setAmaxD(compute_type, true);
@@ -2330,6 +2338,8 @@ namespace
         // companion block in ConstructTensileProblem for details.
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
+
+        tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
         // set E
         if(is_e_enabled(prob.epilogue))
@@ -2846,18 +2856,35 @@ namespace
                 if(auto maybe_path = rocblaslt_find_library_relative_path(
                        /*relpath=*/std::nullopt, default_lib_path))
                     path = std::move(*maybe_path);
-                // Optionally, look for a `processor` sub-directory under the library path.
-                // Only use the subdir if a Tensile mapping file is actually present there;
-                // otherwise the directory may have been created by ExtOp/Transform installs
-                // without a corresponding Tensile library (multi-arch non-TheRock builds).
+                // Optionally, look for a per-architecture sub-directory under the library
+                // path. Only use the subdir if a Tensile mapping file is actually present
+                // there; otherwise the directory may have been created by ExtOp/Transform
+                // installs without a corresponding Tensile library (multi-arch non-TheRock
+                // builds). The subdir is revisioned (library/gfx1250v0/ for a v0 part, no
+                // fallback) while the mapping filenames keep the base `processor` token.
                 {
-                    auto processor_path     = path / processor;
+                    auto processor_path     = path / rocblaslt_internal_get_library_arch_name();
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
                     if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
                        || std::filesystem::exists(mapping_yaml))
-                        path = std::move(processor_path);
+                    {
+                        // Grab the chosen subdir name before the move. It differs
+                        // from the base `processor` only for a silicon revision
+                        // (e.g. gfx1250v0); log that -- the only runtime signal a
+                        // non-v1 revision was loaded.
+                        const auto libArch = processor_path.filename().string();
+                        path               = std::move(processor_path);
+                        if(libArch != processor
+                           && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
+                        {
+                            std::ostringstream msg;
+                            msg << "Loading ASIC-revision GEMM subtree: " << libArch
+                                << " (compiler target " << processor << ")" << std::endl;
+                            log_info(__func__, msg.str());
+                        }
+                    }
                 }
 
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -3196,6 +3223,40 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
     }
 }
 
+// Likewise for the uniform-summation-order request, applied before solution
+// ranking and before each isAlgoSupported query so the selection-time filter
+// and the launch gate see the same value. OR into any value already on the
+// problem so a default-false preference cannot clear a desc- or handle-level
+// enable.
+void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
+                                rocblaslt::RocGemmType gemmType,
+                                bool                   value)
+{
+    if(!gemmData)
+        return;
+    if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
+    {
+        auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+        if(data)
+        {
+            const bool existing = data->problem.getParams().uniformSummationOrder();
+            data->problem.setParams().setUniformSummationOrder(existing || value);
+        }
+    }
+    else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
+    {
+        auto data = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+        if(data)
+        {
+            for(auto& g : data->problem.gemms)
+            {
+                const bool existing = g.getParams().uniformSummationOrder();
+                g.setParams().setUniformSummationOrder(existing || value);
+            }
+        }
+    }
+}
+
 void initTensileGemmData(rocblaslt_handle       handle,
                          rocblaslt::RocGemmType gemmType,
                          hipblasOperation_t     opA,
@@ -3285,6 +3346,35 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 }
 #endif
 
+// Points inputs.Synchronizer at the region the chosen solution actually wants.
+//
+// Two consumers share this pointer and they need very different amounts: a
+// Stream-K kernel reads it as one flag per workgroup, a GSU (MBSK) kernel reads
+// it as the reduction area, which is orders of magnitude larger. They cannot
+// both be live in one kernel -- the Stream-K flag path requires
+// streamKAtomic == 0, and that path forces gsu to 1, which rules MBSK out -- so
+// one pointer is enough and only the target changes.
+//
+// It has to stay one pointer. ContractionInputs is exported by more than one
+// ROCm library (hipsparselt embeds its own TensileLite and exports the same
+// symbols), so adding a field to it makes the destructor resolve to a copy
+// compiled against the old layout and corrupts the heap.
+static void bindFlagRegion(const RocblasltContractionProblem&      prob,
+                           const TensileLite::ContractionSolution& solution,
+                           TensileLite::ContractionInputs&         inputs)
+{
+    if(prob.streamKFlags == nullptr)
+        return;
+    if(solution.sizeMapping.streamK <= 0 || solution.sizeMapping.streamKAtomic != 0)
+        return;
+    // outputAmaxD hands the same pointer to the amax counter, which would then
+    // land on top of flag zero. Leave those on the GSU region: no better than
+    // before for that combination, but no worse.
+    if(solution.problemType.outputAmaxD)
+        return;
+    inputs.Synchronizer = prob.streamKFlags;
+}
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
@@ -3342,6 +3432,17 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         int* solutionIndex = (int*)algo->data;
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
+
+        // A Stream-K solution reads these flags as one int per workgroup, and
+        // needs a region nobody else is touching; everything else reads them as
+        // the GSU reduction area, which is far larger and stays shared. The two
+        // never coincide in one kernel, so a single pointer serves both and the
+        // choice is made here, where the solution is finally known.
+        {
+            auto picked = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            if(picked)
+                bindFlagRegion(prob, *picked, data->inputs);
+        }
 
         if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
            || rocblaslt::Debug::Instance().printLogAsMarker()
@@ -3461,7 +3562,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // set XCC=1 to param when this is a fallback solution
             data->problem.setParams().setWGMXCC((isCUFallback ? 1 : 0));
 
-            auto kernels = solution->solve(data->problem, GetTensileInputs(prob), *hardware);
+            // Build the inputs here rather than inline, so the flag pointer can
+            // be pointed at this solution's region before the kernel arguments
+            // are packed. Passing GetTensileInputs(prob) straight in would use
+            // the problem's original pointer and drop the choice.
+            auto skInputs = GetTensileInputs(prob);
+            bindFlagRegion(prob, *solution, skInputs);
+            auto kernels = solution->solve(data->problem, skInputs, *hardware);
             // Remove this after supports getting comgr buffers from hip.
             bool isPreloaded = false;
             if(rocblaslt::Debug::Instance().preload())
@@ -3498,6 +3605,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
         }
+    }
+    // Must precede the generic handler: a user-input rejection, not an internal
+    // failure.
+    catch(const TensileLite::UniformSummationOrderError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt_status_invalid_value;
     }
     catch(const std::exception& e)
     {
@@ -3673,6 +3787,21 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
     return status;
 }
 
+// An explicit solution index skips softwarePredicate entirely, and the ext
+// GemmTuning splitK/wgm overrides reshape the launch after selection, so neither
+// is covered by the uniform-summation-order selection filter. Warn rather than
+// reject: the launch gate still runs, and a caller deliberately overriding the
+// heuristic should not be blocked.
+static void warnUniformSummationOrderBypass(const char* caller, bool hasTuning)
+{
+    std::ostringstream msg;
+    msg << "uniform summation order is enabled but this solution was selected by explicit index";
+    if(hasTuning)
+        msg << " with GemmTuning splitK/wgm overrides";
+    msg << "; the selection filter was bypassed";
+    log_error(caller, msg.str());
+}
+
 template <typename Tuning>
 rocblaslt_status makeArgument(rocblaslt_handle             handle,
                               const rocblaslt::RocGemmType gemmType,
@@ -3707,6 +3836,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
 
             data->algoIndex = *solutionIndex;
             auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+
+            if(data->problem.getParams().uniformSummationOrder())
+                warnUniformSummationOrderBypass(__func__, tuning != nullptr);
 
             if(tuning)
             {
@@ -3746,6 +3878,27 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->inputs.workspaceSize = workspaceSizeInBytes;
             data->problem.setWorkspaceSize(workspaceSizeInBytes);
 
+            // The object API learns its stream here, not at create time, and the
+            // flag pointer is baked into the kernel arguments by solve() just
+            // below. If this solution reads the flags as Stream-K, point them at
+            // a region private to this stream so two Gemm objects initialized on
+            // different streams cannot share one.
+            if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
+               && !solution->problemType.outputAmaxD)
+            {
+                void* region = nullptr;
+                if(rocblaslt_status s = handle->streamKFlagsForStream(stream, 0, &region);
+                   s != rocblaslt_status_success)
+                {
+                    log_error(__func__,
+                              "no Stream-K flag region left: this handle has already handed "
+                              "one to c_syncSkStreamSlots distinct streams");
+                    return s;
+                }
+                if(region != nullptr)
+                    data->inputs.Synchronizer = region;
+            }
+
             data->kernels = solution->solve(data->problem, data->inputs, *hardware);
         }
         else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -3756,6 +3909,10 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->algoIndex = *solutionIndex;
             auto solution
                 = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
+
+            if(!data->problem.gemms.empty()
+               && data->problem.gemms[0].getParams().uniformSummationOrder())
+                warnUniformSummationOrderBypass(__func__, tuning != nullptr);
 
             if(tuning)
             {
@@ -3820,6 +3977,35 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
             }
 
+            // Grouped GEMM does select Stream-K solutions, so isolation has to
+            // cover the stream as well as the problem index: offsetting by index
+            // alone keeps one grouped call internally safe but still shares the
+            // region with every other stream.
+            if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
+               && !solution->problemType.outputAmaxD)
+            {
+                for(size_t i = 0; i < data->inputs.grouped.size(); i++)
+                {
+                    // SynchronizerSizeCheck refuses every solution that uses
+                    // these flags once the group is wider than the block, so
+                    // problems past it never read the pointer. Give them the
+                    // stream's first region rather than failing a call that runs
+                    // fine without it.
+                    const size_t slot   = i < _rocblaslt_handle::c_syncSkSlotsPerStream ? i : 0;
+                    void*        region = nullptr;
+                    if(rocblaslt_status s = handle->streamKFlagsForStream(stream, slot, &region);
+                       s != rocblaslt_status_success)
+                    {
+                        log_error(__func__,
+                                  "no Stream-K flag region left: this handle has already "
+                                  "handed one to c_syncSkStreamSlots distinct streams");
+                        return s;
+                    }
+                    if(region != nullptr)
+                        data->inputs.grouped[i].Synchronizer = region;
+                }
+            }
+
             data->useUserArgs = useUserArgs;
             if(useUserArgs)
             {
@@ -3848,6 +4034,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             }
         }
         status = rocblaslt_status_success;
+    }
+    catch(const TensileLite::UniformSummationOrderError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt_status_invalid_value;
     }
     catch(const std::exception& e)
     {
@@ -4317,6 +4508,69 @@ void _convertToHeuristicResultArray(
     }
 }
 
+// One stderr record per problem whose solution lookup came back with nothing,
+// naming the uniform-summation-order clauses that eliminated the candidates.
+//
+// "No solution found" is all a caller can see today, and it does not say
+// whether uniform summation order was responsible or, if so, which of its
+// clauses did the work. Both are ordinary questions to ask when the feature is
+// switched on and a previously working problem stops resolving.
+//
+// The record is written on the selection path, so it only ever describes a
+// problem that produced no kernel and therefore no work.
+//
+// Format, one line, stable so it can be consumed by a script:
+//
+//   hipBLASLt-USO-NOSOLUTION uso=<0|1> op=<identifier> m=<M> n=<N> k=<K>
+//     batch=<B> transA=<0|1> transB=<0|1> a=<type> b=<type> c=<type> d=<type>
+//     compute=<type> candidates=<count> refused=<count>
+//     reasons=<Token:count,...|none>
+//
+// candidates counts the solutions that reached the uniform-summation-order
+// filter, that is, the ones that had already satisfied every other selection
+// predicate. candidates=0 therefore means the set was empty before the filter
+// ran and uniform summation order is not the reason.
+//
+// m/n/k/batch are the products over the free, bound and batch indices, which is
+// how the Stream-K resolution reduces the problem, so they agree with the
+// numbers the rest of the library reasons about even for a multi-index
+// contraction.
+inline void reportNoSolutionFound(TensileLite::ContractionProblemGemm const& tensile_prob)
+{
+    using TensileLite::DataTypeInfo;
+
+    size_t m = 1, n = 1, k = 1, batch = 1;
+    for(size_t i = 0; i < tensile_prob.freeIndicesA().size(); ++i)
+        m *= tensile_prob.freeSizeA(i);
+    for(size_t i = 0; i < tensile_prob.freeIndicesB().size(); ++i)
+        n *= tensile_prob.freeSizeB(i);
+    for(size_t i = 0; i < tensile_prob.boundIndices().size(); ++i)
+        k *= tensile_prob.boundSize(i);
+    for(size_t i = 0; i < tensile_prob.batchIndices().size(); ++i)
+        batch *= tensile_prob.batchSize(i);
+
+    size_t            examined = 0;
+    size_t            refused  = 0;
+    const std::string reasons
+        = TensileLite::uniformSummationOrderSelectionTallyReport(examined, refused);
+
+    std::ostringstream msg;
+    msg << "hipBLASLt-USO-NOSOLUTION"
+        << " uso=" << (tensile_prob.getParams().uniformSummationOrder() ? 1 : 0)
+        << " op=" << tensile_prob.operationIdentifier() << " m=" << m << " n=" << n << " k=" << k
+        << " batch=" << batch << " transA=" << (tensile_prob.transA() ? 1 : 0)
+        << " transB=" << (tensile_prob.transB() ? 1 : 0)
+        << " a=" << DataTypeInfo::Get(tensile_prob.a().dataType()).abbrev
+        << " b=" << DataTypeInfo::Get(tensile_prob.b().dataType()).abbrev
+        << " c=" << DataTypeInfo::Get(tensile_prob.c().dataType()).abbrev
+        << " d=" << DataTypeInfo::Get(tensile_prob.d().dataType()).abbrev
+        << " compute=" << DataTypeInfo::Get(tensile_prob.computeType()).abbrev
+        << " candidates=" << examined << " refused=" << refused << " reasons=" << reasons << "\n";
+
+    // stderr, so a caller parsing the bench CSV on stdout is unaffected.
+    std::cerr << msg.str();
+}
+
 template <typename T>
 inline auto getSolutions(
     const T& inputs,
@@ -4327,7 +4581,18 @@ inline auto getSolutions(
     bool                                          enableEpilogue,
     const int&                                    requestedAlgoCount)
 {
+    // Cached from TENSILE_DB at first use; off by default, so the whole
+    // diagnostic costs one predictable branch per lookup.
+    const bool reportEmpty
+        = TensileLite::Debug::Instance().printNoSolutionUniformSummationOrder();
+    if(reportEmpty)
+        TensileLite::uniformSummationOrderSelectionTallyReset();
+
     auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+
+    if(reportEmpty && solutions.empty())
+        reportNoSolutionFound(tensile_prob);
+
     return solutions;
 }
 
@@ -4760,8 +5025,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         // set this flag for SW predicate
         tensile_prob.setParams().setFallbackStatus(isCUFallback);
 
-        TensileLite::Task task(*hardware, tensile_prob, *solution);
         tensile_prob.setWorkspaceSize(algo->max_workspace_bytes);
+        TensileLite::Task task(*hardware, tensile_prob, *solution);
         if(!(*solution->hardwarePredicate)(*hardware))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -4775,26 +5040,20 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             log_error(__func__, "Solution is not supported");
             return rocblaslt_status_invalid_value;
         }
-        if(!(*solution->problemPredicate)(tensile_prob))
+        // Same predicate findTopSolutions uses: problem, task, StreamK
+        // dynamic-queue, and uniform summation order (Synchronizer pointer
+        // skipped at selection; launch still throws if it is missing).
+        if(!TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
+                                           task,
+                                           *hardware,
+                                           *solution,
+                                           tensile_prob))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
             {
                 std::ostringstream msg;
                 msg << "Software match: " << solution->description();
                 solution->problemPredicate->debugEval(tensile_prob, msg);
-                msg << std::endl;
-                log_info(__func__, msg.str());
-            }
-
-            log_error(__func__, "Solution is not supported");
-            return rocblaslt_status_invalid_value;
-        }
-        if(!(*solution->taskPredicate)(task))
-        {
-            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
-            {
-                std::ostringstream msg;
-                msg << "Software match: " << solution->description();
                 solution->taskPredicate->debugEval(task, msg);
                 msg << std::endl;
                 log_info(__func__, msg.str());
@@ -4803,10 +5062,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             log_error(__func__, "Solution is not supported");
             return rocblaslt_status_invalid_value;
         }
-        else
-        {
-            *workspaceSizeInBytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);
-        }
+        *workspaceSizeInBytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);
     }
     else if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGroupedGemm>::value)
     {
@@ -4867,19 +5123,26 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             tensile_prob.gemms[i].setWorkspaceSize(algo->max_workspace_bytes);
             tensile_prob.gemms[i].setWorkspaceSizeGroupedGemm(problemWs);
             tensile_prob.gemms[i].setGroupedGemmCount(tensile_prob.gemms.size());
+            tensile_prob.gemms[i].setGroupedGemm(true);
             // set this flag for SW predicate
             tensile_prob.gemms[i].setParams().setFallbackStatus(isCUFallback);
         }
         for(int i = 0; i < tensile_prob.gemms.size(); i++)
         {
+            TensileLite::Task task(*hardware, tensile_prob.gemms[i], *solution);
             if(!((*solution->hardwarePredicate)(*hardware)
-                 && (*solution->problemPredicate)(tensile_prob.gemms[i])))
+                 && TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
+                                                   task,
+                                                   *hardware,
+                                                   *solution,
+                                                   tensile_prob.gemms[i])))
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
                 {
                     std::ostringstream msg;
                     msg << "Match " << "[" << i << "]: " << solution->description();
                     solution->problemPredicate->debugEval(tensile_prob.gemms[i], msg);
+                    solution->taskPredicate->debugEval(task, msg);
                     msg << std::endl;
                     log_info(__func__, msg.str());
                 }
@@ -5092,6 +5355,7 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
         {
             data->problem.gemms[i].setWorkspaceSize(workspaceBytes);
             data->problem.gemms[i].setGroupedGemmCount(data->problem.gemms.size());
+            data->problem.gemms[i].setGroupedGemm(true);
         }
 
         auto solutions = library->findTopSolutionsGroupedGemm(

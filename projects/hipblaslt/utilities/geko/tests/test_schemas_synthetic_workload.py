@@ -20,6 +20,8 @@ from geko.schemas import GemmConfig, GemmType, RunState
         ("B", "B", "S"),
         ("H", "H", "S"),
         ("X", "S", "S"),
+        ("C", "C", "C"),
+        ("Z", "Z", "Z"),
     ],
 )
 def test_tensile_roundtrip_through_hipblaslt(dt, dd, cd):
@@ -167,3 +169,39 @@ def test_runstate_dump_load_and_verify_failures(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="hash mismatch"):
         bad.verify(input_file)
+
+
+def test_cgemm_conjugate_transpose_accepted() -> None:
+    gt = GemmType.from_tensile("N", "C", "C", "C", "C")
+    assert gt.transA == "N" and gt.transB == "C"
+    assert gt.gemm_name == "CCC_NC"
+
+
+def test_zgemm_both_conjugate_transpose() -> None:
+    gt = GemmType.from_tensile("C", "C", "Z", "Z", "Z")
+    assert gt.transA == "C" and gt.transB == "C"
+    assert gt.gemm_name == "ZZZ_CC"
+
+
+def test_conjugate_transpose_rejected_for_real_types() -> None:
+    with pytest.raises(ValueError, match="conjugate-transpose"):
+        GemmType.from_tensile("C", "N", "B", "B", "S")
+
+
+def test_conjugate_transpose_rejected_transB_real() -> None:
+    with pytest.raises(ValueError, match="conjugate-transpose"):
+        GemmType.from_tensile("N", "C", "S", "S", "S")
+
+
+def test_cgemm_hipblaslt_roundtrip() -> None:
+    a_t, b_t, c_t, comp = GemmType._tensile_triple_to_hipblaslt("C", "C", "C")
+    assert a_t == "f32_c" and b_t == "f32_c" and c_t == "f32_c" and comp == "f32_r"
+    gt = GemmType.from_hipblaslt("T", "N", a_t, b_t, c_t, comp)
+    assert (gt.data_type, gt.dest_data_type, gt.compute_data_type) == ("C", "C", "C")
+
+
+def test_zgemm_hipblaslt_roundtrip() -> None:
+    a_t, b_t, c_t, comp = GemmType._tensile_triple_to_hipblaslt("Z", "Z", "Z")
+    assert a_t == "f64_c" and b_t == "f64_c" and c_t == "f64_c" and comp == "f64_r"
+    gt = GemmType.from_hipblaslt("N", "N", a_t, b_t, c_t, comp)
+    assert (gt.data_type, gt.dest_data_type, gt.compute_data_type) == ("Z", "Z", "Z")

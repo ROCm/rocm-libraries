@@ -93,12 +93,13 @@ New to the DSL? Read in this order:
 30. [`development/engine_parity.md`](./development/engine_parity.md) — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
 31. [`development/invariants.md`](./development/invariants.md) — non-obvious rules (the landmines) for engine contributors
 32. [`development/troubleshooting.md`](./development/troubleshooting.md) — engine/build failure catalog (stale-artifact class, gate failures)
-33. [`reference/file_index.md`](./reference/file_index.md)
-34. [`reference/api_index.md`](./reference/api_index.md)
-35. [`reference/env_flags.md`](./reference/env_flags.md) — every environment variable (core, provider, tooling, diagnostic)
-36. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
-37. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
-38. [`reference/glossary.md`](./reference/glossary.md)
+33. [`development/debugging_rocgdb.md`](./development/debugging_rocgdb.md) — driving rocgdb: fault → authoring line, workgroup/lane, precise-memory
+34. [`reference/file_index.md`](./reference/file_index.md)
+35. [`reference/api_index.md`](./reference/api_index.md)
+36. [`reference/env_flags.md`](./reference/env_flags.md) — every environment variable (core, provider, tooling, diagnostic)
+37. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
+38. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
+39. [`reference/glossary.md`](./reference/glossary.md)
 
 ## One-Screen Summary
 

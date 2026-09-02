@@ -199,6 +199,12 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* block_m_off_v; /* grid.block_m_off OR swizzled row*tile_m */
     rocke_value_t* block_n_off_v; /* grid.block_n_off OR swizzled col*tile_n */
 
+    /* ---- grouped conv state (groups > 1; both NULL for groups == 1) ---- *
+     * group_idx      = b.block_id_z()           (the CTA's group in [0, groups))
+     * k_out_group_base = b.mul(group_idx, kpg)  (absolute output-filter base for B/D) */
+    rocke_value_t* group_idx;
+    rocke_value_t* k_out_group_base;
+
     /* ---- LDS plan + smem handles ---- */
     rocke_conv_lds_layout_t lds_layout; /* spec.effective_lds_layout()         */
     bool double_buffer; /* compv4 || async_dma || unroll_k     */
@@ -274,7 +280,9 @@ typedef struct rocke_conv_build_ctx
 
     /* ---- loaders (exactly one family populated; the other side NULL) ---- *
      * async_dma=True  : a_loader/b_loader are AsyncTileLoader.from_tile(...).
-     * async_dma=False : a_sync_loader/b_sync_loader are CoalescedTileLoader(...). */
+     * async_dma=False : a_sync_loader/b_sync_loader are CoalescedTileLoader(...).
+     * pipeline="wavelet": a_wavelet_loader/b_wavelet_loader are
+     *   CoalescedTileLoader sized to num_load_waves * wave_size threads. */
     bool async_dma; /* spec.async_dma (cached)         */
     rocke_async_tile_loader_t a_loader; /* async A loader (valid iff async)*/
     rocke_async_tile_loader_t b_loader; /* async B loader                  */
@@ -282,6 +290,28 @@ typedef struct rocke_conv_build_ctx
     rocke_coalesced_tile_loader_t a_sync_loader; /* sync A loader (valid iff sync)*/
     rocke_coalesced_tile_loader_t b_sync_loader; /* sync B loader                 */
     bool have_sync_loaders; /* true => *_sync_loader valid     */
+    rocke_coalesced_tile_loader_t a_wavelet_loader; /* wavelet load-wave A loader     */
+    rocke_coalesced_tile_loader_t b_wavelet_loader; /* wavelet load-wave B loader     */
+    bool have_wavelet_loaders; /* true => *_wavelet_loader valid */
+
+    /* ---- wavelet pipeline local state (populated when pipeline=="wavelet") ---- *
+     * These mirror the variables the Python wavelet closure captures from the
+     * enclosing build_implicit_gemm_conv scope.
+     *
+     *   load_tid   = b.sub(tid, b.const_i32(spec.block_size))
+     *   is_math    = b.cmp_lt(warp_id, c_nmath)
+     *   n_math_warps = spec.warp_m * spec.warp_n
+     *   K_iters    = ceil(p.K_gemm / block_k) */
+    rocke_value_t* wavelet_load_tid; /* load-wave-relative tid in [0, nloads*ws) */
+    rocke_value_t* wavelet_is_math; /* i1: warp_id < n_math_warps             */
+    int wavelet_n_math_warps; /* warp_m * warp_n                        */
+    int wavelet_K_iters; /* ceil(K_gemm / block_k)                 */
+    int wavelet_epi_barriers; /* N_epi: extra barriers epilogue emits    */
+
+    /* Set to true by rocke_conv_emit_kloop_wavelet to tell the build driver
+     * that the epilogue has already been emitted inside the wavelet branches
+     * (it cannot be deferred outside the scf_if_else / exec-mask sections). */
+    bool epilogue_already_emitted;
 
     /* ---- schedule policy ---- */
     rocke_schedule_policy_t schedule; /* SchedulePolicy.for_pipeline(...)        */
@@ -453,6 +483,12 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
  * its run_ping_pong sequencing inline against ctx until that port lands.) */
 void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx);
 
+/* pipeline=="wavelet" branch (Python lines 1539-1797): dedicated load-wave /
+ * math-wave split. Requires ctx->have_wavelet_loaders and the wavelet_* fields
+ * to be populated by rocke_conv_build_ctx_init. Dispatches the WMMA
+ * (scf_if_else) or MFMA (exec-mask) sub-path based on ctx->is_wmma. */
+void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx);
+
 /* ----- epilogue (ctx-driven; reads ctx->final_accs) ----- */
 
 /* The epilogue phase (lines 1349-1377): apply the accumulator epilogue, then
@@ -494,7 +530,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        int num_accs,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
-                                       rocke_value_t* ir_c_K_pw);
+                                       rocke_value_t* ir_c_K_pw,
+                                       const rocke_mmaop_t* op);
 
 /* ----- driver-internal ctx population (the build prologue, lines 787-1032) ----
  * Splitting the long prologue out of the public entry keeps the glue TU small;

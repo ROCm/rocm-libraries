@@ -732,6 +732,50 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlarft(rocblas_handle handle,
                                                  rocblas_double_complex* tau,
                                                  rocblas_double_complex* T,
                                                  const rocblas_int ldt);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_slarft_64(rocblas_handle handle,
+                                                    const rocblas_direct direct,
+                                                    const rocblas_storev storev,
+                                                    const int64_t n,
+                                                    const int64_t k,
+                                                    float* V,
+                                                    const int64_t ldv,
+                                                    float* tau,
+                                                    float* T,
+                                                    const int64_t ldt);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dlarft_64(rocblas_handle handle,
+                                                    const rocblas_direct direct,
+                                                    const rocblas_storev storev,
+                                                    const int64_t n,
+                                                    const int64_t k,
+                                                    double* V,
+                                                    const int64_t ldv,
+                                                    double* tau,
+                                                    double* T,
+                                                    const int64_t ldt);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_clarft_64(rocblas_handle handle,
+                                                    const rocblas_direct direct,
+                                                    const rocblas_storev storev,
+                                                    const int64_t n,
+                                                    const int64_t k,
+                                                    rocblas_float_complex* V,
+                                                    const int64_t ldv,
+                                                    rocblas_float_complex* tau,
+                                                    rocblas_float_complex* T,
+                                                    const int64_t ldt);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zlarft_64(rocblas_handle handle,
+                                                    const rocblas_direct direct,
+                                                    const rocblas_storev storev,
+                                                    const int64_t n,
+                                                    const int64_t k,
+                                                    rocblas_double_complex* V,
+                                                    const int64_t ldv,
+                                                    rocblas_double_complex* tau,
+                                                    rocblas_double_complex* T,
+                                                    const int64_t ldt);
 //! @}
 
 /*! @{
@@ -3856,9 +3900,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmbr(rocblas_handle handle,
 
     \f[
         \begin{array}{cl}
-        QC & \: \text{No transpose from the left,}\\
+        QC   & \: \text{No transpose from the left,}\\
         Q^TC & \: \text{Transpose from the left,}\\
-        CQ & \: \text{No transpose from the right, and}\\
+        CQ   & \: \text{No transpose from the right, and}\\
         CQ^T & \: \text{Transpose from the right.}
         \end{array}
     \f]
@@ -19104,6 +19148,22 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheev_strided_batched_64(rocblas_handl
     ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
     reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
+    \parblock
+    \note
+    A 2-stage tridiagonalization approach is available for SYEVD to improve
+    performance for large matrices, n > 8000.
+    Use \ref rocsolver_set_alg_mode to enable it:
+
+        rocsolver_set_alg_mode( handle, rocsolver_function_sytrd, rocsolver_alg_mode_2stage );
+
+    Available modes are:
+    Mode                       |  Description
+    ---------------------------|-----------------------------------------
+    rocsolver_alg_mode_1stage  |  Use 1-stage tridiagonalization algorithm (current default)
+    rocsolver_alg_mode_2stage  |  Use 2-stage tridiagonalization algorithm
+    rocsolver_alg_mode_auto    |  Automatically select the algorithm based on problem size
+    \endparblock
+
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed using a
     divide-and-conquer algorithm, depending on the value of ``evect``. The computed eigenvectors
@@ -19198,6 +19258,22 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevd_64(rocblas_handle handle,
     The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
     ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
     reduction and back-transformation steps remain 32-bit, which bounds the supported size.
+
+    \parblock
+    \note
+    A 2-stage tridiagonalization approach is available for HEEVD to improve
+    performance for large matrices, n > 8000.
+    Use \ref rocsolver_set_alg_mode to enable it:
+
+        rocsolver_set_alg_mode( handle, rocsolver_function_hetrd, rocsolver_alg_mode_2stage );
+
+    Available modes are:
+    Mode                       |  Description
+    ---------------------------|-----------------------------------------
+    rocsolver_alg_mode_1stage  |  Use 1-stage tridiagonalization algorithm (current default)
+    rocsolver_alg_mode_2stage  |  Use 2-stage tridiagonalization algorithm
+    rocsolver_alg_mode_auto    |  Automatically select the algorithm based on problem size
+    \endparblock
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed using a

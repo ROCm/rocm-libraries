@@ -510,6 +510,19 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         # dedicated ``ASYNCcnt`` drained via ``s_wait_asynccnt``.
         return True
 
+    @property
+    def blocks_ds_load_tr16(self) -> bool:
+        # gfx1250: the AMDGPU LLVM backend replaces a ``load <8 x half>`` from
+        # addrspace(3) with ``ds_load_tr16_b128`` (transposed LDS read) when it
+        # detects the load feeds a WMMA instruction.  This assumes LDS is stored
+        # column-major, but conv/GEMM kernels store row-major for coalesced
+        # global-to-LDS writes, so the substitution produces wrong WMMA inputs
+        # (factor ~136x wrong in single-element tests).  Marking LDS loads
+        # ``volatile`` in the emitted IR is opaque to this pass and forces the
+        # plain ``ds_read_b128`` instruction.  The volatile fence has zero cost on
+        # AMDGPU because LDS is sequentially consistent within a wave.
+        return True
+
     def ds_tr16_b128_spec(self, elem_type: str = "f16"):
         # gfx1250 (gfx1250) wave32 ``ds_load_tr16_b128`` is overloaded on the
         # result element type. Select the intrinsic matching the op's element

@@ -373,6 +373,33 @@ TEST_F(TestBundleDiscoveryFixture, SkipsMetaJson)
     EXPECT_EQ(result.front().testName, "withmeta");
 }
 
+TEST_F(TestBundleDiscoveryFixture, SkipsSupportJson)
+{
+    auto bundleDir = _tempDir / "conv" / "nchw" / "fp32" / "withsupport";
+    createMinimalBundle(bundleDir, "withsupport");
+    std::ofstream(bundleDir / "withsupport.support.json") << R"({"version": 1, "claims": {}})";
+
+    auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().testName, "withsupport");
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepSupportJsonIsNotDiscoveredAsGraph)
+{
+    auto sweepDir = _tempDir / "conv" / "sweep";
+    createTemplateSweep(sweepDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    std::ofstream(sweepDir / "support.json") << R"({"version": 1, "claims": {}})";
+
+    auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_TRUE(result.front().isTemplateSweepCase());
+    for(const auto& bundle : result)
+    {
+        EXPECT_NE(bundle.jsonPath.filename(), "support.json");
+    }
+}
+
 TEST_F(TestBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
 {
     std::filesystem::create_directories(_tempDir / "b");
@@ -396,6 +423,8 @@ TEST(TestGraphFile, AllowlistsGraphsAndExcludesCompanions)
     EXPECT_FALSE(isGraphFile("dir/meta.json"));
     EXPECT_FALSE(isGraphFile("dir/graph.template.json"));
     EXPECT_FALSE(isGraphFile("dir/sweep.json"));
+    EXPECT_FALSE(isGraphFile("dir/resnet50.support.json"));
+    EXPECT_FALSE(isGraphFile("dir/support.json"));
 
     EXPECT_TRUE(isGraphFile("dir/model.fp16.json"));
     EXPECT_TRUE(isGraphFile("dir/resnet50.v2.json"));
@@ -828,6 +857,30 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsLoadedBundleForGoodBundl
     EXPECT_EQ(loaded.suiteName, discovered.front().suiteName);
     EXPECT_EQ(loaded.testName, discovered.front().testName);
     ASSERT_NE(loaded.bundle, nullptr);
+
+    EXPECT_EQ(loaded.claimLocator.sidecarPath,
+              supportJsonPath(discovered.front().diagnosticPath()));
+    EXPECT_TRUE(loaded.claimLocator.caseId.empty());
+    EXPECT_FALSE(loaded.claimLocator.isSweep());
+}
+
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleSetsLocatorForSweepCase)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+        {{"fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
+    auto& loaded = std::get<detail::LoadedBundle>(outcome);
+
+    EXPECT_EQ(loaded.claimLocator.sidecarPath,
+              discovered.front().jsonPath.parent_path() / "support.json");
+    EXPECT_EQ(loaded.claimLocator.caseId, "fp32_nchw");
+    EXPECT_TRUE(loaded.claimLocator.isSweep());
 }
 
 // Reuses the baked-value-plus-runtime-pass-by-value corruption from

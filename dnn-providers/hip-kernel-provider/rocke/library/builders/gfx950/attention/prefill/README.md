@@ -24,8 +24,8 @@ rocke IR DSL. Forward-only, bf16/fp16, head_dim 64/128, MHA or GQA.
 - **vectorized O store**.
 
 Shape (batch / seqlen / heads / head_dim / causal / dtype) is baked at build time
-(dense, statically-sized ABI). `block_n` (KV tile) and `waves_per_eu` are the only
-performance knobs.
+(dense, statically-sized ABI). `block_n` (KV tile), `waves_per_eu`, and
+`lds_k_group_pad` are the performance knobs.
 
 ## Persistent (grid-stride) mode
 
@@ -104,6 +104,45 @@ run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
 `dense_persistent="auto"` turns on the persistent grid-stride variant once there is
 enough work to fill the grid (`⌈Sq/256⌉·Hq·B >= num_persistent`) — i.e. the large-Sq
 prefill regime — so the dispatcher reaches the ~948-TFLOPS path, not the default grid.
+
+## Tuning — lds_k_group_pad
+
+`AttentionDenseSpec.lds_k_group_pad` pads each K row-group in LDS to break
+bank conflicts on the `do_qk` K reads. The pad must be a multiple of 8:
+`smem_load_vN` stamps align 16 unconditionally, so an 8-byte-aligned pitch
+preserves `ds_read_b128` alignment. `__post_init__` enforces the invariant.
+
+**Sweep axes.** `pad ∈ {0, 8, 16, 24, 32}` × `block_n ∈ {64, 128}` × three
+GQA ratios (Hq=128/Hkv=8, Hq=64/Hkv=8, Hq=32/Hkv=32) × four modes (causal,
+swa W=512/1024/2048/4096, varlen, persistent) × three sequence lengths
+(S=2048/4096/8192) — 840 total configs, all correctness-passed.
+
+**Bank-conflict model.** A whole-wave view of the K reads treats all 64 lanes
+simultaneously. At D=64 with a 2-row-group boundary, the 32-way conflict at
+pad=0 drops to a 4-lane-per-bank floor at pad=8. Pad values 8, 16, and 24 all
+reach this floor: the 16-lane phase that could distinguish them (pad=8 yields 16
+distinct start banks, pad=16 repeats each twice) is too weak to produce a
+reliable separation in a single forward pass. This model predicts that 8, 16, and
+24 are statistically indistinguishable on most shapes, which the sweep confirms.
+
+**Decision.** Default stays at 8. No shape-conditioned override is added.
+
+pad=24 is the plurality winner (77 shapes vs 65 for pad=8) but gain magnitudes
+are 0.001–3.22%, with the majority under 1%. Without an ABBA repeat sweep,
+differences at this scale are within run-to-run noise; the original pad=8
+selection used ABBA specifically because sub-1% differences are unreliable in a
+single forward pass. The 77-shape plurality is not a strong enough signal to
+change the default.
+
+pad=16 has the largest single-shape win in the sweep but is directly
+contradicted by a large regression on a superficially similar shape at
+bn=128 sliding-window. That cliff makes pad=16 unsafe as either a global
+default or a shape-conditioned override until the regression is understood.
+**The pad=16 regression at S=4096 W=4096 bn=128 Hq=32/Hkv=32 is recorded as a
+constraint for future work on this knob.**
+
+pad=0 and pad=32 are consistently worst across all shapes, confirming the
+original sweep result.
 
 ## TODO / follow-ups
 

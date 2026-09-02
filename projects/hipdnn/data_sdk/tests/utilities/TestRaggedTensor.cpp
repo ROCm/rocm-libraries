@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <hip/hip_runtime.h>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
@@ -467,4 +468,97 @@ TEST(TestRaggedTensor, ValidationSeqAxisOutOfRangeThrows)
     // Sequence axis must be strictly less than the rank.
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, 4, aux),
                  std::invalid_argument);
+}
+
+// ============================================================================
+// Fill Tests
+// ============================================================================
+
+TEST(TestRaggedTensor, FillWithValuesHostGenerator)
+{
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+
+    struct UniformCpuGenerator
+    {
+        explicit UniformCpuGenerator(float min, float max, unsigned int seed)
+            : _min(min)
+            , _max(max)
+            , _seed(seed)
+        {
+        }
+
+        void operator()(float* data, size_t count) const
+        {
+            std::mt19937 rng(_seed);
+            std::uniform_real_distribution<float> dist(_min, _max);
+
+            for(size_t i = 0; i < count; ++i)
+            {
+                data[i] = static_cast<float>(dist(rng));
+            }
+        }
+
+    private:
+        float _min;
+        float _max;
+        unsigned int _seed;
+    };
+
+    const float min = 2.0f;
+    const float max = 5.0f;
+    tensor.fillWithValues(UniformCpuGenerator(min, max, std::random_device{}()), true);
+
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*static_cast<const float*>((*it)))};
+        EXPECT_GE(val, min);
+        EXPECT_LE(val, max);
+    }
+}
+
+TEST(TestRaggedTensor, FillWithValuesDeviceGenerator)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+
+    struct DeviceGpuGenerator
+    {
+        void operator()(float* data, size_t count) const
+        {
+            std::vector<float> writeData(count);
+            std::iota(writeData.begin(), writeData.end(), 0.0f);
+
+            auto err = hipMemcpyWithStream(
+                data, writeData.data(), count * sizeof(float), hipMemcpyHostToDevice, nullptr);
+            if(err != hipSuccess)
+            {
+                throw std::runtime_error("hipMemcpyWithStream failed");
+            }
+        }
+    };
+
+    tensor.fillWithValues(DeviceGpuGenerator(), false);
+
+    auto hostData = static_cast<float*>(tensor.rawHostData());
+    for(size_t i = 0; i < tensor.elementSpace(); i++)
+    {
+        EXPECT_EQ(hostData[i], static_cast<float>(i));
+    }
+}
+
+TEST(TestRaggedTensor, FillWithRandomValues)
+{
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+
+    tensor.fillWithRandomValues(1.0f, 3.0f);
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*static_cast<const float*>((*it)))};
+        EXPECT_GE(val, 1.0f);
+        EXPECT_LE(val, 3.0f);
+    }
 }

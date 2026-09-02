@@ -294,4 +294,13 @@ namespace hiptensor
         checkResult = errorCode;                                  \
     }
 
+// A rank-0 tensor carries no modes, so a null mode array is only an error when its
+// descriptor declares at least one. `descName` must already be known to be non-null.
+#define CheckApiModes(checkResult, logger, errorCode, descName, modeName) \
+    if(!descName->mLengths.empty() && !modeName)                          \
+    {                                                                     \
+        printErrorMessage(logger, errorCode, #modeName);                  \
+        checkResult = errorCode;                                          \
+    }
+
 } // namespace hiptensor

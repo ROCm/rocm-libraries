@@ -340,7 +340,6 @@ add_subdirectory(01_contraction)
 add_subdirectory(02_elementwise)
 add_subdirectory(03_reduction)
 
-add_subdirectory(python)
 # Test entries for the install-tree category filters.
 #
 # Two building-block lists keep the three filters distinct in intent:
@@ -365,8 +364,10 @@ add_subdirectory(python)
 # category parser from test_categories.yaml.
 
 set(_HIPTENSOR_HOST_TESTS
+  batched_contraction_test
   contraction_mode_test
   elementwise_cpu_test
+  elementwise_mode_test
   elementwise_op_test
   hiptensor_options_test
   logger_test
@@ -404,6 +405,8 @@ set(_HIPTENSOR_DEVICE_TESTS
   "complex_scale_contraction_test_m4n4k4|01_contraction/complex_scale_test_params_rank4.yaml"
   "complex_scale_contraction_test_m5n5k5|01_contraction/complex_scale_test_params_rank5.yaml"
   "complex_scale_contraction_test_m6n6k6|01_contraction/complex_scale_test_params_rank6.yaml"
+  "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
+  "plan_lifetime_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
   "bilinear_contraction_with_unary_ops_test|NONE"

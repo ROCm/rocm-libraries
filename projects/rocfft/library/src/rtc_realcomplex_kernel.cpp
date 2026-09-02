@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 
 RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&    node,
                                                                  const std::string& gpu_arch,
-                                                                 bool enable_callbacks)
+                                                                 CallbackType       cbtype)
 {
     RTCGenerator generator;
 
@@ -38,6 +38,9 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
     {
         return generator;
     }
+
+    if(node.GetKernelIndexType() != IndexType::U32)
+        throw std::runtime_error("RealComplex copy kernel does not yet support 64-bit indexing");
 
     // input_size is the innermost dimension
     unsigned int input_size = node.length[0];
@@ -58,7 +61,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
                            node.precision,
                            node.inArrayType,
                            node.outArrayType,
-                           node.GetCallbackType(enable_callbacks),
+                           cbtype,
                            node.loadOps,
                            node.storeOps};
 
@@ -132,7 +135,7 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
 
 RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafNode&    node,
                                                                      const std::string& gpu_arch,
-                                                                     bool enable_callbacks)
+                                                                     CallbackType       cbtype)
 {
     RTCGenerator generator;
 
@@ -140,6 +143,9 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
     {
         return generator;
     }
+
+    if(node.GetKernelIndexType() != IndexType::U32)
+        throw std::runtime_error("RealComplexEven kernel does not yet support 64-bit indexing");
 
     // Input_size is the innermost dimension
     size_t half_N;
@@ -171,7 +177,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
                                 node.precision,
                                 node.inArrayType,
                                 node.outArrayType,
-                                node.GetCallbackType(enable_callbacks),
+                                cbtype,
                                 node.loadOps,
                                 node.storeOps},
                                Ndiv4};
@@ -225,7 +231,7 @@ RTCKernelArgs RTCKernelRealComplexEven::get_launch_args(DeviceCallIn& data)
 }
 
 RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
-    const LeafNode& node, const std::string& gpu_arch, bool enable_callbacks)
+    const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype)
 {
     RTCGenerator generator;
     if(node.scheme != CS_KERNEL_R_TO_CMPLX_TRANSPOSE
@@ -296,7 +302,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
                                          node.precision,
                                          node.inArrayType,
                                          node.outArrayType,
-                                         node.GetCallbackType(enable_callbacks),
+                                         cbtype,
                                          node.loadOps,
                                          node.storeOps,
                                          grid3D}};

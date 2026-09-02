@@ -214,6 +214,13 @@ def run_py(name, idx, mode, src_dir=None):
     if src_dir is None:
         src_dir = PARITY
     env = dict(os.environ)
+    # The C emitters build their IR natively and so have no Python authoring
+    # stack to record; letting location capture through here would give the
+    # reference side debug metadata the other side cannot have, and report drift
+    # for two kernels that lowered identically. The engines' debug emission is
+    # compared where the comparison is meaningful -- one kernel, both lowerers --
+    # by tests/core/test_debug_info.py under ROCKE_BACKEND=both.
+    env.pop("ROCKE_DEBUG_LOC", None)  # ir.LOC_CAPTURE_ENV
     roots = [str(PY_REF_ROOT), str(LIB_ROOT), str(PARITY)]
     if SHIM_DIR:
         roots.insert(0, str(SHIM_DIR))

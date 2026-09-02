@@ -421,19 +421,16 @@ namespace
         {
             AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
             assert(pAMDGPU != nullptr);
-            int  fullTiles   = pAMDGPU->skFullTiles;
-            bool bigEnough   = pack.tiles > pack.grid;
-            bool forceDPOnly = solution.sizeMapping.streamKForceDPOnly != 0;
-            pack.skTiles     = forceDPOnly ? 0u : static_cast<uint32_t>(pack.grid);
-            if(!forceDPOnly && pack.tiles % pack.grid != 0)
-            {
-                pack.skTiles = bigEnough ? pack.grid * fullTiles + pack.tiles % pack.grid
-                                         : pack.tiles;
-                pack.skTiles = std::min(pack.skTiles, static_cast<uint32_t>(pack.tiles));
-            }
-            pack.skItersPerWG
-                = static_cast<uint32_t>(pack.skTiles) * static_cast<uint32_t>(pack.itersPerTile)
-                  / static_cast<uint32_t>(pack.grid);
+            // The same helper generateSingleCall() packs from, so this mirror
+            // cannot drift from the arithmetic it claims to reproduce.
+            const StreamKStaticSplit split
+                = streamKStaticSplit(pack.tiles,
+                                     pack.itersPerTile,
+                                     pack.grid,
+                                     pAMDGPU->skFullTiles,
+                                     solution.sizeMapping.streamKForceDPOnly != 0);
+            pack.skTiles      = split.skTiles;
+            pack.skItersPerWG = split.skItersPerWG;
         }
 
         return pack;

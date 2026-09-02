@@ -3001,7 +3001,10 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder createValidResampleBwdGraph(bool generateIndex = true)
+inline flatbuffers::FlatBufferBuilder
+    createValidResampleBwdGraph(bool useIndex = true,
+                                hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode
+                                = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -3027,7 +3030,7 @@ inline flatbuffers::FlatBufferBuilder createValidResampleBwdGraph(bool generateI
         &dxStrides,
         &dxDims));
     ::flatbuffers::Optional<int64_t> indexTensorUid = ::flatbuffers::nullopt;
-    if(generateIndex)
+    if(useIndex)
     {
         indexTensorUid = 3;
         tensorAttributes.push_back(
@@ -3054,7 +3057,7 @@ inline flatbuffers::FlatBufferBuilder createValidResampleBwdGraph(bool generateI
         &postPadding,
         &stride,
         &window,
-        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
+        resampleMode,
         hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;

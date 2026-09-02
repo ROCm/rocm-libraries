@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "id": "7d024fb9-5e13-4c86-a92b-08f37d1c4e50",
+  "name": "hipkernel:pointwise_add",
+  "matchers": [
+    "be019c8c-dfcc-4cab-ba40-3c440ce3f3fe",
+    "1a7f52c8-b036-4e91-95d2-6c83af407b14"
+  ],
+  "engine": "8f1a6c30-7d24-4a0e-9b51-2c6d84f0a911",
+  "dispatch": "93b6c1e7-2058-4fa3-8d17-4b95e2c60fa8",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "2f8c17d6-4a90-4b53-9e18-c05a63b782d4",
+      "name": "pointwise_add.f32_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "PointwiseAdd.cpp",
+        "entry_point": "PointwiseAdd"
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "FLOAT",
+        "operation": "ADD"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a41b93e5-6d72-4f08-b3c9-15e847d0629f",
+      "name": "pointwise_add.f32_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "PointwiseAdd.cpp",
+        "entry_point": "PointwiseAdd"
+      },
+      "metadata": {
+        "block_size": 256,
+        "dtype": "FLOAT",
+        "operation": "ADD"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c6e20a48-8b31-4d97-a052-9f4173e8b5c1",
+      "name": "pointwise_add.f16_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "PointwiseAdd.cpp",
+        "entry_point": "PointwiseAdd"
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "HALF",
+        "operation": "ADD"
+      },
+      "priority": 0
+    }
+  ]
+}

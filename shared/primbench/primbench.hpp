@@ -22,7 +22,9 @@
 
 #ifdef _WIN32
     // Disables the min() and max() macros from windows.h
-    #define NOMINMAX
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
 
     #include <io.h>
     #include <windows.h>
@@ -2025,6 +2027,8 @@ public:
 
     /// Empirically measures the GPU wall-clock tick rate in kHz
     /// by sampling the on-device clock one second apart
+
+#ifdef __HIP__
     long long measure_wall_clk_rate_khz()
     {
         long long* d_tick;
@@ -2059,6 +2063,7 @@ public:
 
         return std::llround(tot_ticks / (1000 * elapsed_time_s));
     }
+#endif
 
     /// Destructor that unregisters host memory.
     ~stream_blocker()

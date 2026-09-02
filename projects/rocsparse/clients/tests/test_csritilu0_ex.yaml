@@ -71,6 +71,18 @@ Tests:
   itilu0_alg: *all_rocsparse_itilu0_alg
   matrix: [rocsparse_matrix_random]
 
+# Coverage: exercise the (deprecated) sync_split_fusion algorithm through the
+# extended (_ex) API, including its free-iteration kernel path (nfreeiter > 0).
+- name: csritilu0_ex
+  category: quick
+  function: csritilu0_ex
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  itilu0_alg: [rocsparse_itilu0_alg_sync_split_fusion]
+  matrix: [rocsparse_matrix_random]
+
 - name: csritilu0_ex
   category: quick
   function: csritilu0_ex
@@ -80,6 +92,19 @@ Tests:
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   itilu0_alg: *all_rocsparse_itilu0_alg
+  matrix: [rocsparse_matrix_random]
+
+# Coverage: exercise the inner free-iteration loop (nfreeiter > 0) of every
+# per-algorithm compute driver through the extended (_ex) API.
+- name: csritilu0_ex
+  category: quick
+  function: csritilu0_ex
+  precision: *single_double_precisions
+  M_N: *M_N_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  itilu0_alg: *all_rocsparse_itilu0_alg
+  nfreeiter: [2]
   matrix: [rocsparse_matrix_random]
 
 

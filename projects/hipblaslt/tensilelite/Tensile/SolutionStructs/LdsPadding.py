@@ -34,12 +34,13 @@ per data type:
   FP32 -- ds_load_b32        (32-bit, 1 bank/thread)
 
 Public API (see each `def` for the full signature):
-  get_fp4_mt_config  -- FP4       ds_load_tr4_b64   padding
-  get_fp8_mt_config  -- FP8       ds_load_tr8_b64   padding
-  get_fp16_mt_config -- FP16      ds_load_tr16_b128 padding
-  get_fp32_mt_config -- FP32/TF32 ds_load_b32       padding
-  get_mxs_mt_config  -- MX scale tensor padding
-
+  get_fp4_mt_config      -- FP4            ds_load_tr4_b64   padding
+  get_fp8_mt_config      -- FP8            ds_load_tr8_b64   padding
+  get_fp16_mt_config     -- FP16           ds_load_tr16_b128 padding
+  get_fp32_mt_config     -- FP32/TF32      ds_load_b32       padding
+  get_mxs_mt_config      -- MX scale tensor                  padding
+  get_metadata_mt_config -- metadata(byte-typed) reuse FP8   padding
+  
   key is one of "perBlock", "pad", "shift" (FP4/FP8 only for "shift").
 """
 
@@ -224,6 +225,19 @@ def _compute_fp8_config(mt: int, miWaveTile: int, miWaveGroup: int,
 
 def get_fp8_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int) -> int:
   return _compute_fp8_config(mt, miWaveTile, miWaveGroup)[key]
+
+def get_metadata_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int,
+                           lrvwBytes: int, miInputPerThreadBytes: int) -> int:
+  """Sparse metadata TileMajor (enableLDSTrMetadata) padding.
+  Metadata is a byte-typed tensor (bpeDS=1), so the FP8 bank-conflict search model
+  (_compute_fp8_config) applies unchanged. Only the per-thread
+  instruction-offset iteration counts differ from plain FP8: pass
+  LocalReadVectorWidthMetadata and MIInputPerThreadMetadata already converted
+  to "metadata-byte" units.
+  """
+  return _compute_fp8_config(mt, miWaveTile, miWaveGroup,
+                             lrvw=max(lrvwBytes, 1),
+                             miInputPerThread=max(miInputPerThreadBytes, 1))[key]
 
 # -- FP16 b128 padding ---------------------------------------------
 

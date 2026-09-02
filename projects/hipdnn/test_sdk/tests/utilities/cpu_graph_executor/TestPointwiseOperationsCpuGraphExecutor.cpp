@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <unordered_map>
 
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
@@ -450,4 +451,163 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyAb
     params.testDescription = "Upper-bounded ReLU backward with X above bound";
 
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
+}
+
+TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
+{
+    const std::vector<int64_t> tensorDims = {1, 2, 2, 2};
+    const std::vector<int64_t> alphaDims = {1, 2, 1, 1};
+    const std::vector<int64_t> scalarDims = {1, 1, 1, 1};
+
+    Tensor<float> dy(tensorDims);
+    Tensor<float> x(tensorDims);
+    Tensor<float> alpha(alphaDims);
+    Tensor<float> zero(scalarDims);
+    Tensor<float> y(tensorDims);
+    Tensor<float> dx(tensorDims);
+    Tensor<float> dalpha(alphaDims);
+
+    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    graph->set_name("PreluBackwardComposedGraph");
+    graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    int64_t uid = 1;
+    const auto makeInput = [&](const std::string& name, const std::vector<int64_t>& dims) {
+        auto attributes = hipdnn_frontend::graph::makeTensorAttributes(
+            name,
+            hipdnn_frontend::DataType::FLOAT,
+            dims,
+            generateStrides(dims, TensorLayout::NCHW.strideOrder));
+        attributes.set_uid(uid++);
+        return std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(attributes));
+    };
+    const auto configureOutput
+        = [&](const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensor,
+              hipdnn_frontend::DataType dataType,
+              const std::vector<int64_t>& dims) {
+              if(!tensor->has_uid())
+              {
+                  tensor->set_uid(uid++);
+              }
+              tensor->set_data_type(dataType).set_dim(dims).set_stride(
+                  generateStrides(dims, TensorLayout::NCHW.strideOrder));
+          };
+
+    auto dyTensor = makeInput("dy", tensorDims);
+    auto xTensor = makeInput("x", tensorDims);
+    auto alphaTensor = makeInput("alpha", alphaDims);
+    auto zeroTensor = makeInput("zero", scalarDims);
+
+    hipdnn_frontend::graph::PointwiseAttributes compareAttrs;
+    compareAttrs.set_name("positive_mask").set_mode(hipdnn_frontend::PointwiseMode::CMP_GT);
+    auto positiveMask = graph->pointwise(xTensor, zeroTensor, compareAttrs);
+    configureOutput(positiveMask, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
+
+    hipdnn_frontend::graph::PointwiseAttributes multiplyXAlphaAttrs;
+    multiplyXAlphaAttrs.set_name("x_times_alpha").set_mode(hipdnn_frontend::PointwiseMode::MUL);
+    auto xTimesAlpha = graph->pointwise(xTensor, alphaTensor, multiplyXAlphaAttrs);
+    configureOutput(xTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
+
+    hipdnn_frontend::graph::PointwiseAttributes ySelectAttrs;
+    ySelectAttrs.set_name("y_select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
+    auto yTensor = graph->pointwise(xTensor, xTimesAlpha, positiveMask, ySelectAttrs);
+    configureOutput(yTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    yTensor->set_output(true);
+
+    hipdnn_frontend::graph::PointwiseAttributes multiplyAlphaAttrs;
+    multiplyAlphaAttrs.set_name("dy_times_alpha").set_mode(hipdnn_frontend::PointwiseMode::MUL);
+    auto dyTimesAlpha = graph->pointwise(dyTensor, alphaTensor, multiplyAlphaAttrs);
+    configureOutput(dyTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
+
+    hipdnn_frontend::graph::PointwiseAttributes dxSelectAttrs;
+    dxSelectAttrs.set_name("dx_select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
+    auto dxTensor = graph->pointwise(dyTensor, dyTimesAlpha, positiveMask, dxSelectAttrs);
+    configureOutput(dxTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    dxTensor->set_output(true);
+
+    hipdnn_frontend::graph::PointwiseAttributes multiplyXAttrs;
+    multiplyXAttrs.set_name("dy_times_x").set_mode(hipdnn_frontend::PointwiseMode::MUL);
+    auto dyTimesX = graph->pointwise(dyTensor, xTensor, multiplyXAttrs);
+    configureOutput(dyTimesX, hipdnn_frontend::DataType::FLOAT, tensorDims);
+
+    hipdnn_frontend::graph::PointwiseAttributes dalphaSelectAttrs;
+    dalphaSelectAttrs.set_name("dalpha_select")
+        .set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
+    auto dalphaTerms = graph->pointwise(zeroTensor, dyTimesX, positiveMask, dalphaSelectAttrs);
+    configureOutput(dalphaTerms, hipdnn_frontend::DataType::FLOAT, tensorDims);
+
+    hipdnn_frontend::graph::ReductionAttributes reduceAttrs;
+    reduceAttrs.set_name("dalpha_reduce").set_mode(hipdnn_frontend::ReductionMode::ADD);
+    auto dalphaTensor = graph->reduction(dalphaTerms, reduceAttrs);
+    configureOutput(dalphaTensor, hipdnn_frontend::DataType::FLOAT, alphaDims);
+    dalphaTensor->set_output(true);
+
+    constexpr std::array<std::array<float, 4>, 2> X_VALUES = {
+        std::array{-2.0f, 0.0f, 1.0f, 2.0f},
+        std::array{-3.0f, -1.0f, 0.0f, 4.0f},
+    };
+    for(int64_t channel = 0; channel < 2; ++channel)
+    {
+        const auto channelIndex = static_cast<size_t>(channel);
+        alpha.setHostValue(channel == 0 ? 0.1f : 0.25f, 0, channel, 0, 0);
+        for(int64_t height = 0; height < 2; ++height)
+        {
+            for(int64_t width = 0; width < 2; ++width)
+            {
+                const auto dyValue = static_cast<float>(1 + channel * 4 + height * 2 + width);
+                const auto xValue = X_VALUES[channelIndex][static_cast<size_t>(height * 2 + width)];
+                dy.setHostValue(dyValue, 0, channel, height, width);
+                x.setHostValue(xValue, 0, channel, height, width);
+            }
+        }
+    }
+    zero.setHostValue(0.0f, 0, 0, 0, 0);
+    dy.markHostModified();
+    x.markHostModified();
+    alpha.markHostModified();
+    zero.markHostModified();
+
+    const auto validationResult = graph->validate();
+    ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    const std::unordered_map<int64_t, void*> variantPack = {
+        {dyTensor->get_uid(), dy.memory().hostData()},
+        {xTensor->get_uid(), x.memory().hostData()},
+        {alphaTensor->get_uid(), alpha.memory().hostData()},
+        {zeroTensor->get_uid(), zero.memory().hostData()},
+        {yTensor->get_uid(), y.memory().hostData()},
+        {dxTensor->get_uid(), dx.memory().hostData()},
+        {dalphaTensor->get_uid(), dalpha.memory().hostData()},
+    };
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    std::array<float, 2> expectedDalpha = {0.0f, 0.0f};
+    for(int64_t channel = 0; channel < 2; ++channel)
+    {
+        const auto channelIndex = static_cast<size_t>(channel);
+        const float alphaValue = alpha.getHostValue(0, channel, 0, 0);
+        for(int64_t height = 0; height < 2; ++height)
+        {
+            for(int64_t width = 0; width < 2; ++width)
+            {
+                const float dyValue = dy.getHostValue(0, channel, height, width);
+                const float xValue = x.getHostValue(0, channel, height, width);
+                const bool positive = xValue > 0.0f;
+                EXPECT_FLOAT_EQ(y.getHostValue(0, channel, height, width),
+                                positive ? xValue : xValue * alphaValue);
+                EXPECT_FLOAT_EQ(dx.getHostValue(0, channel, height, width),
+                                positive ? dyValue : dyValue * alphaValue);
+                if(!positive)
+                {
+                    expectedDalpha[channelIndex] += dyValue * xValue;
+                }
+            }
+        }
+        EXPECT_FLOAT_EQ(dalpha.getHostValue(0, channel, 0, 0), expectedDalpha[channelIndex]);
+    }
 }

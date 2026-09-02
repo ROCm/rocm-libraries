@@ -1,0 +1,45 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --RegisterAllocationPass=allocator=legacy,apply --print-output
+#
+# Legacy replay: lifting followed by SSA destruction is an identity transform.
+#
+# Legacy colouring gives every SSA value the physical register it was lifted
+# from, so lowering must put the program back exactly as it was. This is the
+# gate the design puts in front of any real allocator: while it holds, a
+# difference in emitted code can be attributed to allocation policy rather than
+# to the lifting and lowering machinery.
+#
+# Every version of v4 below colours back to v4, so the block argument at the join
+# needs no copy on either edge and the ranges stay consecutive.
+#
+# CHECK-LABEL: @lift_asm_registers_to_ssa_replay
+#
+# CHECK: ^entry:
+# CHECK-NEXT: v[4:7] = "st.ds_load_b128"(v0)
+# CHECK: ^left:
+# CHECK-NEXT: v4 = "st.v_add_f32"(v20, v21)
+# CHECK: ^right:
+# CHECK-NEXT: v4 = "st.v_add_f32"(v22, v23)
+# CHECK: ^join:
+# CHECK-NEXT: "st.ds_store_b64"(v0, v[4:5])
+#
+# Nothing was inserted to lower the merge, and no SSA leaked into the output:
+# destruction clears the attached SSA, so the printer has nothing to substitute.
+# CHECK-NOT: st.PHI
+# CHECK-NOT: %
+
+st.func @lift_asm_registers_to_ssa_replay() {
+^entry:
+  v[4:7] = "st.ds_load_b128"(v0)
+  SCC0 = "st.v_cmp_eq_u32"(v10, v11)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  v4 = "st.v_add_f32"(v20, v21)
+  "st.s_branch"("join")
+  Successors: ^join
+^right:
+  v4 = "st.v_add_f32"(v22, v23)
+  Successors: ^join
+^join:
+  "st.ds_store_b64"(v0, v[4:5])
+}

@@ -520,6 +520,28 @@ RppStatus exposure_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                                      RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                      RppLayoutParams layoutParams, rpp::Handle& handle);
 
+// -------------------- tone_map --------------------
+
+RppStatus tone_map_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
+                                     RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
+                                     RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                     RppLayoutParams layoutParams, rpp::Handle& handle);
+
+RppStatus tone_map_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
+                                       RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
+                                       RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                       RppLayoutParams layoutParams, rpp::Handle& handle);
+
+RppStatus tone_map_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr,
+                                       RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
+                                       RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                       RppLayoutParams layoutParams, rpp::Handle& handle);
+
+RppStatus tone_map_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
+                                     RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
+                                     RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                     RppLayoutParams layoutParams, rpp::Handle& handle);
+
 // -------------------- gamma_correction --------------------
 
 RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
