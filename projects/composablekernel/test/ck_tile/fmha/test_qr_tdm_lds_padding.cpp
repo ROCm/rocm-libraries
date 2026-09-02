@@ -119,6 +119,33 @@ struct TestProblemWithShape : BaseProblem
     using BlockFmhaShape = Shape;
 };
 
+template <typename BaseShape,
+          ck_tile::index_t M0,
+          ck_tile::index_t N0,
+          ck_tile::index_t K0,
+          ck_tile::index_t K1,
+          ck_tile::index_t SubQKHeadDim>
+struct TestShapeWithGeometry : BaseShape
+{
+    static constexpr ck_tile::index_t kM0           = M0;
+    static constexpr ck_tile::index_t kN0           = N0;
+    static constexpr ck_tile::index_t kK0           = K0;
+    static constexpr ck_tile::index_t kK1           = K1;
+    static constexpr ck_tile::index_t kSubQKHeaddim = SubQKHeadDim;
+};
+
+template <typename BaseShape, bool IsVRowMajor>
+struct TestShapeWithVLayout : BaseShape
+{
+    static constexpr bool IsVLayoutRowMajor = IsVRowMajor;
+};
+
+template <typename BaseShape, ck_tile::index_t NumWarps_>
+struct TestShapeWithNumWarps : BaseShape
+{
+    static constexpr ck_tile::index_t NumWarps = NumWarps_;
+};
+
 template <typename Selection>
 constexpr bool is_disabled_selection()
 {
@@ -141,16 +168,40 @@ using QK64Shape            = TestShapeWithHeadDims<TestFmhaShape<128>, 64, 128>;
 using V64Shape             = TestShapeWithHeadDims<TestFmhaShape<128>, 128, 64>;
 using QK64Problem          = TestProblemWithShape<SelectionBaseProblem, QK64Shape>;
 using V64Problem           = TestProblemWithShape<SelectionBaseProblem, V64Shape>;
+using TwoWarpProblem =
+    TestProblemWithShape<SelectionBaseProblem, TestShapeWithNumWarps<TestFmhaShape<128>, 2>>;
+using M96Problem =
+    TestProblemWithShape<SelectionBaseProblem,
+                         TestShapeWithGeometry<TestFmhaShape<128>, 96, 64, 32, 32, 128>>;
+using N32Problem =
+    TestProblemWithShape<SelectionBaseProblem,
+                         TestShapeWithGeometry<TestFmhaShape<128>, 128, 32, 32, 32, 128>>;
+using K064Problem =
+    TestProblemWithShape<SelectionBaseProblem,
+                         TestShapeWithGeometry<TestFmhaShape<128>, 128, 64, 64, 32, 128>>;
+using K164Problem =
+    TestProblemWithShape<SelectionBaseProblem,
+                         TestShapeWithGeometry<TestFmhaShape<128>, 128, 64, 32, 64, 128>>;
+using SubQK64Problem =
+    TestProblemWithShape<SelectionBaseProblem,
+                         TestShapeWithGeometry<TestFmhaShape<128>, 128, 64, 32, 32, 64>>;
+using VColumnMajorProblem =
+    TestProblemWithShape<SelectionBaseProblem, TestShapeWithVLayout<TestFmhaShape<128>, false>>;
 
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<MixedTypeProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<FloatProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<PackedProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<QK64Problem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<V64Problem>>());
-static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<SelectionBaseProblem, false, false>>());
-static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<SelectionBaseProblem, false, true>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<TwoWarpProblem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<M96Problem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<N32Problem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<K064Problem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<K164Problem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<SubQK64Problem>>());
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<VColumnMajorProblem>>());
+static_assert(
+    is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<SelectionBaseProblem, false>>());
 
 static_assert(ck_tile::detail::is_valid_lds_padding_config_v<true, 256, 16>);
 static_assert(ck_tile::detail::is_valid_lds_padding_config_v<true, 256, 32>);
@@ -355,15 +406,16 @@ static_assert(validate_arena_layouts<ck_tile::half_t>());
 template <typename DataType, ck_tile::index_t M>
 constexpr bool validate_policy_coupling()
 {
-    using Problem = TestFmhaProblem<DataType, M>;
-    using Policy  = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
-    using QConfig = typename Policy::template LdsPaddingConfigQ<Problem>;
-    using KConfig = typename Policy::template LdsPaddingConfigK<Problem>;
-    using VConfig = typename Policy::template LdsPaddingConfigV<Problem>;
-    using QRaw    = ck_tile::detail::EncodedTdmPadding<QConfig>;
-    using KRaw    = ck_tile::detail::EncodedTdmPadding<KConfig>;
-    using VRaw    = ck_tile::detail::EncodedTdmPadding<VConfig>;
-    using Layout  = typename Policy::template LdsArenaLayout<Problem>;
+    using Problem  = TestFmhaProblem<DataType, M>;
+    using Policy   = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+    using QConfig  = typename Policy::template LdsPaddingConfigQ<Problem>;
+    using KConfig  = typename Policy::template LdsPaddingConfigK<Problem>;
+    using VConfig  = typename Policy::template LdsPaddingConfigV<Problem>;
+    using QRaw     = ck_tile::detail::EncodedTdmPadding<QConfig>;
+    using KRaw     = ck_tile::detail::EncodedTdmPadding<KConfig>;
+    using VRaw     = ck_tile::detail::EncodedTdmPadding<VConfig>;
+    using Layout   = typename Policy::template LdsArenaLayout<Problem>;
+    using Pipeline = ck_tile::BlockFmhaPipelineQRKSVSTdm<Problem>;
 
     constexpr auto q_desc = Policy::template MakeQLdsBlockDescriptor<Problem>();
     constexpr auto k_desc = Policy::template MakeKLdsBlockDescriptor<Problem, (M > 64)>();
@@ -379,6 +431,7 @@ constexpr bool validate_policy_coupling()
     static_assert(k_desc.get_element_space_size() * sizeof(DataType) == (M > 64 ? 17392 : 4336));
     static_assert(v_desc.get_element_space_size() * sizeof(DataType) == 18400);
     static_assert(Layout::kArenaBytes == (M > 64 ? 71680 : 22784));
+    static_assert(Pipeline::GetSmemSize() == Layout::kArenaBytes);
 
     using EnabledQ   = ck_tile::detail::LdsPaddingConfig<true, 256, 16>;
     using EnabledRaw = ck_tile::detail::EncodedTdmPadding<EnabledQ>;

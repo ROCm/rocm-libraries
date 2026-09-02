@@ -1516,6 +1516,7 @@ struct FmhaFwdKernel
         {
             using Layout = typename FmhaPipeline::Policy::template LdsArenaLayout<
                 typename FmhaPipeline::Problem>;
+            static_assert(FmhaPipeline::GetSmemSize() == Layout::kArenaBytes);
             return ck_tile::max(Layout::kArenaBytes, EpiloguePipeline::GetSmemSize());
         }
         else

@@ -137,7 +137,8 @@ struct BlockFmhaPipelineQRKSVSTdm
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return Policy::template GetSmemSize<Problem>();
+        using Layout = typename Policy::template LdsArenaLayout<Problem>;
+        return Layout::kArenaBytes;
     }
 
     // Re-pack gemm_0 C into gemm_1 A: C is M-outer (MIter,KIter), A is K-outer.

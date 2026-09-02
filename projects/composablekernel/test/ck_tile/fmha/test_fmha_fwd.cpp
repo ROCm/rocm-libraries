@@ -279,6 +279,7 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaDecode)
 {
     if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
     {
+        std::string selected_kernel;
         auto decode = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
                                                    1,
                                                    4,
@@ -310,8 +311,11 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaDecode)
                                                    qscale_str,
                                                    true,
                                                    1,
-                                                   COMMON_ARGS);
-        CHECK_RESULT(decode);
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel);
+        ASSERT_EQ(decode, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos);
     }
 }
 
@@ -319,6 +323,7 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
 {
     if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
     {
+        std::string selected_kernel;
         auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
                                                    1,
                                                    4,
@@ -350,8 +355,11 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
                                                    qscale_str,
                                                    true,
                                                    1,
-                                                   COMMON_ARGS);
-        CHECK_RESULT(result);
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos);
     }
 }
 

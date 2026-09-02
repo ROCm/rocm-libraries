@@ -17,6 +17,11 @@ namespace ck_tile {
 
 namespace detail {
 
+// Keep the byte-based padding contract local to FMHA: unlike GEMM's policy, which consumes raw
+// hardware fields, qr_tdm uses one configuration to couple writer encoding, reader descriptors,
+// and LDS capacity.
+inline constexpr index_t kQrTdmLdsAccessBytes = 16;
+
 template <index_t X>
 CK_TILE_HOST_DEVICE constexpr index_t integer_log2_exact()
 {
@@ -180,14 +185,21 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
      (std::is_same_v<typename Problem::QDataType, half_t> &&
       std::is_same_v<typename Problem::KDataType, half_t> &&
       std::is_same_v<typename Problem::VDataType, half_t>)) &&
-    Problem::BlockFmhaShape::kQKHeaddim == 128 && Problem::BlockFmhaShape::kN1 == 128 &&
+    Problem::BlockFmhaShape::NumWarps == 4 &&
+    (Problem::BlockFmhaShape::kM0 == 64 || Problem::BlockFmhaShape::kM0 == 128) &&
+    Problem::BlockFmhaShape::kN0 == 64 && Problem::BlockFmhaShape::kK0 == 32 &&
+    Problem::BlockFmhaShape::kN1 == 128 && Problem::BlockFmhaShape::kK1 == 32 &&
+    Problem::BlockFmhaShape::kQKHeaddim == 128 && Problem::BlockFmhaShape::kSubQKHeaddim == 128 &&
+    Problem::BlockFmhaShape::IsVLayoutRowMajor &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm0BlockWarps, sequence<4, 1, 1>> &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm1BlockWarps, sequence<4, 1, 1>> &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, 32>> &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm1WarpTile, sequence<16, 16, 32>> &&
     numeric_traits<typename Problem::QDataType>::PackedSize == 1 &&
     numeric_traits<typename Problem::KDataType>::PackedSize == 1 &&
     numeric_traits<typename Problem::VDataType>::PackedSize == 1;
 
-template <typename Problem,
-          bool Enabled = is_qr_tdm_padding_enabled_problem_v<Problem>,
-          bool Prefill = (Problem::BlockFmhaShape::kM0 > 64)>
+template <typename Problem, bool Enabled = is_qr_tdm_padding_enabled_problem_v<Problem>>
 struct QrTdmPaddingSelection
 {
     using Q = LdsPaddingConfig<false, 0, 0>;
@@ -195,9 +207,10 @@ struct QrTdmPaddingSelection
     using V = LdsPaddingConfig<false, 0, 0>;
 };
 
-template <typename Problem, bool Prefill>
-struct QrTdmPaddingSelection<Problem, true, Prefill>
+template <typename Problem>
+struct QrTdmPaddingSelection<Problem, true>
 {
+    // Measured production configuration for gfx1250 BF16/FP16 d=128 qr_tdm.
     using Q = LdsPaddingConfig<false, 0, 0>;
     using K = LdsPaddingConfig<true, 256, 16>;
     using V = LdsPaddingConfig<true, 256, 32>;
@@ -424,7 +437,7 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     {
         // TODO: this is for 3d layout
         using QDataType = remove_cvref_t<typename Problem::QDataType>;
-        return static_cast<index_t>(16 / sizeof(QDataType));
+        return static_cast<index_t>(detail::kQrTdmLdsAccessBytes / sizeof(QDataType));
     }
 
     // Plain row-major Q LDS desc. TDM box-major write cannot produce an XOR'd
@@ -438,8 +451,11 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         using DataType               = typename Problem::QDataType;
         using Padding                = LdsPaddingConfigQ<Problem>;
 
-        return detail::
-            make_qr_tdm_row_major_lds_descriptor<DataType, kMPerBlock, kKPerBlock, Padding, 16>();
+        return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                            kMPerBlock,
+                                                            kKPerBlock,
+                                                            Padding,
+                                                            detail::kQrTdmLdsAccessBytes>();
     }
 
     // Plain row-major K LDS desc; same no-swizzle rationale as Q above.
@@ -453,8 +469,11 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         using DataType = typename Problem::KDataType;
         using Padding  = LdsPaddingConfigK<Problem>;
 
-        return detail::
-            make_qr_tdm_row_major_lds_descriptor<DataType, kNPerBlock, kKPerBlock, Padding, 16>();
+        return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                            kNPerBlock,
+                                                            kKPerBlock,
+                                                            Padding,
+                                                            detail::kQrTdmLdsAccessBytes>();
     }
 
     template <typename Problem, bool Xor = false>
@@ -466,8 +485,11 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         using Padding                = LdsPaddingConfigV<Problem>;
 
         static_assert(!Xor, "qr_tdm V LDS descriptor must remain row-major");
-        return detail::
-            make_qr_tdm_row_major_lds_descriptor<DataType, kKPerBlock, kNPerBlock, Padding, 16>();
+        return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                            kKPerBlock,
+                                                            kNPerBlock,
+                                                            Padding,
+                                                            detail::kQrTdmLdsAccessBytes>();
     }
 
     template <typename Problem>
@@ -802,6 +824,13 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 
 namespace detail {
 
+// One 256-byte-aligned arena backs every qr_tdm LDS region. Q intentionally aliases K0 at offset
+// zero and, on decode, overlaps the later S/V regions: the pipeline loads Q into registers and
+// completes the tensor-count barrier before K/V overwrite that storage. For the measured d=128
+// K+V configuration the layouts are:
+//   prefill: Q/K0=0, K1=17408, V0=34816, V1=53248, end=71680
+//   decode:  Q/K0=0, S=4336, V0=4352, end=22784
+// Region alignment follows one gfx1250 LDS bank row.
 template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
 struct QrTdmLdsArenaLayout
 {
@@ -819,17 +848,17 @@ struct QrTdmLdsArenaLayout
                                              Shape::kM0,
                                              Shape::kSubQKHeaddim,
                                              QPadding,
-                                             16>();
+                                             kQrTdmLdsAccessBytes>();
     static constexpr auto k_descriptor = make_qr_tdm_row_major_lds_descriptor <
                                          typename Problem::KDataType,
                           Shape::kN0, kDoubleBuffer ? Shape::kSubQKHeaddim : Shape::kK0, KPadding,
-                          16 > ();
+                          kQrTdmLdsAccessBytes > ();
     static constexpr auto v_descriptor =
         make_qr_tdm_row_major_lds_descriptor<typename Problem::VDataType,
                                              Shape::kN0,
                                              Shape::kN1,
                                              VPadding,
-                                             16>();
+                                             kQrTdmLdsAccessBytes>();
 
     static constexpr index_t kQBytes =
         q_descriptor.get_element_space_size() * sizeof(typename Problem::QDataType);
@@ -952,7 +981,7 @@ CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_issue_geometry()
     constexpr index_t RowsPerWave = Rows / NumWaves;
     constexpr auto raw_box_dim    = to_sequence(d.get_ys_to_d_descriptor().get_lengths()).reverse();
     constexpr auto lds_desc =
-        make_qr_tdm_row_major_lds_descriptor<DataType, Rows, Cols, Padding, 16>();
+        make_qr_tdm_row_major_lds_descriptor<DataType, Rows, Cols, Padding, kQrTdmLdsAccessBytes>();
 
     static_assert(numeric_traits<DataType>::PackedSize == 1);
     static_assert(Distribution::NDimP == 1);
@@ -982,7 +1011,7 @@ CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_issue_geometry()
 
         valid = valid && origin[number<0>{}] == wave * RowsPerWave && origin[number<1>{}] == 0 &&
                 (!Padding::kEnabled || logical_byte_origin % Padding::kIntervalBytes == 0) &&
-                physical_byte_origin % 16 == 0 &&
+                physical_byte_origin % kQrTdmLdsAccessBytes == 0 &&
                 lds_desc.calculate_offset(origin) * sizeof(DataType) == physical_byte_origin;
     }
 
@@ -1020,13 +1049,13 @@ CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_reader_segments()
     constexpr index_t WindowCols     = TensorTag::Id == 1 ? Shape::kK0 : Cols;
     constexpr index_t RowWindows     = TensorTag::Id == 2 ? Rows / WindowRows : 1;
     constexpr index_t ColWindows     = TensorTag::Id == 1 && IsPrefill ? Cols / WindowCols : 1;
-    constexpr index_t VectorElements = 16 / sizeof(DataType);
+    constexpr index_t VectorElements = kQrTdmLdsAccessBytes / sizeof(DataType);
 
     static_assert(numeric_traits<DataType>::PackedSize == 1);
     static_assert(Distribution::NDimP == 2);
 
     constexpr auto lds_desc =
-        make_qr_tdm_row_major_lds_descriptor<DataType, Rows, Cols, Padding, 16>();
+        make_qr_tdm_row_major_lds_descriptor<DataType, Rows, Cols, Padding, kQrTdmLdsAccessBytes>();
     using LdsView = decltype(make_tensor_view<address_space_enum::lds>(
         static_cast<DataType*>(nullptr), lds_desc));
     using ReaderWindow =
@@ -1042,12 +1071,13 @@ CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_reader_segments()
     constexpr index_t VectorDim = ReaderTraits::VectorDimY;
 
     bool valid = ReaderTraits::ScalarPerVector == VectorElements &&
+                 ReaderTraits::ScalarPerVector * sizeof(DataType) == kQrTdmLdsAccessBytes &&
                  safe_lengths[VectorDim] >= VectorElements && safe_strides[VectorDim] == 1 &&
                  lds_desc.get_length(number<0>{}) == Rows &&
                  lds_desc.get_length(number<1>{}) == Cols &&
                  (TensorTag::Id != 1 || WindowCols == Shape::kK0) &&
-                 (!Padding::kEnabled || Padding::kIntervalBytes % 16 == 0) &&
-                 (!Padding::kEnabled || Padding::kPadBytes % 16 == 0);
+                 (!Padding::kEnabled || Padding::kIntervalBytes % kQrTdmLdsAccessBytes == 0) &&
+                 (!Padding::kEnabled || Padding::kPadBytes % kQrTdmLdsAccessBytes == 0);
 
     for(index_t row_window = 0; row_window < RowWindows; ++row_window)
     {
@@ -1059,10 +1089,11 @@ CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_reader_segments()
             const index_t physical_byte =
                 lds_desc.calculate_offset(make_tuple(row, col)) * sizeof(DataType);
 
-            valid = valid && row < Rows && col < Cols && logical_byte % 16 == 0 &&
-                    physical_byte % 16 == 0 &&
+            valid = valid && row < Rows && col < Cols && logical_byte % kQrTdmLdsAccessBytes == 0 &&
+                    physical_byte % kQrTdmLdsAccessBytes == 0 &&
                     (!Padding::kEnabled ||
-                     logical_byte % Padding::kIntervalBytes + 16 <= Padding::kIntervalBytes);
+                     logical_byte % Padding::kIntervalBytes + kQrTdmLdsAccessBytes <=
+                         Padding::kIntervalBytes);
         }
     }
 
