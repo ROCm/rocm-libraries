@@ -279,6 +279,9 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaDecode)
 {
     if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
     {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm LDS arena is only supported on gfx1250";
+
         std::string selected_kernel;
         auto decode = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
                                                    1,
@@ -323,6 +326,9 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
 {
     if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
     {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm LDS arena is only supported on gfx1250";
+
         std::string selected_kernel;
         auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
                                                    1,
