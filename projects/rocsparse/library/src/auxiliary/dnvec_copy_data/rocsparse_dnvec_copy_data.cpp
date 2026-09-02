@@ -191,9 +191,11 @@ rocsparse_status rocsparse::dnvec_copy_data(rocsparse_handle            handle,
                                                : rocsparse_status_invalid_value,
                                            "datatype mismatch");
 
-    const rocsparse_indextype I_indextype = (source->size <= std::numeric_limits<int32_t>::max())
-                                                ? rocsparse_indextype_i32
-                                                : rocsparse_indextype_i64;
+    const rocsparse_indextype I_indextype
+        = ((source->size <= std::numeric_limits<int32_t>::max())
+           && (target->batch_count <= std::numeric_limits<int32_t>::max()))
+              ? rocsparse_indextype_i32
+              : rocsparse_indextype_i64;
 
     if(alpha == nullptr)
     {
