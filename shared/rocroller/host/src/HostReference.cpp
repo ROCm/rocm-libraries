@@ -138,8 +138,8 @@ namespace rocRoller::HostNumerics
             .c       = std::move(c),
             .options = std::move(options),
         };
-        result.options.epilogue.alpha = alpha;
-        result.options.epilogue.beta  = beta;
+        result.options.alpha = alpha;
+        result.options.beta  = beta;
         return result;
     }
 

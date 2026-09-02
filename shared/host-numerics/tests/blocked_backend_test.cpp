@@ -74,12 +74,12 @@ void fillTensor(const roc::host_numerics::Tensor& tensor, float value) {
 void configureFinalizer(GemmTestCase& problem, const std::vector<float>& columnBias) {
     using namespace roc::host_numerics;
 
-    problem.epilogue.alpha = 1.25;
-    problem.epilogue.beta = -0.5;
-    problem.epilogue.bias = Tensor::copyNativeStorage<float>(
+    problem.alpha = 1.25;
+    problem.beta = -0.5;
+    problem.bias = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{columnBias.size()}),
         std::span<const float>(columnBias));
-    problem.epilogue.activation = Activation::Relu;
+    problem.activation = Activation::Relu;
 }
 
 struct ParityRunInfo {
@@ -130,13 +130,13 @@ void testFinalizerAndSmallEdgeBlock() {
         Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)),
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)),
         d.shareStorageWithLayout(Layout(Shape{2, 2}, {1, 2})), ScalarType::Float32);
-    problem.epilogue.alpha = 2;
-    problem.epilogue.beta = 3;
-    problem.epilogue.bias =
+    problem.alpha = 2;
+    problem.beta = 3;
+    problem.bias =
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
                                          std::span<const float>(bias))
             .expandDims(1);
-    problem.epilogue.activation = Activation::Relu;
+    problem.activation = Activation::Relu;
 
     require(queryGemmSupport(problem, GemmBackend::Blocked).supported,
             "Blocked backend unexpectedly rejected the test GEMM.");
@@ -379,8 +379,8 @@ void testOneSidedBlockScalingWithZeroReductionExtent() {
     pointwiseProblem.blockSizeA = 8;
     blockedProblem.blockScaleA = emptyScale;
     blockedProblem.blockSizeA = 8;
-    pointwiseProblem.epilogue.beta = 2.0f;
-    blockedProblem.epilogue.beta = 2.0f;
+    pointwiseProblem.beta = 2.0f;
+    blockedProblem.beta = 2.0f;
 
     runParity(pointwiseProblem, blockedProblem, pointwiseOutput, blockedOutput,
               "One-sided block scaling read scales for an empty reduction dimension.");
@@ -516,7 +516,7 @@ void testOutputAliasingContract() {
     require(queryGemmSupport(exactCAndD, GemmBackend::Pointwise) &&
                 queryGemmSupport(exactCAndD, GemmBackend::Blocked),
             "GEMM rejected an exact in-place C and D tensor.");
-    exactCAndD.epilogue.beta = 1.0;
+    exactCAndD.beta = 1.0;
     referenceGemm(exactCAndD, GemmBackend::Blocked);
     const Tensor expectedCAndD =
         Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{28, 32, 54, 62});

@@ -28,10 +28,10 @@ void validateOwnedGemmStorage(const GemmSpecification& problem, const Tensor& ou
     for (const Tensor& scale : problem.preQuantizationScalesB) inputs.push_back(&scale);
     if (problem.blockScaleA) inputs.push_back(&*problem.blockScaleA);
     if (problem.blockScaleB) inputs.push_back(&*problem.blockScaleB);
-    if (problem.epilogue.bias) inputs.push_back(&*problem.epilogue.bias);
-    if (problem.epilogue.scaleAlpha) inputs.push_back(&*problem.epilogue.scaleAlpha);
-    if (problem.epilogue.scaleA) inputs.push_back(&*problem.epilogue.scaleA);
-    if (problem.epilogue.scaleB) inputs.push_back(&*problem.epilogue.scaleB);
+    if (problem.bias) inputs.push_back(&*problem.bias);
+    if (problem.scaleAlpha) inputs.push_back(&*problem.scaleAlpha);
+    if (problem.scaleA) inputs.push_back(&*problem.scaleA);
+    if (problem.scaleB) inputs.push_back(&*problem.scaleB);
 
     for (const Tensor* input : inputs) {
         if (gemmTensorStorageOverlaps(output, *input))

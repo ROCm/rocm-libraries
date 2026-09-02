@@ -1092,31 +1092,31 @@ namespace TensileLite::Client::HostNumerics
                 request.blockSizeA = m_state->mxBlockA;
                 request.blockSizeB = m_state->mxBlockB;
             }
-            request.epilogue.alpha  = m_state->alpha;
-            request.epilogue.beta   = m_state->beta;
-            request.epilogue.scaleC = m_state->scaleC;
+            request.alpha  = m_state->alpha;
+            request.beta   = m_state->beta;
+            request.scaleC = m_state->scaleC;
             if(!m_state->useStandaloneEpilogue && m_state->typeD == ScalarType::Int8)
-                request.epilogue.outputConversion = OutputConversion::SaturatingInt8;
+                request.outputConversion = OutputConversion::SaturatingInt8;
             if(!m_state->useStandaloneEpilogue)
             {
-                request.epilogue.activation           = m_state->activation;
-                request.epilogue.activationParameter0 = m_state->activationParameter0;
-                request.epilogue.activationParameter1 = m_state->activationParameter1;
-                request.epilogue.outputScale          = m_state->outputScale;
+                request.activation           = m_state->activation;
+                request.activationParameter0 = m_state->activationParameter0;
+                request.activationParameter1 = m_state->activationParameter1;
+                request.outputScale          = m_state->outputScale;
             }
             if(m_state->scaleAlpha)
-                request.epilogue.scaleAlpha = detail::broadcastVectorAsMatrix(
-                    *m_state->scaleAlpha, m_state->scaleAlphaAxis);
+                request.scaleAlpha = detail::broadcastVectorAsMatrix(*m_state->scaleAlpha,
+                                                                     m_state->scaleAlphaAxis);
             if(!m_state->preQuantizationScaleA)
-                request.epilogue.scaleA
-                    = m_state->scaleA ? std::optional<Tensor>(m_state->scaleA->expandDims(1))
-                                      : std::nullopt;
+                request.scaleA = m_state->scaleA
+                                     ? std::optional<Tensor>(m_state->scaleA->expandDims(1))
+                                     : std::nullopt;
             if(!m_state->preQuantizationScaleB)
-                request.epilogue.scaleB
-                    = m_state->scaleB ? std::optional<Tensor>(m_state->scaleB->expandDims(0))
-                                      : std::nullopt;
+                request.scaleB = m_state->scaleB
+                                     ? std::optional<Tensor>(m_state->scaleB->expandDims(0))
+                                     : std::nullopt;
             if(source.bias && !m_state->useStandaloneEpilogue)
-                request.epilogue.bias = source.bias;
+                request.bias = source.bias;
             request.mathMode       = m_state->mathMode;
             request.outputSelection = source.outputSelection;
 

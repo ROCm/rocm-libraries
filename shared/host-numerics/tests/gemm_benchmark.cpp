@@ -197,19 +197,19 @@ int main(int argc, char** argv) {
             requestOptions.blockSizeB = blockSize;
         }
         if (profile.commonEpilogue) {
-            requestOptions.epilogue.alpha = 0.75f;
-            requestOptions.epilogue.beta = -0.25f;
-            requestOptions.epilogue.bias =
+            requestOptions.alpha = 0.75f;
+            requestOptions.beta = -0.25f;
+            requestOptions.bias =
                 makeMatrix(ScalarType::Float32,
                            Layout::contiguousLastDimensionFastest(Shape{1, options.columns}), 6);
-            requestOptions.epilogue.scaleA =
+            requestOptions.scaleA =
                 makeMatrix(ScalarType::Float32,
                            Layout::contiguousLastDimensionFastest(Shape{options.rows, 1}), 7);
-            requestOptions.epilogue.scaleB =
+            requestOptions.scaleB =
                 makeMatrix(ScalarType::Float32,
                            Layout::contiguousLastDimensionFastest(Shape{1, options.columns}), 8);
-            requestOptions.epilogue.activation = Activation::Relu;
-            requestOptions.epilogue.outputScale = 0.5f;
+            requestOptions.activation = Activation::Relu;
+            requestOptions.outputScale = 0.5f;
         }
         GemmTestCase request(a, b, c, output, requestOptions);
 

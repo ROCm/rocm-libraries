@@ -278,8 +278,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                                                 cPlan.matrixElements,
                                                 Layout(Shape{size_t(M), size_t(N)}, {1, ldc}));
         GemmOptions options(scalarType<Tc>());
-        options.epilogue.alpha = static_cast<double>(alpha);
-        options.epilogue.beta  = static_cast<double>(beta);
+        options.alpha = static_cast<double>(alpha);
+        options.beta  = static_cast<double>(beta);
         result.copyLogicalElementsFrom(
             referenceGemm(std::move(a), std::move(b), std::move(c), result.type(), options));
         copyTensorEncodedBackingStorageToBuffer(
