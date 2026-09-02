@@ -61,17 +61,6 @@
 
 namespace TensileLite
 {
-    namespace
-    {
-        // Batch stride for pre-swizzled gfx950 MX scales.
-        size_t preSwizzledScaleBatchStride(TensorDescriptor const& t,
-                                          [[maybe_unused]] char const* semantic)
-        {
-            return RoundUpToMultiple(t.sizes()[1], size_t(32))
-                   * RoundUpToMultiple(t.sizes()[0], size_t(8));
-        }
-    }
-
     std::string toString(CustomArgSemantic arg)
     {
         static const std::array<std::string, static_cast<int>(CustomArgSemantic::COUNT)> CustomArgSemanticStrings = {
