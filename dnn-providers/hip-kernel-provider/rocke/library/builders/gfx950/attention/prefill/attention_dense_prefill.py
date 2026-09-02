@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import os
@@ -97,9 +98,18 @@ def _causal_flops(spec: AttentionDenseSpec) -> int:
     return 2 * 2 * B * Hq * D * Sq * Skv
 
 
+def _spec_with_supported(**kwargs: Any) -> AttentionDenseSpec:
+    declared = {f.name for f in dataclasses.fields(AttentionDenseSpec)}
+    return AttentionDenseSpec(**{k: v for k, v in kwargs.items() if k in declared})
+
+
 def make_spec_from_shape(shape: dict[str, Any]) -> AttentionDenseSpec:
-    """Build an ``AttentionDenseSpec`` from a JSON shape dict (experiment configs)."""
-    return AttentionDenseSpec(
+    """Build an ``AttentionDenseSpec`` from a JSON shape dict (experiment configs).
+
+    Fields the spec does not declare are dropped, so one harness can drive both an
+    older baseline snapshot and a candidate that adds new levers.
+    """
+    return _spec_with_supported(
         batch=int(shape.get("batch", 1)),
         seqlen_q=int(shape["seqlen_q"]),
         seqlen_kv=int(shape.get("seqlen_kv", shape["seqlen_q"])),
