@@ -831,9 +831,15 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
                "so declare one");
     }
 
-    // The single reference every existing consumer reads. Arch resolution proper belongs
-    // to the backend registry, which knows the running device; this is the entry that
-    // applies when no arch-specific one does.
+    // The single reference every existing consumer reads.
+    //
+    // RFC 0019 §8.3 wants this resolved against the running gcnArchName, then `default`. It
+    // cannot happen here: descriptor discovery is a process-wide memoized static that runs
+    // before any device or stream exists (Container's engine-id enumeration calls it), and
+    // getDeviceArch needs a stream. Resolving by arch therefore belongs where an engine
+    // instance is built, which needs DescriptorSet to carry the candidates rather than one
+    // pre-resolved heuristic. Until then a per-arch entry is validated and the `default` one
+    // is used.
     if(const auto fallback = engine.sortKernelCatalog.find("default");
        fallback != engine.sortKernelCatalog.end())
     {
