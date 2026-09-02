@@ -27,7 +27,7 @@
  * The atom @property/method calls that have no standalone C entry point are
  * reproduced inline byte-for-byte from atoms.py, identically to the rest of the
  * port:
- *   atom.zero_acc(b)         -> rocke_b_zero_vec_f32(b, atom->d_per_lane)
+ *   atom.zero_acc(b)         -> rocke_mfma_atom_zero_acc(b, atom)
  *   atom.lane_to_output(...) -> the 16x16 / 32x32 / 4x4 arith from atoms.py
  */
 
@@ -42,10 +42,14 @@
  * atom method reproductions (no standalone C symbol; inline per port)
  * ===================================================================== */
 
-/* atom.zero_acc(b) -> b.zero_vec_f32(self.d_per_lane). */
+/* atom.zero_acc(b) -> a C-typed fragment; these paths require D -> C recurrence. */
 static rocke_value_t* moe_fp8_atom_zero_acc(rocke_ir_builder_t* b, const rocke_mfma_atom_t* atom)
 {
-    return rocke_b_zero_vec_f32(b, atom->d_per_lane);
+    if(rocke_mfma_atom_require_recurrence(b, atom, "moe_fused_mega_fp8") != ROCKE_OK)
+    {
+        return NULL;
+    }
+    return rocke_mfma_atom_zero_acc(b, atom);
 }
 
 /* atom.lane_to_output(b, lane, i) -> (row_in_atom, col_in_atom). Writes both via

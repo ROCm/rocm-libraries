@@ -68,6 +68,7 @@ from .distribution import (
     make_static_distributed_tensor,
     make_static_tile_distribution,
 )
+from .mfma_gemm_inner import _require_recurrent_accumulator_contract
 
 
 # --- Distribution-driven softmax row reduce (CK Tile BlockReduce2dSync) -------
@@ -156,6 +157,7 @@ def _validate_attention_atom(atom: "MfmaAtom", arch: str) -> None:
 
     cat_dtype = _ATOM_DTYPE_TO_CATALOG.get(atom.dtype_in, atom.dtype_in)
     target = ArchTarget.from_gfx(arch)
+    _require_recurrent_accumulator_contract(atom, where="mfma_attention")
     if not target.mma.has_shape(
         a_dtype=cat_dtype,
         b_dtype=cat_dtype,
@@ -567,7 +569,7 @@ def mfma_attention_fwd_inner_body(
     # slot through the K-loop.
     neg_inf = b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
-    acc_zero = b.zero_vec_f32(atom.d_per_lane)
+    acc_zero = atom.zero_acc(b)
 
     iter_args = []
     for r in range(atom.d_per_lane):

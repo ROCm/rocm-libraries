@@ -256,10 +256,11 @@ typedef struct rocke_gemm_build_ctx
 /* _atom_frag_lengths(op) -> (a,b,c)_frag_len. Pure; fills out-params. */
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag);
 
-/* _emit_zero_acc_op(b, op): zero_vec_f32(op->d_frag_len). Used to build
- * acc_init. (The MFMA-only _emit_zero_acc / _mfma_atom_widths variants are not
- * reached by the contract-driven body; kept here for parity with the Python
- * module surface.) */
+/* _emit_zero_acc_op(b, op): construct the C-input zero from c_dtype and
+ * c_frag_len, rejecting an op whose D result cannot recur as the next C. Used
+ * to build acc_init. (The MFMA-only _emit_zero_acc / _mfma_atom_widths variants
+ * are not reached by the contract-driven body; kept here for parity with the
+ * Python module surface.) */
 rocke_value_t* rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b, const rocke_mmaop_t* op);
 
 /* _emit_mma(b, op, a, bb, c): target-neutral D = a*bb + c via rocke_b_mma. */

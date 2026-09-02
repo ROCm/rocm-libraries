@@ -112,7 +112,8 @@ def validate_mfma_atom_in_catalog(atom: MfmaAtom, arch: str, *, where: str) -> N
     if not target.mma.has_shape(
         a_dtype=atom.dtype_in,
         b_dtype=atom.dtype_in,
-        c_dtype=atom.dtype_d, d_dtype=atom.dtype_d,
+        c_dtype=atom.dtype_c,
+        d_dtype=atom.dtype_d,
         m=atom.m,
         n=atom.n,
         k=atom.k,
@@ -122,6 +123,16 @@ def validate_mfma_atom_in_catalog(atom: MfmaAtom, arch: str, *, where: str) -> N
             f"({atom.dtype_in} {atom.m}x{atom.n}x{atom.k}) is not in the "
             f"{arch} MMA catalog; this configuration requires a different "
             f"target."
+        )
+
+
+def _require_recurrent_accumulator_contract(atom: MfmaAtom, *, where: str) -> None:
+    """Require a D result to be usable as the next MMA's C operand."""
+    if atom.c_per_lane != atom.d_per_lane or atom.dtype_c != atom.dtype_d:
+        raise ValueError(
+            f"{where} cannot feed MMA D back as C when the atom's C and D "
+            f"fragment types differ (C={atom.dtype_c}[{atom.c_per_lane}], "
+            f"D={atom.dtype_d}[{atom.d_per_lane}])"
         )
 
 
@@ -398,6 +409,7 @@ def mfma_k_loop(
     """
     if K % atom.k != 0:
         raise ValueError(f"mfma_k_loop: K={K} must be divisible by atom.k={atom.k}")
+    _require_recurrent_accumulator_contract(atom, where="mfma_k_loop")
     n_tiles = K // atom.k
     acc0 = initial_acc if initial_acc is not None else atom.zero_acc(b)
     kloop = b.scf_for_iter(
@@ -442,6 +454,7 @@ def mfma_k_loop_dynamic_K(
     multiple of ``atom.k`` at every group's runtime; the helper does
     not emit a divisibility check.
     """
+    _require_recurrent_accumulator_contract(atom, where="mfma_k_loop_dynamic_K")
     acc0 = initial_acc if initial_acc is not None else atom.zero_acc(b)
     n_tiles = b.div(K_runtime, b.const_i32(atom.k))
     kloop = b.scf_for_iter(

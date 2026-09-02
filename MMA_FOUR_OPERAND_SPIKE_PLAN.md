@@ -560,3 +560,9 @@ deliberately local to the MMA abstraction:
 7. Test-local atoms with unequal C/D dtype, length, and layout verify C zero
    construction, explicit-MmaOp validation, C-to-D role transition, D storage,
    and rejection of incompatible D-to-C recurrence.
+8. Catalog validation queries C and D independently. Helpers that carry an MMA
+   result through another iteration reject unequal C/D dtype or fragment width
+   before constructing loop state; initial accumulator zeros use C metadata.
+9. Universal GEMM and direct deep-fused-conv loops follow the same recurrence
+   rule. Attention-builder ``unpack()`` signatures and loop-state structure are
+   unchanged, as required by the non-goal above.

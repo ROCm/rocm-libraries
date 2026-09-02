@@ -93,6 +93,10 @@ rocke_status_t rocke_validate_attention_atom(rocke_ir_builder_t* b,
                         arch != NULL ? arch : "None");
         return ROCKE_ERR_VALUE;
     }
+    if(rocke_mfma_atom_require_recurrence(b, atom, "mfma_attention") != ROCKE_OK)
+    {
+        return b->status;
+    }
     if(!rocke_mma_catalog_has_shape(
            &target->mma,
            NULL,
@@ -405,7 +409,7 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     /* ---- Online softmax + PV accumulator iter_args ---- */
     rocke_value_t* neg_inf = rocke_b_const_f32(b, -1e30);
     rocke_value_t* zero_f = rocke_b_const_f32(b, 0.0);
-    rocke_value_t* acc_zero = rocke_b_zero_vec_f32(b, atom->d_per_lane);
+    rocke_value_t* acc_zero = rocke_mfma_atom_zero_acc(b, atom);
 
     rocke_iter_arg_t iter_args[ROCKE_ATTN_MAX_ITER_ARGS];
     char name_buf[ROCKE_ATTN_MAX_ITER_ARGS][16];
@@ -483,7 +487,7 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         }
 
         /* ---- QK MFMA chain ---- */
-        rocke_value_t* score = rocke_b_zero_vec_f32(b, atom->d_per_lane);
+        rocke_value_t* score = rocke_mfma_atom_zero_acc(b, atom);
         for(int ka = 0; ka < n_qk_atoms; ++ka)
         {
             rocke_value_t* d_ka = rocke_b_const_i32(b, ka);

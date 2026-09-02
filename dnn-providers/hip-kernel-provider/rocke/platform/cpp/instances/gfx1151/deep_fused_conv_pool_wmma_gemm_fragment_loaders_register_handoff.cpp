@@ -35,6 +35,9 @@
 #include "rocke/helper_rocke.helpers.layouts.h" /* rocke_layout_map_coord (via arch_target.h) */
 #include "rocke/helper_rocke.helpers.schedule.h" /* rocke_schedule_policy_t + ROCKE_SCHED_DS_READ/MFMA */
 #include "rocke/instance_conv_implicit_gemm_internal.h" /* rocke_conv_emit_frag_smem_load (peer _emit_frag_smem_load) */
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
+
+#include <string.h>
 
 /* ------------------------------------------------------------------ *
  * Module-pinned geometry constants (Python module-level names).
@@ -42,6 +45,22 @@
 #define DFCP_WMMA ROCKE_GFX1151_DFCP_WMMA /* _WMMA      = 16 */
 #define DFCP_K_PER_I32 ROCKE_GFX1151_DFCP_K_PER_I32 /* _K_PER_I32 = 4 */
 #define DFCP_I4_PER_I32 ROCKE_GFX1151_DFCP_I4_PER_I32 /* _I4_PER_I32 = 8 */
+
+static rocke_value_t* dfcp_zero_recurrent_mma_acc(rocke_ir_builder_t* b,
+                                                  const rocke_mma_op_t* op)
+{
+    const rocke_type_t* elem;
+    if(op == NULL || op->c_dtype == NULL || op->d_dtype == NULL
+       || op->c_frag_len != op->d_frag_len || strcmp(op->c_dtype, op->d_dtype) != 0)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "gfx1151 deep_fused_conv_pool cannot feed MMA D back as C with incompatible metadata");
+    }
+    elem = strcmp(op->c_dtype, "i32") == 0 ? rocke_i32() : rocke_f32();
+    return rocke_b_zero_vec(b, elem, op->c_frag_len);
+}
 
 /* ------------------------------------------------------------------ *
  * Small local conveniences (1:1 with `b.<op>(...)` shorthands).
@@ -377,7 +396,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_from_lds(rocke_gfx1151_dfcp_build_ctx_t* ctx,
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec_f32(b, op->d_frag_len);
+        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -436,7 +455,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_from_lds_int(rocke_gfx1151_dfcp_build_ctx_t* c
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->d_frag_len);
+        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -494,7 +513,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv0_direct(rocke_gfx1151_dfcp_build_ctx_t* c
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec_f32(b, op->d_frag_len);
+        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -555,7 +574,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv0_direct_int(rocke_gfx1151_dfcp_build_ctx_
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->d_frag_len);
+        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -626,7 +645,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i4_from_lds(rocke_gfx1151_dfcp_build_ctx
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->d_frag_len);
+        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
 
     const void* per_step = sched_fuse ? NULL : policy;
 
@@ -734,7 +753,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i4_packed_from_lds(rocke_gfx1151_dfcp_bu
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->d_frag_len);
+        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
 
     for(int kk = 0; kk < k_atoms; ++kk)
     {
@@ -796,7 +815,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i4_from_regs(rocke_gfx1151_dfcp_build_ct
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->d_frag_len);
+        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
 
     const void* per_step = sched_fuse ? NULL : policy;
 
@@ -882,7 +901,7 @@ void rocke_gfx1151_dfcp_wmma_gemm_conv1_i8_from_regs(rocke_gfx1151_dfcp_build_ct
 
     int n_acc = mfmas_m * mfmas_n;
     for(int i = 0; i < n_acc; ++i)
-        out_accs[i] = rocke_b_zero_vec(b, rocke_i32(), op->d_frag_len);
+        out_accs[i] = dfcp_zero_recurrent_mma_acc(b, op);
 
     const void* per_step = sched_fuse ? NULL : policy;
 

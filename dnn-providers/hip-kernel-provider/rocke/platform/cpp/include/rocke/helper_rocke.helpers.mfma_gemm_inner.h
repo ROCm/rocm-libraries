@@ -42,7 +42,7 @@
  * faithful port reproduces them inline inside rocke_mfma_k_loop /
  * rocke_store_acc_to_global, byte-for-byte:
  *     emit          -> rocke_b_mma(b, atom->name, a, b, c)
- *     zero_acc      -> rocke_b_zero_vec_f32(b, atom->d_per_lane)
+ *     zero_acc      -> rocke_mfma_atom_zero_acc(b, atom)
  *     lane_to_output-> the 16x16 / 32x32 / 4x4 arith from atoms.py:536-591
  *
  * CALLBACKS. The Python `load_a`, `load_b`, `per_tile_post_mfma`, and `epilogue`
@@ -208,7 +208,7 @@ typedef rocke_value_t* (*rocke_mfma_post_fn)(rocke_ir_builder_t* b,
  *   acc = atom.emit(a, b_op, acc)   [-> rocke_b_mma(name, ...)];
  *   acc = per_tile_post_mfma(b, acc, kt)   (if non-NULL);
  *   yield acc.
- * initial_acc NULL => atom.zero_acc(b) [-> rocke_b_zero_vec_f32(d_per_lane)].
+ * initial_acc NULL => atom.zero_acc(b) [-> C dtype / c_per_lane].
  * Returns the final per-lane <d_per_lane x f32> accumulator (the for-op's first
  * result). iv_name/acc_name may be NULL (Python defaults "kt"/"acc").
  *

@@ -280,6 +280,10 @@ rocke_kernel_def_t*
     {
         return NULL;
     }
+    if(rocke_mfma_atom_require_recurrence(b, atom, "mx_gemm") != ROCKE_OK)
+    {
+        return NULL;
+    }
 
     /* mantissa_ty = quant_ir_type(spec.mantissa_dtype) */
     mantissa_ty = rocke_b_quant_ir_type(b, spec->mantissa_dtype);
@@ -395,7 +399,7 @@ rocke_kernel_def_t*
         rocke_value_t* ub = rocke_b_const_i32(b, k_scale_count);
         rocke_value_t* step = rocke_b_const_i32(b, 1);
         iter_arg.name = "oacc";
-        iter_arg.init = rocke_b_zero_vec_f32(b, atom->d_per_lane); /* atom.zero_acc(b) */
+        iter_arg.init = rocke_mfma_atom_zero_acc(b, atom);
         /* Python scf_for_iter signature defaults elide_trailing_barrier=True
          * (unroll=False); build_mx_gemm relies on those defaults. The C wrapper
          * takes them as explicit trailing args, so pass unroll=false,
@@ -436,7 +440,7 @@ rocke_kernel_def_t*
         k_group_base = rocke_b_mul(b, kg, rocke_b_const_i32(b, spec->group_k));
 
         /* group_acc = atom.zero_acc(b) */
-        group_acc = rocke_b_zero_vec_f32(b, atom->d_per_lane);
+        group_acc = rocke_mfma_atom_zero_acc(b, atom);
         /* for kt_local in range(atoms_per_group): */
         for(kt_local = 0; kt_local < atoms_per_group; ++kt_local)
         {

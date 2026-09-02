@@ -7,12 +7,20 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from rocke.core.arch import ArchTarget
+from rocke.core.arch import ArchTarget, MmaCatalog, MmaOp
 from rocke.core.ir import F32, I32, IRBuilder, VectorType
 from rocke.core.isa.backend import Gfx11RdnaBackend
 from rocke.helpers.atoms import MfmaAtom, WmmaAtom
 from rocke.helpers.distribution import WmmaTensor, store_wmma_acc, wmma_mma
+from rocke.helpers.mfma_gemm_inner import (
+    _require_recurrent_accumulator_contract,
+    mfma_k_loop,
+    mfma_k_loop_dynamic_K,
+    validate_mfma_atom_in_catalog,
+)
+from rocke.instances.common.gemm_universal import _emit_zero_acc_op
 
 
 class _Layout:
@@ -26,6 +34,7 @@ class _Layout:
 
 
 class _Atom:
+    k = 1
     a_per_lane = 1
     b_per_lane = 1
     c_per_lane = 2
@@ -103,6 +112,79 @@ class _Lowerer:
 
 
 class TestFourRoleAtomHelpers(unittest.TestCase):
+    def test_catalog_validation_queries_c_and_d_independently(self):
+        op = MmaOp(
+            family="mma",
+            a_dtype="fp16",
+            b_dtype="fp16",
+            c_dtype="i32",
+            d_dtype="fp32",
+            m=1,
+            n=1,
+            k=1,
+            op_id="synthetic_mma",
+        )
+        target = SimpleNamespace(mma=MmaCatalog([op]))
+        atom = SimpleNamespace(
+            dtype_in="f16",
+            dtype_c="i32",
+            dtype_d="f32",
+            m=1,
+            n=1,
+            k=1,
+            name="synthetic_mma",
+        )
+
+        with patch("rocke.core.arch.ArchTarget.from_gfx", return_value=target):
+            validate_mfma_atom_in_catalog(atom, "gfx-test", where="test")
+            atom.dtype_c = "f32"
+            with self.assertRaisesRegex(NotImplementedError, "not in the gfx-test"):
+                validate_mfma_atom_in_catalog(atom, "gfx-test", where="test")
+
+    def test_recurrent_mfma_helpers_reject_distinct_c_and_d(self):
+        atom = _Atom()
+
+        with self.assertRaisesRegex(ValueError, r"C=i32\[2\].*D=f32\[3\]"):
+            mfma_k_loop(
+                object(),
+                K=1,
+                atom=atom,
+                load_a=lambda *_: None,
+                load_b=lambda *_: None,
+            )
+        with self.assertRaisesRegex(ValueError, r"C=i32\[2\].*D=f32\[3\]"):
+            mfma_k_loop_dynamic_K(
+                object(),
+                K_runtime=object(),
+                atom=atom,
+                load_a=lambda *_: None,
+                load_b=lambda *_: None,
+            )
+
+    def test_equal_recurrent_contract_is_accepted(self):
+        atom = SimpleNamespace(
+            c_per_lane=4,
+            d_per_lane=4,
+            dtype_c="f32",
+            dtype_d="f32",
+        )
+        _require_recurrent_accumulator_contract(atom, where="test")
+
+    def test_universal_gemm_zero_uses_c_and_rejects_incompatible_recurrence(self):
+        builder = IRBuilder("four_role_universal_zero")
+        equal = SimpleNamespace(
+            c_dtype="i32", d_dtype="i32", c_frag_len=2, d_frag_len=2
+        )
+        zero = _emit_zero_acc_op(builder, equal)
+        self.assertEqual(zero.type.count, 2)
+        self.assertIs(zero.type.elem, I32)
+
+        unequal = SimpleNamespace(
+            c_dtype="i32", d_dtype="fp32", c_frag_len=2, d_frag_len=3
+        )
+        with self.assertRaisesRegex(ValueError, r"C=i32\[2\].*D=fp32\[3\]"):
+            _emit_zero_acc_op(builder, unequal)
+
     def test_zero_acc_uses_c_dtype_and_width(self):
         builder = IRBuilder("four_role_zero")
         mfma = MfmaAtom(1, 1, 1, 1, 1, 2, 5, "f16", "i32", "f32", "synthetic")

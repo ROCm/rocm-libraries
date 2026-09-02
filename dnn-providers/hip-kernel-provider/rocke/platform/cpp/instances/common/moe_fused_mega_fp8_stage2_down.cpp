@@ -36,11 +36,15 @@
  *  Inline MfmaAtom method reproductions (atoms.py).
  * ====================================================================== */
 
-/* MfmaAtom.zero_acc: fresh <d_per_lane x float> accumulator (all zeros). */
+/* MfmaAtom.zero_acc: fresh C fragment; this path requires D -> C recurrence. */
 static rocke_value_t* rocke_moe_fp8_atom_zero_acc(rocke_ir_builder_t* b,
                                                   const rocke_mfma_atom_t* atom)
 {
-    return rocke_b_zero_vec_f32(b, atom->d_per_lane);
+    if(rocke_mfma_atom_require_recurrence(b, atom, "moe_fused_mega_fp8") != ROCKE_OK)
+    {
+        return NULL;
+    }
+    return rocke_mfma_atom_zero_acc(b, atom);
 }
 
 /* MfmaAtom.lane_to_output(b, lane, i): per-lane (row_in_atom, col_in_atom) of

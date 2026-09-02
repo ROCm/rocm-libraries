@@ -1,22 +1,21 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * rocke/helper_rocke.helpers.atoms.h -- C99 port of three symbols from
+ * rocke/helper_rocke.helpers.atoms.h -- C99 port of the MFMA atom helpers from
  * rocke/helpers/atoms.py:
  *
  *   Python                              C99 (this header)
  *   ---------------------------------   ---------------------------------------
  *   mfma_atom(dtype, m, n, k)           rocke_mfma_atom(...) / rocke_b_mfma_atom(...)
+ *   MfmaAtom.zero_acc(b)                rocke_mfma_atom_zero_acc(...)
  *   d_warp_params(atom)                 rocke_d_warp_params(...)
  *   make_d_warp_dstr_encoding(atom)     rocke_make_d_warp_dstr_encoding(...)
  *
- * SCOPE: only these three symbols (plus the MfmaAtom value type they return /
- * consume). The MfmaAtom factory class-methods, the WMMA family, emit/zero_acc/
- * lane_to_output, and the timing-trait properties are NOT in scope for this
- * phase -- but the static MFMA_ATOMS catalog is reproduced internally because
- * mfma_atom() is a lookup over it.
+ * The recurrence guard is a C-side contract helper for Python call sites that
+ * feed an MMA result D back as the next C. The WMMA family, emit,
+ * lane_to_output, and the timing-trait properties remain outside this port.
  *
- * NONE of these three call the IR builder (rocke_b_*):
+ * The three catalog/layout helpers below do not emit IR:
  *
  *   - mfma_atom is a pure (dtype, m, n, k) -> MfmaAtom catalog lookup.
  *   - d_warp_params is a pure (m, n) -> (kCM0PerLane, kCMLane, kCM1PerLane,
@@ -25,9 +24,8 @@
  *     it only needs the builder for arena ownership of the encoding node, which
  *     is the same lifetime contract the distribution helper already uses.
  *
- * Because the op sequence emitted by all three is empty, the "byte-identical op
- * sequence" requirement is trivially met; fidelity is on the returned struct /
- * encoding values, which are reproduced field-for-field from the Python.
+ * zero_acc emits the same zero-vector builder sequence as MfmaAtom.zero_acc;
+ * the catalog/layout helpers remain otherwise pure.
  *
  * Error model mirrors the rest of the C port: a sticky-error builder spelling
  * (rocke_b_*) stands in for `raise`, and a builder-free pure spelling returns a
@@ -99,6 +97,15 @@ int rocke_mfma_atom_n(const rocke_mfma_atom_t* atom);
 int rocke_mfma_atom_k_per_xdlops(const rocke_mfma_atom_t* atom);
 int rocke_mfma_atom_mfma_cycle(const rocke_mfma_atom_t* atom);
 bool rocke_mfma_atom_is_f4f6(const rocke_mfma_atom_t* atom);
+
+/* Construct the initial MMA C fragment from dtype_c/c_per_lane. */
+rocke_value_t* rocke_mfma_atom_zero_acc(rocke_ir_builder_t* b,
+                                        const rocke_mfma_atom_t* atom);
+
+/* Reject helpers that feed D back as C when the fragment contracts differ. */
+rocke_status_t rocke_mfma_atom_require_recurrence(rocke_ir_builder_t* b,
+                                                  const rocke_mfma_atom_t* atom,
+                                                  const char* where);
 
 /* ------------------------------------------------------------------ mfma_atom *
  *

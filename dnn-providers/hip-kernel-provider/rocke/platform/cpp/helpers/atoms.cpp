@@ -1,12 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * C99 port of mfma_atom / d_warp_params / make_d_warp_dstr_encoding from
+ * C99 port of the MFMA atom helpers from
  * rocke/helpers/atoms.py. See helper_rocke.helpers.atoms.h for the contract.
  *
- * None of the three ported symbols emit IR (no rocke_b_* op calls), so the
- * byte-identical op-sequence requirement is met by emitting nothing; fidelity
- * is on the returned struct/encoding values, reproduced field-for-field below.
+ * Most helpers are pure catalog/layout operations. zero_acc is the one
+ * IR-emitting method and mirrors the Python C-typed zero-vector construction.
  */
 
 #include "rocke/helper_rocke.helpers.atoms.h"
@@ -181,6 +180,75 @@ int rocke_mfma_atom_mfma_cycle(const rocke_mfma_atom_t* atom)
         return (atom->k == 64 ? 64 : 32) / speedup;
     }
     return -1; /* Python NotImplementedError path (no 16x16/32x32 XDL shape). */
+}
+
+rocke_value_t* rocke_mfma_atom_zero_acc(rocke_ir_builder_t* b,
+                                        const rocke_mfma_atom_t* atom)
+{
+    const rocke_type_t* elem = NULL;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(atom == NULL || atom->dtype_c == NULL)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "MfmaAtom.zero_acc: atom and dtype_c must be non-NULL");
+    }
+    if(strcmp(atom->dtype_c, "f16") == 0 || strcmp(atom->dtype_c, "fp16") == 0)
+    {
+        elem = rocke_f16();
+    }
+    else if(strcmp(atom->dtype_c, "bf16") == 0)
+    {
+        elem = rocke_bf16();
+    }
+    else if(strcmp(atom->dtype_c, "f32") == 0 || strcmp(atom->dtype_c, "fp32") == 0)
+    {
+        elem = rocke_f32();
+    }
+    else if(strcmp(atom->dtype_c, "i32") == 0)
+    {
+        elem = rocke_i32();
+    }
+    else
+    {
+        return (rocke_value_t*)rocke_i_set_err(b,
+                                               ROCKE_ERR_VALUE,
+                                               "unsupported MMA accumulator input dtype '%s'",
+                                               atom->dtype_c);
+    }
+    return rocke_b_zero_vec(b, elem, atom->c_per_lane);
+}
+
+rocke_status_t rocke_mfma_atom_require_recurrence(rocke_ir_builder_t* b,
+                                                  const rocke_mfma_atom_t* atom,
+                                                  const char* where)
+{
+    if(!rocke_i_live(b))
+    {
+        return b ? b->status : ROCKE_ERR_VALUE;
+    }
+    if(atom == NULL || atom->dtype_c == NULL || atom->dtype_d == NULL)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "MMA recurrence: atom and C/D dtypes must be non-NULL");
+        return b->status;
+    }
+    if(atom->c_per_lane != atom->d_per_lane || strcmp(atom->dtype_c, atom->dtype_d) != 0)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s cannot feed MMA D back as C when the atom's C and D fragment "
+                        "types differ (C=%s[%d], D=%s[%d])",
+                        where ? where : "MMA recurrence",
+                        atom->dtype_c,
+                        atom->c_per_lane,
+                        atom->dtype_d,
+                        atom->d_per_lane);
+        return b->status;
+    }
+    return ROCKE_OK;
 }
 
 const rocke_mfma_atom_t*

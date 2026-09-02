@@ -31,7 +31,7 @@ import struct
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
-from ...core.ir import F16, I32, IRBuilder, PtrType, Value
+from ...core.ir import F16, F32, I32, IRBuilder, PtrType, Value
 from ...runtime.hip_module import Runtime
 from ...helpers.distribution import (
     LoadStoreTraits,
@@ -66,6 +66,18 @@ __all__ = [
     "run_deep_fused_conv_pool_fp16_manifest_problem",
     "build_deep_fused_conv_pool",
 ]
+
+
+def _zero_recurrent_mma_acc(b: IRBuilder, op, *, where: str) -> Value:
+    """Construct C for an MMA loop that feeds each D result into the next C."""
+    if op.c_frag_len != op.d_frag_len or op.c_dtype != op.d_dtype:
+        raise ValueError(
+            f"{where} cannot feed MMA D back as C when the op's C and D "
+            f"fragment types differ (C={op.c_dtype}[{op.c_frag_len}], "
+            f"D={op.d_dtype}[{op.d_frag_len}])"
+        )
+    c_elem = I32 if op.c_dtype == "i32" else F32
+    return b.zero_vec(c_elem, op.c_frag_len)
 
 
 @dataclass(frozen=True)
@@ -857,7 +869,10 @@ def _emit_conv1_1x1(
     needs_mask = k_chunks * conv1_tile_k != K0
     warp_m_off = grid.warp_m_off(b)
     warp_n_off = grid.warp_n_off(b)
-    accs = [b.zero_vec_f32(op.d_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [
+        _zero_recurrent_mma_acc(b, op, where="deep_fused_conv_pool conv1")
+        for _ in range(mfmas_m * mfmas_n)
+    ]
 
     for k_chunk in range(k_chunks):
         chunk_base = k_chunk * conv1_tile_k

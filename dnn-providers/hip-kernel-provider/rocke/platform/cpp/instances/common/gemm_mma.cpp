@@ -158,12 +158,44 @@ rocke_value_t* rocke_gemm_emit_mma(rocke_ir_builder_t* b,
 }
 
 /* ====================================================================== *
- * _emit_zero_acc_op(b, op): zero accumulator sized from op.d_frag_len.
- *   return b.zero_vec_f32(op.d_frag_len)
+ * _emit_zero_acc_op(b, op): zero the recurrent C-input accumulator.
+ *
+ * The universal GEMM hot loops feed every MMA result D back as the next C, so
+ * reject an op whose two fragment contracts differ before constructing loop
+ * state. Current catalog rows remain byte-identical: fp32 C with c_frag_len.
  * ====================================================================== */
 rocke_value_t* rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b, const rocke_mmaop_t* op)
 {
-    return rocke_b_zero_vec_f32(b, op->d_frag_len);
+    const rocke_type_t* elem;
+    if(op == NULL || op->c_dtype == NULL || op->d_dtype == NULL)
+    {
+        if(b && b->status == ROCKE_OK)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err,
+                     ROCKE_ERR_MSG_CAP,
+                     "universal GEMM recurrence requires non-NULL MMA C/D metadata");
+        }
+        return NULL;
+    }
+    if(op->c_frag_len != op->d_frag_len || strcmp(op->c_dtype, op->d_dtype) != 0)
+    {
+        if(b && b->status == ROCKE_OK)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err,
+                     ROCKE_ERR_MSG_CAP,
+                     "universal GEMM cannot feed MMA D back as C when the op's C and D "
+                     "fragment types differ (C=%s[%d], D=%s[%d])",
+                     op->c_dtype,
+                     op->c_frag_len,
+                     op->d_dtype,
+                     op->d_frag_len);
+        }
+        return NULL;
+    }
+    elem = strcmp(op->c_dtype, "i32") == 0 ? rocke_i32() : rocke_f32();
+    return rocke_b_zero_vec(b, elem, op->c_frag_len);
 }
 
 /* ====================================================================== *

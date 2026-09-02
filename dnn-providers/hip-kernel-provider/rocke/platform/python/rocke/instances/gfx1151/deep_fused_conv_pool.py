@@ -47,7 +47,7 @@ import struct
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
-from ...core.ir import F16, I8, I16, I32, IRBuilder, PtrType, Value, VectorType
+from ...core.ir import F16, F32, I8, I16, I32, IRBuilder, PtrType, Value, VectorType
 from ...helpers.geometry import WarpGrid
 from ...helpers.schedule import DS_READ, MFMA, SchedulePolicy
 from ...helpers.spec import kernel_name_join
@@ -69,6 +69,18 @@ _OP_ID_IU8 = "wmma_i32_16x16x16_iu8"
 _OP_ID_IU4 = "wmma_i32_16x16x16_iu4"
 _K_PER_I32 = 4  # int8 K-values packed per i32 fragment slot
 _I4_PER_I32 = 8  # int4 K-values packed per i32 fragment slot
+
+
+def _zero_recurrent_mma_acc(b: IRBuilder, op, *, where: str) -> Value:
+    """Construct C for an MMA loop that feeds each D result into the next C."""
+    if op.c_frag_len != op.d_frag_len or op.c_dtype != op.d_dtype:
+        raise ValueError(
+            f"{where} cannot feed MMA D back as C when the op's C and D "
+            f"fragment types differ (C={op.c_dtype}[{op.c_frag_len}], "
+            f"D={op.d_dtype}[{op.d_frag_len}])"
+        )
+    c_elem = I32 if op.c_dtype == "i32" else F32
+    return b.zero_vec(c_elem, op.c_frag_len)
 
 
 @dataclass(frozen=True)
@@ -1483,7 +1495,10 @@ def _wmma_gemm_from_lds_int(
     # One ds_read_b128 per fragment (16 i8 = 128 bits).
     n_ds = mfmas_m + mfmas_n
 
-    accs = [b.zero_vec(I32, op.d_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [
+        _zero_recurrent_mma_acc(b, op, where="gfx1151 deep_fused_conv_pool")
+        for _ in range(mfmas_m * mfmas_n)
+    ]
     for kk in range(k_atoms):
         k_tile_base = b.const_i32(kk * _WMMA)
         a_rows = []
@@ -1564,7 +1579,10 @@ def _wmma_gemm_conv1_i4_from_lds(
             )
         return out
 
-    accs = [b.zero_vec(I32, op.d_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [
+        _zero_recurrent_mma_acc(b, op, where="gfx1151 deep_fused_conv_pool")
+        for _ in range(mfmas_m * mfmas_n)
+    ]
     # Per-step hint is suppressed when fusing; the combined group is emitted once
     # after the loop instead.
     per_step = None if sched_fuse else policy
@@ -1617,7 +1635,10 @@ def _wmma_gemm_conv1_i4_packed_from_lds(
     warp_n_off = grid.warp_n_off(b)
     n_ds = mfmas_m + mfmas_n
 
-    accs = [b.zero_vec(I32, op.d_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [
+        _zero_recurrent_mma_acc(b, op, where="gfx1151 deep_fused_conv_pool")
+        for _ in range(mfmas_m * mfmas_n)
+    ]
     for kk in range(k_atoms):
         k_tile_base = b.const_i32(kk * _WMMA)
         a_rows = []
@@ -1747,7 +1768,10 @@ def _wmma_gemm_conv1_i4_from_regs(
             )
         return out
 
-    accs = [b.zero_vec(I32, op.d_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [
+        _zero_recurrent_mma_acc(b, op, where="gfx1151 deep_fused_conv_pool")
+        for _ in range(mfmas_m * mfmas_n)
+    ]
     per_step = None if sched_fuse else policy
 
     b_all = [load_b(kk) for kk in range(k_atoms)] if prefetch_k else None
@@ -1800,7 +1824,10 @@ def _wmma_gemm_conv1_i8_from_regs(
             )
         return out
 
-    accs = [b.zero_vec(I32, op.d_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [
+        _zero_recurrent_mma_acc(b, op, where="gfx1151 deep_fused_conv_pool")
+        for _ in range(mfmas_m * mfmas_n)
+    ]
     per_step = None if sched_fuse else policy
 
     b_all = [load_b(kk) for kk in range(k_atoms)] if prefetch_k else None
@@ -1980,7 +2007,10 @@ def _wmma_gemm_from_lds(
     ds_per_frag = (op.a_frag_len + 7) // 8
     n_ds = ds_per_frag * (mfmas_m + mfmas_n)
 
-    accs = [b.zero_vec_f32(op.d_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [
+        _zero_recurrent_mma_acc(b, op, where="gfx1151 deep_fused_conv_pool")
+        for _ in range(mfmas_m * mfmas_n)
+    ]
     for kk in range(k_atoms):
         k_tile_base = b.const_i32(kk * _WMMA)
         a_rows = []
@@ -2174,7 +2204,10 @@ def _wmma_gemm_conv0_direct(
     # B frags via 8-wide chunks. Used for the L2 group-hint counts.
     n_ds = op.a_frag_len * mfmas_m + ((op.b_frag_len + 7) // 8) * mfmas_n
 
-    accs = [b.zero_vec_f32(op.d_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [
+        _zero_recurrent_mma_acc(b, op, where="gfx1151 deep_fused_conv_pool")
+        for _ in range(mfmas_m * mfmas_n)
+    ]
     for kk in range(k_atoms):
         k_tile_base = b.const_i32(kk * _WMMA)
         k_base = b.add(k_tile_base, a_k)
@@ -2237,7 +2270,10 @@ def _wmma_gemm_conv0_direct_int(
     # A: four 4-byte LDS loads then bitcast; B: one 16-byte LDS load.
     n_ds = _K_PER_I32 * mfmas_m + mfmas_n
 
-    accs = [b.zero_vec(I32, op.d_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    accs = [
+        _zero_recurrent_mma_acc(b, op, where="gfx1151 deep_fused_conv_pool")
+        for _ in range(mfmas_m * mfmas_n)
+    ]
     for kk in range(k_atoms):
         k_tile_base = b.const_i32(kk * _WMMA)
         k_base = b.add(k_tile_base, a_k)

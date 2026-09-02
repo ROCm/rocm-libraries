@@ -18,7 +18,13 @@
 #include <cstring>
 
 #include "rocke/arch_target.h"
+#include "rocke/helper_rocke.helpers.atoms.h"
 #include "rocke/ir.h"
+
+/* Private universal-GEMM helper under test. Keep the core test independent of
+ * the large instance_gemm_internal.h closure-state surface. */
+extern "C" rocke_value_t*
+    rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b, const rocke_mma_op_t* op);
 
 static int g_failures = 0;
 
@@ -100,6 +106,39 @@ int main(void)
     check_atom(&b, "wmma_i32_16x16x16_iu8", 8, true);
     check_atom(&b, "wmma_i32_16x16x16_iu4", 8, true);
 
+    /* Initial accumulator construction is a C-role operation. A synthetic
+     * unequal contract proves that zero_acc does not borrow D's dtype/width,
+     * and that recurrent helpers reject D -> C rather than emitting an invalid
+     * loop-carried value. */
+    {
+        const rocke_mfma_atom_t unequal
+            = {1, 1, 1, 1, 1, 2, 3, "f16", "i32", "f32", "synthetic_mfma"};
+        rocke_value_t* zero = rocke_mfma_atom_zero_acc(&b, &unequal);
+        CHECK(zero != NULL, "C-shaped synthetic zero exists");
+        if(zero && zero->type)
+        {
+            CHECK(zero->type->kind == ROCKE_TYPE_VECTOR, "synthetic zero is a vector");
+            CHECK(zero->type->count == 2, "synthetic zero uses c_per_lane");
+            CHECK(zero->type->elem && zero->type->elem->scalar == ROCKE_SCALAR_I32,
+                  "synthetic zero uses dtype_c");
+        }
+    }
+    {
+        rocke_mma_op_t equal = {};
+        equal.c_dtype = "i32";
+        equal.d_dtype = "i32";
+        equal.c_frag_len = 2;
+        equal.d_frag_len = 2;
+        rocke_value_t* zero = rocke_gemm_emit_zero_acc_op(&b, &equal);
+        CHECK(zero != NULL, "universal GEMM C-shaped zero exists");
+        if(zero && zero->type)
+        {
+            CHECK(zero->type->count == 2, "universal GEMM zero uses c_frag_len");
+            CHECK(zero->type->elem && zero->type->elem->scalar == ROCKE_SCALAR_I32,
+                  "universal GEMM zero uses c_dtype");
+        }
+    }
+
     /* Unknown op_id must be rejected. The engine's error path either returns
      * NULL with a sticky builder error or raises (ckc::ValueError) depending on
      * build config, so accept either form of rejection. */
@@ -117,6 +156,65 @@ int main(void)
     CHECK(rejected, "unknown op_id must be rejected");
 
     rocke_ir_builder_free(&b);
+
+    {
+        const rocke_mfma_atom_t unequal
+            = {1, 1, 1, 1, 1, 2, 3, "f16", "i32", "f32", "synthetic_mfma"};
+        bool rejected = false;
+        if(rocke_ir_builder_init(&b, "rocke_mma_recurrence_reject") != ROCKE_OK)
+        {
+            fprintf(stderr, "rocke_ir_builder_init failed\n");
+            return 1;
+        }
+        try
+        {
+            rejected = rocke_mfma_atom_require_recurrence(&b, &unequal, "test")
+                       == ROCKE_ERR_VALUE;
+        }
+        catch(...)
+        {
+            rejected = true;
+        }
+        CHECK(rejected, "unequal C/D recurrence must be rejected");
+        rocke_ir_builder_free(&b);
+    }
+
+    {
+        rocke_mma_op_t unequal = {};
+        unequal.c_dtype = "i32";
+        unequal.d_dtype = "fp32";
+        unequal.c_frag_len = 2;
+        unequal.d_frag_len = 3;
+        bool rejected = false;
+        if(rocke_ir_builder_init(&b, "rocke_gemm_recurrence_reject") != ROCKE_OK)
+        {
+            fprintf(stderr, "rocke_ir_builder_init failed\n");
+            return 1;
+        }
+        try
+        {
+            rejected = rocke_gemm_emit_zero_acc_op(&b, &unequal) == NULL;
+        }
+        catch(...)
+        {
+            rejected = true;
+        }
+        CHECK(rejected, "universal GEMM unequal C/D recurrence must be rejected");
+        rocke_ir_builder_free(&b);
+    }
+
+    {
+        const rocke_mfma_atom_t equal
+            = {1, 1, 1, 1, 1, 2, 2, "f16", "f32", "f32", "synthetic_mfma"};
+        if(rocke_ir_builder_init(&b, "rocke_mma_recurrence_accept") != ROCKE_OK)
+        {
+            fprintf(stderr, "rocke_ir_builder_init failed\n");
+            return 1;
+        }
+        CHECK(rocke_mfma_atom_require_recurrence(&b, &equal, "test") == ROCKE_OK,
+              "equal C/D recurrence must be accepted");
+        rocke_ir_builder_free(&b);
+    }
 
     if(g_failures)
     {
