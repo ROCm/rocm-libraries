@@ -21,6 +21,7 @@ import math
 import pytest
 
 from kernels.gfx950.attention_dense import (
+    AttentionDenseSpec,
     run_attention_dense_torch,
 )
 
@@ -53,6 +54,7 @@ _COHORT = [
     ("bf16", 128, 16, 4, True),  # bf16 D128 persistent
     ("bf16", 128, 16, 4, False),  # bf16 D128 default
     ("fp16", 64, 16, 16, False),  # D64 MHA default
+    ("fp16", 128, 16, 16, True),  # D128 MHA persistent (auto -> qb_major)
     ("bf16", 64, 16, 4, True),  # D64 bf16 persistent
 ]
 
@@ -111,7 +113,7 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _standard_reference(q, k, v, scale):
+def _standard_reference(q, k, v, scale, sliding_window=0):
     """Standard causal attention reference using PyTorch SDPA.
 
     Args:
@@ -136,11 +138,20 @@ def _standard_reference(q, k, v, scale):
     vf = v.transpose(1, 2).float().repeat_interleave(rep, dim=1)
 
     # PyTorch SDPA with causal masking
-    ref = F.scaled_dot_product_attention(
-        qf, kf, vf, is_causal=True, scale=scale
-    ).transpose(
-        1, 2
-    )  # -> [B, S, Hq, D]
+    if sliding_window:
+        sq, sk = q.shape[1], k.shape[1]
+        qi = torch.arange(sq, device=q.device).view(-1, 1)
+        ki = torch.arange(sk, device=q.device).view(1, -1)
+        allowed = (ki <= qi) & (ki > qi - sliding_window)
+        ref = F.scaled_dot_product_attention(
+            qf, kf, vf, attn_mask=allowed, scale=scale
+        ).transpose(1, 2)
+    else:
+        ref = F.scaled_dot_product_attention(
+            qf, kf, vf, is_causal=True, scale=scale
+        ).transpose(
+            1, 2
+        )  # -> [B, S, Hq, D]
 
     return ref
 
@@ -272,6 +283,90 @@ def _sink_reference(q, k, v, sinks, scale, sliding_window=0, causal=True):
     # Weighted sum over values
     ref = torch.einsum("bhqk,bhkd->bhqd", attn, vh).transpose(1, 2)
     return ref
+
+
+_GQA_PAIR_VARIANTS = [
+    ("plain", 0, False, False),
+    ("interleave", 0, False, True),
+    ("sliding_window", 128, False, False),
+    ("sinks", 0, True, False),
+    ("sinks_sliding_window", 128, True, False),
+]
+
+
+class TestDenseGqaPairVariants:
+    """Numeric coverage for features composed with the optimized work mapping."""
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "_name,sliding_window,use_sinks,interleave", _GQA_PAIR_VARIANTS
+    )
+    def test_gqa_pair_variant_numeric(
+        self, _name, sliding_window, use_sinks, interleave
+    ):
+        import torch
+
+        B, S, Hq, Hkv, D = 1, 512, 32, 8, 128
+        torch.manual_seed(0)
+        q = torch.randn(B, S, Hq, D, device="cuda", dtype=torch.float16)
+        k = torch.randn(B, S, Hkv, D, device="cuda", dtype=torch.float16)
+        v = torch.randn(B, S, Hkv, D, device="cuda", dtype=torch.float16)
+        out = torch.empty_like(q)
+        sinks = (
+            torch.zeros(Hq, device="cuda", dtype=torch.float16)
+            if use_sinks
+            else None
+        )
+        scale = 1.0 / math.sqrt(D)
+
+        # NQB=2 and Hkv=8, so the balanced mapping needs exactly 16 CTAs.
+        spec = AttentionDenseSpec(
+            batch=B,
+            seqlen_q=S,
+            seqlen_kv=S,
+            num_query_heads=Hq,
+            num_kv_heads=Hkv,
+            head_size=D,
+            causal=True,
+            dtype="fp16",
+            block_n=64,
+            persistent=True,
+            num_persistent=16,
+            persist_decode="gqa_pair",
+            interleave=interleave,
+            sliding_window=sliding_window,
+            use_sinks=use_sinks,
+        )
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            scale=scale,
+            sinks=sinks,
+        )
+        torch.cuda.synchronize()
+
+        if use_sinks:
+            ref = _sink_reference(
+                q,
+                k,
+                v,
+                sinks,
+                scale,
+                sliding_window=sliding_window,
+                causal=True,
+            )
+        else:
+            ref = _standard_reference(
+                q, k, v, scale, sliding_window=sliding_window
+            )
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < _tolerance("fp16"), (
+            f"gqa_pair {_name}: max_abs={max_abs:.3e}"
+        )
 
 
 class TestDenseSinksNumeric:
