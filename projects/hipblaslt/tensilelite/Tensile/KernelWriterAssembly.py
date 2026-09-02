@@ -17177,6 +17177,11 @@ class KernelWriterAssembly(KernelWriter):
       soffset = tmpS01
       globalOffset = 0
       bpeType = self.states.bpeCinternal
+      # Partials stores already force glc+slc (sc0/sc1). Loads must too, or the
+      # StreamK owner can hit a stale per-XCD L2 line after the flag is visible.
+      isGlc, isSlc, isNT, scope, th, nv = forceCoherentNonTemporal(
+          self.states.asmCaps, isNT, _temporalHint(kernel, "WS"),
+          _nonVolatile(kernel, "WS"), scope)
     else:
       if dataType == kernel["ProblemType"]["ComputeDataType"]:
         globalOffset = addrCalc.globalOffsetInternal
