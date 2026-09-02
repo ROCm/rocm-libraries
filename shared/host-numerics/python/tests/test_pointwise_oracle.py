@@ -139,6 +139,7 @@ class PointwiseOracleTests(unittest.TestCase):
                         hv.from_numpy(initial),
                         hv.ScalarType.Float32,
                         hv.ScalarType.Float32,
+                        alpha=np.nan if reductions == 0 else 1.0,
                         beta=1.5,
                         backend=backend,
                     )
