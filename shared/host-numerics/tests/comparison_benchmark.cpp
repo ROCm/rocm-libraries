@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     options.maxReportedMismatches = 0;
     options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
 
-    ComparisonResult report;
+    ComparisonReport report;
     const double componentSeconds =
         bestSeconds([&] { report = compare(observedView, expectedView, options); });
     if (!report.passed() || report.compared != elements) return 1;
@@ -66,14 +66,14 @@ int main(int argc, char** argv) {
     ComparisonOptions statisticsOptions = defaultComparisonOptions(ScalarType::Float32);
     statisticsOptions.computeFrobenius = false;
     statisticsOptions.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
-    ComparisonResult statisticsReport;
+    ComparisonReport statisticsReport;
     const double statisticsComponentSeconds = bestSeconds(
         [&] { statisticsReport = compare(observedView, expectedView, statisticsOptions); });
     if (!statisticsReport.passed() || statisticsReport.compared != elements) return 1;
 
     ComparisonOptions detailedOptions = defaultComparisonOptions(ScalarType::Float32);
     detailedOptions.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
-    ComparisonResult detailedReport;
+    ComparisonReport detailedReport;
     const double detailedComponentSeconds =
         bestSeconds([&] { detailedReport = compare(observedView, expectedView, detailedOptions); });
     if (!detailedReport.passed() || detailedReport.compared != elements) return 1;

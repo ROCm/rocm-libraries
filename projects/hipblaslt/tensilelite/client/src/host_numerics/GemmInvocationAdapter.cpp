@@ -947,12 +947,21 @@ namespace TensileLite::Client::HostNumerics
     GemmInvocationAdapter&
         GemmInvocationAdapter::operator=(GemmInvocationAdapter&&) noexcept = default;
 
+    roc::host_numerics::GemmBackend
+        TranslatedGemmBatch::runGemm(roc::host_numerics::GemmBackend backend) const
+    {
+        return roc::host_numerics::referenceGemmInto(a, b, c, d, options, backend);
+    }
+
     void TranslatedGemmBatch::runPostGemmOperationsAndCopyOutputs() const
     {
         if(epilogue)
-            referenceEpilogue(*epilogue);
+            referenceEpilogueInto(epilogue->input, epilogue->outputs, epilogue->options);
         if(biasReduction)
-            referenceSum(*biasReduction);
+            referenceSumInto(biasReduction->input,
+                             biasReduction->output,
+                             biasReduction->axes,
+                             biasReduction->accumulatorType);
         for(const auto& copyBack : copyBacks)
         {
             if(copyBack.selection.selectsAll())
@@ -974,13 +983,13 @@ namespace TensileLite::Client::HostNumerics
         return m_state->batchPlans.size();
     }
 
-    roc::host_numerics::GemmRunInfo
+    roc::host_numerics::GemmBackend
         GemmInvocationAdapter::execute(roc::host_numerics::GemmBackend backend) const
     {
         using namespace roc::host_numerics;
 
-        GemmRunInfo combined;
-        bool        hasRunInfo = false;
+        GemmBackend combined   = GemmBackend::Pointwise;
+        bool        hasBackend = false;
         for(size_t batch = 0; batch < batchCount(); ++batch)
         {
             auto translation = translateBatch(batch);
@@ -993,23 +1002,18 @@ namespace TensileLite::Client::HostNumerics
 
             TranslatedGemmBatch translated
                 = std::move(std::get<TranslatedGemmBatch>(translation));
-            const GemmRunInfo runInfo = referenceGemm(translated.gemm(), backend);
+            const GemmBackend backendUsed = translated.runGemm(backend);
             translated.runPostGemmOperationsAndCopyOutputs();
 
-            if(!hasRunInfo)
+            if(!hasBackend)
             {
-                combined.backendUsed    = runInfo.backendUsed;
-                combined.fallbackReason = runInfo.fallbackReason;
-                hasRunInfo              = true;
+                combined   = backendUsed;
+                hasBackend = true;
             }
-            else if(combined.backendUsed != runInfo.backendUsed)
+            else if(combined != backendUsed)
             {
-                combined.backendUsed = GemmBackend::Mixed;
+                combined = GemmBackend::Mixed;
             }
-            combined.outputElementsWritten += runInfo.outputElementsWritten;
-            combined.outputElementsCovered += runInfo.outputElementsCovered;
-            if(!combined.fallbackReason && runInfo.fallbackReason)
-                combined.fallbackReason = runInfo.fallbackReason;
         }
         return combined;
     }
@@ -1074,8 +1078,8 @@ namespace TensileLite::Client::HostNumerics
                 gemmOutput = *intermediate;
             }
 
-            TranslatedGemmBatch translated{GemmRequest(
-                std::move(operandA), std::move(operandB), source.c, gemmOutput, accumulatorType)};
+            TranslatedGemmBatch translated(
+                std::move(operandA), std::move(operandB), source.c, gemmOutput, accumulatorType);
             translated.copyBacks.push_back(
                 {source.dDestination, productOutput, source.outputSelection});
             if(m_state->amax && m_state->amaxDestination)
@@ -1088,7 +1092,7 @@ namespace TensileLite::Client::HostNumerics
                 translated.copyBacks.push_back({*source.auxiliaryOutputDestination,
                                                 *source.auxiliaryOutput,
                                                 source.outputSelection});
-            auto& request           = translated.gemm();
+            auto& request           = translated.gemmOptions();
             request.epilogue.alpha  = m_state->alpha;
             request.epilogue.beta   = m_state->beta;
             request.epilogue.scaleC = m_state->scaleC;
@@ -1117,41 +1121,38 @@ namespace TensileLite::Client::HostNumerics
 
             if(m_state->useStandaloneEpilogue)
             {
-                EpilogueRequest epilogue(*intermediate, productOutput, accumulatorType);
+                TranslatedGemmBatch::BoundEpilogue epilogue(
+                    *intermediate, productOutput, accumulatorType);
                 if(!m_state->useGradient)
-                    epilogue.bias = source.bias;
-                epilogue.activation           = m_state->activation;
-                epilogue.activationParameter0 = m_state->activationParameter0;
-                epilogue.activationParameter1 = m_state->activationParameter1;
-                epilogue.outputScale          = m_state->outputScale;
+                    epilogue.options.bias = source.bias;
+                epilogue.options.activation           = m_state->activation;
+                epilogue.options.activationParameter0 = m_state->activationParameter0;
+                epilogue.options.activationParameter1 = m_state->activationParameter1;
+                epilogue.options.outputScale          = m_state->outputScale;
                 if(m_state->typeD == ScalarType::Int8)
-                    epilogue.outputConversion = OutputConversion::SaturatingInt8;
-                epilogue.outputSelection = request.outputSelection;
+                    epilogue.options.outputConversion = OutputConversion::SaturatingInt8;
+                epilogue.options.outputSelection = request.outputSelection;
 
                 if(m_state->useGradient && m_state->useBias
                    && m_state->biasSource == ContractionProblemGemm::D)
                 {
-                    epilogue.rawOutput.emplace(accumulatorType,
-                                               Shape{m_state->m, m_state->n});
-                    epilogue.rawOutputType = epilogue.rawOutput->type();
+                    epilogue.outputs.rawOutput.emplace(accumulatorType,
+                                                       Shape{m_state->m, m_state->n});
                 }
-                epilogue.auxiliaryInput  = source.auxiliaryInput;
-                epilogue.auxiliaryOutput = source.auxiliaryOutput;
-                if(epilogue.auxiliaryOutput)
-                    epilogue.auxiliaryOutputType = epilogue.auxiliaryOutput->type();
+                epilogue.options.auxiliaryInput  = source.auxiliaryInput;
+                epilogue.outputs.auxiliaryOutput = source.auxiliaryOutput;
                 if(m_state->useGradient)
                 {
-                    epilogue.activationApplication = ActivationApplication::Gradient;
-                    if(!epilogue.auxiliaryInput)
-                        epilogue.auxiliaryInput.emplace(accumulatorType,
-                                                        Shape{m_state->m, m_state->n});
+                    epilogue.options.activationApplication = ActivationApplication::Gradient;
+                    if(!epilogue.options.auxiliaryInput)
+                        epilogue.options.auxiliaryInput.emplace(accumulatorType,
+                                                                Shape{m_state->m, m_state->n});
                 }
-                epilogue.gateResidual = source.gateResidual;
+                epilogue.options.gateResidual = source.gateResidual;
                 if(m_state->amax)
                 {
-                    epilogue.amax           = m_state->amax;
-                    epilogue.amaxType       = epilogue.amax->type();
-                    epilogue.accumulateAmax = batch != 0;
+                    epilogue.outputs.amax           = m_state->amax;
+                    epilogue.options.accumulateAmax = batch != 0;
                 }
                 translated.epilogue.emplace(std::move(epilogue));
 
@@ -1162,7 +1163,7 @@ namespace TensileLite::Client::HostNumerics
                     if(m_state->biasSource == ContractionProblemGemm::D)
                     {
                         translated.biasReduction.emplace(
-                            *translated.epilogue->rawOutput,
+                            *translated.epilogue->outputs.rawOutput,
                             biasOutput,
                             accumulatorType,
                             std::vector<size_t>{biasAxis == MatrixAxis::Row ? size_t(1)
@@ -1170,13 +1171,17 @@ namespace TensileLite::Client::HostNumerics
                     }
                     else if(m_state->biasSource == ContractionProblemGemm::A)
                     {
-                        translated.biasReduction.emplace(
-                            request.a.values, biasOutput, accumulatorType, std::vector<size_t>{1});
+                        translated.biasReduction.emplace(translated.a.values,
+                                                         biasOutput,
+                                                         accumulatorType,
+                                                         std::vector<size_t>{1});
                     }
                     else
                     {
-                        translated.biasReduction.emplace(
-                            request.b.values, biasOutput, accumulatorType, std::vector<size_t>{0});
+                        translated.biasReduction.emplace(translated.b.values,
+                                                         biasOutput,
+                                                         accumulatorType,
+                                                         std::vector<size_t>{0});
                     }
                 }
             }

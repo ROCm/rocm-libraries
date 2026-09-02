@@ -9,7 +9,9 @@ namespace roc::host_numerics {
 // Reports whether the optional BLAS component can execute a request using the
 // requested policy. Unlike queryGemmSupport(), this function accepts
 // GemmBackend::Blas and includes BLAS in Automatic policy.
-GemmSupportInfo queryGemmSupportWithBlasBackend(const GemmRequest& request,
+GemmSupportInfo queryGemmSupportWithBlasBackend(const GemmOperand& a, const GemmOperand& b,
+                                                const Tensor& c, const Tensor& d,
+                                                const GemmOptions& options = GemmOptions{},
                                                 GemmBackend backend = GemmBackend::Automatic);
 
 // Provides BLAS acceleration for direct and transformed GEMM requests.
@@ -19,10 +21,12 @@ GemmSupportInfo queryGemmSupportWithBlasBackend(const GemmRequest& request,
 // is applied while writing the caller-owned output tensor. Automatic tries
 // BLAS first when its cost policy prefers BLAS, then delegates to the built-in
 // Blocked/Pointwise policy.
-GemmRunInfo referenceGemmWithBlasBackend(const GemmRequest& request,
-                                         GemmBackend backend = GemmBackend::Automatic);
+GemmBackend referenceGemmIntoWithBlasBackend(GemmOperand a, GemmOperand b, Tensor c, Tensor d,
+                                             const GemmOptions& options = GemmOptions{},
+                                             GemmBackend backend = GemmBackend::Automatic);
 
-GemmResult referenceGemmWithBlasBackend(const GemmProblem& problem,
-                                        const GemmOutputOptions& output = {},
-                                        GemmBackend backend = GemmBackend::Automatic);
+Tensor referenceGemmWithBlasBackend(GemmOperand a, GemmOperand b, Tensor c, ScalarType outputType,
+                                    const GemmOptions& options = GemmOptions{},
+                                    std::optional<Layout> outputLayout = std::nullopt,
+                                    GemmBackend backend = GemmBackend::Automatic);
 }  // namespace roc::host_numerics

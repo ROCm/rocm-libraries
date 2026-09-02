@@ -43,13 +43,12 @@ namespace hipblaslt::host_numerics
         return Layout(Shape{rows, columns}, {rowStride, columnStride}, offset);
     }
 
-    roc::host_numerics::GemmRunInfo
-        referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,
-                            const hipblaslt::client::MatmulDataTypes&       dataTypes,
-                            const hipblaslt::client::PreparedMatmulProblem& preparation,
-                            MatmulReferenceInputs                            inputs,
-                            hipblaslt_scaling_format                         scaleAMode,
-                            hipblaslt_scaling_format                         scaleBMode)
+    void referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,
+                             const hipblaslt::client::MatmulDataTypes&       dataTypes,
+                             const hipblaslt::client::PreparedMatmulProblem& preparation,
+                             MatmulReferenceInputs                           inputs,
+                             hipblaslt_scaling_format                        scaleAMode,
+                             hipblaslt_scaling_format                        scaleBMode)
     {
         using namespace roc::host_numerics;
 
@@ -76,18 +75,18 @@ namespace hipblaslt::host_numerics
         if(inputs.scaleB && !isBlockScaling(scaleBMode))
             operandB.preQuantizationScales.emplace_back(*inputs.scaleB, MatrixAxis::Column);
 
-        GemmRequest request(std::move(operandA),
-                            std::move(operandB),
-                            std::move(inputs.c),
-                            std::move(inputs.d),
-                            referenceAccumulatorType(dataTypes.coefficient));
-        request.epilogue.alpha           = scalarValue(preparation.alpha, dataTypes.coefficient);
-        request.epilogue.beta            = scalarValue(preparation.beta, dataTypes.coefficient);
-        const ScalarType accumulatorType = request.accumulatorType;
-        request.epilogue.scaleC          = inputs.scaleC.value_or(Scalar::one(accumulatorType));
-        request.epilogue.outputScale     = inputs.scaleD.value_or(Scalar::one(accumulatorType));
-        if(request.d.type() == ScalarType::Int8)
-            request.epilogue.outputConversion = OutputConversion::SaturatingInt8;
-        return referenceGemmWithBlasBackend(request);
+        const ScalarType accumulatorType = referenceAccumulatorType(dataTypes.coefficient);
+        GemmOptions      options(accumulatorType);
+        options.epilogue.alpha       = scalarValue(preparation.alpha, dataTypes.coefficient);
+        options.epilogue.beta        = scalarValue(preparation.beta, dataTypes.coefficient);
+        options.epilogue.scaleC      = inputs.scaleC.value_or(Scalar::one(accumulatorType));
+        options.epilogue.outputScale = inputs.scaleD.value_or(Scalar::one(accumulatorType));
+        if(inputs.d.type() == ScalarType::Int8)
+            options.epilogue.outputConversion = OutputConversion::SaturatingInt8;
+        (void)referenceGemmIntoWithBlasBackend(std::move(operandA),
+                                               std::move(operandB),
+                                               std::move(inputs.c),
+                                               std::move(inputs.d),
+                                               options);
     }
 } // namespace hipblaslt::host_numerics

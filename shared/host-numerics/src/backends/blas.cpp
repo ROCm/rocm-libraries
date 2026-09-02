@@ -25,8 +25,8 @@ namespace {
 // type, and their views must satisfy the direct-layout and aliasing restrictions.
 class BlasGemmBackend final {
    public:
-    GemmSupportInfo querySupport(const GemmRequest& request) const;
-    GemmRunInfo run(const GemmRequest& request) const;
+    GemmSupportInfo querySupport(const GemmInvocation& request) const;
+    GemmExecutionInfo run(const GemmInvocation& request) const;
 };
 
 struct BlasMatrixLayout {
@@ -99,8 +99,8 @@ T* typedMutableData(const Tensor& view, const char* name) {
     return reinterpret_cast<T*>(const_cast<std::byte*>(data));
 }
 
-void validateCommon(const GemmRequest& problem) {
-    const GemmSupportInfo pointwise = queryGemmSupport(problem, GemmBackend::Pointwise);
+void validateCommon(const GemmInvocation& problem) {
+    const GemmSupportInfo pointwise = detail::queryGemmSupport(problem, GemmBackend::Pointwise);
     if (!pointwise) throw std::invalid_argument(pointwise.reason);
 
     if (problem.a.values.type() != problem.accumulatorType ||
@@ -148,7 +148,7 @@ void validateCommon(const GemmRequest& problem) {
 }
 
 template <typename T>
-GemmRunInfo runReal(const GemmRequest& problem) {
+GemmExecutionInfo runReal(const GemmInvocation& problem) {
     const auto aLayout = toBlasLayout(problem.a.values, problem.a.conjugate, "A");
     const auto bLayout = toBlasLayout(problem.b.values, problem.b.conjugate, "B");
     const int m = static_cast<int>(problem.a.values.shape()[0]);
@@ -177,7 +177,7 @@ GemmRunInfo runReal(const GemmRequest& problem) {
 }
 
 template <typename T>
-GemmRunInfo runComplex(const GemmRequest& problem) {
+GemmExecutionInfo runComplex(const GemmInvocation& problem) {
     const auto aLayout = toBlasLayout(problem.a.values, problem.a.conjugate, "A");
     const auto bLayout = toBlasLayout(problem.b.values, problem.b.conjugate, "B");
     const int m = static_cast<int>(problem.a.values.shape()[0]);
@@ -215,8 +215,8 @@ size_t saturatedSum(size_t left, size_t right) {
     return left + right;
 }
 
-void validateTransforming(const GemmRequest& problem) {
-    const GemmSupportInfo pointwise = queryGemmSupport(problem, GemmBackend::Pointwise);
+void validateTransforming(const GemmInvocation& problem) {
+    const GemmSupportInfo pointwise = detail::queryGemmSupport(problem, GemmBackend::Pointwise);
     if (!pointwise) throw std::invalid_argument(pointwise.reason);
 
     switch (problem.accumulatorType) {
@@ -334,7 +334,7 @@ GemmOperand prepareBlasOperand(const GemmOperand& operand, MathMode mathMode, co
 }
 
 template <typename Accumulator>
-GemmRunInfo runTransforming(const GemmRequest& problem) {
+GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
     using namespace detail;
     static const BlasGemmBackend blas;
     if (blas.querySupport(problem)) return blas.run(problem);
@@ -345,10 +345,8 @@ GemmRunInfo runTransforming(const GemmRequest& problem) {
     if (!finalizer.alphaIsZero()) {
         GemmOperand stagedA = prepareBlasOperand<Accumulator>(problem.a, problem.mathMode, "A");
         GemmOperand stagedB = prepareBlasOperand<Accumulator>(problem.b, problem.mathMode, "B");
-        GemmRequest stagedProblem(std::move(stagedA), std::move(stagedB), stagedOutput,
-                                  stagedOutput, nativeScalarType<Accumulator>);
-        stagedProblem.epilogue.alpha = Scalar::one(nativeScalarType<Accumulator>);
-        stagedProblem.epilogue.beta = Scalar::zero(nativeScalarType<Accumulator>);
+        GemmInvocation stagedProblem(std::move(stagedA), std::move(stagedB), stagedOutput,
+                                     stagedOutput, nativeScalarType<Accumulator>);
 
         blas.run(stagedProblem);
     }
@@ -375,7 +373,7 @@ GemmRunInfo runTransforming(const GemmRequest& problem) {
     };
 }
 
-GemmSupportInfo BlasGemmBackend::querySupport(const GemmRequest& problem) const {
+GemmSupportInfo BlasGemmBackend::querySupport(const GemmInvocation& problem) const {
     try {
         validateCommon(problem);
         switch (problem.accumulatorType) {
@@ -408,7 +406,7 @@ GemmSupportInfo BlasGemmBackend::querySupport(const GemmRequest& problem) const 
     }
 }
 
-GemmRunInfo BlasGemmBackend::run(const GemmRequest& problem) const {
+GemmExecutionInfo BlasGemmBackend::run(const GemmInvocation& problem) const {
     const GemmSupportInfo support = querySupport(problem);
     if (!support) throw std::invalid_argument(support.reason);
 
@@ -425,7 +423,7 @@ GemmRunInfo BlasGemmBackend::run(const GemmRequest& problem) const {
             throw std::invalid_argument("BLAS backend accumulator type is unsupported.");
     }
 }
-GemmSupportInfo queryTransformingBlasGemmSupport(const GemmRequest& problem) {
+GemmSupportInfo queryTransformingBlasGemmSupport(const GemmInvocation& problem) {
     try {
         validateTransforming(problem);
         static const BlasGemmBackend directBlas;
@@ -467,7 +465,7 @@ GemmSupportInfo queryTransformingBlasGemmSupport(const GemmRequest& problem) {
     }
 }
 
-GemmRunInfo runTransformingBlasGemm(const GemmRequest& problem) {
+GemmExecutionInfo runTransformingBlasGemm(const GemmInvocation& problem) {
     const GemmSupportInfo support = queryTransformingBlasGemmSupport(problem);
     if (!support) throw std::invalid_argument(support.reason);
 
@@ -487,36 +485,53 @@ GemmRunInfo runTransformingBlasGemm(const GemmRequest& problem) {
 }
 }  // namespace
 
-GemmSupportInfo queryGemmSupportWithBlasBackend(const GemmRequest& problem, GemmBackend backend) {
+GemmSupportInfo detail::queryBlasGemmSupport(const GemmInvocation& problem, GemmBackend backend) {
     if (backend == GemmBackend::Blas) return queryTransformingBlasGemmSupport(problem);
-    return queryGemmSupport(problem, backend);
+    return detail::queryGemmSupport(problem, backend);
 }
 
-GemmRunInfo referenceGemmWithBlasBackend(const GemmRequest& problem, GemmBackend backend) {
+detail::GemmExecutionInfo detail::executeBlasGemm(const GemmInvocation& problem,
+                                                  GemmBackend backend) {
     if (backend == GemmBackend::Blas) {
         const GemmSupportInfo support = queryTransformingBlasGemmSupport(problem);
         if (!support) throw std::invalid_argument(support.reason);
         return runTransformingBlasGemm(problem);
     }
-    if (backend != GemmBackend::Automatic) return referenceGemm(problem, backend);
+    if (backend != GemmBackend::Automatic) return detail::executeGemm(problem, backend);
 
     const GemmSupportInfo blasSupport = queryTransformingBlasGemmSupport(problem);
     if (blasSupport && blasSupport.preferredForAutomaticExecution)
         return runTransformingBlasGemm(problem);
 
-    GemmRunInfo runInfo = referenceGemm(problem, GemmBackend::Automatic);
+    GemmExecutionInfo runInfo = detail::executeGemm(problem, GemmBackend::Automatic);
     if (!blasSupport) runInfo.fallbackReason = blasSupport.reason;
     return runInfo;
 }
 
-GemmResult referenceGemmWithBlasBackend(const GemmProblem& problem, const GemmOutputOptions& output,
-                                        GemmBackend backend) {
+GemmSupportInfo queryGemmSupportWithBlasBackend(const GemmOperand& a, const GemmOperand& b,
+                                                const Tensor& c, const Tensor& d,
+                                                const GemmOptions& options, GemmBackend backend) {
+    return detail::queryBlasGemmSupport(GemmInvocation(a, b, c, d, options), backend);
+}
+
+GemmBackend referenceGemmIntoWithBlasBackend(GemmOperand a, GemmOperand b, Tensor c, Tensor d,
+                                             const GemmOptions& options, GemmBackend backend) {
+    return detail::executeBlasGemm(
+               GemmInvocation(std::move(a), std::move(b), std::move(c), std::move(d), options),
+               backend)
+        .backendUsed;
+}
+
+Tensor referenceGemmWithBlasBackend(GemmOperand a, GemmOperand b, Tensor c, ScalarType outputType,
+                                    const GemmOptions& options, std::optional<Layout> outputLayout,
+                                    GemmBackend backend) {
+    const GemmSpecification problem(std::move(a), std::move(b), std::move(c), outputType, options);
     const Shape outputShape{problem.a.values.shape()[0], problem.b.values.shape()[1]};
-    const Layout outputLayout =
-        output.layout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
-    Tensor destination(problem.outputType, outputLayout);
-    GemmRequest request(problem, destination, output.selection);
-    GemmRunInfo runInfo = referenceGemmWithBlasBackend(request, backend);
-    return {.output = std::move(destination), .runInfo = std::move(runInfo)};
+    const Layout layout =
+        outputLayout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
+    Tensor destination(outputType, layout);
+    (void)detail::executeBlasGemm(GemmInvocation(problem, destination, options.outputSelection),
+                                  backend);
+    return destination;
 }
 }  // namespace roc::host_numerics

@@ -251,7 +251,7 @@ TEST(HostNumericsTypeBridge, UsesScalarTypeAsTheExternalTypeConversionHub)
 }
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-TEST(HostNumericsMxGenerationBridge, MapsScaleLayoutsAndBuildsTypedProblem)
+TEST(HostNumericsMxGenerationBridge, MapsScaleLayoutsAndGeneratesTypedData)
 {
     using namespace hipblaslt::host_numerics;
     using namespace roc::host_numerics;
@@ -264,18 +264,17 @@ TEST(HostNumericsMxGenerationBridge, MapsScaleLayoutsAndBuildsTypedProblem)
         mxScaleStorageLayoutForFormat(hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT, "gfx950"),
         MxScaleStorageLayout::Gfx950);
 
-    const MxGenerationProblem problem = makeMxGenerationProblem((hipDataType)HIP_R_4F_E2M1,
-                                                                HIP_R_8F_UE8M0,
-                                                                Shape{8, 4},
-                                                                8,
-                                                                0,
-                                                                4,
-                                                                hipblaslt_initialization::hpl,
-                                                                17);
-    EXPECT_EQ(problem.dataType, ScalarType::Float4E2M1);
-    EXPECT_EQ(problem.scaleType, ScalarType::E8M0);
-    EXPECT_EQ(problem.data.quantization(), MxDataQuantization::PreserveRange);
-    EXPECT_EQ(problem.data.recipe().seed(), 17);
+    const MxTensor generated = generateMxData((hipDataType)HIP_R_4F_E2M1,
+                                              HIP_R_8F_UE8M0,
+                                              Shape{8, 4},
+                                              8,
+                                              0,
+                                              4,
+                                              hipblaslt_initialization::hpl,
+                                              17);
+    EXPECT_EQ(generated.data.type(), ScalarType::Float4E2M1);
+    EXPECT_EQ(generated.scales.type(), ScalarType::E8M0);
+    EXPECT_EQ(generated.reference.shape(), (Shape{8, 4}));
 }
 #endif
 
@@ -529,9 +528,9 @@ TEST(HostNumericsMatrixTransformBridge, MapsLayoutsAndTransposes)
     arguments.alpha                  = 2.0;
     arguments.beta                   = -1.0;
 
-    const auto result = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
-    EXPECT_EQ(result.runInfo.outputElementsWritten, rows * columns * batches);
-    EXPECT_TRUE(result.comparison.passed());
+    const auto comparison = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
+    EXPECT_EQ(comparison.compared, rows * columns * batches);
+    EXPECT_TRUE(comparison.passed());
 }
 
 TEST(HostNumericsComparisonBridge, FindsAllcloseToleranceAcrossBatches)
@@ -1161,15 +1160,12 @@ TEST(HostNumericsCblasBridge, ConsumesNormalizedMatmulProblemAndTensorBindings)
         Tensor::copyNativeValues<float>(Shape{2, 2}, c),
         d);
 
-    const GemmRunInfo runInfo = hipblaslt::host_numerics::referenceMatmulGemm(
-        problem,
-        dataTypes,
-        preparation,
-        std::move(inputs),
-        hipblaslt_scaling_format::none,
-        hipblaslt_scaling_format::none);
-
-    EXPECT_EQ(runInfo.outputElementsWritten, 4);
+    hipblaslt::host_numerics::referenceMatmulGemm(problem,
+                                                  dataTypes,
+                                                  preparation,
+                                                  std::move(inputs),
+                                                  hipblaslt_scaling_format::none,
+                                                  hipblaslt_scaling_format::none);
     EXPECT_FLOAT_EQ(d.loadAs<float>({0, 0}), 41.0f);
     EXPECT_FLOAT_EQ(d.loadAs<float>({0, 1}), 47.0f);
     EXPECT_FLOAT_EQ(d.loadAs<float>({1, 0}), 89.0f);

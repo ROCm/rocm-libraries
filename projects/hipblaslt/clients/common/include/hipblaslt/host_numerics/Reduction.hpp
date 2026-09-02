@@ -12,8 +12,6 @@
 
 namespace hipblaslt::host_numerics
 {
-    using ::roc::host_numerics::ReductionRunInfo;
-
     struct ReductionArguments
     {
         int64_t     rows            = 0;
@@ -28,5 +26,5 @@ namespace hipblaslt::host_numerics
         hipDataType accumulatorType = HIP_R_32F;
     };
 
-    ReductionRunInfo referenceSum(const ReductionArguments& arguments);
+    void referenceSum(const ReductionArguments& arguments);
 } // namespace hipblaslt::host_numerics

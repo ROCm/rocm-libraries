@@ -77,13 +77,13 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     using namespace roc::host_numerics;
     using namespace hipblaslt::host_numerics;
     Tensor expected(ScalarType::Float32, Shape{m, n});
-    referenceSoftmax(SoftmaxRequest(
+    referenceSoftmaxInto(
         copyTensorFromEncodedStorage(
             input.data(), input.size(), Layout::contiguousLastDimensionFastest(Shape{m, n})),
         expected,
         1,
-        ScalarType::Float32));
-    const ComparisonResult comparison = compare(
+        ScalarType::Float32);
+    const ComparisonReport comparison = compare(
         copyTensorFromEncodedStorage(
             output.data(), output.size(), Layout::contiguousLastDimensionFastest(Shape{m, n})),
         expected,
@@ -155,19 +155,20 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     const Layout statisticsLayout = Layout::contiguousLastDimensionFastest(Shape{m});
     const Layout affineLayout     = Layout::contiguousLastDimensionFastest(Shape{n});
 
-    LayerNormProblem problem(copyTensorFromEncodedStorage(input.data(), input.size(), tensorLayout),
-                             ScalarType::Float32,
-                             1,
-                             ScalarType::Float32);
-    problem.meanType            = ScalarType::Float32;
-    problem.inverseVarianceType = ScalarType::Float32;
-    problem.gamma = copyTensorFromEncodedStorage(gamma.data(), gamma.size(), affineLayout);
-    problem.beta  = copyTensorFromEncodedStorage(beta.data(), beta.size(), affineLayout);
-    problem.epsilon             = 1e-5;
-    const LayerNormResult reference = referenceLayerNorm(problem);
+    LayerNormOptions options;
+    options.axis    = 1;
+    options.gamma   = copyTensorFromEncodedStorage(gamma.data(), gamma.size(), affineLayout);
+    options.beta    = copyTensorFromEncodedStorage(beta.data(), beta.size(), affineLayout);
+    options.epsilon = 1e-5;
+    const LayerNormOutputs reference
+        = referenceLayerNorm(copyTensorFromEncodedStorage(input.data(), input.size(), tensorLayout),
+                             {.output          = ScalarType::Float32,
+                              .mean            = ScalarType::Float32,
+                              .inverseVariance = ScalarType::Float32},
+                             options);
 
     const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
-    const ComparisonResult  outputComparison
+    const ComparisonReport  outputComparison
         = compare(copyTensorFromEncodedStorage(output.data(), output.size(), tensorLayout),
                   reference.output,
                   comparisonOptions);
@@ -175,7 +176,7 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
         << "LayerNorm output mismatches: " << outputComparison.mismatches
         << ", max absolute difference: " << outputComparison.maxAbsoluteDifference;
 
-    const ComparisonResult meanComparison
+    const ComparisonReport meanComparison
         = compare(copyTensorFromEncodedStorage(mean.data(), mean.size(), statisticsLayout),
                   *reference.mean,
                   comparisonOptions);
@@ -183,7 +184,7 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
         << "LayerNorm mean mismatches: " << meanComparison.mismatches
         << ", max absolute difference: " << meanComparison.maxAbsoluteDifference;
 
-    const ComparisonResult inverseVarianceComparison
+    const ComparisonReport inverseVarianceComparison
         = compare(copyTensorFromEncodedStorage(invvar.data(), invvar.size(), statisticsLayout),
                   *reference.inverseVariance,
                   comparisonOptions);
@@ -233,12 +234,12 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     using namespace roc::host_numerics;
     Tensor referenceOutput = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
         refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
-    referenceMaximumAbsolute(hipblaslt::host_numerics::copyTensorFromEncodedStorage(
-                                 cpuInput.data(),
-                                 cpuInput.size(),
-                                 Layout::contiguousLastDimensionFastest(Shape{numElements})),
-                             referenceOutput,
-                             ScalarType::Float32);
+    referenceMaximumAbsoluteInto(hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+                                     cpuInput.data(),
+                                     cpuInput.size(),
+                                     Layout::contiguousLastDimensionFastest(Shape{numElements})),
+                                 referenceOutput,
+                                 ScalarType::Float32);
     hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
         refOutput.data(), refOutput.size(), referenceOutput);
 

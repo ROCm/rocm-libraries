@@ -265,24 +265,23 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         auto result = copyTensorFromEncodedStorage(expectedD.data() + batch * dPlan.matrixElements,
                                                    dPlan.matrixElements,
                                                    Layout(Shape{size_t(M), size_t(N)}, {1, ldd}));
-        GemmProblem problem(
-            GemmOperand(copyTensorFromEncodedStorage(
-                hostA.data() + batch * aPlan.allocationElements + aPlan.logicalStart(),
-                aPlan.matrixElements,
-                Layout(Shape{size_t(M), size_t(K)}, {aRowStride, aColumnStride}))),
-            GemmOperand(copyTensorFromEncodedStorage(
-                hostB.data() + batch * bPlan.allocationElements + bPlan.logicalStart(),
-                bPlan.matrixElements,
-                Layout(Shape{size_t(K), size_t(N)}, {bRowStride, bColumnStride}))),
-            copyTensorFromEncodedStorage(hostC.data() + batch * cPlan.allocationElements
-                                             + cPlan.logicalStart(),
-                                         cPlan.matrixElements,
-                                         Layout(Shape{size_t(M), size_t(N)}, {1, ldc})),
-            result.type(),
-            scalarType<Tc>());
-        problem.epilogue.alpha = static_cast<double>(alpha);
-        problem.epilogue.beta  = static_cast<double>(beta);
-        result.copyLogicalElementsFrom(referenceGemm(problem).output);
+        GemmOperand operandA(copyTensorFromEncodedStorage(
+            hostA.data() + batch * aPlan.allocationElements + aPlan.logicalStart(),
+            aPlan.matrixElements,
+            Layout(Shape{size_t(M), size_t(K)}, {aRowStride, aColumnStride})));
+        GemmOperand operandB(copyTensorFromEncodedStorage(
+            hostB.data() + batch * bPlan.allocationElements + bPlan.logicalStart(),
+            bPlan.matrixElements,
+            Layout(Shape{size_t(K), size_t(N)}, {bRowStride, bColumnStride})));
+        Tensor      c = copyTensorFromEncodedStorage(hostC.data() + batch * cPlan.allocationElements
+                                                         + cPlan.logicalStart(),
+                                                     cPlan.matrixElements,
+                                                     Layout(Shape{size_t(M), size_t(N)}, {1, ldc}));
+        GemmOptions options(scalarType<Tc>());
+        options.epilogue.alpha = static_cast<double>(alpha);
+        options.epilogue.beta  = static_cast<double>(beta);
+        result.copyLogicalElementsFrom(referenceGemm(
+            std::move(operandA), std::move(operandB), std::move(c), result.type(), options));
         copyTensorEncodedBackingStorageToBuffer(
             expectedD.data() + batch * dPlan.matrixElements, dPlan.matrixElements, result);
     }

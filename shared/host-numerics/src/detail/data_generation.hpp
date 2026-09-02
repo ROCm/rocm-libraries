@@ -336,9 +336,9 @@ struct GenerationRecipeAccess {
                     return 0.0;
                 } else if constexpr (std::is_same_v<Pattern, Component::ConstantPattern>) {
                     return pattern.parameters.value;
-                } else if constexpr (std::is_same_v<Pattern, Component::CandidateSetPattern>) {
+                } else if constexpr (std::is_same_v<Pattern, Component::ChoicePattern>) {
                     if (pattern.parameters.values.empty())
-                        throw std::invalid_argument("Candidate-set generation requires values.");
+                        throw std::invalid_argument("Choice generation requires values.");
                     return pattern.parameters.values[counterRandom(seed, domain, logicalIndex) %
                                                      pattern.parameters.values.size()];
                 } else if constexpr (std::is_same_v<Pattern, Component::UniformIntegerPattern>) {

@@ -274,10 +274,10 @@ namespace
         arguments.beta                         = beta;
         arguments.comparison.absoluteTolerance = 1e-5;
 
-        const auto         result = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
+        const auto comparison = hipblaslt::host_numerics::referenceMatrixTransform(arguments);
         std::ostringstream diagnostics;
-        hipblaslt::host_numerics::reportMatrixTransformMismatches(diagnostics, result.comparison);
-        ASSERT_TRUE(result.comparison.passed()) << diagnostics.str();
+        hipblaslt::host_numerics::reportMatrixTransformMismatches(diagnostics, comparison);
+        ASSERT_TRUE(comparison.passed()) << diagnostics.str();
     }
 }
 
