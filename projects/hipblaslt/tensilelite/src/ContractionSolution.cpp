@@ -62,17 +62,6 @@ namespace TensileLite
 {
     namespace
     {
-        // Batch stride for pre-swizzled gfx950 MX scales.
-        size_t preSwizzledScaleBatchStride(TensorDescriptor const& t,
-                                          [[maybe_unused]] char const* semantic)
-        {
-            return RoundUpToMultiple(t.sizes()[1], size_t(32))
-                   * RoundUpToMultiple(t.sizes()[0], size_t(8));
-        }
-    }
-
-    namespace
-    {
         // The dynamic-queue StreamK kernels (SK4 and the SK4 sub-path of SK5)
         // bake a fixed power-of-two per-XCD queue count for fast index masking.
         // Codegen derives it from the arch's XCD count (StreamK.py
