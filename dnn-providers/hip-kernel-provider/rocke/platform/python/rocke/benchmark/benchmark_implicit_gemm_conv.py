@@ -760,6 +760,17 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--async-dma",
+        action="store_true",
+        dest="async_dma",
+        help=(
+            "wgrad only: load the A/B tiles with the direct global->LDS "
+            "intrinsic instead of staging them through registers. Requires "
+            "--lds-k-outer (the intrinsic needs a stride-1 reduction axis, "
+            "which wgrad only has on the K-outer tile)."
+        ),
+    )
+    parser.add_argument(
         "--lds-k-outer",
         action="store_true",
         dest="lds_k_outer",
@@ -1317,7 +1328,7 @@ def _build_wgrad_one(args_tuple):
     Returns ``(combo, spec, resolved_split_k, kernel)`` on success, or ``None``.
     Must live at module level for pickle.
     """
-    combo, problem, dtype, arch, lds_k_outer = args_tuple
+    combo, problem, dtype, arch, lds_k_outer, async_dma = args_tuple
     (
         tile_m,
         tile_n,
@@ -1386,6 +1397,7 @@ def _build_wgrad_one(args_tuple):
         epilogue=epilogue,
         split_k=resolved_split_k,
         lds_k_outer=lds_k_outer,
+        async_dma=async_dma,
     )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
@@ -2043,7 +2055,14 @@ def _run_wgrad_sweep(
     if jobs != 1:
         print(f"Building IR for {len(combos)} wgrad combos in parallel ...", flush=True)
     work = [
-        (combo, problem, dtype, arch, bool(getattr(args, "lds_k_outer", False)))
+        (
+            combo,
+            problem,
+            dtype,
+            arch,
+            bool(getattr(args, "lds_k_outer", False)),
+            bool(getattr(args, "async_dma", False)),
+        )
         for combo in combos
     ]
     pending = _build_ir_parallel(work, _build_wgrad_one, jobs)
