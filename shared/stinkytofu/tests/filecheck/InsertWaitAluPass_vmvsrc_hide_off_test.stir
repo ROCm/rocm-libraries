@@ -1,0 +1,60 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass --print-output
+#
+# Gate OFF (enableSkipHiddenVmVsrc not passed): the FIFO-depth vm_vsrc skip must
+# be inert. The SAME 11-follower cases that skip with the gate on still emit their
+# normal vm_vsrc wait here, proving the switch reverts to the pre-existing
+# per-FIFO min/max behavior. vm_vsrc is 3-bit so the wait saturates to 6.
+
+#===----------------------------------------------------------------------===#
+# 11 later TEX reads: with the gate OFF this still emits a wait (saturates to 6),
+# not a skip.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @vmtex_11_still_waits_off
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 6
+# CHECK: v_mov_b32
+
+st.func @vmtex_11_still_waits_off() {
+^entry:
+  v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+  v101 = "st.buffer_load_b32"(v1) { issueCycles = 1, latencyCycles = 100 }
+  v102 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v103 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v104 = "st.buffer_load_b32"(v4) { issueCycles = 1, latencyCycles = 100 }
+  v105 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+  v106 = "st.buffer_load_b32"(v6) { issueCycles = 1, latencyCycles = 100 }
+  v107 = "st.buffer_load_b32"(v7) { issueCycles = 1, latencyCycles = 100 }
+  v108 = "st.buffer_load_b32"(v8) { issueCycles = 1, latencyCycles = 100 }
+  v109 = "st.buffer_load_b32"(v9) { issueCycles = 1, latencyCycles = 100 }
+  v110 = "st.buffer_load_b32"(v10) { issueCycles = 1, latencyCycles = 100 }
+  v111 = "st.buffer_load_b32"(v11) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#===----------------------------------------------------------------------===#
+# flat_* with 11 later TEX reads: gate OFF -> f = max(fLds=0, fTex=11) = 11,
+# saturates to vm_vsrc = 6. No skip.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @flat_11_still_waits_off
+# CHECK: flat_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 6
+# CHECK: v_mov_b32
+
+st.func @flat_11_still_waits_off() {
+^entry:
+  v100 = "st.flat_load_b32"(v[0:1], s[16:17]) { issueCycles = 1, latencyCycles = 20 }
+  v101 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v102 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v103 = "st.buffer_load_b32"(v4) { issueCycles = 1, latencyCycles = 100 }
+  v104 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+  v105 = "st.buffer_load_b32"(v6) { issueCycles = 1, latencyCycles = 100 }
+  v106 = "st.buffer_load_b32"(v7) { issueCycles = 1, latencyCycles = 100 }
+  v107 = "st.buffer_load_b32"(v8) { issueCycles = 1, latencyCycles = 100 }
+  v108 = "st.buffer_load_b32"(v9) { issueCycles = 1, latencyCycles = 100 }
+  v109 = "st.buffer_load_b32"(v12) { issueCycles = 1, latencyCycles = 100 }
+  v110 = "st.buffer_load_b32"(v13) { issueCycles = 1, latencyCycles = 100 }
+  v111 = "st.buffer_load_b32"(v14) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}

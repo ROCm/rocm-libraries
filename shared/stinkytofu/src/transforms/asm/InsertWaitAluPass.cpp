@@ -60,6 +60,17 @@ bool g_enableESM2TrackValuVsrc = false;
 bool g_enableESM2SkipHiddenXdlVaVdst = false;
 constexpr unsigned kXdlVaVdstHideWmmas = 12;
 
+// When true, skip the vm_vsrc WAR wait for an in-flight VMEM read once at least
+// kVmVsrcHideDepth same-FIFO reads have been issued between that read and the
+// overwriting consumer: the bounded VMEM read FIFO guarantees the older read has
+// completed, so the wait is redundant. Per-FIFO and independent -- a TEX read is
+// hidden only by TEX-FIFO depth, an LDS read only by LDS-FIFO depth; reads in the
+// other FIFO never count. A flat_* sits in BOTH FIFOs and retires from both at
+// once, so either FIFO reaching the depth proves the whole read done. Gate OFF
+// restores the exact pre-existing per-FIFO min/max behavior.
+bool g_enableESM2SkipHiddenVmVsrc = false;
+constexpr unsigned kVmVsrcHideDepth = 11;
+
 // TEMP HACK gate. When true, suppress the va_vdst wait for the VGPR-source (RAW)
 // hazard of GLOBAL-family memory ops and global_prefetch — the "valu writes VGPR,
 // global op / prefetch reads it" case. global_prefetch does not carry IF_GLOBALLoad,
@@ -432,12 +443,32 @@ class WaitcntBrackets {
             });
     }
 
-    // Wait needed for this reg's VM readers.
+    // Wait needed for this reg's VM readers. Returns kNoWait if no live producer
+    // constrains the wait (drained, or -- with the hide gate -- pushed past the
+    // FIFO depth).
     unsigned vmFollowers(const VgprStamp& s) const {
         bool liveLds = s.vmOrdLds && s.vmOrdLds > vmFifoLB[FIFO_LDS];
         bool liveTex = s.vmOrdTex && s.vmOrdTex > vmFifoLB[FIFO_TEX];
         unsigned fLds = liveLds ? vmFifoUB[FIFO_LDS] - s.vmOrdLds : 0u;
         unsigned fTex = liveTex ? vmFifoUB[FIFO_TEX] - s.vmOrdTex : 0u;
+
+        // >=kVmVsrcHideDepth same-FIFO reads issued after this one force it out of
+        // the bounded FIFO -- the read has provably completed, so that FIFO no
+        // longer needs a wait. Per-FIFO; the other FIFO's depth is irrelevant.
+        if (g_enableESM2SkipHiddenVmVsrc) {
+            bool hidLds = liveLds && fLds >= kVmVsrcHideDepth;
+            bool hidTex = liveTex && fTex >= kVmVsrcHideDepth;
+            if (s.pairedFlat && liveLds && liveTex) {
+                // One flat_* in both FIFOs, retires from both at once: either FIFO
+                // clearing it proves the whole read done.
+                if (hidLds || hidTex) return kNoWait;
+            } else {
+                if (hidLds) liveLds = false;
+                if (hidTex) liveTex = false;
+                if (!liveLds && !liveTex) return kNoWait;
+            }
+        }
+
         // One flat_* retires from both FIFOs at once, so either proves it done.
         if (s.pairedFlat && liveLds && liveTex) return std::max(fLds, fTex);
         // Two distinct producers: must wait for both.
@@ -488,6 +519,12 @@ class WaitcntBrackets {
                 return;
             }
             unsigned f = vmFollowers(s);
+            if (f == kNoWait) {  // no live FIFO constrains it (drained or hidden by depth)
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait vm_vsrc on v" << k.idx << "("
+                                     << halfName(k.half) << "," << role << ")" << vmStateStr(&s)
+                                     << " → hidden/drained (no wait)\n");
+                return;
+            }
             unsigned chosen = (f > 0) ? std::min(f, maxEmittableWait(c)) : 0u;
             addWait(wait, c, chosen);
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]     wait hit vm_vsrc on v" << k.idx << "("
@@ -679,9 +716,11 @@ class InsertWaitAluPassImpl : public Pass {
 
    public:
     explicit InsertWaitAluPassImpl(bool enableESM2TrackValuVsrc,
-                                   bool enableSkipHiddenXdlVaVdst = false) {
+                                   bool enableSkipHiddenXdlVaVdst = false,
+                                   bool enableSkipHiddenVmVsrc = false) {
         g_enableESM2TrackValuVsrc = enableESM2TrackValuVsrc;
         g_enableESM2SkipHiddenXdlVaVdst = enableSkipHiddenXdlVaVdst;
+        g_enableESM2SkipHiddenVmVsrc = enableSkipHiddenVmVsrc;
     }
 
    private:
@@ -1065,9 +1104,11 @@ char InsertWaitAluPassImpl::ID = 0;
 class InsertWaitAluModulePass : public ModulePass {
    public:
     explicit InsertWaitAluModulePass(bool enableESM2TrackValuVsrc,
-                                     bool enableSkipHiddenXdlVaVdst = false)
+                                     bool enableSkipHiddenXdlVaVdst = false,
+                                     bool enableSkipHiddenVmVsrc = false)
         : enableESM2TrackValuVsrc(enableESM2TrackValuVsrc),
-          enableSkipHiddenXdlVaVdst(enableSkipHiddenXdlVaVdst) {}
+          enableSkipHiddenXdlVaVdst(enableSkipHiddenXdlVaVdst),
+          enableSkipHiddenVmVsrc(enableSkipHiddenVmVsrc) {}
 
     const char* getName() const override {
         return "InsertWaitAluModulePass";
@@ -1075,7 +1116,8 @@ class InsertWaitAluModulePass : public ModulePass {
 
     PreservedAnalyses run(StinkyAsmModule& M, PassContext& passCtx,
                           ModuleAnalysisManager& /*MAM*/) override {
-        InsertWaitAluPassImpl impl(enableESM2TrackValuVsrc, enableSkipHiddenXdlVaVdst);
+        InsertWaitAluPassImpl impl(enableESM2TrackValuVsrc, enableSkipHiddenXdlVaVdst,
+                                   enableSkipHiddenVmVsrc);
         AnalysisManager AM;
         registerAllAnalyses(AM);
 
@@ -1096,19 +1138,22 @@ class InsertWaitAluModulePass : public ModulePass {
    private:
     bool enableESM2TrackValuVsrc;
     bool enableSkipHiddenXdlVaVdst;
+    bool enableSkipHiddenVmVsrc;
 };
 
 }  // namespace
 
 namespace stinkytofu {
 std::unique_ptr<Pass> createInsertWaitAluPass(bool enableESM2TrackValuVsrc,
-                                              bool enableSkipHiddenXdlVaVdst) {
-    return std::make_unique<InsertWaitAluPassImpl>(enableESM2TrackValuVsrc,
-                                                   enableSkipHiddenXdlVaVdst);
+                                              bool enableSkipHiddenXdlVaVdst,
+                                              bool enableSkipHiddenVmVsrc) {
+    return std::make_unique<InsertWaitAluPassImpl>(
+        enableESM2TrackValuVsrc, enableSkipHiddenXdlVaVdst, enableSkipHiddenVmVsrc);
 }
 std::unique_ptr<ModulePass> createInsertWaitAluModulePass(bool enableESM2TrackValuVsrc,
-                                                          bool enableSkipHiddenXdlVaVdst) {
-    return std::make_unique<InsertWaitAluModulePass>(enableESM2TrackValuVsrc,
-                                                     enableSkipHiddenXdlVaVdst);
+                                                          bool enableSkipHiddenXdlVaVdst,
+                                                          bool enableSkipHiddenVmVsrc) {
+    return std::make_unique<InsertWaitAluModulePass>(
+        enableESM2TrackValuVsrc, enableSkipHiddenXdlVaVdst, enableSkipHiddenVmVsrc);
 }
 }  // namespace stinkytofu
