@@ -67,14 +67,12 @@ function(hkp_resolve_kpack out_var python_exe)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_selected_arches(<out_var> <rejected_var>)
+# hkp_selected_arches(<out_var>)
 #   Normalize GPU_TARGETS (or AMDGPU_TARGETS) into a bare gfx arch list,
 #   stripping feature suffixes (gfx942:xnack-) and dropping anything that is not
-#   a concrete gfx name. Rejected entries are returned in <rejected_var> so a
-#   caller can tell "nothing was asked for" (legal: install nothing) apart from
-#   "everything asked for was unusable" (a misconfiguration). No intersection
-#   with a fixed fixture set: the tool compiles from authored sources for
-#   whatever arch is requested.
+#   a concrete gfx name. Empty result is legal (install nothing, non-error). No
+#   intersection with a fixed fixture set: the tool compiles from authored
+#   sources for whatever arch is requested.
 #
 #   The only consumer of GPU_TARGETS in dnn-providers/. The sibling kpack
 #   producer, src/engines/asm_sdpa_engine/CMakeLists.txt, declares an explicit
@@ -88,7 +86,7 @@ endfunction()
 #   rather than coarse. Hence drop-with-warning, not passthrough, and no
 #   family-to-arch expansion table.
 # ---------------------------------------------------------------------------
-function(hkp_selected_arches out_var rejected_var)
+function(hkp_selected_arches out_var)
     set(_targets "")
     set(_source "")
     if(DEFINED GPU_TARGETS AND GPU_TARGETS)
@@ -100,7 +98,6 @@ function(hkp_selected_arches out_var rejected_var)
     endif()
 
     set(_selected "")
-    set(_rejected "")
     foreach(_arch IN LISTS _targets)
         string(REGEX REPLACE ":.*$" "" _bare "${_arch}")
         if(NOT _bare)
@@ -112,14 +109,12 @@ function(hkp_selected_arches out_var rejected_var)
                 "architecture and cannot be passed to hipcc --offload-arch. Nothing "
                 "is packed for it. Name real gfx architectures in ${_source} to pack "
                 "for them.")
-            list(APPEND _rejected "${_arch}")
             continue()
         endif()
         list(APPEND _selected "${_bare}")
     endforeach()
     list(REMOVE_DUPLICATES _selected)
     set(${out_var} "${_selected}" PARENT_SCOPE)
-    set(${rejected_var} "${_rejected}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -178,15 +173,8 @@ function(hkp_wire_pack_step)
     # child folder retriggers the pack step. The packer itself walks recursively
     # (load_flat_input uses rglob), so a flat glob here would drop the
     # dependency edge for every nested descriptor.
-    #
-    # `.bin` is not a descriptor and the packer never globs for it -- it reaches
-    # it only through `tree_data.artifact`. It is listed here anyway because
-    # retraining a heuristic rewrites the model and its descriptor and nothing
-    # else, and without the edge the pack step would keep shipping the previous
-    # model.
     file(GLOB_RECURSE _source_inputs CONFIGURE_DEPENDS
-         "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp"
-         "${ARG_SOURCE_ROOT}/*.fb" "${ARG_SOURCE_ROOT}/*.bin")
+         "${ARG_SOURCE_ROOT}/*.json" "${ARG_SOURCE_ROOT}/*.cpp")
 
     # Editing the tool's own sources must retrigger the pack step, else the
     # artifacts go stale against the current pipeline code. The resolved
@@ -307,41 +295,10 @@ function(hkp_stage_all)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_diagnose_no_arches(<name> <install_base> <rejected>)
-#   Report a root that selected no arch, for the two cases that mean different
-#   things. Only a root that SHIPS is diagnosed at all: a test fixture with no
-#   arch is a developer choice.
-#
-#   Nothing was asked for -> warn. Everything asked for was REJECTED -> fatal:
-#   the build was pointed at targets it cannot pack (a family name where a
-#   concrete gfx belongs), and warning there produces a green build that ships
-#   an empty descriptor tree. That is the failure this guard exists to prevent.
-# ---------------------------------------------------------------------------
-function(hkp_diagnose_no_arches name install_base rejected)
-    if(NOT install_base)
-        return()
-    endif()
-    if(rejected)
-        message(FATAL_ERROR
-            "hkp: source root '${name}' ships, but every requested GPU target "
-            "was unusable: ${rejected}. These are not concrete gfx "
-            "architectures and cannot reach hipcc --offload-arch, so packaging "
-            "would install an EMPTY descriptor tree. Name real gfx "
-            "architectures (e.g. gfx942) in GPU_TARGETS. A family name like "
-            "gfx94X-dcgpu is valid only for the ROCm wheel extra, never for "
-            "GPU_TARGETS.")
-    endif()
-    message(WARNING
-        "hkp: source root '${name}' is set but no GPU architectures are "
-        "selected, so descriptor packaging will produce and install NOTHING. "
-        "Set GPU_TARGETS (or AMDGPU_TARGETS) to the arches you want packed.")
-endfunction()
-
-# ---------------------------------------------------------------------------
 # hkp_wire_root(NAME <label> GROUP <archive-group> SOURCE_ROOT <dir>
 #               ENABLE_ROCKE <bool> ARCHES <list> HIPCC <path>
 #               ROCM_KPACK_DIR <dir> STAGE_ROOT <dir>
-#               [INSTALL_BASE <dir>] [REQUIRE_HIPCC <bool>] [REJECTED <list>]
+#               [INSTALL_BASE <dir>] [REQUIRE_HIPCC <bool>]
 #               [ROCKE_INTERP <path>] [ROCKE_COMGR_LIB <path>]
 #               [ROCKE_WHEEL_STAMP <path>])
 #   Wire the compile -> prune -> pack -> stage (-> install) DAG for ONE authored
@@ -380,18 +337,25 @@ endfunction()
 #   packaged artifacts. Without that edge the kpacks would keep shipping kernels
 #   compiled from stale wheel contents.
 #
-#   Empty ARCHES wires nothing. REJECTED carries the targets hkp_selected_arches
-#   threw out, so that case can be told from "nothing was requested" -- see
-#   hkp_diagnose_no_arches.
+#   Empty ARCHES wires nothing.
 # ---------------------------------------------------------------------------
 function(hkp_wire_root)
-    set(_one NAME GROUP SOURCE_ROOT ENABLE_ROCKE ARCHES REJECTED HIPCC
-        ROCM_KPACK_DIR INSTALL_BASE STAGE_ROOT REQUIRE_HIPCC ROCKE_INTERP
-        ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP)
+    set(_one NAME GROUP SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR
+        INSTALL_BASE STAGE_ROOT REQUIRE_HIPCC ROCKE_INTERP ROCKE_COMGR_LIB
+        ROCKE_WHEEL_STAMP)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
     if(NOT ARG_ARCHES)
-        hkp_diagnose_no_arches("${ARG_NAME}" "${ARG_INSTALL_BASE}" "${ARG_REJECTED}")
+        # Only warn for a root that ships. A test fixture with no arch selected
+        # is a developer choice; a release that installs an empty descriptor
+        # tree and says so nowhere is the silent-empty-package failure.
+        if(ARG_INSTALL_BASE)
+            message(WARNING
+                "hkp: source root '${ARG_NAME}' is set but no GPU architectures "
+                "are selected, so descriptor packaging will produce and install "
+                "NOTHING. Set GPU_TARGETS (or AMDGPU_TARGETS) to the arches you "
+                "want packed.")
+        endif()
         return()
     endif()
     if(NOT IS_DIRECTORY "${ARG_SOURCE_ROOT}")
@@ -540,13 +504,6 @@ function(hkp_probe_comgr_resolvable out_ok out_detail)
         set(_sep ":")
     endif()
     set(_pp "${_rocke_root}/platform/python${_sep}${_rocke_root}/library")
-    # On Windows the path separator IS CMake's list separator, so an unescaped
-    # "a;b" makes `-E env` see two arguments: PYTHONPATH=<first> and a stray
-    # <second> it tries to run. The probe then fails with "no such file or
-    # directory" and reports it as comgr being unresolvable -- a real machine
-    # misconfiguration and this quoting bug are indistinguishable in the error.
-    # Escaping keeps it one argument; a no-op where the separator is ':'.
-    string(REPLACE ";" "\\;" _pp "${_pp}")
     # Probe under the SAME override the build will use, so configure and build
     # ask the same question. Without this a machine that only resolves comgr via
     # the override would fail configure despite being correctly configured.
@@ -762,7 +719,7 @@ function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
-    hkp_selected_arches(_arches _rejected_arches)
+    hkp_selected_arches(_arches)
 
     # hipcc is the perl/bat driver that honors --genco; on Windows it is
     # hipcc.exe or hipcc.bat. hipcc.bin.exe is the raw clang driver and is only
@@ -870,7 +827,6 @@ assertion: an unloadable path silently falls through to the next candidate.")
             SOURCE_ROOT "${_source_root}"
             ENABLE_ROCKE "${_enable_rocke}"
             ARCHES "${_arches}"
-            REJECTED "${_rejected_arches}"
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             INSTALL_BASE "${_install_base}"
@@ -1004,6 +960,57 @@ silently stop running.")
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}"
         ${_disabled})
+
+    # S4: hipdnn_validate_descriptors --native-source cross-checks a pack's descriptor
+    # JSON against the C++ source it dispatches into (dispatch/graph_match/kernel_match/
+    # score symbol names). This is a pure filesystem/JSON/regex check -- no HIP call, no
+    # device -- but the flag was previously exercised only against generator-emitted
+    # synthetic fixtures, never against a real shipped pack, so a typo in any of the four
+    # symbol strings in a real descriptor was invisible to every test that ran.
+    #
+    # One entry per attention_dense pack this repo ships. The list is EMPTY on this
+    # branch: it ships the mechanism, not a pack. Each integration adds its own row,
+    # so the table never names a Native.cpp the branch does not carry. Each row targets
+    # the descriptor tree staged under HIPDNN_DESCRIPTOR_BUILD_DIR for its arch; that
+    # arch's kind: rocke sources are lowered to a loadable kind: kpack tree only when the
+    # arch is in GPU_TARGETS, so a build that did not target the arch never stages one.
+    # The driver script skips (ctest's SKIP_RETURN_CODE, 77) rather than fails in that
+    # case: absence reflects which arches this build configured, not a descriptor defect.
+    #
+    # Gated on the validator target existing (HIPDNN_ENABLE_KERNEL_INGESTOR) and nothing
+    # else -- the per-arch skip is the driver script's job, not configure-time's, since
+    # which arches got packed is a build-time fact HIPDNN_DESCRIPTOR_BUILD_DIR only
+    # resolves once hkp_stage_all()'s custom command has actually run.
+    # Rows are `<arch>;<pack-dir>;<engine-name>;<Native.cpp>`, one per attention_dense
+    # pack the branch actually ships. Empty here by design -- this branch carries the
+    # cross-check mechanism, not a pack -- and each integration branch sets its own
+    # rows, so the table can never name a Native.cpp absent from the checkout. Rows
+    # escape their separators (`\;`) so each stays ONE list element.
+    set(HKP_NATIVE_SOURCE_PACKS)
+
+    if(TARGET hipdnn_validate_descriptors AND HKP_NATIVE_SOURCE_PACKS)
+        set(_ns_native_source_root "${HKP_PKG_DIR}/../src/engines/kernel_ingestor_engine/packs")
+        foreach(_ns_spec IN LISTS HKP_NATIVE_SOURCE_PACKS)
+            list(GET _ns_spec 0 _ns_arch)
+            list(GET _ns_spec 1 _ns_pack)
+            list(GET _ns_spec 2 _ns_engine)
+            list(GET _ns_spec 3 _ns_native_file)
+            set(_ns_test_name "hip-kernel-provider-hkp-native-source-${_ns_arch}")
+            add_test(
+                NAME ${_ns_test_name}
+                COMMAND "${Python3_EXECUTABLE}"
+                        "${HKP_PKG_DIR}/tools/hkp_native_source_check.py"
+                        --arch "${_ns_arch}"
+                        --root "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_ns_arch}/rocKE/${_ns_pack}"
+                        --validator "$<TARGET_FILE:hipdnn_validate_descriptors>"
+                        --expect-engine "${_ns_engine}"
+                        --native-source "${_ns_native_source_root}/${_ns_native_file}"
+            )
+            set_tests_properties(${_ns_test_name} PROPERTIES
+                SKIP_RETURN_CODE 77
+                LABELS "unit_test;hip-kernel-provider;host")
+        endforeach()
+    endif()
 
     # Both entries are add_test()'d in this scope just above, so the YAML's
     # test_patterns match them via the directory-property loop. EXPLICIT_TESTS is

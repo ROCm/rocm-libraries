@@ -559,11 +559,7 @@ def test_example_tree_is_self_consistent():
     ids = [d.id for d in flat.descriptors]
     assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
     rel_dirs = {d.rel_dir.as_posix() for d in flat.kdps()}
-    assert rel_dirs == {
-        "hip/pointwise_add",
-        "rocKE/gfx942_tiled_attention",
-        "rocKE/gfx942_attention_dense",
-    }
+    assert rel_dirs == {"hip/pointwise_add", "rocKE/gfx942_tiled_attention"}
 
 
 # --- F. Toolchain provenance ------------------------------------------------
@@ -815,10 +811,6 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
     invented field set -- the failure that shipped here once already, where UDD
     had `grid`/`block`/`args` instead of `dispatch_symbol` and UMD had
     `criteria`/`nodes` instead of `match_symbol`.
-
-    Intersected, not unioned: a UHD's body key is its adapter's name (RFC 0019
-    §4), so a `native` and a `tree_data` heuristic legitimately differ below the
-    header. Unioning would demand every UHD carry `tree_data`.
     """
     if not RUNTIME_FIXTURE.is_dir():
         pytest.skip(f"runtime fixture not present at {RUNTIME_FIXTURE}")
@@ -827,8 +819,7 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
         out = {}
         for path in _descriptor_files(root):
             kind = path.name.split(".")[-2]
-            keys = set(_read(path).keys())
-            out[kind] = keys if kind not in out else out[kind] & keys
+            out.setdefault(kind, set()).update(_read(path).keys())
         return out
 
     fixture = shapes(RUNTIME_FIXTURE)
@@ -970,7 +961,7 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
         # cleanly and is rejected at load, dropping the matcher, then the pack
         # naming it, then the engine -- at a log level that is off by default.
         ("pointwise.umd.json", {"scope": "Kernel"}, "invalid scope"),
-        ("shared.uhd.json", {"adapter": "Native"}, "invalid adapter"),
+        ("shared.uhd.json", {"kind": "Native"}, "invalid kind"),
         (
             "pointwise.kmd.json",
             {"fields": [{"name": "block_size", "type": "integer"}]},

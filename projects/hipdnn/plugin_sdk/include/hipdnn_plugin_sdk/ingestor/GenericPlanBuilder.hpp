@@ -10,13 +10,9 @@
 #include <exception>
 #include <map>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
-
-#include <nlohmann/json.hpp>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
@@ -36,23 +32,6 @@ namespace hipdnn_plugin_sdk::ingestor
 /// A caller's requested value for each knob it explicitly set, keyed by KMD field
 /// name.
 using KnobFilter = std::map<std::string, int64_t>;
-
-namespace detail
-{
-
-/// One MetadataValue as the JSON value it already is: an int stays an int, a string
-/// stays a string, an int list stays a list.
-///
-/// Verbatim on purpose. Turning `"float16"` into an ordinal here would bake one encoding
-/// into the training corpus that every later reader would have to guess and undo, and
-/// RFC 0019 §7 puts categorical encoding in the feature extractor, which is the only
-/// place that knows the signature the encoding has to agree with.
-inline nlohmann::json metadataValueToJson(const MetadataValue& value)
-{
-    return std::visit([](const auto& held) { return nlohmann::json(held); }, value);
-}
-
-} // namespace detail
 
 /// What a `TSettings` used with GenericPlanBuilder must carry, grouped so a second
 /// provider embeds one member rather than replicating loose fields by name.
@@ -325,8 +304,7 @@ public:
                      std::make_unique<GenericPlan<THandle>>(
                          _stateManager.getDispatchDetails(kernel), context, catalog.bound),
                      kernel.packId,
-                     kernel.dispatchId,
-                     candidateFeatures(catalog.bound, kernel)});
+                     kernel.dispatchId});
             }
             catch(const std::exception& error)
             {
@@ -341,31 +319,12 @@ public:
         // The callback is the write-back channel, already bound to the key: it captures
         // the state manager by reference, which the engine owns and which strictly
         // outlives every plan it hands out.
-        // benchmarkId is the graph half of the winner key and deviceId the device half.
-        // Both are logged, and neither is the whole key: an exporter needs to group rows
-        // by problem, and a problem is (graph, device) exactly as the winner cache keys
-        // it. The device half is constant within one process but NOT across a corpus
-        // merged from several machines, nor across a sweep spanning two GPUs; grouping on
-        // the graph alone there would silently take RFC 0019.13 §11.2's per-problem oracle
-        // across devices and understate every regret figure computed from it.
-        //
-        // Taken from winnerKey.device rather than re-derived from DeviceProperties here:
-        // one notion of "which GPU", so a log line and a cache entry can never disagree
-        // about whether two rows came from the same device.
-        // Hex so both values survive a log grep unambiguously.
-        std::ostringstream benchmarkId;
-        benchmarkId << std::hex << winnerKey.graph.hash();
-        std::ostringstream deviceId;
-        deviceId << std::hex << winnerKey.device.hash();
-
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
             handle,
             [&stateManager = _stateManager, winnerKey](const std::vector<RankedEntry>& ranking) {
                 stateManager.recordWinner(winnerKey, ranking);
-            },
-            benchmarkId.str(),
-            deviceId.str()));
+            }));
     }
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
@@ -421,57 +380,15 @@ public:
     }
 
 private:
-    /// Every feature value that describes one benchmarked (problem, kernel) pair: the
-    /// tokens graph matching bound for the problem, and the kernel's own KMD metadata.
-    ///
-    /// This is where the knowledge lives -- BenchmarkPlan holds the MatchContext and the
-    /// KernelDefinition for nothing, and teaching it to reach into a graph would cost it
-    /// the opacity its benchmarkId comment exists to protect.
-    ///
-    /// Keys mirror how FeatureExtractor will bind the same values, so a logged column and
-    /// a `features_signature` entry are the same string minus the `$`. Both roots come
-    /// from `bindNamespace`: bound tokens land under `q` (`bindQueryVars`) and KMD
-    /// metadata under `kernel` (`bindKernelVars`). Dropping either prefix here would name
-    /// a column no signature can reference.
-    ///
-    /// Note this makes `q` a namespace meaning "the problem", which is NOT what RFC 0020
-    /// §6.1 means by it -- there `$q` is a pattern variable naming the query tensor. The
-    /// divergence is FeatureExtractor's, not this function's; mirroring it is the only way
-    /// the two sides agree today. Reconciling them is the pattern-driven path's to do.
-    ///
-    /// Built for every sweep, whatever the engine ships. Gating this on a UHD being
-    /// present would make the corpus collectable only by a build that already has the
-    /// model the corpus exists to train.
-    static nlohmann::json candidateFeatures(const BoundTokens& bound,
-                                            const KernelDefinition& kernel)
-    {
-        nlohmann::json features = nlohmann::json::object();
-        for(const auto& [token, value] : bound)
-        {
-            features["q." + token] = detail::metadataValueToJson(value);
-        }
-        for(const auto& [field, value] : kernel.metadata)
-        {
-            features["kernel." + field] = detail::metadataValueToJson(value);
-        }
-        return features;
-    }
-
     /// The seam for a deterministic test timer is the constructor's `timer` parameter,
     /// not this factory: tests exercise this exact code path rather than overriding it.
     std::unique_ptr<IPlan<THandle>>
         makeBenchmarkPlan(std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates,
                           const THandle& handle,
-                          typename BenchmarkPlan<THandle>::RecordRankingFn recordRanking,
-                          std::string benchmarkId,
-                          std::string deviceId) const
+                          typename BenchmarkPlan<THandle>::RecordRankingFn recordRanking) const
     {
-        return std::make_unique<BenchmarkPlan<THandle>>(std::move(candidates),
-                                                        handle,
-                                                        _timer,
-                                                        std::move(recordRanking),
-                                                        std::move(benchmarkId),
-                                                        std::move(deviceId));
+        return std::make_unique<BenchmarkPlan<THandle>>(
+            std::move(candidates), handle, _timer, std::move(recordRanking));
     }
 
     /// An arch-independent pack (empty `arch` list, itself legal) passes `archSupports`
