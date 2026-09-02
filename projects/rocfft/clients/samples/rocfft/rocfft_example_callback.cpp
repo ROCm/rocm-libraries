@@ -210,7 +210,7 @@ int main()
 
     // Read the result back before tearing down the plan and its resources.
     std::vector<double2> y(N);
-    hip_status = hipMemcpy(&y[0], x, Nbytes, hipMemcpyDeviceToHost);
+    hip_status = hipMemcpy(y.data(), x, Nbytes, hipMemcpyDeviceToHost);
     if(hip_status != hipSuccess)
         throw std::runtime_error("hipMemcpy failed.");
 
