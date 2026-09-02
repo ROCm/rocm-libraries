@@ -10,7 +10,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Fixed a HIPRTC compilation failure in the ConvDepthwiseFwd3D (gfx942/gfx950) FP16/BFP16 solver.
 * [BatchNorm] Fixed MIOpen#3900 by implementing Welford's algorithm in FwdTrainSpatial variant 1
 * [Conv] Fixed a batch-split miscalculation that produced incorrect results for large backward-weights (WrW) tensors.
-* [Conv] Fixed a convolution failure on XNACK-unsupported gfx9 APUs (gfx90c).
+* [Conv] Fixed a convolution failure on XNACK-unsupported gfx9 APUs (gfx902, gfx909, gfx90c).
 * [BatchNorm] Fixed a device heap-buffer-overflow in the forward spatial `FinalMeanVariance` kernel.
 * [Conv] Fixed incorrect `SetNextValue` polarity in deterministic mode for the grouped backward-data and backward-weights CK solvers.
 * [LRN][LayerNorm] Fixed grid alignment and out-of-bounds thread access on gfx1250.
