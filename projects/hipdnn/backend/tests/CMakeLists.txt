@@ -268,44 +268,12 @@ install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
 
-# libhipdnn_test_scorer_lib.so or hipdnn_test_scorer_lib.dll (used by TestCustomLibraryAdapter.cpp)
-# RFC 0019 UHD selection tests, gated with the sources they cover.
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    target_sources(
-        hipdnn_backend_tests
-        PRIVATE
-        heuristics/TestJsonLogicEvaluator.cpp
-        heuristics/TestFeatureExtractor.cpp
-        heuristics/TestDerivedValues.cpp
-        heuristics/TestTreeDataAdapter.cpp
-        heuristics/TestNativeAdapter.cpp
-        heuristics/TestTableAdapter.cpp
-        heuristics/TestCustomLibraryAdapter.cpp
-        heuristics/uhd/TestUhdLoader.cpp
-        heuristics/uhd/TestUhdLoaderMultiArch.cpp
-    )
-endif()
+# The RFC 0019 UHD tests used to be listed here. They moved to plugin_sdk/tests/ingestor/uhd
+# with the code they cover -- every one of them included only plugin SDK headers, so a plugin
+# SDK change was breaking a backend test target and the plugin SDK's own suite looked as though
+# it did not test its own UHD modules. hipdnn_test_scorer_lib moved with TestCustomLibraryAdapter,
+# which is its only consumer.
 
-# Only TestCustomLibraryAdapter loads this, and that test is gated above.
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-add_library(hipdnn_test_scorer_lib SHARED heuristics/test_scorer_lib.cpp)
-set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
-target_compile_options(hipdnn_test_scorer_lib PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-add_dependencies(hipdnn_backend_tests hipdnn_test_scorer_lib)
-
-set_target_properties(
-    hipdnn_test_scorer_lib
-    PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
-        RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
-        ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
-        THEROCK_INSTALL_RPATH_ORIGIN "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}"
-)
-
-install(TARGETS hipdnn_test_scorer_lib LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
-        RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
-)
-endif()
 
 # A real, loadable engine plugin used by TestEnginePluginResourceManager.cpp, and
 # the only consumer of EnginePluginImpl.inl inside the main build; see

@@ -17,7 +17,7 @@
 #include <hipdnn_plugin_sdk/ingestor/uhd/adapters/TreeDataAdapter.hpp>
 #include <hipdnn_plugin_sdk/ingestor/uhd/Sha256.hpp>
 
-#include "GbdtModelTestBuilder.hpp"
+#include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
 
 #include <gtest/gtest.h>
 
@@ -35,7 +35,7 @@ namespace
 {
 
 /// Shared with TestUhdSelectionFlow so both suites build model artifacts the same way.
-using GbdtModelBuilder = hipdnn_backend::heuristics::uhd::testing::GbdtModelTestBuilder;
+using GbdtModelBuilder = hipdnn_test_sdk::utilities::GbdtModelTestBuilder;
 
 /// Create a simple single-node tree (just a leaf).
 GbdtModelBuilder::TreeSpec makeLeafTree(double leafValue)
