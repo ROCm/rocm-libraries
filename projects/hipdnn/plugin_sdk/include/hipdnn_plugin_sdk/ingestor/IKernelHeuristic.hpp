@@ -146,6 +146,42 @@ public:
         return ranked;
     }
 
+    /// @brief Whether this heuristic's score is comparable against other engines' scores.
+    ///
+    /// RFC 0019 §11.3: a cross-engine score must be an absolute metric on a scale that means
+    /// the same thing everywhere -- calibrated TFLOPS. Defaults to false, so a heuristic that
+    /// has not said otherwise is never compared against another engine by accident.
+    virtual bool scoreIsCalibrated() const { return false; }
+
+    /// @brief This engine's predicted TFLOPS for @p catalog, or nullopt if it cannot say.
+    ///
+    /// RFC 0019 §11.1 defines `predict_engine_tflops` as the cheap proxy for engine ranking and
+    /// then states it is not needed for v1: with a single descriptor engine there is nothing to
+    /// rank against. It names the stopgap -- "an engine reports sort_kernel_catalog's best
+    /// predicted score as its estimate, accepting the enumeration cost" -- which is what this
+    /// is. A distinct estimate model, when one exists, replaces the body without moving the
+    /// seam.
+    ///
+    /// Returns nullopt rather than a number whenever the number would not mean what the caller
+    /// needs it to. An uncalibrated score ranks within one engine only (§15.1), and a NaN score
+    /// is a ranking that computed no figure of merit at all (§15.2). Both are legal rankings and
+    /// neither is an estimate, so the distinction is returned rather than flattened -- a caller
+    /// comparing engines has to be able to tell "slow" from "declined to say".
+    std::optional<double> estimateTflops(const Catalog& catalog, const MatchContext& context) const
+    {
+        if(!scoreIsCalibrated())
+        {
+            return std::nullopt;
+        }
+
+        const auto scored = rankScored(catalog, context);
+        if(scored.empty() || std::isnan(scored.front().score))
+        {
+            return std::nullopt;
+        }
+        return scored.front().score;
+    }
+
     /// The same order as rankScored(), as whole kernels.
     ///
     /// Kept because the catalog is what the state manager holds and re-sorts; §15.2's point is

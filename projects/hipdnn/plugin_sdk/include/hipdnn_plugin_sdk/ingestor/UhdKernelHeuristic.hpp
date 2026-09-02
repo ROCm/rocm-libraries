@@ -269,6 +269,15 @@ public:
         return orientedScore(_extractor->extract(ctx));
     }
 
+    /// Whatever the UHD declared. §15.1 already refused the one combination that would make
+    /// this incoherent -- calibrated together with a descending objective -- so a calibrated
+    /// score reaching here is ascending TFLOPS, which is what §11.3 asks a cross-engine
+    /// comparison to be given.
+    bool scoreIsCalibrated() const override
+    {
+        return _config.scoreCalibrated;
+    }
+
     std::vector<ScoredKernel> rankScored(const Catalog& catalog,
                                          const MatchContext& context) const override
     {

@@ -613,4 +613,65 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedScoreCannotAlsoBeMinimising)
     EXPECT_TRUE(uhd::UhdLoader::load(okDir.path() / ok.uhdFileName).has_value());
 }
 
+TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngineEstimate)
+{
+    // RFC 0019 §11.1's stopgap for `predict_engine_tflops`: with no distinct estimate model,
+    // the engine reports sort_kernel_catalog's best predicted score. The estimate must be the
+    // *same* number the ranking put first -- an estimate derived from a second traversal could
+    // disagree with the kernel actually selected, and the engine would be ranked on a plan it
+    // is not going to run.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_engine_estimate");
+    const auto fixture
+        = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true);
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    const auto estimate = heuristic->estimateTflops(catalogAgainstPriority(2048), context);
+    ASSERT_TRUE(estimate.has_value());
+    EXPECT_DOUBLE_EQ(*estimate,
+                     heuristic->rankScored(catalogAgainstPriority(2048), context).front().score);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedModelDeclinesToEstimate)
+{
+    // §11.3: a cross-engine score has to be an absolute metric on a shared scale. An
+    // uncalibrated model ranks within its own engine and says nothing about how it compares to
+    // another, so it returns nothing rather than a number that would be compared anyway. It
+    // still ranks -- declining to estimate is not declining to select.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_no_estimate");
+    const auto fixture
+        = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/false);
+
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture.uhdFileName),
+                                               {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_FALSE(heuristic->estimateTflops(catalogAgainstPriority(2048), context).has_value());
+    EXPECT_FALSE(heuristic->rankScored(catalogAgainstPriority(2048), context).empty())
+        << "declining to estimate must not stop it selecting";
+}
+
+TEST(TestIngestorKernelHeuristicEstimate, AnEngineWithNoModelDeclinesToEstimate)
+{
+    // The fallback ranks on declared order and computes no figure of merit. §11.1's stopgap is
+    // "report the ranker's best predicted score"; there is no predicted score here, and
+    // reporting the priority it sorted by would put an arbitrary integer on a TFLOPS scale.
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    const UnrankedKernelHeuristic heuristic;
+    EXPECT_FALSE(heuristic.estimateTflops(catalogAgainstPriority(2048), context).has_value());
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
