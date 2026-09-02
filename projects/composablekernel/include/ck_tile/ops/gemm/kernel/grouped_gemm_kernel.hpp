@@ -380,11 +380,12 @@ struct GroupedGemmKernel
                                  const index_t block_idx_m,
                                  const index_t block_idx_n)
     {
-        // Create block windows using specialized methods
-        const auto& a_block_window =
+        // Create block windows using specialized methods.
+        // Copy the block windows out of the temporary tuple to avoid dangling references.
+        const auto a_block_window =
             Base::MakeABlockWindows({a_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_m)
                 .at(Base::I0);
-        const auto& b_block_window =
+        const auto b_block_window =
             Base::MakeBBlockWindows({b_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_n)
                 .at(Base::I0);
         const auto& d_block_window =
@@ -441,11 +442,12 @@ struct GroupedGemmKernel
                                      const index_t block_idx_m,
                                      const index_t block_idx_n)
     {
-        // Create block windows using specialized methods
-        const auto& a_block_window =
+        // Create block windows using specialized methods.
+        // Copy the block windows out of the temporary tuple to avoid dangling references.
+        const auto a_block_window =
             Base::MakeABlockWindows({a_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_m)
                 .at(Base::I0);
-        const auto& b_block_window =
+        const auto b_block_window =
             Base::MakeBBlockWindows({b_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_n)
                 .at(Base::I0);
         const auto& d_block_window =
