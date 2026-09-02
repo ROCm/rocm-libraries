@@ -910,15 +910,15 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         d_ptr + i3 * stride_d[i],
                         dElements,
                         Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]}));
-                    GemmOperand operandA(copyTensorFromEncodedStorage(
+                    Tensor a = copyTensorFromEncodedStorage(
                         a_ptr + i3 * stride_a[i],
                         aElements,
-                        Layout(Shape{size_t(m[i]), size_t(k[i])}, {a_stride_1[i], a_stride_2[i]})));
-                    GemmOperand operandB(copyTensorFromEncodedStorage(
+                        Layout(Shape{size_t(m[i]), size_t(k[i])}, {a_stride_1[i], a_stride_2[i]}));
+                    Tensor b = copyTensorFromEncodedStorage(
                         b_ptr + i3 * stride_b[i],
                         bElements,
-                        Layout(Shape{size_t(k[i]), size_t(n[i])}, {b_stride_1[i], b_stride_2[i]})));
-                    Tensor      c = copyTensorFromEncodedStorage(
+                        Layout(Shape{size_t(k[i]), size_t(n[i])}, {b_stride_1[i], b_stride_2[i]}));
+                    Tensor c = copyTensorFromEncodedStorage(
                         c_ptr + i3 * stride_c[i],
                         cElements,
                         Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldc[i]}));
@@ -939,11 +939,8 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         options.epilogue.activationParameter0 = -1.0;
                         options.epilogue.activationParameter1 = 1.0;
                     }
-                    referenceGemmInto(std::move(operandA),
-                                      std::move(operandB),
-                                      std::move(c),
-                                      referenceOutput,
-                                      options);
+                    referenceGemmInto(
+                        std::move(a), std::move(b), std::move(c), referenceOutput, options);
                     copyTensorEncodedBackingStorageToBuffer(
                         d_ptr + i3 * stride_d[i], dElements, referenceOutput);
 

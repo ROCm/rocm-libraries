@@ -36,20 +36,16 @@ void testTransformingBlockScaleFallsBack(roc::host_numerics::ScalarType accumula
 
     auto makeOperandA = [&]() {
         GemmOperand operand(Tensor::copyNativeStorage<T>(layoutA, std::span<const T>(a)));
-        operand.blockScale = BlockScaleBinding{
-            Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
-                                              std::as_bytes(std::span(scaleA))),
-            2,
-        };
+        operand.blockScale = Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
+                                                               std::as_bytes(std::span(scaleA)));
+        operand.blockSize = 2;
         return operand;
     };
     auto makeOperandB = [&]() {
         GemmOperand operand(Tensor::copyNativeStorage<T>(layoutB, std::span<const T>(b)));
-        operand.blockScale = BlockScaleBinding{
-            Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
-                                              std::as_bytes(std::span(scaleB))),
-            2,
-        };
+        operand.blockScale = Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
+                                                               std::as_bytes(std::span(scaleB)));
+        operand.blockSize = 2;
         return operand;
     };
 

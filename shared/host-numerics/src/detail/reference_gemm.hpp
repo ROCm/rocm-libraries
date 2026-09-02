@@ -177,27 +177,33 @@ inline void validateRuntimeGemmProblem(const GemmSpecification& problem) {
     if (problem.epilogue.scaleA) validateEpilogueTensor(*problem.epilogue.scaleA, "scale-A");
     if (problem.epilogue.scaleB) validateEpilogueTensor(*problem.epilogue.scaleB, "scale-B");
 
-    auto validateBlockScale = [&](const BlockScaleBinding& binding, size_t freeExtent,
-                                  const char* name) {
-        if (binding.blockSize == 0)
+    auto validateBlockScale = [&](const GemmOperand& operand, size_t freeExtent, const char* name) {
+        if (!operand.blockScale) {
+            if (operand.blockSize != 0)
+                throw std::invalid_argument(std::string("Reference GEMM ") + name +
+                                            " block size requires a scale tensor.");
+            return;
+        }
+        if (operand.blockSize == 0)
             throw std::invalid_argument(std::string("Reference GEMM ") + name +
                                         " block size must be nonzero.");
-        requireRank(binding.values.shape(), 2, "Reference GEMM", name);
-        const size_t blockCount = k / binding.blockSize + (k % binding.blockSize != 0 ? 1 : 0);
-        if (binding.values.shape()[0] != freeExtent || binding.values.shape()[1] < blockCount)
+        requireRank(operand.blockScale->shape(), 2, "Reference GEMM", name);
+        const size_t blockCount = k / operand.blockSize + (k % operand.blockSize != 0 ? 1 : 0);
+        if (operand.blockScale->shape()[0] != freeExtent ||
+            operand.blockScale->shape()[1] < blockCount)
             throw std::invalid_argument(std::string("Reference GEMM ") + name +
                                         " block-scale shape mismatch.");
-        if (isComplexScalarType(binding.values.type()))
+        if (isComplexScalarType(operand.blockScale->type()))
             throw std::invalid_argument(std::string("Reference GEMM ") + name +
                                         " block scales must be real.");
     };
+    validateBlockScale(problem.a, m, "A");
+    validateBlockScale(problem.b, n, "B");
     if (problem.a.blockScale) {
-        validateBlockScale(*problem.a.blockScale, m, "A");
         if (complexAccumulator)
             throw std::invalid_argument("Complex reference GEMM does not support block scaling.");
     }
     if (problem.b.blockScale) {
-        validateBlockScale(*problem.b.blockScale, n, "B");
         if (complexAccumulator)
             throw std::invalid_argument("Complex reference GEMM does not support block scaling.");
     }
@@ -235,10 +241,10 @@ inline void validateGemmOutputAliasing(const GemmInvocation& problem) {
         if (storageOverlaps(problem.d, scale))
             throw std::invalid_argument(
                 "Reference GEMM destination must not overlap a B pre-quantization scale.");
-    if (problem.a.blockScale && storageOverlaps(problem.d, problem.a.blockScale->values))
+    if (problem.a.blockScale && storageOverlaps(problem.d, *problem.a.blockScale))
         throw std::invalid_argument(
             "Reference GEMM destination must not overlap the A block scale.");
-    if (problem.b.blockScale && storageOverlaps(problem.d, problem.b.blockScale->values))
+    if (problem.b.blockScale && storageOverlaps(problem.d, *problem.b.blockScale))
         throw std::invalid_argument(
             "Reference GEMM destination must not overlap the B block scale.");
     if (problem.epilogue.bias && storageOverlaps(problem.d, *problem.epilogue.bias))
@@ -386,8 +392,8 @@ GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
     preScalesB.reserve(problem.b.preQuantizationScales.size());
     for (const Tensor& scale : problem.b.preQuantizationScales)
         preScalesB.emplace_back(scale.broadcastTo(problem.b.values.shape()));
-    if (problem.a.blockScale) blockScaleA.emplace(problem.a.blockScale->values);
-    if (problem.b.blockScale) blockScaleB.emplace(problem.b.blockScale->values);
+    if (problem.a.blockScale) blockScaleA.emplace(*problem.a.blockScale);
+    if (problem.b.blockScale) blockScaleB.emplace(*problem.b.blockScale);
 
     const size_t m = problem.a.values.shape()[0];
     const size_t k = problem.a.values.shape()[1];
@@ -399,14 +405,12 @@ GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
         if (!finalizer.alphaIsZero() && (blockScaleA || blockScaleB)) {
             size_t blockBase = 0;
             while (blockBase < k) {
-                const size_t remainingA = blockScaleA
-                                              ? problem.a.blockScale->blockSize -
-                                                    blockBase % problem.a.blockScale->blockSize
-                                              : k - blockBase;
-                const size_t remainingB = blockScaleB
-                                              ? problem.b.blockScale->blockSize -
-                                                    blockBase % problem.b.blockScale->blockSize
-                                              : k - blockBase;
+                const size_t remainingA =
+                    blockScaleA ? problem.a.blockSize - blockBase % problem.a.blockSize
+                                : k - blockBase;
+                const size_t remainingB =
+                    blockScaleB ? problem.b.blockSize - blockBase % problem.b.blockSize
+                                : k - blockBase;
                 const size_t blockLength = std::min({k - blockBase, remainingA, remainingB});
                 const size_t blockEnd = blockBase + blockLength;
                 Accumulator blockSum = Accumulator(0);
@@ -426,10 +430,10 @@ GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
                 Accumulator scale = Accumulator(1);
                 if (blockScaleA)
                     scale = finalizer.multiply(
-                        scale, (*blockScaleA)(row, blockBase / problem.a.blockScale->blockSize));
+                        scale, (*blockScaleA)(row, blockBase / problem.a.blockSize));
                 if (blockScaleB)
                     scale = finalizer.multiply(
-                        scale, (*blockScaleB)(column, blockBase / problem.b.blockScale->blockSize));
+                        scale, (*blockScaleB)(column, blockBase / problem.b.blockSize));
                 sum = finalizer.add(sum, finalizer.multiply(blockSum, scale));
                 blockBase = blockEnd;
             }

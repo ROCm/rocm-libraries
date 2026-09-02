@@ -18,7 +18,7 @@ struct GemmValidationOptions {
 // Computes and compares the requested reference output. Partial selections are
 // streamed into compact temporary storage rather than materializing complete D.
 // GPU readback, tolerance selection, and result presentation remain caller-owned.
-ComparisonReport validateGemm(const GemmOperand& a, const GemmOperand& b, const Tensor& c,
+ComparisonReport validateGemm(const Tensor& a, const Tensor& b, const Tensor& c,
                               const Tensor& observed, const GemmOptions& gemmOptions,
                               const GemmValidationOptions& validationOptions = {});
 }  // namespace roc::host_numerics

@@ -29,16 +29,15 @@ void validatePythonGemmBackend(GemmBackend backend) {
         throw std::invalid_argument("Mixed is a reporting-only GEMM backend value.");
 }
 
-Tensor referenceGemmOwned(GemmOperand a, GemmOperand b, Tensor c, ScalarType outputType,
-                          GemmOptions options, std::optional<Layout> outputLayout,
-                          GemmBackend backend) {
+Tensor referenceGemmOwned(Tensor a, Tensor b, Tensor c, ScalarType outputType, GemmOptions options,
+                          std::optional<Layout> outputLayout, GemmBackend backend) {
     validatePythonGemmBackend(backend);
     return referenceGemm(std::move(a), std::move(b), std::move(c), outputType, options,
                          std::move(outputLayout), backend);
 }
 
-GemmBackend referenceGemmIntoBound(GemmOperand a, GemmOperand b, Tensor c, Tensor d,
-                                   GemmOptions options, GemmBackend backend) {
+GemmBackend referenceGemmIntoBound(Tensor a, Tensor b, Tensor c, Tensor d, GemmOptions options,
+                                   GemmBackend backend) {
     validatePythonGemmBackend(backend);
     return referenceGemmInto(std::move(a), std::move(b), std::move(c), std::move(d), options,
                              backend);
@@ -47,23 +46,6 @@ GemmBackend referenceGemmIntoBound(GemmOperand a, GemmOperand b, Tensor c, Tenso
 }  // namespace
 
 void registerGemmBindings(nb::module_& module) {
-    nb::class_<BlockScaleBinding>(
-        module, "BlockScaleBinding",
-        "Owning tensor and reduction-block size used for GEMM block scaling.")
-        .def(nb::init<Tensor, size_t>(), "values"_a, "block_size"_a)
-        .def_rw("values", &BlockScaleBinding::values)
-        .def_rw("block_size", &BlockScaleBinding::blockSize);
-
-    nb::class_<GemmOperand>(
-        module, "GemmOperand",
-        "Owning GEMM operand, including compute-input quantization and scaling metadata.")
-        .def(nb::init<Tensor>(), "values"_a)
-        .def_rw("values", &GemmOperand::values)
-        .def_rw("compute_type", &GemmOperand::computeType)
-        .def_rw("pre_quantization_scales", &GemmOperand::preQuantizationScales)
-        .def_rw("block_scale", &GemmOperand::blockScale)
-        .def_rw("conjugate", &GemmOperand::conjugate);
-
     nb::class_<GemmEpilogue>(
         module, "GemmEpilogue",
         "Owning GEMM alpha/beta, vector scaling, activation, and output-conversion settings.")
@@ -118,10 +100,20 @@ void registerGemmBindings(nb::module_& module) {
         .def_rw("accumulator_type", &GemmOptions::accumulatorType)
         .def_rw("accumulation_rounding", &GemmOptions::accumulationRounding)
         .def_rw("math_mode", &GemmOptions::mathMode)
+        .def_rw("compute_type_a", &GemmOptions::computeTypeA)
+        .def_rw("compute_type_b", &GemmOptions::computeTypeB)
+        .def_rw("pre_quantization_scales_a", &GemmOptions::preQuantizationScalesA)
+        .def_rw("pre_quantization_scales_b", &GemmOptions::preQuantizationScalesB)
+        .def_rw("block_scale_a", &GemmOptions::blockScaleA)
+        .def_rw("block_scale_b", &GemmOptions::blockScaleB)
+        .def_rw("block_size_a", &GemmOptions::blockSizeA)
+        .def_rw("block_size_b", &GemmOptions::blockSizeB)
+        .def_rw("conjugate_a", &GemmOptions::conjugateA)
+        .def_rw("conjugate_b", &GemmOptions::conjugateB)
         .def_rw("epilogue", &GemmOptions::epilogue)
         .def_rw("output_selection", &GemmOptions::outputSelection);
 
-    module.def("reference_gemm_operands", &referenceGemmOwned, "a"_a, "b"_a, "c"_a,
+    module.def("_reference_gemm", &referenceGemmOwned, "a"_a, "b"_a, "c"_a,
                "output_type"_a = ScalarType::Float32, "options"_a = GemmOptions{},
                "output_layout"_a = std::optional<Layout>{}, "backend"_a = GemmBackend::Pointwise);
     module.def("reference_gemm_into", &referenceGemmIntoBound, "a"_a, "b"_a, "c"_a, "d"_a,
