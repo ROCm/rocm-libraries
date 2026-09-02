@@ -1,0 +1,162 @@
+# Worked example: pack-level `variants`.
+#
+# WHEN TO REACH FOR THIS INSTEAD OF `axes`. `axes` crosses ONE `kernel_template`,
+# which fits a sweep over a single base kernel. A DISPATCHER-DERIVED variant set
+# does not look like that: `tools/dispatch_parity.py` asks the library for a spec
+# per shape, so every shape carries its own resolved values for the fields the
+# dispatcher derives (`waves_per_eu` and `persistent` on gfx942 attention_dense).
+# There is no one template to cross. Forcing it into `axes` means either crossing
+# those derived fields as axes -- manufacturing combinations the dispatcher would
+# never resolve to, the exact mistake `--report-knobs` exists to prevent -- or one
+# `axes` block per shape, which is the enumeration again with extra syntax.
+#
+# So a group is a SHAPE LIST crossed per-shape with a NAMED KNOB SET. The largest
+# shipped gfx942 attention_dense config went from 89,265 lines to about 1,150 this
+# way, generating byte-identical descriptors.
+#
+# IT IS NOT A GRID. On the shipped sets most shapes carry four arms and 63 carry
+# six. A format that crossed one knob set over every shape would silently invent
+# variants for some shapes and drop them for others, so the knob set is chosen
+# per shape.
+#
+# Expansion happens at LOAD TIME, into the same per-kernel dicts a hand-authored
+# `kernels:` entry produces -- so generator.py, the emitters and the dedup pass
+# never see `variants` at all, and `kernel_defaults` applies underneath exactly as
+# it does under a hand-authored kernel.
+#
+# To convert an already-enumerated config, use `tools/factorise_config.py`, which
+# re-expands what it writes and refuses to emit anything that does not reproduce
+# the input kernel-for-kernel.
+#
+# See `tests/test_variants.py` for the load-time contract.
+
+dialect: packaged
+authored_subpath: rocKE/variants_example
+
+engine:
+  name: hipkernel:VariantsExample
+  sdk_version: "1.0.0"
+  knobs: [block_m]
+  heuristic: native
+
+kmd_fields:
+  - name: dtype
+    type: string
+  - name: seqlen_q
+    type: int
+    default_value: 256
+  - name: block_m
+    type: int
+    default_value: 256
+  - name: waves_per_eu
+    type: int
+    default_value: 2
+  # A TRI-STATE the dispatcher never sets: it returns the shared spec and leaves
+  # arch-private knobs to the kernel's own policy. `default_value: -1` because no
+  # real kernel takes it -- 0 is a value the policy genuinely returns, so a 0
+  # default would alias "policy decided off" onto "explicitly off" and collapse two
+  # distinct catalog entries into one.
+  - name: use_exp2_fast
+    type: int
+    default_value: -1
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: rocke
+workspace_policy: none
+delegates_to_existing_plan: false
+
+packs:
+  - name: variants_example
+    arch: [gfx942]
+    # Constant across every kernel in the pack, whatever group it came from.
+    kernel_defaults:
+      kind: rocke
+      source: kernels/gfx942/dense_example.py
+      builder: build_dense_example
+
+    variants:
+      - # Every name slot is a spec field, a `md_<field>` metadata mirror, the
+        # arm's `{tag}`, or `{ordinal}`. The name must encode everything that
+        # varies. The loader rejects a pack whose expansion produces two kernels
+        # with the same name, because nothing after it would: the dedup pass keys on
+        # metadata rather than name, so a collision that got through would ship as
+        # descriptors nothing can tell apart in a log or a failure message.
+        #
+        # `{ordinal}` is a per-shape serial for grammars that number their kernels
+        # rather than name every field -- a shape sets `ordinal:` and each arm may
+        # shift it with `ordinal_offset:`, so one shape's arms get consecutive
+        # numbers. Unused here; the shipped gfx942 C-extended set uses it throughout
+        # its `full_NNNNN_...` group.
+        name: dense.{dtype}_sq{seqlen_q}_bm{block_m}_w{waves_per_eu}_{tag}
+
+        # The fields the MATCHER compares, in the order they reach the descriptor.
+        metadata: [dtype, seqlen_q, block_m, waves_per_eu, use_exp2_fast]
+
+        # Metadata carries the hipDNN spelling; the spec carries the builder's. A
+        # descriptor written in the builder's vocabulary loads cleanly, reconciles
+        # on every count, and matches NOTHING.
+        vocabulary:
+          dtype: {bf16: BF16, fp16: FP16}
+
+        # Knobs the KERNEL'S OWN POLICY decides when the spec leaves them absent.
+        # Naming them here is what makes "absent" legible as a third state rather
+        # than a missing key: each shape must then state what the policy resolved
+        # to, under `resolved`.
+        policy_knobs: [use_exp2_fast]
+
+        # Spec key ORDER reaches the emitted descriptor, so it is part of the bytes.
+        spec_order: [dtype, seqlen_q, block_m, waves_per_eu, use_exp2_fast]
+
+        # Spec fields constant across this GROUP. Pack-level `kernel_defaults.spec`
+        # hoists what is constant across every kernel; a group needs its own because
+        # different groups may emit different key orders.
+        spec_defaults: {waves_per_eu: 2}
+
+        knob_sets:
+          # An arm that OMITS `use_exp2_fast` emits a spec that omits it, which is
+          # what tells the builder its own policy decides at build time. That is NOT
+          # the same as pinning it false, and both reach metadata as 0.
+          policy: [{block_m: 128, tag: 'e{md_use_exp2_fast}'},
+                   {block_m: 256, tag: 'e{md_use_exp2_fast}'}]
+          # THE CONFUSABLE PAIR, and the commonest arrangement in the shipped gfx942
+          # set (471 of 2,710 entries): one arm leaves the knob to the policy, which
+          # answered 1, and the other pins it OFF. The specs differ -- absent versus
+          # `false` -- so the binaries differ, and the metadata differs too, which is
+          # what keeps them two catalog entries.
+          #
+          # Note what you CANNOT do: give a shape one policy-decided arm and one
+          # pinned arm that resolve to the SAME metadata. The binaries would differ
+          # while the matcher saw one tuple, so the dedup pass drops the second and
+          # says so. Distinguish them in metadata, or do not ship both.
+          policy_and_off: [{block_m: 256, tag: 'e{md_use_exp2_fast}'},
+                           {block_m: 256, use_exp2_fast: false, tag: ed}]
+          # Both sides pinned. `tag` keeps the two apart in the name even where the
+          # resolved metadata agrees. Quoted, because YAML 1.1 reads a bare `on` and
+          # `off` as booleans and the tag would then render as `True`/`False`.
+          pinned: [{block_m: 256, use_exp2_fast: true, tag: 'on'},
+                   {block_m: 256, use_exp2_fast: false, tag: 'off'}]
+          # An arm may state `metadata` DIRECTLY, for a knob the spec does not carry.
+          # The dispatcher returns the shared spec and leaves arch-private knobs to
+          # the kernel's policy, so pinning one here changes which descriptor the
+          # MATCHER selects without changing the binary the spec builds: two catalog
+          # entries over one kernel. The spec stays silent, which is the truth.
+          swept: [{block_m: 256, metadata: {use_exp2_fast: 0}, tag: sweep0},
+                  {block_m: 256, metadata: {use_exp2_fast: 1}, tag: sweep1}]
+
+        shapes:
+          # `resolved` states what the policy chose for a knob this shape's arms
+          # leave absent. Without it the loader substitutes the KMD `default_value`
+          # as the catalog key while the binary was built from the policy's answer.
+          - {dtype: bf16, seqlen_q: 512, knobs: policy, resolved: {use_exp2_fast: 1}}
+          - {dtype: bf16, seqlen_q: 4096, knobs: policy, resolved: {use_exp2_fast: 1}}
+          # The policy answered 1 here, so this shape's two arms are the pair above:
+          # policy-decided-on beside pinned-off.
+          - {dtype: bf16, seqlen_q: 256, knobs: policy_and_off, resolved: {use_exp2_fast: 1}}
+          # A shape carrying a DIFFERENT arm count -- the set is not a grid.
+          - {dtype: fp16, seqlen_q: 512, knobs: pinned}
+          # An arm-stated metadata value needs no `resolved`: the arm already says
+          # what the matcher compares.
+          - {dtype: fp16, seqlen_q: 4096, knobs: swept}
