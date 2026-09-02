@@ -2135,3 +2135,232 @@ TEST_CASE("GEMM: skinny TN/NT L1 headroom fix", "[gemm]") {
     }
   }
 }
+
+// PrefetchGlobalRead directional truth: PGR2 double-buffers the global->LDS
+// prefetch, overlapping the next K-tile's loads behind the current tile's
+// MFMA.  Physically that pays off only once the main loop is deep enough to
+// amortize the fill/drain; on a single-iter (or k_iters <= pgr) loop the extra
+// buffer is pure overhead.  Grid pinned to data-parallel (stream_k=0) so the
+// delta is a pure K-loop effect, not a StreamK grid change.
+TEST_CASE("GEMM: PrefetchGlobalRead PGR2 vs PGR1 latency ordering", "[gemm][pgr]") {
+  for (int gpu_arch : test_architectures) {
+    auto hw = make_hardware(gpu_arch);
+    // make_config(..., wgm, occ, hints_a, hints_b, stream_k); stream_k=0 -> data-parallel.
+    auto cfg = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+
+    // Latency of `cfg` with prefetch_global_read forced to `pgr`, everything
+    // else held constant -- the pure PGR delta for this (size, config).
+    auto latency_with_pgr = [&](origami::problem_t p, int pgr) {
+      auto c                           = cfg;
+      c.tensile().prefetch_global_read = pgr;
+      return origami::gemm::compute_total_latency(p, hw, c);
+    };
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - deep K (128 iters): PGR2 wins") {
+      auto p = make_problem(4096, 4096, 8192);
+      double l1 = latency_with_pgr(p, 1);
+      double l2 = latency_with_pgr(p, 2);
+      INFO("PGR1=" << l1 << "  PGR2=" << l2);
+      REQUIRE(l2 < l1);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - single K iter: PGR2 not better") {
+      auto p = make_problem(4096, 4096, 64);
+      double l1 = latency_with_pgr(p, 1);
+      double l2 = latency_with_pgr(p, 2);
+      INFO("PGR1=" << l1 << "  PGR2=" << l2);
+      REQUIRE(l1 <= l2);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - k_iters <= pgr (2 iters): PGR2 not better") {
+      auto p = make_problem(4096, 4096, 128);
+      double l1 = latency_with_pgr(p, 1);
+      double l2 = latency_with_pgr(p, 2);
+      INFO("PGR1=" << l1 << "  PGR2=" << l2);
+      REQUIRE(l1 <= l2);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - mid K (16 iters): PGR2 amortized") {
+      auto p = make_problem(4096, 4096, 1024);
+      double l1 = latency_with_pgr(p, 1);
+      double l2 = latency_with_pgr(p, 2);
+      INFO("PGR1=" << l1 << "  PGR2=" << l2);
+      REQUIRE(l2 <= l1);
+    }
+  }
+}
+
+// NonTemporalD (cache_hints_d) directional truth.  NTD only enters the model
+// through the epilogue store path (apply_epilogue_store_cache_model), gated by
+// store_exposure, so it surfaces at total-latency level -- not in
+// compute_epilogue_latency, which returns only the store-bandwidth baseline.
+// cache_hints_d < 4 == cached/L2 store; == 4 == streaming/non-temporal store.
+// Grid pinned to data-parallel (stream_k=0) to isolate the store effect.
+TEST_CASE("GEMM: NonTemporalD (NTD) store-hint latency effect", "[gemm][ntd]") {
+  for (int gpu_arch : test_architectures) {
+    auto hw = make_hardware(gpu_arch);
+
+    // Latency with cache_hints_d forced to `hint`, everything else held fixed.
+    auto latency_with_ntd = [&](origami::problem_t p, int hint) {
+      auto c          = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+      c.cache_hints_d = hint;
+      return origami::gemm::compute_total_latency(p, hw, c);
+    };
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - cached-D never slower than streaming-D") {
+      // With L2-bandwidth store advantage, cached stores are >= as good as
+      // streaming across output sizes; streaming only ever adds traffic here.
+      for (auto p : {make_problem(1024, 1024, 256),
+                     make_problem(2048, 2048, 128),
+                     make_problem(8192, 8192, 512)}) {
+        double cached    = latency_with_ntd(p, 0);
+        double streaming = latency_with_ntd(p, 4);
+        INFO("cached=" << cached << "  streaming=" << streaming);
+        REQUIRE(cached <= streaming);
+      }
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - streaming-D penalized for exposed moderate output") {
+      // 8 MB output (> L2), shallow K -> stores exposed on the critical path;
+      // streaming pays a real traffic penalty vs cached.
+      auto p           = make_problem(2048, 2048, 128);
+      double cached    = latency_with_ntd(p, 0);
+      double streaming = latency_with_ntd(p, 4);
+      INFO("cached=" << cached << "  streaming=" << streaming);
+      REQUIRE(streaming > cached);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - streaming penalty fades as D outgrows L2") {
+      // Same store hint delta, but a D >> L2 footprint: cached would thrash L2
+      // too, so the streaming penalty shrinks relative to the exposed case.
+      auto p_exposed = make_problem(2048, 2048, 128);   // 8 MB, > L2
+      auto p_huge    = make_problem(8192, 8192, 512);   // 128 MB, >> L2
+      double ratio_exposed = latency_with_ntd(p_exposed, 4) / latency_with_ntd(p_exposed, 0);
+      double ratio_huge    = latency_with_ntd(p_huge, 4) / latency_with_ntd(p_huge, 0);
+      INFO("ratio_exposed=" << ratio_exposed << "  ratio_huge=" << ratio_huge);
+      REQUIRE(ratio_exposed > ratio_huge);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - partial-M edge (M<MT_M) must prefer cached-D") {
+      // M=127, MT_M=128: one partial-M tile.  Streaming-D wastes store traffic on
+      // the masked rows, so cached-D is faster.  This skinny-M wide-N shape also
+      // forces cache_hints_b==4 (predicate at gemm.cpp:2749), so set it to keep the
+      // config valid and isolate the NTD-on-D toggle.
+      auto ntd_partial = [&](origami::problem_t p, int hint) {
+        auto c          = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 4, 0);
+        c.cache_hints_d = hint;
+        return origami::gemm::compute_total_latency(p, hw, c);
+      };
+      auto p_partial   = make_problem(127, 4096, 512);
+      double cached    = ntd_partial(p_partial, 0);
+      double streaming = ntd_partial(p_partial, 4);
+      INFO("cached=" << cached << "  streaming=" << streaming);
+      REQUIRE(cached < streaming);
+
+      // The partial-M tile should amplify the streaming penalty beyond an
+      // M-aligned tile of the same footprint.
+      auto p_aligned         = make_problem(128, 4096, 512);
+      double ratio_partial   = streaming / cached;
+      double ratio_aligned   = ntd_partial(p_aligned, 4) / ntd_partial(p_aligned, 0);
+      INFO("ratio_partial=" << ratio_partial << "  ratio_aligned=" << ratio_aligned);
+      REQUIRE(ratio_partial > ratio_aligned);
+    }
+  }
+}
+
+// SourceSwap controls which axis (M or N) is the fast store axis in the epilogue.
+// SourceSwap=true → M-contiguous stores (IDEAL/NARROW patterns, natural_svw>1).
+// SourceSwap=false → N-direction stores, non-contiguous in D (NONCONTIG pattern,
+// natural_svw=1, +2× address-issue overhead).
+// The latency difference is in the issue path; we test it at epilogue level.
+TEST_CASE("GEMM: epilogue SourceSwap store pattern", "[gemm][sourceswap]") {
+  for (int gpu_arch : test_architectures) {
+    auto hw = make_hardware(gpu_arch);
+
+    // Epilogue latency with source_swap forced, everything else fixed.
+    // Use source_swap=true (M-contiguous, MI_M=16 → natural_svw=4) vs false
+    // (N-direction, natural_svw=1, NONCONTIG overhead).
+    auto epi_with_swap = [&](origami::problem_t p, origami::config_t c, bool swap) {
+      c.tensile().source_swap = swap;
+      origami::gemm::context_t ctx(p, hw, c);
+      return origami::gemm::compute_epilogue_latency(p, hw, c, ctx);
+    };
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - SourceSwap=true lower epilogue than false") {
+      // Interior tile (no edge path), 16-bit output (larger natural_svw gap).
+      auto p = make_problem(4096, 4096, 1024);
+      auto c = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+      double lat_swap   = epi_with_swap(p, c, true);
+      double lat_noswap = epi_with_swap(p, c, false);
+      INFO("swap=" << lat_swap << "  noswap=" << lat_noswap);
+      REQUIRE(lat_swap <= lat_noswap);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - SourceSwap penalty scales with tile size") {
+      // Larger tiles → more store instructions → NONCONTIG overhead grows.
+      auto p_small = make_problem(4096, 4096, 1024);
+      auto p_large = make_problem(4096, 4096, 1024);
+      auto c_small = make_config(64,  64,  64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+      auto c_large = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+      double ratio_small = epi_with_swap(p_small, c_small, false) / epi_with_swap(p_small, c_small, true);
+      double ratio_large = epi_with_swap(p_large, c_large, false) / epi_with_swap(p_large, c_large, true);
+      INFO("ratio_small=" << ratio_small << "  ratio_large=" << ratio_large);
+      // Both ratios >= 1 (swap=false always >= swap=true).
+      REQUIRE(ratio_small >= 1.0);
+      REQUIRE(ratio_large >= 1.0);
+    }
+  }
+}
+
+// Wave-group layout controls how many epilogue waves run per SIMD batch.
+// simds_per_cu=4 for CDNA; wave_batches = ceil(wave_num / min(wave_num, 4)).
+//
+// Key invariants from the wave_batches fix (gemm.cpp:1778):
+//   - Within one batch (waves <= 4): doubling waves halves epilogue (pure parallelism).
+//   - Doubling into a new batch (e.g. 4→8): same batch count, same epilogue as the
+//     un-doubled config because the extra waves fill the new batch at equal cost.
+//   - Same wave count, different layout (1x3 vs 3x1): epilogue equal (wave_range
+//     partitions MT_M/MT_N identically, only total count matters for batching).
+TEST_CASE("GEMM: epilogue wave-group batch scheduling", "[gemm][wavebatch]") {
+  for (int gpu_arch : test_architectures) {
+    auto hw = make_hardware(gpu_arch);
+
+    auto epi_wg = [&](int wg_m, int wg_n) {
+      auto c = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+      c.tensile().wave_group_m = wg_m;
+      c.tensile().wave_group_n = wg_n;
+      auto p = make_problem(4096, 4096, 1024);
+      origami::gemm::context_t ctx(p, hw, c);
+      return origami::gemm::compute_epilogue_latency(p, hw, c, ctx);
+    };
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - doubling waves within one batch halves epilogue") {
+      double e1 = epi_wg(1, 1);  // 1 wave,  batch=1
+      double e2 = epi_wg(2, 1);  // 2 waves, batch=1
+      double e4 = epi_wg(2, 2);  // 4 waves, batch=1
+      INFO("1w=" << e1 << "  2w=" << e2 << "  4w=" << e4);
+      REQUIRE(e2 < e1);
+      REQUIRE(e4 < e2);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - 4-wave and 8-wave equal (same batch count, double parallelism)") {
+      // 8-wave: wave_batches=2, wave_issue_parallelism=4.
+      // 4-wave: wave_batches=1, wave_issue_parallelism=4.
+      // critical_path(8w) = max(2×max_wave_8w, total_8w/4)
+      //                   = max(2×C/2,  8×(C/2)/4) = max(C, C) = C  (same as 4w).
+      double e4 = epi_wg(2, 2);  // 4 waves
+      double e8 = epi_wg(4, 2);  // 8 waves
+      INFO("4w=" << e4 << "  8w=" << e8);
+      REQUIRE(std::abs(e4 - e8) / e4 < 0.01);  // within 1%
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - wave layout (1x4 vs 4x1 vs 2x2) does not affect epilogue cost") {
+      double e_1x4 = epi_wg(1, 4);
+      double e_4x1 = epi_wg(4, 1);
+      double e_2x2 = epi_wg(2, 2);
+      INFO("1x4=" << e_1x4 << "  4x1=" << e_4x1 << "  2x2=" << e_2x2);
+      REQUIRE(std::abs(e_1x4 - e_4x1) / e_1x4 < 0.01);
+      REQUIRE(std::abs(e_1x4 - e_2x2) / e_1x4 < 0.01);
+    }
+  }
+}

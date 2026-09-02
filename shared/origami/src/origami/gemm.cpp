@@ -1772,11 +1772,15 @@ double compute_epilogue_latency(const problem_t& problem,
       }
     }
 
-    // Critical path over the SIMD-issue lanes: either the slowest single wave,
-    // or the total work serialized over the available parallelism.  Used
-    // identically for bounds-check issue, store issue, and store memory.
+    // Critical path over the SIMD-issue lanes.  With wave_num_epi > simds_per_cu
+    // waves must run in ceil(wave_num/simds) serial batches: the slowest single
+    // wave repeats for each batch.  Take the max of:
+    //   (a) wave_batches × max_wave — serialized-batch bound (e.g. 6-wave WG on
+    //       4-SIMD CU: 2 rounds × max_wave, not 1.5 × max_wave from total/4).
+    //   (b) total / wave_issue_parallelism — throughput bound.
     auto critical_path = [&](double max_wave, double total) {
-      return std::max(max_wave, total / static_cast<double>(wave_issue_parallelism));
+      return std::max(max_wave * wave_batches,
+                      total / static_cast<double>(wave_issue_parallelism));
     };
 
     tile.bounds = edge_path ? heuristic.epilogue_cycles_per_bounds_check *

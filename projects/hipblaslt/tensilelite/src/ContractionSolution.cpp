@@ -4589,34 +4589,21 @@ namespace TensileLite
             }
 
             // If no option is specified, launch exactly cuCount worth of workgroups.
-            // The universal partial-tile guard below corrects this to tiles when
-            // cuCount causes CTAs to cross tile boundaries.
             else
             {
                 skGrid = cuCount;
             }
 
-            // Correct skGrid if it would force CTAs to cross tile boundaries.
-            // Delegated to Origami so the logic is co-located with other SK grid decisions.
+            // Tree-fixup: scalarUInt24DivideAndRemainder requires dividend < 2^24
+            // and divisor < 2^16.  If we exceed those bounds, fall back to DP.
+            if(reductionStrat == origami::reduction_t::tree)
             {
-                size_t skBatch = 1;
-                for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-                    skBatch *= problem.batchSize(i);
                 size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
-                skGrid = origami::streamk::correct_sk_grid_for_partial_tiles(
-                    skGrid, tiles, itersPerTile, cuCount, skBatch);
-
-                // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
-                // If we exceed those bounds, fall back to DP.
-                if(reductionStrat == origami::reduction_t::tree)
+                size_t itersPerWG   = (skGrid > 0) ? tiles * itersPerTile / skGrid : 0;
+                if(itersPerTile >= 65536 || itersPerWG >= 65536
+                   || (tiles * itersPerTile) >= 16777216)
                 {
-                    size_t itersPerWG = tiles * itersPerTile / skGrid;
-
-                    if(itersPerTile >= 65536 || itersPerWG >= 65536
-                       || (tiles * itersPerTile) >= 16777216)
-                    {
-                        skGrid = tiles;
-                    }
+                    skGrid = tiles;
                 }
             }
 

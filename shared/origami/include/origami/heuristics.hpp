@@ -120,12 +120,6 @@ struct streamk_hybrid_defaults_t {
   static constexpr size_t MIN_TILES_FOR_DYNAMIC                  = 480;
   static constexpr int    MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC = 3;
   static constexpr double TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY   = 8.41;
-  // Upper bound (in DP waves = tiles/cu_count) for forcing DP on ipt==1
-  // tile-streaming shapes.  Below this the DP grid is small enough that spatial
-  // locality beats SK; above it the DP grid is too large (launch overhead) and
-  // SK tile-streaming wins.  Between the two measured points (7 waves -> DP,
-  // 293 waves -> SK) with margin.
-  static constexpr size_t STREAMK_IPT1_DP_MAX_WAVES              = 32;
 };
 
 /**
