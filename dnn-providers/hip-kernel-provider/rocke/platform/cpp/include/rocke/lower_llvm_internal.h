@@ -330,6 +330,7 @@ typedef struct rocke_ll_debug
     int cu_id;
     int subprogram_id;
     int next_id;
+    bool has_variables;
     const char* primary_file; /* NULL until the first location is interned */
     int primary_line;
     ROCKE_VEC(rocke_ll_dbg_str_id_t) file_ids;
@@ -490,7 +491,8 @@ const char* rocke_ll_fresh(rocke_lower_t* L, const char* hint);
 
 /* Allocate the per-kernel debug state. Called only when the kernel carries the
  * debug_info attr, so a kernel built without location capture pays nothing. */
-rocke_ll_debug_t* rocke_ll_debug_create(rocke_lower_t* L, const char* kernel_name);
+rocke_ll_debug_t*
+    rocke_ll_debug_create(rocke_lower_t* L, const char* kernel_name, bool has_variables);
 
 /* Whether any location was interned; false means render nothing and leave the
  * define line bare (Python has_locations). */
@@ -499,6 +501,14 @@ bool rocke_ll_debug_has_locations(const rocke_ll_debug_t* D);
 /* Intern an Op.loc and return the innermost !DILocation id, or -1 when the
  * location carries no usable frame (Python location_id). */
 int rocke_ll_debug_location_id(rocke_lower_t* L, rocke_ll_debug_t* D, const char* loc);
+
+/* Create one scalar DILocalVariable and return its metadata id
+ * (Python variable_id). */
+int rocke_ll_debug_variable_id(rocke_lower_t* L,
+                               rocke_ll_debug_t* D,
+                               const char* name,
+                               const char* type_name,
+                               const char* loc);
 
 /* Attach ", !dbg !<id>" to the lines `blk` grew from `start` on (Python
  * annotate). */

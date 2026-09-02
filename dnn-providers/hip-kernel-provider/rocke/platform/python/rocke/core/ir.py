@@ -524,6 +524,47 @@ class IRBuilder:
     def get_param(self, name: str) -> Value:
         return self._param_values[name]
 
+    def debug_value(self, name: str, value: Value) -> Value:
+        """Select one scalar SSA value for source-level debugging.
+
+        The selection is semantic metadata on the kernel, not an executable
+        IR operation. LLVM lowering emits ``llvm.dbg.value`` for the selected
+        SSA definition while HIP lowering and ordinary code generation remain
+        unchanged. Returning ``value`` allows the concise form
+        ``tid = b.debug_value("tid", b.thread_id_x())``.
+
+        This first prototype accepts scalar values produced by an operation.
+        Parameters, vectors, tiles, and memory-backed values need separate
+        location and fragment contracts.
+        """
+        if not name or not name.isidentifier():
+            raise ValueError(f"debug value name must be an identifier, got {name!r}")
+        if value.op is None:
+            raise ValueError("debug_value currently requires an op-produced value")
+        if not isinstance(value.type, Type) or isinstance(
+            value.type, (VectorType, PtrType, SmemType)
+        ):
+            raise ValueError(
+                f"debug_value currently supports scalar values, got {value.type.name}"
+            )
+        if not self._capture_loc:
+            return value
+        loc = current_source_loc()
+        if loc is None:
+            raise ValueError("debug_value could not capture a source location")
+        selections = self.kernel.attrs.setdefault("debug_values", [])
+        if any(selection["name"] == name for selection in selections):
+            raise ValueError(f"duplicate debug value name {name!r}")
+        selections.append(
+            {
+                "name": name,
+                "value": value.name,
+                "type": value.type.name,
+                "loc": loc,
+            }
+        )
+        return value
+
     # ----- compile-time loops -----
 
     def static_for(
