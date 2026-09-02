@@ -174,6 +174,7 @@ def build_conv_wgrad(
     epilogue="default",
     split_k=1,
     dtype_d="fp16",
+    two_stage=False,
 ):
     def _build():
         from rocke.instances.common.conv_implicit_gemm_wgrad import (
@@ -202,6 +203,7 @@ def build_conv_wgrad(
             pipeline=pipeline,
             epilogue=epilogue,
             split_k=split_k,
+            two_stage=two_stage,
         )
         return build_implicit_gemm_conv_wgrad(spec, arch=arch)
 
@@ -249,6 +251,38 @@ def build_dgrad(
             split_k=split_k,
         )
         return build_implicit_gemm_conv_dgrad(spec, arch=arch)
+
+    return _build
+
+
+def build_conv_wgrad_reduce(
+    name, arch, wg_M, wg_N, dtype_d="fp16", tile_m=4, tile_n=64
+):
+    """Build a workspace-reduce (Stage 2) kernel for the two-stage deterministic wgrad.
+
+    ``wg_M`` = K (output channels), ``wg_N`` = Y*X*C (filter spatial × input channel).
+    A minimal ConvProblem with Y=1, X=1, C=wg_N, K=wg_M is used solely to satisfy
+    WgradReduceSpec's requirement for a ConvProblem (it only reads wg_M/wg_N from it).
+    """
+
+    def _build():
+        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+            WgradReduceSpec,
+            build_conv_wgrad_workspace_reduce,
+        )
+        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+
+        # WgradReduceSpec only uses p for wg_M (= K) and wg_N (= Y*X*C).
+        # Y=1, X=1 → wg_N = C = wg_N.
+        p = ConvProblem(N=1, Hi=1, Wi=1, C=wg_N, K=wg_M, Y=1, X=1)
+        spec = WgradReduceSpec(
+            problem=p,
+            dtype_d=dtype_d,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            name=name,
+        )
+        return build_conv_wgrad_workspace_reduce(spec, arch=arch)
 
     return _build
 
@@ -1494,6 +1528,89 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=32,
+        ),
+    )
+
+    # Two-stage wgrad Stage 1: workspace-store epilogue instead of atomic-add.
+    # split_k=4, two_stage=True — exercises the _emit_wgrad_workspace_store_epilogue
+    # path.  The problem/tile params match the existing spk4 case for comparability.
+    add(
+        "conv_wgrad_two_stage",
+        "conv_wgrad_two_stage/gfx950/n1h8c16k32r3_spk4",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_twostage_spk4",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            split_k=4,
+            two_stage=True,
+        ),
+    )
+    add(
+        "conv_wgrad_two_stage",
+        "conv_wgrad_two_stage/gfx942/n1h8c16k32r3_spk4",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_twostage_spk4",
+            "gfx942",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            split_k=4,
+            two_stage=True,
+        ),
+    )
+
+    # Workspace reduce Stage 2: reads f32 partial sums written by Stage 1 and
+    # reduces along split_k, emitting the result as dtype_d.
+    # wg_M=32, wg_N=72 (3*3*8): small 3x3 filter footprint, fp16 output.
+    add(
+        "conv_wgrad_reduce",
+        "conv_wgrad_reduce/gfx950/wgM32_wgN72_fp16",
+        "gfx950",
+        build_conv_wgrad_reduce(
+            "irhash_wgrad_reduce_950_m32n72_fp16",
+            "gfx950",
+            wg_M=32,
+            wg_N=72,
+            dtype_d="fp16",
+        ),
+    )
+    # wg_M=64, wg_N=576 (3*3*64): larger filter footprint, bf16 output.
+    add(
+        "conv_wgrad_reduce",
+        "conv_wgrad_reduce/gfx950/wgM64_wgN576_bf16",
+        "gfx950",
+        build_conv_wgrad_reduce(
+            "irhash_wgrad_reduce_950_m64n576_bf16",
+            "gfx950",
+            wg_M=64,
+            wg_N=576,
+            dtype_d="bf16",
+        ),
+    )
+    add(
+        "conv_wgrad_reduce",
+        "conv_wgrad_reduce/gfx942/wgM32_wgN72_fp16",
+        "gfx942",
+        build_conv_wgrad_reduce(
+            "irhash_wgrad_reduce_942_m32n72_fp16",
+            "gfx942",
+            wg_M=32,
+            wg_N=72,
+            dtype_d="fp16",
         ),
     )
 

@@ -174,8 +174,8 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
 
     /* flags: async, spk{N}, spkauto  -- Python boolean flags */
     char spk_flag[32] = {0};
-    const char* flag_names[3];
-    int flag_on[3];
+    const char* flag_names[4];
+    int flag_on[4];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
@@ -201,6 +201,10 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
         flag_on[n_flags] = 1;
         n_flags++;
     }
+
+    flag_names[n_flags] = "twostage";
+    flag_on[n_flags] = s->two_stage ? 1 : 0;
+    n_flags++;
 
     return rocke_kernel_name_join(
         s->name, parts, 5, flag_names, flag_on, n_flags, out, out_cap, NULL);
@@ -277,6 +281,16 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                      reason_cap,
                      "split_k must be -1 (auto), 0 (runtime), 1, or >1 (got %d)",
                      sk);
+        return false;
+    }
+    /* two_stage=true requires split_k > 1 (or -1 for auto); mirrors Python validate(). */
+    if(s->two_stage && sk == 1)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "two_stage=true requires split_k > 1 (got split_k=1); "
+                     "with split_k=1 there is nothing to reduce and two_stage is a no-op");
         return false;
     }
 
@@ -822,9 +836,128 @@ static void wgrad_a_load_override(rocke_ir_builder_t* b,
 #include "rocke/helper_rocke.helpers.distribution.h"
 #include "rocke/helper_rocke.helpers.epilogues.h"
 #include "rocke/helper_rocke.helpers.grid.h"
+#include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.schedule.h"
 
 // ---------------------------------------------------------------------------
+// Two-stage deterministic workspace store epilogue
+// ---------------------------------------------------------------------------
+
+/*
+ * Emit per-lane plain f32 stores to the workspace buffer for two_stage=True.
+ * Mirrors Python _emit_wgrad_workspace_store_epilogue.
+ *
+ * Each CTA (blockIdx.z = k_id) writes its partial f32 accumulator to its own
+ * private slice of the workspace: ws_ptr[k_id * wg_M * wg_N + c_m * wg_N + c_n].
+ * Because every k_id writes to a distinct, non-overlapping slice, no atomics are
+ * needed.  Stage 2 (conv_wgrad_workspace_reduce) then reduces the slices
+ * sequentially, guaranteeing bit-exact, deterministic output.
+ *
+ * The output is always f32 regardless of dtype_d; the dtype conversion happens in
+ * Stage 2.  Out-of-bounds elements are guarded by scf_if rather than a sentinel
+ * offset (global_store to a sentinel would compute a real address and fault).
+ */
+static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
+                                                const rocke_conv_build_ctx_t* ctx,
+                                                const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
+                                                rocke_value_t* ws_ptr,
+                                                int wg_M,
+                                                int wg_N)
+{
+    const rocke_mfma_atom_t* atom = ctx->atom;
+    int mfmas_m = ctx->mfmas_m;
+    int mfmas_n = ctx->mfmas_n;
+    int c_per_lane = ctx->c_per_lane;
+
+    /* Per-warp M/N offsets — identical to split_k epilogue */
+    rocke_value_t* warp_m_off
+        = rocke_b_mul(b, ctx->warp_m_idx, rocke_b_const_i32(b, mfmas_m * spec->warp_tile_m));
+    rocke_value_t* warp_n_off
+        = rocke_b_mul(b, ctx->warp_n_idx, rocke_b_const_i32(b, mfmas_n * spec->warp_tile_n));
+    rocke_value_t* block_warp_m_off = rocke_b_add(b, ctx->block_m_off_v, warp_m_off);
+    rocke_value_t* block_warp_n_off = rocke_b_add(b, ctx->block_n_off_v, warp_n_off);
+
+    /* Decode C-fragment layout — same calls as split_k epilogue */
+    int m0, m_lane, m1, n_lane;
+    if(rocke_b_c_warp_params(b, atom, &m0, &m_lane, &m1, &n_lane) != ROCKE_OK)
+        return;
+
+    rocke_tile_distribution_encoding_t* enc = rocke_make_c_warp_dstr_encoding(b, atom);
+    if(enc == NULL)
+        return;
+    rocke_tile_distribution_t* c_dist = rocke_make_static_tile_distribution(b, enc);
+    if(c_dist == NULL)
+        return;
+
+    rocke_value_t* c_nlane_v = rocke_b_const_i32(b, n_lane);
+    rocke_value_t* n_in_atom = rocke_b_mod(b, ctx->lane, c_nlane_v);
+    rocke_value_t* m_blk = rocke_b_div(b, ctx->lane, c_nlane_v);
+    rocke_value_t* p_lane_subs[2] = {m_blk, n_in_atom};
+    rocke_value_t* const* p_arr[1] = {p_lane_subs};
+    int p_counts[1] = {2};
+
+    /* Pre-compute per-slot (row, col) within the atom */
+    rocke_value_t* slot_rows[ROCKE_CONV_MAX_ACCS * 4];
+    rocke_value_t* slot_cols[ROCKE_CONV_MAX_ACCS * 4];
+    for(int i = 0; i < c_per_lane; ++i)
+    {
+        rocke_value_t* y0 = rocke_b_const_i32(b, i / m1);
+        rocke_value_t* y1 = rocke_b_const_i32(b, i % m1);
+        rocke_value_t* ys[2] = {y0, y1};
+        rocke_value_t* out_x[2] = {NULL, NULL};
+        rocke_tile_distribution_calculate_x(b, c_dist, ys, 2, p_arr, p_counts, 1, out_x, 2);
+        slot_rows[i] = out_x[0];
+        slot_cols[i] = out_x[1];
+    }
+
+    rocke_value_t* wg_M_v = rocke_b_const_i32(b, wg_M);
+    rocke_value_t* wg_N_v = rocke_b_const_i32(b, wg_N);
+
+    /* workspace slice index = blockIdx.z (always).
+     * Ungrouped:        z = k_id              -> slices 0..split_k-1
+     * Grouped+split_k:  z = group*split_k+k_id -> slices 0..groups*split_k-1
+     * Each (group, k_id) pair gets a unique z and thus a unique workspace region.
+     * Workspace total size = groups * split_k * wg_M * wg_N (f32 elements). */
+    rocke_value_t* k_id = rocke_b_to_sgpr_u32(b, rocke_b_block_id_z(b));
+    rocke_value_t* slice_off = rocke_b_mul(b, k_id, rocke_b_const_i32(b, wg_M * wg_N));
+
+    int flat = 0;
+    for(int mi = 0; mi < mfmas_m; ++mi)
+    {
+        rocke_value_t* atom_m_base
+            = rocke_b_add(b, block_warp_m_off, rocke_b_const_i32(b, mi * spec->warp_tile_m));
+
+        for(int ni = 0; ni < mfmas_n; ++ni)
+        {
+            rocke_value_t* acc = ctx->final_accs[flat++];
+            rocke_value_t* atom_n_base
+                = rocke_b_add(b, block_warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
+
+            for(int i = 0; i < c_per_lane; ++i)
+            {
+                rocke_value_t* c_m = rocke_b_add(b, atom_m_base, slot_rows[i]);
+                rocke_value_t* c_n = rocke_b_add(b, atom_n_base, slot_cols[i]);
+                rocke_value_t* val_f32 = rocke_b_vec_extract(b, acc, i);
+
+                /* OOB guard: scf_if instead of sentinel — global_store to a
+                 * sentinel offset would compute a real address and fault. */
+                rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_v);
+                rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_v);
+                rocke_value_t* in_bounds = rocke_b_land(b, m_ok, n_ok);
+
+                rocke_if_t if_op = rocke_b_scf_if(b, in_bounds);
+                rocke_b_region_enter(b, if_op.then_region);
+                {
+                    rocke_value_t* ws_off = rocke_b_add(
+                        b, slice_off, rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_v), c_n));
+                    rocke_b_global_store(b, ws_ptr, ws_off, val_f32, 4);
+                }
+                rocke_b_region_leave(b);
+            }
+        }
+    }
+}
+
 // Split-K atomic epilogue for wgrad
 // ---------------------------------------------------------------------------
 
@@ -1370,10 +1503,11 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         if(ctx->op == NULL)
             return false;
         ctx->is_wmma = (ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0);
-        ctx->atom
-            = ctx->is_wmma
-                  ? NULL
-                  : rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+        ctx->atom = ctx->is_wmma ? NULL
+                                 : rocke_mfma_atom(spec->dtype_a ? spec->dtype_a : "fp16",
+                                                   spec->warp_tile_m,
+                                                   spec->warp_tile_n,
+                                                   spec->warp_tile_k);
     }
     ctx->a_per_lane = ctx->op->a_frag_len;
     ctx->b_per_lane = ctx->op->b_frag_len;
@@ -1739,8 +1873,6 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     int wg_N = rocke_wgrad_conv_spec_wg_N(spec);
 
     const rocke_conv_problem_t* p = &spec->problem;
-    const rocke_type_t* f16_glob = rocke_ptr_type(b, rocke_f16(), "global");
-
     /* --- kernel params with wgrad names (Python: dY, X, dW, *_bytes) --- */
     rocke_param_opts_t ro_opts;
     memset(&ro_opts, 0, sizeof(ro_opts));
@@ -1763,12 +1895,23 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     d_opts.align = 16;
     d_opts.align_set = true;
 
-    /* dtype for dW: use dtype_d field */
-    bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
-    const rocke_type_t* dw_glob = is_fp32_d ? rocke_ptr_type(b, rocke_f32(), "global") : f16_glob;
+    /* dtype for dW/dY/X: rocke_b_io_ir_type handles f16/bf16 only.
+     * fp32 inputs/outputs use rocke_f32() directly. */
+#define _WGRAD_ELEM_TYPE(dt_field, fallback)                                             \
+    (((dt_field) && (strcmp((dt_field), "fp32") == 0 || strcmp((dt_field), "f32") == 0)) \
+         ? rocke_f32()                                                                   \
+         : rocke_b_io_ir_type(b, (dt_field) ? (dt_field) : (fallback)))
 
-    rocke_value_t* dY = rocke_b_param(b, "dY", f16_glob, &ro_opts);
-    rocke_value_t* X = rocke_b_param(b, "X", f16_glob, &ro_opts);
+    const rocke_type_t* dw_elem = _WGRAD_ELEM_TYPE(spec->dtype_d, "fp16");
+    const rocke_type_t* dw_glob = rocke_ptr_type(b, dw_elem, "global");
+
+    const rocke_type_t* dy_glob
+        = rocke_ptr_type(b, _WGRAD_ELEM_TYPE(spec->dtype_a, "fp16"), "global");
+    const rocke_type_t* x_glob
+        = rocke_ptr_type(b, _WGRAD_ELEM_TYPE(spec->dtype_b, "fp16"), "global");
+#undef _WGRAD_ELEM_TYPE
+    rocke_value_t* dY = rocke_b_param(b, "dY", dy_glob, &ro_opts);
+    rocke_value_t* X = rocke_b_param(b, "X", x_glob, &ro_opts);
     rocke_value_t* dW = rocke_b_param(b, "dW", dw_glob, &d_opts);
     rocke_value_t* dY_bytes = rocke_b_param(b, "dY_bytes", rocke_i32(), NULL);
     rocke_value_t* X_bytes = rocke_b_param(b, "X_bytes", rocke_i32(), NULL);
@@ -1777,6 +1920,24 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
      * Only emitted when split_k == 0; fixed-degree kernels bake ks as a const.
      * Mirrors Python: _ks_param = b.param("ks", I32) if _split_k_runtime else None */
     rocke_value_t* ks_param = split_k_runtime ? rocke_b_param(b, "ks", rocke_i32(), NULL) : NULL;
+
+    /* Two-stage only: workspace ptr (f32) and its byte size.
+     * Only present when two_stage=true && split_k>1. */
+    bool is_two_stage = is_split_k && spec->two_stage;
+    rocke_value_t* ws_ptr = NULL;
+    if(is_two_stage)
+    {
+        rocke_param_opts_t ws_opts;
+        memset(&ws_opts, 0, sizeof(ws_opts));
+        ws_opts.noalias = true;
+        ws_opts.noalias_set = true;
+        ws_opts.writeonly = true;
+        ws_opts.writeonly_set = true;
+        ws_opts.align = 16;
+        ws_opts.align_set = true;
+        ws_ptr = rocke_b_param(b, "ws_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &ws_opts);
+        rocke_b_param(b, "ws_bytes", rocke_i32(), NULL); /* consumed by host */
+    }
 
     /* --- build wgrad ctx (with correct param names) --- */
     rocke_conv_build_ctx_t ctx;
@@ -1880,7 +2041,19 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         return NULL;
 
     /* --- epilogue --- */
-    if(is_split_k)
+    if(is_two_stage)
+    {
+        /* Two-stage deterministic: plain f32 store to per-k workspace slice. */
+        rocke_conv_acc_epilogue_t identity = rocke_conv_acc_epilogue_default();
+        rocke_value_t* post_accs[ROCKE_CONV_MAX_ACCS];
+        rocke_conv_apply_accumulator_epilogue(
+            b, &identity, ctx.final_accs, ctx.num_final_accs, post_accs);
+        for(int i = 0; i < ctx.num_final_accs; ++i)
+            ctx.final_accs[i] = post_accs[i];
+
+        wgrad_emit_workspace_store_epilogue(b, &ctx, spec, ws_ptr, wg_M, wg_N);
+    }
+    else if(is_split_k)
     {
         /* Apply identity acc epilogue (wgrad spec has no acc_epilogue field). */
         rocke_conv_acc_epilogue_t identity = rocke_conv_acc_epilogue_default();
@@ -2038,13 +2211,15 @@ rocke_status_t
     rocke_kernel_def_t* kernel = rocke_build_implicit_gemm_conv_wgrad_new(&b, spec, arch);
     if(kernel == NULL)
     {
+        /* Capture status BEFORE free — free memsets the struct to zero. */
+        rocke_status_t st = rocke_ir_builder_status(&b);
         const char* m = rocke_ir_builder_error(&b);
         set_err((m && m[0]) ? m : "build_implicit_gemm_conv_wgrad failed");
         rocke_ir_builder_free(&b);
-        return rocke_ir_builder_status(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    rocke_status_t st = rocke_lower_kernel_to_llvm(kernel, flavor, arch, out_ll);
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
     rocke_ir_builder_free(&b);
     return st;
 }

@@ -40,6 +40,8 @@ extern "C" {
 #include "rocke/instance_block_scale_gemm.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_implicit_gemm.h"
+#include "rocke/instance_conv_implicit_gemm_wgrad.h"
+#include "rocke/instance_conv_wgrad_workspace_reduce.h"
 #include "rocke/instance_deep_fused_conv_pool.h"
 #include "rocke/instance_flatmm.h"
 #include "rocke/instance_gemm_multi_abd.h"
@@ -2143,6 +2145,149 @@ std::vector<std::string> reduce_verify(const py::dict& d, const std::string& arc
                              rocke_build_reduce2d_new(&b, &s, arch_or_default(arch)));
 }
 
+/* =================== conv_implicit_gemm_wgrad (two-stage) ================== */
+
+rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
+                                                            std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_implicit_gemm_conv_wgrad_spec_t s = rocke_implicit_gemm_conv_wgrad_spec_default();
+    if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
+        fill_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.tile_k = dict_int(d, "tile_k", s.tile_k);
+    s.warp_m = dict_int(d, "warp_m", s.warp_m);
+    s.warp_n = dict_int(d, "warp_n", s.warp_n);
+    s.warp_tile_m = dict_int(d, "warp_tile_m", s.warp_tile_m);
+    s.warp_tile_n = dict_int(d, "warp_tile_n", s.warp_tile_n);
+    s.warp_tile_k = dict_int(d, "warp_tile_k", s.warp_tile_k);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.split_k = dict_int(d, "split_k", s.split_k);
+    s.two_stage = dict_bool(d, "two_stage", s.two_stage);
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+        if(dict_str(d, "dtype_a", v))
+            s.dtype_a = keep(v);
+        if(dict_str(d, "dtype_b", v))
+            s.dtype_b = keep(v);
+        if(dict_str(d, "dtype_d", v))
+            s.dtype_d = keep(v);
+        if(dict_str(d, "pipeline", v))
+            s.pipeline = keep(v);
+        if(dict_str(d, "epilogue", v))
+            s.epilogue = keep(v);
+    }
+    return s;
+}
+
+std::string conv_wgrad_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    std::deque<std::string> store;
+    rocke_implicit_gemm_conv_wgrad_spec_t s = conv_wgrad_build_spec(d, store);
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = rocke_build_implicit_gemm_conv_wgrad_new(&b, &s, arch_or_default(arch));
+    if(!k || !rocke_ir_builder_ok(&b))
+    {
+        std::string msg = std::string("rocke_engine.conv_wgrad_lower_llvm build failed: ")
+                          + rocke_ir_builder_error(&b);
+        rocke_ir_builder_free(&b);
+        throw std::runtime_error(msg);
+    }
+    char* ll = nullptr;
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
+    rocke_ir_builder_free(&b);
+    return take_lowered(st, ll, nullptr, "rocke_engine.conv_wgrad_lower_llvm");
+}
+
+std::string conv_wgrad_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_SERIALIZE_BODY(
+        "rocke_engine.conv_wgrad_serialize_ir",
+        rocke_implicit_gemm_conv_wgrad_spec_t,
+        conv_wgrad_build_spec,
+        rocke_build_implicit_gemm_conv_wgrad_new(&b, &s, arch_or_default(arch)));
+}
+
+std::vector<std::string> conv_wgrad_verify(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_VERIFY_BODY(
+        "rocke_engine.conv_wgrad_verify",
+        rocke_implicit_gemm_conv_wgrad_spec_t,
+        conv_wgrad_build_spec,
+        rocke_build_implicit_gemm_conv_wgrad_new(&b, &s, arch_or_default(arch)));
+}
+
+/* =================== conv_wgrad_workspace_reduce (Stage 2) ================ */
+
+rocke_wgrad_reduce_spec_t conv_wgrad_reduce_build_spec(const py::dict& d,
+                                                       std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_wgrad_reduce_spec_t s = rocke_wgrad_reduce_spec_default();
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.wg_M = dict_int(d, "wg_M", s.wg_M);
+    s.wg_N = dict_int(d, "wg_N", s.wg_N);
+    {
+        std::string v;
+        if(dict_str(d, "dtype_d", v))
+            s.dtype_d = keep(v);
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+        if(dict_str(d, "problem_short", v))
+            s.problem_short = keep(v);
+    }
+    return s;
+}
+
+std::string conv_wgrad_reduce_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    std::deque<std::string> store;
+    rocke_wgrad_reduce_spec_t s = conv_wgrad_reduce_build_spec(d, store);
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = rocke_build_wgrad_workspace_reduce_new(&b, &s, arch_or_default(arch));
+    if(!k || !rocke_ir_builder_ok(&b))
+    {
+        std::string msg = std::string("rocke_engine.conv_wgrad_reduce_lower_llvm build failed: ")
+                          + rocke_ir_builder_error(&b);
+        rocke_ir_builder_free(&b);
+        throw std::runtime_error(msg);
+    }
+    char* ll = nullptr;
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
+    rocke_ir_builder_free(&b);
+    return take_lowered(st, ll, nullptr, "rocke_engine.conv_wgrad_reduce_lower_llvm");
+}
+
+std::string conv_wgrad_reduce_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_SERIALIZE_BODY(
+        "rocke_engine.conv_wgrad_reduce_serialize_ir",
+        rocke_wgrad_reduce_spec_t,
+        conv_wgrad_reduce_build_spec,
+        rocke_build_wgrad_workspace_reduce_new(&b, &s, arch_or_default(arch)));
+}
+
+std::vector<std::string> conv_wgrad_reduce_verify(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_wgrad_reduce_verify",
+                             rocke_wgrad_reduce_spec_t,
+                             conv_wgrad_reduce_build_spec,
+                             rocke_build_wgrad_workspace_reduce_new(&b, &s, arch_or_default(arch)));
+}
+
 /* ---- pooling (nested problem, generic lower, build takes arch) ---- */
 rocke_pooling2d_spec_t pool_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
@@ -3571,6 +3716,13 @@ PYBIND11_MODULE(rocke_engine, m)
          &gfx1201_wmma_gemm_lower_llvm,
          &gfx1201_wmma_gemm_serialize_ir,
          &gfx1201_wmma_gemm_verify);
+
+    /* ---- wgrad two-stage family ---- */
+    reg3("conv_wgrad", conv_wgrad_lower_llvm, conv_wgrad_serialize_ir, conv_wgrad_verify);
+    reg3("conv_wgrad_reduce",
+         conv_wgrad_reduce_lower_llvm,
+         conv_wgrad_reduce_serialize_ir,
+         conv_wgrad_reduce_verify);
 
     /* ---- attention families (separate TU; shared fmha/tiled struct tags) ---- */
     register_attention(m);

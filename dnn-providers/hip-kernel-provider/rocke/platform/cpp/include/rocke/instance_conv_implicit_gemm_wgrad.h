@@ -140,6 +140,13 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
 
     /* split_k: -1 = auto, 1 = off, >1 = fixed degree. */
     int split_k; /* default 1 */
+
+    /* two_stage: when true and split_k > 1, Stage 1 writes f32 partial sums
+     * to a workspace buffer (ws_ptr / ws_bytes kernel params) instead of
+     * atomic-adding into dW.  Stage 2 (conv_wgrad_workspace_reduce) then
+     * reduces the workspace slices into dW in a fixed sequential order.
+     * This guarantees bit-exact, deterministic output. */
+    bool two_stage; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

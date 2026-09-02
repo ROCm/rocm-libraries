@@ -333,6 +333,13 @@ class WgradConvSpec:
     #      Caller must zero-init dW before launch.
     # ABI for 0 and >1: dW is not writeonly; K_wg is padded as needed.
     split_k: int = 1
+    # Two-stage deterministic mode (requires split_k > 1).
+    # When True, Stage 1 writes f32 partial sums to a workspace buffer
+    # (ws_ptr) instead of atomic-adding into dW.  The caller must launch a
+    # separate Stage 2 reduce kernel (conv_wgrad_workspace_reduce) afterwards
+    # on the same stream to accumulate workspace slices into dW.
+    # Workspace size: split_k * wg_M * wg_N * 4 bytes (always f32).
+    two_stage: bool = False
 
     @property
     def block_size(self) -> int:
@@ -402,6 +409,7 @@ class WgradConvSpec:
                 "async": self.async_dma,
                 f"spk{self.split_k}": self.split_k > 1,
                 "spkauto": self.split_k == -1,
+                "twostage": self.two_stage,
                 "spkrt": self.split_k == 0,
             },
         )
@@ -428,6 +436,11 @@ class WgradConvSpec:
                 f"split_k must be -1 (auto), 0 (runtime atomic), 1 (disabled), "
                 f"or >1 (fixed); got {self.split_k}"
             )
+        if self.two_stage and self.split_k == 1:
+            raise ValueError(
+                "two_stage=True requires split_k > 1 (or split_k=-1 for auto); "
+                "with split_k=1 there is nothing to reduce and two_stage is a no-op"
+            )
         if self.split_k == 0 or self.split_k > 1:
             if self.data.dtype_d not in ("fp32", "bf16", "fp16"):
                 raise ValueError(
@@ -441,7 +454,14 @@ class WgradConvSpec:
                     f"position; the packed dW inner dim is cpg=C/groups); "
                     f"got cpg={self.problem.cpg} (C={self.problem.C}, groups={self.problem.groups})"
                 )
-        if self.data.dtype_d in ("bf16", "fp16") and self.epilogue == "default":
+        # two_stage writes to f32 workspace (not atomic dW), so the cshuffle
+        # requirement only applies to atomic split-K paths (not two_stage).
+        _needs_atomic = (self.split_k == 0 or self.split_k > 1) and not self.two_stage
+        if (
+            _needs_atomic
+            and self.data.dtype_d in ("bf16", "fp16")
+            and self.epilogue == "default"
+        ):
             raise ValueError(
                 f"split_k atomic with dtype_d={self.data.dtype_d!r} requires "
                 f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
@@ -568,7 +588,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"position; the packed dW inner dim is cpg=C/groups); "
             f"got cpg={spec.problem.cpg}"
         )
-    if spec.data.dtype_d in ("bf16", "fp16") and spec.epilogue == "default":
+    # two_stage writes to f32 workspace (not atomic dW), so the cshuffle
+    # requirement only applies to atomic split-K paths (not two_stage).
+    _atomic_not_two_stage = _is_atomic and not spec.two_stage
+    if (
+        _atomic_not_two_stage
+        and spec.data.dtype_d in ("bf16", "fp16")
+        and spec.epilogue == "default"
+    ):
         return False, (
             f"split_k atomic with dtype_d={spec.data.dtype_d!r} requires "
             f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
@@ -739,6 +766,7 @@ def build_implicit_gemm_conv_wgrad(
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
 
     _is_split_k = spec.split_k > 1 or spec.split_k == 0
+    _is_two_stage = spec.split_k > 1 and spec.two_stage
     _split_k_runtime = spec.split_k == 0  # ks passed as kernel arg at launch
     _grouped = p_load.groups > 1
 
@@ -756,8 +784,10 @@ def build_implicit_gemm_conv_wgrad(
     )
     # dW (weight gradient): output D.
     # split_k=1: normal writeonly store.
-    # split_k>1: atomic-add into caller-zero-init dW; writeonly dropped because
-    #            atomicrmw is read+modify+write (dtype_d in fp32/bf16/fp16).
+    # split_k>1 atomic: atomic-add into caller-zero-init dW; writeonly dropped.
+    # split_k>1 two_stage: dW is still the final output written by Stage 2;
+    #   Stage 1 (this kernel) never touches dW, but we keep it in the ABI so
+    #   the signature is identical between the atomic and two-stage variants.
     _dw_writeonly = not _is_split_k
     dW = b.param(
         "dW",
@@ -769,6 +799,15 @@ def build_implicit_gemm_conv_wgrad(
     dY_bytes = b.param("dY_bytes", I32)
     X_bytes = b.param("X_bytes", I32)
     dW_bytes = b.param("dW_bytes", I32)
+    # Two-stage only: workspace buffer that receives f32 partial sums.
+    # Size = split_k * wg_M * wg_N * 4.  Not present in the atomic-add ABI.
+    if _is_two_stage:
+        ws_ptr = b.param(
+            "ws_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
+        )
+        _ws_bytes = b.param(
+            "ws_bytes", I32
+        )  # noqa: F841  (side-effect: adds param to kernel signature)
     # Runtime split-K: ks = slice width per CTA, computed and passed by the launcher.
     # Only present when split_k == 0; fixed-degree kernels bake ks as a constant.
     # ks_count = number of slices; only needed when grouped+runtime so the kernel
@@ -1273,7 +1312,23 @@ def build_implicit_gemm_conv_wgrad(
     # ---- epilogue ----
     final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
 
-    if _is_split_k and op.family == "wmma":
+    if _is_two_stage:
+        # Two-stage deterministic: plain f32 store to per-k workspace slice.
+        # ws_ptr is defined above only when _is_two_stage=True.
+        _emit_wgrad_workspace_store_epilogue(
+            b,
+            spec,
+            atom,
+            final_accs,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off_v,
+            block_n_off_v,
+            ws_ptr,
+            c_per_lane,
+        )
+    elif _is_split_k and op.family == "wmma":
         # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
         _emit_wgrad_split_k_epilogue_wmma(
             b,
@@ -1502,6 +1557,92 @@ def _emit_wgrad_split_k_epilogue(
                     c_m_i = b.add(atom_m_base, rows[i])
                     c_n_i = b.add(atom_n_base, cols[i])
                     _emit_single_packed_atomic(c_m_i, c_n_i, b.vec_extract(acc, i))
+
+
+def _emit_wgrad_workspace_store_epilogue(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    atom: MfmaAtom,
+    accs: Sequence[Value],
+    warp_m_idx: Value,
+    warp_n_idx: Value,
+    lane: Value,
+    block_m_off: Value,
+    block_n_off: Value,
+    ws_ptr: Value,
+    c_per_lane: int,
+) -> None:
+    """Two-stage Stage 1 epilogue: plain f32 store to workspace slice.
+
+    Identical coordinate computation to :func:`_emit_wgrad_split_k_epilogue`
+    but replaces every ``global_atomic_add`` with a ``global_store`` (f32).
+    The workspace slice for this CTA is at:
+
+        ws_ptr + k_id * wg_M * wg_N + c_m * wg_N + c_n
+
+    where ``k_id = blockIdx.z``.  The output is always f32 regardless of
+    ``dtype_d``; the dtype conversion happens in Stage 2 (workspace reduce).
+    Out-of-bounds elements are guarded by ``scf_if`` — a plain ``global_store``
+    to a sentinel offset would compute a real address and fault on AMD GPUs.
+    """
+    p = spec.problem
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+    wg_M = _wg_M(p)
+    wg_N = _wg_N(p)
+    wg_M_v = b.const_i32(wg_M)
+    wg_N_v = b.const_i32(wg_N)
+
+    # workspace slice index = blockIdx.z (always).
+    # Ungrouped:       z = k_id              → slices 0..split_k-1
+    # Grouped+split_k: z = group*split_k+k_id → slices 0..groups*split_k-1
+    # Each (group, k_id) pair gets a unique z and thus a unique workspace region.
+    # Workspace total size = groups * split_k * wg_M * wg_N (f32 elements).
+    k_id = b.to_sgpr_u32(b.block_id_z())
+    slice_off = b.mul(k_id, b.const_i32(wg_M * wg_N))
+
+    # Per-warp M/N offsets (same as the atomic epilogue).
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
+    block_warp_m_off = b.add(block_m_off, warp_m_off)
+    block_warp_n_off = b.add(block_n_off, warp_n_off)
+
+    # Decode C-fragment layout (same as atomic epilogue).
+    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
+    from ...helpers.distribution import make_static_tile_distribution
+
+    _, __, kc_m1, kc_nlane = c_warp_params(atom)
+    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+    c_nlane = b.const_i32(kc_nlane)
+    n_in_atom = b.mod(lane, c_nlane)
+    m_blk = b.div(lane, c_nlane)
+    p_lane = [m_blk, n_in_atom]
+
+    rows: List[Value] = []
+    cols: List[Value] = []
+    for i in range(c_per_lane):
+        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
+        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
+        rows.append(x_row)
+        cols.append(x_col)
+
+    flat = 0
+    for mi in range(mfmas_m):
+        atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
+        for ni in range(mfmas_n):
+            acc = accs[flat]
+            flat += 1
+            atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
+            for i in range(c_per_lane):
+                c_m = b.add(atom_m_base, rows[i])
+                c_n = b.add(atom_n_base, cols[i])
+                val_f32 = b.vec_extract(acc, i)
+                # OOB guard via conditional — global_store to a sentinel offset
+                # would compute a real address and fault; use scf_if instead.
+                in_bounds = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
+                with b.scf_if(in_bounds):
+                    ws_off = b.add(slice_off, b.add(b.mul(c_m, wg_N_v), c_n))
+                    b.global_store(ws_ptr, ws_off, val_f32, align=4)
 
 
 def _emit_wgrad_split_k_epilogue_wmma(
