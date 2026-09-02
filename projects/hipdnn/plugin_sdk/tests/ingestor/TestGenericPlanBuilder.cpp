@@ -1082,6 +1082,79 @@ private:
     int64_t _failingBlockSize;
 };
 
+/// Rejects the front candidate the way a malformed descriptor does, rather than the way a
+/// kernel that merely does not fit does. INVALID_VALUE is the status buildPlan() keys its
+/// rethrow on.
+class MalformedAtBlockSizeHandler : public IKernelDispatchHandler<TestHandle>
+{
+public:
+    explicit MalformedAtBlockSizeHandler(int64_t malformedBlockSize)
+        : _malformedBlockSize(malformedBlockSize)
+    {
+    }
+
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        return static_cast<size_t>(kernel.getIntMetadata(BLOCK_SIZE));
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == _malformedBlockSize)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "kernel source names a library outside the descriptor's directory");
+        }
+        return std::make_unique<PreparedDispatch>();
+    }
+
+    void launch(const TestHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+
+private:
+    int64_t _malformedBlockSize;
+};
+
+/// Fails every candidate, naming the block size in each reason, so the reasons the error
+/// gathers can be told apart from one another.
+class FailsToPrepareEveryBlockSizeHandler : public IKernelDispatchHandler<TestHandle>
+{
+public:
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        return static_cast<size_t>(kernel.getIntMetadata(BLOCK_SIZE));
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "no code object at block size " + std::to_string(kernel.getIntMetadata(BLOCK_SIZE)));
+    }
+
+    void launch(const TestHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+};
+
 /// Constructing a GenericPlan runs prepare(), so the ranked front is where an unloadable
 /// code object surfaces -- after applicability already promised the graph. kernel_64 fails,
 /// kernel_128 takes the plan, and the WARN is the only record that a slower kernel is
@@ -1120,6 +1193,169 @@ TEST(TestIngestorGenericPlanBuilder, FallsBackWhenTheFrontCandidateCannotPrepare
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
                                           "the archive holds no code object for this "
                                           "kernel"));
+}
+
+TEST(TestIngestorGenericPlanBuilder, RethrowsAMalformedDescriptorInsteadOfServingTheNextKernel)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const MalformedAtBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xB7));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected a malformed descriptor to be reported, not skipped";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        // The author's own status and wording, not the aggregate one: falling past this
+        // kernel would have served kernel_128 and hidden the fault entirely.
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("outside the descriptor's directory"),
+                  std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(TestIngestorGenericPlanBuilder, NamesEveryCandidateReasonWhenNothingCanBeBuilt)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const FailsToPrepareEveryBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xB8));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected the exhausted candidate walk to be reported";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        const std::string what = error.what();
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(what.find("3 applicable kernel(s)"), std::string::npos) << what;
+        // Every candidate's reason, not just the last: the per-kernel WARN lines that
+        // carry the same information are suppressed at the default log level, so this
+        // message is the only place the cause survives.
+        EXPECT_NE(what.find("block size 64"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 128"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 256"), std::string::npos) << what;
+        EXPECT_NE(what.find(toString(testId(0x70))), std::string::npos) << what;
+        EXPECT_NE(what.find(toString(testId(0x72))), std::string::npos) << what;
+    }
+}
+
+TEST(TestIngestorGenericPlanBuilder, RethrowsAMalformedDescriptorWhileBenchmarking)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const MalformedAtBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+    const TestHandle handle;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    // The only difference from RethrowsAMalformedDescriptorInsteadOfServingTheNextKernel:
+    // whether a malformed descriptor is reported or absorbed must not follow a tuning setting.
+    const TestGraph graph(makeGraphId(0xB9));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(handle, graph, engineConfig, context);
+        FAIL() << "expected a malformed descriptor to be reported, not dropped from the "
+                  "benchmarking set";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("outside the descriptor's directory"),
+                  std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(TestIngestorGenericPlanBuilder, NamesEveryCandidateReasonWhenBenchmarkingBuildsNothing)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const FailsToPrepareEveryBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+    const TestHandle handle;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    // The benchmarking half of NamesEveryCandidateReasonWhenNothingCanBeBuilt.
+    const TestGraph graph(makeGraphId(0xBA));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(handle, graph, engineConfig, context);
+        FAIL() << "expected the exhausted candidate set to be reported";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        const std::string what = error.what();
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(what.find("3 applicable kernel(s)"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 64"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 128"), std::string::npos) << what;
+        EXPECT_NE(what.find("block size 256"), std::string::npos) << what;
+    }
 }
 
 // ---------------------------------------------------------------------------

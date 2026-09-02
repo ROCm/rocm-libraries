@@ -13,6 +13,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
+#include "harness/ScratchDirectory.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
@@ -189,9 +190,8 @@ TEST(TestGpuGoldenVerificationRef, SkipsWhenNoPlanAvailable)
 // ---------------------------------------------------------------------------
 TEST(TestVerificationRouting, BundleDiscoveryFindsOnlyAuthoredBundleData)
 {
-    auto path = std::filesystem::temp_directory_path() / "golden_routing_test";
-    std::filesystem::remove_all(path);
-    const hipdnn_test_sdk::utilities::ScopedDirectory tempDir(path);
+    const hipdnn_test_sdk::utilities::ScopedDirectory tempDir
+        = hipdnn_integration_tests::claimScratchDirectory("goldenrouting");
 
     writeMinimalBatchNormBundle(tempDir.path() / "BatchnormInference" / "nchw" / "fp32" / "Small",
                                 "Small");

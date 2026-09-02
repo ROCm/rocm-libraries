@@ -3,3 +3,9 @@
 # templates for the kernel inlining -- clang-format breaks the
 # syntax of varialbes by adding a space after the second @ character
 src/cmake/templates/*
+
+# vendored byte-identical to projects/rocfft/shared, so provenance stays checkable
+# with diff -- and formatting it is an edit like any other. src/CMakeLists.txt
+# excludes it from the warning and clang-tidy sets for the same reason.
+src/utilities/sha256.h
+src/utilities/sha256.cpp

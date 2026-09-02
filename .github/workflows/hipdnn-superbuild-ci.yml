@@ -173,6 +173,7 @@ jobs:
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
+            -DHIPKERNELPROVIDER_KPACK_REQUIRE_WIRING=ON \
             -DENABLE_CLANG_TIDY=OFF \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
@@ -184,14 +185,20 @@ jobs:
 
       # Packing is skipped with a STATUS message, so a resolution regression
       # would otherwise pass CI while producing no archives.
+      # Both producers, asserted separately: the ASM SDPA engine writes to its own build-tree
+      # .kpack directory and never appears under arch_content, so one glob leaves the other
+      # unobserved. The build/*/ segment is the stage root -- hip-kernel-provider sets
+      # HIPDNN_PLUGIN_ENGINE_ROOTDIR to bin on Windows and lib elsewhere.
       - name: Verify kpack archives were produced
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
-          test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
-          printf '%s\n' "${kpacks[@]}"
+          staged=(build/*/hipdnn_plugins/engines/arch_content/hip-kernel-provider/*/kpack/*.kpack)
+          test "${#staged[@]}" -gt 0 || { echo "no staged .kpack archives produced" >&2; exit 1; }
+          sdpa=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
+          test "${#sdpa[@]}" -gt 0 || { echo "no ASM SDPA .kpack archives produced" >&2; exit 1; }
+          printf '%s\n' "${staged[@]}" "${sdpa[@]}"
 
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
@@ -378,12 +385,17 @@ jobs:
           test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
           echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
 
+      # DEVICE_TARGET, not GPU_TARGET: the latter is a family alias naming a ROCm SDK
+      # artifact, while GPU_TARGETS is a codegen arch list that reaches hipcc as
+      # --offload-arch and has to name a concrete gfx. Consumers reject the alias rather
+      # than expanding it -- hkp packs nothing for it and warns, hipBLASLt validates
+      # against a fixed arch list -- so the alias yields no arch-specific output.
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
             -DROCM_PATH="$ROCM_SDK_PATH" \
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
-            -DGPU_TARGETS="$GPU_TARGET" \
+            -DGPU_TARGETS="$DEVICE_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
             -DENABLE_CLANG_TIDY=ON \
@@ -397,6 +409,7 @@ jobs:
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
             -DHIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC=ON \
             -DHIPKERNELPROVIDER_KPACK_REQUIRE_COMGR=ON \
+            -DHIPKERNELPROVIDER_KPACK_REQUIRE_WIRING=ON \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20 \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
@@ -409,13 +422,19 @@ jobs:
 
       # Packing is skipped with a STATUS message, so a resolution regression
       # would otherwise pass CI while producing no archives.
+      # Both producers, asserted separately: the ASM SDPA engine writes to its own build-tree
+      # .kpack directory and never appears under arch_content, so one glob leaves the other
+      # unobserved. The build/*/ segment is the stage root -- hip-kernel-provider sets
+      # HIPDNN_PLUGIN_ENGINE_ROOTDIR to bin on Windows and lib elsewhere.
       - name: Verify kpack archives were produced
         run: |
           set -euo pipefail
           shopt -s nullglob
-          kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
-          test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
-          printf '%s\n' "${kpacks[@]}"
+          staged=(build/*/hipdnn_plugins/engines/arch_content/hip-kernel-provider/*/kpack/*.kpack)
+          test "${#staged[@]}" -gt 0 || { echo "no staged .kpack archives produced" >&2; exit 1; }
+          sdpa=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
+          test "${#sdpa[@]}" -gt 0 || { echo "no ASM SDPA .kpack archives produced" >&2; exit 1; }
+          printf '%s\n' "${staged[@]}" "${sdpa[@]}"
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure

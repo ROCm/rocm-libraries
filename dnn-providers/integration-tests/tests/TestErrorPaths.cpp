@@ -21,6 +21,7 @@
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
+#include "harness/ScratchDirectory.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 
@@ -92,12 +93,7 @@ protected:
 
     void SetUp() override
     {
-        auto path
-            = std::filesystem::temp_directory_path()
-              / ("err_path_test_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        _scopedDir = claimScratchDirectory("errpath");
         _tempDir = _scopedDir->path();
     }
 

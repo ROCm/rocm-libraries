@@ -95,13 +95,17 @@ static std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::D
 
 static bool isMi308Device(hipStream_t stream)
 {
-    int deviceId;
+    // Seeded, not left indeterminate: some HIP runtimes return hipSuccess from
+    // hipStreamGetDevice without writing the out-parameter, so the status alone does not mean
+    // an ordinal was produced.
+    int deviceId = -1;
     auto status = hipStreamGetDevice(stream, &deviceId);
-    if(status != hipSuccess)
+    if(status != hipSuccess || deviceId < 0)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "hipStreamGetDevice failed with error code: "
-                                                           + std::to_string(status));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "hipStreamGetDevice produced no device ordinal, error code: " + std::to_string(status)
+                + ", ordinal: " + std::to_string(deviceId));
     }
     int chipId;
     status = hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, deviceId);

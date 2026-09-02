@@ -323,8 +323,11 @@ endfunction()
 #     INSTALL_BASE  set to install the packed tree; omit for a root that exists
 #                   only for tests.
 #     REQUIRE_HIPCC ON makes a missing hipcc a configure error, OFF warns and
-#                   skips. A release must not silently ship nothing; a test
-#                   fixture must not break a developer's build.
+#                   skips. A release must not silently ship nothing, so the
+#                   shipping root passes ON unconditionally; the fixture root
+#                   passes the caller's policy, because a missing hipcc must not
+#                   break a developer's build but must stop a lane that exists
+#                   to pack.
 #
 #   ENABLE_ROCKE says whether the rocKE producer may run. It is a switch of its
 #   own rather than something inferred from the root, because the root names a
@@ -337,7 +340,8 @@ endfunction()
 #   packaged artifacts. Without that edge the kpacks would keep shipping kernels
 #   compiled from stale wheel contents.
 #
-#   Empty ARCHES wires nothing.
+#   Empty ARCHES wires nothing and warns either way, never fatally: the arches
+#   a build ends up with are a property of its environment, not a mistake.
 # ---------------------------------------------------------------------------
 function(hkp_wire_root)
     set(_one NAME GROUP SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR
@@ -346,15 +350,27 @@ function(hkp_wire_root)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
     if(NOT ARG_ARCHES)
-        # Only warn for a root that ships. A test fixture with no arch selected
-        # is a developer choice; a release that installs an empty descriptor
-        # tree and says so nowhere is the silent-empty-package failure.
+        # Every root speaks. The wording differs because the consequences do: a
+        # release installs an empty descriptor tree, while a fixture root leaves
+        # hkp_descriptor_staging undefined and every test that loads it skipping.
+        # Both are silent-empty-package failures.
+        #
+        # Warning, never FATAL_ERROR: GPU_TARGETS values that hkp_selected_arches
+        # drops are reachable in normal use, and a fatal here would turn a lane
+        # that packs nothing into a lane that does not configure.
         if(ARG_INSTALL_BASE)
             message(WARNING
                 "hkp: source root '${ARG_NAME}' is set but no GPU architectures "
                 "are selected, so descriptor packaging will produce and install "
                 "NOTHING. Set GPU_TARGETS (or AMDGPU_TARGETS) to the arches you "
                 "want packed.")
+        else()
+            message(WARNING
+                "hkp: source root '${ARG_NAME}' has no GPU architectures selected"
+                ", so nothing is staged for it and every test that loads it will "
+                "skip. GPU_TARGETS='${GPU_TARGETS}' AMDGPU_TARGETS="
+                "'${AMDGPU_TARGETS}' -- see the per-label notes above for which "
+                "were dropped and why.")
         endif()
         return()
     endif()
@@ -371,7 +387,7 @@ function(hkp_wire_root)
         return()
     endif()
     if(NOT ARG_HIPCC)
-        # Fatal for a shipping root, skip for a fixture: see REQUIRE_HIPCC above.
+        # Whether this is fatal is the caller's policy: see REQUIRE_HIPCC above.
         if(ARG_REQUIRE_HIPCC)
             message(FATAL_ERROR
                 "hkp: source root '${ARG_NAME}' requires hipcc but it was not "
@@ -701,6 +717,46 @@ function(hkp_rocke_wheel_python_interp out_interp wheel_stamp)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_find_hipcc()
+#   Resolve the hipcc that honors --genco into the HKP_HIPCC cache entry.
+#
+#   hipcc is the perl/bat driver that honors --genco; on Windows it is hipcc.exe
+#   or hipcc.bat. hipcc.bin.exe is the raw clang driver and is only a last-resort
+#   fallback.
+#
+#   The default name-major search is what holds that ordering: every directory is
+#   tried for hipcc before hipcc.bin.exe is tried anywhere, so the fallback wins
+#   only when no real driver exists anywhere on the path. NAMES_PER_DIR would
+#   demote this list to a tiebreak within one directory and let an early
+#   hipcc.bin.exe beat a later hipcc.
+#
+#   HIP_HIPCC_EXECUTABLE, when a toolchain has already resolved one, contributes its
+#   directory as a hint -- consulted first, but it does not stop the search, so a stale
+#   value narrows nothing.
+# ---------------------------------------------------------------------------
+function(hkp_find_hipcc)
+    if(DEFINED HIP_HIPCC_EXECUTABLE)
+        get_filename_component(_hipcc_hint "${HIP_HIPCC_EXECUTABLE}" DIRECTORY)
+    else()
+        set(_hipcc_hint "")
+    endif()
+    find_program(HKP_HIPCC
+        NAMES hipcc hipcc.bat hipcc.bin.exe
+        HINTS "${_hipcc_hint}")
+endfunction()
+
+# Same shape as the KPACK_REQUIRE_* flags hkp_register_tests declares, and for
+# the same reason: a fixture root that wires nothing leaves every test that loads
+# it skipping, which is indistinguishable from a green run. OFF keeps a
+# toolchain-less developer's build working; ON is for lanes that exist to pack.
+# At file scope rather than beside the other knobs in hkp_add_packaging only to
+# keep that function under the lint's statement ceiling.
+set(HIPKERNELPROVIDER_KPACK_REQUIRE_WIRING OFF CACHE BOOL
+    "Fail (rather than warn) when the test-fixture source root cannot be wired \
+because hipcc was not found. Set ON in CI so a lane cannot silently pack \
+nothing.")
+
+# ---------------------------------------------------------------------------
 # hkp_add_packaging()
 #   Gate production packaging on ONE source root plus explicit per-producer
 #   switches. The root names a location; the switches say which producers may
@@ -721,10 +777,7 @@ function(hkp_add_packaging)
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
     hkp_selected_arches(_arches)
 
-    # hipcc is the perl/bat driver that honors --genco; on Windows it is
-    # hipcc.exe or hipcc.bat. hipcc.bin.exe is the raw clang driver and is only
-    # a last-resort fallback.
-    find_program(HKP_HIPCC NAMES hipcc hipcc.bat hipcc.bin.exe)
+    hkp_find_hipcc()
 
     hkp_install_base(_install_base)
 
@@ -856,7 +909,7 @@ assertion: an unloadable path silently falls through to the next candidate.")
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             STAGE_ROOT "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
-            REQUIRE_HIPCC OFF)
+            REQUIRE_HIPCC "${HIPKERNELPROVIDER_KPACK_REQUIRE_WIRING}")
     endif()
 
     hkp_stage_all()

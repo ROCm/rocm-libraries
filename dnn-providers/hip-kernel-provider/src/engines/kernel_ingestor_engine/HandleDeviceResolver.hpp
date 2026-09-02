@@ -26,12 +26,15 @@ class HandleDeviceResolver : public hipdnn_plugin_sdk::ingestor::IDeviceResolver
 public:
     hipdnn_plugin_sdk::ingestor::DeviceId deviceId(const Handle& handle) const override
     {
-        int deviceId = 0;
+        // Seeded to -1, not 0: some HIP runtimes return hipSuccess from hipStreamGetDevice
+        // without writing the out-parameter. At 0 that goes unseen -- every stream resolves
+        // to device 0 and looks right on a single-device machine.
+        int deviceId = -1;
 
         // Null stream: default stream belongs to the current device.
         if(handle.getStream() != nullptr)
         {
-            if(hipStreamGetDevice(handle.getStream(), &deviceId) == hipSuccess)
+            if(hipStreamGetDevice(handle.getStream(), &deviceId) == hipSuccess && deviceId >= 0)
             {
                 return deviceId;
             }

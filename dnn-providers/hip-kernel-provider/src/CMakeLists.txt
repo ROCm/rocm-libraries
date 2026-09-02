@@ -10,6 +10,21 @@ add_library(
     core/Utils.cpp
     compilation/Kernel.cpp
     compilation/Program.cpp
+    utilities/Digest.cpp
+    utilities/sha256.cpp
+)
+
+# utilities/sha256.{h,cpp} is LekKit's MIT SHA-256, byte-identical to the copies
+# projects/rocfft/shared and projects/hipfft/shared carry, so provenance stays checkable
+# with diff. It is upstream's .c compiled as C++ because this provider declares
+# LANGUAGES CXX; renaming beats enabling C here. Held to neither the project warning set
+# nor clang-tidy, because meeting them means editing it -- -Wold-style-cast alone rejects
+# six lines. ../.clang-format-ignore excludes it from formatting for the same reason.
+set_source_files_properties(
+    utilities/sha256.cpp
+    PROPERTIES SKIP_LINTING ON
+               COMPILE_OPTIONS
+               "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>"
 )
 
 add_subdirectory(engines)

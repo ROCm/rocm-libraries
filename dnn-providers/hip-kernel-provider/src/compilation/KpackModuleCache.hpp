@@ -8,6 +8,8 @@
 #include "KpackArchive.hpp"
 #include "KpackModule.hpp"
 #include "ModuleCache.hpp"
+#include "device/ScopedDevice.hpp"
+#include "utilities/Digest.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -22,8 +24,8 @@ namespace hip_kernel_provider::compilation
 {
 
 /// A staged failure escaping the cache's load(). The message already describes what went
-/// wrong -- but not *who asked*, because the cache is keyed on (archive, tocKey, arch) and
-/// deliberately never sees the descriptor or the symbol. KpackKernelLoader catches this and
+/// wrong -- but not *who asked*, because the cache is keyed on (archive, tocKey, arch,
+/// ordinal, sha256) and never sees the descriptor or the symbol. KpackKernelLoader catches this and
 /// prefixes both, so every message names the descriptor and the symbol without either
 /// entering the key.
 ///
@@ -49,7 +51,8 @@ private:
 
 using CachedKpackModule = std::shared_ptr<const KpackModule>;
 
-/// One hipModule_t per (archive path, toc_key, device arch), loaded lazily and shared.
+/// One hipModule_t per (archive path, toc_key, device arch, device ordinal, declared
+/// sha256), loaded lazily and shared.
 ///
 /// The key deliberately excludes the kernel symbol. `toc_key` is content-addressed on
 /// (source, build) only, so two kernels that differ solely by entry point name the same
@@ -61,17 +64,13 @@ using CachedKpackModule = std::shared_ptr<const KpackModule>;
 /// Why not rocm-kpack's own cache: kpack_cache_* caches the decompressed code-object
 /// *blob*, not the loaded hipModule_t, so it would still leave a hipModuleLoadData on
 /// every dispatch. Building on compilation::ModuleCache also matches SdpaModuleCache.
-///
-/// Not keyed by device ordinal, which is safe only because every device in a process
-/// that shares an arch also shares this provider's single HIP context. A hipModule_t
-/// belongs to the device current when it was loaded, so keying by arch alone would be
-/// wrong under a per-device context; arch is in the key, so the different-arch case is
-/// correct either way. SdpaModuleCache has the identical property.
 class KpackModuleCache : public ModuleCache<KpackModuleCache,
                                             CachedKpackModule,
                                             const std::string& /*archivePath*/,
                                             const std::string& /*tocKey*/,
-                                            const std::string& /*deviceArch*/>
+                                            const std::string& /*deviceArch*/,
+                                            int /*deviceOrdinal*/,
+                                            const std::string& /*expectedSha256*/>
 {
 public:
     KpackModuleCache() = default;
@@ -79,11 +78,26 @@ public:
     // Both members are public because MakeKeyFormatsCorrectly calls makeKey directly;
     // the precedent is SdpaModuleCache.hpp.
 
+    /// The arch component is feature-stripped: flags like ":sramecc+:xnack-" describe the
+    /// device, not the code object, and archMatches already gates on the bare name, so
+    /// "gfx90a" and "gfx90a:xnack-" must reach one entry rather than load the same blob
+    /// twice. load() keeps the decorated string -- it feeds archMatches and names the
+    /// device arch in its diagnostics.
+    ///
+    /// `expectedSha256` is in the key so that no cache hit can bypass the digest check: a
+    /// hit answers from the key alone, so a digest outside it would hand a second
+    /// descriptor declaring a different one the first's module, unverified. It does not
+    /// fragment the cache -- two descriptors naming one entry agree on its digest unless
+    /// one is wrong, and a wrong one throws in load() before anything is cached.
     static std::string makeKey(const std::string& archivePath,
                                const std::string& tocKey,
-                               const std::string& deviceArch)
+                               const std::string& deviceArch,
+                               int deviceOrdinal,
+                               const std::string& expectedSha256)
     {
-        return archivePath + "::" + tocKey + "::" + deviceArch;
+        return archivePath + "::" + tocKey
+               + "::" + std::string(hipdnn_plugin_sdk::stripArchFeatures(deviceArch))
+               + "::" + std::to_string(deviceOrdinal) + "::" + expectedSha256;
     }
 
     /// @throws KpackModuleLoadFailure on any stage that fails. Never returns a null
@@ -91,7 +105,9 @@ public:
     ///         the caller could not tell which stage gave up.
     static CachedKpackModule load(const std::string& archivePath,
                                   const std::string& tocKey,
-                                  const std::string& deviceArch)
+                                  const std::string& deviceArch,
+                                  int deviceOrdinal,
+                                  const std::string& expectedSha256)
     {
         KpackArchive archive;
         KpackError error;
@@ -161,6 +177,34 @@ public:
                                              + "' (" + error.codeName + ")");
         }
 
+        // Before hipModuleLoadData, so bytes that fail never reach the driver. The reader
+        // cannot catch this itself: a TOC entry pointing at the wrong offset decompresses
+        // cleanly and returns another entry's code object rather than an error.
+        const std::string actualSha256 = utilities::sha256Hex(codeObject.data(), codeObject.size());
+        if(actualSha256 != expectedSha256)
+        {
+            throw KpackModuleLoadFailure(KpackLoadStage::DIGEST_MISMATCH,
+                                         "the code object for toc_key '" + tocKey + "' at arch '"
+                                             + *matched + "' in kpack archive '" + archivePath
+                                             + "' hashes to " + actualSha256
+                                             + ", but the descriptor declares " + expectedSha256
+                                             + "; the archive and the descriptor disagree about "
+                                               "what this entry contains");
+        }
+
+        // Bound before the load, not after: the device current at hipModuleLoadData is
+        // the one the module belongs to for the rest of its life. A refused bind fails
+        // the load, because an entry cached under one ordinal and resident on another is
+        // a wrong answer every later dispatch reuses.
+        const device::ScopedDevice binding(deviceOrdinal);
+        if(!binding.bound())
+        {
+            throw KpackModuleLoadFailure(KpackLoadStage::MODULE_LOAD,
+                                         "cannot make device " + std::to_string(deviceOrdinal)
+                                             + " current to load toc_key '" + tocKey
+                                             + "' from kpack archive '" + archivePath + "'");
+        }
+
         hipModule_t module = nullptr;
         const hipError_t status = hipModuleLoadData(&module, codeObject.data());
         if(status != hipSuccess)
@@ -172,7 +216,7 @@ public:
                                              + "': " + hipGetErrorString(status));
         }
 
-        return std::make_shared<const KpackModule>(module);
+        return std::make_shared<const KpackModule>(module, deviceOrdinal);
     }
 };
 

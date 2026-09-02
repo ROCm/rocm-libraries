@@ -38,6 +38,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+#include "utilities/ScratchDirectory.hpp"
 
 /**
  * @file TestPointwiseKpackDispatch.cpp
@@ -66,6 +67,10 @@ using hip_kernel_provider::kernel_ingestor_engine::testing::GraphFixture;
 using hip_kernel_provider::kernel_ingestor_engine::testing::matchesGraph;
 using hip_kernel_provider::kernel_ingestor_engine::testing::POINTWISE_ADD;
 using hip_kernel_provider::kernel_ingestor_engine::testing::testDeviceProperties;
+using hip_kernel_provider::tests::claimScratchDirectory;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+constexpr const char* SCRATCH_LABEL = "pointwisekpack";
 
 /// Where this build stages the descriptors it packed, one subdirectory per arch. Same
 /// value main.cpp points the binary at.
@@ -86,6 +91,7 @@ struct PackagedKernelSource
 {
     std::string library;
     std::string tocKey;
+    std::string sha256;
     /// The descriptor's OWN directory, which `library` is relative to. Not the arch
     /// root: the packer preserves each descriptor's authored subpath, so the two differ
     /// for every nested descriptor.
@@ -148,9 +154,11 @@ void readPackagedKernelSource(const std::filesystem::path& directory,
     const nlohmann::json& source = document["kernel_source"];
     ASSERT_TRUE(source.contains("toc_key")) << descriptor;
     ASSERT_TRUE(source.contains("library")) << descriptor;
+    ASSERT_TRUE(source.contains("sha256")) << descriptor;
 
     out.tocKey = source["toc_key"].get<std::string>();
     out.library = source["library"].get<std::string>();
+    out.sha256 = source["sha256"].get<std::string>();
     out.originDirectory = descriptor.parent_path();
     ASSERT_TRUE(std::filesystem::exists(out.originDirectory / out.library))
         << descriptor
@@ -164,6 +172,17 @@ DescriptorId id(uint8_t seed)
     return value;
 }
 
+/// What the pointwise pack's own pointwiseKernelSignature() declares: three device
+/// pointers. A descriptor built here has to agree with it or the dispatch is refused
+/// before the archive is ever opened, which would mask the failure each case is after.
+const std::vector<KernelArgument>& pointwiseSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{s_buffer, s_buffer, s_buffer};
+    return s_signature;
+}
+
 /// A KernelDefinition whose code comes from a kpack archive at
 /// `originDirectory / library`. Metadata carries exactly what the pointwise handler
 /// reads, so the only thing that differs from the embedded-source path is the source.
@@ -171,13 +190,18 @@ DescriptorId id(uint8_t seed)
 /// `treeRoot` is the containment boundary the loader would have stamped. Passed
 /// separately from originDirectory because they differ for a nested descriptor, which is
 /// exactly the case whose archive lives at the arch root above it.
+///
+/// `sha256` defaults to empty for the cases that only read metadata -- workspace sizing
+/// reaches no archive, so there are no bytes for a digest to describe. A case that
+/// prepares a dispatch must pass the descriptor's own digest, which the loader checks.
 KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
                                  const std::filesystem::path& treeRoot,
                                  const std::string& library,
                                  const std::string& tocKey,
                                  const std::string& symbol,
                                  int64_t blockSize,
-                                 uint8_t seed)
+                                 uint8_t seed,
+                                 const std::string& sha256 = {})
 {
     KernelDefinition kernel;
     kernel.kernelId = id(seed);
@@ -188,6 +212,8 @@ KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
     kernel.source.library = library;
     kernel.source.tocKey = tocKey;
     kernel.source.symbol = symbol;
+    kernel.source.sha256 = sha256;
+    kernel.source.signature = pointwiseSignature();
     kernel.originDirectory = originDirectory;
     kernel.treeRoot = treeRoot;
     kernel.metadata = {{std::string(BLOCK_SIZE_FIELD), blockSize},
@@ -199,8 +225,6 @@ KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
 // The workspace seam, unchanged
 // ---------------------------------------------------------------------------
 
-/// `workspaceBytes` reads metadata only, so it never reaches a loader and needs no
-/// device: the same handler, asked about a KPACK kernel, answers from the same metadata.
 TEST(TestPointwiseKpackDispatch, QueriesWorkspaceForAKpackKernel)
 {
     const GraphFixture fixture(buildPointwiseGraph(), testDeviceProperties());
@@ -216,6 +240,7 @@ TEST(TestPointwiseKpackDispatch, QueriesWorkspaceForAKpackKernel)
     const auto smallBlock = makeKpackKernel(
         "/nonexistent", "/nonexistent", "pack.kpack", "toc#0", "PointwiseAdd", 64, 0x50);
 
+    // Metadata only, so this never reaches a loader and needs no device.
     EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, largeBlock), 1024U);
     EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, smallBlock), 0U);
 }
@@ -351,6 +376,7 @@ DescriptorSet makeTwoPackSet(const std::filesystem::path& emptyDirectory)
     failing.source.library = "there-is-no-archive-here.kpack";
     failing.source.tocKey = "lib/libhip.so#0";
     failing.source.symbol = "PointwiseAdd";
+    failing.source.signature = pointwiseSignature();
     failing.originDirectory = emptyDirectory;
     failing.metadata = {{std::string(BLOCK_SIZE_FIELD), int64_t{256}},
                         {std::string(DTYPE_FIELD), std::string("FLOAT")}};
@@ -386,11 +412,6 @@ DescriptorSet makeTwoPackSet(const std::filesystem::path& emptyDirectory)
     return set;
 }
 
-/// The GPU-less half of the drop-costs-only-itself case. The front-ranked candidate
-/// names a kpack archive that
-/// is not there; the loader reports it at archive-open, before HIP is involved, so the
-/// whole path runs on a machine with no device. The graph is still served, and the
-/// failure is named rather than swallowed.
 TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
 {
     registerNativeIngestorSymbols();
@@ -399,8 +420,9 @@ TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
     const NoHipDispatchHandler siblingHandler;
     scope.add(SIBLING_DISPATCH_SYMBOL, &siblingHandler);
 
-    const hipdnn_test_sdk::utilities::ScopedDirectory emptyDirectory(
-        std::filesystem::temp_directory_path() / "hipdnn-kpack-absent-archive");
+    // The front-ranked candidate names an archive that is not there. Reported at
+    // archive-open, before HIP is involved, so this whole path runs without a device.
+    const ScopedDirectory emptyDirectory = claimScratchDirectory(SCRATCH_LABEL);
 
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
@@ -440,9 +462,6 @@ TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
 // One module across two dispatches
 // ---------------------------------------------------------------------------
 
-/// Two kernels differing only by block size, both naming one (archive, toc_key, arch):
-/// the cache must grow by exactly one. Measured as a delta because the cache is
-/// process-lifetime and another case may have populated it first.
 TEST(TestPointwiseKpackDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
 {
     SKIP_IF_NO_DEVICES();
@@ -472,12 +491,25 @@ TEST(TestPointwiseKpackDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
 
     // originDirectory is the descriptor's own (nested) folder; the arch root is the
     // tree, and the archive sits under it -- the real shipped shape.
-    const auto first = makeKpackKernel(
-        packed.originDirectory, packaged, packed.library, packed.tocKey, PACKED_SYMBOL, 256, 0x60);
-    const auto second = makeKpackKernel(
-        packed.originDirectory, packaged, packed.library, packed.tocKey, PACKED_SYMBOL, 64, 0x70);
+    const auto first = makeKpackKernel(packed.originDirectory,
+                                       packaged,
+                                       packed.library,
+                                       packed.tocKey,
+                                       PACKED_SYMBOL,
+                                       256,
+                                       0x60,
+                                       packed.sha256);
+    const auto second = makeKpackKernel(packed.originDirectory,
+                                        packaged,
+                                        packed.library,
+                                        packed.tocKey,
+                                        PACKED_SYMBOL,
+                                        64,
+                                        0x70,
+                                        packed.sha256);
 
     const auto& handler = dispatchHandler(POINTWISE_ADD);
+    // A delta, because the cache is process-lifetime and another case may have filled it.
     const size_t before = pointwiseKpackModuleCache().size();
 
     const auto preparedFirst = handler.prepare(fixture.context(), *bound, first);

@@ -315,6 +315,23 @@ inline DescriptorVersion parseDescriptorVersion(const std::string& text, const s
     return version;
 }
 
+/// Checks that a `sha256` value has the shape `hashlib.sha256(...).hexdigest()` produces:
+/// exactly 64 characters of `[0-9a-f]`. Lowercase only -- the packer emits nothing else.
+///
+/// A maintainability guard, not a security control: descriptor and archive travel together,
+/// so anyone able to substitute one can rewrite the other. What it catches is a truncated,
+/// misspelled, or wrong-algorithm digest, at parse time and with a locator.
+inline void requireSha256Shape(const std::string& text, const std::string& where)
+{
+    const auto isLowerHex
+        = [](unsigned char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); };
+    if(text.size() != 64 || !std::all_of(text.begin(), text.end(), isLowerHex))
+    {
+        fail("key 'sha256' in " + where
+             + " must be 64 lowercase hex characters, as sha256 hexdigest, not '" + text + "'");
+    }
+}
+
 /// RFC 0017 §4's accept rule, run for every descriptor before its body is parsed and
 /// ahead of the catalog insert: RFC 0020 §10.2.1 requires an unsupported-version UED to
 /// drop for its version alone and leave the descriptors it would have collided with
@@ -801,16 +818,85 @@ inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root,
     return dispatch;
 }
 
+/// Reads `signature`: the packager-derived list of arguments the host is expected to
+/// marshal, one object per argument in declaration order.
+///
+/// Shape-checked rather than merely type-checked, for the reason requireSha256Shape is: a
+/// field nothing validates is a field that can drift into nonsense and still load. `name`
+/// is the one optional key, because clang emits argument names for some producers and not
+/// others -- requiring it would make every HIP-compiled kernel unloadable. An empty array
+/// is accepted and means a kernel taking no arguments; that is why the key itself is
+/// required, since absence would otherwise be indistinguishable from it.
+inline std::vector<KernelArgument> requireKernelSignature(const nlohmann::json& object,
+                                                          const std::string& where)
+{
+    const auto& value = requireKey(object, "signature", where);
+    if(!value.is_array())
+    {
+        fail("key 'signature' in " + where + " must be an array of argument objects");
+    }
+
+    // Sizes and offsets are kernarg-segment quantities: unsigned, and small. A negative or
+    // out-of-range value is a broken producer, not a large kernel.
+    const auto requireUint32
+        = [](const nlohmann::json& entry, std::string_view key, const std::string& entryWhere) {
+              const auto& field = requireKey(entry, key, entryWhere);
+              if(!field.is_number_unsigned())
+              {
+                  fail("key '" + std::string(key) + "' in " + entryWhere
+                       + " must be a non-negative integer");
+              }
+              const auto raw = field.get<uint64_t>();
+              if(raw > std::numeric_limits<uint32_t>::max())
+              {
+                  fail("key '" + std::string(key) + "' in " + entryWhere
+                       + " is too large for a kernel argument");
+              }
+              return static_cast<uint32_t>(raw);
+          };
+
+    std::vector<KernelArgument> signature;
+    signature.reserve(value.size());
+    for(std::size_t index = 0; index < value.size(); ++index)
+    {
+        // Positional, because argument lists are compared positionally and an index is the
+        // only locator an unnamed argument has.
+        const std::string entryWhere = where + " signature[" + std::to_string(index) + "]";
+        const auto& entry = value[index];
+        requireObject(entry, entryWhere);
+        requireKnownKeys(entry, {"kind", "size", "offset", "name"}, entryWhere);
+
+        KernelArgument argument;
+        argument.kind = requireString(entry, "kind", entryWhere);
+        argument.size = requireUint32(entry, "size", entryWhere);
+        argument.offset = requireUint32(entry, "offset", entryWhere);
+        if(entry.find("name") != entry.end())
+        {
+            // requireString rejects the empty string, which is what keeps "omitted" and
+            // "named nothing" from collapsing into the same parsed value.
+            argument.name = requireString(entry, "name", entryWhere);
+        }
+        signature.push_back(std::move(argument));
+    }
+    return signature;
+}
+
 inline KernelSource parseKernelSource(const nlohmann::json& root, const std::string& where)
 {
     requireObject(root, where);
     // The union of every kind's keys, checked ahead of the kind switch so that a key
     // belonging to a kind this build cannot dispatch fails with the honest "no
     // implementation yet" below rather than a misleading "unknown key".
-    requireKnownKeys(
-        root,
-        {"kind", "source_file", "entry_point", "library", "toc_key", "symbol", "sha256"},
-        where);
+    requireKnownKeys(root,
+                     {"kind",
+                      "source_file",
+                      "entry_point",
+                      "library",
+                      "toc_key",
+                      "symbol",
+                      "sha256",
+                      "signature"},
+                     where);
 
     KernelSource source;
     const std::string kindText = requireString(root, "kind", where);
@@ -831,13 +917,16 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     }
     else if(source.kind == KernelSourceKind::KPACK)
     {
-        // All four are mandatory: the packager emits them together, and an adapter needs
-        // every one of them to name a code object. None is validated here -- see
-        // KernelSource for what each carries.
+        // All five are mandatory: the packager emits them together, and an adapter needs
+        // every one of them to name a code object and vouch for it. Only sha256 and
+        // signature are checked past non-empty, and only for shape -- see
+        // requireSha256Shape and requireKernelSignature.
         source.library = requireString(root, "library", where);
         source.tocKey = requireString(root, "toc_key", where);
         source.symbol = requireString(root, "symbol", where);
         source.sha256 = requireString(root, "sha256", where);
+        requireSha256Shape(source.sha256, where);
+        source.signature = requireKernelSignature(root, where);
     }
     else
     {
