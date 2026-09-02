@@ -1076,10 +1076,11 @@ struct hipfftHandle_t
         {
             (*ret).device_contexts.emplace_back(device_context_t::make_nonowned_copy(ctx));
         }
-        // TODO: add JIT CB states
-        (*ret).scale_factor = src->scale_factor;
-        (*ret).comm_type    = src->comm_type;
-        (*ret).comm_handle  = src->comm_handle;
+        (*ret).load_callback  = src->load_callback;
+        (*ret).store_callback = src->store_callback;
+        (*ret).scale_factor   = src->scale_factor;
+        (*ret).comm_type      = src->comm_type;
+        (*ret).comm_handle    = src->comm_handle;
 #ifdef HIPFFT_MPI_ENABLE
         (*ret).mp_input_brick  = src->mp_input_brick;
         (*ret).mp_output_brick = src->mp_output_brick;
