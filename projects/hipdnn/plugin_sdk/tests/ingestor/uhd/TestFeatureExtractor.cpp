@@ -769,4 +769,44 @@ TEST_F(TestFeatureExtractor, ClearKernelVarsDropsOnlyKernelBindings)
     EXPECT_NO_THROW(queryOnly.extract(ctx));
 }
 
+/// RFC 0019 §6.3: the categorical encoding is part of the feature contract's fingerprint, because
+/// changing a string-to-code map changes what the model reads while leaving the signature text
+/// identical. §6.5 says so outright: "features_hash does not catch it because the signature text
+/// is unchanged."
+///
+/// The extractor's static computeHash always folded the encoding in, and matched
+/// tools/uhd_gen/features.py. The constructor did not pass it, so the *live* hash -- the one
+/// §6.3 check 1 compares against the descriptor -- was computed without it. Every UHD carrying an
+/// encoding therefore failed the check and degraded to declared order, silently, because a
+/// degraded ranking is a legal ranking. These cases pin the constructor to the helper.
+TEST(TestIngestorFeatureExtractor, TheConstructorFoldsTheCategoricalEncodingIntoItsHash)
+{
+    const std::vector<std::string> signature{"$q.batch", "$kernel.layout"};
+    const std::map<std::string, std::map<std::string, int32_t>> encoding{
+        {"$kernel.layout", {{"nchw", 0}, {"nhwc", 1}}}};
+
+    const FeatureExtractor withEncoding(signature, {}, encoding);
+    EXPECT_EQ(withEncoding.getSignatureHash(), FeatureExtractor::computeHash(signature, encoding))
+        << "the constructor's hash disagrees with the helper the trainer mirrors";
+
+    // And it is genuinely a different fingerprint, so the check can actually fail.
+    const FeatureExtractor withoutEncoding(signature);
+    EXPECT_NE(withEncoding.getSignatureHash(), withoutEncoding.getSignatureHash())
+        << "the encoding did not affect the hash at all";
+}
+
+TEST(TestIngestorFeatureExtractor, ASignatureWithNoEncodingHashesAsItAlwaysDid)
+{
+    // The compatibility half. Every UHD shipped so far reads no string field, so passing an
+    // empty encoding must not change its hash -- rehashing those would invalidate contracts
+    // that are intact.
+    const std::vector<std::string> signature{"$q.batch", "$kernel.tile_m"};
+
+    const FeatureExtractor implicitlyEmpty(signature);
+    const FeatureExtractor explicitlyEmpty(signature, {}, {});
+
+    EXPECT_EQ(implicitlyEmpty.getSignatureHash(), explicitlyEmpty.getSignatureHash());
+    EXPECT_EQ(implicitlyEmpty.getSignatureHash(), FeatureExtractor::computeHash(signature));
+}
+
 } // namespace

@@ -84,9 +84,14 @@ public:
     /// Construct with a features signature (list of JsonLogic expression strings).
     /// @param signature Ordered list of feature expressions.
     /// @param derived Optional derived values (RFC 0019 §6.4) as (name, expression) pairs.
+    /// @param categoricalEncoding RFC 0019 §6.3's string-to-code map, folded into the signature
+    ///        hash. Defaulted, so a UHD that reads no string field hashes exactly as it did
+    ///        before this argument existed -- every model shipped so far is that case.
     explicit FeatureExtractor(const std::vector<std::string>& signature,
                                const std::vector<std::pair<std::string, std::string>>& derived
-                               = {});
+                               = {},
+                               const std::map<std::string, std::map<std::string, int32_t>>&
+                                   categoricalEncoding = {});
 
     /// Extract feature vector from context.
     /// @returns Ordered vector of feature values matching the signature.
@@ -329,8 +334,10 @@ inline nlohmann::json FeatureExtractor::parseSignatureEntry(const std::string& e
     return JsonLogicEvaluator::parse(entry);
 }
 
-inline FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature,
-                                     const std::vector<std::pair<std::string, std::string>>& derived)
+inline FeatureExtractor::FeatureExtractor(
+    const std::vector<std::string>& signature,
+    const std::vector<std::pair<std::string, std::string>>& derived,
+    const std::map<std::string, std::map<std::string, int32_t>>& categoricalEncoding)
 {
     // Parse and analyze derived values (RFC 0019 §6.4)
     _parsedDerived.reserve(derived.size());
@@ -464,7 +471,12 @@ inline FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signat
         }
     }
 
-    _signatureHash = computeHash(signature);
+    // The encoding travels into the hash. computeHash has always accepted it and folded it in;
+    // the constructor did not pass it, so the runtime computed H(signature) while
+    // tools/uhd_gen computed H(signature|encoding). Any UHD carrying an encoding therefore
+    // failed §6.3 check 1 and degraded to declared order -- silently, a degraded ranking being
+    // a legal one. Every piece of the plumbing existed except this argument.
+    _signatureHash = computeHash(signature, categoricalEncoding);
 }
 
 inline std::vector<double> FeatureExtractor::extract(const FeatureExtractionContext& ctx) const

@@ -225,7 +225,7 @@ public:
             }
 
             auto extractor = std::make_shared<const uhd::FeatureExtractor>(
-                config->featuresSignature, config->derived);
+                config->featuresSignature, config->derived, config->categoricalEncoding);
 
             // RFC 0019 §6.3: the signature the model was trained against must be the one
             // the extractor will produce. Both sides carry the hash; disagreeing means the
