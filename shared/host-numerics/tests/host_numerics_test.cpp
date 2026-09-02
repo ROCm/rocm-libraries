@@ -66,19 +66,19 @@ void testRuntimeReferenceGemm() {
         Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)),
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)), d,
         ScalarType::Float32);
-    problem.epilogue.beta = 1.0;
-    problem.epilogue.scaleC = 2.0;
-    problem.epilogue.bias =
+    problem.beta = 1.0;
+    problem.scaleC = 2.0;
+    problem.bias =
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
                                          std::span<const float>(bias))
             .expandDims(1);
-    problem.epilogue.scaleA =
+    problem.scaleA =
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
                                          std::span<const float>(scaleA))
             .expandDims(1);
-    problem.epilogue.scaleB = Tensor::copyNativeStorage<float>(
+    problem.scaleB = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(scaleB));
-    problem.epilogue.activation = Activation::Relu;
+    problem.activation = Activation::Relu;
 
     const GemmSupportInfo mixedSupport = queryGemmSupport(problem, GemmBackend::Mixed);
     require(!mixedSupport && mixedSupport.reason == "Mixed is a reporting-only GEMM backend value.",
@@ -167,8 +167,8 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                          std::span<const float>(finiteC)),
         output, ScalarType::Float32);
-    alphaZero.epilogue.alpha = 0.0;
-    alphaZero.epilogue.beta = 2.0;
+    alphaZero.alpha = 0.0;
+    alphaZero.beta = 2.0;
     referenceGemm(alphaZero);
     require(compare(output, Tensor::copyNativeStorage<float>(
                                 Layout::contiguousLastDimensionFastest(Shape{2, 2}),
@@ -176,17 +176,15 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
                 .passed(),
             "Zero alpha propagated a non-finite GEMM operand.");
 
-    alphaZero.epilogue.scaleA =
-        Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{nan});
-    alphaZero.epilogue.scaleB =
-        Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{3.0f});
+    alphaZero.scaleA = Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{nan});
+    alphaZero.scaleB = Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{3.0f});
     referenceGemm(alphaZero);
     require(compare(output, Tensor::copyNativeStorage<float>(
                                 Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                 std::span<const float>(std::array<float, 4>{2, 4, 6, 8})))
                 .passed(),
             "Zero alpha evaluated a broadcast scale or non-finite GEMM operand.");
-    alphaZero.epilogue.scaleA =
+    alphaZero.scaleA =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{nan, nan}).expandDims(1);
     referenceGemm(alphaZero);
     require(compare(output, Tensor::copyNativeStorage<float>(
@@ -195,14 +193,13 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
                 .passed(),
             "Zero alpha treated broadcast and expanded non-finite scales differently.");
 
-    alphaZero.epilogue.alpha = 1.0;
-    alphaZero.epilogue.scaleA =
-        Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{0.0f});
+    alphaZero.alpha = 1.0;
+    alphaZero.scaleA = Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{0.0f});
     referenceGemm(alphaZero);
     require(std::isnan(output.loadAs<float>({0, 0})),
             "A zero broadcast scale did not preserve IEEE multiplication of a non-finite dot "
             "product.");
-    alphaZero.epilogue.scaleA =
+    alphaZero.scaleA =
         Tensor::copyNativeValues<float>(Shape{2}, std::array<float, 2>{0.0f, 0.0f}).expandDims(1);
     referenceGemm(alphaZero);
     require(std::isnan(output.loadAs<float>({0, 0})),
@@ -219,7 +216,7 @@ void testZeroGemmScalarsSuppressNonFiniteOperands() {
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
                                          std::span<const float>(nonFiniteC)),
         output, ScalarType::Float32);
-    betaZero.epilogue.beta = 0.0;
+    betaZero.beta = 0.0;
     referenceGemm(betaZero);
     require(compare(output, Tensor::copyNativeStorage<float>(
                                 Layout::contiguousLastDimensionFastest(Shape{2, 2}),
@@ -237,7 +234,7 @@ void testGemmScaleCValidationMatchesExecution() {
                              Tensor::copyNativeStorage<float>(std::span<const float>(realValues)),
                              Tensor::copyNativeStorage<float>(std::span<const float>(realValues)),
                              realOutput, ScalarType::Float32);
-    realProblem.epilogue.scaleC = std::complex<double>(1.0, 1.0);
+    realProblem.scaleC = std::complex<double>(1.0, 1.0);
 
     require(!queryGemmSupport(realProblem, GemmBackend::Pointwise),
             "GEMM support query accepted a complex C scale for a real accumulator.");
@@ -258,7 +255,7 @@ void testGemmScaleCValidationMatchesExecution() {
         Tensor::copyNativeStorage<int32_t>(std::span<const int32_t>(integerValues)),
         Tensor::copyNativeStorage<int32_t>(std::span<const int32_t>(integerValues)), integerOutput,
         ScalarType::Int32);
-    integerProblem.epilogue.scaleC = 0.5;
+    integerProblem.scaleC = 0.5;
 
     require(!queryGemmSupport(integerProblem, GemmBackend::Pointwise),
             "GEMM support query accepted a fractional C scale for an integer accumulator.");
@@ -288,7 +285,7 @@ void testRuntimeMixedAndBlockScaledGemm() {
 
     GemmTestCase mixed(a, b, c, d, ScalarType::Float32);
     mixed.computeTypeA = ScalarType::Float4E2M1;
-    mixed.epilogue.beta = 1.0;
+    mixed.beta = 1.0;
     referenceGemm(mixed);
     require(d.loadAs<float>({0, 0}) == 9.0f, "Runtime mixed-type GEMM result mismatch.");
 
@@ -385,7 +382,7 @@ void testExactIntegerGemm() {
         Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                   std::span<const int32_t>(c)),
         d, ScalarType::Int32);
-    problem.epilogue.beta = 2.0;
+    problem.beta = 2.0;
     referenceGemm(problem);
 
     const auto wrapMultiply = [](int32_t left, int32_t right) {
@@ -398,7 +395,7 @@ void testExactIntegerGemm() {
     require(d.loadAs<int32_t>({0, 0}) == expected,
             "Int32 GEMM did not use defined wrapping arithmetic.");
 
-    problem.epilogue.alpha = 0.5;
+    problem.alpha = 0.5;
     bool rejectedFractionalIntegerScalar = false;
     try {
         referenceGemm(problem);
@@ -446,7 +443,7 @@ void testRuntimeComplexAndExplicitAxisGemm() {
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 2}),
                                          std::span<const float>(realC)),
         realD, ScalarType::Float32);
-    axisProblem.epilogue.bias = Tensor::copyNativeStorage<float>(
+    axisProblem.bias = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(columnBias));
     referenceGemm(axisProblem);
     require(compare(realD, Tensor::copyNativeStorage<float>(
@@ -1484,18 +1481,18 @@ void testActivations() {
                                          std::span<const float>(c)),
         d, ScalarType::Float32);
 
-    problem.epilogue.activation = Activation::Gelu;
+    problem.activation = Activation::Gelu;
     referenceGemm(problem);
     require(std::abs(d.loadAs<float>({0, 0}) - 1.9545977f) < 1e-6f, "GELU result mismatch.");
 
-    problem.epilogue.activation = Activation::Silu;
-    problem.epilogue.activationParameter0 = 1;
+    problem.activation = Activation::Silu;
+    problem.activationParameter0 = 1;
     referenceGemm(problem);
     require(std::abs(d.loadAs<float>({0, 0}) - 1.7615942f) < 1e-6f, "SiLU result mismatch.");
 
-    problem.epilogue.activation = Activation::Clamp;
-    problem.epilogue.activationParameter0 = -1;
-    problem.epilogue.activationParameter1 = 1;
+    problem.activation = Activation::Clamp;
+    problem.activationParameter0 = -1;
+    problem.activationParameter1 = 1;
     referenceGemm(problem);
     require(d.loadAs<float>({0, 0}) == 1, "Clamp result mismatch.");
 }
@@ -1523,8 +1520,8 @@ void testStridedAndOffsetViews() {
                                                      std::move(dStorage)),
         ScalarType::Float32);
     Tensor d = problem.d;
-    problem.epilogue.alpha = 2.0;
-    problem.epilogue.beta = 3.0;
+    problem.alpha = 2.0;
+    problem.beta = 3.0;
 
     referenceGemm(problem);
 

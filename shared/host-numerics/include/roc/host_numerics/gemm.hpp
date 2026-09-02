@@ -29,34 +29,16 @@ enum class AccumulationRounding {
     AfterProductAndSum,  // Quantizes every product and accumulated sum.
 };
 
-// Describes alpha/beta/C-scale combination and the fused D finalization program.
-struct GemmEpilogue {
-    explicit GemmEpilogue(ScalarType coefficientType)
-        : alpha(Scalar::one(coefficientType)),
-          beta(Scalar::zero(coefficientType)),
-          scaleC(Scalar::one(coefficientType)),
-          outputScale(Scalar::one(coefficientType)),
-          activationParameter0(Scalar::zero(coefficientType)),
-          activationParameter1(Scalar::zero(coefficientType)) {}
-
-    Scalar alpha;                      // Multiplies the accumulated A*B term.
-    Scalar beta;                       // Multiplies C.
-    Scalar scaleC;                     // Multiplies C before beta.
-    std::optional<Tensor> bias;        // Broadcast addend after alpha*A*B + beta*scaleC*C.
-    std::optional<Tensor> scaleAlpha;  // Broadcast factor applied to alpha.
-    std::optional<Tensor> scaleA;      // Broadcast factor applied to alpha.
-    std::optional<Tensor> scaleB;      // Broadcast factor applied to alpha.
-    Scalar outputScale;                // Applied after activation.
-    OutputConversion outputConversion = OutputConversion::Default;  // Final D encoding.
-    Activation activation = Activation::None;                       // Applied before outputScale.
-    Scalar activationParameter0;  // First activation-specific scalar.
-    Scalar activationParameter1;  // Second activation-specific scalar.
-};
-
 // Operand transforms, arithmetic, epilogue, and output-selection policy for one GEMM.
 struct GemmOptions {
     explicit GemmOptions(ScalarType accumulator = ScalarType::Float32)
-        : accumulatorType(accumulator), epilogue(accumulator) {}
+        : accumulatorType(accumulator),
+          alpha(Scalar::one(accumulator)),
+          beta(Scalar::zero(accumulator)),
+          scaleC(Scalar::one(accumulator)),
+          outputScale(Scalar::one(accumulator)),
+          activationParameter0(Scalar::zero(accumulator)),
+          activationParameter1(Scalar::zero(accumulator)) {}
 
     ScalarType accumulatorType;  // Dot-product and epilogue arithmetic type.
     AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
@@ -73,7 +55,19 @@ struct GemmOptions {
     bool conjugateA = false;
     bool conjugateB = false;
 
-    GemmEpilogue epilogue;
+    Scalar alpha;                      // Multiplies the accumulated A*B term.
+    Scalar beta;                       // Multiplies C.
+    Scalar scaleC;                     // Multiplies C before beta.
+    std::optional<Tensor> bias;        // Broadcast addend after alpha*A*B + beta*scaleC*C.
+    std::optional<Tensor> scaleAlpha;  // Broadcast factor applied to alpha.
+    std::optional<Tensor> scaleA;      // Broadcast factor applied to alpha.
+    std::optional<Tensor> scaleB;      // Broadcast factor applied to alpha.
+    Scalar outputScale;                // Applied after activation.
+    OutputConversion outputConversion = OutputConversion::Default;  // Final D encoding.
+    Activation activation = Activation::None;                       // Applied before outputScale.
+    Scalar activationParameter0;  // First activation-specific scalar.
+    Scalar activationParameter1;  // Second activation-specific scalar.
+
     OutputSelection outputSelection = OutputSelection::all();  // Logical D coordinates to write.
 };
 
