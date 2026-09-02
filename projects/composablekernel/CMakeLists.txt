@@ -244,7 +244,7 @@ else()
 endif()
 
 # Increase the number of max elements in fold expressions
-add_compile_options(-fbracket-depth=4096)
+add_compile_options(-fbracket-depth=1024)
 
 # add -Og -gdwarf64 for debug builds
 add_compile_options(
