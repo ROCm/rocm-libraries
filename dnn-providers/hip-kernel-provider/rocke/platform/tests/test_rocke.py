@@ -6440,6 +6440,33 @@ class TestPackArgsKernargABI(unittest.TestCase):
                 [{"name": "p", "type": "ptr<f16,global>"}], {"p": "not a pointer"}
             )
 
+    def test_compile_packer_matches_pack_args_byte_for_byte(self):
+        # KernelLauncher swaps in ``compile_packer`` for the per-launch
+        # pack, so it must be a byte-identical oracle for ``pack_args`` on
+        # the same signature -- any divergence silently corrupts kernargs.
+        from rocke.runtime.packing import compile_packer, pack_args
+
+        for sig, vals in (
+            (self._MIXED_SIG, self._MIXED_VALS),
+            (
+                [
+                    {"name": "p", "type": "ptr<f32,global>"},
+                    {"name": "i", "type": "i32"},
+                    {"name": "q", "type": "i64"},
+                    {"name": "f", "type": "f32"},
+                ],
+                {"p": 0x10, "i": 7, "q": 0x1122334455, "f": 1.5},
+            ),
+            ([{"name": "p", "type": "ptr<f16,global>"}], {"p": None}),
+        ):
+            self.assertEqual(compile_packer(sig)(vals), pack_args(sig, vals))
+        # Error parity: unknown type is rejected when the packer is built,
+        # a missing arg when the packer is called.
+        with self.assertRaises(ValueError):
+            compile_packer([{"name": "x", "type": "f16"}])
+        with self.assertRaises(KeyError):
+            compile_packer([{"name": "x", "type": "i32"}])({})
+
 
 class TestHostBufferReExportShim(unittest.TestCase):
     """The manifest_runner.utils re-export shim over rocke.runtime.host_buffers.

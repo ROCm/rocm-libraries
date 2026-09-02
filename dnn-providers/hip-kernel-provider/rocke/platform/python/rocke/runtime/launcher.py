@@ -95,7 +95,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, Tuple
 
 from .hip_module import Runtime
-from .packing import pack_args
+from .packing import compile_packer
 from .torch_interop import resolve_stream
 
 __all__ = [
@@ -420,6 +420,11 @@ class KernelLauncher:
         rt = _runtime()
         self._module = rt.load_module(hsaco)
         self._fn = self._module.get_function(kernel_name)
+        # Precompiled hot-path kernarg packer (signature is immutable for
+        # the launcher's lifetime). Byte-identical to ``pack_args`` but
+        # hoists the layout/format-compile work out of the per-launch
+        # path -- the dominant Python cost on tiny decode launches.
+        self._packer = compile_packer(self._signature)
 
     @property
     def kernel_name(self) -> str:
@@ -436,7 +441,7 @@ class KernelLauncher:
         config: LaunchConfig,
     ) -> LaunchSummary:
         rt = _runtime()
-        args = pack_args(self._signature, values)
+        args = self._packer(values)
         stream = resolve_stream(config.stream)
         fence = _resolved_fence(config.fence)
 
