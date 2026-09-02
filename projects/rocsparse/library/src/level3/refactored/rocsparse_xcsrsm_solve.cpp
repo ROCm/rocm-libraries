@@ -154,17 +154,17 @@ namespace rocsparse
         _rocsparse_dnvec_descr local_alpha(
             1, 1, rocsparse::get_datatype<T>(), alpha, nullptr, 1, 0, handle->pointer_mode);
 
-        rocsparse::csrsm_compute(handle,
-                                 nrhs,
-                                 trans_A,
-                                 trans_B,
-                                 &local_alpha,
-                                 &local_A,
-                                 &local_B,
-                                 csrsm_info,
-                                 std::numeric_limits<size_t>::max(),
-                                 temp_buffer,
-                                 p_error);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_compute(handle,
+                                                           nrhs,
+                                                           trans_A,
+                                                           trans_B,
+                                                           &local_alpha,
+                                                           &local_A,
+                                                           &local_B,
+                                                           csrsm_info,
+                                                           std::numeric_limits<size_t>::max(),
+                                                           temp_buffer,
+                                                           p_error));
 
         return rocsparse_status_success;
     }
