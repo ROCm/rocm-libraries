@@ -390,9 +390,19 @@ struct DescriptorSet
 {
     EngineDescriptor engine;
     MetadataSchema schema;
-    /// nullopt when this engine ships no ranking model; the generic engine then ranks
-    /// on `priority` then descriptor id. See makeKernelHeuristic().
+    /// The UHD for the `default` arch, or the only one when the UED named a bare id.
+    /// nullopt when this engine ships no ranking model; the generic engine then ranks on
+    /// `priority` then descriptor id. See makeKernelHeuristic().
     std::optional<HeuristicDescriptor> heuristic;
+
+    /// RFC 0019 §3.1: the engine's catalog-ranking UHD per architecture, keyed as the UED
+    /// wrote it, `default` included.
+    ///
+    /// Resolution cannot happen at load: descriptor discovery is a process-wide memoized
+    /// static that runs before any device exists. §8.3's "exact gcnArchName, then default"
+    /// therefore happens at first rank(), where the device is known -- which is also what
+    /// §9.2 asks for, load-on-demand with a per-engine cache.
+    std::map<std::string, HeuristicDescriptor> heuristicsByArch;
     std::vector<MatchDescriptor> matchers;
     std::vector<DispatchDescriptor> dispatches;
     std::vector<KernelDescriptorPack> packs;

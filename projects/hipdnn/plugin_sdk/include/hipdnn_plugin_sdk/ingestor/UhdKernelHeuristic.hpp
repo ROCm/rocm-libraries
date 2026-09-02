@@ -177,7 +177,10 @@ public:
     ///          declared-order ranking. Never throws.
     static std::shared_ptr<UhdKernelHeuristic> tryCreate(const HeuristicDescriptor& descriptor,
                                                          const std::string& describedBy,
-                                                         const std::vector<std::string>& knobs = {})
+                                                         const std::vector<std::string>& knobs = {},
+                                                         const std::map<std::string,
+                                                                        HeuristicDescriptor>&
+                                                             byArch = {})
     {
         try
         {
@@ -236,8 +239,14 @@ public:
                 return nullptr;
             }
 
-            return std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
+            auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
                 std::move(*config), std::move(adapter), std::move(extractor), describedBy));
+            // Kept for RFC 0019 §8.3: the arch this was built from is whatever the loader
+            // resolved (the `default` entry), and rank() re-resolves against the running
+            // device the first time it sees one that these do not describe.
+            built->_byArch = byArch;
+            built->_knobs = knobs;
+            return built;
         }
         catch(const std::exception& e)
         {
@@ -262,6 +271,69 @@ public:
 
     std::vector<KernelDefinition> rank(const Catalog& catalog,
                                        const MatchContext& context) const override
+    {
+        // RFC 0019 §8.3: exact gcnArchName, then `default`. Resolved here rather than at
+        // load because descriptor discovery is a process-wide static that runs before any
+        // device exists -- and §9.2 asks for load-on-demand with a per-engine cache anyway,
+        // which is what this is.
+        if(const auto forArch = resolveForArch(context.deviceProperties.gcnArchName))
+        {
+            return forArch->rankWith(catalog, context);
+        }
+        return rankWith(catalog, context);
+    }
+
+    /// @returns the model for @p arch when the UED named a different one for it, else
+    ///          nullptr, meaning "the model this object already holds applies".
+    std::shared_ptr<const UhdKernelHeuristic> resolveForArch(const std::string& arch) const
+    {
+        if(_byArch.size() < 2 || arch.empty())
+        {
+            // One entry (or none) means every architecture gets the same model, which is
+            // what was built eagerly. No lookup, no lock, no cache.
+            return nullptr;
+        }
+
+        const std::lock_guard<std::mutex> lock(_archMutex);
+        if(const auto cached = _archCache.find(arch); cached != _archCache.end())
+        {
+            return cached->second;
+        }
+
+        const HeuristicDescriptor* chosen = nullptr;
+        for(const auto& [candidate, descriptor] : _byArch)
+        {
+            // archMatches, not ==: a device reports its features (`gfx942:sramecc+:xnack-`)
+            // while an authored entry carries a bare id, so equality would miss every real
+            // device.
+            if(candidate != "default" && archMatches(arch, candidate, ArchMatchMode::PREFIX))
+            {
+                chosen = &descriptor;
+                break;
+            }
+        }
+        if(chosen == nullptr)
+        {
+            // The `default` entry is what was built eagerly, so falling back to it means
+            // using this object. Caching the null keeps the miss from re-scanning per graph.
+            _archCache.emplace(arch, nullptr);
+            return nullptr;
+        }
+
+        auto loaded = tryCreate(*chosen, _describedBy, _knobs);
+        if(loaded == nullptr)
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " names a model for '" << arch
+                                            << "' that could not be brought up; the default "
+                                               "model ranks instead");
+        }
+        _archCache.emplace(arch, loaded);
+        return loaded;
+    }
+
+private:
+    std::vector<KernelDefinition> rankWith(const Catalog& catalog,
+                                           const MatchContext& context) const
     {
         try
         {
@@ -378,7 +450,6 @@ public:
                                << " ranked=[" << candidates.str() << "]");
     }
 
-private:
     UhdKernelHeuristic(uhd::UhdConfig config,
                        std::shared_ptr<const uhd::IUhdAdapter> adapter,
                        std::shared_ptr<const uhd::FeatureExtractor> extractor,
@@ -400,6 +471,14 @@ private:
         const double raw = _adapter->score(row);
         return _objectiveSign * uhd::score_transform::applyInverse(raw, _config.scoreTransform);
     }
+
+    /// RFC 0019 §3.1's arch -> UHD map, and §9.2's per-engine cache of what has been
+    /// loaded from it. Empty when the UED named a bare id, in which case the eagerly built
+    /// model above serves every architecture.
+    std::map<std::string, HeuristicDescriptor> _byArch;
+    std::vector<std::string> _knobs;
+    mutable std::mutex _archMutex;
+    mutable std::map<std::string, std::shared_ptr<const UhdKernelHeuristic>> _archCache;
 
     uhd::UhdConfig _config;
     std::shared_ptr<const uhd::IUhdAdapter> _adapter;

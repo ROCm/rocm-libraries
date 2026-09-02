@@ -1913,6 +1913,17 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             }
         }
 
+        // Every arch the UED named, resolved to its descriptor. The dangling check above
+        // already established each id exists, so a miss here cannot happen quietly.
+        std::map<std::string, HeuristicDescriptor> heuristicsByArch;
+        for(const auto& [arch, id] : engine.sortKernelCatalog)
+        {
+            if(const auto* candidate = detail::findDescriptor(catalog.heuristics, id))
+            {
+                heuristicsByArch.emplace(arch, *candidate);
+            }
+        }
+
         const auto* schema = detail::findDescriptor(catalog.schemas, engine.metadataSchemaId);
         if(schema == nullptr)
         {
@@ -1952,6 +1963,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         {
             set.heuristic = *heuristic;
         }
+        set.heuristicsByArch = std::move(heuristicsByArch);
 
         // Keyed by id: deduplicates descriptors two packs share and orders them in one
         // step.

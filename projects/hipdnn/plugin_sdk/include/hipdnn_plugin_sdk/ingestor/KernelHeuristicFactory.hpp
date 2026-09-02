@@ -31,7 +31,8 @@ namespace hipdnn_plugin_sdk::ingestor
 inline std::shared_ptr<IKernelHeuristic>
     makeKernelHeuristic(const std::optional<HeuristicDescriptor>& descriptor,
                         const std::string& describedBy = {},
-                        const std::vector<std::string>& knobs = {})
+                        const std::vector<std::string>& knobs = {},
+                        const std::map<std::string, HeuristicDescriptor>& byArch = {})
 {
     if(!descriptor.has_value())
     {
@@ -55,7 +56,7 @@ inline std::shared_ptr<IKernelHeuristic>
         // the engine could never score; an unloadable model is a deployment fact, and
         // RFC 0019 §5 wants the engine still selecting, by declared order.
         const auto named = describeDescriptor("heuristic", descriptor->name, descriptor->id);
-        if(auto heuristic = UhdKernelHeuristic::tryCreate(*descriptor, named, knobs))
+        if(auto heuristic = UhdKernelHeuristic::tryCreate(*descriptor, named, knobs, byArch))
         {
             return heuristic;
         }

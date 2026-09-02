@@ -80,6 +80,20 @@ hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec preferLargeTiles()
     return spec;
 }
 
+/// The inverse of preferLargeTiles: small tiles score higher. Paired with it, the winner
+/// identifies which model ranked, so an arch-resolution test cannot pass by coincidence.
+hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec preferSmallTiles()
+{
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec spec;
+    spec.featureIndices = {0, 0, 0};
+    spec.thresholds = {96.0, 0.0, 0.0};
+    spec.leftChildren = {1, -1, -1};
+    spec.rightChildren = {2, -1, -1};
+    spec.leafValues = {0.0, 9.0, 1.0};
+    spec.defaultLeft = {1, 1, 1};
+    return spec;
+}
+
 /// A tree splitting on slot 1 (`$q.seqlen`), so the same catalog ranks differently for
 /// different problems -- which is the whole reason a UHD exists.
 hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec preferLargeTilesOnLongSequences()
@@ -413,6 +427,100 @@ TEST(TestIngestorUhdKernelHeuristic, AnAxisWithNoKnobIsRefused)
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
     ASSERT_EQ(ranked.size(), 2U);
     EXPECT_EQ(ranked.front().kernelId, testId(0x01));
+}
+
+/// RFC 0019 §3.1 lets a UED name a UHD per architecture; §8.3 resolves exact gcnArchName then
+/// `default`. It cannot happen at load -- descriptor discovery runs before any device exists --
+/// so it happens at first rank(), which is also §9.2's load-on-demand.
+TEST(TestIngestorUhdKernelHeuristic, AnArchSpecificModelOutranksTheDefaultOne)
+{
+    // Two models that disagree: the default prefers small tiles, the gfx942 one prefers large.
+    // Whichever ranks first identifies which model was used, so the assertion cannot pass by
+    // coincidence.
+    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_arch_specific_default");
+    const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_arch_specific_gfx942");
+    const auto fallback = writeFixture(defaultDir.path(), preferSmallTiles());
+    const auto specific = writeFixture(archDir.path(), preferLargeTiles());
+
+    const std::map<std::string, HeuristicDescriptor> byArch{
+        {"default", modelDescriptor(defaultDir.path(), fallback.uhdFileName)},
+        {"gfx942", modelDescriptor(archDir.path(), specific.uhdFileName)}};
+
+    const auto heuristic = makeKernelHeuristic(
+        modelDescriptor(defaultDir.path(), fallback.uhdFileName), {}, KNOBS, byArch);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x02))
+        << "the gfx942 model should have ranked, not the default one";
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AnUnnamedArchFallsBackToDefault)
+{
+    // §8.3: exact match, then `default`, and a device the UED says nothing about takes the
+    // second. The fallback prefers small tiles, so its winner differs from the gfx942 model's.
+    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_arch_fallback_default");
+    const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_arch_fallback_gfx942");
+    const auto fallback = writeFixture(defaultDir.path(), preferSmallTiles());
+    const auto specific = writeFixture(archDir.path(), preferLargeTiles());
+
+    const std::map<std::string, HeuristicDescriptor> byArch{
+        {"default", modelDescriptor(defaultDir.path(), fallback.uhdFileName)},
+        {"gfx942", modelDescriptor(archDir.path(), specific.uhdFileName)}};
+
+    const auto heuristic = makeKernelHeuristic(
+        modelDescriptor(defaultDir.path(), fallback.uhdFileName), {}, KNOBS, byArch);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    auto properties = gfx942();
+    properties.gcnArchName = "gfx1100"; // named by neither entry
+    const MatchContext context{graph, 0, properties};
+    const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x01))
+        << "an unnamed architecture should rank by the default model";
+}
+
+TEST(TestIngestorUhdKernelHeuristic, ArchResolutionIsStableAcrossCalls)
+{
+    // §9.2 caches what it loads. A cache that returned a different model on the second call --
+    // or that served one arch's model to another -- would be worse than no cache at all.
+    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_arch_cached_default");
+    const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_arch_cached_gfx942");
+    const auto fallback = writeFixture(defaultDir.path(), preferSmallTiles());
+    const auto specific = writeFixture(archDir.path(), preferLargeTiles());
+
+    const std::map<std::string, HeuristicDescriptor> byArch{
+        {"default", modelDescriptor(defaultDir.path(), fallback.uhdFileName)},
+        {"gfx942", modelDescriptor(archDir.path(), specific.uhdFileName)}};
+
+    const auto heuristic = makeKernelHeuristic(
+        modelDescriptor(defaultDir.path(), fallback.uhdFileName), {}, KNOBS, byArch);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto onGfx942 = gfx942();
+    auto onOther = gfx942();
+    onOther.gcnArchName = "gfx1100";
+
+    const MatchContext gfx942Context{graph, 0, onGfx942};
+    const MatchContext otherContext{graph, 0, onOther};
+
+    const auto first = heuristic->rank(catalogAgainstPriority(2048), gfx942Context);
+    const auto other = heuristic->rank(catalogAgainstPriority(2048), otherContext);
+    const auto again = heuristic->rank(catalogAgainstPriority(2048), gfx942Context);
+
+    ASSERT_EQ(first.size(), 2U);
+    EXPECT_EQ(first.front().kernelId, again.front().kernelId) << "the cache changed its answer";
+    EXPECT_NE(first.front().kernelId, other.front().kernelId)
+        << "two architectures were served the same model";
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor
