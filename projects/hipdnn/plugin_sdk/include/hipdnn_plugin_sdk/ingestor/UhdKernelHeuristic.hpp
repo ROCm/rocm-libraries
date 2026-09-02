@@ -314,6 +314,8 @@ public:
             {
                 ordered.push_back(*entry);
             }
+
+            traceSelection(scored, context);
             return ordered;
         }
         catch(const std::exception& e)
@@ -324,8 +326,56 @@ public:
             HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " failed while ranking: "
                                             << e.what()
                                             << "; kernels rank by priority, then descriptor id");
+            // RFC 0019 §12 wants the trace to say *whether the model or a fallback decided*,
+            // so the degraded path is traced too. A trace that only ever appears on success
+            // cannot answer the question it exists for.
+            HIPDNN_PLUGIN_LOG_INFO("uhd trace: " << _describedBy << " decided_by=fallback"
+                                                 << " reason=ranking_failed"
+                                                 << " candidates=" << catalog.entries.size()
+                                                 << " uhd=" << _config.uhdId
+                                                 << " adapter=" << _config.adapterType
+                                                 << " features_hash=" << _config.featuresHash);
             return detail::declaredOrder(catalog.entries);
         }
+    }
+
+    /// RFC 0019 §12: the selection trace -- candidates, scores, the ranked order, the winner,
+    /// and whether the model or a fallback decided -- plus the model provenance that says
+    /// which model produced them.
+    ///
+    /// Logged rather than returned. The removed backend implementation kept an in-memory trace
+    /// map with a retrieval path that had no public API, so nothing outside its own test could
+    /// read it; a log line is what an operator can actually see, and §12 exists so selection is
+    /// inspectable rather than queryable.
+    ///
+    /// At INFO because it is per-graph and verbose: a build ranking thousands of graphs should
+    /// not pay for it by default, and §12's error-level requirements are the contract
+    /// diagnostics, which are logged where they occur.
+    void traceSelection(const std::vector<std::pair<double, const KernelDefinition*>>& scored,
+                        const MatchContext& context) const
+    {
+        if(scored.empty())
+        {
+            return;
+        }
+
+        std::ostringstream candidates;
+        for(size_t i = 0; i < scored.size(); ++i)
+        {
+            candidates << (i == 0 ? "" : " ") << toString(scored[i].second->kernelId)
+                       << "=" << scored[i].first;
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("uhd trace: "
+                               << _describedBy << " decided_by=model"
+                               << " winner=" << toString(scored.front().second->kernelId)
+                               << " candidates=" << scored.size()
+                               << " arch=" << context.deviceProperties.gcnArchName
+                               << " uhd=" << _config.uhdId
+                               << " adapter=" << _config.adapterType
+                               << " objective=" << _config.objective
+                               << " features_hash=" << _config.featuresHash
+                               << " ranked=[" << candidates.str() << "]");
     }
 
 private:

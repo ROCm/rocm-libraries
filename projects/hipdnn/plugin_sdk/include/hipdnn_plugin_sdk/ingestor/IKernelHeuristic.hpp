@@ -56,6 +56,13 @@ public:
     /// candidate and should be computed once, and a model that fails partway through must
     /// abandon the whole ranking rather than leave a mix of real scores and sentinels,
     /// which would be neither the model's order nor the fallback's.
+    /// What decided the order, for the §12 trace: a compiled scorer, or nothing at all.
+    /// Overridden by the unranked fallback, which declines to rank.
+    virtual std::string traceDecidedBy() const
+    {
+        return "native";
+    }
+
     virtual std::vector<KernelDefinition> rank(const Catalog& catalog,
                                                const MatchContext& context) const
     {
@@ -79,6 +86,26 @@ public:
             }
             return lhs.second->kernelId < rhs.second->kernelId;
         });
+
+        // RFC 0019 §12's selection trace, for every heuristic that ranks through this
+        // default -- native scorers and the unranked fallback. UhdKernelHeuristic overrides
+        // rank() and traces its own, with the model provenance §12 also asks for. Two of the
+        // three shipped UHDs are `native` kind, so tracing only the model path would leave
+        // most real selections invisible.
+        if(!scored.empty() && ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))
+        {
+            std::ostringstream candidates;
+            for(size_t i = 0; i < scored.size(); ++i)
+            {
+                candidates << (i == 0 ? "" : " ") << toString(scored[i].second->kernelId) << "="
+                           << scored[i].first;
+            }
+            HIPDNN_PLUGIN_LOG_INFO("uhd trace: decided_by=" << traceDecidedBy()
+                                   << " winner=" << toString(scored.front().second->kernelId)
+                                   << " candidates=" << scored.size()
+                                   << " arch=" << context.deviceProperties.gcnArchName
+                                   << " ranked=[" << candidates.str() << "]");
+        }
 
         std::vector<KernelDefinition> ranked;
         ranked.reserve(scored.size());
@@ -123,6 +150,14 @@ private:
 class UnrankedKernelHeuristic : public IKernelHeuristic
 {
 public:
+    /// §12 asks whether the model or a fallback decided. For this one it is always the
+    /// fallback, and saying so is the point: an engine ranking on priority because it ships
+    /// no UHD looks identical in the output to one whose model ranked that way.
+    std::string traceDecidedBy() const override
+    {
+        return "declared_order";
+    }
+
     double score(const MatchContext& /*context*/,
                  const BoundTokens& /*bound*/,
                  const KernelDefinition& /*kernel*/) const override
