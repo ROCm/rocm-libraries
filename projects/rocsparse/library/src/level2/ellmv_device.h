@@ -41,40 +41,40 @@ namespace rocsparse
                                             Y*                   y,
                                             rocsparse_index_base idx_base)
     {
-        // Cast to the 64-bit index type BEFORE the multiply so the global thread
-        // id does not wrap at 2^32 when m exceeds the 32-bit range, and stride
-        // over m with a grid-stride loop so every row is computed even when the
-        // grid is clamped to handle->properties.maxGridSize[0].
-        const I stride = static_cast<I>(BLOCKSIZE) * hipGridDim_x;
+        // Cast to the (possibly 64-bit) index type I before the multiply so the
+        // global thread id does not wrap at 2^32 when m exceeds the 32-bit range.
+        const I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
 
-        for(I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x; ai < m; ai += stride)
+        if(ai >= m)
         {
-            T sum = static_cast<T>(0);
-            for(I p = 0; p < ell_width; ++p)
-            {
+            return;
+        }
 
-                const int64_t idx = ELL_IND(ai, (int64_t)p, m, ell_width);
-                const I       col = rocsparse::nontemporal_load(ell_col_ind + idx) - idx_base;
-                if(col >= 0 && col < n)
-                {
-                    sum = rocsparse::fma<T>(
-                        rocsparse::nontemporal_load(ell_val + idx), rocsparse::ldg(x + col), sum);
-                }
-                else
-                {
-                    break;
-                }
-            }
+        T sum = static_cast<T>(0);
+        for(I p = 0; p < ell_width; ++p)
+        {
 
-            if(beta != static_cast<T>(0))
+            const int64_t idx = ELL_IND(ai, (int64_t)p, m, ell_width);
+            const I       col = rocsparse::nontemporal_load(ell_col_ind + idx) - idx_base;
+            if(col >= 0 && col < n)
             {
-                const Y yv = rocsparse::nontemporal_load(y + ai);
-                rocsparse::nontemporal_store(rocsparse::fma<T>(beta, yv, alpha * sum), y + ai);
+                sum = rocsparse::fma<T>(
+                    rocsparse::nontemporal_load(ell_val + idx), rocsparse::ldg(x + col), sum);
             }
             else
             {
-                rocsparse::nontemporal_store(alpha * sum, y + ai);
+                break;
             }
+        }
+
+        if(beta != static_cast<T>(0))
+        {
+            const Y yv = rocsparse::nontemporal_load(y + ai);
+            rocsparse::nontemporal_store(rocsparse::fma<T>(beta, yv, alpha * sum), y + ai);
+        }
+        else
+        {
+            rocsparse::nontemporal_store(alpha * sum, y + ai);
         }
     }
 
@@ -91,36 +91,36 @@ namespace rocsparse
                                             Y*                   y,
                                             rocsparse_index_base idx_base)
     {
-        // Cast to the 64-bit index type BEFORE the multiply so the global thread
-        // id does not wrap at 2^32 when m exceeds the 32-bit range, and stride
-        // over m with a grid-stride loop so every row is computed even when the
-        // grid is clamped to handle->properties.maxGridSize[0].
-        const I stride = static_cast<I>(BLOCKSIZE) * hipGridDim_x;
+        // Cast to the (possibly 64-bit) index type I before the multiply so the
+        // global thread id does not wrap at 2^32 when m exceeds the 32-bit range.
+        const I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
 
-        for(I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x; ai < m; ai += stride)
+        if(ai >= m)
         {
-            const T row_val = alpha * rocsparse::ldg(x + ai);
+            return;
+        }
 
-            for(I p = 0; p < ell_width; ++p)
+        const T row_val = alpha * rocsparse::ldg(x + ai);
+
+        for(I p = 0; p < ell_width; ++p)
+        {
+            const int64_t idx = ELL_IND(ai, (int64_t)p, m, ell_width);
+            const I       col = rocsparse::nontemporal_load(ell_col_ind + idx) - idx_base;
+
+            if(col >= 0 && col < n)
             {
-                const int64_t idx = ELL_IND(ai, (int64_t)p, m, ell_width);
-                const I       col = rocsparse::nontemporal_load(ell_col_ind + idx) - idx_base;
+                A val = rocsparse::nontemporal_load(ell_val + idx);
 
-                if(col >= 0 && col < n)
+                if(trans == rocsparse_operation_conjugate_transpose)
                 {
-                    A val = rocsparse::nontemporal_load(ell_val + idx);
-
-                    if(trans == rocsparse_operation_conjugate_transpose)
-                    {
-                        val = rocsparse::conj(val);
-                    }
-
-                    rocsparse::atomic_add(y, col, n, row_val * val);
+                    val = rocsparse::conj(val);
                 }
-                else
-                {
-                    break;
-                }
+
+                rocsparse::atomic_add(y, col, n, row_val * val);
+            }
+            else
+            {
+                break;
             }
         }
     }

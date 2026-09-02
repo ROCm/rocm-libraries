@@ -99,24 +99,23 @@ namespace rocsparse
         // Run different ellmv kernels
         if(trans == rocsparse_operation_none)
         {
-#define LAUNCH_ELLMVN(DIM)                                                       \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                          \
-        (rocsparse::ellmvn_kernel<DIM>),                                         \
-        dim3(rocsparse::min((m - 1) / (DIM) + 1,                                 \
-                            static_cast<I>(handle->properties.maxGridSize[0]))), \
-        dim3(DIM),                                                               \
-        0,                                                                       \
-        stream,                                                                  \
-        m,                                                                       \
-        n,                                                                       \
-        ell_width,                                                               \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),            \
-        ell_col_ind,                                                             \
-        ell_val,                                                                 \
-        x,                                                                       \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),             \
-        y,                                                                       \
-        descr->base,                                                             \
+#define LAUNCH_ELLMVN(DIM)                                            \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+        (rocsparse::ellmvn_kernel<DIM>),                              \
+        dim3((m - 1) / (DIM) + 1),                                    \
+        dim3(DIM),                                                    \
+        0,                                                            \
+        stream,                                                       \
+        m,                                                            \
+        n,                                                            \
+        ell_width,                                                    \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+        ell_col_ind,                                                  \
+        ell_val,                                                      \
+        x,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
+        y,                                                            \
+        descr->base,                                                  \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
             // Launch tuning for the one-thread-per-row non-transpose kernel.
@@ -164,8 +163,7 @@ namespace rocsparse
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::ellmvt_kernel<ELLMVT_DIM>),
-                dim3(rocsparse::min((m - 1) / ELLMVT_DIM + 1,
-                                    static_cast<I>(handle->properties.maxGridSize[0]))),
+                dim3((m - 1) / ELLMVT_DIM + 1),
                 dim3(ELLMVT_DIM),
                 0,
                 stream,
