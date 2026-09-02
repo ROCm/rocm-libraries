@@ -127,14 +127,17 @@ TEST_P(RotateTest, Correctness) {
 }
 
 // Cardinal angles: 0 (identity), 90/270 (both rotation directions), 180. All map to integer source
-// coordinates, so the transform math is validated deterministically.
+// coordinates, so the transform math is validated deterministically. 45 degrees is the one angle
+// that does not: it lands every sample between source pixels and sends the corners off the frame.
 INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, RotateTest,
     ::testing::ValuesIn(with_params<RotateParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kTailWidthSize}),
         {RotateParams{0.0f, NEAREST_NEIGHBOR}, RotateParams{0.0f, BILINEAR},
          RotateParams{90.0f, NEAREST_NEIGHBOR}, RotateParams{90.0f, BILINEAR},
          RotateParams{180.0f, NEAREST_NEIGHBOR}, RotateParams{180.0f, BILINEAR},
-         RotateParams{270.0f, NEAREST_NEIGHBOR}, RotateParams{270.0f, BILINEAR}})),
+         RotateParams{270.0f, NEAREST_NEIGHBOR}, RotateParams{270.0f, BILINEAR},
+         RotateParams{45.0f, NEAREST_NEIGHBOR}, RotateParams{45.0f, BILINEAR}})),
     op_config_name<RotateParams>);

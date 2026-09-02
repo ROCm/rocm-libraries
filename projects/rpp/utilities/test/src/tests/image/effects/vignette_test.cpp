@@ -116,12 +116,13 @@ TEST_P(VignetteTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, VignetteTest,
     ::testing::ValuesIn(with_params<VignetteParams>(
-        make_configs({DType::U8, DType::F16, DType::F32},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial}),
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFull,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
         {VignetteParams{6.0f}, VignetteParams{1.0f}})),
     op_config_name<VignetteParams>);

@@ -123,6 +123,7 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Effects, PixelateTest,
     ::testing::ValuesIn(with_params<PixelateParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kTailWidthSize}),
         {PixelateParams{87.5f}, PixelateParams{50.0f}})),
     op_config_name<PixelateParams>);

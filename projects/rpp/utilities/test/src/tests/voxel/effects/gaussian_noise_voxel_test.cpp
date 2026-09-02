@@ -161,7 +161,8 @@ INSTANTIATE_TEST_SUITE_P(Voxel_Effects, GaussianNoiseVoxelTest,
                          ::testing::ValuesIn(make_voxel_configs(
                              {DType::U8, DType::F32},
                              {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3, VoxelLayout::NDHWC3},
-                             {Roi::Full, Roi::Partial}, {Roi3D::XYZWHD, Roi3D::LTFRBB})),
+                             {Roi::Full, Roi::Partial}, {Roi3D::XYZWHD, Roi3D::LTFRBB},
+                             {presets::kDefaultVolume, presets::kTailVolume})),
                          voxel_config_param_name);
 
 // Full name:

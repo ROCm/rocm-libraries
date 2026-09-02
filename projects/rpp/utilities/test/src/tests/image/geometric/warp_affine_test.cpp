@@ -47,8 +47,9 @@ std::string interp_token(RpptInterpolationType i) {
 }
 
 // A 2x3 affine matrix (forward source->destination) plus the interpolation to sample with. The
-// matrices are restricted to identity and pure translation so the result is invariant to the
-// undocumented mapping-origin convention and the direction is unambiguous (see warp_affine_ref).
+// identity and pure-translation matrices are invariant to the mapping-origin convention, so they
+// pin the direction unambiguously; scale2 and rot30 have a non-identity linear part and are the
+// cases that exercise the centre the matrix acts about (see warp_affine_ref).
 struct WarpAffineParams {
     std::array<float, 6> m;
     RpptInterpolationType interp;
@@ -134,10 +135,15 @@ INSTANTIATE_TEST_SUITE_P(
                       {Layout::PLN1, Layout::PLN1},
                       {Layout::PKD3, Layout::PLN3},
                       {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial}),
+                     {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kTailWidthSize}),
         {WarpAffineParams{{1, 0, 0, 0, 1, 0}, NEAREST_NEIGHBOR, "identity"},
          WarpAffineParams{{1, 0, 0, 0, 1, 0}, BILINEAR, "identity"},
          WarpAffineParams{{1, 0, 5, 0, 1, -3}, NEAREST_NEIGHBOR, "shift"},
          WarpAffineParams{{1, 0, 5, 0, 1, -3}, BILINEAR, "shift"},
-         WarpAffineParams{{1, 0, 5.5f, 0, 1, -2.5f}, BILINEAR, "halfshift"}})),
+         WarpAffineParams{{1, 0, 5.5f, 0, 1, -2.5f}, BILINEAR, "halfshift"},
+         WarpAffineParams{{2, 0, 0, 0, 2, 0}, NEAREST_NEIGHBOR, "scale2"},
+         WarpAffineParams{{2, 0, 0, 0, 2, 0}, BILINEAR, "scale2"},
+         WarpAffineParams{{0.8660254f, -0.5f, 0, 0.5f, 0.8660254f, 0}, NEAREST_NEIGHBOR, "rot30"},
+         WarpAffineParams{{0.8660254f, -0.5f, 0, 0.5f, 0.8660254f, 0}, BILINEAR, "rot30"}})),
     op_config_name<WarpAffineParams>);

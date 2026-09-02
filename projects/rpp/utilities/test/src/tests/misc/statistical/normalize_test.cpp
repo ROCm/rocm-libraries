@@ -67,7 +67,7 @@ Bound normalize_tolerance(DType out) {
 
 template <typename Tin, typename Tout>
 void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
-    const NdDims dims = nd_extents(cfg.nDim);
+    const NdDims dims = nd_extents(cfg);
 
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
     GenericDescriptor srcDesc(cfg.backend, dims, cfg.dtypeIn);
@@ -136,7 +136,8 @@ std::vector<NdWithParams<NormalizeParams>> normalize_grid() {
                                           {DType::F32, DType::F32}};
     std::vector<NdWithParams<NormalizeParams>> grid;
     for (Rpp32u nDim : {2u, 3u, 4u})
-        for (const NdConfig& cfg : make_nd_configs(convs, {nDim}))
+        for (const NdConfig& cfg :
+             make_nd_configs(convs, {nDim}, {NdShape::VectorAligned, NdShape::Tail}))
             for (Rpp32u axisMask : masks_for(nDim))
                 for (Rpp8u mode : {0, 1, 2, 3})
                     grid.push_back({cfg, NormalizeParams{axisMask, mode}});

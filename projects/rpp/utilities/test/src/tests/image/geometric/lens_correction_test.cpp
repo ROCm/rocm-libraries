@@ -183,6 +183,7 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, LensCorrectionTest,
     ::testing::ValuesIn(with_params<LensParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kTailWidthSize}),
         {LensParams{LensKind::NoDistortion}, LensParams{LensKind::Barrel}})),
     op_config_name<LensParams>);

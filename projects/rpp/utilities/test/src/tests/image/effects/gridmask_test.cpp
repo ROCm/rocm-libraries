@@ -122,13 +122,15 @@ TEST_P(GridmaskTest, Correctness) {
 //              API doc does not specify -- cannot affect the result.
 INSTANTIATE_TEST_SUITE_P(Image_Effects, GridmaskTest,
                          ::testing::ValuesIn(with_params<GridmaskParams>(
-                             make_configs({DType::U8, DType::F16, DType::F32},
-                                          {{Layout::PKD3, Layout::PKD3},
-                                           {Layout::PLN3, Layout::PLN3},
-                                           {Layout::PLN1, Layout::PLN1},
-                                           {Layout::PKD3, Layout::PLN3},
-                                           {Layout::PLN3, Layout::PKD3}},
-                                          {Roi::Full, Roi::Partial}, {{2, 36, 48}, {2, 36, 64}}),
+                             concat_configs({
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayoutsFullConv,
+                                              {Roi::Full, Roi::Partial},
+                                              {presets::kTailWidthSize}),
+                                 make_configs({DType::U8, DType::F16, DType::F32},
+                                              presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                                              {presets::kDefaultSize, presets::kSubVectorSize}),
+                             }),
                              {GridmaskParams{8, 0.5f, 0.0f, 0, 0, "axis"},
                               GridmaskParams{8, 0.5f, 0.0f, 3, 2, "shift"},
                               GridmaskParams{10, 0.55f, 0.0f, 0, 0, "wide"},

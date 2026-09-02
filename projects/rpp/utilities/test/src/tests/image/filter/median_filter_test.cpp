@@ -39,7 +39,7 @@ using namespace rpptest;
 
 namespace {
 
-// kernelSize is an odd square window size (3/5 tested; 3/5/7/9 per the API doc).
+// kernelSize is an odd square window size (3/5/7/9 per the API doc).
 struct MedianFilterParams {
     Rpp32u kernelSize;
     std::string name() const { return "k" + std::to_string(kernelSize); }
@@ -118,5 +118,6 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(with_params<MedianFilterParams>(
         make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
                      {presets::kDefaultSize, presets::kTailWidthSize, presets::kSubVectorSize}),
-        {MedianFilterParams{3}, MedianFilterParams{5}})),
+        {MedianFilterParams{3}, MedianFilterParams{5}, MedianFilterParams{7},
+         MedianFilterParams{9}})),
     op_config_name<MedianFilterParams>);

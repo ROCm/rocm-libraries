@@ -89,7 +89,7 @@ NdDims concat_dst_dims(const NdDims& dims1, const NdDims& dims2, Rpp32u axis) {
 template <typename T>
 void run_concat(const NdConfig& cfg, AxisKind kind) {
     const Rpp32u axis = concat_axis(kind, cfg.nDim);
-    const NdDims dims1 = nd_extents(cfg.nDim);
+    const NdDims dims1 = nd_extents(cfg);
     const NdDims dims2 = concat_src2_dims(cfg.nDim, axis);
     const NdDims outDims = concat_dst_dims(dims1, dims2, axis);
 
@@ -171,6 +171,6 @@ TEST_P(ConcatTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(Misc_Geometric, ConcatTest,
                          ::testing::ValuesIn(nd_with_params<ConcatParams>(
                              make_nd_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                             {2, 3, 4}),
+                                             {2, 3, 4}, {NdShape::VectorAligned, NdShape::Tail}),
                              {{AxisKind::First}, {AxisKind::Middle}, {AxisKind::Last}})),
                          nd_op_config_name<ConcatParams>);

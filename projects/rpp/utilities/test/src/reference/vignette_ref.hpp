@@ -48,11 +48,16 @@ Description
   always left unchanged (g = 1).
 
 Expression
-  For pixel (i, j) of the processed region, centre at (w/2, h/2):
+  For pixel (i, j) of the processed region, with the half-extents truncated to
+  whole pixels (hw = floor(w/2), hh = floor(h/2)) and radius = max(hw, hh):
 
-  r2  = (i - w/2)^2 + (j - h/2)^2
-  g   = exp(-intensity * r2 / max(w, h)^2)   sigma = max(w,h)/sqrt(2*intensity)
+  r2  = (i - hw)^2 + (j - hh)^2
+  g   = exp(-0.25 * intensity * r2 / radius^2)   sigma = radius*sqrt(2/intensity)
   dst = src * g
+
+  For an even w and h this is exp(-intensity * r2 / max(w, h)^2); the truncated
+  form is what an odd extent distinguishes, and it centres the falloff on the
+  lower pixel rather than between two.
 
 Per-type form
   The multiply happens in normalized [0,1] intensity space via to_unit() /
@@ -81,9 +86,10 @@ Notes
 
 // Gaussian falloff at (x, y) within a w x h region.
 inline double vignette_weight(double x, double y, double w, double h, double intensity) {
-    const double extent = w > h ? w : h;
-    const double dx = x - w * 0.5, dy = y - h * 0.5;
-    return std::exp(-intensity * (dx * dx + dy * dy) / (extent * extent));
+    const double halfW = std::floor(w * 0.5), halfH = std::floor(h * 0.5);
+    const double radius = halfW > halfH ? halfW : halfH;
+    const double dx = x - halfW, dy = y - halfH;
+    return std::exp(-0.25 * intensity * (dx * dx + dy * dy) / (radius * radius));
 }
 
 inline double vignette_scalar(double v, double weight, DType dt) {

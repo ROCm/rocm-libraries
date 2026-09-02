@@ -71,8 +71,8 @@ Bound tolerance_for(DType dt) {
 
 template <typename T>
 void run_tensor_multiply_tensor(const NdConfig& cfg, Broadcast broadcast) {
-    const NdDims dims1 = nd_operand_dims(cfg.nDim, broadcast, 1);
-    const NdDims dims2 = nd_operand_dims(cfg.nDim, broadcast, 2);
+    const NdDims dims1 = nd_operand_dims(cfg, broadcast, 1);
+    const NdDims dims2 = nd_operand_dims(cfg, broadcast, 2);
     const NdDims outDims = nd_broadcast_dims(dims1, dims2);
 
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
@@ -159,6 +159,6 @@ TEST_P(TensorMultiplyTensorTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(Misc_Arithmetic, TensorMultiplyTensorTest,
                          ::testing::ValuesIn(nd_with_params<BroadcastParams>(
                              make_nd_configs({DType::U8, DType::I8, DType::F16, DType::F32},
-                                             {2, 3, 4}),
+                                             {2, 3, 4}, {NdShape::VectorAligned, NdShape::Tail}),
                              {{Broadcast::None}, {Broadcast::Src1}, {Broadcast::Src2}})),
                          nd_op_config_name<BroadcastParams>);

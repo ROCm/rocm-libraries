@@ -40,8 +40,10 @@ using namespace rpptest;
 
 namespace {
 
-// kernelSize is an odd square window size (3/5/7/9 per the API doc); this suite exercises 3 and 5.
-// stdDev is the per-image Gaussian standard deviation (same value fed to golden and kernel).
+// kernelSize is an odd square window size (3/5/7/9 per the API doc); each has its own SIMD path.
+// stdDev is the per-image Gaussian standard deviation (same value fed to golden and kernel). At
+// 0.25 the weights collapse onto the centre tap (near-identity), at 5.0 they flatten towards a box
+// over the window -- the two ends of the table the kernel builds.
 struct GaussianFilterParams {
     Rpp32u kernelSize;
     float stdDev;
@@ -134,5 +136,7 @@ INSTANTIATE_TEST_SUITE_P(
             make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
                          {presets::kDefaultSize, presets::kSubVectorSize}),
         }),
-        {GaussianFilterParams{3, 1.0f}, GaussianFilterParams{5, 1.0f}})),
+        {GaussianFilterParams{3, 1.0f}, GaussianFilterParams{5, 1.0f},
+         GaussianFilterParams{7, 1.0f}, GaussianFilterParams{9, 1.0f},
+         GaussianFilterParams{5, 0.25f}, GaussianFilterParams{5, 5.0f}})),
     op_config_name<GaussianFilterParams>);

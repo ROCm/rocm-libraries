@@ -53,9 +53,13 @@ Description
   quantize are handled by geometric_reference(), shared with warp_affine.
 
 Expression
-  w    =  m6*outX + m7*outY + m8
-  srcX = (m0*outX + m1*outY + m2) / w
-  srcY = (m3*outX + m4*outY + m5) / w
+  cx = floor(roiW/2), cy = floor(roiH/2), dx = outX - cx, dy = outY - cy
+
+  w    =  m6*dx + m7*dy + m8
+  srcX = (m0*dx + m1*dy + m2) / w + cx
+  srcY = (m3*dx + m4*dy + m5) / w + cy
+
+  As in warp_affine, the matrix acts about the truncated centre of the ROI.
 
 Notes
   The public header does not document the matrix direction or the mapping
@@ -73,9 +77,13 @@ void warp_perspective_reference(const T* src, const RpptDesc& sd, T* dst, const 
                            [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
                                const Rpp32f* m =
                                    perspectiveTensor + static_cast<std::size_t>(n) * 9;
-                               const double w = m[6] * ox + m[7] * oy + m[8];
-                               sx = (m[0] * ox + m[1] * oy + m[2]) / w;
-                               sy = (m[3] * ox + m[4] * oy + m[5]) / w;
+                               const RoiBounds b = roi_bounds(roi[n], roiType);
+                               const double cx = static_cast<double>(b.w / 2);
+                               const double cy = static_cast<double>(b.h / 2);
+                               const double dx = ox - cx, dy = oy - cy;
+                               const double w = m[6] * dx + m[7] * dy + m[8];
+                               sx = (m[0] * dx + m[1] * dy + m[2]) / w + cx;
+                               sy = (m[3] * dx + m[4] * dy + m[5]) / w + cy;
                            });
 }
 

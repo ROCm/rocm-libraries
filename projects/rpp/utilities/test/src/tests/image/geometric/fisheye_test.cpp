@@ -105,5 +105,6 @@ INSTANTIATE_TEST_SUITE_P(
                                       {Layout::PLN1, Layout::PLN1},
                                       {Layout::PKD3, Layout::PLN3},
                                       {Layout::PLN3, Layout::PKD3}},
-                                     {Roi::Full, Roi::Partial})),
+                                     {Roi::Full, Roi::Partial},
+                                     {presets::kDefaultSize, presets::kTailWidthSize})),
     config_param_name);

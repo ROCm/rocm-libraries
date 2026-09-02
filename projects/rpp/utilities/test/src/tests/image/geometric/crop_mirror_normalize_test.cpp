@@ -139,13 +139,14 @@ TEST_P(CropMirrorNormalizeTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, CropMirrorNormalizeTest,
     ::testing::ValuesIn(with_params<CmnParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial}),
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
         {CmnParams{{0.0, 0.0, 0.0}, 1.0, 0, "Identity"},
          CmnParams{{0.0, 0.0, 0.0}, 1.0, 1, "MirrorOnly"},
          CmnParams{{0.0, 0.0, 0.0}, 2.0, 0, "Scale"},

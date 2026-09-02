@@ -46,7 +46,7 @@ Bound log1p_tolerance(DType) { return {1e-5, 1e-6}; }
 
 template <typename Tin, typename Tout>
 void run_log1p(const NdConfig& cfg) {
-    const NdDims dims = nd_extents(cfg.nDim);
+    const NdDims dims = nd_extents(cfg);
 
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
     GenericDescriptor srcDesc(cfg.backend, dims, cfg.dtypeIn);
@@ -107,5 +107,6 @@ TEST_P(Log1pTest, Correctness) {
 // two make_nd_configs overloads.)
 INSTANTIATE_TEST_SUITE_P(Misc_Arithmetic, Log1pTest,
                          ::testing::ValuesIn(make_nd_configs(
-                             std::vector<DTypeConv>{{DType::I16, DType::F32}}, {2, 3, 4})),
+                             std::vector<DTypeConv>{{DType::I16, DType::F32}}, {2, 3, 4},
+                             {NdShape::VectorAligned, NdShape::Tail})),
                          nd_config_param_name);

@@ -145,8 +145,9 @@ TEST_P(GaussianNoiseTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(Image_Effects, GaussianNoiseTest,
                          ::testing::ValuesIn(make_configs(
                              {DType::U8, DType::F16, DType::F32, DType::I8},
-                             {Layout::PKD3, Layout::PLN3, Layout::PLN1},
-                             {Roi::Full, Roi::Partial})),
+                             presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                             {presets::kDefaultSize, presets::kTailWidthSize,
+                              presets::kSubVectorSize})),
                          config_param_name);
 
 // Full name:

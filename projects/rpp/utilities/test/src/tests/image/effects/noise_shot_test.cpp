@@ -206,13 +206,14 @@ constexpr char kHostPoissonSkip[] =
 std::vector<WithParams<NoiseShotParams>> noise_shot_configs() {
     // Same-layout cases plus both directions of the fused output-layout conversion.
     std::vector<WithParams<NoiseShotParams>> configs = with_params<NoiseShotParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial}),
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
         {NoiseShotParams{Check::Identity}});
     const std::vector<WithParams<NoiseShotParams>> validRange = with_params<NoiseShotParams>(
         make_configs({DType::U8, DType::F32}, {Layout::PKD3, Layout::PLN1},

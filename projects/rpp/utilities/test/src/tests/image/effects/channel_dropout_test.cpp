@@ -43,8 +43,8 @@ using namespace rpptest;
 namespace {
 
 // Per-channel keep(1)/drop(0) mask. PLN1 (1 channel) uses mask[0] only; PKD3/PLN3 use all
-// three. Instantiated with two patterns so PLN1 gets both a drop and a keep case, and the
-// 3-channel layouts exercise mixed keep/drop across channels.
+// three. The mixed patterns exercise keep/drop across channels (and give PLN1 both a drop and a
+// keep case); the uniform ones are the two degenerate ends, all-drop and the identity.
 struct ChannelDropoutParams {
     std::array<Rpp8u, 3> mask;
     std::string name() const {
@@ -118,12 +118,14 @@ TEST_P(ChannelDropoutTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, ChannelDropoutTest,
     ::testing::ValuesIn(with_params<ChannelDropoutParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial}),
-        {ChannelDropoutParams{{0, 1, 1}}, ChannelDropoutParams{{1, 0, 1}}})),
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {ChannelDropoutParams{{0, 1, 1}}, ChannelDropoutParams{{1, 0, 1}},
+         ChannelDropoutParams{{0, 0, 0}}, ChannelDropoutParams{{1, 1, 1}}})),
     op_config_name<ChannelDropoutParams>);

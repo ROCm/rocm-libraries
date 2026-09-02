@@ -44,9 +44,14 @@ namespace {
 // bounds are chosen deliberately: fill_input emits integer-valued pixels, so no pixel ever
 // lands exactly on a cutoff -- the in-range classification (and thus the binary mask) is
 // unambiguous in every dtype and comparison space, keeping the output bit-exact.
+// step is added to both cutoffs once per channel, so channel c is tested against
+// [rawMin + c*step, rawMax + c*step]; at step 0 every channel shares one pair.
 struct ThresholdParams {
-    float rawMin, rawMax;
-    std::string name() const { return "min" + num_token(rawMin) + "_max" + num_token(rawMax); }
+    float rawMin, rawMax, step;
+    std::string name() const {
+        const std::string base = "min" + num_token(rawMin) + "_max" + num_token(rawMax);
+        return step == 0.0f ? base : base + "_step" + num_token(step);
+    }
 };
 
 // Converts a raw [0,255]-unit cutoff into the dtype's own units (the exact value the op
@@ -79,8 +84,9 @@ void run_threshold(const TestConfig& cfg, const ThresholdParams& op) {
     const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
     for (Rpp32u i = 0; i < cfg.size.n; ++i) {
         for (Rpp32u ch = 0; ch < c; ++ch) {
-            minTensor[i * c + ch] = cutoff_in_dtype(op.rawMin, cfg.dtype);
-            maxTensor[i * c + ch] = cutoff_in_dtype(op.rawMax, cfg.dtype);
+            const float shift = op.step * static_cast<float>(ch);
+            minTensor[i * c + ch] = cutoff_in_dtype(op.rawMin + shift, cfg.dtype);
+            maxTensor[i * c + ch] = cutoff_in_dtype(op.rawMax + shift, cfg.dtype);
         }
         roi[i] = roiVec[i];
     }
@@ -128,12 +134,14 @@ TEST_P(ThresholdTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Statistical, ThresholdTest,
     ::testing::ValuesIn(with_params<ThresholdParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial}),
-        {ThresholdParams{29.5f, 100.5f}})),
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32, DType::I8}, presets::kLayoutsFull,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {ThresholdParams{29.5f, 100.5f, 0.0f}, ThresholdParams{100.5f, 29.5f, 0.0f},
+         ThresholdParams{29.5f, 100.5f, 40.0f}})),
     op_config_name<ThresholdParams>);

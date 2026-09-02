@@ -62,8 +62,10 @@ Notes
   The public header documents neither the centre of rotation nor the exact
   sign. The centre = (roiWidth/2, roiHeight/2) and the source = R(+theta)*d
   mapping above were confirmed against the op on FullRoi by black-box probing:
-  180 deg gives srcCol = W - outCol, so the centre is the geometric centre W/2
-  and not (W-1)/2, and +10 deg fixes the sign.
+  180 deg gives srcCol = W - outCol, so the centre is W/2 and not (W-1)/2, and
+  +10 deg fixes the sign. The halves are truncated to whole pixels, as the
+  shared warp_affine kernel computes them (roiWidth >> 1); only an odd extent
+  tells the truncated half from the geometric one.
 
   Cardinal angles (0/90/180/270) map to integer source coordinates, so the
   golden is bit-exact there.
@@ -74,7 +76,9 @@ void rotate_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const R
     geometric_reference<T>(src, d, dst, d, dt, roi, roiType, roi_out_sizes(d, roi, roiType), interp,
                            [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
                                const RoiBounds b = roi_bounds(roi[n], roiType);
-                               const double cx = b.w / 2.0, cy = b.h / 2.0;
+                               // integer division by 2 is on purpose
+                               const double cx = static_cast<double>(b.w / 2);
+                               const double cy = static_cast<double>(b.h / 2);
                                const double theta = static_cast<double>(angleDeg[n]) * M_PI / 180.0;
                                const double ct = std::cos(theta), st = std::sin(theta);
                                const double dx = ox - cx, dy = oy - cy;

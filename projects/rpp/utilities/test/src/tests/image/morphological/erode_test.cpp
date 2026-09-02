@@ -125,14 +125,16 @@ TEST_P(ErodeTest, Correctness) {
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(Image_Morphological, ErodeTest,
-                         ::testing::ValuesIn(with_params<ErodeParams>(
-                             make_configs({DType::U8, DType::F16, DType::F32},
-                                          {{Layout::PKD3, Layout::PKD3},
-                                           {Layout::PLN3, Layout::PLN3},
-                                           {Layout::PLN1, Layout::PLN1},
-                                           {Layout::PKD3, Layout::PLN3},
-                                           {Layout::PLN3, Layout::PKD3}},
-                                          {Roi::Full, Roi::Partial}),
-                             {ErodeParams{3}, ErodeParams{5}})),
-                         op_config_name<ErodeParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Image_Morphological, ErodeTest,
+    ::testing::ValuesIn(with_params<ErodeParams>(
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFull,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {ErodeParams{3}, ErodeParams{5}, ErodeParams{7}, ErodeParams{9}})),
+    op_config_name<ErodeParams>);

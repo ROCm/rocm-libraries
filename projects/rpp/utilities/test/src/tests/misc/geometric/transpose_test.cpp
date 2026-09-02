@@ -71,7 +71,7 @@ std::vector<Rpp32u> make_perm(PermKind kind, Rpp32u nDim) {
 
 template <typename T>
 void run_transpose(const NdConfig& cfg, const TransposeParams& p) {
-    const NdDims srcDims = nd_extents(cfg.nDim);
+    const NdDims srcDims = nd_extents(cfg);
     const std::vector<Rpp32u> perm = make_perm(p.kind, cfg.nDim);
     const NdDims dstDims = transpose_dst_dims(srcDims, perm);
 
@@ -145,7 +145,7 @@ TEST_P(TransposeTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(Misc_Geometric, TransposeTest,
                          ::testing::ValuesIn(nd_with_params<TransposeParams>(
                              make_nd_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                             {2, 3, 4}),
+                                             {2, 3, 4}, {NdShape::VectorAligned, NdShape::Tail}),
                              {{PermKind::Identity}, {PermKind::Reverse},
                               {PermKind::RotateLeft}})),
                          nd_op_config_name<TransposeParams>);

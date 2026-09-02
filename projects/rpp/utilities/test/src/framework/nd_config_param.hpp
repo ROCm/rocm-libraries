@@ -74,26 +74,38 @@ struct DTypeConv {
     DType in, out;
 };
 
+// The innermost extent decides whether the vector loops see a tail. The ND tensors are dense
+// (unlike the image domain, whose rows are padded out), so a non-multiple innermost extent is the
+// only way the tail path and the one-past-the-end of the last store are exercised here. This is
+// the counterpart of the image grid's size axis.
+enum class NdShape { VectorAligned, Tail };
+
 struct NdConfig {
     RppBackend backend;
     DType dtypeIn, dtypeOut;
     Rpp32u nDim;  // per-sample rank: 2, 3 or 4
+    NdShape shape;
 };
 
 // Every axis has a distinct extent, so an axis mix-up cannot pass by coincidence.
-inline NdDims nd_extents(Rpp32u nDim) {
+inline NdDims nd_extents(Rpp32u nDim, NdShape shape = NdShape::VectorAligned) {
+    const bool tail = shape == NdShape::Tail;
     switch (nDim) {
         case 3:
-            return {2, 5, 12, 16};
+            return tail ? NdDims{2, 5, 12, 19} : NdDims{2, 5, 12, 16};
         case 4:
-            return {2, 2, 4, 10, 12};
+            return tail ? NdDims{2, 2, 4, 10, 13} : NdDims{2, 2, 4, 10, 12};
         default:
-            return {2, 24, 32};
+            return tail ? NdDims{2, 24, 35} : NdDims{2, 24, 32};
     }
 }
 
-inline NdDims nd_operand_dims(Rpp32u nDim, Broadcast broadcast, int operand) {
-    NdDims dims = nd_extents(nDim);
+inline NdDims nd_extents(const NdConfig& c) {
+    return nd_extents(c.nDim, c.shape);
+}
+
+inline NdDims nd_operand_dims(const NdConfig& c, Broadcast broadcast, int operand) {
+    NdDims dims = nd_extents(c);
     if ((broadcast == Broadcast::Src1 && operand == 1) ||
         (broadcast == Broadcast::Src2 && operand == 2))
         dims.back() = 1;
@@ -108,24 +120,29 @@ inline NdDims nd_broadcast_dims(const NdDims& a, const NdDims& b) {
 }
 
 inline std::vector<NdConfig> make_nd_configs(const std::vector<DTypeConv>& convs,
-                                             const std::vector<Rpp32u>& ranks) {
+                                             const std::vector<Rpp32u>& ranks,
+                                             const std::vector<NdShape>& shapes) {
     std::vector<NdConfig> configs;
     for (RppBackend backend : available_backends())
         for (DTypeConv conv : convs)
-            for (Rpp32u nDim : ranks) configs.push_back({backend, conv.in, conv.out, nDim});
+            for (Rpp32u nDim : ranks)
+                for (NdShape shape : shapes)
+                    configs.push_back({backend, conv.in, conv.out, nDim, shape});
     return configs;
 }
 
 inline std::vector<NdConfig> make_nd_configs(const std::vector<DType>& dtypes,
-                                             const std::vector<Rpp32u>& ranks) {
+                                             const std::vector<Rpp32u>& ranks,
+                                             const std::vector<NdShape>& shapes) {
     std::vector<DTypeConv> convs;
     for (DType d : dtypes) convs.push_back({d, d});
-    return make_nd_configs(convs, ranks);
+    return make_nd_configs(convs, ranks, shapes);
 }
 
-// "<Backend>_<DTypeConv>_<Rank>[_<opToken>]_<Shape>".
+// "<Backend>_<DTypeConv>_<Rank>[_<opToken>]_<Shape>". The shape token spells the extents out, so
+// NdShape needs no token of its own.
 inline std::string nd_label(const NdConfig& c, const std::string& opToken) {
-    const NdDims dims = nd_extents(c.nDim);
+    const NdDims dims = nd_extents(c);
     std::string shape = std::to_string(dims[0]);
     for (std::size_t i = 1; i < dims.size(); ++i) shape += "x" + std::to_string(dims[i]);
     return backend_name(c.backend) + "_" + dtype_name(c.dtypeIn) + "to" + dtype_name(c.dtypeOut) +

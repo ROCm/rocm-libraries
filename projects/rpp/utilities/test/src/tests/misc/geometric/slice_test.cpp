@@ -241,7 +241,10 @@ TEST_P(SliceTest, Correctness) {
 // so only its planar form is instantiated -- the packed duplicate would be the same call.
 std::vector<NdWithParams<SliceParams>> slice_configs() {
     std::vector<NdWithParams<SliceParams>> out;
-    for (const NdConfig& cfg : make_nd_configs({DType::U8, DType::F32}, {2, 3, 4}))
+    // slice_extents() supplies this op's own extents, so the shared shape axis has nothing to
+    // vary here.
+    for (const NdConfig& cfg :
+         make_nd_configs({DType::U8, DType::F32}, {2, 3, 4}, {NdShape::VectorAligned}))
         for (SliceLayout layout : {SliceLayout::Planar, SliceLayout::Packed}) {
             if (cfg.nDim == 2 && layout == SliceLayout::Packed) continue;
             for (SliceKind kind : {SliceKind::Inside, SliceKind::Padded})

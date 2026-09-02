@@ -132,7 +132,8 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(voxel_with_params<FlipVoxelParams>(
         make_voxel_configs({DType::U8, DType::F32},
                            {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3, VoxelLayout::NDHWC3},
-                           {Roi::Full, Roi::Partial}, {Roi3D::XYZWHD, Roi3D::LTFRBB}),
+                           {Roi::Full, Roi::Partial}, {Roi3D::XYZWHD, Roi3D::LTFRBB},
+                           {presets::kDefaultVolume, presets::kTailVolume}),
         {FlipVoxelParams{0, 0, 0}, FlipVoxelParams{1, 0, 0}, FlipVoxelParams{0, 1, 0},
          FlipVoxelParams{0, 0, 1}, FlipVoxelParams{1, 1, 0}, FlipVoxelParams{1, 0, 1},
          FlipVoxelParams{0, 1, 1}, FlipVoxelParams{1, 1, 1}})),

@@ -126,14 +126,16 @@ TEST_P(DilateTest, Correctness) {
 }
 
 // Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(Image_Morphological, DilateTest,
-                         ::testing::ValuesIn(with_params<DilateParams>(
-                             make_configs({DType::U8, DType::F16, DType::F32},
-                                          {{Layout::PKD3, Layout::PKD3},
-                                           {Layout::PLN3, Layout::PLN3},
-                                           {Layout::PLN1, Layout::PLN1},
-                                           {Layout::PKD3, Layout::PLN3},
-                                           {Layout::PLN3, Layout::PKD3}},
-                                          {Roi::Full, Roi::Partial}),
-                             {DilateParams{3}, DilateParams{5}})),
-                         op_config_name<DilateParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Image_Morphological, DilateTest,
+    ::testing::ValuesIn(with_params<DilateParams>(
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFull,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {DilateParams{3}, DilateParams{5}, DilateParams{7}, DilateParams{9}})),
+    op_config_name<DilateParams>);

@@ -88,12 +88,14 @@ void non_linear_blend_reference(const T* src1, const T* src2, const RpptDesc& sd
                                 const RpptDesc& dd, DType dt, const RpptROI* roi,
                                 RpptRoiType roiType, double stdDev) {
     const double multiplier = -0.5 / (stdDev * stdDev);
-    // Per-image gaussian center = (roiW/2, roiH/2), integer halves as in the reference definition.
+    // Per-image gaussian center = (roiW/2, roiH/2), integer halves as in the reference definition:
+    // an odd extent centres on the lower pixel rather than between two.
     std::vector<double> halfW(sd.n), halfH(sd.n);
     for (Rpp32u n = 0; n < sd.n; ++n) {
         const RoiBounds b = roi_bounds(roi[n], roiType);
-        halfW[n] = static_cast<double>(static_cast<int>(b.w) / 2.0);
-        halfH[n] = static_cast<double>(static_cast<int>(b.h) / 2.0);
+        const Rpp32u hw = b.w / 2, hh = b.h / 2;
+        halfW[n] = static_cast<double>(hw);
+        halfH[n] = static_cast<double>(hh);
     }
     for_each_roi_io(
         sd, dd, roi, roiType,

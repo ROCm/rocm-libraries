@@ -144,9 +144,11 @@ INSTANTIATE_TEST_SUITE_P(
                       {Layout::PLN1, Layout::PLN1},
                       {Layout::PKD3, Layout::PLN3},
                       {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial}),
+                     {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kTailWidthSize}),
         {ResizeParams{72, 54, NEAREST_NEIGHBOR, "up"},
          ResizeParams{72, 54, BILINEAR, "up"},
          ResizeParams{24, 18, NEAREST_NEIGHBOR, "down"},
+         ResizeParams{37, 53, NEAREST_NEIGHBOR, "oddratio"},
          ResizeParams{24, 18, BILINEAR, "down"}})),
     op_config_name<ResizeParams>);

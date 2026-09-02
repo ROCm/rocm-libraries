@@ -40,7 +40,7 @@ using namespace rpptest;
 
 namespace {
 
-// kernelSize is an odd square window size (3/5/7/9 per the API doc); this suite exercises 3 and 5.
+// kernelSize is an odd square window size (3/5/7/9 per the API doc); each has its own SIMD path.
 struct BoxFilterParams {
     Rpp32u kernelSize;
     std::string name() const { return "k" + std::to_string(kernelSize); }
@@ -127,5 +127,5 @@ INSTANTIATE_TEST_SUITE_P(
             make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
                          {presets::kDefaultSize, presets::kSubVectorSize}),
         }),
-        {BoxFilterParams{3}, BoxFilterParams{5}})),
+        {BoxFilterParams{3}, BoxFilterParams{5}, BoxFilterParams{7}, BoxFilterParams{9}})),
     op_config_name<BoxFilterParams>);

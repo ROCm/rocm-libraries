@@ -45,8 +45,8 @@ template <typename T>
 void run_tensor_or_tensor(const NdConfig& cfg, Broadcast broadcast) {
     // The two operands may differ in shape (one axis collapsed to 1) and the output takes the
     // broadcast shape, so each of the three needs its own descriptor.
-    const NdDims dims1 = nd_operand_dims(cfg.nDim, broadcast, 1);
-    const NdDims dims2 = nd_operand_dims(cfg.nDim, broadcast, 2);
+    const NdDims dims1 = nd_operand_dims(cfg, broadcast, 1);
+    const NdDims dims2 = nd_operand_dims(cfg, broadcast, 2);
     const NdDims outDims = nd_broadcast_dims(dims1, dims2);
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
     GenericDescriptor desc1(cfg.backend, dims1, cfg.dtypeIn);
@@ -118,6 +118,7 @@ TEST_P(TensorOrTensorTest, Correctness) {
 // the device. Undocumented and rank-dependent.
 INSTANTIATE_TEST_SUITE_P(Misc_Bitwise, TensorOrTensorTest,
                          ::testing::ValuesIn(nd_with_params<BroadcastParams>(
-                             make_nd_configs({DType::U8, DType::I8}, {2, 3, 4}),
+                             make_nd_configs({DType::U8, DType::I8}, {2, 3, 4},
+                                             {NdShape::VectorAligned, NdShape::Tail}),
                              {{Broadcast::None}, {Broadcast::Src1}, {Broadcast::Src2}})),
                          nd_op_config_name<BroadcastParams>);

@@ -90,6 +90,16 @@ inline std::string voxel_config_name(const VoxelConfig& c) {
            voxel_size_name(c.size);
 }
 
+namespace presets {
+// The default test volume: every extent is a multiple of 4, so the vector loops see no tail.
+inline constexpr VoxelSize kDefaultVolume{2, 4, 12, 16};
+
+// Odd width and odd depth. Voxel tensors are dense -- unlike an image row, nothing pads the end of
+// a row -- so this is the shape that puts a tail element at the end of the vector span and live
+// data immediately after the last store.
+inline constexpr VoxelSize kTailVolume{2, 3, 10, 19};
+}  // namespace presets
+
 inline std::vector<VoxelConfig> make_voxel_configs(
     const std::vector<DType>& dtypes, const std::vector<VoxelLayout>& layouts,
     const std::vector<Roi>& rois, const std::vector<Roi3D>& roiTypes,

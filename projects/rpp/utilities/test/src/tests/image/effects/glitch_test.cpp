@@ -122,6 +122,7 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Effects, GlitchTest,
     ::testing::ValuesIn(with_params<GlitchParams>(
         make_configs({DType::U8, DType::F16, DType::F32}, {Layout::PKD3, Layout::PLN3},
-                     {Roi::Full, Roi::Partial}),
+                     {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kTailWidthSize, presets::kSubVectorSize}),
         {GlitchParams{GlitchKind::Identity}, GlitchParams{GlitchKind::Shift}})),
     op_config_name<GlitchParams>);

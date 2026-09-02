@@ -121,6 +121,7 @@ INSTANTIATE_TEST_SUITE_P(Voxel_Arithmetic, MultiplyScalarTest,
                                                 {VoxelLayout::NCDHW1, VoxelLayout::NCDHW3,
                                                  VoxelLayout::NDHWC3},
                                                 {Roi::Full, Roi::Partial},
-                                                {Roi3D::XYZWHD, Roi3D::LTFRBB}),
+                                                {Roi3D::XYZWHD, Roi3D::LTFRBB},
+                                                {presets::kDefaultVolume, presets::kTailVolume}),
                              {{80.0f}})),
                          voxel_op_config_name<MultiplyScalarParams>);

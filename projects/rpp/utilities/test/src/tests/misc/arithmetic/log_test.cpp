@@ -74,7 +74,7 @@ void fill_input_nonzero(Tin* buf, const RpptGenericDesc& d, DType dt) {
 
 template <typename Tin, typename Tout>
 void run_log(const NdConfig& cfg) {
-    const NdDims dims = nd_extents(cfg.nDim);
+    const NdDims dims = nd_extents(cfg);
 
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
     GenericDescriptor srcDesc(cfg.backend, dims, cfg.dtypeIn);
@@ -150,5 +150,7 @@ INSTANTIATE_TEST_SUITE_P(Misc_Arithmetic, LogTest,
                                                               {DType::I8, DType::F32},
                                                               {DType::F16, DType::F16},
                                                               {DType::F32, DType::F32}},
-                                                             {2, 3, 4})),
+                                                             {2, 3, 4},
+                                                             {NdShape::VectorAligned,
+                                                              NdShape::Tail})),
                          nd_config_param_name);

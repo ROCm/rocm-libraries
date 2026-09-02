@@ -127,7 +127,8 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, CropAndPatchTest,
     ::testing::ValuesIn(with_params<CropAndPatchParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full}),
+                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full},
+                     {presets::kDefaultSize, presets::kTailWidthSize}),
         {CropAndPatchParams{8, 6, 16, 12, 8, 6, "inplace"},
          CropAndPatchParams{8, 6, 16, 12, 24, 18, "moved"}})),
     op_config_name<CropAndPatchParams>);

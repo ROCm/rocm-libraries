@@ -127,12 +127,13 @@ TEST_P(WaterTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, WaterTest,
     ::testing::ValuesIn(with_params<WaterParams>(
-        make_configs({DType::U8, DType::F16, DType::F32},
-                     {{Layout::PKD3, Layout::PKD3},
-                      {Layout::PLN3, Layout::PLN3},
-                      {Layout::PLN1, Layout::PLN1},
-                      {Layout::PKD3, Layout::PLN3},
-                      {Layout::PLN3, Layout::PKD3}},
-                     {Roi::Full, Roi::Partial}),
+        concat_configs({
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kTailWidthSize}),
+            make_configs({DType::U8, DType::F16, DType::F32}, presets::kLayoutsFull,
+                         {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
         {WaterParams{WaterKind::Flat}, WaterParams{WaterKind::Wave}})),
     op_config_name<WaterParams>);

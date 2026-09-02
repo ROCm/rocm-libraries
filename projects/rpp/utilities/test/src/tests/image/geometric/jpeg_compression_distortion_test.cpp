@@ -138,6 +138,7 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, JpegCompressionDistortionTest,
     ::testing::ValuesIn(with_params<JpegParams>(
         make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kTailWidthSize}),
         {JpegParams{50}, JpegParams{10}, JpegParams{90}})),
     op_config_name<JpegParams>);
