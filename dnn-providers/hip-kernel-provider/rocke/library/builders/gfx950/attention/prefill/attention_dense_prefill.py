@@ -6,7 +6,8 @@ Owns the host path: spec construction, kernel-spec generation, compilation, ABI
 signature, and runtime launch — plus a torch/SDPA parity check and a benchmark. The
 kernel bakes in the winning levers (CK-1 transposed PV, LDS K-padding, exp2_fast,
 sched template, diagonal masking, depth-1 cluster, vectorized store); only the KV tile
-(`block_n`) and occupancy hint (`waves_per_eu`) are tunable.
+(`block_n`), occupancy hint (`waves_per_eu`), persistent decode, and qualified
+gfx950 wide-LDS-DMA path are tunable.
 
 Usage:
     python attention_dense_prefill.py                 # parity + bench, default shapes
@@ -117,6 +118,7 @@ def make_spec_from_shape(shape: dict[str, Any]) -> AttentionDenseSpec:
         use_sinks=bool(shape.get("use_sinks", False)),
         lazy_rescale=bool(shape.get("lazy_rescale", True)),
         persist_decode=str(shape.get("persist_decode", "auto")),
+        wide_lds_dma=bool(shape.get("wide_lds_dma", False)),
     )
 
 
@@ -280,6 +282,11 @@ def main():
     )
     ap.add_argument("--use-sinks", action="store_true", help="enable attention sinks")
     ap.add_argument(
+        "--wide-lds-dma",
+        action="store_true",
+        help="use gfx950 dwordx4 buffer-to-LDS slab loading",
+    )
+    ap.add_argument(
         "--exact-shape",
         action="store_true",
         help="run only --sq (default 8192) once; emit JSON with --json-out",
@@ -310,6 +317,7 @@ def main():
             "sliding_window": args.sw,
             "use_sinks": args.use_sinks,
             "persist_decode": args.persist_decode,
+            "wide_lds_dma": args.wide_lds_dma,
         }
         spec = make_spec_from_shape(shape)
         result = run_benchmark(
@@ -342,6 +350,7 @@ def main():
             sliding_window=args.sw,
             use_sinks=args.use_sinks,
             persist_decode=args.persist_decode,
+            wide_lds_dma=args.wide_lds_dma,
         )
         run(spec)
     return 0

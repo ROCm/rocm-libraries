@@ -1961,6 +1961,18 @@ def cases():
             "persist_swa_w128_sq512",
             {"persistent": True, "num_persistent": 256, "sliding_window": 128},
         ),
+        (
+            "persist_wdma_gqapair_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "num_query_heads": 32,
+                "num_kv_heads": 8,
+                "persistent": True,
+                "num_persistent": 16,
+                "persist_decode": "gqa_pair",
+                "wide_lds_dma": True,
+            },
+        ),
         # D=64 packed-row DMA loader (2 rows/instr, unpadded LDS) on the persistent
         # builder -- locks the head_size=64 fix (fp16_h64 above only exercises the
         # default builder).

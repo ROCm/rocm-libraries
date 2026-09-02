@@ -59,6 +59,8 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
         self.assertIn("gqapair", spec.kernel_name())
+        self.assertTrue(spec.wide_lds_dma)
+        self.assertIn("wdma", spec.kernel_name())
         self.assertEqual(spec.num_persistent, 256)
 
     def test_explicit_gqa_pair_passes_through_dispatcher(self):
@@ -77,6 +79,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.persist_decode, "gqa_pair")
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        self.assertTrue(spec.wide_lds_dma)
         self.assertIn("gqapair", spec.kernel_name())
 
     def test_invalid_dense_decode_is_rejected_at_dispatch(self):
@@ -99,6 +102,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         )
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.resolved_persist_decode, "qb_major")
+        self.assertFalse(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())
 
     def test_exact_shape_with_sinks_keeps_gqa_pair(self):
@@ -117,6 +121,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
         self.assertTrue(spec.use_sinks)
+        self.assertFalse(spec.wide_lds_dma)
 
     def test_sliding_window_falls_back_to_qb_major(self):
         req = _gfx950_dense_req(
@@ -133,6 +138,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         )
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.resolved_persist_decode, "qb_major")
+        self.assertFalse(spec.wide_lds_dma)
 
     def test_mha_falls_back_to_qb_major(self):
         req = _gfx950_dense_req(
@@ -148,6 +154,7 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         )
         spec = dense_spec_for_request(req)
         self.assertEqual(spec.resolved_persist_decode, "qb_major")
+        self.assertFalse(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())
 
 

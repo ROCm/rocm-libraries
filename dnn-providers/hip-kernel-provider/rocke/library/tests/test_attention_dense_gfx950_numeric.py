@@ -337,6 +337,7 @@ class TestDenseGqaPairVariants:
             interleave=interleave,
             sliding_window=sliding_window,
             use_sinks=use_sinks,
+            wide_lds_dma=True,
         )
         run_attention_dense_torch(
             spec=spec,
@@ -366,6 +367,44 @@ class TestDenseGqaPairVariants:
         max_abs = (ref - out.float()).abs().max().item()
         assert max_abs < _tolerance("fp16"), (
             f"gqa_pair {_name}: max_abs={max_abs:.3e}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    def test_wide_dma_mha_numeric(self):
+        """The layout remains correct without grouped-query reuse."""
+        import torch
+
+        B, S, H, D = 1, 512, 16, 128
+        torch.manual_seed(0)
+        q = torch.randn(B, S, H, D, device="cuda", dtype=torch.float16)
+        k = torch.randn(B, S, H, D, device="cuda", dtype=torch.float16)
+        v = torch.randn(B, S, H, D, device="cuda", dtype=torch.float16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(D)
+        spec = AttentionDenseSpec(
+            batch=B,
+            seqlen_q=S,
+            seqlen_kv=S,
+            num_query_heads=H,
+            num_kv_heads=H,
+            head_size=D,
+            causal=True,
+            dtype="fp16",
+            block_n=64,
+            persistent=True,
+            num_persistent=32,
+            persist_decode="qb_major",
+            wide_lds_dma=True,
+        )
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, scale=scale
+        )
+        torch.cuda.synchronize()
+        ref = _standard_reference(q, k, v, scale)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < _tolerance("fp16"), (
+            f"wide DMA MHA: max_abs={max_abs:.3e}"
         )
 
 
