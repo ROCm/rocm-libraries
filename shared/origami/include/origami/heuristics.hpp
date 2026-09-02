@@ -99,6 +99,9 @@ struct heuristic_defaults_t {
   static constexpr double UNAMORTIZED_FILL_PENALTY       = 4.0;
   static constexpr double BATCHED_FILL_ITER_TARGET       = 4.0;
   static constexpr double BATCHED_FILL_PENALTY           = 4.0;
+  static constexpr size_t DEEPEN_MN_MAX                  = 512;
+  static constexpr size_t DEEPEN_MAX_DIM                 = 4096;
+  static constexpr size_t DEEPEN_K_MAX                   = 2048;
   static constexpr double TAIL_WASTE_PENALTY             = 4.0;
   static constexpr double OVERSIZE_WASTE_WEIGHT          = 3.0;
   static constexpr double M_EDGE_PENALTY                 = 2.0;
