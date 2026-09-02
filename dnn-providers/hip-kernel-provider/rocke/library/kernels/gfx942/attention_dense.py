@@ -935,6 +935,13 @@ def supports_attention_dense(
         return False, "gfx942 attention_dense: sliding_window not yet supported"
     if spec.use_sinks:
         return False, "gfx942 attention_dense: sinks not yet supported"
+    # causal_bottom_right lives on the SHARED spec but is implemented only in the gfx950
+    # builder; this one never reads it. Rejecting here is what keeps the module contract
+    # honest -- without it the spec validates, the build silently emits a top-left mask,
+    # and gfx942_kernel_name() still inherits the `br` token from the shared
+    # kernel_name(), caching a wrong result under a symbol that claims to be right.
+    if spec.causal_bottom_right:
+        return False, "gfx942 attention_dense: causal_bottom_right not yet supported"
 
     # --- gfx942-private sweep knobs. Validated here rather than only in the builder
     # because the module contract is support() => build(): a knob that only the

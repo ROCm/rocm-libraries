@@ -30,6 +30,11 @@ from .common import (
 # block_n (KV tile) the dense candidate ships; 64 is the resource-efficient
 # peak (see AttentionDenseSpec.block_n).
 _DENSE_BLOCK_N = 64
+# AttentionRequest.mask_type carries the engine's MaskType ordinals, defined in
+# src/engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp:
+#   0 = NO_MASK, 1 = TOP_LEFT_CAUSAL, 2 = BOTTOM_RIGHT_CAUSAL, 3 = SLIDING_WINDOW
+# Everything nonzero is causal; only the alignment differs between 1 and 2.
+_MASK_BOTTOM_RIGHT_CAUSAL = 2
 
 
 def _dense_spec(req: OperatorRequest):
@@ -46,9 +51,26 @@ def _dense_spec(req: OperatorRequest):
     sw = int(req.sliding_window)
     use_sinks = bool(req.use_sinks)
     bn = _DENSE_BLOCK_N
-    # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
-    # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
-    ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % bn != 0))
+    # MaskType.BOTTOM_RIGHT_CAUSAL. Read before the ragged gate below, which depends
+    # on it.
+    #
+    # Gated on sq != sk, which is not cosmetic. At equal lengths the offset is zero,
+    # so a bottom-right request IS a top-left one -- the same mask, the same emitted
+    # body. Asking for the flag anyway would cost twice: the spec refuses
+    # persistent=True, so an explicit dense_persistent="on" would decline a request
+    # this kernel serves perfectly, and the "auto" downgrade below would drop the
+    # large-Sq cohort off the grid-stride path for a diagonal that never moved. It
+    # would also mint a second `br` symbol whose body is byte-identical to the
+    # top-left kernel already in the cache. Normalising here keeps all three from
+    # happening while leaving the mask semantics untouched.
+    bottom_right = int(req.mask_type) == _MASK_BOTTOM_RIGHT_CAUSAL and sq != sk
+    # On-chip ragged padding for lengths that are not a 256/block_n multiple. Normally
+    # self-attention only (seqlen_q == seqlen_kv), because a shorter query block has no
+    # diagonal to sit on -- EXCEPT under bottom-right, which supplies exactly that. A
+    # chunked-prefill request is the case: its KV cache is whatever length it is, so
+    # without this the spec falls to the aligned path and the 256-multiple check rejects
+    # it.
+    ragged = (sq == sk or bottom_right) and ((sq % _BLOCK_M != 0) or (sk % bn != 0))
     nqb = (sq + _BLOCK_M - 1) // _BLOCK_M
     work = nqb * int(req.nhead_q) * int(req.batch)
     np = int(req.dense_num_persistent)
@@ -63,6 +85,19 @@ def _dense_spec(req: OperatorRequest):
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
         )
+    # Only the non-persistent grid implements the shifted diagonal, so under "auto" --
+    # where persistent is a heuristic about work size, not something the caller asked
+    # for -- pick the grid that can serve the mask instead of declining. An explicit
+    # dense_persistent="on" is a caller request, so leave it and let the spec reject the
+    # combination. The grid that ran stays visible: select() sets kernel_name_override
+    # from the spec name, which carries persist{N} only when persistent.
+    #
+    # This only fires where the diagonal actually moves: `bottom_right` is already
+    # False at seqlen_q == seqlen_kv, so equal-length requests keep the persistent
+    # grid. Lifting the downgrade entirely needs the shifted diagonal in the
+    # persistent builder, tracked in AICK-2145.
+    if bottom_right and mode == "auto":
+        persistent = False
     return AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -71,6 +106,7 @@ def _dense_spec(req: OperatorRequest):
         num_kv_heads=int(req.nhead_k),
         head_size=int(req.hdim_q),
         causal=(int(req.mask_type) != 0),
+        causal_bottom_right=bottom_right,
         dtype=req.dtype.lower(),
         block_n=bn,
         persistent=persistent,
