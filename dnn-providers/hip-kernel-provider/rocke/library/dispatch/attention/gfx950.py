@@ -196,7 +196,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem)
+        ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
         if problem.select_path() != "2d":

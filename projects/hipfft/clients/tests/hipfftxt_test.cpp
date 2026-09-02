@@ -1476,7 +1476,7 @@ static std::vector<spmd_hipfft_params>
         {
             for(const auto& precision : {fft_precision_double, fft_precision_single})
             {
-                for(int ngpus = 2; ngpus <= rocfft_scoped_device::device_count(); ++ngpus)
+                for(size_t ngpus = 2; ngpus <= gpus_per_rank; ++ngpus)
                 {
                     // Determine batch values to test for this ngpus:
                     // - MAX_HIP_DESCRIPTOR_GPUS guarantees all devices have work

@@ -24,11 +24,12 @@ Two modes:
   by more than ``--tolerance`` percentage points (see ``DEFAULT_TOLERANCE`` for
   why that buffer is deliberately wide for now). This runs in CI on every
   coverage run. Prints exactly which files dropped and the one command to fix it.
-* ``update`` - the ratchet click: rewrite the baseline from the current
-  ``coverage.json``, raising each file's floor to the new level (or, for a
-  reviewed intentional reduction, resetting it). This is the single reviewed
-  command for a deliberate floor move; the resulting diff is reviewed like any
-  other change.
+* ``update`` - the ratchet click: raise each file's floor to the level in the
+  current ``coverage.json``. A floor never moves down on its own; lowering one
+  requires naming the file with ``--allow-lower``, so a reviewed intentional
+  reduction stays possible but cannot happen as a side effect of raising
+  something else. This is the single reviewed command for a deliberate floor
+  move; the resulting diff is reviewed like any other change.
 
 Input is the coverage.py JSON report (``--cov-report=json``), whose per-file
 line-coverage percentage is ``files[<path>]["summary"]["percent_covered"]``. In
@@ -42,8 +43,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
+from collections.abc import Iterable
 from pathlib import Path
+
+# Decimal places the baseline is written at. Comparisons round to this first, so
+# a difference the file cannot represent is never treated as a change.
+_BASELINE_PRECISION = 2
 
 # A file must drop by more than this many percentage points to count as a
 # regression. This absorbs measurement noise rather than real coverage loss, and
@@ -63,15 +70,31 @@ from pathlib import Path
 # across a few develop merges; the whole-project floor is the backstop meanwhile.
 DEFAULT_TOLERANCE = 1.0
 
-# Printed verbatim so a failing CI log tells the developer exactly how to move
-# the baseline on purpose (never a blanket "just regenerate everything").
-REMEDIATION = (
-    "If these drops are intentional, review them and update the baseline with:\n"
-    "    tox -e coverage-unit            # regenerate coverage.json, then\n"
-    "    python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py \\\n"
-    "        update --current coverage.json\n"
-    "and commit the reviewed coverage-baseline.json diff."
-)
+
+def remediation(paths: list[str]) -> str:
+    """The exact command to move these floors on purpose, file by file.
+
+    Emitted with one ``--allow-lower`` per regressed file so a failing CI log
+    can be copy-pasted without also becoming a blanket "regenerate everything":
+    the command it prints can only lower the files named in it.
+
+    Each path is shell-quoted and passed as ``--allow-lower=<value>`` rather
+    than ``--allow-lower <value>``: a path with a space would otherwise split
+    into two shell arguments, a path starting with ``-`` would otherwise be
+    read as another option, and quoting alone stops shell metacharacters (for
+    example ``$(...)``) in a path from being interpreted when this command is
+    copy-pasted, all of which coverage.py and git happily allow in a filename.
+    """
+    named = "".join(
+        f" \\\n        --allow-lower={shlex.quote(path)}" for path in paths
+    )
+    return (
+        "If these drops are intentional, review them and update the baseline with:\n"
+        "    tox -e coverage-unit            # regenerate coverage.json, then\n"
+        "    python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py \\\n"
+        f"        update --current coverage.json{named}\n"
+        "and commit the reviewed coverage-baseline.json diff."
+    )
 
 
 class RatchetError(Exception):
@@ -128,6 +151,51 @@ def find_regressions(
     return regressions
 
 
+def ratchet_floors(
+    existing: dict[str, float],
+    current: dict[str, float],
+    allow_lower: Iterable[str] = (),
+    tolerance: float = 0.0,
+) -> tuple[dict[str, float], list[tuple[str, float, float]]]:
+    """Return ``(new_floors, refused)`` for an ``update``.
+
+    A floor rises to the current level, and a file with no floor yet is pinned at
+    its current level. A floor that would *fall* is held at its existing value
+    and reported in ``refused``, unless its path was named in ``allow_lower``.
+    That is what makes ``update`` a ratchet rather than a snapshot of whichever
+    coverage run happened to be on disk: raising one file's floor can no longer
+    quietly lower another's.
+
+    A drop no bigger than ``tolerance`` is held at the existing floor without
+    being added to ``refused``. This keeps the command ``check`` prints in sync
+    with what ``update`` actually demands: ``check`` only names files whose drop
+    exceeds the same tolerance, so an unnamed in-tolerance wobble must not force
+    a second, separate authorization here.
+
+    Percentages are rounded to the precision the baseline is written at before
+    being compared, so a difference too small to appear in the file is not
+    treated as a fall.
+    """
+    allow_lower = set(allow_lower)
+    floors: dict[str, float] = {}
+    refused: list[tuple[str, float, float]] = []
+    for path, cur_pct in current.items():
+        cur_pct = round(cur_pct, _BASELINE_PRECISION)
+        base_pct = existing.get(path)
+        base_pct = (
+            round(base_pct, _BASELINE_PRECISION) if base_pct is not None else None
+        )
+        if base_pct is None or cur_pct >= base_pct or path in allow_lower:
+            floors[path] = cur_pct
+        elif cur_pct >= base_pct - tolerance:
+            floors[path] = base_pct
+        else:
+            floors[path] = base_pct
+            refused.append((path, base_pct, cur_pct))
+    refused.sort(key=lambda row: row[2] - row[1])  # biggest drop first
+    return floors, refused
+
+
 def write_baseline(
     current: dict[str, float], baseline_path: Path, tolerance: float
 ) -> None:
@@ -144,7 +212,10 @@ def write_baseline(
             "prove stable."
         ),
         "tolerance": tolerance,
-        "files": {path: round(pct, 2) for path, pct in sorted(current.items())},
+        "files": {
+            path: round(pct, _BASELINE_PRECISION)
+            for path, pct in sorted(current.items())
+        },
     }
     baseline_path.parent.mkdir(parents=True, exist_ok=True)
     with baseline_path.open("w", encoding="utf-8") as fh:
@@ -200,7 +271,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             f"  {base_pct:8.2f}%  {cur_pct:8.2f}%  {cur_pct - base_pct:+7.2f}  {path}",
             file=sys.stderr,
         )
-    print("\n" + REMEDIATION, file=sys.stderr)
+    print("\n" + remediation([path for path, _, _ in regressions]), file=sys.stderr)
     return 1
 
 
@@ -208,9 +279,50 @@ def cmd_update(args: argparse.Namespace) -> int:
     current = per_file_coverage(_load_json(Path(args.current), "coverage report"))
     tolerance = args.tolerance if args.tolerance is not None else DEFAULT_TOLERANCE
     baseline_path = Path(args.baseline)
-    write_baseline(current, baseline_path, tolerance)
+    allow_lower = set(args.allow_lower or ())
+
+    # Absent on the very first update, which pins every file at its current
+    # level. After that the existing floors are what the new ones ratchet from.
+    existing = (
+        _baseline_files(_load_json(baseline_path, "baseline"))
+        if baseline_path.is_file()
+        else {}
+    )
+    floors, refused = ratchet_floors(existing, current, allow_lower, tolerance)
+
+    if refused:
+        print(
+            f"coverage_ratchet: refusing to lower {len(refused)} floor(s). "
+            "Name each file you mean to lower:\n",
+            file=sys.stderr,
+        )
+        print(f"  {'floor':>9}  {'current':>9}  {'delta':>8}  file", file=sys.stderr)
+        for path, base_pct, cur_pct in refused:
+            print(
+                f"  {base_pct:8.2f}%  {cur_pct:8.2f}%  {cur_pct - base_pct:+7.2f}  {path}",
+                file=sys.stderr,
+            )
+        print("\n" + remediation([path for path, _, _ in refused]), file=sys.stderr)
+        return 1
+
+    # A path that is not in the report cannot be the one you meant to lower, so
+    # it is a typo or a stale entry. Silence here would look like consent.
+    for path in sorted(allow_lower - set(current)):
+        print(
+            f"coverage_ratchet: warning: --allow-lower {path} is not in the "
+            "coverage report; nothing to lower.",
+            file=sys.stderr,
+        )
+
+    raised = sum(1 for p, pct in floors.items() if p in existing and pct > existing[p])
+    lowered = sum(1 for p, pct in floors.items() if p in existing and pct < existing[p])
+    added = len(set(floors) - set(existing))
+
+    write_baseline(floors, baseline_path, tolerance)
     print(
-        f"coverage_ratchet: wrote baseline for {len(current)} files to {baseline_path}"
+        f"coverage_ratchet: wrote baseline for {len(floors)} files to "
+        f"{baseline_path} ({raised} raised, {added} newly pinned, "
+        f"{lowered} lowered on request)."
     )
     return 0
 
@@ -246,7 +358,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_check.set_defaults(func=cmd_check)
 
-    p_update = sub.add_parser("update", parents=[common], help="rewrite the baseline")
+    p_update = sub.add_parser(
+        "update", parents=[common], help="raise the baseline to the current coverage"
+    )
+    p_update.add_argument(
+        "--allow-lower",
+        action="append",
+        metavar="PATH",
+        help="lower this file's floor to its current coverage (repeatable). "
+        "Without it, update never moves a floor down; every deliberate "
+        "reduction has to be named here and reviewed in the diff.",
+    )
     p_update.set_defaults(func=cmd_update)
 
     return parser

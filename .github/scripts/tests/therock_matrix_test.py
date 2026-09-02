@@ -27,6 +27,13 @@ class TheRockMatrixTest(unittest.TestCase):
         self.assertEqual(len(project_to_run), 1)
         self.assertFalse(project_to_run[0]["run_rocjitsu_race_check"])
 
+    def test_rocjitsu_race_check_accepts_explicit_disable(self):
+        project_to_run = therock_matrix.collect_projects_to_run(
+            ["projects/hipblaslt"], run_rocjitsu_race_check=False
+        )
+        self.assertEqual(len(project_to_run), 1)
+        self.assertFalse(project_to_run[0]["run_rocjitsu_race_check"])
+
     def test_rocjitsu_race_check_does_not_run_for_provider_rows(self):
         # These rows exercise the names that motivated the explicit selection
         # marker. In particular, `hipblasltprovider` must not match merely
