@@ -14,11 +14,8 @@
  *
  *   static float launch(const ck_tile::StreamKHostArgs& args, const stream_config& stream);
  *
- * which allocates the reduction workspace internally (DeviceMem). This lib is
- * reduction-strategy agnostic: the strategy is a codegen-time template constant
- * baked into SelectedKernel (unified_gemm_codegen.py), and GetWorkSpaceSize
- * returns 0 for Atomic and a non-zero size for Linear/Tree, so the single
- * allocate-and-launch path below serves all three. The single-problem registry path
+ * which allocates the reduction workspace internally (DeviceMem) and uses the
+ * Atomic reduction strategy. The single-problem registry path
  * (g_dispatcher->run / GemmHostArgs) and the generated_tile_backend wrapper both
  * hard-code the plain GemmHostArgs launch, so this lib bypasses the registry and
  * calls SelectedKernel::launch(args, stream) directly, reporting the kernel name

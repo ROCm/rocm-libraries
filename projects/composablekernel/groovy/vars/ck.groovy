@@ -1664,7 +1664,9 @@ def runDispatcherPerfTests(String compiler, String gpuTarget = "gfx942") {
         // reasoning as runDispatcherCorrectnessTests: execute_cmd runs from
         // projects/composablekernel/build while archiveArtifacts resolves against
         // the workspace root, so the build-relative path is spelled out in full.
-        archiveArtifacts artifacts: "projects/composablekernel/build/*_results.json",
+        // dispatcher_* prefix matches the correctness lane and avoids accidentally
+        // capturing tile_engine benchmark JSONs that share the same build dir.
+        archiveArtifacts artifacts: "projects/composablekernel/build/dispatcher_*_results.json",
                          allowEmptyArchive: true
     }
 }
@@ -1852,18 +1854,19 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
         run_ok python3 ../dispatcher/tests/test_gemm_parity.py && \
         run_ok python3 ../dispatcher/tests/test_batched_gemm_gpu_correctness.py --gfx ${arch} && \
         run_ok python3 ../dispatcher/tests/test_batched_contraction_gpu_correctness.py --gfx ${arch} && \
-        python3 ../dispatcher/tests/test_grouped_gemm_gpu_correctness.py && \
+        run_ok python3 ../dispatcher/tests/test_grouped_gemm_gpu_correctness.py && \
         run_ok python3 ../dispatcher/tests/test_multi_d_gpu_correctness.py --gfx ${arch} && \
-        python3 ../dispatcher/tests/test_multi_abd_gpu_correctness.py && \
+        run_ok python3 ../dispatcher/tests/test_multi_abd_gpu_correctness.py && \
         run_ok python3 ../dispatcher/tests/test_rowcolquant_gpu_correctness.py --gfx ${arch} && \
         run_ok python3 ../dispatcher/tests/test_tensorquant_gpu_correctness.py --gfx ${arch}"""
     // The grouped/multi_d/multi_abd tests are the bridge-level companions to the
     // --variant sweeps below: the sweep exercises the search space, they exercise
     // the ctypes bridge. They were registered in ctest but never invoked from
-    // here. grouped_gemm and multi_abd are unittest-based, take no --gfx, and
-    // exit 0 on an internal skip, so they need no run_ok. multi_d is
-    // script-style: it takes --gfx and exits 77 on a clean skip, so it must be
-    // wrapped -- a bare 77 would break the && chain and fail the lane.
+    // here. All three are wrapped with run_ok: multi_d is script-style and exits
+    // 77 on a clean skip (a bare 77 would break the && chain), and grouped_gemm /
+    // multi_abd are unittest-based but still need run_ok to guard against exit 1
+    // from environment failures (bad import, setUpClass error) that would kill the
+    // rest of the chain without running the quant operators.
     //
     // rowcolquant and tensorquant sit here rather than in the gfx950 block
     // because, unlike the other quant ops, both support gfx942 as well --
@@ -1908,12 +1911,12 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
     // expand_sweep -- mx_gemm_utils exposes only default_fp8_config() /
     // default_fp4_config() -- so it cannot join the --variant sweep above and
     // instead runs the two-config smoke test merged in #10132. That test is
-    // unittest-based and self-gates to gfx950, so it takes no --gfx and needs no
-    // run_ok (unlike its neighbours, which do).
+    // unittest-based and self-gates to gfx950, so it takes no --gfx. It is still
+    // wrapped with run_ok -- see the NOTE below for why every test in this chain is.
     if (arch == "gfx950") {
         execute_cmd += """ && \
         run_ok python3 ../dispatcher/tests/test_bquant_gpu_correctness.py --gfx ${arch} && \
-        python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py"""
+        run_ok python3 ../dispatcher/tests/test_mx_gemm_gpu_correctness.py"""
     }
     // aquant runs on both archs. Its non-preshuffleaq builders use standard fp8
     // MFMA (warp_tile_k=32), present on gfx942. _preshuffleaq_warp_tile_k() is
@@ -1930,6 +1933,11 @@ def runDispatcherCorrectnessTests(String arch, String compiler) {
     // pending one green run, and reports that as a per-case SKIP, not a 77.
     execute_cmd += """ && \
         run_ok python3 ../dispatcher/tests/test_abquant_gpu_correctness.py --gfx ${arch}"""
+    // NOTE: run_ok is applied to every script-style test AND every unittest-based
+    // test above. Unittest-based tests exit 0 on an internal skipTest, but a bad
+    // import or setUpClass crash still exits 1, which would break the && chain and
+    // silently drop every subsequent operator. run_ok costs nothing and makes the
+    // chain resilient to environment failures regardless of test style.
     try {
         buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
     } finally {

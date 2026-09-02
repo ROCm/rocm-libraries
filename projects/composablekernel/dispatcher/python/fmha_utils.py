@@ -1236,13 +1236,6 @@ def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str
     ]
     if arch.startswith("gfx9"):
         flags.append("-DCK_TILE_FMHA_FWD_FAST_EXP2=1")
-        # NOTE: OCP fp8 is forced on every gfx9 arch, including gfx942 whose CK
-        # default is FNUZ (see dispatcher_common.fp8_uses_ocp). That is not the
-        # host/device split-brain the GEMM bridges had -- the define lands on both
-        # compiler passes, so they agree -- but it does mean fmha fp8 on gfx942
-        # runs a software OCP codec rather than the arch-native FNUZ one.
-        # Left as-is deliberately: flipping it is a numeric change to an operator
-        # outside this lane's coverage matrix and needs its own verification pass.
         flags.append("-DCK_TILE_USE_OCP_FP8")
         flags.append("-DCK_GFX950_SUPPORT")
         flags.append("-DCK_USE_GFX950")
