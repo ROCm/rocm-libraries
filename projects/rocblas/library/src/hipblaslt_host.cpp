@@ -647,6 +647,29 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                               &(prob.batch_stride_d),
                                               sizeof(int64_t)));
+        if(!prob.strided_batch)
+        {
+            if (prob.buffer_offset_a != 0) {
+                const int64_t offset_a = static_cast<int64_t>(prob.buffer_offset_a);
+                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                    matA, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &offset_a, sizeof(offset_a)));
+            }
+            if (prob.buffer_offset_b != 0) {
+                const int64_t offset_b = static_cast<int64_t>(prob.buffer_offset_b);
+                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                    matB, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &offset_b, sizeof(offset_b)));
+            }
+            if (prob.buffer_offset_c != 0) {
+                const int64_t offset_c = static_cast<int64_t>(prob.buffer_offset_c);
+                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                    matC, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &offset_c, sizeof(offset_c)));
+            }
+            if (prob.buffer_offset_d != 0) {
+                const int64_t offset_d = static_cast<int64_t>(prob.buffer_offset_d);
+                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                    matD, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &offset_d, sizeof(offset_d)));
+            }
+        }
         THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(
             &matmulDesc, hipblaslt_compute_type<Tc>, hipblaslt_scaletype<Ti>));
         THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
@@ -734,33 +757,20 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             throw rocblas_status_invalid_value;
         if(!prob.strided_batch)
         {
-            void *ptrA = (void*)prob.batch_A, *ptrB = (void*)prob.batch_B,
-                 *ptrC = (void*)prob.batch_C, *ptrD = (void*)prob.batch_D;
-
-            if (prob.buffer_offset_a != 0)
-                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                    matA, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_a), sizeof(int64_t)));
-            if (prob.buffer_offset_b != 0)
-                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                    matB, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_b), sizeof(int64_t)));
-            if (prob.buffer_offset_c != 0)
-                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                    matC, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_c), sizeof(int64_t)));
-            if (prob.buffer_offset_d != 0)
-                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                    matD, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_d), sizeof(int64_t)));
+            //void *ptrA = (void*)prob.batch_A, *ptrB = (void*)prob.batch_B,
+            //     *ptrC = (void*)prob.batch_C, *ptrD = (void*)prob.batch_D;
 
             THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
                                                      matmulDesc,
                                                      &alpha,
-                                                     ptrA,
+                                                     (void*)prob.batch_A,
                                                      matA,
-                                                     ptrB,
+                                                     (void*)prob.batch_B,
                                                      matB,
                                                      &beta,
-                                                     ptrC,
+                                                     (void*)prob.batch_C,
                                                      matC,
-                                                     ptrD,
+                                                     (void*)prob.batch_D,
                                                      matD,
                                                      &heuristicResult.algo,
                                                      workspace,
