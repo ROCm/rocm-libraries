@@ -226,11 +226,14 @@ namespace TensileLite::Client::HostNumerics
                                                             const void* storage,
                                                             ptrdiff_t byteOffset = 0)
         {
-            auto [rebasedLayout, layoutByteOffset]
-                = rebaseLayoutToByteAlignedStorage(type, layout);
-            const auto* bytes = static_cast<const std::byte*>(storage)
-                                + checkedAdd(byteOffset, layoutByteOffset);
+            auto [rebasedLayout, layoutByteOffset] = rebaseLayoutToByteAlignedStorage(type, layout);
             const size_t requiredBytes = storageBytesForLayout(type, rebasedLayout);
+            if(requiredBytes == 0)
+                return {std::move(rebasedLayout), {}};
+            if(storage == nullptr)
+                throw std::invalid_argument("Nonempty tensor storage is null.");
+            const auto* bytes
+                = static_cast<const std::byte*>(storage) + checkedAdd(byteOffset, layoutByteOffset);
             return {std::move(rebasedLayout),
                     std::span<const std::byte>(bytes, requiredBytes)};
         }
@@ -240,11 +243,14 @@ namespace TensileLite::Client::HostNumerics
                                                                 void* storage,
                                                                 ptrdiff_t byteOffset = 0)
         {
-            auto [rebasedLayout, layoutByteOffset]
-                = rebaseLayoutToByteAlignedStorage(type, layout);
-            auto* bytes = static_cast<std::byte*>(storage)
-                          + checkedAdd(byteOffset, layoutByteOffset);
+            auto [rebasedLayout, layoutByteOffset] = rebaseLayoutToByteAlignedStorage(type, layout);
             const size_t requiredBytes = storageBytesForLayout(type, rebasedLayout);
+            if(requiredBytes == 0)
+                return {std::move(rebasedLayout), {}};
+            if(storage == nullptr)
+                throw std::invalid_argument("Nonempty tensor storage is null.");
+            auto* bytes
+                = static_cast<std::byte*>(storage) + checkedAdd(byteOffset, layoutByteOffset);
             return {std::move(rebasedLayout),
                     std::span<std::byte>(bytes, requiredBytes)};
         }
@@ -460,20 +466,43 @@ namespace TensileLite::Client::HostNumerics
             using namespace roc::host_numerics;
             using detail::failure;
 
+            if(batches == 0 || m == 0 || n == 0)
+                return std::nullopt;
+
+            try
+            {
+                alpha = detail::scalarValue(problem.alphaType(), inputs.alpha);
+                beta  = detail::scalarValue(problem.betaType(), inputs.beta);
+            }
+            catch(std::invalid_argument const& error)
+            {
+                return failure(TranslationFailureCode::UnsupportedDataType, error.what());
+            }
+
+            const bool computeProduct = k != 0 && alpha != std::complex<double>(0.0, 0.0);
+            readA                     = computeProduct
+                    || (useGradient && useBias && biasSource == ContractionProblemGemm::A);
+            readB = computeProduct
+                    || (useGradient && useBias && biasSource == ContractionProblemGemm::B);
+            readC                   = beta != std::complex<double>(0.0, 0.0);
+            const bool aHasElements = m != 0 && k != 0;
+            const bool bHasElements = k != 0 && n != 0;
+
             if(problem.useBias() && inputs.bias == nullptr && inputs.batchBias == nullptr)
                 return failure(TranslationFailureCode::MissingInput, "Bias input is missing.");
-            if(problem.useScaleAlphaVec() && inputs.scaleAlphaVec == nullptr)
+            if(computeProduct && problem.useScaleAlphaVec() && inputs.scaleAlphaVec == nullptr)
             {
                 return failure(TranslationFailureCode::MissingInput,
                                "Scale-alpha vector input is missing.");
             }
-            if(scaleABMode != detail::ScaleABMode::None
+            if(computeProduct && scaleABMode != detail::ScaleABMode::None
                && (inputs.scaleA == nullptr || inputs.scaleB == nullptr))
             {
                 return failure(TranslationFailureCode::MissingInput,
                                "A and B scale inputs are required together.");
             }
-            if(problem.mxBlockA() > 0 && (inputs.mxsa == nullptr || inputs.mxsb == nullptr))
+            if(computeProduct && problem.mxBlockA() > 0
+               && (inputs.mxsa == nullptr || inputs.mxsb == nullptr))
                 return failure(TranslationFailureCode::MissingInput, "MX scale input is missing.");
             if(problem.useE() && inputs.e == nullptr)
                 return failure(TranslationFailureCode::MissingInput,
@@ -491,26 +520,14 @@ namespace TensileLite::Client::HostNumerics
                 return failure(TranslationFailureCode::MissingInput,
                                "Gate-residual input is missing.");
             }
-            if((inputs.a == nullptr && inputs.batchA == nullptr)
-               || (inputs.b == nullptr && inputs.batchB == nullptr)
-               || (inputs.c == nullptr && inputs.batchC == nullptr)
+            if((readA && aHasElements && inputs.a == nullptr && inputs.batchA == nullptr)
+               || (readB && bHasElements && inputs.b == nullptr && inputs.batchB == nullptr)
+               || (readC && inputs.c == nullptr && inputs.batchC == nullptr)
                || (inputs.d == nullptr && inputs.batchD == nullptr))
             {
                 return failure(TranslationFailureCode::MissingInput,
                                "A, B, C, or D input is missing.");
             }
-
-            try
-            {
-                alpha = detail::scalarValue(problem.alphaType(), inputs.alpha);
-                beta  = detail::scalarValue(problem.betaType(), inputs.beta);
-            }
-            catch(std::invalid_argument const& error)
-            {
-                return failure(TranslationFailureCode::UnsupportedDataType, error.what());
-            }
-
-            const bool computeProduct = alpha != std::complex<double>(0.0, 0.0);
 
             if(problem.useScaleCD())
             {
@@ -540,9 +557,11 @@ namespace TensileLite::Client::HostNumerics
 
             for(size_t batch = 0; batch < batches; ++batch)
             {
-                if((inputs.batchA != nullptr && inputs.batchA[batch] == nullptr)
-                   || (inputs.batchB != nullptr && inputs.batchB[batch] == nullptr)
-                   || (inputs.batchC != nullptr && inputs.batchC[batch] == nullptr)
+                if((readA && aHasElements && inputs.batchA != nullptr
+                    && inputs.batchA[batch] == nullptr)
+                   || (readB && bHasElements && inputs.batchB != nullptr
+                       && inputs.batchB[batch] == nullptr)
+                   || (readC && inputs.batchC != nullptr && inputs.batchC[batch] == nullptr)
                    || (inputs.batchD != nullptr && inputs.batchD[batch] == nullptr)
                    || (problem.useBias() && inputs.batchBias != nullptr
                        && inputs.batchBias[batch] == nullptr)
@@ -563,11 +582,6 @@ namespace TensileLite::Client::HostNumerics
             const ptrdiff_t batchOffsetD
                 = detail::checkedHostNumericsPtrdiff(inputs.batchOffsetD);
 
-            readA = computeProduct
-                    || (useGradient && useBias && biasSource == ContractionProblemGemm::A);
-            readB = computeProduct
-                    || (useGradient && useBias && biasSource == ContractionProblemGemm::B);
-            readC = beta != std::complex<double>(0.0, 0.0);
             TensorDescriptor const* auxiliaryDescriptor = nullptr;
             if(problem.useE())
                 auxiliaryDescriptor = &problem.tensors()[ContractionProblemGemm::TENSOR::E];
@@ -682,18 +696,19 @@ namespace TensileLite::Client::HostNumerics
                 void*       currentD = inputs.batchD == nullptr ? inputs.d : inputs.batchD[batch];
 
                 detail::BatchPlan plan{
-                    .a = detail::makeBorrowedConstTensor(
-                        typeA, layoutA, currentA, batchOffsetA),
-                    .b = detail::makeBorrowedConstTensor(
-                        typeB, layoutB, currentB, batchOffsetB),
-                    .c = detail::makeBorrowedConstTensor(
-                        typeC, layoutC, currentC, batchOffsetC),
-                    .d = detail::makeBorrowedMutableTensor(
-                        typeD, layoutD, currentD, batchOffsetD),
-                    .outputSelection = selectAllOutputs
-                                           ? OutputSelection::all()
-                                           : OutputSelection::explicitIndices(
-                                                 selectedByBatch[batch]),
+                    .a = readA ? detail::makeBorrowedConstTensor(
+                                     typeA, layoutA, currentA, batchOffsetA)
+                               : detail::BorrowedConstTensor{layoutA, {}},
+                    .b = readB ? detail::makeBorrowedConstTensor(
+                                     typeB, layoutB, currentB, batchOffsetB)
+                               : detail::BorrowedConstTensor{layoutB, {}},
+                    .c = readC ? detail::makeBorrowedConstTensor(
+                                     typeC, layoutC, currentC, batchOffsetC)
+                               : detail::BorrowedConstTensor{layoutC, {}},
+                    .d = detail::makeBorrowedMutableTensor(typeD, layoutD, currentD, batchOffsetD),
+                    .outputSelection
+                    = selectAllOutputs ? OutputSelection::all()
+                                       : OutputSelection::explicitIndices(selectedByBatch[batch]),
                 };
 
                 if(problem.useBias())
