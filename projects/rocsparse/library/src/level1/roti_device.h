@@ -35,9 +35,9 @@ namespace rocsparse
         // Cast to the (possibly 64-bit) index type I before the multiply so the
         // element index does not overflow 32-bit arithmetic for large nnz.
         const I stride = static_cast<I>(hipGridDim_x) * BLOCKSIZE;
+        const I gid    = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
-        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < nnz;
-            idx += stride)
+        for(I idx = gid; idx < nnz; idx += stride)
         {
             I i = x_ind[idx] - idx_base;
 
