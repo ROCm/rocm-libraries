@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -30,32 +31,36 @@ namespace hipdnn_plugin_sdk::ingestor::jsonexpr::detail
 // dimension's stride rank, 0 being the fastest-varying. The common layouts get
 // names, and a name expands to its array here, at compile time, so the array
 // stays the single canonical form and evaluation never sees an alias.
+
+/// The longest layout the table names. Rows are fixed-width so the table can
+/// be a constexpr value rather than pointers into separate objects.
+inline constexpr std::size_t MAX_LAYOUT_RANK = 5;
+
 struct LayoutAlias
 {
-    const char* name;
-    const std::int64_t* order;
+    std::string_view name;
+    /// The stride order, `rank` entries wide; anything past that is padding
+    /// and is never read -- `order()` is the only accessor.
+    std::array<std::int64_t, MAX_LAYOUT_RANK> dims;
     std::size_t rank;
+
+    /// The meaningful prefix of `dims`, i.e. the layout itself.
+    [[nodiscard]] std::vector<std::int64_t> order() const
+    {
+        return {dims.begin(), dims.begin() + static_cast<std::ptrdiff_t>(rank)};
+    }
 };
 
 /// Every layout name the language knows, and the array each expands to.
-inline const std::array<LayoutAlias, 5>& layoutAliasTable()
-{
-    static const std::int64_t s_nchw[] = {3, 2, 1, 0};
-    static const std::int64_t s_nhwc[] = {3, 0, 2, 1};
-    static const std::int64_t s_ncdhw[] = {4, 3, 2, 1, 0};
-    static const std::int64_t s_ndhwc[] = {4, 0, 3, 2, 1};
-    static const std::int64_t s_bhsd[] = {3, 2, 1, 0};
-    static const std::array<LayoutAlias, 5> s_table = {{{"nchw", s_nchw, 4},
-                                                        {"nhwc", s_nhwc, 4},
-                                                        {"ncdhw", s_ncdhw, 5},
-                                                        {"ndhwc", s_ndhwc, 5},
-                                                        {"bhsd", s_bhsd, 4}}};
-    return s_table;
-}
+inline constexpr std::array<LayoutAlias, 5> LAYOUT_ALIAS_TABLE = {{{"nchw", {3, 2, 1, 0}, 4},
+                                                                   {"nhwc", {3, 0, 2, 1}, 4},
+                                                                   {"ncdhw", {4, 3, 2, 1, 0}, 5},
+                                                                   {"ndhwc", {4, 0, 3, 2, 1}, 5},
+                                                                   {"bhsd", {3, 2, 1, 0}, 4}}};
 
 inline const LayoutAlias* lookupLayoutAlias(const std::string& name)
 {
-    for(const auto& e : layoutAliasTable())
+    for(const auto& e : LAYOUT_ALIAS_TABLE)
     {
         if(name == e.name)
         {
@@ -70,7 +75,7 @@ inline const LayoutAlias* lookupLayoutAlias(const std::string& name)
 inline std::string knownLayoutAliases()
 {
     std::string s;
-    for(const auto& e : layoutAliasTable())
+    for(const auto& e : LAYOUT_ALIAS_TABLE)
     {
         if(!s.empty())
         {
@@ -111,17 +116,20 @@ inline bool isLayoutAliasCandidate(const nlohmann::json& j, char sigil)
     return s.empty() || s[0] != sigil;
 }
 
+/// True for a path whose last segment is `segment` -- ".stride_order" or
+/// ".rank". A path is more than its final segment, so the segment alone
+/// ("$.rank") does not name a tensor and does not match.
+inline bool pathEndsWithSegment(const std::string& path, std::string_view segment)
+{
+    return path.size() > segment.size() + 1
+           && path.compare(path.size() - segment.size(), segment.size(), segment) == 0;
+}
+
 /// True for a reference whose last path segment is `stride_order`.
 inline bool isStrideOrderRef(const nlohmann::json& j, char sigil)
 {
     const std::string* s = variablePath(j, sigil);
-    if(s == nullptr)
-    {
-        return false;
-    }
-    static const std::string k_suffix = ".stride_order";
-    return s->size() > k_suffix.size() + 1
-           && s->compare(s->size() - k_suffix.size(), k_suffix.size(), k_suffix) == 0;
+    return s != nullptr && pathEndsWithSegment(*s, ".stride_order");
 }
 
 /// The tensor a `.rank` / `.stride_order` reference is about: the whole path
@@ -178,9 +186,7 @@ inline void collectRankPins(const nlohmann::json& j,
         {
             continue;
         }
-        static const std::string k_suffix = ".rank";
-        if(s->size() > k_suffix.size() + 1
-           && s->compare(s->size() - k_suffix.size(), k_suffix.size(), k_suffix) == 0)
+        if(pathEndsWithSegment(*s, ".rank"))
         {
             // First pin wins; a second, contradictory one makes the criteria
             // unsatisfiable on its own terms, which is not the alias's problem.
@@ -197,7 +203,7 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
     // A stride_order is an IntArray, so a string in this position can only be
     // an alias; an unknown one is a typo that would otherwise compare unequal
     // forever and decline silently at match time.
-    const std::string& name = aliasNode.get_ref<const nlohmann::json::string_t&>();
+    const auto& name = aliasNode.get_ref<const nlohmann::json::string_t&>();
     const LayoutAlias* alias = lookupLayoutAlias(name);
     if(alias == nullptr)
     {
@@ -216,7 +222,7 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
             "layout alias '" + name + "' is rank " + std::to_string(alias->rank)
             + ", but the expression pins " + refPath + " to rank " + std::to_string(pin->second));
     }
-    return nlohmann::json(std::vector<std::int64_t>(alias->order, alias->order + alias->rank));
+    return alias->order();
 }
 
 /// Rewrite every layout alias into its canonical array. An alias is recognized

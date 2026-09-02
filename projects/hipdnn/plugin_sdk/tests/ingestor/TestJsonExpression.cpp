@@ -781,10 +781,11 @@ TEST(TestJsonExpression, VariablesIteratorEqualityComparesPositions)
     EXPECT_TRUE(first == first); // reflexive
     EXPECT_FALSE(first != first);
 
-    auto copy = first;
-    EXPECT_TRUE(copy == first); // a copy sits at the same position
-
+    // A copy sits at the same position as its source, and advancing it moves
+    // it off that position rather than dragging the original along.
     auto second = first;
+    EXPECT_TRUE(second == first);
+
     ++second;
     EXPECT_FALSE(second == first); // different positions differ
     EXPECT_TRUE(second != first);
