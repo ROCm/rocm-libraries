@@ -1719,7 +1719,7 @@ def runDispatcherPerfTests(String compiler, String gpuTarget = "gfx942") {
 // configs to run". Covering RDNA4 needs real gfx1201 tile coverage first.
 def dispatcherGemmVariantsFor(String arch) {
     switch (arch) {
-        case "gfx942":  return ["grouped", "multi_d", "multi_abd", "stream_k"]
+        case "gfx942":
         case "gfx950":  return ["grouped", "multi_d", "multi_abd", "stream_k"]
         default:        return []
     }
@@ -1746,7 +1746,7 @@ def dispatcherGemmVariantsFor(String arch) {
 // cannot drift apart again.
 def dispatcherSweepDtypesFor(String arch) {
     switch (arch) {
-        case "gfx942":  return "fp16,bf16,fp8,bf8"
+        case "gfx942":
         case "gfx950":  return "fp16,bf16,fp8,bf8"
         default:        return "fp16,bf16"
     }

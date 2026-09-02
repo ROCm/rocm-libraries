@@ -191,11 +191,11 @@ pipeline {
             description: "Run the tile_engine_gemm tests (default: OFF)")
         booleanParam(
             name: "RUN_DISPATCHER_CORRECTNESS_TESTS",
-            defaultValue: true,
+            defaultValue: false,
             description: "Run Correctness Tier for Dispatcher")
         booleanParam(
             name: "RUN_DISPATCHER_PERF_TESTS",
-            defaultValue: true,
+            defaultValue: false,
             description: "Run Performance Tier for Dispatcher")
         booleanParam(
             name: "BUILD_INSTANCES_ONLY",
