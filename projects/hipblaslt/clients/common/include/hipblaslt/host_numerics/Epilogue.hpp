@@ -14,7 +14,6 @@ namespace hipblaslt::host_numerics
 {
     using ::roc::host_numerics::Activation;
     using ::roc::host_numerics::ActivationApplication;
-    using ::roc::host_numerics::MatrixAxis;
 
     struct EpilogueArguments
     {
@@ -33,7 +32,6 @@ namespace hipblaslt::host_numerics
         const void*           auxiliaryScale        = nullptr;
         const void*           bias                  = nullptr;
         hipDataType           biasType              = HIP_R_32F;
-        MatrixAxis            biasAxis              = MatrixAxis::Row;
         Activation            activation            = Activation::None;
         ActivationApplication activationApplication = ActivationApplication::Forward;
         double                activationParameter0  = 0.0;

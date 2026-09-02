@@ -97,14 +97,14 @@ inline void validateRuntimeGemmProblem(const GemmSpecification& problem) {
     validateComputeType(problem.a, "A");
     validateComputeType(problem.b, "B");
     auto validatePreQuantizationScales = [&](const GemmOperand& operand, const char* name) {
-        for (const VectorBinding& binding : operand.preQuantizationScales) {
-            requireRank(binding.values.shape(), 1, "Reference GEMM", name);
-            const size_t expected =
-                axisExtent(binding.axis, operand.values.shape()[0], operand.values.shape()[1]);
-            if (binding.values.shape()[0] != 1 && binding.values.shape()[0] != expected)
+        for (const Tensor& scale : operand.preQuantizationScales) {
+            try {
+                (void)scale.broadcastTo(operand.values.shape());
+            } catch (const std::invalid_argument&) {
                 throw std::invalid_argument(std::string("Reference GEMM ") + name +
-                                            " length mismatch.");
-            if (!complexAccumulator && isComplexScalarType(binding.values.type()))
+                                            " is not broadcast-compatible with its operand.");
+            }
+            if (!complexAccumulator && isComplexScalarType(scale.type()))
                 throw std::invalid_argument(
                     std::string("Reference GEMM real accumulator cannot consume complex ") + name +
                     ".");
@@ -158,33 +158,24 @@ inline void validateRuntimeGemmProblem(const GemmSpecification& problem) {
         throw std::invalid_argument(
             "Reference GEMM saturating output conversion currently requires Int8 output.");
 
-    auto validateEpilogueVector = [&](const Tensor& values, size_t expected, const char* name) {
-        validateRuntimeVector(values, expected, "Reference GEMM", name);
-        if (!complexAccumulator && isComplexScalarType(values.type()))
-            throw std::invalid_argument(
-                std::string("Reference GEMM real accumulator cannot consume complex ") + name +
-                ".");
-    };
-    if (problem.epilogue.bias) {
-        const auto& binding = *problem.epilogue.bias;
-        validateEpilogueVector(binding.values, axisExtent(binding.axis, m, n), "bias");
-    }
-    if (problem.epilogue.scaleAlpha) {
-        const auto& binding = *problem.epilogue.scaleAlpha;
-        validateEpilogueVector(binding.values, axisExtent(binding.axis, m, n), "scale-alpha");
-    }
-    auto validateEpilogueScale = [&](const Tensor& values, size_t expected, const char* name) {
-        requireRank(values.shape(), 1, "Reference GEMM", name);
-        if (values.shape()[0] != 1 && values.shape()[0] != expected)
+    const Shape outputShape{m, n};
+    auto validateEpilogueTensor = [&](const Tensor& values, const char* name) {
+        try {
+            (void)values.broadcastTo(outputShape);
+        } catch (const std::invalid_argument&) {
             throw std::invalid_argument(std::string("Reference GEMM ") + name +
-                                        " length mismatch.");
+                                        " is not broadcast-compatible with D.");
+        }
         if (!complexAccumulator && isComplexScalarType(values.type()))
             throw std::invalid_argument(
                 std::string("Reference GEMM real accumulator cannot consume complex ") + name +
                 ".");
     };
-    if (problem.epilogue.scaleA) validateEpilogueScale(*problem.epilogue.scaleA, m, "scale-A");
-    if (problem.epilogue.scaleB) validateEpilogueScale(*problem.epilogue.scaleB, n, "scale-B");
+    if (problem.epilogue.bias) validateEpilogueTensor(*problem.epilogue.bias, "bias");
+    if (problem.epilogue.scaleAlpha)
+        validateEpilogueTensor(*problem.epilogue.scaleAlpha, "scale-alpha");
+    if (problem.epilogue.scaleA) validateEpilogueTensor(*problem.epilogue.scaleA, "scale-A");
+    if (problem.epilogue.scaleB) validateEpilogueTensor(*problem.epilogue.scaleB, "scale-B");
 
     auto validateBlockScale = [&](const BlockScaleBinding& binding, size_t freeExtent,
                                   const char* name) {
@@ -236,12 +227,12 @@ inline void validateGemmOutputAliasing(const GemmInvocation& problem) {
         throw std::invalid_argument(
             "Reference GEMM permits C and D to overlap only as the same tensor layout.");
 
-    for (const VectorBinding& binding : problem.a.preQuantizationScales)
-        if (storageOverlaps(problem.d, binding.values))
+    for (const Tensor& scale : problem.a.preQuantizationScales)
+        if (storageOverlaps(problem.d, scale))
             throw std::invalid_argument(
                 "Reference GEMM destination must not overlap an A pre-quantization scale.");
-    for (const VectorBinding& binding : problem.b.preQuantizationScales)
-        if (storageOverlaps(problem.d, binding.values))
+    for (const Tensor& scale : problem.b.preQuantizationScales)
+        if (storageOverlaps(problem.d, scale))
             throw std::invalid_argument(
                 "Reference GEMM destination must not overlap a B pre-quantization scale.");
     if (problem.a.blockScale && storageOverlaps(problem.d, problem.a.blockScale->values))
@@ -250,10 +241,9 @@ inline void validateGemmOutputAliasing(const GemmInvocation& problem) {
     if (problem.b.blockScale && storageOverlaps(problem.d, problem.b.blockScale->values))
         throw std::invalid_argument(
             "Reference GEMM destination must not overlap the B block scale.");
-    if (problem.epilogue.bias && storageOverlaps(problem.d, problem.epilogue.bias->values))
+    if (problem.epilogue.bias && storageOverlaps(problem.d, *problem.epilogue.bias))
         throw std::invalid_argument("Reference GEMM destination must not overlap the bias.");
-    if (problem.epilogue.scaleAlpha &&
-        storageOverlaps(problem.d, problem.epilogue.scaleAlpha->values))
+    if (problem.epilogue.scaleAlpha && storageOverlaps(problem.d, *problem.epilogue.scaleAlpha))
         throw std::invalid_argument("Reference GEMM destination must not overlap the alpha scale.");
     if (problem.epilogue.scaleA && storageOverlaps(problem.d, *problem.epilogue.scaleA))
         throw std::invalid_argument("Reference GEMM destination must not overlap scale A.");
@@ -296,10 +286,14 @@ class RuntimeGemmFinalizer {
               problem.epilogue.activationParameter1, "activation parameter 1"))),
           m_alphaIsZero(m_alpha == Accumulator(0)),
           m_betaIsZero(m_beta == Accumulator(0)) {
-        if (problem.epilogue.bias) m_bias.emplace(problem.epilogue.bias->values);
-        if (problem.epilogue.scaleAlpha) m_scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
-        if (problem.epilogue.scaleA) m_scaleA.emplace(*problem.epilogue.scaleA);
-        if (problem.epilogue.scaleB) m_scaleB.emplace(*problem.epilogue.scaleB);
+        if (problem.epilogue.bias)
+            m_bias.emplace(problem.epilogue.bias->broadcastTo(problem.c.shape()));
+        if (problem.epilogue.scaleAlpha)
+            m_scaleAlpha.emplace(problem.epilogue.scaleAlpha->broadcastTo(problem.c.shape()));
+        if (problem.epilogue.scaleA)
+            m_scaleA.emplace(problem.epilogue.scaleA->broadcastTo(problem.c.shape()));
+        if (problem.epilogue.scaleB)
+            m_scaleB.emplace(problem.epilogue.scaleB->broadcastTo(problem.c.shape()));
     }
 
     bool alphaIsZero() const {
@@ -318,19 +312,10 @@ class RuntimeGemmFinalizer {
     Accumulator finalize(size_t row, size_t column, Accumulator accumulation) const {
         Accumulator effectiveAlpha = m_alpha;
         if (!m_alphaIsZero) {
-            if (m_scaleA)
-                effectiveAlpha =
-                    multiply(effectiveAlpha,
-                             (*m_scaleA)[m_problem.epilogue.scaleA->shape()[0] == 1 ? 0 : row]);
-            if (m_scaleB)
-                effectiveAlpha =
-                    multiply(effectiveAlpha,
-                             (*m_scaleB)[m_problem.epilogue.scaleB->shape()[0] == 1 ? 0 : column]);
-            if (m_scaleAlpha) {
-                const MatrixAxis axis = m_problem.epilogue.scaleAlpha->axis;
-                effectiveAlpha = multiply(effectiveAlpha,
-                                          (*m_scaleAlpha)[axis == MatrixAxis::Row ? row : column]);
-            }
+            if (m_scaleA) effectiveAlpha = multiply(effectiveAlpha, (*m_scaleA)(row, column));
+            if (m_scaleB) effectiveAlpha = multiply(effectiveAlpha, (*m_scaleB)(row, column));
+            if (m_scaleAlpha)
+                effectiveAlpha = multiply(effectiveAlpha, (*m_scaleAlpha)(row, column));
         }
 
         Accumulator result = multiply(effectiveAlpha, accumulation);
@@ -342,10 +327,7 @@ class RuntimeGemmFinalizer {
     // Finalize a value whose alpha/beta combination was already performed by
     // the backend, preserving that backend's established floating-point order.
     Accumulator finalizeCombined(size_t row, size_t column, Accumulator result) const {
-        if (m_bias) {
-            const MatrixAxis axis = m_problem.epilogue.bias->axis;
-            result = add(result, (*m_bias)[axis == MatrixAxis::Row ? row : column]);
-        }
+        if (m_bias) result = add(result, (*m_bias)(row, column));
         result = m_quantizeAccumulator(applyActivation(
             m_problem.epilogue.activation, result, m_activationParameter0, m_activationParameter1));
         result = multiply(result, m_outputScale);
@@ -356,10 +338,10 @@ class RuntimeGemmFinalizer {
     const GemmSpecification& m_problem;
     RuntimeMatrixReader<Accumulator> m_c;
     RuntimeQuantizer<Accumulator> m_quantizeAccumulator;
-    std::optional<RuntimeVectorReader<Accumulator>> m_bias;
-    std::optional<RuntimeVectorReader<Accumulator>> m_scaleAlpha;
-    std::optional<RuntimeVectorReader<Accumulator>> m_scaleA;
-    std::optional<RuntimeVectorReader<Accumulator>> m_scaleB;
+    std::optional<RuntimeMatrixReader<Accumulator>> m_bias;
+    std::optional<RuntimeMatrixReader<Accumulator>> m_scaleAlpha;
+    std::optional<RuntimeMatrixReader<Accumulator>> m_scaleA;
+    std::optional<RuntimeMatrixReader<Accumulator>> m_scaleB;
     Accumulator m_alpha;
     Accumulator m_beta;
     Accumulator m_scaleC;
@@ -394,16 +376,16 @@ GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
 
-    std::vector<RuntimeVectorReader<Accumulator>> preScalesA;
-    std::vector<RuntimeVectorReader<Accumulator>> preScalesB;
+    std::vector<RuntimeMatrixReader<Accumulator>> preScalesA;
+    std::vector<RuntimeMatrixReader<Accumulator>> preScalesB;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
     preScalesA.reserve(problem.a.preQuantizationScales.size());
-    for (const VectorBinding& binding : problem.a.preQuantizationScales)
-        preScalesA.emplace_back(binding.values);
+    for (const Tensor& scale : problem.a.preQuantizationScales)
+        preScalesA.emplace_back(scale.broadcastTo(problem.a.values.shape()));
     preScalesB.reserve(problem.b.preQuantizationScales.size());
-    for (const VectorBinding& binding : problem.b.preQuantizationScales)
-        preScalesB.emplace_back(binding.values);
+    for (const Tensor& scale : problem.b.preQuantizationScales)
+        preScalesB.emplace_back(scale.broadcastTo(problem.b.values.shape()));
     if (problem.a.blockScale) blockScaleA.emplace(problem.a.blockScale->values);
     if (problem.b.blockScale) blockScaleB.emplace(problem.b.blockScale->values);
 
@@ -432,22 +414,10 @@ GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
                     Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                     Accumulator bValue =
                         conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
-                    for (size_t scaleIndex = 0; scaleIndex < preScalesA.size(); ++scaleIndex) {
-                        const auto& binding = problem.a.preQuantizationScales[scaleIndex];
-                        const size_t index =
-                            binding.values.shape()[0] == 1
-                                ? 0
-                                : (binding.axis == MatrixAxis::Row ? row : reduction);
-                        aValue = finalizer.multiply(aValue, preScalesA[scaleIndex][index]);
-                    }
-                    for (size_t scaleIndex = 0; scaleIndex < preScalesB.size(); ++scaleIndex) {
-                        const auto& binding = problem.b.preQuantizationScales[scaleIndex];
-                        const size_t index =
-                            binding.values.shape()[0] == 1
-                                ? 0
-                                : (binding.axis == MatrixAxis::Row ? reduction : column);
-                        bValue = finalizer.multiply(bValue, preScalesB[scaleIndex][index]);
-                    }
+                    for (const auto& scale : preScalesA)
+                        aValue = finalizer.multiply(aValue, scale(row, reduction));
+                    for (const auto& scale : preScalesB)
+                        bValue = finalizer.multiply(bValue, scale(reduction, column));
                     aValue = operandMath(quantizeA(aValue));
                     bValue = operandMath(quantizeB(bValue));
                     blockSum = finalizer.add(blockSum, finalizer.multiply(aValue, bValue));
@@ -467,21 +437,10 @@ GemmExecutionInfo runPointwiseGemmTyped(const GemmInvocation& problem,
             for (size_t reduction = 0; reduction < k; ++reduction) {
                 Accumulator aValue = conjugateIfNeeded(a(row, reduction), problem.a.conjugate);
                 Accumulator bValue = conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
-                for (size_t scaleIndex = 0; scaleIndex < preScalesA.size(); ++scaleIndex) {
-                    const auto& binding = problem.a.preQuantizationScales[scaleIndex];
-                    const size_t index = binding.values.shape()[0] == 1
-                                             ? 0
-                                             : (binding.axis == MatrixAxis::Row ? row : reduction);
-                    aValue = finalizer.multiply(aValue, preScalesA[scaleIndex][index]);
-                }
-                for (size_t scaleIndex = 0; scaleIndex < preScalesB.size(); ++scaleIndex) {
-                    const auto& binding = problem.b.preQuantizationScales[scaleIndex];
-                    const size_t index =
-                        binding.values.shape()[0] == 1
-                            ? 0
-                            : (binding.axis == MatrixAxis::Row ? reduction : column);
-                    bValue = finalizer.multiply(bValue, preScalesB[scaleIndex][index]);
-                }
+                for (const auto& scale : preScalesA)
+                    aValue = finalizer.multiply(aValue, scale(row, reduction));
+                for (const auto& scale : preScalesB)
+                    bValue = finalizer.multiply(bValue, scale(reduction, column));
                 aValue = operandMath(quantizeA(aValue));
                 bValue = operandMath(quantizeB(bValue));
                 sum = finalizer.add(sum, finalizer.multiply(aValue, bValue));

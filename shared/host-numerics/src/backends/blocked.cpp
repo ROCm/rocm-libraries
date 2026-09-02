@@ -132,16 +132,16 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
         selectedOutputWriter.emplace(*selectedOutput, problem.epilogue.outputConversion);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
-    std::vector<RuntimeVectorReader<Accumulator>> preScalesA;
-    std::vector<RuntimeVectorReader<Accumulator>> preScalesB;
+    std::vector<RuntimeMatrixReader<Accumulator>> preScalesA;
+    std::vector<RuntimeMatrixReader<Accumulator>> preScalesB;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
     std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
     preScalesA.reserve(problem.a.preQuantizationScales.size());
-    for (const VectorBinding& binding : problem.a.preQuantizationScales)
-        preScalesA.emplace_back(binding.values);
+    for (const Tensor& scale : problem.a.preQuantizationScales)
+        preScalesA.emplace_back(scale.broadcastTo(problem.a.values.shape()));
     preScalesB.reserve(problem.b.preQuantizationScales.size());
-    for (const VectorBinding& binding : problem.b.preQuantizationScales)
-        preScalesB.emplace_back(binding.values);
+    for (const Tensor& scale : problem.b.preQuantizationScales)
+        preScalesB.emplace_back(scale.broadcastTo(problem.b.values.shape()));
     if (problem.a.blockScale) blockScaleA.emplace(problem.a.blockScale->values);
     if (problem.b.blockScale) blockScaleB.emplace(problem.b.blockScale->values);
 
@@ -167,15 +167,8 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
                 for (size_t reduction = 0; reduction < reductions; ++reduction) {
                     Accumulator value = conjugateIfNeeded(
                         a(rowBase + row, reductionBase + reduction), problem.a.conjugate);
-                    for (size_t scaleIndex = 0; scaleIndex < preScalesA.size(); ++scaleIndex) {
-                        const auto& binding = problem.a.preQuantizationScales[scaleIndex];
-                        const size_t index =
-                            binding.values.shape()[0] == 1
-                                ? 0
-                                : (binding.axis == MatrixAxis::Row ? rowBase + row
-                                                                   : reductionBase + reduction);
-                        value *= preScalesA[scaleIndex][index];
-                    }
+                    for (const auto& scale : preScalesA)
+                        value *= scale(rowBase + row, reductionBase + reduction);
                     aBlock[row * reductions + reduction] = operandMath(quantizeA(value));
                 }
             }
@@ -183,15 +176,8 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
                 for (size_t column = 0; column < columns; ++column) {
                     Accumulator value = conjugateIfNeeded(
                         b(reductionBase + reduction, columnBase + column), problem.b.conjugate);
-                    for (size_t scaleIndex = 0; scaleIndex < preScalesB.size(); ++scaleIndex) {
-                        const auto& binding = problem.b.preQuantizationScales[scaleIndex];
-                        const size_t index =
-                            binding.values.shape()[0] == 1
-                                ? 0
-                                : (binding.axis == MatrixAxis::Row ? reductionBase + reduction
-                                                                   : columnBase + column);
-                        value *= preScalesB[scaleIndex][index];
-                    }
+                    for (const auto& scale : preScalesB)
+                        value *= scale(reductionBase + reduction, columnBase + column);
                     bBlock[reduction * columns + column] = operandMath(quantizeB(value));
                 }
             }

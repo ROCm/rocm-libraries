@@ -139,12 +139,17 @@ def reference_gemm(
     block_size_a=0,
     block_size_b=0,
     pre_quantization_scales_a=None,
-    pre_quantization_axes_a=None,
     pre_quantization_scales_b=None,
-    pre_quantization_axes_b=None,
+    bias=None,
+    scale_alpha=None,
+    scale_a=None,
+    scale_b=None,
     output_scale=1.0,
     output_conversion=OutputConversion.Default,  # noqa: F405
     accumulation_rounding=AccumulationRounding.TypeDefault,  # noqa: F405
+    conjugate_a=False,
+    conjugate_b=False,
+    output_layout=None,
 ):
     """Compute a reference GEMM from tensor arguments and return its output tensor."""
 
@@ -154,34 +159,20 @@ def reference_gemm(
         operand_a.compute_type = compute_type_a
     if compute_type_b is not None:
         operand_b.compute_type = compute_type_b
+    operand_a.conjugate = conjugate_a
+    operand_b.conjugate = conjugate_b
 
-    def add_pre_quantization_scales(operand, scales, axes, default_axis, name):
+    def as_default_vector_broadcast(scale, axis):
+        return scale.expand_dims(axis) if len(scale.shape) == 1 else scale
+
+    def add_pre_quantization_scales(operand, scales, default_axis):
         scales = [] if scales is None else list(scales)
-        axes = [] if axes is None else list(axes)
-        if axes and len(axes) != len(scales):
-            raise ValueError(f"Python reference_gemm {name} scale/axis counts differ.")
         operand.pre_quantization_scales = [
-            VectorBinding(  # noqa: F405
-                scale,
-                default_axis if not axes else axes[index],
-            )
-            for index, scale in enumerate(scales)
+            as_default_vector_broadcast(scale, default_axis) for scale in scales
         ]
 
-    add_pre_quantization_scales(
-        operand_a,
-        pre_quantization_scales_a,
-        pre_quantization_axes_a,
-        MatrixAxis.Row,  # noqa: F405
-        "A pre-quantization",
-    )
-    add_pre_quantization_scales(
-        operand_b,
-        pre_quantization_scales_b,
-        pre_quantization_axes_b,
-        MatrixAxis.Column,  # noqa: F405
-        "B pre-quantization",
-    )
+    add_pre_quantization_scales(operand_a, pre_quantization_scales_a, 1)
+    add_pre_quantization_scales(operand_b, pre_quantization_scales_b, 0)
 
     if block_scale_a is not None:
         if block_size_a == 0:
@@ -211,6 +202,14 @@ def reference_gemm(
     options.epilogue.alpha = alpha
     options.epilogue.beta = beta
     options.epilogue.scale_c = scale_c
+    options.epilogue.bias = bias
+    options.epilogue.scale_alpha = scale_alpha
+    options.epilogue.scale_a = (
+        None if scale_a is None else as_default_vector_broadcast(scale_a, 1)
+    )
+    options.epilogue.scale_b = (
+        None if scale_b is None else as_default_vector_broadcast(scale_b, 0)
+    )
     options.epilogue.output_scale = output_scale
     options.epilogue.output_conversion = output_conversion
     options.epilogue.activation = activation
@@ -227,6 +226,6 @@ def reference_gemm(
         c,
         output_type,
         options,
-        None,
+        output_layout,
         backend,
     )

@@ -46,6 +46,17 @@ void requireInvalidArgument(Function function, const char* message) {
     }
     require(rejected, message);
 }
+
+template <typename Function>
+void requireOutOfRange(Function function, const char* message) {
+    bool rejected = false;
+    try {
+        function();
+    } catch (const std::out_of_range&) {
+        rejected = true;
+    }
+    require(rejected, message);
+}
 }  // namespace
 
 int main() {
@@ -145,6 +156,14 @@ int main() {
             "Tensor broadcast view mismatch.");
     requireInvalidArgument([&] { (void)column.broadcastTo(Shape{3, 2}); },
                            "Tensor broadcast accepted an incompatible destination shape.");
+    const Tensor expandedColumn =
+        Tensor::copyNativeValues<float>(Shape{2}, columnValues).expandDims(1);
+    require(expandedColumn.shape() == Shape{2, 1} && expandedColumn.layout().stride(0) == 1 &&
+                expandedColumn.layout().stride(1) == 0 &&
+                expandedColumn.loadAs<float>({1, 0}) == 5.0f,
+            "Tensor singleton-dimension expansion mismatch.");
+    requireOutOfRange([&] { (void)column.expandDims(3); },
+                      "Tensor expansion accepted an out-of-range axis.");
 
     const Tensor broadcastScalar = scalarTensor.broadcastTo(Shape{2, 3});
     require(broadcastScalar.layout().strides()[0] == 0 &&

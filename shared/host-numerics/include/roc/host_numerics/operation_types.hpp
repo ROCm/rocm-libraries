@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <limits>
-#include <roc/host_numerics/tensor.hpp>
+#include <roc/host_numerics/index_order.hpp>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -35,12 +35,6 @@ enum class Activation {
     Clamp,
 };
 
-// Selects which matrix coordinate indexes a broadcast vector.
-enum class MatrixAxis {
-    Row,     // values[row]
-    Column,  // values[column]
-};
-
 // Selects operand arithmetic applied after input quantization and before
 // multiplication.
 enum class MathMode {
@@ -52,15 +46,6 @@ enum class MathMode {
 enum class OutputConversion {
     Default,
     SaturatingInt8,  // Round and clamp to [-128, 127].
-};
-
-// Associates a rank-one tensor with its row- or column-broadcasting rule.
-struct VectorBinding {
-    VectorBinding(Tensor tensor, MatrixAxis selectedAxis = MatrixAxis::Row)
-        : values(std::move(tensor)), axis(selectedAxis) {}
-
-    Tensor values;
-    MatrixAxis axis = MatrixAxis::Row;
 };
 
 // Storage form used by OutputSelection.

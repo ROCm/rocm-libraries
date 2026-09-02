@@ -47,12 +47,6 @@ GemmBackend referenceGemmIntoBound(GemmOperand a, GemmOperand b, Tensor c, Tenso
 }  // namespace
 
 void registerGemmBindings(nb::module_& module) {
-    nb::class_<VectorBinding>(module, "VectorBinding",
-                              "Owning row- or column-axis tensor binding used by GEMM requests.")
-        .def(nb::init<Tensor, MatrixAxis>(), "values"_a, "axis"_a = MatrixAxis::Row)
-        .def_rw("values", &VectorBinding::values)
-        .def_rw("axis", &VectorBinding::axis);
-
     nb::class_<BlockScaleBinding>(
         module, "BlockScaleBinding",
         "Owning tensor and reduction-block size used for GEMM block scaling.")

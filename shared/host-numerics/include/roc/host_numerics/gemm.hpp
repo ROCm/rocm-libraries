@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <optional>
 #include <roc/host_numerics/operation_types.hpp>
+#include <roc/host_numerics/tensor.hpp>
 #include <string>
 #include <utility>
 #include <vector>
@@ -43,10 +44,10 @@ struct BlockScaleBinding {
 struct GemmOperand {
     explicit GemmOperand(Tensor tensor) : values(std::move(tensor)) {}
 
-    Tensor values;                                     // A is [M,K]; B is [K,N].
-    std::optional<ScalarType> computeType;             // Optional per-element input quantization.
-    std::vector<VectorBinding> preQuantizationScales;  // Ordered factors before quantization.
-    std::optional<BlockScaleBinding> blockScale;       // Independent per-reduction-block factor.
+    Tensor values;                                // A is [M,K]; B is [K,N].
+    std::optional<ScalarType> computeType;        // Optional per-element input quantization.
+    std::vector<Tensor> preQuantizationScales;    // Ordered broadcast factors before quantization.
+    std::optional<BlockScaleBinding> blockScale;  // Independent per-reduction-block factor.
     bool conjugate = false;  // Conjugates values after loading and before scaling.
 };
 
@@ -60,14 +61,14 @@ struct GemmEpilogue {
           activationParameter0(Scalar::zero(coefficientType)),
           activationParameter1(Scalar::zero(coefficientType)) {}
 
-    Scalar alpha;                             // Multiplies the accumulated A*B term.
-    Scalar beta;                              // Multiplies C.
-    Scalar scaleC;                            // Multiplies C before beta.
-    std::optional<VectorBinding> bias;        // Added after alpha*A*B + beta*scaleC*C.
-    std::optional<VectorBinding> scaleAlpha;  // Row/column factor applied to alpha.
-    std::optional<Tensor> scaleA;  // Rank-one row factor, or length-one broadcast, on alpha.
-    std::optional<Tensor> scaleB;  // Rank-one column factor, or length-one broadcast, on alpha.
-    Scalar outputScale;            // Applied after activation.
+    Scalar alpha;                      // Multiplies the accumulated A*B term.
+    Scalar beta;                       // Multiplies C.
+    Scalar scaleC;                     // Multiplies C before beta.
+    std::optional<Tensor> bias;        // Broadcast addend after alpha*A*B + beta*scaleC*C.
+    std::optional<Tensor> scaleAlpha;  // Broadcast factor applied to alpha.
+    std::optional<Tensor> scaleA;      // Broadcast factor applied to alpha.
+    std::optional<Tensor> scaleB;      // Broadcast factor applied to alpha.
+    Scalar outputScale;                // Applied after activation.
     OutputConversion outputConversion = OutputConversion::Default;  // Final D encoding.
     Activation activation = Activation::None;                       // Applied before outputScale.
     Scalar activationParameter0;  // First activation-specific scalar.

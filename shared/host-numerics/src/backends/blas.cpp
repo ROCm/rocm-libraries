@@ -230,7 +230,7 @@ void validateTransforming(const GemmInvocation& problem) {
                 "Transforming BLAS backend supports F32, F64, C64, and C128 accumulation.");
     }
     const auto hasNonScalarScale = [](const std::optional<Tensor>& scale) {
-        return scale && scale->shape()[0] != 1;
+        return scale && scale->elementCount() != 1;
     };
     if (problem.epilogue.bias || problem.epilogue.scaleAlpha ||
         hasNonScalarScale(problem.epilogue.scaleA) || hasNonScalarScale(problem.epilogue.scaleB) ||
@@ -264,10 +264,10 @@ Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode) {
     const RuntimeMatrixWriter<Accumulator> writer(output);
     const RuntimeQuantizer<Accumulator> quantize(operand.computeType);
     const RuntimeMathFunction<Accumulator> operandMath = runtimeMathFunction<Accumulator>(mathMode);
-    std::vector<RuntimeVectorReader<Accumulator>> scaleReaders;
+    std::vector<RuntimeMatrixReader<Accumulator>> scaleReaders;
     scaleReaders.reserve(operand.preQuantizationScales.size());
-    for (const VectorBinding& binding : operand.preQuantizationScales)
-        scaleReaders.emplace_back(binding.values);
+    for (const Tensor& scale : operand.preQuantizationScales)
+        scaleReaders.emplace_back(scale.broadcastTo(operand.values.shape()));
     const size_t rows = operand.values.shape()[0];
     const size_t columns = operand.values.shape()[1];
     const size_t elementCount = detail::saturatedProduct(rows, columns);
@@ -276,13 +276,7 @@ Tensor materializeOperand(const GemmOperand& operand, MathMode mathMode) {
             const size_t column = linearIndex / rows;
             const size_t row = linearIndex % rows;
             Accumulator value = conjugateIfNeeded(input(row, column), operand.conjugate);
-            for (size_t scaleIndex = 0; scaleIndex < scaleReaders.size(); ++scaleIndex) {
-                const VectorBinding& binding = operand.preQuantizationScales[scaleIndex];
-                const size_t index = binding.values.shape()[0] == 1
-                                         ? 0
-                                         : (binding.axis == MatrixAxis::Row ? row : column);
-                value *= scaleReaders[scaleIndex][index];
-            }
+            for (const auto& scale : scaleReaders) value *= scale(row, column);
             value = operandMath(quantize(value));
             writer.store(row, column, value);
         });
