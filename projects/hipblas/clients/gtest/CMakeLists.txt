@@ -174,12 +174,7 @@ if(NOT USE_CUDA)
   endif( )
 
 else( )
-  target_include_directories( hipblas-test
-    PRIVATE
-      $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-  )
-
-  target_link_libraries( hipblas-test PRIVATE ${CUDA_LIBRARIES} )
+  target_link_libraries( hipblas-test PRIVATE hip::host CUDA::cudart )
 endif( )
 
 if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
