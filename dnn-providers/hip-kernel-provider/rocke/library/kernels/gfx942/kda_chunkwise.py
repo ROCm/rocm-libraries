@@ -2326,8 +2326,7 @@ class KdaChunkScanSpec:
 
     def kernel_name(self) -> str:
         t = self.tile
-        return kernel_name_join(
-            self.name,
+        parts = (
             f"dk{self.head_k}",
             f"dv{self.head_v}",
             self.dtype,
@@ -2335,6 +2334,11 @@ class KdaChunkScanSpec:
             f"b{t.block_size}",
             *((f"sa{t.scan_atom_m}",) if t.scan_atom_m else ()),
         )
+        if self.has_initial_state:
+            parts += ("h0",)
+        if not self.store_final_state:
+            parts += ("noht",)
+        return kernel_name_join(self.name, *parts)
 
 
 def is_valid_scan_spec(

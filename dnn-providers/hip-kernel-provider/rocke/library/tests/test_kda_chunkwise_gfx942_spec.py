@@ -166,6 +166,22 @@ def test_names_are_distinct_and_encode_gfx942_geometry():
         assert "c16" in name
 
 
+def test_scan_state_flags_are_encoded_in_kernel_name():
+    names = {
+        (h0, ht): KdaChunkScanSpec(
+            has_initial_state=h0, store_final_state=ht
+        ).kernel_name()
+        for h0 in (False, True)
+        for ht in (False, True)
+    }
+
+    assert len(set(names.values())) == 4
+    assert names[False, True].endswith("_sa16")
+    assert names[True, True].endswith("_sa16_h0")
+    assert names[False, False].endswith("_sa16_noht")
+    assert names[True, False].endswith("_sa16_h0_noht")
+
+
 def _sig_names(signature) -> list[str]:
     return [arg["name"] for arg in signature]
 

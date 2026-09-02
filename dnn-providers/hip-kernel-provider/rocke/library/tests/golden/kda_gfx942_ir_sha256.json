@@ -19,8 +19,8 @@
           "sha256": "6ac8bc41cb18a9a90dcfeba744eb159002d17eac1b3c5115ef6fa7ed4dff95cc"
         },
         "kda_gfx942/c16_scan_initial_state": {
-          "bytes": 106971,
-          "sha256": "dcd6d994bfc589d3f4263c4ae4b05e46d4720b91e1d4a26f9f31180769d6a009"
+          "bytes": 107040,
+          "sha256": "80e5c495f5305c667ab603780fe6c04510da26e8561db07bd3e07e92ba5a7cde"
         }
       }
     },
@@ -43,8 +43,8 @@
           "sha256": "c8cee7ad6a23db515dbfacbf7adc44b33e0099387a193dbc92a5fa8e9545cebd"
         },
         "kda_gfx942/c16_scan_initial_state": {
-          "bytes": 106978,
-          "sha256": "d92d0887ffe135d50f2854c27897be55f238186f1284a0bf84eea2ff822e0b0e"
+          "bytes": 107047,
+          "sha256": "1460ae64f3a6548bba959b99838bb7c185cd36526c53c6c238ac124e637b094a"
         }
       }
     }

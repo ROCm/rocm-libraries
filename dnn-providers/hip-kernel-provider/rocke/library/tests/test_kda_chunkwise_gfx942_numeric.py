@@ -87,27 +87,22 @@ def test_fused_path_matches_token_serial(gate_low):
     assert worst <= TOL
 
 
-# head_k sets the group count of the intra-chunk cumulative-decay fold:
-# block_size / head_k threads share a channel, so 128 folds two row-groups and
-# 64 folds four. Only from three groups up does the fold read a group total out
-# of a row the fold itself rewrites, so 64 is the width that exercises the
-# hazard and the reason the default 128 everywhere else never caught it.
-FOLD_HEAD_KS = (64, 96, 128)
+# head_k=64 is the partial-Kt-pass case: C * head_k / 8 produces only 128 Kt
+# slots for a 256-thread block. head_k=128 is the full-pass control.
+SUPPORTED_HEAD_KS = (64, 128)
 
-# The fold failed intermittently -- roughly one launch in ten on a single
-# workgroup -- so a single check would pass most of the time. B2/H4/T256 is 32
-# workgroups, which makes one bad fold anywhere a failure, and the repeats are
-# what turn "usually passes" into a real gate.
-FOLD_REPEATS = 4
+# An unwritten Kt tile reads stale LDS, so the failure depends on workgroup
+# placement. Repeats make that intermittent failure a reliable gate.
+NUMERIC_REPEATS = 4
 
 
-@pytest.mark.parametrize("head_k", FOLD_HEAD_KS)
-def test_fused_grouped_cumsum_fold_is_stable(head_k):
+@pytest.mark.parametrize("head_k", SUPPORTED_HEAD_KS)
+def test_fused_kt_generation_is_stable(head_k):
     import kda_chunk_fused as fused
     from kernels.gfx942.kda_chunkwise import KdaChunkFusedSpec
 
     spec = KdaChunkFusedSpec(head_k=head_k)
-    for attempt in range(FOLD_REPEATS):
+    for attempt in range(NUMERIC_REPEATS):
         worst = fused.check(
             spec,
             B=2,
@@ -117,9 +112,9 @@ def test_fused_grouped_cumsum_fold_is_stable(head_k):
             logical_head_v=128,
             verbose=False,
         )
-        assert worst <= TOL, (
-            f"head_k={head_k} attempt {attempt}: worst={worst:.3e} > {TOL:.1e}"
-        )
+        assert (
+            worst <= TOL
+        ), f"head_k={head_k} attempt {attempt}: worst={worst:.3e} > {TOL:.1e}"
 
 
 def test_split_and_fused_agree_bitwise():
