@@ -203,6 +203,7 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 4, 6,  2, 1]   # MT128x96 wg2x1
           - [16, 16, 128, 1,  1, 2, 6,  4, 1]   # MT128x96 wg4x1
           - [16, 16, 128, 1,  1, 12, 4, 1, 2]   # MT192x128 wg1x2 (12 tiles, one wave)
+          - [16, 16, 128, 1,  1, 6, 6,  2, 2]   # MT192x192 wg2x2 (12 tiles both dims, shared strip)
           - [16, 16, 128, 1,  1, 8, 6,  2, 1]   # MT256x96 wg2x1
           - [16, 16, 128, 1,  1, 4, 6,  4, 1]   # MT256x96 wg4x1
         - PrefetchGlobalRead: [0]
@@ -219,13 +220,13 @@ BenchmarkProblems:
           - Exact: [384, 768, 1, 512]
 
   -
-    - # NT, non-power-of-two macro tiles at four waves in N.  The stack is the
-      # largest power-of-two divisor of the tile in MI tiles, so MT192 is 12
-      # tiles -> strip 4, 3 strips per wave, and MT224 is 14 -> strip 2, 7 strips.
-      # Both need the M wave group at 1: splitting the tile over M waves leaves a
-      # per-wave count that neither divides nor is divided by the strip (12 -> 6
-      # against strip 4, 14 -> 7 against strip 2), so the wave straddles a strip
-      # and the geometry check rejects it.
+    - # NT, non-power-of-two macro tiles at four waves in N.  The stack is picked
+      # for cache-line utilization and then backed off until the wave group can
+      # lay it out, so a tile that no stack suits at a given wave group is still
+      # rejected.  MT224 is 14 MI tiles and is one of those: every M wave group
+      # above 1 leaves 7 tiles per wave, which no power-of-two stack tiles.
+      # MT192 (12 tiles) is not -- it shares a strip at wg2x2 on a stack of 2,
+      # covered by the MT192x192 entry above.
       #
       # MT256x224 puts the non-power-of-two on N instead, where the same rule
       # pins the N wave group to 1 and leaves M free to take all four waves.
