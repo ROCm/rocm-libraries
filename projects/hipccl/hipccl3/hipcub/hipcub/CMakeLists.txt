@@ -44,6 +44,12 @@ if(HIP_COMPILER STREQUAL "clang")
     INTERFACE
       roc::rocprim_hip
   )
+  if (libhipcxx_FOUND)
+    target_link_libraries(hipcub
+      INTERFACE
+        libhipcxx::libhipcxx
+    )
+  endif()
 else()
   # On CUDA platform we don't want to export hipcub target with
   # INTERFACE_INCLUDE_DIRECTORIES property containing a path to
