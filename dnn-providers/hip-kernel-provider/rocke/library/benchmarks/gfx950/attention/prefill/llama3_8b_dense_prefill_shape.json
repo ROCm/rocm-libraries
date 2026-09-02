@@ -17,7 +17,7 @@
   "lazy_rescale": true,
   "persist_decode": "auto",
   "q_reload": false,
-  "qk_pipeline": false,
-  "k_prefetch_early": true,
+  "qk_pipeline": true,
+  "k_prefetch_early": false,
   "causal": true
 }

@@ -240,8 +240,13 @@ class AttentionDenseSpec:
     qk_pipeline: bool = False
     # k_prefetch_early: issue tile j+1's K DMA at the top of body j instead of at
     #   the end, so it overlaps a full tile of compute. Legal at NBUF=2 because
-    #   only V's prefetch buffer aliases a buffer the body still reads. Off by
-    #   default (the end-of-body issue is byte-identical to the shipped kernel).
+    #   only V's prefetch buffer aliases a buffer the body still reads.
+    #   MEASURED LOSER, kept for reproducibility: 684.6 vs 739.1 TFLOPS (-7.4%)
+    #   at Sq=8192 Hq=32 fp16 causal, +5 VGPR. The async DMA lands in LDS, so
+    #   issuing it early puts its writes in the same window as the QK/PV clusters'
+    #   LDS reads and the port contention costs more than the prefetch distance
+    #   gains. The end-of-body placement is deliberate: it keeps DMA writes out
+    #   of the compute window at the price of the vmcnt wait at the top.
     k_prefetch_early: bool = False
 
     def __post_init__(self) -> None:
