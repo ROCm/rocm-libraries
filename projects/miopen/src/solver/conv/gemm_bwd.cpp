@@ -472,9 +472,6 @@ bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
     if(!GemmBwdBase::IsApplicable(context, problem))
         return false;
 
-    if(!problem.IsLayoutDefault())
-        return false;
-
     const auto& conv  = problem.GetConv();
     const auto& wDesc = problem.GetWeights();
 
@@ -487,7 +484,7 @@ bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
     // first while a_cast_type is filled from w.
     const auto nhwc_supported = problem.IsLayoutNHWC() && conv.group_count == 1 &&
                                 !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
-    if(!problem.IsLayoutDefault() && !nhwc_supported)
+    if(!(problem.IsLayoutDefault() || nhwc_supported))
         return false;
 
     const auto spatial_dim = conv.GetSpatialDimension();
@@ -792,8 +789,7 @@ bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
     if(!GemmBwdBase::IsApplicable(context, problem))
         return false;
 
-    // Everything below goes through Im2Col/Col2Im, which addresses dx channel-first.
-    if(!problem.IsLayoutDefault())
+    if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
         return false;
 
     return !GemmBwd1x1_stride2{}.IsApplicable(context, problem) &&

@@ -112,7 +112,7 @@ TEST_P(CPU_UnitTestConvSolverGemmWrw1x1Stride1DevApplicabilityWrw_NONE, GemmWrw1
     this->RunTest(miopen::solver::conv::GemmWrw1x1_stride1{});
 };
 
-TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NHWCUsesUniversalSolver)
+TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NHWCUsesStride1Solver)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
@@ -123,8 +123,8 @@ TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NHWCUsesUniversalSolver)
     problem.SetupFloats(context);
     problem.SetupComputeType(context);
 
-    EXPECT_FALSE(miopen::solver::conv::GemmWrw1x1_stride1{}.IsApplicable(context, problem));
-    EXPECT_TRUE(miopen::solver::conv::GemmWrwUniversal{}.IsApplicable(context, problem));
+    EXPECT_TRUE(miopen::solver::conv::GemmWrw1x1_stride1{}.IsApplicable(context, problem));
+    EXPECT_FALSE(miopen::solver::conv::GemmWrwUniversal{}.IsApplicable(context, problem));
 }
 
 // Smoke tests

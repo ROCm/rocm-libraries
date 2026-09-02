@@ -220,8 +220,6 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
 #if MIOPEN_USE_GEMM
     if(!GemmWrwBase::IsApplicable(context, problem))
         return false;
-    if(!problem.IsLayoutDefault())
-        return false;
 
     const auto& dwDesc = problem.GetWeights();
     const auto& conv   = problem.GetConv();
@@ -233,7 +231,7 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
     // for f8 on every architecture except gfx942. Grouped NHWC has no branch there at all.
     const auto nhwc_supported = problem.IsLayoutNHWC() && conv.group_count == 1 &&
                                 !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
-    if(!problem.IsLayoutDefault() && !nhwc_supported)
+    if(!(problem.IsLayoutDefault() || nhwc_supported))
         return false;
 
     const auto wei_spatial =
