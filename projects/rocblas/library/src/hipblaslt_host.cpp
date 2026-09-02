@@ -773,14 +773,18 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             void *ptrA = (void*)prob.batch_A, *ptrB = (void*)prob.batch_B,
                  *ptrC = (void*)prob.batch_C, *ptrD = (void*)prob.batch_D;
 
-            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                matA, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_a), sizeof(int64_t)));
-            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                matB, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_b), sizeof(int64_t)));
-            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                matC, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_c), sizeof(int64_t)));
-            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
-                matD, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_d), sizeof(int64_t)));
+            if (prob.buffer_offset_a != 0)
+                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                    matA, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_a), sizeof(int64_t)));
+            if (prob.buffer_offset_b != 0)
+                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                    matB, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_b), sizeof(int64_t)));
+            if (prob.buffer_offset_c != 0)
+                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                    matC, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_c), sizeof(int64_t)));
+            if (prob.buffer_offset_d != 0)
+                THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+                    matD, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &(prob.buffer_offset_d), sizeof(int64_t)));
 
             THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
                                                      matmulDesc,
