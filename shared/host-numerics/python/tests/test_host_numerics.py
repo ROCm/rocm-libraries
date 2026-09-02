@@ -1984,6 +1984,35 @@ class TensorAndGemmTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             hv.reference_gemm(operand_a, operand_b)
 
+    def test_gemm_coefficients_accept_native_and_rank_zero_values(self):
+        a = hv.from_numpy(np.asarray([[2.0]], dtype=np.float32))
+        b = hv.from_numpy(np.asarray([[3.0]], dtype=np.float32))
+        c = hv.from_numpy(np.asarray([[5.0]], dtype=np.float32))
+        alpha = hv.from_numpy(np.asarray(4.0, dtype=np.float32))
+
+        result = hv.reference_gemm(
+            a,
+            b,
+            c,
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            alpha=alpha,
+            beta=2.0,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(result), np.asarray([[34.0]], dtype=np.float32)
+        )
+
+        with self.assertRaisesRegex(ValueError, "rank-zero"):
+            hv.reference_gemm(
+                a,
+                b,
+                c,
+                hv.ScalarType.Float32,
+                hv.ScalarType.Float32,
+                alpha=a,
+            )
+
     def test_gemm_options_apply_operand_quantization_and_block_scales(self):
         operand_a = hv.from_numpy(np.full((1, 8), 1.5, dtype=np.float32))
         operand_b = hv.from_numpy(np.full((8, 1), 2.0, dtype=np.float32))
