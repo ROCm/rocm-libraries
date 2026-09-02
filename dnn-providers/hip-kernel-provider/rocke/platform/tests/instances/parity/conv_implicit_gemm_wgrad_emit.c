@@ -135,11 +135,12 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
     case 12:
         /* K-outer + direct load (async_dma). */
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
-        spec->epilogue = "cshuffle";
+        spec->dtype_d = "fp32";
         spec->lds_k_outer = true;
         spec->async_dma = true;
         spec->has_lds_k_pad = true;
         spec->lds_k_pad = 0;
+        spec->split_k = 4;
         *arch = "gfx950";
         return 0;
     default:

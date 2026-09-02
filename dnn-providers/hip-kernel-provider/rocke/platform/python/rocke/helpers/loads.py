@@ -593,6 +593,13 @@ class AsyncTileLoader:
             chunks = (tile_rows * tile_cols) // elems
             if chunks < block_size:
                 continue
+            # Every pass fires block_size chunks. Chunks past chunks_total still
+            # issue (with the OOB sentinel, which the hardware zero-fills), so a
+            # partial last pass writes past this tile's allocation and into the
+            # next smem_alloc. Require whole passes; a narrower width is tried
+            # next and usually succeeds.
+            if chunks % block_size != 0:
+                continue
             return d
         raise ValueError(
             f"no usable dwords value for tile {tile_rows}x{tile_cols} "

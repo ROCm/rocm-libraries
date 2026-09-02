@@ -60,7 +60,9 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx)
     rocke_ir_builder_t* b = ctx->b;
     const rocke_conv_problem_t* p = ctx->p;
     int block_k = ctx->block_k;
-    int K_iters = (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
+    int K_iters = (ctx->kloop_num_iters > 0)
+                      ? ctx->kloop_num_iters
+                      : (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
     int num_accs = ctx->num_accs;
     int it, i;
 
@@ -131,7 +133,9 @@ void rocke_conv_emit_kloop_basic(rocke_conv_build_ctx_t* ctx)
     rocke_ir_builder_t* b = ctx->b;
     const rocke_conv_problem_t* p = ctx->p;
     int block_k = ctx->block_k;
-    int K_iters = (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
+    int K_iters = (ctx->kloop_num_iters > 0)
+                      ? ctx->kloop_num_iters
+                      : (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
     int num_accs = ctx->num_accs;
     int it, i;
 
@@ -277,7 +281,9 @@ void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
     rocke_ir_builder_t* b = ctx->b;
     const rocke_conv_problem_t* p = ctx->p;
     int block_k = ctx->block_k;
-    int num_iters = (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
+    int num_iters = (ctx->kloop_num_iters > 0)
+                        ? ctx->kloop_num_iters
+                        : (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
     int num_accs = ctx->num_accs;
     int it, i, pp;
 

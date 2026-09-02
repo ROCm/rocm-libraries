@@ -1585,6 +1585,15 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      * base is part of the expression, unlike the forward conv which uses a bare
      * const. Handing the driver k_lo keeps the emitted SSA identical. */
     ctx->kloop_k_lo = k_lo;
+    /* Python: slice_k = wg_K if k_hi is None else wg_K_padded() // split_k
+     *         K_iters = ceil(slice_k / block_k)
+     * k_hi is None exactly when split_k == 1. */
+    {
+        const int wgk = rocke_wgrad_conv_spec_wg_K(spec);
+        const int slice_k
+            = (k_hi_v == NULL) ? wgk : (rocke_wgrad_conv_spec_wg_K_padded(spec) / spec->split_k);
+        ctx->kloop_num_iters = (slice_k + ctx->block_k - 1) / ctx->block_k;
+    }
 
     /* Chiplet swizzle */
     if(spec->chiplet_swizzle)
@@ -1705,8 +1714,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* The async A slot has no a_load_override; give it the wgrad dY descriptor
      * (swapped coordinates on the K-outer tile) so it does not fall back to the
      * forward descriptor. */
-    ctx->a_descriptor_fn
-        = spec->lds_k_outer ? wgrad_dy_descriptor_kouter : wgrad_dy_descriptor;
+    ctx->a_descriptor_fn = spec->lds_k_outer ? wgrad_dy_descriptor_kouter : wgrad_dy_descriptor;
     if(ctx->async_dma)
     {
         /* K-outer: rows are K_wg, columns are the free axis, so a chunk is a run
@@ -1796,9 +1804,8 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
                     ctx->block_k, ctx->block_n, ctx->threads, cap_b, /*row=*/false, &vb);
                 if(ka != ROCKE_OK || kb != ROCKE_OK)
                 {
-                    rocke_i_set_err(b,
-                                    ROCKE_ERR_VALUE,
-                                    "wgrad: no usable load_vec for K-outer tile geometry");
+                    rocke_i_set_err(
+                        b, ROCKE_ERR_VALUE, "wgrad: no usable load_vec for K-outer tile geometry");
                     return false;
                 }
                 axis_a = false;

@@ -299,6 +299,8 @@ def _spec(idx: int):
         )
 
     if idx == 12:
+        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+
         # K-outer + direct load. Exercises the async loader on the swapped tile
         # axes, the contig_cols guard and the packed (pad-0) LDS shape.
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
@@ -314,10 +316,16 @@ def _spec(idx: int):
                 warp_tile_n=32,
                 warp_tile_k=16,
                 pipeline="mem",
-                epilogue="cshuffle",
+                # fp32 output + the direct-store epilogue. split-K with the
+                # cshuffle atomic epilogue is separately divergent between the
+                # engines (reproducible with neither async nor K-outer), so this
+                # config isolates the async / K-outer path under split-K.
+                epilogue="default",
+                data=ConvDataSpec(dtype_d="fp32"),
                 lds_k_outer=True,
                 async_dma=True,
                 lds_k_pad=0,
+                split_k=4,
             ),
             "gfx950",
         )

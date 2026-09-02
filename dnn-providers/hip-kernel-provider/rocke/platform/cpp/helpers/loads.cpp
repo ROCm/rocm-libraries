@@ -555,6 +555,14 @@ rocke_status_t rocke_async_tile_loader_choose_dwords(
         {
             continue;
         }
+        /* Every pass fires block_size chunks; chunks past chunks_total still
+         * issue (OOB sentinel, zero-filled), so a partial last pass writes past
+         * this tile's allocation into the next smem_alloc. Require whole
+         * passes -- a narrower width is tried next. Mirrors the Python. */
+        if(chunks % block_size != 0)
+        {
+            continue;
+        }
         if(out != NULL)
         {
             *out = d;

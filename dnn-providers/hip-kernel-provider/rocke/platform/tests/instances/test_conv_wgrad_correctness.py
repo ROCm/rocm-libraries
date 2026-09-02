@@ -401,7 +401,13 @@ class TestConvWgradCorrectness(unittest.TestCase):
     """Wgrad correctness: each pipeline x epilogue x shape x dtype (+ split-K)."""
 
     def _check(
-        self, shape, dtype, pipeline, epilogue, split_k=1, lds_k_outer=False,
+        self,
+        shape,
+        dtype,
+        pipeline,
+        epilogue,
+        split_k=1,
+        lds_k_outer=False,
         async_dma=False,
     ) -> None:
         passed, reason = _run_one(
@@ -446,8 +452,9 @@ class TestConvWgradCorrectness(unittest.TestCase):
             self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
         for shape in _SHAPES:
             with self.subTest(shape=shape.id):
-                self._check(shape, "bf16", "mem", "cshuffle", split_k=8,
-                            lds_k_outer=True)
+                self._check(
+                    shape, "bf16", "mem", "cshuffle", split_k=8, lds_k_outer=True
+                )
 
     def test_lds_k_outer_async_dma(self):
         """Direct global->LDS load, which is only legal on the K-outer tile.
@@ -463,8 +470,14 @@ class TestConvWgradCorrectness(unittest.TestCase):
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
-                    self._check(shape, dtype, "mem", "cshuffle",
-                                lds_k_outer=True, async_dma=True)
+                    self._check(
+                        shape,
+                        dtype,
+                        "mem",
+                        "cshuffle",
+                        lds_k_outer=True,
+                        async_dma=True,
+                    )
 
     def test_async_dma_requires_k_outer(self):
         """async_dma on the M-outer tile must be rejected, not silently wrong."""
@@ -473,8 +486,14 @@ class TestConvWgradCorrectness(unittest.TestCase):
         )
 
         spec, _p, _w = _make_spec(
-            GPU_ARCH, _SHAPES[0], "bf16", "mem", "cshuffle", 1,
-            lds_k_outer=False, async_dma=True,
+            GPU_ARCH,
+            _SHAPES[0],
+            "bf16",
+            "mem",
+            "cshuffle",
+            1,
+            lds_k_outer=False,
+            async_dma=True,
         )
         if spec is None:
             self.skipTest("no atom for this arch")

@@ -298,6 +298,13 @@ typedef struct rocke_conv_build_ctx
      * split-K lower bound. NULL keeps the bare-const form, so fwd/dgrad emit
      * exactly what they emitted before. */
     rocke_value_t* kloop_k_lo;
+    /* Iteration count for the unrolled / async k-loop drivers. 0 = derive from
+     * the problem's full K_gemm, which is what the forward conv wants. wgrad
+     * must override it: its stub problem carries the UNSLICED wg_K, while the
+     * Python emitter sizes the loop from wg_K_padded()/split_k. They agree only
+     * at split_k == 1, so without this the C engine emits a full-range
+     * reduction under split-K atomics. */
+    int kloop_num_iters;
     /* Atom edge + fragment length used by the K-outer transpose-read feed. */
     rocke_value_t* tr_lane_mod4;
     rocke_value_t* tr_grp16;
